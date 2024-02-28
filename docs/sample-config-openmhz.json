@@ -1,0 +1,82 @@
+{
+    "ver": 2,
+    "defaultMode": "digital",
+    "logFile": true,
+    "frequencyFormat": "mhz",
+    "callTimeout": 3,
+    "controlWarnRate": 10,
+    "statusAsString": true,
+    "broadcastSignals": true,
+    "logLevel": "info",
+    "audioStreaming": true,
+    "uploadServer" : "https://api.openmhz.com",
+    "systems": [
+        {
+            "shortName": "whiteoakmt",
+	        "apiKey": "<enter your API key here>",
+            "type": "p25",
+            "talkgroupsFile": "chatt_talkgroups.csv",
+            "control_channels": [
+                855212500,
+                856237500,
+                856762500,
+                857237500
+            ],
+            "modulation": "qpsk",
+            "compressWav": true,
+            "audioArchive": false,
+            "transmissionArchive": false,
+            "callLog": true,
+            "analogLevels": 8,
+            "maxDev": 4000,
+            "digitalLevels": 1,
+            "recordUnknown": true,
+            "recordUUVCalls": true,
+            "hideEncrypted": false,
+            "hideUnknownTalkgroups": false,
+            "minDuration": 5,
+            "minTransmissionDuration": 0,
+            "talkgroupDisplayFormat": "id_tag"
+        }
+    ],
+    "sources": [
+        {
+            "center": 855309375,
+            "rate": 2048000,
+            "error": 0,
+            "gain": 40,
+            "digitalRecorders": 4,
+            "analogRecorders": 0,
+            "driver": "osmosdr",
+            "device": "rtl=0,buflen=65536",
+            "ppm": -2.0,
+            "agc": false
+        },
+	    {
+            "center": 857600000,
+            "rate": 2048000,
+            "error": 0,
+            "gain": 40,
+            "digitalRecorders": 7,
+            "analogRecorders": 0,
+            "driver": "osmosdr",
+            "device": "rtl=1,buflen=65536",
+            "ppm": -2.0,
+            "agc": false
+        }
+    ],
+    "plugins": [
+        {
+	        "name":"callstream",
+            "library":"libcallstream.so",
+            "streams":[
+                {
+                    "TGID":0,
+                    "address":"192.168.1.122",
+                    "port":9123,
+                    "shortName":"whiteoakmt"
+                }
+            ]
+        }
+    ]
+}
