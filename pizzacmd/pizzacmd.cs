@@ -48,29 +48,30 @@ namespace pizzacmd
             // awful, awful awful. So this is all you'll get and YOU'LL LIKE IT.
             //
             string settingsPath = pizzalib.Settings.DefaultSettingsFileLocation;
+            string tgLocation = string.Empty;
             foreach (var arg in Args)
             {
                 if (arg.ToLower().StartsWith("--settings") ||
                     arg.ToLower().StartsWith("-settings"))
                 {
-                    if (!arg.Contains('='))
+                    settingsPath = ParsePathArgument(arg);
+                    if (string.IsNullOrEmpty(settingsPath))
                     {
                         Console.WriteLine($"Invalid settings file: {arg}");
                         Console.WriteLine("Usage: pizzacmd.exe --settings=<path>");
                         return 1;
                     }
-                    var pieces = arg.Split('=');
-                    if (pieces.Length != 2)
+
+                    break;
+                }
+                else if (arg.ToLower().StartsWith("--talkgroups") ||
+                         arg.ToLower().StartsWith("-talkgroups"))
+                {
+                    tgLocation = ParsePathArgument(arg);
+                    if (string.IsNullOrEmpty(tgLocation))
                     {
-                        Console.WriteLine($"Invalid settings file: {arg}");
-                        Console.WriteLine("Usage: pizzacmd.exe --settings=<path>");
-                        return 1;
-                    }
-                    settingsPath = pieces[1];
-                    if (!File.Exists(settingsPath))
-                    {
-                        Console.WriteLine($"Settings file doesn't exist: {settingsPath}");
-                        Console.WriteLine("Usage: pizzacmd.exe --settings=<path>");
+                        Console.WriteLine($"Invalid talkgroup file: {arg}");
+                        Console.WriteLine("Usage: pizzacmd.exe --talkgroups=<path_to_csv>");
                         return 1;
                     }
                     break;
@@ -83,11 +84,11 @@ namespace pizzacmd
                 else
                 {
                     Console.WriteLine($"Unknown argument {arg}");
-                    Console.WriteLine("Usage: pizzacmd.exe --settings=<path>");
+                    Console.WriteLine("Usage: pizzacmd.exe --settings=<path> [--talkgroups=<talkgroup_csv_file>]");
                     return 1;
                 }
             }
-            var result = await Initialize(settingsPath);
+            var result = await Initialize(settingsPath, tgLocation);
             if (!result)
             {
                 return 1;
@@ -97,11 +98,30 @@ namespace pizzacmd
             return result ? 0 : 1;
         }
 
-        private async Task<bool> Initialize(string SettingsPath)
+        private string ParsePathArgument(string Argument)
+        {
+            if (!Argument.Contains('='))
+            {
+                return string.Empty;
+            }
+            var pieces = Argument.Split('=');
+            if (pieces.Length != 2)
+            {
+                return string.Empty;
+            }
+            var targetPath = pieces[1];
+            if (!File.Exists(targetPath))
+            {
+                return string.Empty;
+            }
+            return targetPath;
+        }
+
+        private async Task<bool> Initialize(string SettingsPath, string TalkgroupLocation)
         {
             Trace(TraceLoggerType.Main,
                   TraceEventType.Information,
-                  $"Init: Using settings {SettingsPath}");
+                  $"Init: Using settings {SettingsPath}, talkgroups {TalkgroupLocation}");
             if (!File.Exists(SettingsPath))
             {
                 Trace(TraceLoggerType.Main,
@@ -122,6 +142,38 @@ namespace pizzacmd
                     Trace(TraceLoggerType.Main, TraceEventType.Error, $"{ex.Message}");
                     return false;
                 }
+            }
+
+            if (!string.IsNullOrEmpty(TalkgroupLocation))
+            {
+                try
+                {
+                    var tgs = TalkgroupHelper.GetTalkgroupsFromCsv(TalkgroupLocation);
+                    if (tgs.Count == 0)
+                    {
+                        Trace(TraceLoggerType.Main,
+                              TraceEventType.Warning,
+                              "Invalid talkgroup file: no data in file.");
+                    }
+                    else
+                    {
+                        Trace(TraceLoggerType.Main,
+                              TraceEventType.Information,
+                              $"Loaded {tgs.Count} talkgroups");
+                        m_Settings.talkgroups = tgs;
+                        m_Settings.SaveToFile(SettingsPath); // persist
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Trace(TraceLoggerType.Main,
+                          TraceEventType.Warning,
+                          $"Unable to parse talkgroup CSV '{TalkgroupLocation}': {ex.Message}");
+                }
+            }
+            else
+            {
+                Trace(TraceLoggerType.Main, TraceEventType.Warning, "No talkgroups provided!");
             }
 
             TraceLogger.SetLevel(m_Settings.TraceLevelApp);
@@ -172,7 +224,10 @@ namespace pizzacmd
 
         private void NewCallTranscribed(TranscribedCall Call)
         {
-            Trace(TraceLoggerType.Main, TraceEventType.Verbose, $"{Call.ToString(m_Settings!)}");
+            //
+            // NB: do not use Trace() here, as this could hide the call data based on user's settings
+            //
+            Console.WriteLine($"{Call.ToString(m_Settings!)}");
 
             var jsonContents = new StringBuilder();
             try

@@ -41,6 +41,26 @@ You can use Visual Studio Community Edition for free.
 * CD into repo source
 * run `dotnet build --runtime <RID>` where [RID can be found here](https://learn.microsoft.com/en-us/dotnet/core/rid-catalog)
 
+### Developing on Linux/Mac
+
+You will want to develop pizzacmd using VS Code on Linux/Mac using the C# extension. To debug the program, use a launch configuration such as:
+
+```
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "dotnet: build /home/<USER>/pizzawave/pizzacmd/pizzacmd.csproj",
+            "program": "/home/<USER>/pizzawave/pizzacmd/bin/Debug/net8.0/pizzacmd",
+            "name": "Test pizzawave",
+            "args": ["--talkgroups=/home/<USER>/my_talkgroups.csv"]
+        }
+    ]
+}
+```
+
 # Configuration
 
 Pizzawave configuration lives in `<user profile>\pizzawave\settings.json`. On Windows, this is `Users\<user>\AppData\Roaming\pizzawave\settings.json`. Please see the READMEs for each individual tool you are using for what settings options are available and how to use them in your setup. `pizzaui` includes a feature that allows you to setup your configuration in a more automated way, but you can always create the file manually. If you run the UI or command line application without a settings file, the default one will be created in the location specified above.

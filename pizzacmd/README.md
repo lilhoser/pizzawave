@@ -10,7 +10,7 @@
 * A supported operating system (Win, Lin, Mac) running .NET 8 or later
 
 # Configuration
-`pizzacmd` currently has no settings beyond what is contained in `pizzalib`.
+The `--talkgroups=<CSV_file>` allows you to pass a talkgroups CSV to `pizzacmd`
 
 # Running on WSL2
 

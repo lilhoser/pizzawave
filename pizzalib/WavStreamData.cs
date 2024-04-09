@@ -143,7 +143,7 @@ namespace pizzalib
             }
 
             Trace(TraceLoggerType.WavStreamData,
-                  TraceEventType.Information,
+                  TraceEventType.Verbose,
                   $"Received data: {m_JsonData.Length} bytes JSON / {m_WavData.Length} bytes samples.");
             return true;
         }

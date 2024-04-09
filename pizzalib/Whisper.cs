@@ -156,7 +156,7 @@ namespace pizzalib
             var length = Math.Min(25, call.Transcription.Length);
             var snippet = call.Transcription.Substring(0, length);
             Trace(TraceLoggerType.Whisper,
-                  TraceEventType.Information,
+                  TraceEventType.Verbose,
                   $"Transcribed call id={call.CallId}:  \"{snippet}...\"");
             return call;
         }

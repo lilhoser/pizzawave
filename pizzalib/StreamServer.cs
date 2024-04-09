@@ -50,7 +50,7 @@ namespace pizzalib
             {
                 var listenStr = $"Listening on port {m_Settings.listenPort}";
                 m_Settings.UpdateConnectionLabelCallback?.Invoke(listenStr);
-                Trace(TraceLoggerType.StreamServer, TraceEventType.Verbose, listenStr);
+                Trace(TraceLoggerType.StreamServer, TraceEventType.Information, listenStr);
                 listener.Start();
                 while (!CancelSource.IsCancellationRequested)
                 {
@@ -65,7 +65,7 @@ namespace pizzalib
                 if (ae.InnerException != null && ae.InnerException is OperationCanceledException)
                 {
                     Trace(TraceLoggerType.StreamServer,
-                          TraceEventType.Verbose,
+                          TraceEventType.Information,
                           $"Successfully canceled listener operation.");
                     return true;
                 }
@@ -82,7 +82,7 @@ namespace pizzalib
             catch (OperationCanceledException)
             {
                 Trace(TraceLoggerType.StreamServer,
-                      TraceEventType.Verbose,
+                      TraceEventType.Information,
                       $"Successfully canceled listener operation.");
                 return true;
             }
@@ -97,7 +97,7 @@ namespace pizzalib
         public void Shutdown()
         {
             Trace(TraceLoggerType.StreamServer,
-                  TraceEventType.Verbose,
+                  TraceEventType.Information,
                   $"Received shutdown request.");
             CancelSource?.CancelAsync();
         }
