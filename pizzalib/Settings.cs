@@ -30,7 +30,7 @@ namespace pizzalib
             new string[] { Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "pizzawave"});
         public static string DefaultSettingsFileName = "settings.json";
-        public static string DefaultCallLogFileName = "calls.json";
+        public static string DefaultCaptureDirectory = Path.Combine(DefaultWorkingDirectory, "captures");
         public static string DefaultSettingsFileLocation = Path.Combine(
             DefaultWorkingDirectory, DefaultSettingsFileName);
         public static string DefaultAlertWavLocation = Path.Combine(DefaultWorkingDirectory, "alerts");
@@ -38,7 +38,6 @@ namespace pizzalib
         // pizzalib library settings
         //
         public SourceLevels TraceLevelApp;
-        public string? WavFileLocation;
         public List<Alert> Alerts;
         public bool AutostartListener;
         public string? gmailUser;
@@ -111,7 +110,6 @@ namespace pizzalib
                 return false;
             }
             return TraceLevelApp == Other.TraceLevelApp &&
-                WavFileLocation == Other.WavFileLocation &&
                 Alerts == Other.Alerts &&
                 AutostartListener == Other.AutostartListener &&
                 gmailUser == Other.gmailUser &&
@@ -141,7 +139,6 @@ namespace pizzalib
         public override int GetHashCode()
         {
             return (TraceLevelApp,
-                WavFileLocation,
                 Alerts,
                 AutostartListener,
                 gmailUser,

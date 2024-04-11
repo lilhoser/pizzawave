@@ -55,8 +55,6 @@ namespace pizzaui
             transcriptionListview = new BrightIdeasSoftware.FastObjectListView();
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
-            exportJSONToolStripMenuItem = new ToolStripMenuItem();
-            exportCSVToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator3 = new ToolStripSeparator();
             saveSettingsAsToolStripMenuItem = new ToolStripMenuItem();
             openSettingsToolStripMenuItem = new ToolStripMenuItem();
@@ -72,6 +70,10 @@ namespace pizzaui
             viewToolStripMenuItem = new ToolStripMenuItem();
             clearToolStripMenuItem = new ToolStripMenuItem();
             showAlertMatchesOnlyToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator5 = new ToolStripSeparator();
+            exportJSONToolStripMenuItem = new ToolStripMenuItem();
+            exportCSVToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator4 = new ToolStripSeparator();
             groupByToolStripMenuItem = new ToolStripMenuItem();
             alphaTagToolStripMenuItem = new ToolStripMenuItem();
             tagToolStripMenuItem = new ToolStripMenuItem();
@@ -92,6 +94,7 @@ namespace pizzaui
             cleanupToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             githubToolStripMenuItem = new ToolStripMenuItem();
+            openCaptureToolStripMenuItem = new ToolStripMenuItem();
             tableLayoutPanel1.SuspendLayout();
             statusStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)transcriptionListview).BeginInit();
@@ -172,24 +175,10 @@ namespace pizzaui
             // 
             // fileToolStripMenuItem
             // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { exportJSONToolStripMenuItem, exportCSVToolStripMenuItem, toolStripSeparator3, saveSettingsAsToolStripMenuItem, openSettingsToolStripMenuItem, toolStripSeparator1, startListeningToolStripMenuItem, toolStripSeparator2, exitToolStripMenuItem });
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCaptureToolStripMenuItem, toolStripSeparator3, saveSettingsAsToolStripMenuItem, openSettingsToolStripMenuItem, toolStripSeparator1, startListeningToolStripMenuItem, toolStripSeparator2, exitToolStripMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(54, 29);
             fileToolStripMenuItem.Text = "File";
-            // 
-            // exportJSONToolStripMenuItem
-            // 
-            exportJSONToolStripMenuItem.Name = "exportJSONToolStripMenuItem";
-            exportJSONToolStripMenuItem.Size = new Size(270, 34);
-            exportJSONToolStripMenuItem.Text = "Export JSON...";
-            exportJSONToolStripMenuItem.Click += exportJSONToolStripMenuItem_Click;
-            // 
-            // exportCSVToolStripMenuItem
-            // 
-            exportCSVToolStripMenuItem.Name = "exportCSVToolStripMenuItem";
-            exportCSVToolStripMenuItem.Size = new Size(270, 34);
-            exportCSVToolStripMenuItem.Text = "Export CSV...";
-            exportCSVToolStripMenuItem.Click += exportCSVToolStripMenuItem_Click;
             // 
             // toolStripSeparator3
             // 
@@ -220,7 +209,7 @@ namespace pizzaui
             startListeningToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { startToolStripMenuItem, stopToolStripMenuItem });
             startListeningToolStripMenuItem.Name = "startListeningToolStripMenuItem";
             startListeningToolStripMenuItem.Size = new Size(270, 34);
-            startListeningToolStripMenuItem.Text = "Server";
+            startListeningToolStripMenuItem.Text = "Call Manager";
             // 
             // startToolStripMenuItem
             // 
@@ -231,6 +220,7 @@ namespace pizzaui
             // 
             // stopToolStripMenuItem
             // 
+            stopToolStripMenuItem.Enabled = false;
             stopToolStripMenuItem.Name = "stopToolStripMenuItem";
             stopToolStripMenuItem.Size = new Size(151, 34);
             stopToolStripMenuItem.Text = "Stop";
@@ -271,7 +261,7 @@ namespace pizzaui
             // 
             // viewToolStripMenuItem
             // 
-            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clearToolStripMenuItem, showAlertMatchesOnlyToolStripMenuItem, groupByToolStripMenuItem });
+            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clearToolStripMenuItem, showAlertMatchesOnlyToolStripMenuItem, toolStripSeparator5, exportJSONToolStripMenuItem, exportCSVToolStripMenuItem, toolStripSeparator4, groupByToolStripMenuItem });
             viewToolStripMenuItem.Name = "viewToolStripMenuItem";
             viewToolStripMenuItem.Size = new Size(65, 29);
             viewToolStripMenuItem.Text = "View";
@@ -290,6 +280,30 @@ namespace pizzaui
             showAlertMatchesOnlyToolStripMenuItem.Size = new Size(307, 34);
             showAlertMatchesOnlyToolStripMenuItem.Text = "Show alert matches only";
             showAlertMatchesOnlyToolStripMenuItem.Click += showAlertMatchesOnlyToolStripMenuItem_Click;
+            // 
+            // toolStripSeparator5
+            // 
+            toolStripSeparator5.Name = "toolStripSeparator5";
+            toolStripSeparator5.Size = new Size(304, 6);
+            // 
+            // exportJSONToolStripMenuItem
+            // 
+            exportJSONToolStripMenuItem.Name = "exportJSONToolStripMenuItem";
+            exportJSONToolStripMenuItem.Size = new Size(307, 34);
+            exportJSONToolStripMenuItem.Text = "Export JSON...";
+            exportJSONToolStripMenuItem.Click += exportJSONToolStripMenuItem_Click;
+            // 
+            // exportCSVToolStripMenuItem
+            // 
+            exportCSVToolStripMenuItem.Name = "exportCSVToolStripMenuItem";
+            exportCSVToolStripMenuItem.Size = new Size(307, 34);
+            exportCSVToolStripMenuItem.Text = "Export CSV...";
+            exportCSVToolStripMenuItem.Click += exportCSVToolStripMenuItem_Click;
+            // 
+            // toolStripSeparator4
+            // 
+            toolStripSeparator4.Name = "toolStripSeparator4";
+            toolStripSeparator4.Size = new Size(304, 6);
             // 
             // groupByToolStripMenuItem
             // 
@@ -444,6 +458,13 @@ namespace pizzaui
             githubToolStripMenuItem.Text = "Github";
             githubToolStripMenuItem.Click += githubToolStripMenuItem_Click;
             // 
+            // openCaptureToolStripMenuItem
+            // 
+            openCaptureToolStripMenuItem.Name = "openCaptureToolStripMenuItem";
+            openCaptureToolStripMenuItem.Size = new Size(270, 34);
+            openCaptureToolStripMenuItem.Text = "Open capture...";
+            openCaptureToolStripMenuItem.Click += openCaptureToolStripMenuItem_Click;
+            // 
             // MainWindow
             // 
             AutoScaleDimensions = new SizeF(10F, 25F);
@@ -508,12 +529,15 @@ namespace pizzaui
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem githubToolStripMenuItem;
         private ToolStripMenuItem cleanupToolStripMenuItem;
-        private ToolStripMenuItem exportJSONToolStripMenuItem;
-        private ToolStripMenuItem exportCSVToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator3;
         private ToolStripMenuItem saveSettingsAsToolStripMenuItem;
         private ToolStripMenuItem openSettingsToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator1;
         private ToolStripSeparator toolStripSeparator2;
+        private ToolStripSeparator toolStripSeparator5;
+        private ToolStripMenuItem exportJSONToolStripMenuItem;
+        private ToolStripMenuItem exportCSVToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator4;
+        private ToolStripMenuItem openCaptureToolStripMenuItem;
     }
 }

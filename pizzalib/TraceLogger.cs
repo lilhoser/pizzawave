@@ -25,33 +25,33 @@ namespace pizzalib
         public static readonly string m_TraceFileDir = Path.Combine(new string[] {
             Settings.DefaultWorkingDirectory, "Logs"});
         private static string m_Location = Path.Combine(new string[] { m_TraceFileDir,
-                            $"pizzawave-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
+                            $"pizzalib-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
         private static TextWriterTraceListener m_TextWriterTraceListener =
-            new TextWriterTraceListener(m_Location, "pizzawaveTextWriterListener");
+            new TextWriterTraceListener(m_Location, "pizzalibTextWriterListener");
         private static ConsoleTraceListener m_ConsoleTraceListener = new ConsoleTraceListener();
         private static SourceSwitch m_Switch =
-            new SourceSwitch("pizzawaveSwitch", "Verbose");
+            new SourceSwitch("pizzalibSwitch", "Verbose");
         private static TraceSource[] Sources = {
-            new TraceSource("MainWindow", SourceLevels.Verbose),
             new TraceSource("StreamServer", SourceLevels.Verbose),
             new TraceSource("WavStreamData", SourceLevels.Verbose),
             new TraceSource("Settings", SourceLevels.Verbose),
             new TraceSource("Whisper", SourceLevels.Verbose),
             new TraceSource("Alerts", SourceLevels.Verbose),
             new TraceSource("Utilities", SourceLevels.Verbose),
-            new TraceSource("Headless", SourceLevels.Verbose),
+            new TraceSource("StandaloneClient", SourceLevels.Verbose),
+            new TraceSource("CallManager", SourceLevels.Verbose),
         };
 
         public enum TraceLoggerType
         {
-            MainWindow,
             StreamServer,
             WavStreamData,
             Settings,
             Whisper,
             Alerts,
             Utilities,
-            Headless,
+            StandaloneClient,
+            CallManager,
             Max
         }
 

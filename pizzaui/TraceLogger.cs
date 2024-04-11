@@ -26,12 +26,12 @@ namespace pizzaui
     {
         public static readonly string m_TraceFileDir = Path.Combine(new string[] {pizzalib.Settings.DefaultWorkingDirectory, "Logs"});
         private static string m_Location = Path.Combine(new string[] { m_TraceFileDir,
-                            $"pizzawave-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
+                            $"pizzaui-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
         private static TextWriterTraceListener m_TextWriterTraceListener =
-            new TextWriterTraceListener(m_Location, "pizzawaveTextWriterListener");
+            new TextWriterTraceListener(m_Location, "pizzauiTextWriterListener");
         private static ConsoleTraceListener m_ConsoleTraceListener = new ConsoleTraceListener();
         private static SourceSwitch m_Switch =
-            new SourceSwitch("pizzawaveSwitch", "Verbose");
+            new SourceSwitch("pizzauiSwitch", "Verbose");
         private static TraceSource[] Sources = {
             new TraceSource("MainWindow", SourceLevels.Verbose),
             new TraceSource("StreamServer", SourceLevels.Verbose),

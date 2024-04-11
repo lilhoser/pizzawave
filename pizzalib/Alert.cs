@@ -35,7 +35,6 @@ namespace pizzalib
         public string Keywords { get; set; }
         public AlertFrequency Frequency { get; set; }
         public List<long> Talkgroups { get; set; }
-        public bool CaptureWAV { get; set; }
         public bool Enabled { get; set; }
 
         public Alert()
@@ -74,7 +73,6 @@ namespace pizzalib
                 Keywords == Other.Keywords &&
                 Frequency == Other.Frequency &&
                 Talkgroups == Other.Talkgroups &&
-                CaptureWAV == Other.CaptureWAV &&
                 Enabled == Other.Enabled;
         }
 
@@ -94,7 +92,7 @@ namespace pizzalib
 
         public override int GetHashCode()
         {
-            return (Name, Email, Keywords, Frequency, Talkgroups, CaptureWAV, Enabled
+            return (Name, Email, Keywords, Frequency, Talkgroups, Enabled
                 ).GetHashCode();
         }
 

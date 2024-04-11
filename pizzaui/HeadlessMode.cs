@@ -18,204 +18,65 @@ under the License.
 */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Newtonsoft.Json;
-using System.Text;
 using pizzalib;
 
 namespace pizzaui
 {
     using static TraceLogger;
-    using Whisper = pizzalib.Whisper;
 
-    internal class HeadlessMode
+    internal class HeadlessMode : StandaloneClient
     {
-        private StreamServer? m_StreamServer;
-        private Whisper? m_Whisper;
-        private Alerter? m_Alerter;
-        private Settings? m_Settings;
-
-        public HeadlessMode()
+        public HeadlessMode() : base()
         {
+            m_CallManager = new CallManager(NewCallTranscribed);
         }
 
-        public async Task<int> Run(string[] HeadlessModeArgs)
+        protected override void PrintUsage(string Message = null)
+        {
+            if (!string.IsNullOrEmpty(Message))
+            {
+                Trace(TraceLoggerType.Headless, TraceEventType.Error, Message);
+            }
+            Trace(TraceLoggerType.Headless,
+                  TraceEventType.Information,
+                  "Usage: pizzawave.exe --headless [--settings=<path>]");
+        }
+
+        protected override void NewCallTranscribed(TranscribedCall Call)
+        {
+            Trace(TraceLoggerType.Headless, TraceEventType.Information, $"{Call.ToString(m_Settings!)}");
+        }
+
+        public override async Task<int> Run(string[] Args)
         {
             //
             // Redirect console output to parent process
             //
-            var console = new WinConsole();
-            console.Initialize(false);
-            TraceLogger.Initialize(true);
-            pizzalib.TraceLogger.Initialize(true);
-            Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "");
-            Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "Pizzawave Headless Mode.");
-            Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "Console initialized");
-
-            if (HeadlessModeArgs == null || HeadlessModeArgs.Length == 0)
+            using (var console = new WinConsole())
             {
-                PrintUsage("Error: No arguments provided.");
-                return 1;
-            }
+                console.Initialize(false);
+                TraceLogger.Initialize(true);
+                pizzalib.TraceLogger.Initialize(true);
+                Trace(TraceLoggerType.Headless, TraceEventType.Information, "");
+                Trace(TraceLoggerType.Headless, TraceEventType.Information, "Pizzawave Headless Mode.");
+                Trace(TraceLoggerType.Headless, TraceEventType.Information, "Console initialized");
 
-            //
-            // Look. I've tried Microsoft's System.CommandLine for parsing and it's simply
-            // awful, awful awful. So this is all you'll get and YOU'LL LIKE IT.
-            //
-            string settingsPath = pizzalib.Settings.DefaultSettingsFileLocation;
-            foreach (var arg in HeadlessModeArgs)
-            {
-                if (arg.ToLower().StartsWith("--settings") ||
-                    arg.ToLower().StartsWith("-settings"))
+                var args = new List<string>();
+                foreach (var arg in Args)
                 {
-                    if (!arg.Contains('='))
+                    if (arg.ToLower().StartsWith("--headless") ||
+                        arg.ToLower().StartsWith("-headless"))
                     {
-                        PrintUsage($"Invalid settings file: {arg}");
-                        return 1;
+                        continue;
                     }
-                    var pieces = arg.Split('=');
-                    if (pieces.Length != 2)
-                    {
-                        PrintUsage($"Invalid settings file: {arg}");
-                        return 1;
-                    }
-                    settingsPath = pieces[1];
-                    if (!File.Exists(settingsPath))
-                    {
-                        PrintUsage($"Settings file doesn't exist: {settingsPath}");
-                        return 1;
-                    }
-                    break;
+                    args.Add(arg);
                 }
-                else if (arg.ToLower().StartsWith("--help") || arg.ToLower().StartsWith("-help"))
-                {
-                    PrintUsage();
-                    return 0;
-                }
-                else if (arg.ToLower().StartsWith("--headless") || arg.ToLower().StartsWith("-headless"))
-                {
-                    continue;
-                }
-                else
-                {
-                    PrintUsage($"Unknown argument {arg}");
-                    return 1;
-                }
-            }
-            var result = await Initialize(settingsPath!);
-            if (!result)
-            {
-                return 1;
-            }
-            result = await StartServer(); // blocks until CTRL+C
-            TraceLogger.Shutdown();
-            return result ? 0 : 1;
-        }
 
-        private async Task<bool> Initialize(string SettingsPath)
-        {
-            if (!File.Exists(SettingsPath))
-            {
-                Trace(TraceLoggerType.Headless,
-                      TraceEventType.Warning,
-                      $"Settings file {SettingsPath} does not exist, loading default...");
-                m_Settings = new Settings();
-                m_Settings.SaveToFile(SettingsPath); // persist it
+                var result = await base.Run(args.ToArray());
+                TraceLogger.Shutdown();
+                pizzalib.TraceLogger.Shutdown();
+                return result;
             }
-            else
-            {
-                try
-                {
-                    var json = File.ReadAllText(SettingsPath);
-                    m_Settings = (Settings)JsonConvert.DeserializeObject(json, typeof(Settings))!;
-                }
-                catch (Exception ex)
-                {
-                    Trace(TraceLoggerType.Headless, TraceEventType.Error, $"{ex.Message}");
-                    return false;
-                }
-            }
-
-            try
-            {
-                TraceLogger.SetLevel(m_Settings.TraceLevelApp);
-                pizzalib.TraceLogger.SetLevel(m_Settings.TraceLevelApp);
-                m_Whisper = new Whisper(m_Settings);
-                m_Alerter = new Alerter(m_Settings, m_Whisper, NewCallTranscribed);
-                m_StreamServer = new StreamServer(m_Alerter.NewCallDataAvailable, m_Settings);
-                _ = await m_Whisper.Initialize();
-            }
-            catch (Exception ex)
-            {
-                Trace(TraceLoggerType.Headless, TraceEventType.Error, $"{ex.Message}");
-                return false;
-            }
-            return true;
-        }
-
-        private async Task<bool> StartServer()
-        {
-            try
-            {
-                Console.CancelKeyPress += (sender, eventArgs) => {
-                    eventArgs.Cancel = true;
-                    Trace(TraceLoggerType.Headless, TraceEventType.Information, "Server shutting down...");
-                    m_StreamServer?.Shutdown();
-                };
-                _ = await m_StreamServer?.Listen(); // blocks until CTRL+C                    
-            }
-            catch (Exception ex)
-            {
-                Trace(TraceLoggerType.Headless, TraceEventType.Error, $"{ex.Message}");
-                return false;
-            }
-
-            return true;
-        }
-
-        private void NewCallTranscribed(TranscribedCall Call)
-        {
-            Trace(TraceLoggerType.Headless, TraceEventType.Verbose, $"{Call.ToString(m_Settings!)}");
-
-            var jsonContents = new StringBuilder();
-            try
-            {
-                var jsonObject = JsonConvert.SerializeObject(Call, Formatting.Indented);
-                jsonContents.AppendLine(jsonObject);
-            }
-            catch (Exception ex)
-            {
-                Trace(TraceLoggerType.Headless,
-                      TraceEventType.Error,
-                      $"Failed to create JSON: {ex.Message}");
-                return;
-            }
-            try
-            {
-                var target = Path.Combine(Settings.DefaultWorkingDirectory,
-                    Settings.DefaultCallLogFileName);
-                using (var writer = new StreamWriter(target, true, Encoding.UTF8))
-                {
-                    writer.WriteLine(jsonContents.ToString());
-                }
-            }
-            catch (Exception ex)
-            {
-                Trace(TraceLoggerType.Headless,
-                      TraceEventType.Error,
-                      $"Failed to save JSON: {ex.Message}");
-                return;
-            }
-        }
-
-        private void PrintUsage(string Message = null)
-        {
-            if (!string.IsNullOrEmpty(Message))
-            {
-                Trace(TraceLoggerType.MainWindow, TraceEventType.Error, Message);
-            }
-            Trace(TraceLoggerType.MainWindow,
-                  TraceEventType.Information,
-                  "Usage: pizzawave.exe --headless [--settings=<path>]");
         }
     }
 

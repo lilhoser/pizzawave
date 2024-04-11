@@ -26,7 +26,8 @@ namespace pizzaui
             if (HeadlessModeArgs.Length > 0)
             {
                 var headless = new HeadlessMode();
-                return await headless.Run(HeadlessModeArgs);
+                var result = await headless.Run(HeadlessModeArgs);
+                return result;
             }
             else
             {

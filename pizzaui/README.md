@@ -23,7 +23,11 @@ To backup your settings, use `File->Save settings as...`. To load external setti
 
 ## Exporting
 
-All call data and complete transcriptions can be exported to JSON or CSV from the `File->Export..` sub-menus. In headless mode, call data is automatically written to the default working directory as JSON, in the file `calls.json`.
+All call data and complete transcriptions shown in the current view can be exported to JSON or CSV from the `View->Export..` sub-menus. Alternatively, you can navigate to `Diagnostics->View logs` to open pizzawave's working directory. Inside this director you'll find full [captures](https://github.com/lilhoser/pizzawave#Running) which you can export manually.
+
+## Opening a capture
+
+To open a `pizzawave` capture, navigate to `File->Open capture`. You can find all of `pizzawave`'s past captures in `<user profile>\pizzawave\captures`.  Read more about captures [here](https://github.com/lilhoser/pizzawave#Running)].
 
 ## Viewing full call transcription
 

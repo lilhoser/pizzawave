@@ -24,11 +24,13 @@ using static pizzalib.TraceLogger;
 
 namespace pizzalib
 {
-    public class StreamServer
+    public class StreamServer : IDisposable
     {
         private CancellationTokenSource CancelSource;
         private Func<WavStreamData, Task> NewCallDataCallback;
         private Settings m_Settings;
+        private bool m_Started;
+        private bool m_Disposed;
 
         public StreamServer(
             Func<WavStreamData, Task> NewCallDataCallback_,
@@ -37,6 +39,36 @@ namespace pizzalib
             NewCallDataCallback = NewCallDataCallback_;
             CancelSource = new CancellationTokenSource();
             m_Settings = Settings;
+        }
+
+        ~StreamServer()
+        {
+            Dispose(false);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            Trace(TraceLoggerType.StreamServer, TraceEventType.Information, "Stream server disposed.");
+
+            if (m_Disposed)
+            {
+                return;
+            }
+
+            m_Disposed = true;
+            m_Started = false;
+            CancelSource.Cancel();
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        public bool IsStarted()
+        {
+            return m_Started;
         }
 
         public async Task<bool> Listen()
@@ -51,12 +83,12 @@ namespace pizzalib
                 var listenStr = $"Listening on port {m_Settings.listenPort}";
                 m_Settings.UpdateConnectionLabelCallback?.Invoke(listenStr);
                 Trace(TraceLoggerType.StreamServer, TraceEventType.Information, listenStr);
+                m_Started = true;
                 listener.Start();
                 while (!CancelSource.IsCancellationRequested)
                 {
                     var client = await listener.AcceptTcpClientAsync(CancelSource.Token);
-                    var task = Task.Run(() => HandleNewClient(client)).ContinueWith(
-                        t => m_Settings.UpdateConnectionLabelCallback?.Invoke(listenStr));
+                    var task = Task.Run(async () => await HandleNewClient(client));
                     tasks.Add(task);
                 }
             }
@@ -84,25 +116,32 @@ namespace pizzalib
                 Trace(TraceLoggerType.StreamServer,
                       TraceEventType.Information,
                       $"Successfully canceled listener operation.");
-                return true;
             }
             finally
             {
                 Task.WaitAll(tasks.ToArray());
                 listener.Stop();
+                m_Started = false;
             }
             return true;
         }
 
-        public void Shutdown()
+        public void Shutdown(bool block = false)
         {
             Trace(TraceLoggerType.StreamServer,
                   TraceEventType.Information,
                   $"Received shutdown request.");
-            CancelSource?.CancelAsync();
+            if (block)
+            {
+                CancelSource.Cancel();
+            }
+            else
+            {
+                CancelSource.CancelAsync();
+            }
         }
 
-        private async Task HandleNewClient(TcpClient Client)
+        private async Task<bool> HandleNewClient(TcpClient Client)
         {
             var clientEndpoint = Client.Client.RemoteEndPoint as IPEndPoint;
             var clientStr = $"{clientEndpoint!.Address}:{clientEndpoint!.Port}";
@@ -128,6 +167,7 @@ namespace pizzalib
                       TraceEventType.Error,
                       $"HandleNewClient() exception: {ex.Message}");
             }
+            return true;
         }
     }
 }

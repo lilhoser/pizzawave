@@ -56,7 +56,6 @@ namespace pizzaui
             //
             // Application settings
             //
-            wavOutputLocationTextbox.Text = CurrentSettings.WavFileLocation;
             autostartListenerCheckbox.Checked = CurrentSettings.AutostartListener;
             gmailUserTextbox.Text = CurrentSettings.gmailUser;
             if (!string.IsNullOrEmpty(CurrentSettings.gmailPassword))
@@ -95,7 +94,6 @@ namespace pizzaui
             //
             // Application settings
             //
-            settings.WavFileLocation = wavOutputLocationTextbox.Text;
             settings.AutostartListener = autostartListenerCheckbox.Checked;
             settings.gmailUser = gmailUserTextbox.Text;
             settings.gmailPassword = gmailAppPasswordTextbox.Text;
@@ -160,17 +158,6 @@ namespace pizzaui
             }
             DialogResult = DialogResult.OK;
             Close();
-        }
-
-        private void browseButton_Click(object sender, EventArgs e)
-        {
-            FolderBrowserDialog dialog = new FolderBrowserDialog();
-            dialog.RootFolder = Environment.SpecialFolder.UserProfile;
-            if (dialog.ShowDialog() != DialogResult.OK)
-            {
-                return;
-            }
-            wavOutputLocationTextbox.Text = dialog.SelectedPath;
         }
 
         private void browseButton2_Click(object sender, EventArgs e)

@@ -122,7 +122,6 @@ namespace pizzaui
             alert.Name = alertNameTextbox.Text;
             alert.Email = alertEmailTextbox.Text;
             alert.Keywords = alertKeywordsTextbox.Text;
-            alert.CaptureWAV = captureWavCheckbox.Checked;
             alert.Enabled = enableCheckbox.Checked;
             if (applyToSelectedRadioButton.Checked)
             {
@@ -156,7 +155,6 @@ namespace pizzaui
             alertNameTextbox.Text = alert.Name;
             alertEmailTextbox.Text = alert.Email;
             alertKeywordsTextbox.Text = alert.Keywords;
-            captureWavCheckbox.Checked = alert.CaptureWAV;
             enableCheckbox.Checked = alert.Enabled;
             foreach (var item in alertFrequencyCombobox.Items)
             {
@@ -185,7 +183,6 @@ namespace pizzaui
             alertNameTextbox.Text = "";
             alertEmailTextbox.Text = "";
             alertKeywordsTextbox.Text = "";
-            captureWavCheckbox.Checked = true;
             enableCheckbox.Checked = true;
             alertFrequencyCombobox.SelectedIndex = 0;
         }
@@ -210,7 +207,6 @@ namespace pizzaui
                     alert.Keywords = data.Keywords;
                     alert.Talkgroups = data.Talkgroups;
                     alert.Frequency = data.Frequency;
-                    alert.CaptureWAV = data.CaptureWAV;
                     alert.Enabled = data.Enabled;
                     alert.Validate();
                 }

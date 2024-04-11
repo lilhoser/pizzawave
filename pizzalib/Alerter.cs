@@ -26,52 +26,16 @@ namespace pizzalib
 {
     public class Alerter
     {
-        private Action<TranscribedCall>? TranscriptionCompleteCallback;
-        private Whisper m_Whisper;
         private Dictionary<Guid, AlertEvent> m_AlertEvents;
         private Settings m_Settings;
 
-        public Alerter(
-            Settings Settings,
-            Whisper WhisperInstance,
-            Action<TranscribedCall>? Callback)
+        public Alerter(Settings Settings)
         {
             m_Settings = Settings;
-            m_Whisper = WhisperInstance;
             m_AlertEvents = new Dictionary<Guid, AlertEvent>();
-            TranscriptionCompleteCallback = Callback;
         }
 
-        public async Task NewCallDataAvailable(WavStreamData Data)
-        {
-            //
-            // This routine is a callback invoked from a worker thread in StreamServer.cs
-            // It is safe/OK to perform blocking calls here.
-            // NOTE: This method is invoked PER CALL, and calls can happen in parallel.
-            //
-            try
-            {
-                var wavLocation = string.Empty;
-                if (!string.IsNullOrEmpty(m_Settings.WavFileLocation))
-                {
-                    var baseDir = m_Settings.WavFileLocation;
-                    var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss}.mp3";
-                    Data.DumpStreamToFile(baseDir, fileName, OutputFileFormat.Mp3);
-                    wavLocation = Path.Combine(baseDir, fileName);
-                }
-                var call = await m_Whisper.TranscribeCall(Data);
-                call.Location = wavLocation;
-                ProcessAlerts(call, Data);
-                TranscriptionCompleteCallback?.Invoke(call);
-            }
-            catch (Exception ex)
-            {
-                Trace(TraceLoggerType.Alerts, TraceEventType.Error, $"{ex.Message}");
-                throw; // back up to worker thread
-            }
-        }
-
-        private void ProcessAlerts(TranscribedCall Call, WavStreamData CallWavData)
+        public void ProcessAlerts(TranscribedCall Call)
         {
             foreach (var alert in m_Settings.Alerts)
             {
@@ -94,13 +58,13 @@ namespace pizzalib
                               TraceEventType.Information,
                               $"Alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
                         Call.IsAlertMatch = true;                        
-                        TriggerAlertEvent(alert, Call, CallWavData);
+                        TriggerAlertEvent(alert, Call);
                     }
                 }
             }
         }
 
-        private void TriggerAlertEvent(Alert Alert, TranscribedCall Call, WavStreamData CallWavData)
+        private void TriggerAlertEvent(Alert Alert, TranscribedCall Call)
         {
             //
             // If this alert has triggered before, pull its record, otherwise create
@@ -178,22 +142,6 @@ namespace pizzalib
 
                 alertEvent.LastTriggered = DateTime.Now;
                 alertEvent.TriggerCountLastInterval++;
-
-                if (Alert.CaptureWAV)
-                {
-                    //
-                    // Only write the audio file once - either this was already done because the global
-                    // setting to capture MP3 files was enabled, or a prior alert triggered for
-                    // this call and wrote it.
-                    //
-                    if (string.IsNullOrEmpty(Call.Location))
-                    {
-                        var fileName = $"alert-audio-{DateTime.Now:yyyy-MM-dd-HHmmss}.mp3";
-                        CallWavData.DumpStreamToFile(
-                            Settings.DefaultAlertWavLocation, fileName, OutputFileFormat.Mp3);
-                        Call.Location = Path.Combine(Settings.DefaultAlertWavLocation, fileName);
-                    }
-                }
 
                 if (!string.IsNullOrEmpty(Alert.Email) &&
                     !string.IsNullOrEmpty(m_Settings.gmailUser) &&

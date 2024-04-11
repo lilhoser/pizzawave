@@ -56,9 +56,6 @@ namespace pizzaui
             gmailUserTextbox = new TextBox();
             label11 = new Label();
             autostartListenerCheckbox = new CheckBox();
-            wavOutputLocationTextbox = new TextBox();
-            label7 = new Label();
-            browseButton = new Button();
             tabPage1 = new TabPage();
             talkgroupCountLabel = new Label();
             label10 = new Label();
@@ -130,9 +127,6 @@ namespace pizzaui
             tabPage3.Controls.Add(gmailUserTextbox);
             tabPage3.Controls.Add(label11);
             tabPage3.Controls.Add(autostartListenerCheckbox);
-            tabPage3.Controls.Add(wavOutputLocationTextbox);
-            tabPage3.Controls.Add(label7);
-            tabPage3.Controls.Add(browseButton);
             tabPage3.Location = new Point(4, 34);
             tabPage3.Name = "tabPage3";
             tabPage3.Size = new Size(752, 768);
@@ -142,7 +136,7 @@ namespace pizzaui
             // 
             // gmailAppPasswordTextbox
             // 
-            gmailAppPasswordTextbox.Location = new Point(196, 118);
+            gmailAppPasswordTextbox.Location = new Point(194, 61);
             gmailAppPasswordTextbox.Margin = new Padding(4, 5, 4, 5);
             gmailAppPasswordTextbox.Name = "gmailAppPasswordTextbox";
             gmailAppPasswordTextbox.Size = new Size(373, 31);
@@ -151,7 +145,7 @@ namespace pizzaui
             // label12
             // 
             label12.AutoSize = true;
-            label12.Location = new Point(7, 118);
+            label12.Location = new Point(4, 64);
             label12.Margin = new Padding(4, 0, 4, 0);
             label12.Name = "label12";
             label12.Size = new Size(179, 25);
@@ -160,7 +154,7 @@ namespace pizzaui
             // 
             // gmailUserTextbox
             // 
-            gmailUserTextbox.Location = new Point(196, 63);
+            gmailUserTextbox.Location = new Point(193, 9);
             gmailUserTextbox.Margin = new Padding(4, 5, 4, 5);
             gmailUserTextbox.Name = "gmailUserTextbox";
             gmailUserTextbox.Size = new Size(373, 31);
@@ -169,7 +163,7 @@ namespace pizzaui
             // label11
             // 
             label11.AutoSize = true;
-            label11.Location = new Point(7, 63);
+            label11.Location = new Point(4, 9);
             label11.Margin = new Padding(4, 0, 4, 0);
             label11.Name = "label11";
             label11.Size = new Size(148, 25);
@@ -181,41 +175,12 @@ namespace pizzaui
             autostartListenerCheckbox.AutoSize = true;
             autostartListenerCheckbox.Checked = true;
             autostartListenerCheckbox.CheckState = CheckState.Checked;
-            autostartListenerCheckbox.Location = new Point(7, 169);
+            autostartListenerCheckbox.Location = new Point(4, 115);
             autostartListenerCheckbox.Name = "autostartListenerCheckbox";
             autostartListenerCheckbox.Size = new Size(164, 29);
             autostartListenerCheckbox.TabIndex = 25;
             autostartListenerCheckbox.Text = "Autostart server";
             autostartListenerCheckbox.UseVisualStyleBackColor = true;
-            // 
-            // wavOutputLocationTextbox
-            // 
-            wavOutputLocationTextbox.Location = new Point(196, 13);
-            wavOutputLocationTextbox.Margin = new Padding(4, 5, 4, 5);
-            wavOutputLocationTextbox.Name = "wavOutputLocationTextbox";
-            wavOutputLocationTextbox.Size = new Size(373, 31);
-            wavOutputLocationTextbox.TabIndex = 2;
-            // 
-            // label7
-            // 
-            label7.AutoSize = true;
-            label7.Location = new Point(7, 13);
-            label7.Margin = new Padding(4, 0, 4, 0);
-            label7.Name = "label7";
-            label7.Size = new Size(161, 25);
-            label7.TabIndex = 21;
-            label7.Text = "Save MP3s to disk:";
-            // 
-            // browseButton
-            // 
-            browseButton.Location = new Point(577, 10);
-            browseButton.Margin = new Padding(4, 5, 4, 5);
-            browseButton.Name = "browseButton";
-            browseButton.Size = new Size(94, 36);
-            browseButton.TabIndex = 3;
-            browseButton.Text = "Browse...";
-            browseButton.UseVisualStyleBackColor = true;
-            browseButton.Click += browseButton_Click;
             // 
             // tabPage1
             // 
@@ -437,9 +402,6 @@ namespace pizzaui
         private Label label4;
         private TextBox samplingRateTextbox;
         private TextBox bitDepthTextbox;
-        private TextBox wavOutputLocationTextbox;
-        private Label label7;
-        private Button browseButton;
         private Button browseButton2;
         private TextBox whisperModelFileTextbox;
         private Label label8;
@@ -449,7 +411,7 @@ namespace pizzaui
         private CheckBox autostartListenerCheckbox;
         private TextBox gmailUserTextbox;
         private Label label11;
-        private TextBox gmailAppPasswordTextbox;
         private Label label12;
+        private TextBox gmailAppPasswordTextbox;
     }
 }

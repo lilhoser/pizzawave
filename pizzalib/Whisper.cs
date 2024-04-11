@@ -25,19 +25,48 @@ namespace pizzalib
 {
     using static TraceLogger;
 
-    public class Whisper
+    public class Whisper : IDisposable
     {
         private string m_ModelFile;
         private readonly string s_ModelFolder = Path.Combine(
             Settings.DefaultWorkingDirectory, "model");
         private bool m_Initialized;
         private Settings m_Settings;
+        private bool m_Disposed;
+        private WhisperFactory? m_Factory;
+        private WhisperProcessor? m_Processor;
 
         public Whisper(Settings Settings)
         {
             m_Initialized = false;
             m_ModelFile = string.Empty;
             m_Settings = Settings;
+        }
+
+        ~Whisper()
+        {
+            Dispose(false);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            Trace(TraceLoggerType.Whisper, TraceEventType.Information, "Model disposed.");
+
+            if (m_Disposed)
+            {
+                return;
+            }
+
+            m_Disposed = true;
+            m_Initialized = false;
+            m_Factory?.Dispose();
+            m_Processor?.Dispose();
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         public async Task<bool> Initialize()
@@ -92,51 +121,56 @@ namespace pizzalib
                     m_Settings.ProgressBarStepCallback?.Invoke();
                 }
             }
-            m_Initialized = true;
-            m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
-            return true;
-        }
 
-        public async Task<TranscribedCall> TranscribeCall(WavStreamData CallData)
-        {
-            if (!m_Initialized)
-            {
-                throw new Exception("Whisper model is not initialized.");
-            }
-
-            var call = new TranscribedCall();
-            call.UniqueId = Guid.NewGuid();
-
+            //
+            // Build the factory & processor once! This consumes MASSIVE memory depending on model.
+            //
             try
             {
-                var jsonObject = CallData.GetJsonObject();
-                call.StopTime = jsonObject["StopTime"]!.ToObject<long>();
-                call.StartTime = jsonObject["StartTime"]!.ToObject<long>();
-                call.CallId = jsonObject["CallId"]!.ToObject<long>();
-                call.Source = jsonObject["Source"]!.ToObject<int>();
-                call.Talkgroup = jsonObject["Talkgroup"]!.ToObject<long>();
-                call.PatchedTalkgroups = jsonObject["PatchedTalkgroups"]!.ToObject<List<long>>();
-                call.Frequency = jsonObject["Frequency"]!.ToObject<double>();
-                call.SystemShortName = jsonObject["SystemShortName"]!.ToObject<string>();
+                m_Factory = WhisperFactory.FromPath(m_ModelFile);
+                m_Processor = m_Factory.CreateBuilder().WithLanguage("auto").Build();
             }
             catch (Exception ex)
             {
-                var err = $"Unable to parse JSON data: {ex.Message}";
+                var err = $"Failed to build processor/factory: {ex.Message}";
                 Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
                 throw new Exception(err);
-            }            
+            }
+
+            m_Initialized = true;
+            m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
+            Trace(TraceLoggerType.Whisper, TraceEventType.Information, "Model initialized.");
+            return true;
+        }
+
+        public async Task<string> TranscribeCall(MemoryStream WavData)
+        {
+            if (!m_Initialized || m_Processor == null)
+            {
+                throw new Exception("Whisper model is not initialized.");
+            }           
 
             try
             {
-                using (var whisperFactory = WhisperFactory.FromPath(m_ModelFile))
+                var sb = new StringBuilder();
+                await foreach (var result in m_Processor.ProcessAsync(WavData))
                 {
-                    var processor = whisperFactory.CreateBuilder().WithLanguage("auto").Build();
-                    var sb = new StringBuilder();
-                    await foreach (var result in processor.ProcessAsync(CallData.GetRawStream()))
-                    {
-                        sb.Append($"{result.Text} ");
-                    }
-                    call.Transcription = sb.ToString();
+                    sb.Append($"{result.Text} ");
+                }
+                var transcription = sb.ToString();
+                if (string.IsNullOrEmpty(transcription))
+                {
+                    var err = $"Transcription was empty";
+                    Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
+                }
+                else
+                {
+                    var length = Math.Min(25, transcription.Length);
+                    var snippet = transcription.Substring(0, length);
+                    Trace(TraceLoggerType.Whisper,
+                          TraceEventType.Verbose,
+                          $"Transcription: \"{snippet}...\"");
+                    return transcription;
                 }
             }
             catch (Exception ex)
@@ -146,19 +180,7 @@ namespace pizzalib
                 throw new Exception(err);
             }
 
-            if (string.IsNullOrEmpty(call.Transcription))
-            {
-                var err = $"Transcription was empty";
-                Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
-                throw new Exception(err);
-            }
-
-            var length = Math.Min(25, call.Transcription.Length);
-            var snippet = call.Transcription.Substring(0, length);
-            Trace(TraceLoggerType.Whisper,
-                  TraceEventType.Verbose,
-                  $"Transcribed call id={call.CallId}:  \"{snippet}...\"");
-            return call;
+            return string.Empty;
         }
     }
 }

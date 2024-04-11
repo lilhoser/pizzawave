@@ -71,6 +71,26 @@ _Important_: Make sure your `trunk-recorder` system is configured to connect to 
 StreamServer Verbose: 1 : 3/22/2024 3:39 PM: Listening on port 9123
 ```
 
+# Running
+
+Whether you use `pizzaui`, `pizzacmd` or your own .NET application built on `pizzalib`, all calls will be stored in a `capture`, which is a folder in the root working directory (`<user profile>\pizzawave\`). This folder consists of:
+
+* `calljournal.json`: Each line contains a JSON-serialized `TranscribedCall` structure. The audio data can be linked to this record via the `Location` field.
+* `<timestamp>.mp3`: call audio files
+
+The call journal can be deserialized into a list of `TranscribedCall` objects using `NewtonSoft.Json` as follows:
+
+```
+var lines = File.ReadAllLines("calljournal.json");
+var calls = new List<TranscribedCall>();
+foreach (var line in lines)
+{
+    var call = (TranscribedCall)JsonConvert.DeserializeObject(line, typeof(TranscribedCall))!;
+    calls.Add(call);
+}
+```
+
+
 # Other
 
 ## Diagnostics
@@ -98,9 +118,9 @@ Here is the parts list, all of which can be purchased on Amazon:
 * [RTL-SDR Blog LNA](https://www.amazon.com/dp/B07G14Q6XX)
 * [PL-259/UHF-F to F-type-M](https://www.amazon.com/dp/B0C36VGYKZ)
 * [PL-259/UHF-F to SMA-M](https://www.amazon.com/dp/B00CVQOOAI)
-* [DirecTV F-type 3-way splitter](https://www.amazon.com/dp/B00BW60R68)
-* [SMA splitters](https://www.amazon.com/dp/B091DQ3HGZ) ([adapters needed](https://www.amazon.com/dp/B07FDHBS19))
-* [F-type to SMA adapters](https://www.amazon.com/dp/B0814BQHJN) and [these too](https://www.amazon.com/dp/B09KB9RM6Q)
+* [DirecTV F-type 8-way splitter](https://www.amazon.com/gp/product/B0045DVIP4)
+* [F to SMA jumpers](https://www.amazon.com/gp/product/B09GVSHQJX)
+* Other adapters you might need: [SMA adapters](https://www.amazon.com/dp/B07FDHBS19)), [F-type to SMA adapters](https://www.amazon.com/dp/B0814BQHJN) and [these too](https://www.amazon.com/dp/B09KB9RM6Q)
 * [RTL-SDR v4 dongles](https://www.amazon.com/dp/B0CD745394)
 * [10-port USB hub](https://www.amazon.com/dp/B098KZMR4J) with sufficient port spacing for side-by-side RTL-SDR dongles!
 * [Monoprice USB extension cable](https://www.amazon.com/dp/B00AA0U08M)

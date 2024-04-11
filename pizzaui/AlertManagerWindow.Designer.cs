@@ -51,7 +51,6 @@ namespace pizzaui
             tabPage3 = new TabPage();
             splitContainer1 = new SplitContainer();
             enableCheckbox = new CheckBox();
-            captureWavCheckbox = new CheckBox();
             talkgroupsTextbox = new TextBox();
             label6 = new Label();
             alertNameTextbox = new TextBox();
@@ -109,7 +108,6 @@ namespace pizzaui
             // splitContainer1.Panel1
             // 
             splitContainer1.Panel1.Controls.Add(enableCheckbox);
-            splitContainer1.Panel1.Controls.Add(captureWavCheckbox);
             splitContainer1.Panel1.Controls.Add(talkgroupsTextbox);
             splitContainer1.Panel1.Controls.Add(label6);
             splitContainer1.Panel1.Controls.Add(alertNameTextbox);
@@ -140,24 +138,12 @@ namespace pizzaui
             enableCheckbox.AutoSize = true;
             enableCheckbox.Checked = true;
             enableCheckbox.CheckState = CheckState.Checked;
-            enableCheckbox.Location = new Point(493, 339);
+            enableCheckbox.Location = new Point(489, 314);
             enableCheckbox.Name = "enableCheckbox";
             enableCheckbox.Size = new Size(101, 29);
             enableCheckbox.TabIndex = 45;
             enableCheckbox.Text = "Enabled";
             enableCheckbox.UseVisualStyleBackColor = true;
-            // 
-            // captureWavCheckbox
-            // 
-            captureWavCheckbox.AutoSize = true;
-            captureWavCheckbox.Checked = true;
-            captureWavCheckbox.CheckState = CheckState.Checked;
-            captureWavCheckbox.Location = new Point(493, 304);
-            captureWavCheckbox.Name = "captureWavCheckbox";
-            captureWavCheckbox.Size = new Size(143, 29);
-            captureWavCheckbox.TabIndex = 44;
-            captureWavCheckbox.Text = "Capture WAV";
-            captureWavCheckbox.UseVisualStyleBackColor = true;
             // 
             // talkgroupsTextbox
             // 
@@ -394,7 +380,6 @@ namespace pizzaui
         private Label label9;
         private BrightIdeasSoftware.FastObjectListView talkgroupsListview;
         private TextBox talkgroupsTextbox;
-        private CheckBox captureWavCheckbox;
         private CheckBox enableCheckbox;
     }
 }

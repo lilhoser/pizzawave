@@ -78,32 +78,6 @@ namespace pizzaui
         {
             base.Validate();
         }
-
-        public void SaveToFile(string Target)
-        {
-            string target;
-
-            if (string.IsNullOrEmpty(Target))
-            {
-                target = DefaultSettingsFileLocation;
-            }
-            else
-            {
-                target = Target;
-            }
-
-            try
-            {
-                Validate();
-                var json = JsonConvert.SerializeObject(this, Formatting.Indented);
-                File.WriteAllText(target, json);
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Could not save the Settings object " +
-                    $"to JSON: {ex.Message}");
-            }
-        }
     }
 }
 

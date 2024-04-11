@@ -27,18 +27,12 @@ using pizzalib;
 namespace pizzaui
 {
     using static TraceLogger;
-    using Whisper = pizzalib.Whisper;
 
     public partial class MainWindow : Form
     {
-        private bool m_ShutdownComplete;
-        private bool m_ListenerStarted;
-        private bool m_CloseFormRequested;
         private AudioPlayer m_AudioPlayer;
-        private StreamServer? m_StreamServer;
-        private Whisper? m_Whisper;
-        private Alerter? m_Alerter;
         private Settings m_Settings;
+        private CallManager m_CallManager;
 
         public MainWindow()
         {
@@ -70,40 +64,217 @@ namespace pizzaui
                           $"Unable to load settings {settingsPath}: {ex.Message}");
                     m_Settings = new Settings();
                     SetUiCallbacks();
-                    return;
+                    m_Settings.SaveToFile(string.Empty); // persist it
                 }
             }
+            m_CallManager = new CallManager(NewCallTranscribed);
         }
 
-        private async void MainWindow_Shown(object sender, EventArgs e)
+        private void MainWindow_Shown(object sender, EventArgs e)
         {
-            try
-            {
-                m_Whisper = new Whisper(m_Settings);
-                m_Alerter = new Alerter(m_Settings, m_Whisper, NewCallTranscribed);
-                m_StreamServer = new StreamServer(m_Alerter.NewCallDataAvailable, m_Settings);
-                _ = await ApplyNewSettings();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Unable to apply settings: {ex.Message}");
-                return;
-            }
+            ApplyNewSettings();
         }
 
         private void MainWindow_FormClosing(object sender, FormClosingEventArgs e)
         {
             m_AudioPlayer.Shutdown();
             TraceLogger.Shutdown();
-            if (m_ListenerStarted && !m_ShutdownComplete)
-            {
-                m_CloseFormRequested = true;
-                m_StreamServer?.Shutdown();
-                e.Cancel = true;
-            }
+            m_CallManager.Stop();
         }
 
         #region file menuitem handlers
+
+        private void openCaptureToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (m_CallManager.IsStarted())
+            {
+                MessageBox.Show("Please stop the call manager before loading a capture.");
+                return;
+            }
+
+            var fbd = new FolderBrowserDialog();
+            fbd.InitialDirectory = Settings.DefaultCaptureDirectory;
+            fbd.ShowHiddenFiles = true;
+            fbd.Description = "Choose a capture";
+            if (fbd.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+            var target = Path.Join(fbd.SelectedPath, CallManager.s_CallJournalFile);
+            if (!File.Exists(target))
+            {
+                MessageBox.Show($"{fbd.SelectedPath} is not a valid capture path.");
+                return;
+            }
+
+            try
+            {
+                var lines = File.ReadAllLines(target);
+                var calls = new List<TranscribedCall>();
+                foreach (var line in lines)
+                {
+                    var call = (TranscribedCall)JsonConvert.DeserializeObject(line, typeof(TranscribedCall))!;
+                    calls.Add(call);
+                }
+                transcriptionListview.ClearObjects();
+                transcriptionListview.SetObjects(calls);
+                this.Text = $"PizzaWave - Capture {target}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to load capture: {ex.Message}");
+            }
+        }
+
+        private void saveSettingsAsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SaveFileDialog sfd = new SaveFileDialog();
+            sfd.OverwritePrompt = true;
+            sfd.DefaultExt = "JSON";
+            sfd.Filter = "JSON File (*.json)|*.json";
+
+            if (sfd.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            try
+            {
+                m_Settings.SaveToFile(sfd.FileName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to save settings to {sfd.FileName}: {ex.Message}");
+            }
+            UpdateProgressLabel($"Settings saved to {sfd.FileName}");
+        }
+
+        private void openSettingsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (m_CallManager.IsStarted())
+            {
+                MessageBox.Show("Please stop the call manager before loading new settings.");
+                return;
+            }
+
+            OpenFileDialog dialog = new OpenFileDialog();
+            dialog.CheckFileExists = true;
+            dialog.CheckPathExists = true;
+            dialog.Multiselect = false;
+
+            if (dialog.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(dialog.FileName);
+                m_Settings = (Settings)JsonConvert.DeserializeObject(json, typeof(Settings))!;
+                ApplyNewSettings();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to load settings from {dialog.FileName}: {ex.Message}");
+            }
+            UpdateProgressLabel($"Settings loaded from {dialog.FileName}");
+        }
+
+        private void startToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (!m_CallManager.IsStarted())
+            {
+                UpdateProgressLabel("Starting call manager...");
+                startToolStripMenuItem.Enabled = false;
+                stopToolStripMenuItem.Enabled = false;
+                try
+                {
+                    _ = m_CallManager.Start();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message);
+                    startToolStripMenuItem.Enabled = true;
+                    return;
+                }
+                //
+                // Start a timer to check if the server is up after 5 seconds
+                //
+                var timer = new System.Windows.Forms.Timer();
+                timer.Interval = 5000;
+                timer.Tick += new EventHandler(delegate (object? sender, EventArgs e)
+                {
+                    timer.Stop();
+                    if (!m_CallManager.IsStarted())
+                    {
+                        UpdateProgressLabel("Unable to start call manager. Please see logs.");
+                        return;
+                    }
+                    stopToolStripMenuItem.Enabled = true;
+                    UpdateProgressLabel("Call manager started.");
+                });
+                timer.Start();
+            }
+        }
+
+        private void stopToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (m_CallManager.IsStarted())
+            {
+                UpdateProgressLabel("Stopping call manager...");
+                stopToolStripMenuItem.Enabled = false;
+                startToolStripMenuItem.Enabled = false;
+                m_CallManager.Stop();
+                UpdateProgressLabel("Call manager stopped.");
+                UpdateConnectionLabel("Not listening");
+                startToolStripMenuItem.Enabled = true;
+            }
+        }
+
+        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Application.Exit();
+        }
+
+        #endregion
+
+        #region edit menuitem handlers
+
+        private void alertsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            //
+            // While it's possible to allow alert creation without talkgroups, it makes the
+            // experience much worse and adds unnecessary complexity.
+            //
+            if (m_Settings.talkgroups == null || m_Settings.talkgroups.Count == 0)
+            {
+                MessageBox.Show("Please import talkgroups in the Settings Window before creating alerts.");
+                return;
+            }
+
+            var window = new AlertManagerWindow(m_Settings, m_CallManager.IsStarted());
+            if (window.ShowDialog() == DialogResult.OK)
+            {
+                PersistSettingsSilent();
+            }
+        }
+
+        private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var window = new SettingsWindow(m_Settings, m_CallManager.IsStarted());
+            if (window.ShowDialog() == DialogResult.OK)
+            {
+                //
+                // DialogResult.OK means at least something changed in Settings.
+                //
+                m_Settings = window.m_UpdatedSettings;
+                ApplyNewSettings();
+            }
+        }
+
+        #endregion
+
+        #region view menuitem handlers
 
         private void exportJSONToolStripMenuItem_Click(object sender, EventArgs e)
         {
@@ -124,7 +295,7 @@ namespace pizzaui
             }
             var jsonContents = new StringBuilder();
             try
-            {                
+            {
                 foreach (var obj in transcriptionListview.FilteredObjects)
                 {
                     var call = (TranscribedCall)obj;
@@ -170,7 +341,7 @@ namespace pizzaui
             {
                 var configuration = new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
-                    HasHeaderRecord = true,  
+                    HasHeaderRecord = true,
                 };
 
                 var filteredRecords = transcriptionListview.FilteredObjects.Cast<TranscribedCall>().ToList();
@@ -187,123 +358,6 @@ namespace pizzaui
             }
             UpdateProgressLabel($"CSV exported to {sfd.FileName}");
         }
-
-        private void saveSettingsAsToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            SaveFileDialog sfd = new SaveFileDialog();
-            sfd.OverwritePrompt = true;
-            sfd.DefaultExt = "JSON";
-            sfd.Filter = "JSON File (*.json)|*.json";
-
-            if (sfd.ShowDialog() != DialogResult.OK)
-            {
-                return;
-            }
-
-            try
-            {
-                m_Settings.SaveToFile(sfd.FileName);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Unable to save settings to {sfd.FileName}: {ex.Message}");
-            }
-            UpdateProgressLabel($"Settings saved to {sfd.FileName}");
-        }
-
-        private async void openSettingsToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (m_ListenerStarted)
-            {
-                MessageBox.Show("Please stop the server before loading new settings.");
-                return;
-            }
-
-            OpenFileDialog dialog = new OpenFileDialog();
-            dialog.CheckFileExists = true;
-            dialog.CheckPathExists = true;
-            dialog.Multiselect = false;
-
-            if (dialog.ShowDialog() != DialogResult.OK)
-            {
-                return;
-            }
-
-            try
-            {
-                var json = File.ReadAllText(dialog.FileName);
-                m_Settings = (Settings)JsonConvert.DeserializeObject(json, typeof(Settings))!;
-                _ = await ApplyNewSettings();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Unable to load settings from {dialog.FileName}: {ex.Message}");
-            }
-            UpdateProgressLabel($"Settings loaded from {dialog.FileName}");
-        }
-
-        private void startToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (!m_ListenerStarted)
-            {
-                StartServer();
-            }
-        }
-
-        private void stopToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (m_ListenerStarted)
-            {
-                UpdateProgressLabel("Stopping server...");
-                stopToolStripMenuItem.Enabled = false;
-                m_StreamServer?.Shutdown();
-            }
-        }
-
-        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            Application.Exit();
-        }
-
-        #endregion
-
-        #region edit menuitem handlers
-
-        private void alertsToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            //
-            // While it's possible to allow alert creation without talkgroups, it makes the
-            // experience much worse and adds unnecessary complexity.
-            //
-            if (m_Settings.talkgroups == null || m_Settings.talkgroups.Count == 0)
-            {
-                MessageBox.Show("Please import talkgroups in the Settings Window before creating alerts.");
-                return;
-            }
-
-            var window = new AlertManagerWindow(m_Settings, m_ListenerStarted);
-            if (window.ShowDialog() == DialogResult.OK)
-            {
-                PersistSettingsSilent();
-            }
-        }
-
-        private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            var window = new SettingsWindow(m_Settings, m_ListenerStarted);
-            if (window.ShowDialog() == DialogResult.OK)
-            {
-                //
-                // DialogResult.OK means at least something changed in Settings.
-                //
-                m_Settings = window.m_UpdatedSettings;
-                _ = ApplyNewSettings();
-            }
-        }
-
-        #endregion
-
-        #region view menuitem handlers
 
         private void clearToolStripMenuItem_Click(object sender, EventArgs e)
         {
@@ -522,12 +576,12 @@ namespace pizzaui
 
         #region settings management
 
-        private async Task<bool> ApplyNewSettings()
+        private void ApplyNewSettings()
         {
-            if (m_ListenerStarted)
+            if (m_CallManager.IsStarted())
             {
-                MessageBox.Show("Cannot apply new settings when server is active.");
-                return false;
+                MessageBox.Show("Cannot apply new settings when call manager is active.");
+                return;
             }
 
             //
@@ -541,23 +595,23 @@ namespace pizzaui
             TraceLogger.SetLevel(m_Settings.TraceLevelApp);
             ApplySettingsToForm();
             InitializeListview();
+            this.Enabled = false; // lock window until init is done
 
-            try
-            {
-                _ = await m_Whisper!.Initialize();
-            }
-            catch (Exception ex)
-            {
-                Trace(TraceLoggerType.MainWindow, TraceEventType.Error, $"{ex.Message}");
-                return false;
-            }
+            UpdateProgressLabel("Initializing, please wait...");
 
-            if (m_Settings.AutostartListener)
+            Task.Run(() =>
             {
-                StartServer();
-            }
-
-            return true;
+                try
+                {
+                    _ = m_CallManager.Initialize(m_Settings);
+                }
+                catch (Exception ex)
+                {
+                    Trace(TraceLoggerType.MainWindow, TraceEventType.Error, $"{ex.Message}");
+                    UpdateProgressLabel($"{ex.Message}");
+                }
+                this.Invoke(() => this.Enabled = true);
+            });
         }
 
         private void ApplySettingsToForm()
@@ -587,60 +641,13 @@ namespace pizzaui
 
         #endregion
 
-        #region stream server management
-
-        private void StartServer()
-        {
-            startToolStripMenuItem.Enabled = false;
-            stopToolStripMenuItem.Enabled = true;
-            UpdateProgressLabel("Server started");
-            Task.Run(async () =>
-            {
-                try
-                {
-                    m_ListenerStarted = true;
-                    var result = await m_StreamServer!.Listen();
-                    if (result)
-                    {
-                        m_ShutdownComplete = true;
-                        if (m_CloseFormRequested)
-                        {
-                            this.Invoke((MethodInvoker)(() => Close()));
-                            return;
-                        }
-                    }
-                    m_ListenerStarted = false;
-                    startToolStripMenuItem.Enabled = true;
-                    stopToolStripMenuItem.Enabled = false;
-                    UpdateProgressLabel("Server stopped");
-                    UpdateConnectionLabel("Not connected");
-                }
-                catch (Exception ex)
-                {
-                    m_ListenerStarted = false;
-                    Trace(TraceLoggerType.MainWindow, TraceEventType.Error, $"{ex.Message}");
-                    UpdateProgressLabel("Unable to start server");
-                    UpdateConnectionLabel("Not connected");
-                }
-            });
-        }
-        #endregion
-
         #region process call transcription data
 
         private void NewCallTranscribed(TranscribedCall Call)
         {
             transcriptionListview.Invoke((MethodInvoker)(() =>
             {
-                var focused = transcriptionListview.FocusedObject;
-                var focusedItem = transcriptionListview.FocusedItem;
                 transcriptionListview.AddObject(Call);
-                if (focused != null)
-                {
-                    transcriptionListview.EnsureModelVisible(focused);
-                    transcriptionListview.FocusedObject = focused;
-                    transcriptionListview.TopItem = focusedItem;
-                }
             }));
         }
 
@@ -709,5 +716,6 @@ namespace pizzaui
             }));
         }
         #endregion
+
     }
 }

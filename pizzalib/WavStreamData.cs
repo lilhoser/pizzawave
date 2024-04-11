@@ -152,6 +152,12 @@ namespace pizzalib
         {
             return m_WavData;
         }
+
+        public void RewindStream()
+        {
+            m_WavData.Seek(0, SeekOrigin.Begin);
+        }
+
         public JObject GetJsonObject()
         {
             var json = Encoding.UTF8.GetString(m_JsonData.GetBuffer());
@@ -227,7 +233,7 @@ namespace pizzalib
             }
             finally
             {
-                m_WavData.Seek(0, SeekOrigin.Begin);
+                RewindStream();
             }
         }
 
