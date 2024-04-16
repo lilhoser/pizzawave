@@ -391,6 +391,22 @@ namespace pizzaui
                 transcriptionListview.ShowGroups = true;
                 transcriptionListview.AlwaysGroupByColumn = transcriptionListview.GetColumn("Talkgroup");
                 transcriptionListview.ShowItemCountOnGroups = true;
+                transcriptionListview.GroupExpandingCollapsing += new EventHandler<GroupExpandingCollapsingEventArgs>(
+                    delegate (object? sender, GroupExpandingCollapsingEventArgs args)
+                {
+                    //
+                    // TODO: This is a workaround to an OLV bug. For whatever reason, the undelrying listview
+                    // groups member is not being synced with OLV's groups member and this manifests as a crash
+                    // whenever the group is collapsed/expanded. This workaround just prevents a crash; the
+                    // expand/collapse button does not work.
+                    //
+                    if (transcriptionListview.Groups.Count == 0)
+                    {
+                        transcriptionListview.ShowGroups = true;
+                        transcriptionListview.BuildGroups();
+                    }
+                    args.Canceled = false;
+                });
             }
         }
 

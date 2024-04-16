@@ -1,8 +1,7 @@
 {
   "profiles": {
     "pizzawave": {
-      "commandName": "Project",
-      "commandLineArgs": "--headless"
+      "commandName": "Project"
     }
   }
 }

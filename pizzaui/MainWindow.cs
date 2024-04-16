@@ -38,6 +38,7 @@ namespace pizzaui
         {
             InitializeComponent();
             TraceLogger.Initialize();
+            pizzalib.TraceLogger.Initialize();
             m_AudioPlayer = new AudioPlayer();
             string settingsPath = pizzalib.Settings.DefaultSettingsFileLocation;
             if (!File.Exists(settingsPath))
@@ -79,6 +80,7 @@ namespace pizzaui
         {
             m_AudioPlayer.Shutdown();
             TraceLogger.Shutdown();
+            pizzalib.TraceLogger.Shutdown();
             m_CallManager.Stop();
         }
 
@@ -116,7 +118,6 @@ namespace pizzaui
                     var call = (TranscribedCall)JsonConvert.DeserializeObject(line, typeof(TranscribedCall))!;
                     calls.Add(call);
                 }
-                transcriptionListview.ClearObjects();
                 transcriptionListview.SetObjects(calls);
                 this.Text = $"PizzaWave - Capture {target}";
             }
@@ -180,41 +181,62 @@ namespace pizzaui
             UpdateProgressLabel($"Settings loaded from {dialog.FileName}");
         }
 
-        private void startToolStripMenuItem_Click(object sender, EventArgs e)
+        private async void startToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (!m_CallManager.IsStarted())
+            if (m_CallManager.IsStarted())
             {
-                UpdateProgressLabel("Starting call manager...");
-                startToolStripMenuItem.Enabled = false;
-                stopToolStripMenuItem.Enabled = false;
-                try
+                return;
+            }
+
+            InitializeListview();
+            this.Enabled = false; // lock window until init is done
+            UpdateProgressLabel("Initializing, please wait...");
+
+            try
+            {
+                _ = await m_CallManager.Initialize(m_Settings);
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.MainWindow, TraceEventType.Error, $"{ex.Message}");
+                UpdateProgressLabel($"{ex.Message}");
+                return;
+            }
+            finally
+            {
+                this.Invoke(() => this.Enabled = true);
+            }
+
+            UpdateProgressLabel("Starting call manager...");
+            startToolStripMenuItem.Enabled = false;
+            stopToolStripMenuItem.Enabled = false;
+            try
+            {
+                _ = m_CallManager.Start();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+                startToolStripMenuItem.Enabled = true;
+                return;
+            }
+            //
+            // Start a timer to check if the server is up after 5 seconds
+            //
+            var timer = new System.Windows.Forms.Timer();
+            timer.Interval = 5000;
+            timer.Tick += new EventHandler(delegate (object? sender, EventArgs e)
+            {
+                timer.Stop();
+                if (!m_CallManager.IsStarted())
                 {
-                    _ = m_CallManager.Start();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(ex.Message);
-                    startToolStripMenuItem.Enabled = true;
+                    UpdateProgressLabel("Unable to start call manager. Please see logs.");
                     return;
                 }
-                //
-                // Start a timer to check if the server is up after 5 seconds
-                //
-                var timer = new System.Windows.Forms.Timer();
-                timer.Interval = 5000;
-                timer.Tick += new EventHandler(delegate (object? sender, EventArgs e)
-                {
-                    timer.Stop();
-                    if (!m_CallManager.IsStarted())
-                    {
-                        UpdateProgressLabel("Unable to start call manager. Please see logs.");
-                        return;
-                    }
-                    stopToolStripMenuItem.Enabled = true;
-                    UpdateProgressLabel("Call manager started.");
-                });
-                timer.Start();
-            }
+                stopToolStripMenuItem.Enabled = true;
+                UpdateProgressLabel("Call manager started.");
+            });
+            timer.Start();
         }
 
         private void stopToolStripMenuItem_Click(object sender, EventArgs e)
@@ -584,6 +606,8 @@ namespace pizzaui
                 return;
             }
 
+            InitializeListview();
+
             //
             // This routine can be called:
             //  by MainWindow_Shown on app startup
@@ -593,25 +617,8 @@ namespace pizzaui
             // It's important that the server is not active.
             //
             TraceLogger.SetLevel(m_Settings.TraceLevelApp);
+            pizzalib.TraceLogger.SetLevel(m_Settings.TraceLevelApp);
             ApplySettingsToForm();
-            InitializeListview();
-            this.Enabled = false; // lock window until init is done
-
-            UpdateProgressLabel("Initializing, please wait...");
-
-            Task.Run(() =>
-            {
-                try
-                {
-                    _ = m_CallManager.Initialize(m_Settings);
-                }
-                catch (Exception ex)
-                {
-                    Trace(TraceLoggerType.MainWindow, TraceEventType.Error, $"{ex.Message}");
-                    UpdateProgressLabel($"{ex.Message}");
-                }
-                this.Invoke(() => this.Enabled = true);
-            });
         }
 
         private void ApplySettingsToForm()
