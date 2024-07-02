@@ -27,7 +27,11 @@ All call data and complete transcriptions shown in the current view can be expor
 
 ## Opening a capture
 
-To open a `pizzawave` capture, navigate to `File->Open capture`. You can find all of `pizzawave`'s past captures in `<user profile>\pizzawave\captures`.  Read more about captures [here](https://github.com/lilhoser/pizzawave#Running)].
+To open a `pizzawave` capture from a prior live session, navigate to `File->Open capture`. You can find all of `pizzawave`'s past live-session captures in `<user profile>\pizzawave\captures`.
+
+To open an offline capture created by `callstream`'s SFTP feature, navigate to `File->Open offline capture`.
+
+Read more about captures [here](https://github.com/lilhoser/pizzawave#Running)].
 
 ## Viewing full call transcription
 

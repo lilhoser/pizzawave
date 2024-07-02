@@ -16,7 +16,6 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-using System.Text.Json.Serialization;
 
 namespace pizzalib
 {
@@ -32,13 +31,11 @@ namespace pizzalib
         public double Frequency { get; set; }
         public string Location { get; set; }
         public string Transcription { get; set; }
-        //
-        // Used to track when the call is being played in the UI
-        //
-        [JsonIgnore]
-        public bool IsAudioPlaying;
-        public Guid UniqueId;
-        public bool IsAlertMatch;
+        [Newtonsoft.Json.JsonIgnore]
+        public bool IsAudioPlaying { get; set; } // Used to track when the call is being played in the UI
+        public Guid UniqueId { get; set; }
+        [Newtonsoft.Json.JsonIgnore]
+        public bool IsAlertMatch { get; set; } // must be re-evaluated on every load or change in alerts
 
         public string ToString(Settings Settings)
         {

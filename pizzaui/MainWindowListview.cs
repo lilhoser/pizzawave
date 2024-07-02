@@ -103,6 +103,7 @@ namespace pizzaui
             void rowHighlightHandler(object? sender, FormatRowEventArgs e)
             {
                 var call = (TranscribedCall)e.Model;
+                e.Item.BackColor = Color.White;
                 if (call.IsAlertMatch && !m_Settings.ShowAlertMatchesOnly)
                 {
                     e.Item.BackColor = Color.Orange;
@@ -242,7 +243,8 @@ namespace pizzaui
             // because pizzalib is not Windows-only (which OLV is), so we cannot
             // annotate OLV-visible fields with [OLVColumn].
             //
-            var hiddenColumns = new List<string>() { "PatchedTalkgroups", "IsAudioPlaying", "UniqueId" };
+            var hiddenColumns = new List<string>() { 
+                "PatchedTalkgroups", "IsAudioPlaying", "UniqueId", "IsAlertMatch" };
             foreach (var col in transcriptionListview.AllColumns)
             {
                 col.MinimumWidth = 125;

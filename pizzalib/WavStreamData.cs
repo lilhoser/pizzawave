@@ -51,7 +51,7 @@ namespace pizzalib
             m_Settings = settings;
         }
 
-        public async Task<bool> ProcessClientData(NetworkStream ClientStream, CancellationTokenSource CancelSource)
+        public async Task<bool> ProcessClientData(Stream ClientStream, CancellationTokenSource CancelSource)
         {
             byte[] buffer4 = new byte[4];
             byte[] buffer8 = new byte[8];

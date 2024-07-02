@@ -40,6 +40,8 @@ namespace pizzalib
             new TraceSource("Utilities", SourceLevels.Verbose),
             new TraceSource("StandaloneClient", SourceLevels.Verbose),
             new TraceSource("CallManager", SourceLevels.Verbose),
+            new TraceSource("LiveCallManager", SourceLevels.Verbose),
+            new TraceSource("OfflineCallManager", SourceLevels.Verbose),
         };
 
         public enum TraceLoggerType
@@ -52,6 +54,8 @@ namespace pizzalib
             Utilities,
             StandaloneClient,
             CallManager,
+            LiveCallManager,
+            OfflineCallManager,
             Max
         }
 

@@ -30,7 +30,8 @@ namespace pizzalib
             new string[] { Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "pizzawave"});
         public static string DefaultSettingsFileName = "settings.json";
-        public static string DefaultCaptureDirectory = Path.Combine(DefaultWorkingDirectory, "captures");
+        public static string DefaultLiveCaptureDirectory = Path.Combine(DefaultWorkingDirectory, "captures");
+        public static string DefaultOfflineCaptureDirectory = Path.Combine(DefaultWorkingDirectory, "offline");
         public static string DefaultSettingsFileLocation = Path.Combine(
             DefaultWorkingDirectory, DefaultSettingsFileName);
         public static string DefaultAlertWavLocation = Path.Combine(DefaultWorkingDirectory, "alerts");
