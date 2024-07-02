@@ -23,6 +23,7 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using System.Globalization;
 using pizzalib;
+using System.IO;
 
 namespace pizzaui
 {
@@ -32,7 +33,8 @@ namespace pizzaui
     {
         private AudioPlayer m_AudioPlayer;
         private Settings m_Settings;
-        private CallManager m_CallManager;
+        private LiveCallManager m_LiveCallManager;
+        private OfflineCallManager m_OfflineCallManager;
 
         public MainWindow()
         {
@@ -68,7 +70,7 @@ namespace pizzaui
                     m_Settings.SaveToFile(string.Empty); // persist it
                 }
             }
-            m_CallManager = new CallManager(NewCallTranscribed);
+            m_LiveCallManager = new LiveCallManager(NewCallTranscribed);
         }
 
         private void MainWindow_Shown(object sender, EventArgs e)
@@ -81,28 +83,29 @@ namespace pizzaui
             m_AudioPlayer.Shutdown();
             TraceLogger.Shutdown();
             pizzalib.TraceLogger.Shutdown();
-            m_CallManager.Stop();
+            m_LiveCallManager.Stop();
+            m_OfflineCallManager?.Stop();
         }
 
         #region file menuitem handlers
 
         private void openCaptureToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (m_CallManager.IsStarted())
+            if (m_LiveCallManager.IsStarted())
             {
                 MessageBox.Show("Please stop the call manager before loading a capture.");
                 return;
             }
 
             var fbd = new FolderBrowserDialog();
-            fbd.InitialDirectory = Settings.DefaultCaptureDirectory;
+            fbd.InitialDirectory = Settings.DefaultLiveCaptureDirectory;
             fbd.ShowHiddenFiles = true;
             fbd.Description = "Choose a capture";
             if (fbd.ShowDialog() != DialogResult.OK)
             {
                 return;
             }
-            var target = Path.Join(fbd.SelectedPath, CallManager.s_CallJournalFile);
+            var target = Path.Join(fbd.SelectedPath, LiveCallManager.s_CallJournalFile);
             if (!File.Exists(target))
             {
                 MessageBox.Show($"{fbd.SelectedPath} is not a valid capture path.");
@@ -119,12 +122,67 @@ namespace pizzaui
                     calls.Add(call);
                 }
                 transcriptionListview.SetObjects(calls);
+                ReevaluateAlerts();
+                UpdateProgressLabel("Loaded capture.");
                 this.Text = $"PizzaWave - Capture {target}";
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Unable to load capture: {ex.Message}");
             }
+        }
+
+        private async void openOfflineCaptureToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (m_LiveCallManager.IsStarted())
+            {
+                MessageBox.Show("Please stop the call manager before loading an offline capture.");
+                return;
+            }
+
+            var fbd = new FolderBrowserDialog();
+            fbd.ShowHiddenFiles = true;
+            fbd.Description = "Choose a capture";
+            if (fbd.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            menuStrip1.Enabled = false;
+            cancelTaskButton.Visible = true;
+
+            var calls = new List<TranscribedCall>();
+            using (m_OfflineCallManager = new OfflineCallManager(fbd.SelectedPath,
+                (TranscribedCall call) =>
+                {
+                    calls.Add(call);
+                }))
+            {
+                try
+                {
+                    if (!await m_OfflineCallManager.Initialize(m_Settings))
+                    {
+                        throw new Exception("Failed to initialize OfflineCallManager");
+                    }
+                    await m_OfflineCallManager.Start();
+                }
+                catch (Exception ex)
+                {
+                    m_OfflineCallManager.DeleteCapture();
+                    UpdateProgressLabel($"Failed to load offline records: {ex.Message}");
+                    HideProgressBar();
+                    cancelTaskButton.Visible = false;
+                    menuStrip1.Enabled = true;
+                    return;
+                }
+            }
+
+            transcriptionListview.SetObjects(calls);
+            UpdateProgressLabel("Loaded offline capture.");
+            HideProgressBar();
+            this.Text = $"PizzaWave - Offline Capture {fbd.SelectedPath}";
+            menuStrip1.Enabled = true;
+            cancelTaskButton.Visible = false;
         }
 
         private void saveSettingsAsToolStripMenuItem_Click(object sender, EventArgs e)
@@ -152,7 +210,7 @@ namespace pizzaui
 
         private void openSettingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (m_CallManager.IsStarted())
+            if (m_LiveCallManager.IsStarted())
             {
                 MessageBox.Show("Please stop the call manager before loading new settings.");
                 return;
@@ -183,7 +241,7 @@ namespace pizzaui
 
         private async void startToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (m_CallManager.IsStarted())
+            if (m_LiveCallManager.IsStarted())
             {
                 return;
             }
@@ -194,7 +252,7 @@ namespace pizzaui
 
             try
             {
-                _ = await m_CallManager.Initialize(m_Settings);
+                _ = await m_LiveCallManager.Initialize(m_Settings);
             }
             catch (Exception ex)
             {
@@ -212,7 +270,7 @@ namespace pizzaui
             stopToolStripMenuItem.Enabled = false;
             try
             {
-                _ = m_CallManager.Start();
+                _ = m_LiveCallManager.Start();
             }
             catch (Exception ex)
             {
@@ -228,7 +286,7 @@ namespace pizzaui
             timer.Tick += new EventHandler(delegate (object? sender, EventArgs e)
             {
                 timer.Stop();
-                if (!m_CallManager.IsStarted())
+                if (!m_LiveCallManager.IsStarted())
                 {
                     UpdateProgressLabel("Unable to start call manager. Please see logs.");
                     return;
@@ -241,12 +299,12 @@ namespace pizzaui
 
         private void stopToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (m_CallManager.IsStarted())
+            if (m_LiveCallManager.IsStarted())
             {
                 UpdateProgressLabel("Stopping call manager...");
                 stopToolStripMenuItem.Enabled = false;
                 startToolStripMenuItem.Enabled = false;
-                m_CallManager.Stop();
+                m_LiveCallManager.Stop();
                 UpdateProgressLabel("Call manager stopped.");
                 UpdateConnectionLabel("Not listening");
                 startToolStripMenuItem.Enabled = true;
@@ -274,16 +332,18 @@ namespace pizzaui
                 return;
             }
 
-            var window = new AlertManagerWindow(m_Settings, m_CallManager.IsStarted());
+            var window = new AlertManagerWindow(m_Settings, m_LiveCallManager.IsStarted());
             if (window.ShowDialog() == DialogResult.OK)
             {
                 PersistSettingsSilent();
+                ReevaluateAlerts();
+                ReapplyAlertMatchesFilter();
             }
         }
 
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            var window = new SettingsWindow(m_Settings, m_CallManager.IsStarted());
+            var window = new SettingsWindow(m_Settings, m_LiveCallManager.IsStarted());
             if (window.ShowDialog() == DialogResult.OK)
             {
                 //
@@ -398,6 +458,11 @@ namespace pizzaui
         {
             m_Settings.ShowAlertMatchesOnly = showAlertMatchesOnlyToolStripMenuItem.Checked;
             PersistSettingsSilent();
+            ReapplyAlertMatchesFilter();
+        }
+
+        private void ReapplyAlertMatchesFilter()
+        {
             if (m_Settings.ShowAlertMatchesOnly)
             {
                 ShowOnlyAlertMatches();
@@ -571,21 +636,30 @@ namespace pizzaui
         {
             var alertsDir = Settings.DefaultAlertWavLocation;
             var logsDir = TraceLogger.m_TraceFileDir;
-            var dirs = new List<string>() { alertsDir, logsDir };
-            var numDeleted = 0;
+            var liveCapturesDir = Settings.DefaultLiveCaptureDirectory;
+            var offlineCapturesDir = Settings.DefaultOfflineCaptureDirectory;
+            var dirs = new List<string>() { alertsDir, logsDir, liveCapturesDir, offlineCapturesDir };
+            var numFilesDeleted = 0;
+            var numDirsDeleted = 0;
             foreach (var dir in dirs)
             {
-                foreach (var file in Directory.GetFiles(dir))
+                try
                 {
-                    try
+                    var di = new DirectoryInfo(dir);
+                    foreach (var file in di.GetFiles("*.*", SearchOption.AllDirectories))
                     {
-                        File.Delete(file);
-                        numDeleted++;
+                        numFilesDeleted++;
+                        file.Delete();
                     }
-                    catch { }
+                    foreach (var dir2 in di.GetDirectories())
+                    {
+                        numDirsDeleted++;
+                        dir2.Delete(true);
+                    }
                 }
+                catch { }
             }
-            MessageBox.Show($"Deleted {numDeleted} files.");
+            MessageBox.Show($"Deleted {numFilesDeleted} files and {numDirsDeleted} directories.");
         }
         #endregion
 
@@ -600,7 +674,7 @@ namespace pizzaui
 
         private void ApplyNewSettings()
         {
-            if (m_CallManager.IsStarted())
+            if (m_LiveCallManager.IsStarted())
             {
                 MessageBox.Show("Cannot apply new settings when call manager is active.");
                 return;
@@ -644,6 +718,24 @@ namespace pizzaui
                       TraceEventType.Error,
                       $"Unable to persist a settings change: {ex.Message}");
             }
+        }
+
+        private void ReevaluateAlerts()
+        {
+            if (transcriptionListview.Objects == null)
+            {
+                return;
+            }
+            var calls = transcriptionListview.Objects.Cast<TranscribedCall>().ToList();
+            if (calls.Count == 0)
+            {
+                return;
+            }
+            foreach (var call in calls)
+            {
+                Alerter.ProcessAlertsOffline(call, m_Settings.Alerts);
+            }
+            transcriptionListview.RefreshObjects(calls);
         }
 
         #endregion
@@ -724,5 +816,13 @@ namespace pizzaui
         }
         #endregion
 
+        #region statusbar handlers
+
+        private void CancelTaskButton_Click(object sender, EventArgs e)
+        {
+            m_OfflineCallManager?.Stop();
+        }
+
+        #endregion
     }
 }

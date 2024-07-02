@@ -17,29 +17,27 @@ specific language governing permissions and limitations
 under the License.
 */
 using static pizzalib.TraceLogger;
-using Newtonsoft.Json;
 using System.Diagnostics;
+using Newtonsoft.Json;
 
 namespace pizzalib
 {
-    public class CallManager : IDisposable
+    public abstract class CallManager : IDisposable
     {
         private Whisper? m_Whisper;
-        private Alerter? m_Alerter;
-        private StreamServer? m_StreamServer;
         private bool m_Initialized;
         private bool m_Disposed;
-        private Action<TranscribedCall>? NewTranscribedCallCallback;
-        private string m_CaptureRoot;
         private StreamWriter? m_JournalFile;
+        private string m_CaptureRoot;
         public static readonly string s_CallJournalFile = "calljournal.json";
+        private Action<TranscribedCall> m_NewTranscribedCallCallback;
 
-        public CallManager(Action<TranscribedCall> newTranscribedCallCallback)
+        public CallManager(Action<TranscribedCall> NewTranscribedCallCallback)
         {
+            m_NewTranscribedCallCallback = NewTranscribedCallCallback;
+            m_CaptureRoot = Path.Combine(
+                Settings.DefaultLiveCaptureDirectory, $"{DateTime.Now:yyyy-MM-dd-HHmmss}");
             m_Initialized = false;
-            var capture = $"{DateTime.Now:yyyy-MM-dd-HHmmss}";
-            m_CaptureRoot = Path.Combine(Settings.DefaultCaptureDirectory, capture);
-            NewTranscribedCallCallback = newTranscribedCallCallback;
         }
 
         ~CallManager()
@@ -59,33 +57,24 @@ namespace pizzalib
             m_Disposed = true;
             m_Initialized = false;
             m_Whisper?.Dispose();
-            m_StreamServer?.Dispose();
             m_JournalFile?.Dispose();
         }
 
-        public void Dispose()
+        public virtual void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
         }
 
-        public async Task<bool> Initialize(Settings Settings)
+        public virtual async Task<bool> Initialize(Settings Settings)
         {
             if (m_Initialized)
             {
-                return await Reinitialize(Settings);
+                return true;
             }
 
             try
             {
-                //
-                // Initialize whisper, alerter and streamserver
-                //
-                m_Whisper = new Whisper(Settings);
-                _ = await m_Whisper.Initialize();
-                m_Alerter = new Alerter(Settings);
-                m_StreamServer = new StreamServer(HandleNewCall, Settings);
-
                 //
                 // Create capture folder and journal for this session
                 //
@@ -93,6 +82,12 @@ namespace pizzalib
                 string name = new DirectoryInfo(m_CaptureRoot).Name;
                 var journal = Path.Join(m_CaptureRoot, s_CallJournalFile);
                 m_JournalFile = new StreamWriter(journal);
+
+                //
+                // Initialize whisper
+                //
+                m_Whisper = new Whisper(Settings);
+                _ = await m_Whisper.Initialize();
                 m_Initialized = true;
             }
             catch (Exception ex)
@@ -103,88 +98,42 @@ namespace pizzalib
             return true;
         }
 
-        public bool IsStarted()
-        {
-            if (!m_Initialized)
-            {
-                return false;
-            }
-            if (m_StreamServer == null)
-            {
-                return false;
-            }
-            return m_StreamServer.IsStarted();
-        }
-
-        public async Task<bool> Start(bool block = false)
-        {
-            if (!m_Initialized || m_StreamServer == null)
-            {
-                throw new Exception("Call manager not initialized");
-            }
-            if (m_StreamServer.IsStarted())
-            {
-                throw new Exception("Call manager already started");
-            }
-
-            if (!block)
-            {
-                _ = Task.Run(async() =>
-                {
-                    try
-                    {
-                        _ = await m_StreamServer.Listen();
-                    }
-                    catch (Exception ex)
-                    {
-                        Trace(TraceLoggerType.CallManager, TraceEventType.Error, $"{ex.Message}");
-                    }
-                });
-                return true;
-            }
-            else
-            {
-                try
-                {
-                    return await m_StreamServer.Listen();
-                }
-                catch (Exception ex)
-                {
-                    Trace(TraceLoggerType.CallManager, TraceEventType.Error, $"{ex.Message}");
-                    return false;
-                }
-            }
-        }
-
-        public void Stop(bool block = true)
+        protected void DeleteCaptureRoot()
         {
             if (!m_Initialized)
             {
                 return;
             }
-            if (m_StreamServer == null)
-            {
-                return;
-            }
+            m_JournalFile?.Dispose();
+            Directory.Delete(m_CaptureRoot, true);
+        }
 
-            //
-            // Shutdown the listener socket
-            //
-            m_StreamServer.Shutdown(block:block);
+        public virtual bool IsStarted()
+        {
+            return m_Initialized;
+        }
 
-            //
-            // Close the call journal
-            //
+        public virtual async Task<bool> Start(bool block = false)
+        {
+            return true;
+        }
+
+        public virtual async void Stop(bool block = true)
+        {
             m_JournalFile?.Close();
         }
 
-        private async Task<bool> Reinitialize(Settings Settings)
+        protected virtual async Task<bool> Reinitialize(Settings Settings)
         {
+            if (!m_Initialized)
+            {
+                throw new Exception("Invalid CallManager state for re-initialize");
+            }
+
             m_Initialized = false;
-            
+
             try
             {
-                m_StreamServer?.Dispose();
                 m_Whisper?.Dispose();
             }
             catch (Exception ex)
@@ -196,18 +145,53 @@ namespace pizzalib
             return await Initialize(Settings);
         }
 
-        private async Task HandleNewCall(WavStreamData CallData)
+        protected virtual async Task HandleNewCall(WavStreamData CallData)
         {
-            if (!m_Initialized || m_Whisper == null || m_StreamServer == null || m_Alerter == null)
+            try
             {
-                throw new Exception("Call manager not initialized");
-            }
+                //
+                // Get the transcribed call info
+                //
+                var call = await GetTranscribedCall(CallData);
 
-            //
-            // This routine is a callback invoked from a worker thread in StreamServer.cs
-            // It is safe/OK to perform blocking calls here.
-            // NOTE: This method is invoked PER CALL, and calls can happen in parallel.
-            //
+                //
+                // Send any alerts on the transcription and update call meta data with matches.
+                //
+                ProcessAlerts(call);
+
+                //
+                // Write the call mp3 to disk and update call journal.
+                //
+                var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
+                CallData.DumpStreamToFile(m_CaptureRoot, fileName, OutputFileFormat.Mp3);
+                call.Location = Path.Combine(m_CaptureRoot, fileName);
+
+                var journalJson = JsonConvert.SerializeObject(call, Formatting.None);
+                m_JournalFile?.WriteLine(journalJson);
+
+                //
+                // If our instantiator wants to see the transcribed call, notify them.
+                //
+                m_NewTranscribedCallCallback?.Invoke(call);
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.LiveCallManager, TraceEventType.Error, $"{ex.Message}");
+                throw; // back up to worker thread
+            }
+        }
+
+        protected virtual void ProcessAlerts(TranscribedCall Call)
+        {
+            return;
+        }
+
+        private async Task<TranscribedCall> GetTranscribedCall(WavStreamData CallData)
+        {
+            if (!m_Initialized || m_Whisper == null)
+            {
+                throw new Exception("CallManager not initialized");
+            }
 
             var call = new TranscribedCall();
             call.UniqueId = Guid.NewGuid();
@@ -238,32 +222,14 @@ namespace pizzalib
                 //
                 call.Transcription = await m_Whisper.TranscribeCall(CallData.GetRawStream());
                 CallData.RewindStream();
-
-                //
-                // Send any alerts on the transcription and update call meta data with matches.
-                //
-                m_Alerter.ProcessAlerts(call);
-
-                //
-                // Write the call mp3 to disk and update call journal.
-                //
-                var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
-                CallData.DumpStreamToFile(m_CaptureRoot, fileName, OutputFileFormat.Mp3);
-                call.Location = Path.Combine(m_CaptureRoot, fileName);
-
-                var journalJson = JsonConvert.SerializeObject(call, Formatting.None);
-                m_JournalFile?.WriteLine(journalJson);
-
-                //
-                // If our instantiator wants to see the transcribed call, notify them.
-                //
-                NewTranscribedCallCallback?.Invoke(call);
             }
             catch (Exception ex)
             {
                 Trace(TraceLoggerType.CallManager, TraceEventType.Error, $"{ex.Message}");
                 throw; // back up to worker thread
             }
+
+            return call;
         }
     }
 }

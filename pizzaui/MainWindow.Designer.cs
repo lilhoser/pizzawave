@@ -51,10 +51,13 @@ namespace pizzaui
             statusStrip1 = new StatusStrip();
             toolStripStatusLabel1 = new ToolStripStatusLabel();
             toolStripProgressBar1 = new ToolStripProgressBar();
+            cancelTaskButton = new ToolStripDropDownButton();
             toolStripConnectionLabel = new ToolStripStatusLabel();
             transcriptionListview = new BrightIdeasSoftware.FastObjectListView();
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
+            openCaptureToolStripMenuItem = new ToolStripMenuItem();
+            openOfflineCaptureToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator3 = new ToolStripSeparator();
             saveSettingsAsToolStripMenuItem = new ToolStripMenuItem();
             openSettingsToolStripMenuItem = new ToolStripMenuItem();
@@ -94,7 +97,6 @@ namespace pizzaui
             cleanupToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             githubToolStripMenuItem = new ToolStripMenuItem();
-            openCaptureToolStripMenuItem = new ToolStripMenuItem();
             tableLayoutPanel1.SuspendLayout();
             statusStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)transcriptionListview).BeginInit();
@@ -120,7 +122,7 @@ namespace pizzaui
             // 
             statusStrip1.Dock = DockStyle.Fill;
             statusStrip1.ImageScalingSize = new Size(24, 24);
-            statusStrip1.Items.AddRange(new ToolStripItem[] { toolStripStatusLabel1, toolStripProgressBar1, toolStripConnectionLabel });
+            statusStrip1.Items.AddRange(new ToolStripItem[] { toolStripStatusLabel1, toolStripProgressBar1, cancelTaskButton, toolStripConnectionLabel });
             statusStrip1.Location = new Point(0, 1078);
             statusStrip1.Name = "statusStrip1";
             statusStrip1.Size = new Size(1872, 34);
@@ -138,6 +140,20 @@ namespace pizzaui
             toolStripProgressBar1.Name = "toolStripProgressBar1";
             toolStripProgressBar1.Size = new Size(100, 26);
             toolStripProgressBar1.Visible = false;
+            // 
+            // cancelTaskButton
+            // 
+            cancelTaskButton.BackColor = SystemColors.Highlight;
+            cancelTaskButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            cancelTaskButton.ForeColor = SystemColors.ButtonHighlight;
+            cancelTaskButton.Image = (Image)resources.GetObject("cancelTaskButton.Image");
+            cancelTaskButton.ImageTransparentColor = Color.Magenta;
+            cancelTaskButton.Name = "cancelTaskButton";
+            cancelTaskButton.ShowDropDownArrow = false;
+            cancelTaskButton.Size = new Size(67, 31);
+            cancelTaskButton.Text = "Cancel";
+            cancelTaskButton.Visible = false;
+            cancelTaskButton.Click += CancelTaskButton_Click;
             // 
             // toolStripConnectionLabel
             // 
@@ -175,40 +191,54 @@ namespace pizzaui
             // 
             // fileToolStripMenuItem
             // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCaptureToolStripMenuItem, toolStripSeparator3, saveSettingsAsToolStripMenuItem, openSettingsToolStripMenuItem, toolStripSeparator1, startListeningToolStripMenuItem, toolStripSeparator2, exitToolStripMenuItem });
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCaptureToolStripMenuItem, openOfflineCaptureToolStripMenuItem, toolStripSeparator3, saveSettingsAsToolStripMenuItem, openSettingsToolStripMenuItem, toolStripSeparator1, startListeningToolStripMenuItem, toolStripSeparator2, exitToolStripMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(54, 29);
             fileToolStripMenuItem.Text = "File";
             // 
+            // openCaptureToolStripMenuItem
+            // 
+            openCaptureToolStripMenuItem.Name = "openCaptureToolStripMenuItem";
+            openCaptureToolStripMenuItem.Size = new Size(289, 34);
+            openCaptureToolStripMenuItem.Text = "Open capture...";
+            openCaptureToolStripMenuItem.Click += openCaptureToolStripMenuItem_Click;
+            // 
+            // openOfflineCaptureToolStripMenuItem
+            // 
+            openOfflineCaptureToolStripMenuItem.Name = "openOfflineCaptureToolStripMenuItem";
+            openOfflineCaptureToolStripMenuItem.Size = new Size(289, 34);
+            openOfflineCaptureToolStripMenuItem.Text = "Open offline capture...";
+            openOfflineCaptureToolStripMenuItem.Click += openOfflineCaptureToolStripMenuItem_Click;
+            // 
             // toolStripSeparator3
             // 
             toolStripSeparator3.Name = "toolStripSeparator3";
-            toolStripSeparator3.Size = new Size(267, 6);
+            toolStripSeparator3.Size = new Size(286, 6);
             // 
             // saveSettingsAsToolStripMenuItem
             // 
             saveSettingsAsToolStripMenuItem.Name = "saveSettingsAsToolStripMenuItem";
-            saveSettingsAsToolStripMenuItem.Size = new Size(270, 34);
+            saveSettingsAsToolStripMenuItem.Size = new Size(289, 34);
             saveSettingsAsToolStripMenuItem.Text = "Save settings as...";
             saveSettingsAsToolStripMenuItem.Click += saveSettingsAsToolStripMenuItem_Click;
             // 
             // openSettingsToolStripMenuItem
             // 
             openSettingsToolStripMenuItem.Name = "openSettingsToolStripMenuItem";
-            openSettingsToolStripMenuItem.Size = new Size(270, 34);
+            openSettingsToolStripMenuItem.Size = new Size(289, 34);
             openSettingsToolStripMenuItem.Text = "Load settings...";
             openSettingsToolStripMenuItem.Click += openSettingsToolStripMenuItem_Click;
             // 
             // toolStripSeparator1
             // 
             toolStripSeparator1.Name = "toolStripSeparator1";
-            toolStripSeparator1.Size = new Size(267, 6);
+            toolStripSeparator1.Size = new Size(286, 6);
             // 
             // startListeningToolStripMenuItem
             // 
             startListeningToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { startToolStripMenuItem, stopToolStripMenuItem });
             startListeningToolStripMenuItem.Name = "startListeningToolStripMenuItem";
-            startListeningToolStripMenuItem.Size = new Size(270, 34);
+            startListeningToolStripMenuItem.Size = new Size(289, 34);
             startListeningToolStripMenuItem.Text = "Call Manager";
             // 
             // startToolStripMenuItem
@@ -229,12 +259,12 @@ namespace pizzaui
             // toolStripSeparator2
             // 
             toolStripSeparator2.Name = "toolStripSeparator2";
-            toolStripSeparator2.Size = new Size(267, 6);
+            toolStripSeparator2.Size = new Size(286, 6);
             // 
             // exitToolStripMenuItem
             // 
             exitToolStripMenuItem.Name = "exitToolStripMenuItem";
-            exitToolStripMenuItem.Size = new Size(270, 34);
+            exitToolStripMenuItem.Size = new Size(289, 34);
             exitToolStripMenuItem.Text = "Exit";
             exitToolStripMenuItem.Click += exitToolStripMenuItem_Click;
             // 
@@ -458,13 +488,6 @@ namespace pizzaui
             githubToolStripMenuItem.Text = "Github";
             githubToolStripMenuItem.Click += githubToolStripMenuItem_Click;
             // 
-            // openCaptureToolStripMenuItem
-            // 
-            openCaptureToolStripMenuItem.Name = "openCaptureToolStripMenuItem";
-            openCaptureToolStripMenuItem.Size = new Size(270, 34);
-            openCaptureToolStripMenuItem.Text = "Open capture...";
-            openCaptureToolStripMenuItem.Click += openCaptureToolStripMenuItem_Click;
-            // 
             // MainWindow
             // 
             AutoScaleDimensions = new SizeF(10F, 25F);
@@ -539,5 +562,7 @@ namespace pizzaui
         private ToolStripMenuItem exportCSVToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator4;
         private ToolStripMenuItem openCaptureToolStripMenuItem;
+        private ToolStripMenuItem openOfflineCaptureToolStripMenuItem;
+        private ToolStripDropDownButton cancelTaskButton;
     }
 }

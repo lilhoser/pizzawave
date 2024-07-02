@@ -1,8 +1,8 @@
 
 # Introduction
-<img align="right" src="http://github.com/lilhoser/pizzawave/raw/main/docs/logo-med.png"> `pizzawave` is a set of cross-platform .NET tools for processing audio data streamed by the [callstream plugin](https://github.com/lilhoser/callstream) of [trunk-recorder](https://github.com/robotastic/trunk-recorder). The audio data consists of calls recorded by trunk-recorder from conventional and trunked radio systems, such as local fire/rescue/EMS. `pizzawave` tooling transcribes these calls to text using [OpenAI's Whisper AI model](https://openai.com/research/whisper) as exposed through [whisper.net toolchain](https://github.com/sandrohanea/whisper.net). Among other features, the application allows you to monitor and set alerts for keywords of interest.
+<img align="right" src="http://github.com/lilhoser/pizzawave/raw/main/docs/logo-med.png"> `pizzawave` is a set of cross-platform .NET applications and tools for processing audio data streamed by the [callstream plugin](https://github.com/lilhoser/callstream) of [trunk-recorder](https://github.com/robotastic/trunk-recorder). The audio data consists of calls recorded by trunk-recorder from conventional and trunked radio systems, such as local fire/rescue/EMS. `pizzawave` tooling transcribes these calls to text using [OpenAI's Whisper AI model](https://openai.com/research/whisper) as exposed through [whisper.net toolchain](https://github.com/sandrohanea/whisper.net). Among other features, the application allows you to monitor and set alerts for keywords of interest.
 
-The `pizzawave` project consists of these tools:
+The `pizzawave` Visual Studio solution consists of these tools:
 * A windows-only .NET UI (`pizzaui` in source)
 * A cross-platform .NET command line application (`pizzacmd` in source)
 * A cross-platform .NET library (`pizzalib` in source), used by the UI and CLI application
@@ -13,7 +13,7 @@ Please be sure to read the README for each individual tool.
 
 Regardless of whether you choose to use the UI, command line application, or roll your own application that uses the cross-platform library, you will need to observe these requirements:
 
-* A Linux system running trunk-recorder with the [callstream plugin](https://github.com/lilhoser/callstream) configured
+* A Linux system running trunk-recorder with the [callstream plugin](https://github.com/lilhoser/callstream) configured correctly
 * An operating system capable of running .NET 8.0 runtime (e.g, Win, Lin or Mac)
     * The pizzawave tools currently target .NET 8.0, but if you are building from source, earlier versions should work as well.
 * The requirements as specified in the tool of choice:
@@ -73,7 +73,11 @@ StreamServer Verbose: 1 : 3/22/2024 3:39 PM: Listening on port 9123
 
 # Running
 
-Whether you use `pizzaui`, `pizzacmd` or your own .NET application built on `pizzalib`, all calls will be stored in a `capture`, which is a folder in the root working directory (`<user profile>\pizzawave\`). This folder consists of:
+## Live captures
+
+Whether you use `pizzaui`, `pizzacmd` or your own .NET application built on `pizzalib`, all calls streamed in real-time from a `callstream` server will be stored in a `capture`, which is a folder in the root working directory (`<user profile>\pizzawave\`). When you stop your live session with the `callstream` server, the `capture` is ended and a new capture will be created if you reconnect later. Older captures can be loaded in `pizzawave` tooling later by opening the `capture` folder directly.
+
+The `capture` folder consists of:
 
 * `calljournal.json`: Each line contains a JSON-serialized `TranscribedCall` structure. The audio data can be linked to this record via the `Location` field.
 * `<timestamp>.mp3`: call audio files
@@ -90,6 +94,71 @@ foreach (var line in lines)
 }
 ```
 
+## Offline captures
+
+The [callstream plugin](https://github.com/lilhoser/callstream) allows you to redirect call records to an SFTP server. These call records are stored on disk in a raw binary format identical to data streamed to a live capture. These are referred to as `offline captures` in pizzawave parlance. The `callstream` plugin uploads offline capture records to the SFTP server according to the following naming and organization convention:
+* YEAR
+    * MONTH
+       * DAY
+           * HOUR
+               * YEAR-MONTH-DAY.HOURMINUTESECOND.bin.bin
+
+Offline captures can be loaded at any directory level by `pizzaui` or by the following code (`pizzalib` required):
+
+```
+var targets = Directory.GetFiles(offlineDir, "*.*", SearchOption.AllDirectories).ToList();
+foreach (var file in targets)
+{
+    using (var stream = new MemoryStream(File.ReadAllBytes(file)))
+    {
+        var wavStream = new WavStreamData(m_Settings);
+        var cancelSource = new CancellationTokenSource();
+        var result = await wavStream.ProcessClientData(stream, cancelSource);
+        if (result)
+        {
+            var call = new TranscribedCall();
+            call.UniqueId = Guid.NewGuid();
+
+            try
+            {
+                var jsonObject = wavStream.GetJsonObject();
+                call.StopTime = jsonObject["StopTime"]!.ToObject<long>();
+                call.StartTime = jsonObject["StartTime"]!.ToObject<long>();
+                call.CallId = jsonObject["CallId"]!.ToObject<long>();
+                call.Source = jsonObject["Source"]!.ToObject<int>();
+                call.Talkgroup = jsonObject["Talkgroup"]!.ToObject<long>();
+                call.PatchedTalkgroups = jsonObject["PatchedTalkgroups"]!.ToObject<List<long>>();
+                call.Frequency = jsonObject["Frequency"]!.ToObject<double>();
+                call.SystemShortName = jsonObject["SystemShortName"]!.ToObject<string>();
+            }
+            catch (Exception ex)
+            {
+                var err = $"Unable to parse JSON data: {ex.Message}";
+                throw new Exception(err);
+            }
+            
+            try
+            {
+                //
+                // Transcribe the wav audio
+                //
+                call.Transcription = await m_Whisper.TranscribeCall(wavStream.GetRawStream());
+                wavStream.RewindStream();
+            }
+            catch (Exception ex)
+            {
+                throw; // back up to worker thread
+            }
+        }
+    }
+}
+```
+
+Offline captures are slow to load, because many audio recordings are being transcribed at one time (whereas in live mode, calls are transcribed as they are received over the air). As a result, after an offline capture is loaded, the contained call records are also exported to a live capture for easier retrieval later.
+
+## Alerts when loading captures
+
+Alerts are NOT processed when older captures are loaded, for both live and offline captures. You can see what alerts would match a loaded capture by navigating to `View`->`Show alert matches only`.
 
 # Other
 

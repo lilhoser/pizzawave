@@ -28,7 +28,7 @@ namespace pizzaui
     {
         public HeadlessMode() : base()
         {
-            m_CallManager = new CallManager(NewCallTranscribed);
+            m_CallManager = new LiveCallManager(NewCallTranscribed);
         }
 
         protected override void PrintUsage(string Message = null)

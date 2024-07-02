@@ -37,6 +37,7 @@ namespace pizzalib
 
         public void ProcessAlerts(TranscribedCall Call)
         {
+            Call.IsAlertMatch = false;
             foreach (var alert in m_Settings.Alerts)
             {
                 Trace(TraceLoggerType.Alerts,
@@ -59,7 +60,46 @@ namespace pizzalib
                               $"Alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
                         Call.IsAlertMatch = true;                        
                         TriggerAlertEvent(alert, Call);
+                        break;
                     }
+                }
+                if (Call.IsAlertMatch)
+                {
+                    break;
+                }
+            }
+        }
+
+        public static void ProcessAlertsOffline(TranscribedCall Call, List<Alert> Alerts)
+        {
+            Call.IsAlertMatch = false;
+            foreach (var alert in Alerts)
+            {
+                Trace(TraceLoggerType.Alerts,
+                      TraceEventType.Verbose,
+                      $"Processing offline alert {alert.Name} for call ID {Call.CallId}");
+                if (!alert.Enabled)
+                {
+                    Trace(TraceLoggerType.Alerts,
+                          TraceEventType.Information,
+                          $"Offline alert {alert.Name} is disabled, skipping.");
+                    continue;
+                }
+                var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+                foreach (var keyword in keywords)
+                {
+                    if (Call.Transcription.ToLower().Contains(keyword.ToLower()))
+                    {
+                        Trace(TraceLoggerType.Alerts,
+                              TraceEventType.Information,
+                              $"Offline alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
+                        Call.IsAlertMatch = true;
+                        break;
+                    }
+                }
+                if (Call.IsAlertMatch)
+                {
+                    break;
                 }
             }
         }

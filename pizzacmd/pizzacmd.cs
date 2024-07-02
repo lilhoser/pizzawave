@@ -28,7 +28,7 @@ namespace pizzacmd
     {
         public PizzaCmd()
         {
-            m_CallManager = new CallManager(NewCallTranscribed);
+            m_CallManager = new LiveCallManager(NewCallTranscribed);
         }
 
         protected override void PrintUsage(string Error)
