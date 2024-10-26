@@ -75,6 +75,8 @@ StreamServer Verbose: 1 : 3/22/2024 3:39 PM: Listening on port 9123
 
 ## Live captures
 
+To create a live audio capture within PizzaUI, navigate to `File`->`Call Manager`->`Start`. This will connect to the `callstream` plugin running on your configured trunk-recorder system.
+
 Whether you use `pizzaui`, `pizzacmd` or your own .NET application built on `pizzalib`, all calls streamed in real-time from a `callstream` server will be stored in a `capture`, which is a folder in the root working directory (`<user profile>\pizzawave\`). When you stop your live session with the `callstream` server, the `capture` is ended and a new capture will be created if you reconnect later. Older captures can be loaded in `pizzawave` tooling later by opening the `capture` folder directly.
 
 The `capture` folder consists of:

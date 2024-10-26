@@ -17,17 +17,15 @@ Please be sure to read the [`pizzawave` README page](https://github.com/lilhoser
 
 # Using Whisper for Transcription
 
-`pizzalib` uses OpenAI's Whisper model for audio transcription. While out of the box, both the UI and command line applications require an Nvidia GPU with [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) installed, you have some options to reconfigure this. Keep reading.
+`pizzalib` uses OpenAI's Whisper model for audio transcription, which [supports](https://github.com/sandrohanea/whisper.net/tree/fc1282f9a92f03e854a66c65b39ef2c9dfdc23e4?tab=readme-ov-file#multiple-runtimes-support) the following compute backends, which will be automatically selected at runtime in this order:
 
-## Switching compute backend
+* `Whisper.net.Runtime.Cuda` (NVidia devices with all drivers installed)
+* `Whisper.net.Runtime.Vulkan` (Windows x64 with Vulkan installed)
+* `Whisper.net.Runtime.CoreML` (Apple devices)
+* `Whisper.net.Runtime.OpenVino` (Intel devices)
+* `Whisper.net.Runtime` (CPU inference)
 
-An NVIDIA GPU is currently required, because the underlying Whisper.net library [does not support](https://github.com/SciSharp/LLamaSharp/issues/264) dynamically choosing a compute backend. However, don't despair: it is fairly straightforward to run pizzwave on your CPU:
-* Clone this repo
-* Open the solution file in Visual Studio (you can use free Community Edition)
-* Open nuget package manager `pizzalib` project
-* Uninstall `Whisper.net.runtime.cublas`
-* Install `Whisper.net.runtime` (CPU only), `Whisper.net.Runtime.CoreML` (Mac CoreML), or `Whisper.net.Runtime.Clblast` (Linux/Windows)
-* Rebuild
+If using NVidia GPU, be sure to install the [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads).
 
 ## Switching base model
 
