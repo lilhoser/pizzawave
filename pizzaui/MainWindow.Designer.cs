@@ -72,6 +72,7 @@ namespace pizzaui
             alertsToolStripMenuItem = new ToolStripMenuItem();
             viewToolStripMenuItem = new ToolStripMenuItem();
             clearToolStripMenuItem = new ToolStripMenuItem();
+            findToolStripMenuItem = new ToolStripMenuItem();
             showAlertMatchesOnlyToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator5 = new ToolStripSeparator();
             exportJSONToolStripMenuItem = new ToolStripMenuItem();
@@ -97,6 +98,8 @@ namespace pizzaui
             cleanupToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             githubToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator6 = new ToolStripSeparator();
+            clearSearchFilterToolStripMenuItem = new ToolStripMenuItem();
             tableLayoutPanel1.SuspendLayout();
             statusStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)transcriptionListview).BeginInit();
@@ -291,7 +294,7 @@ namespace pizzaui
             // 
             // viewToolStripMenuItem
             // 
-            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clearToolStripMenuItem, showAlertMatchesOnlyToolStripMenuItem, toolStripSeparator5, exportJSONToolStripMenuItem, exportCSVToolStripMenuItem, toolStripSeparator4, groupByToolStripMenuItem });
+            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clearToolStripMenuItem, toolStripSeparator6, findToolStripMenuItem, clearSearchFilterToolStripMenuItem, showAlertMatchesOnlyToolStripMenuItem, toolStripSeparator5, exportJSONToolStripMenuItem, exportCSVToolStripMenuItem, toolStripSeparator4, groupByToolStripMenuItem });
             viewToolStripMenuItem.Name = "viewToolStripMenuItem";
             viewToolStripMenuItem.Size = new Size(65, 29);
             viewToolStripMenuItem.Text = "View";
@@ -302,6 +305,13 @@ namespace pizzaui
             clearToolStripMenuItem.Size = new Size(307, 34);
             clearToolStripMenuItem.Text = "Clear";
             clearToolStripMenuItem.Click += clearToolStripMenuItem_Click;
+            // 
+            // findToolStripMenuItem
+            // 
+            findToolStripMenuItem.Name = "findToolStripMenuItem";
+            findToolStripMenuItem.Size = new Size(307, 34);
+            findToolStripMenuItem.Text = "Find...";
+            findToolStripMenuItem.Click += findToolStripMenuItem_Click;
             // 
             // showAlertMatchesOnlyToolStripMenuItem
             // 
@@ -348,7 +358,7 @@ namespace pizzaui
             alphaTagToolStripMenuItem.CheckOnClick = true;
             alphaTagToolStripMenuItem.CheckState = CheckState.Checked;
             alphaTagToolStripMenuItem.Name = "alphaTagToolStripMenuItem";
-            alphaTagToolStripMenuItem.Size = new Size(204, 34);
+            alphaTagToolStripMenuItem.Size = new Size(270, 34);
             alphaTagToolStripMenuItem.Text = "Alpha Tag";
             alphaTagToolStripMenuItem.Click += alphaTagToolStripMenuItem_Click;
             // 
@@ -356,7 +366,7 @@ namespace pizzaui
             // 
             tagToolStripMenuItem.CheckOnClick = true;
             tagToolStripMenuItem.Name = "tagToolStripMenuItem";
-            tagToolStripMenuItem.Size = new Size(204, 34);
+            tagToolStripMenuItem.Size = new Size(270, 34);
             tagToolStripMenuItem.Text = "Tag";
             tagToolStripMenuItem.Click += tagToolStripMenuItem_Click;
             // 
@@ -364,7 +374,7 @@ namespace pizzaui
             // 
             descriptionToolStripMenuItem.CheckOnClick = true;
             descriptionToolStripMenuItem.Name = "descriptionToolStripMenuItem";
-            descriptionToolStripMenuItem.Size = new Size(204, 34);
+            descriptionToolStripMenuItem.Size = new Size(270, 34);
             descriptionToolStripMenuItem.Text = "Description";
             descriptionToolStripMenuItem.Click += descriptionToolStripMenuItem_Click;
             // 
@@ -372,14 +382,14 @@ namespace pizzaui
             // 
             categoryToolStripMenuItem.CheckOnClick = true;
             categoryToolStripMenuItem.Name = "categoryToolStripMenuItem";
-            categoryToolStripMenuItem.Size = new Size(204, 34);
+            categoryToolStripMenuItem.Size = new Size(270, 34);
             categoryToolStripMenuItem.Text = "Category";
             categoryToolStripMenuItem.Click += categoryToolStripMenuItem_Click;
             // 
             // offGroupByToolStripMenuItem
             // 
             offGroupByToolStripMenuItem.Name = "offGroupByToolStripMenuItem";
-            offGroupByToolStripMenuItem.Size = new Size(204, 34);
+            offGroupByToolStripMenuItem.Size = new Size(270, 34);
             offGroupByToolStripMenuItem.Text = "Off";
             offGroupByToolStripMenuItem.Click += offGroupByToolStripMenuItem_Click;
             // 
@@ -488,6 +498,18 @@ namespace pizzaui
             githubToolStripMenuItem.Text = "Github";
             githubToolStripMenuItem.Click += githubToolStripMenuItem_Click;
             // 
+            // toolStripSeparator6
+            // 
+            toolStripSeparator6.Name = "toolStripSeparator6";
+            toolStripSeparator6.Size = new Size(304, 6);
+            // 
+            // clearSearchFilterToolStripMenuItem
+            // 
+            clearSearchFilterToolStripMenuItem.Name = "clearSearchFilterToolStripMenuItem";
+            clearSearchFilterToolStripMenuItem.Size = new Size(307, 34);
+            clearSearchFilterToolStripMenuItem.Text = "Clear search filter";
+            clearSearchFilterToolStripMenuItem.Click += clearSearchFilterToolStripMenuItem_Click;
+            // 
             // MainWindow
             // 
             AutoScaleDimensions = new SizeF(10F, 25F);
@@ -501,6 +523,8 @@ namespace pizzaui
             Text = "PizzaWave";
             FormClosing += MainWindow_FormClosing;
             Shown += MainWindow_Shown;
+            KeyDown += MainWindow_KeyDown;
+            KeyUp += MainWindow_KeyUp;
             tableLayoutPanel1.ResumeLayout(false);
             tableLayoutPanel1.PerformLayout();
             statusStrip1.ResumeLayout(false);
@@ -564,5 +588,8 @@ namespace pizzaui
         private ToolStripMenuItem openCaptureToolStripMenuItem;
         private ToolStripMenuItem openOfflineCaptureToolStripMenuItem;
         private ToolStripDropDownButton cancelTaskButton;
+        private ToolStripMenuItem findToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator6;
+        private ToolStripMenuItem clearSearchFilterToolStripMenuItem;
     }
 }

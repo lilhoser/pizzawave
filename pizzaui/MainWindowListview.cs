@@ -18,6 +18,7 @@ under the License.
 */
 using BrightIdeasSoftware;
 using pizzalib;
+using System.Text;
 
 namespace pizzaui
 {
@@ -49,6 +50,9 @@ namespace pizzaui
 
         private void InitializeListview()
         {
+            transcriptionListview.UseFiltering = true;
+            ShowAllCalls(); // clear any existing filter
+
             //
             // This routine can be called multiple times during the app, as new settings
             // are loaded or changed.
@@ -112,8 +116,10 @@ namespace pizzaui
             if (m_InitializedOnce)
             {
                 transcriptionListview.FormatRow -= rowHighlightHandler;
+                transcriptionListview.CellRightClick -= TranscriptionListview_CellRightClick;
             }
             transcriptionListview.FormatRow += rowHighlightHandler;
+            transcriptionListview.CellRightClick += TranscriptionListview_CellRightClick;
 
             //
             // Configure aspect and other getters for each column.
@@ -243,7 +249,7 @@ namespace pizzaui
             // because pizzalib is not Windows-only (which OLV is), so we cannot
             // annotate OLV-visible fields with [OLVColumn].
             //
-            var hiddenColumns = new List<string>() { 
+            var hiddenColumns = new List<string>() {
                 "PatchedTalkgroups", "IsAudioPlaying", "UniqueId", "IsAlertMatch" };
             foreach (var col in transcriptionListview.AllColumns)
             {
@@ -264,6 +270,28 @@ namespace pizzaui
             transcriptionListview.AutoResizeColumns(ColumnHeaderAutoResizeStyle.HeaderSize);
 
             m_InitializedOnce = true;
+        }
+
+        private void TranscriptionListview_CellRightClick(object? sender, CellRightClickEventArgs Args)
+        {
+            var row = Args.Model;
+            var column = Args.Column;
+            if (row == null || column == null)
+            {
+                return;
+            }
+            Args.MenuStrip = new ContextMenuStrip();
+            Args.MenuStrip.Items.AddRange(new ToolStripMenuItem[]
+            {
+                new ToolStripMenuItem("Copy row to clipboard", null, ContextMenuCopyRow),
+                new ToolStripMenuItem("Copy cell to clipboard", null, ContextMenuCopyCell),
+                new ToolStripMenuItem("Save MP3", null, ContextMenuSaveMp3),
+                new ToolStripMenuItem("Go to capture folder", null, ContextMenuGoToCaptureFolder),
+            });
+            foreach (var item in Args.MenuStrip.Items)
+            {
+                ((ToolStripMenuItem)item).Tag = Args; // convenience for context menu handlers
+            }
         }
 
         private void transcriptionListview_CellToolTipShowing(object sender, BrightIdeasSoftware.ToolTipShowingEventArgs e)
@@ -374,13 +402,13 @@ namespace pizzaui
                     return;
                 }
             }
-            
+
             if (m_InitializedOnce)
             {
                 transcriptionListview.ButtonClick -= ButtonClickHandler;
             }
 
-            transcriptionListview.ButtonClick += ButtonClickHandler; 
+            transcriptionListview.ButtonClick += ButtonClickHandler;
             playButtonColumn.IsButton = true;
         }
 
@@ -417,7 +445,8 @@ namespace pizzaui
             //
             // Note: if filtering becomes any more complex, switch to CompositeAllFilter
             //
-            transcriptionListview.AdditionalFilter = new ModelFilter(delegate (object row) {
+            transcriptionListview.AdditionalFilter = new ModelFilter(delegate (object row)
+            {
                 var call = (TranscribedCall)row;
                 return call.IsAlertMatch;
             });
@@ -425,7 +454,171 @@ namespace pizzaui
 
         private void ShowAllCalls()
         {
+            transcriptionListview.ModelFilter = null;
             transcriptionListview.AdditionalFilter = null;
+        }
+
+        private void HandleSearch()
+        {
+            var searchForm = new SearchForm();
+            searchForm.Focus();
+            searchForm.ShowDialog();
+            var searchText = searchForm.m_SearchText;
+            if (string.IsNullOrEmpty(searchText))
+            {
+                return;
+            }
+
+            TextMatchFilter searchFilter = new TextMatchFilter(
+                transcriptionListview, searchText, StringComparison.InvariantCultureIgnoreCase);
+            transcriptionListview.DefaultRenderer = new HighlightTextRenderer(searchFilter);
+            transcriptionListview.ModelFilter = searchFilter;
+        }
+
+        private
+        void
+        ContextMenuCopyRow(
+            object Sender,
+            EventArgs Args
+            )
+        {
+            object tag = ((ToolStripMenuItem)Sender).Tag;
+            if (tag == null)
+            {
+                return;
+            }
+            var args = (CellRightClickEventArgs)tag;
+            var listview = args.ListView;
+            StringBuilder text = new StringBuilder();
+            int count = 0;
+
+            foreach (int index in listview.SelectedIndices)
+            {
+                foreach (ListViewItem.ListViewSubItem cell in listview.Items[index].SubItems)
+                {
+                    text.Append(cell.Text);
+                    text.Append(',');
+                }
+                text.Length--; // remove trailing ','
+                text.AppendLine();
+                count++;
+            }
+            text.Length--; // remove trailing new line
+            Clipboard.SetText(text.ToString());
+        }
+
+        private
+        void
+        ContextMenuCopyCell(
+            object Sender,
+            EventArgs Args
+            )
+        {
+            object tag = ((ToolStripMenuItem)Sender).Tag;
+            if (tag == null)
+            {
+                return;
+            }
+
+            var args = (CellRightClickEventArgs)tag;
+            var targetCell = args.ColumnIndex;
+            var listview = args.ListView as FastObjectListView;
+            StringBuilder text = new StringBuilder();
+            int count = 0;
+            foreach (int index in listview.SelectedIndices)
+            {
+                var cell = listview.Items[index].SubItems[targetCell];
+                text.AppendLine(cell.Text);
+                count++;
+            }
+            text.Length--; // remove trailing new line
+            Clipboard.SetText(text.ToString());
+        }
+
+        private
+        void
+        ContextMenuSaveMp3(
+            object Sender,
+            EventArgs Args
+            )
+        {
+            object tag = ((ToolStripMenuItem)Sender).Tag;
+            if (tag == null)
+            {
+                return;
+            }
+
+            var args = (CellRightClickEventArgs)tag;
+            var targetCell = args.ColumnIndex;
+            var listview = args.ListView as FastObjectListView;
+
+            if (listview.SelectedItem == null)
+            {
+                return;
+            }
+            var call = listview.SelectedItem.RowObject as TranscribedCall;
+            if (call == null)
+            {
+                return;
+            }
+
+            var sfd = new SaveFileDialog();
+            sfd.OverwritePrompt = true;
+            sfd.DefaultExt = "MP3";
+            sfd.Filter = "MP3 File (*.mp3)|*.mp3";
+
+            if (sfd.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            try
+            {
+                File.Copy(call.Location, sfd.FileName, true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to save source MP3 {call.Location} to " +
+                    $"{sfd.FileName}: {ex.Message}");
+                return;
+            }
+        }
+
+        private
+        void
+        ContextMenuGoToCaptureFolder(
+            object Sender,
+            EventArgs Args
+            )
+        {
+            object tag = ((ToolStripMenuItem)Sender).Tag;
+            if (tag == null)
+            {
+                return;
+            }
+
+            var args = (CellRightClickEventArgs)tag;
+            var targetCell = args.ColumnIndex;
+            var listview = args.ListView as FastObjectListView;
+
+            if (listview.SelectedItem == null)
+            {
+                return;
+            }
+            var call = listview.SelectedItem.RowObject as TranscribedCall;
+            if (call == null)
+            {
+                return;
+            }
+            var folder = Path.GetDirectoryName(call.Location);
+            try
+            {
+                System.Diagnostics.Process.Start($"explorer",$"{folder}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Unable to navigate to {folder}: {ex.Message}");
+            }
         }
     }
 }

@@ -74,11 +74,11 @@ namespace pizzalib
         {
             m_Settings.UpdateProgressLabelCallback?.Invoke("Initializing Whisper model...");
 
-            LogProvider.Instance.OnLog += delegate (WhisperLogLevel arg1, string? arg2) {
+            LogProvider.AddLogger(delegate (WhisperLogLevel arg1, string? arg2) {
                 Trace(TraceLoggerType.Whisper,
                       TraceEventType.Information,
                       $"{arg2}");
-            };
+            });
 
             if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
             {

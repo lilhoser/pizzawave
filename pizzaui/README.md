@@ -31,7 +31,7 @@ To open a `pizzawave` capture from a prior live session, navigate to `File->Open
 
 To open an offline capture created by `callstream`'s SFTP feature, navigate to `File->Open offline capture`.
 
-Read more about captures [here](https://github.com/lilhoser/pizzawave#Running)].
+Read more about captures [here](https://github.com/lilhoser/pizzawave#Running).
 
 ## Viewing full call transcription
 
@@ -42,6 +42,10 @@ Hover over the transcription snippet to view a popup window containing the full 
 To sort, click on a column header. To filter by any column, right-click on that column and select a value from the `Filtering` sub-menu. These values are populated from the current dataset being displayed. To clear filters, navigate to the same sub-menu and select `Clear All Filters`.
 
 The default sort order is call start time, descending.
+
+## Searching
+
+Press `CTRL+F` to open the search window, or navigate via `View->Find...`. Type a keyword into the search box and press enter. This will apply a search filter to your call list. To clear the search filter and view all calls, press `ESC` or navigate via `View->Clear search filter`.
 
 ## Grouping
 
@@ -55,7 +59,17 @@ By default, `pizzaui` will immediately display all calls in its primary listview
 
 ## Copying data
 
-To copy rows of data from the display listview, highlight the rows and press CTRL+C.
+To copy rows of data from the display listview, highlight the rows and press CTRL+C. You can also use the right-click context menu discussed in the next section.
+
+## Right-click context menu
+
+Right click on any cell to open the context menu. From the menu you can:
+* Copy an entire row to the clipboard, as a CSV string
+* Copy a single cell to the clipboard
+* Save a call recording MP3 to a specific location
+* Open a Windows Explorer window for the capture folder to browse the capture data
+
+To copy entire rows or cells for multiple calls, first `SHIFT+Select` or `CTRL+Select` the desired rows, then right-click anywhere and select either `Copy row to clipboard` or `Copy cell to clipboard`.
 
 # Alerts
 

@@ -23,7 +23,6 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using System.Globalization;
 using pizzalib;
-using System.IO;
 
 namespace pizzaui
 {
@@ -39,6 +38,7 @@ namespace pizzaui
         public MainWindow()
         {
             InitializeComponent();
+            KeyPreview = true;
             TraceLogger.Initialize();
             pizzalib.TraceLogger.Initialize();
             m_AudioPlayer = new AudioPlayer();
@@ -87,6 +87,37 @@ namespace pizzaui
             m_OfflineCallManager?.Stop();
         }
 
+        private void MainWindow_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (e.Modifiers == Keys.Control && e.KeyCode == Keys.F) // CTRL+F to show search dialog window
+            {
+                HandleSearch();
+                e.Handled = true; // prevent "ding" audio
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void MainWindow_KeyDown(object sender, KeyEventArgs e)
+        {
+            //
+            // Prevent the "ding" audio by suppressing KeyPress event, for CTRL+F
+            //
+            if (e.Control)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                //
+                // Clear the search filter
+                //
+                ShowAllCalls();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
         #region file menuitem handlers
 
         private void openCaptureToolStripMenuItem_Click(object sender, EventArgs e)
@@ -121,6 +152,7 @@ namespace pizzaui
                     var call = (TranscribedCall)JsonConvert.DeserializeObject(line, typeof(TranscribedCall))!;
                     calls.Add(call);
                 }
+                ShowAllCalls(); // clear any existing filter
                 transcriptionListview.SetObjects(calls);
                 ReevaluateAlerts();
                 UpdateProgressLabel("Loaded capture.");
@@ -177,6 +209,7 @@ namespace pizzaui
                 }
             }
 
+            ShowAllCalls(); // clear any existing filter
             transcriptionListview.SetObjects(calls);
             UpdateProgressLabel("Loaded offline capture.");
             HideProgressBar();
@@ -313,7 +346,7 @@ namespace pizzaui
 
         private void exitToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            Application.Exit();
+            Close();
         }
 
         #endregion
@@ -357,6 +390,16 @@ namespace pizzaui
         #endregion
 
         #region view menuitem handlers
+
+        private void findToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            HandleSearch();
+        }
+
+        private void clearSearchFilterToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ShowAllCalls();
+        }
 
         private void exportJSONToolStripMenuItem_Click(object sender, EventArgs e)
         {
@@ -824,5 +867,6 @@ namespace pizzaui
         }
 
         #endregion
+
     }
 }

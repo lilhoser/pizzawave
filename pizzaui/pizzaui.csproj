@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="ObjectListView.Repack.NET6Plus" Version="2.9.4" />
+    <PackageReference Include="ObjectListView.Repack.NET6Plus" Version="2.9.5" />
   </ItemGroup>
 
   <ItemGroup>
