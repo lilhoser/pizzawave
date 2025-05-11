@@ -114,7 +114,7 @@ namespace pizzalib
                           $"Downloading model file to {m_ModelFile}");
                     try
                     {
-                        var modelStream = await WhisperGgmlDownloader.GetGgmlModelAsync(GgmlType.Base);
+                        var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(GgmlType.Base);
                         var fileWriter = File.OpenWrite(m_ModelFile);
                         await modelStream.CopyToAsync(fileWriter);
                     }
