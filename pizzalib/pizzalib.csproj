@@ -14,13 +14,14 @@
     <EmbeddedResource Include="banner.txt" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="CsvHelper" Version="33.1.0" />
-    <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Whisper.net" Version="1.9.0-preview1" />
-    <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.0-preview1" />
-    <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.0-preview1" />
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="CsvHelper" Version="33.1.0" />
+        <PackageReference Include="NAudio" Version="2.2.1" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+        <PackageReference Include="Whisper.net" Version="1.9.0-preview2" />
+        <PackageReference Include="Whisper.net.Runtime" Version="1.9.0-preview2" />
+        <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.0-preview2" />
+        <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.0-preview2" />
+    </ItemGroup>
 
 </Project>
