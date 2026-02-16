@@ -23,14 +23,12 @@ namespace pizzalib
 {
     public class LiveCallManager : CallManager, IDisposable
     {
-        private bool m_Initialized;
         private Alerter? m_Alerter;
         private StreamServer? m_StreamServer;
         private bool m_Disposed;
 
         public LiveCallManager(Action<TranscribedCall> newTranscribedCallCallback) : base(newTranscribedCallCallback)
         {
-            m_Initialized = false;
         }
 
         ~LiveCallManager()
@@ -56,12 +54,12 @@ namespace pizzalib
 
             m_Disposed = true;
             m_StreamServer?.Dispose();
-            base.Dispose(disposing);
+            // Note: base.Dispose() will handle m_Whisper disposal
         }
 
         public override async Task<bool> Initialize(Settings Settings)
         {
-            if (m_Initialized)
+            if (IsStarted())
             {
                 return await Reinitialize(Settings);
             }
@@ -71,7 +69,6 @@ namespace pizzalib
                 await base.Initialize(Settings);
                 m_Alerter = new Alerter(Settings);
                 m_StreamServer = new StreamServer(HandleNewCall, Settings);
-                m_Initialized = true;
             }
             catch (Exception ex)
             {
@@ -83,11 +80,7 @@ namespace pizzalib
 
         public override bool IsStarted()
         {
-            if (!m_Initialized || !base.IsStarted())
-            {
-                return false;
-            }
-            if (m_StreamServer == null)
+            if (!base.IsStarted() || m_StreamServer == null)
             {
                 return false;
             }
@@ -109,17 +102,18 @@ namespace pizzalib
 
             if (!block)
             {
-                _ = Task.Run(async () =>
+                var fireForgetTask = Task.Run(async () =>
                 {
                     try
                     {
-                        _ = await m_StreamServer.Listen();
+                        await m_StreamServer.Listen().ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         Trace(TraceLoggerType.LiveCallManager, TraceEventType.Error, $"{ex.Message}");
                     }
                 });
+                AsyncHelpers.Register(fireForgetTask);
                 return true;
             }
             else
@@ -157,12 +151,10 @@ namespace pizzalib
 
         protected override async Task<bool> Reinitialize(Settings Settings)
         {
-            if (!m_Initialized)
+            if (!IsStarted())
             {
                 throw new Exception("Invalid LiveCallManager state for re-initialize");
             }
-
-            m_Initialized = false;
 
             try
             {
@@ -178,7 +170,7 @@ namespace pizzalib
             return await Initialize(Settings);
         }
 
-        protected override async Task HandleNewCall(WavStreamData CallData)
+        protected override async Task HandleNewCall(RawCallData CallData)
         {
             if (!m_Initialized || m_StreamServer == null || m_Alerter == null)
             {
@@ -191,7 +183,7 @@ namespace pizzalib
             // NOTE: This method is invoked PER CALL, and calls can happen in parallel.
             //
 
-            await base.HandleNewCall(CallData);            
+            await base.HandleNewCall(CallData);
         }
 
         protected override void ProcessAlerts(TranscribedCall Call)

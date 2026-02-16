@@ -23,7 +23,7 @@ namespace pizzaui
     public partial class SettingsWindow : Form
     {
         private Settings m_OriginalSettings;
-        private List<Talkgroup> m_LoadedTalkgroups;
+        private List<Talkgroup>? m_LoadedTalkgroups;
         private bool m_SaveDisabled;
         public Settings m_UpdatedSettings;
 
@@ -46,7 +46,7 @@ namespace pizzaui
                 saveButton.Enabled = false;
             }
 
-            m_LoadedTalkgroups = CurrentSettings.talkgroups;
+            m_LoadedTalkgroups = CurrentSettings.Talkgroups;
 
             if (m_LoadedTalkgroups != null)
             {
@@ -116,7 +116,7 @@ namespace pizzaui
             {
                 throw new Exception("Invalid bit depth");
             }
-            settings.talkgroups = m_LoadedTalkgroups;
+            settings.Talkgroups = m_LoadedTalkgroups;
             //
             // Whisper.net settings
             //

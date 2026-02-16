@@ -22,108 +22,48 @@ using System.Globalization;
 
 namespace pizzalib
 {
-    public class Talkgroup : IEquatable<Talkgroup>, IComparable<Talkgroup>
+    public record Talkgroup
     {
         [Index(0)]
-        public long Id { get; set; }
+        public long Id { get; init; }
         [Index(1)]
-        public string Mode { get; set; }
+        public string? Mode { get; init; }
         [Index(2)]
-        public string AlphaTag { get; set; }
+        public string? AlphaTag { get; init; }
         [Index(3)]
-        public string Description { get; set; }
+        public string? Description { get; init; }
         [Index(4)]
-        public string Tag { get; set; }
+        public string? Tag { get; init; }
         [Index(5)]
-        public string Category { get; set; }
-
-        public int CompareTo(Talkgroup obj)
-        {
-            //
-            // Sorting Talkgroup objects is by Id
-            //
-            return Id.CompareTo(obj.Id);
-        }
-
-        public override string ToString()
-        {
-            return $"{AlphaTag} ({Tag}/{Category}) - {Description}";
-        }
-
-        public override bool Equals(object? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            var field = Other as Talkgroup;
-            return Equals(field);
-        }
-
-        public bool Equals(Talkgroup? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            return Id == Other.Id &&
-                Mode == Other.Mode &&
-                AlphaTag == Other.AlphaTag &&
-                Description == Other.Description &&
-                Tag == Other.Tag &&
-                Category == Other.Category;
-        }
-
-        public static bool operator ==(Talkgroup? Talkgroup1, Talkgroup? Talkgroup2)
-        {
-            if ((object)Talkgroup1 == null || (object)Talkgroup2 == null)
-                return Equals(Talkgroup1, Talkgroup2);
-            return Talkgroup1.Equals(Talkgroup2);
-        }
-
-        public static bool operator !=(Talkgroup? Talkgroup1, Talkgroup? Talkgroup2)
-        {
-            if ((object)Talkgroup1 == null || (object)Talkgroup2 == null)
-                return !Equals(Talkgroup1, Talkgroup2);
-            return !(Talkgroup1.Equals(Talkgroup2));
-        }
-
-        public override int GetHashCode()
-        {
-            return (Id, Mode, AlphaTag, Description, Tag, Category
-                ).GetHashCode();
-        }
+        public string? Category { get; init; }
     }
 
-    public static class TalkgroupHelper
+    public class TalkgroupHelper
     {
-        public static List<Talkgroup> GetTalkgroupsFromCsv(string FileName)
+        public static List<Talkgroup> GetTalkgroupsFromCsv(string fileName)
         {
-            using (var reader = new StreamReader(FileName))
-            using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
-            {
-                return csv.GetRecords<Talkgroup>().ToList();
-            }
+            using var reader = new StreamReader(fileName);
+            using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
+            return csv.GetRecords<Talkgroup>().ToList();
         }
 
-        public static Talkgroup? LookupTalkgroup(Settings Settings, long Talkgroup)
+        public static Talkgroup? LookupTalkgroup(Settings settings, long talkgroupId)
         {
-            if (Settings.talkgroups == null || Settings.talkgroups.Count == 0)
-            {
-                return null;
-            }
-            return Settings.talkgroups.FirstOrDefault(t => t.Id == Talkgroup);
+            return settings.Talkgroups?.FirstOrDefault(t => t.Id == talkgroupId);
         }
 
-        public static string FormatTalkgroup(Settings Settings, long Talkgroup, bool ShortFormat = false)
+        public static string FormatTalkgroup(Settings settings, long talkgroupId, bool shortFormat = true)
         {
-            var talkgroup = LookupTalkgroup(Settings, Talkgroup);
+            var talkgroup = LookupTalkgroup(settings, talkgroupId);
             if (talkgroup == null)
             {
-                return $"{Talkgroup}";
+                return $"{talkgroupId}";
             }
-
-            return ShortFormat ? $"{talkgroup.AlphaTag}" : $"{talkgroup}";
+            if (shortFormat)
+            {
+                return $"{talkgroup.AlphaTag} - {talkgroup.Description} ({talkgroup.Category})";
+            }
+            return talkgroup.ToString();
         }
     }
 }

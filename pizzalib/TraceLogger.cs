@@ -1,4 +1,4 @@
-﻿/* 
+/*
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 using System.Diagnostics;
+using System.IO;
 
 namespace pizzalib
 {
@@ -28,12 +29,11 @@ namespace pizzalib
                             $"pizzalib-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
         private static TextWriterTraceListener m_TextWriterTraceListener =
             new TextWriterTraceListener(m_Location, "pizzalibTextWriterListener");
-        private static ConsoleTraceListener m_ConsoleTraceListener = new ConsoleTraceListener();
         private static SourceSwitch m_Switch =
             new SourceSwitch("pizzalibSwitch", "Verbose");
         private static TraceSource[] Sources = {
             new TraceSource("StreamServer", SourceLevels.Verbose),
-            new TraceSource("WavStreamData", SourceLevels.Verbose),
+            new TraceSource("RawCallData", SourceLevels.Verbose),
             new TraceSource("Settings", SourceLevels.Verbose),
             new TraceSource("Whisper", SourceLevels.Verbose),
             new TraceSource("Alerts", SourceLevels.Verbose),
@@ -42,12 +42,13 @@ namespace pizzalib
             new TraceSource("CallManager", SourceLevels.Verbose),
             new TraceSource("LiveCallManager", SourceLevels.Verbose),
             new TraceSource("OfflineCallManager", SourceLevels.Verbose),
+            new TraceSource("Headless", SourceLevels.Verbose),
         };
 
         public enum TraceLoggerType
         {
             StreamServer,
-            WavStreamData,
+            RawCallData,
             Settings,
             Whisper,
             Alerts,
@@ -56,20 +57,19 @@ namespace pizzalib
             CallManager,
             LiveCallManager,
             OfflineCallManager,
+            Headless,
             Max
         }
 
         public static void Initialize(bool RedirectToStdout = false)
         {
-            System.Diagnostics.Trace.AutoFlush = true;
+            // Disable AutoFlush to prevent excessive disk I/O on Linux/RPI
+            // Traces will be flushed when Shutdown() is called or manually
+            System.Diagnostics.Trace.AutoFlush = false;
             foreach (var source in Sources)
             {
                 source.Listeners.Add(m_TextWriterTraceListener);
                 source.Switch = m_Switch;
-                if (RedirectToStdout)
-                {
-                    source.Listeners.Add(m_ConsoleTraceListener);
-                }
             }
 
             if (Directory.Exists(Settings.DefaultWorkingDirectory))
@@ -89,8 +89,14 @@ namespace pizzalib
 
         public static void Shutdown()
         {
-            m_TextWriterTraceListener.Close();
-            m_ConsoleTraceListener.Close();
+            try
+            {
+                m_TextWriterTraceListener?.Close();
+            }
+            catch
+            {
+                // Ignore errors during shutdown
+            }
         }
 
         public static void SetLevel(SourceLevels Level)
@@ -104,78 +110,16 @@ namespace pizzalib
             {
                 throw new Exception("Invalid logger type");
             }
-            using (GetColorContext(EventType))
-            {
-                Sources[(int)Type].TraceEvent(EventType, 1, $"{DateTime.Now:M/d/yyyy h:mm tt}: {Message}");
-            }
+
+            // Structured logging format: timestamp|level|type|message
+            // Note: AutoFlush is disabled to prevent excessive disk I/O on Linux/RPI
+            var structuredMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}|{(int)EventType}|{Type}|{Message}";
+            Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
         }
 
         public static void OpenTraceLog()
         {
             Utilities.LaunchFile(m_Location);
-        }
-
-        private static ColorContext GetColorContext(TraceEventType eventType)
-        {
-            switch (eventType)
-            {
-                case TraceEventType.Verbose:
-                    return new ColorContext(ConsoleColor.DarkGray);
-                case TraceEventType.Information:
-                    return new ColorContext(ConsoleColor.Gray);
-                case TraceEventType.Critical:
-                    return new ColorContext(ConsoleColor.DarkRed);
-                case TraceEventType.Error:
-                    return new ColorContext(ConsoleColor.Red);
-                case TraceEventType.Warning:
-                    return new ColorContext(ConsoleColor.Yellow);
-                case TraceEventType.Start:
-                    return new ColorContext(ConsoleColor.DarkGreen);
-                case TraceEventType.Stop:
-                    return new ColorContext(ConsoleColor.DarkMagenta);
-                case TraceEventType.Transfer:
-                    return new ColorContext(ConsoleColor.DarkYellow);
-                default:
-                    return new ColorContext();
-            }
-        }
-    }
-
-    internal sealed class ColorContext : IDisposable
-    {
-        private readonly ConsoleColor previousBackgroundColor;
-        private readonly ConsoleColor previousForegroundColor;
-        private bool isDisposed;
-
-        public ColorContext()
-            : this(Console.ForegroundColor, Console.BackgroundColor)
-        {
-        }
-
-        public ColorContext(ConsoleColor foregroundColor)
-            : this(foregroundColor, Console.BackgroundColor)
-        {
-        }
-
-        public ColorContext(ConsoleColor foregroundColor, ConsoleColor backgroundColor)
-        {
-            this.isDisposed = false;
-            this.previousForegroundColor = Console.ForegroundColor;
-            this.previousBackgroundColor = Console.BackgroundColor;
-            Console.ForegroundColor = foregroundColor;
-            Console.BackgroundColor = backgroundColor;
-        }
-
-        public void Dispose()
-        {
-            if (this.isDisposed)
-            {
-                return;
-            }
-
-            Console.ForegroundColor = this.previousForegroundColor;
-            Console.BackgroundColor = this.previousBackgroundColor;
-            this.isDisposed = true;
         }
     }
 }

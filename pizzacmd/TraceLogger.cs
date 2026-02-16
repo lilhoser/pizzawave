@@ -70,8 +70,22 @@ namespace pizzacmd
 
         public static void Shutdown()
         {
-            m_TextWriterTraceListener.Close();
-            m_ConsoleTraceListener.Close();
+            try
+            {
+                m_TextWriterTraceListener?.Close();
+            }
+            catch
+            {
+                // Ignore errors during shutdown
+            }
+            try
+            {
+                m_ConsoleTraceListener?.Close();
+            }
+            catch
+            {
+                // Ignore errors during shutdown
+            }
         }
 
         public static void SetLevel(SourceLevels Level)
