@@ -1,45 +1,40 @@
 #!/bin/bash
-# pizzapi-upgrade.sh - Upgrade pizzapi to the latest release
-# Run on Raspberry Pi: curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh | sudo bash
+# pizzapi-upgrade.sh - Upgrade pizzapi on Raspberry Pi
+#
+# Usage:
+#   curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh | sudo bash
+#   # Or specify a version:
+#   curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh | sudo -s bash - v1.0.6
 
 set -e
 
 VERSION="${1:-latest}"
 DOWNLOAD_DIR="/tmp"
-INSTALL_DIR="/opt/pizzapi"
 
 echo "=========================================="
-echo "  PizzaPi API Upgrade Script"
+echo "  PizzaPi API Upgrade"
 echo "=========================================="
 
 # Get latest version if not specified
 if [ "$VERSION" = "latest" ]; then
     VERSION=$(curl -s https://api.github.com/repos/lilhoser/pizzawave/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-    echo "Latest version: $VERSION"
 fi
 
 DEB_FILE="pizzapi_${VERSION#v}_arm64.deb"
 DOWNLOAD_URL="https://github.com/lilhoser/pizzawave/releases/download/${VERSION}/${DEB_FILE}"
 
-echo ""
+echo "Version: $VERSION"
 echo "Downloading ${DEB_FILE}..."
 cd $DOWNLOAD_DIR
 wget -q --show-progress "$DOWNLOAD_URL" -O "$DEB_FILE"
 
 echo ""
-echo "Installing pizzapi ${VERSION#v}..."
-sudo dpkg -i "$DEB_FILE"
+echo "Installing..."
+sudo dpkg -i "$DEB_FILE" || sudo apt-get install -f -y
 
 echo ""
-echo "Fixing dependencies (if needed)..."
-sudo apt-get install -f -y
-
-echo ""
-echo "Reloading systemd configuration..."
+echo "Restarting service..."
 sudo systemctl daemon-reload
-
-echo ""
-echo "Restarting pizzapi service..."
 sudo systemctl restart pizzapi
 
 echo ""
@@ -47,12 +42,9 @@ echo "=========================================="
 echo "  Upgrade Complete!"
 echo "=========================================="
 echo ""
-echo "Service status:"
 sudo systemctl status pizzapi --no-pager -l
 echo ""
-echo "View logs: journalctl -u pizzapi -f"
-echo "Config:    /etc/pizzapi/appsettings.json"
+echo "Logs: journalctl -u pizzapi -f"
 echo ""
 
-# Cleanup
-rm -f "$DOWNLOAD_DIR/$DEB_FILE"
+rm -f "$DEB_FILE"
