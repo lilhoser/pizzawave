@@ -27,74 +27,18 @@ namespace pizzalib
         Daily
     }
 
-    public class Alert : IEquatable<Alert>
+    public class Alert
     {
-        public Guid Id { get; set; }
-        public string Name { get; set; }
-        public string Email { get; set; }
-        public string Keywords { get; set; }
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Keywords { get; set; } = string.Empty;
         public AlertFrequency Frequency { get; set; }
-        public List<long> Talkgroups { get; set; }
+        public List<long> Talkgroups { get; set; } = [];
         public bool Enabled { get; set; }
+        public bool Autoplay { get; set; } = true;
 
-        public Alert()
-        {
-            Name = string.Empty;
-            Email = string.Empty;
-            Keywords = string.Empty;
-            Id = Guid.NewGuid();
-            Talkgroups = new List<long>();
-        }
-
-        public override string ToString()
-        {
-            return $"{Name}({(Enabled ? "on" : "off")}: {Keywords}";
-        }
-
-        public override bool Equals(object? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            var field = Other as Alert;
-            return Equals(field);
-        }
-
-        public bool Equals(Alert? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            return Id == Other.Id &&
-                Name == Other.Name &&
-                Email == Other.Email &&
-                Keywords == Other.Keywords &&
-                Frequency == Other.Frequency &&
-                Talkgroups == Other.Talkgroups &&
-                Enabled == Other.Enabled;
-        }
-
-        public static bool operator ==(Alert? Alert1, Alert? Alert2)
-        {
-            if ((object)Alert1 == null || (object)Alert2 == null)
-                return Equals(Alert1, Alert2);
-            return Alert1.Equals(Alert2);
-        }
-
-        public static bool operator !=(Alert? Alert1, Alert? Alert2)
-        {
-            if ((object)Alert1 == null || (object)Alert2 == null)
-                return !Equals(Alert1, Alert2);
-            return !(Alert1.Equals(Alert2));
-        }
-
-        public override int GetHashCode()
-        {
-            return (Name, Email, Keywords, Frequency, Talkgroups, Enabled
-                ).GetHashCode();
-        }
+        public override string ToString() => $"{Name}({(Enabled ? "on" : "off")}: {Keywords}";
 
         public void Validate()
         {
@@ -103,28 +47,29 @@ namespace pizzalib
                 throw new Exception("Name is required");
             }
 
-            if (string.IsNullOrEmpty(Email))
-            {
-                throw new Exception("Email is required");
-            }
             if (string.IsNullOrEmpty(Keywords))
             {
                 throw new Exception("Keywords are required");
             }
-            var emails = GetEmailRecipients();
-            if (emails.Count == 0)
+
+            // Email is optional - if provided, validate format
+            if (!string.IsNullOrEmpty(Email))
             {
-                throw new Exception("Email is required");
-            }
-            foreach (var email in emails)
-            {
-                try
+                var emails = GetEmailRecipients();
+                if (emails.Count == 0)
                 {
-                    var m = new MailAddress(email);
+                    throw new Exception("Email is required");
                 }
-                catch (FormatException ex)
+                foreach (var email in emails)
                 {
-                    throw new Exception($"Alert email address {email} is invalid: {ex.Message}");
+                    try
+                    {
+                        _ = new MailAddress(email);
+                    }
+                    catch (FormatException)
+                    {
+                        throw new Exception($"Alert email address {email} is invalid");
+                    }
                 }
             }
         }

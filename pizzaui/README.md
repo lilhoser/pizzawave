@@ -1,69 +1,85 @@
+# pizzaui - Windows UI Application
 
-# Introduction
-<img align="right" src="http://github.com/lilhoser/pizzawave/raw/main/docs/logo-med.png"> `pizzaui` is a multi-threaded .NET user-interface application built on top of the [`pizzalib`](https://github.com/lilhoser/pizzawave/tree/main/pizzalib) library.
+<img align="right" src="../docs/logo-med.png">
 
-<img align="left" src="http://github.com/lilhoser/pizzawave/raw/main/docs/screenshot1.png"> Please be sure to read the [`pizzawave` README page](https://github.com/lilhoser/pizzawave)
+`pizzaui` is a multi-threaded .NET Windows Forms application built on top of the [`pizzalib`](../pizzalib/README.md) library.
 
-# Requirements
-* [Requirements as specified in the `pizzawave` README](https://github.com/lilhoser/pizzawave)
-* [Requirements as specified in the `pizzalib` README]((https://github.com/lilhoser/pizzawave/tree/main/pizzalib)
-* A Windows system running .NET 8 or later
+<img align="left" src="../docs/screenshot1.png" width="400">
 
-# Configuration
+**Note for Linux/macOS users**: Use [`pizzapi`](../docs/pizzapi.md) instead - a cross-platform UI built on Avalonia that runs on Linux, macOS, and Windows.
 
-`pizzaui` provides a powerful interface for editing `pizzawave` configuration (that is, both `pizzaui` and `pizzalib` parameters) through the `Edit->Settings` menu. See [`pizzalib` README](https://github.com/lilhoser/pizzawave/pizzalib) for details on these parameters.
+Please be sure to read the [`pizzawave` README page](../docs/README.md).
 
-`pizzaui` also manages its own parameters that are stored in the same `settings.json` file used by `pizzalib` parameters.  These parameters are:
-* `GroupingStrategy` (default=`Category`): How transcribed calls should be grouped in the UI, by talkgroup field: `Off`=0, `AlphaTag`=1, `Tag`=2, `Description`=3, `Category`=4
-* `ShowAlertMatchesOnly` (default=`false`): If set to `false`, all transcribed calls are shown in the UI; if set to `true`, only calls that trigger an alert will be shown.
+## Requirements
 
-To backup your settings, use `File->Save settings as...`. To load external settings, use `File->Open settings...`.
+* [Requirements as specified in the `pizzawave` README](../docs/README.md)
+* [Requirements as specified in the `pizzalib` README](../pizzalib/README.md)
+* A Windows system running .NET 9.0 or later
 
-# Display Interface
+## Configuration
 
-## Exporting
+`pizzaui` provides a powerful interface for editing `pizzawave` configuration (that is, both `pizzaui` and `pizzalib` parameters) through the `Edit → Settings` menu. See [`pizzalib` README](../pizzalib/README.md) for details on these parameters.
 
-All call data and complete transcriptions shown in the current view can be exported to JSON or CSV from the `View->Export..` sub-menus. Alternatively, you can navigate to `Diagnostics->View logs` to open pizzawave's working directory. Inside this director you'll find full [captures](https://github.com/lilhoser/pizzawave#Running) which you can export manually.
+`pizzaui` also manages its own parameters that are stored in the same `settings.json` file used by `pizzalib` parameters. These parameters are:
 
-## Opening a capture
+* **GroupingStrategy** (default=`Category`): How transcribed calls should be grouped in the UI, by talkgroup field:
+  - `Off`=0
+  - `AlphaTag`=1
+  - `Tag`=2
+  - `Description`=3
+  - `Category`=4
+* **ShowAlertMatchesOnly** (default=`false`): If set to `false`, all transcribed calls are shown in the UI; if set to `true`, only calls that trigger an alert will be shown.
 
-To open a `pizzawave` capture from a prior live session, navigate to `File->Open capture`. You can find all of `pizzawave`'s past live-session captures in `<user profile>\pizzawave\captures`.
+To backup your settings, use `File → Save settings as...`. To load external settings, use `File → Open settings...`.
 
-To open an offline capture created by `callstream`'s SFTP feature, navigate to `File->Open offline capture`.
+## Display Interface
 
-Read more about captures [here](https://github.com/lilhoser/pizzawave#Running).
+### Exporting
 
-## Viewing full call transcription
+All call data and complete transcriptions shown in the current view can be exported to JSON or CSV from the `View → Export...` sub-menus. Alternatively, you can navigate to `Diagnostics → View logs` to open pizzawave's working directory. Inside this directory you'll find full [captures](../docs/README.md#Running) which you can export manually.
+
+Build output is organized in the `artifacts/` folder by project.
+
+### Opening a Capture
+
+To open a `pizzawave` capture from a prior live session, navigate to `File → Open capture`. You can find all of `pizzawave`'s past live-session captures in `<user profile>\pizzawave\captures`.
+
+To open an offline capture created by `callstream`'s SFTP feature, navigate to `File → Open offline capture`.
+
+Read more about captures [here](../docs/README.md#Running).
+
+### Viewing Full Call Transcription
 
 Hover over the transcription snippet to view a popup window containing the full text of the transcription.
 
-## Sorting and Filtering
+### Sorting and Filtering
 
 To sort, click on a column header. To filter by any column, right-click on that column and select a value from the `Filtering` sub-menu. These values are populated from the current dataset being displayed. To clear filters, navigate to the same sub-menu and select `Clear All Filters`.
 
 The default sort order is call start time, descending.
 
-## Searching
+### Searching
 
-Press `CTRL+F` to open the search window, or navigate via `View->Find...`. Type a keyword into the search box and press enter. This will apply a search filter to your call list. To clear the search filter and view all calls, press `ESC` or navigate via `View->Clear search filter`.
+Press `CTRL+F` to open the search window, or navigate via `View → Find...`. Type a keyword into the search box and press enter. This will apply a search filter to your call list. To clear the search filter and view all calls, press `ESC` or navigate via `View → Clear search filter`.
 
-## Grouping
+### Grouping
 
-To change how the calls are displayed in groups, select `View->Group by` and choose a talkgroup sub-field. These sub-fields come from the talkgroup CSV you specified in settings.
+To change how the calls are displayed in groups, select `View → Group by` and choose a talkgroup sub-field. These sub-fields come from the talkgroup CSV you specified in settings.
 
 The default grouping is by Talkgroup category.
 
-## Show only calls matching an alert
+### Show Only Calls Matching an Alert
 
-By default, `pizzaui` will immediately display all calls in its primary listview control as calls are sent from trunk-recorder. Any call that matches an alert will be highlighted in orange. To show only calls that matched an alert, select `View->Show alert matches only`.
+By default, `pizzaui` will immediately display all calls in its primary listview control as calls are sent from trunk-recorder. Any call that matches an alert will be highlighted in orange. To show only calls that matched an alert, select `View → Show alert matches only`.
 
-## Copying data
+### Copying Data
 
 To copy rows of data from the display listview, highlight the rows and press CTRL+C. You can also use the right-click context menu discussed in the next section.
 
-## Right-click context menu
+### Right-Click Context Menu
 
 Right click on any cell to open the context menu. From the menu you can:
+
 * Copy an entire row to the clipboard, as a CSV string
 * Copy a single cell to the clipboard
 * Save a call recording MP3 to a specific location
@@ -71,23 +87,27 @@ Right click on any cell to open the context menu. From the menu you can:
 
 To copy entire rows or cells for multiple calls, first `SHIFT+Select` or `CTRL+Select` the desired rows, then right-click anywhere and select either `Copy row to clipboard` or `Copy cell to clipboard`.
 
-# Alerts
+## Alerts
 
-Alerts are driven by rules which are provided by `pizzalib`. Navigate to `Edit->Alerts` to manage your alert rules. <img align="left" src="http://github.com/lilhoser/pizzawave/raw/main/docs/screenshot2.png">
+Alerts are driven by rules which are provided by `pizzalib`. Navigate to `Edit → Alerts` to manage your alert rules.
 
-Please see [the `pizzalib` README](https://github.com/lilhoser/pizzawave/pizzalib) for details on how Alerts work.
+<img align="left" src="../docs/screenshot2.png" width="400">
 
-# Headless mode
+Please see [the `pizzalib` README](../pizzalib/README.md) for details on how Alerts work.
 
-`pizzaui` can be run without a UI at all, in case you prefer the command line experience or if you want to setup `pizzaui` as a local service. <img align="right" src="http://github.com/lilhoser/pizzawave/raw/main/docs/screenshot3.png">
+## Headless Mode
+
+`pizzaui` can be run without a UI at all, in case you prefer the command line experience or if you want to setup `pizzaui` as a local service.
+
+<img align="right" src="../docs/screenshot3.png" width="300">
 
 To operate `pizzaui` in headless mode, simply execute `pizzaui.exe --headless` from a command prompt window. If you don't want to use the default settings file, you can pass `--settings=<location>`. If you don't see any output, ensure that your `pizzalib` settings have the `TraceLevelApp` parameter set to something chatty, like `Verbose`. You can also verify the application is running in headless mode by looking for `pizzaui` in task manager or seeing a port listener in `netstat -an` output. And, of course, if your settings are correct and you have defined some alerts that are being triggered by active calls, you can browse the application's working folder to see output.
 
-## `pizzaui` as a service
+### pizzaui as a Service
 
 It's simple to setup `pizzaui` to run as a Windows service. See this [Microsoft Learn page](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/new-service?view=powershell-7.4) for details:
 
-```
+```powershell
 $params = @{
   Name = "PizzawaveService"
   BinaryPathName = '<path_to_pizzawave>\pizzaui.exe --headless --settings=<path_to_settings_file>'
@@ -99,11 +119,19 @@ $params = @{
 New-Service @params
 ```
 
-# Other
+## Other
 
-## Tools
+### Tools
 
 Pizzawave comes with some helper tools to make your life easier, found in `Tools` menu:
-* `Transcription quality` - this tool allows you to listen to a WAV file and compare whisper's transcription of that file
-* `Find talkgroups` - this tool helps you find talkgroup data to import into pizzawave
-* `Cleanup` - erase all of those extra log files and WAV files
+
+* **Transcription quality** - This tool allows you to listen to a WAV file and compare whisper's transcription of that file
+* **Find talkgroups** - This tool helps you find talkgroup data to import into pizzawave
+* **Cleanup** - Erase all of those extra log files and WAV files
+
+## See Also
+
+* [pizzapi](../docs/pizzapi.md) - Cross-platform UI for Linux/macOS/Windows
+* [pizzacmd](../pizzacmd/README.md) - Command line application
+* [pizzalib](../pizzalib/README.md) - Core library
+* [Main README](../docs/README.md) - Project overview

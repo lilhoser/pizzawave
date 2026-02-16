@@ -36,6 +36,7 @@ namespace pizzalib
         private bool m_Disposed;
         private WhisperFactory? m_Factory;
         private WhisperProcessor? m_Processor;
+        private readonly SemaphoreSlim m_ProcessorLock = new SemaphoreSlim(1, 1);
 
         public Whisper(Settings Settings)
         {
@@ -43,11 +44,9 @@ namespace pizzalib
             m_ModelFile = string.Empty;
             m_Settings = Settings;
         }
-
-        ~Whisper()
-        {
-            Dispose(false);
-        }
+        
+        // Removed finalizer - native resources must be explicitly disposed
+        // Finalizers on Linux can cause segfaults when cleaning up native libraries
 
         protected virtual void Dispose(bool disposing)
         {
@@ -60,8 +59,9 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Initialized = false;
-            m_Factory?.Dispose();
             m_Processor?.Dispose();
+            m_Factory?.Dispose();
+            m_ProcessorLock?.Dispose();
         }
 
         public void Dispose()
@@ -74,17 +74,20 @@ namespace pizzalib
         {
             m_Settings.UpdateProgressLabelCallback?.Invoke("Initializing Whisper model...");
 
-            LogProvider.AddLogger(delegate (WhisperLogLevel arg1, string? arg2) {
-                Trace(TraceLoggerType.Whisper,
-                      TraceEventType.Information,
-                      $"{arg2}");
-            });
-
             if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
             {
-                m_ModelFile = m_Settings.whisperModelFile; // nothing to do
+                m_ModelFile = m_Settings.whisperModelFile;
+                // Check if configured model exists
+                if (!File.Exists(m_ModelFile))
+                {
+                    Trace(TraceLoggerType.Whisper, TraceEventType.Warning,
+                          $"Configured model file not found: {m_ModelFile}");
+                    // Fall through to auto-download logic
+                    m_ModelFile = string.Empty;
+                }
             }
-            else
+            
+            if (string.IsNullOrEmpty(m_ModelFile))
             {
                 if (!Directory.Exists(s_ModelFolder))
                 {
@@ -102,7 +105,35 @@ namespace pizzalib
                     }
                 }
 
-                m_ModelFile = Path.Combine(s_ModelFolder, "ggml-base.bin");
+                // Determine model type from filename or default to base
+                var modelMap = new Dictionary<string, (string filename, GgmlType type)>(StringComparer.OrdinalIgnoreCase)
+                {
+                    { "large-v3", ("ggml-large-v3.bin", GgmlType.LargeV3) },
+                    { "medium", ("ggml-medium.bin", GgmlType.Medium) },
+                    { "small", ("ggml-small.bin", GgmlType.Small) },
+                    { "tiny", ("ggml-tiny.bin", GgmlType.Tiny) }
+                };
+
+                string modelFilename = "ggml-base.bin";
+                GgmlType modelType = GgmlType.Base;
+
+                if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
+                {
+                    var configuredModel = Path.GetFileName(m_Settings.whisperModelFile);
+                    foreach (var kvp in modelMap)
+                    {
+                        if (configuredModel.Contains(kvp.Key))
+                        {
+                            modelFilename = kvp.Value.filename;
+                            modelType = kvp.Value.type;
+                            Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                                  $"Attempting to download configured model: {modelFilename}");
+                            break;
+                        }
+                    }
+                }
+                
+                m_ModelFile = Path.Combine(s_ModelFolder, modelFilename);
 
                 if (!File.Exists(m_ModelFile))
                 {
@@ -114,9 +145,11 @@ namespace pizzalib
                           $"Downloading model file to {m_ModelFile}");
                     try
                     {
-                        var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(GgmlType.Base);
-                        var fileWriter = File.OpenWrite(m_ModelFile);
+                        using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(modelType).ConfigureAwait(false);
+                        using var fileWriter = File.OpenWrite(m_ModelFile);
                         await modelStream.CopyToAsync(fileWriter);
+                        Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                              $"Model download complete: {m_ModelFile}");
                     }
                     catch (Exception ex)
                     {
@@ -130,12 +163,11 @@ namespace pizzalib
             }
 
             //
-            // Build the factory & processor once! This consumes MASSIVE memory depending on model.
+            // Build the factory once! This consumes MASSIVE memory depending on model.
             //
             try
             {
                 m_Factory = WhisperFactory.FromPath(m_ModelFile);
-                m_Processor = m_Factory.CreateBuilder().WithLanguage("auto").Build();
             }
             catch (Exception ex)
             {
@@ -143,6 +175,23 @@ namespace pizzalib
                 Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
                 throw new Exception(err);
             }
+
+            //
+            // Create a persistent processor. This keeps the Whisper thread pool
+            // alive but stable, avoiding the overhead of creating/destroying
+            // processors for each call (which was causing high CPU on Linux).
+            // The processor will be reused for all transcriptions.
+            //
+            m_Processor = m_Factory.CreateBuilder()
+                .WithLanguage("auto")
+                .WithNoContext()
+                .WithSingleSegment()
+                .Build();
+
+            // Reset semaphore to allow concurrent access (it was created with 1, 1)
+            // This is fine since we only allow one wait at a time
+            await m_ProcessorLock.WaitAsync();
+            m_ProcessorLock.Release();
 
             m_Initialized = true;
             m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
@@ -152,32 +201,42 @@ namespace pizzalib
 
         public async Task<string> TranscribeCall(MemoryStream WavData)
         {
-            if (!m_Initialized || m_Processor == null)
+            if (!m_Initialized || m_Factory == null)
             {
                 throw new Exception("Whisper model is not initialized.");
             }           
 
             try
             {
-                var sb = new StringBuilder();
-                await foreach (var result in m_Processor.ProcessAsync(WavData))
+                // Use the persistent processor, protected by a semaphore to prevent
+                // concurrent use from multiple threads (which caused transcription bleed).
+                await m_ProcessorLock.WaitAsync();
+                try
                 {
-                    sb.Append($"{result.Text} ");
+                    var sb = new StringBuilder();
+                    await foreach (var result in m_Processor!.ProcessAsync(WavData))
+                    {
+                        sb.Append($"{result.Text} ");
+                    }
+                    var transcription = sb.ToString();
+                    if (string.IsNullOrEmpty(transcription))
+                    {
+                        var err = $"Transcription was empty";
+                        Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
+                    }
+                    else
+                    {
+                        var length = Math.Min(25, transcription.Length);
+                        var snippet = transcription.Substring(0, length);
+                        Trace(TraceLoggerType.Whisper,
+                              TraceEventType.Verbose,
+                              $"Transcription: \"{snippet}...\"");
+                        return transcription;
+                    }
                 }
-                var transcription = sb.ToString();
-                if (string.IsNullOrEmpty(transcription))
+                finally
                 {
-                    var err = $"Transcription was empty";
-                    Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
-                }
-                else
-                {
-                    var length = Math.Min(25, transcription.Length);
-                    var snippet = transcription.Substring(0, length);
-                    Trace(TraceLoggerType.Whisper,
-                          TraceEventType.Verbose,
-                          $"Transcription: \"{snippet}...\"");
-                    return transcription;
+                    m_ProcessorLock.Release();
                 }
             }
             catch (Exception ex)

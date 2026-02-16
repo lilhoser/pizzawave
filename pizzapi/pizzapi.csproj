@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <MauiEnableXamlCompilation>false</MauiEnableXamlCompilation>
+    <ApplicationIcon></ApplicationIcon>
+    <AssemblyName>pizzapi</AssemblyName>
+    <RootNamespace>pizzapi</RootNamespace>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <Configurations>Debug;Release;DEBUG_X64_CUDA;RELEASE_X64_CUDA</Configurations>
+  </PropertyGroup>
+
+  <!-- Debug_X64_CUDA configuration with CUDA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug_X64_CUDA'">
+    <BuildProfile>Debug_X64_CUDA</BuildProfile>
+  </PropertyGroup>
+
+  <!-- Release_X64_CUDA configuration with CUDA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_X64_CUDA'">
+    <BuildProfile>Release_X64_CUDA</BuildProfile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\pizzalib\pizzalib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.0-preview1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.0-preview1" />
+    <PackageReference Include="Avalonia.LinuxFramebuffer" Version="12.0.0-preview1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.0-preview1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.0-preview1" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.5-beta1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="App.xaml" />
+    <AvaloniaResource Include="MainWindow.xaml" />
+    <AvaloniaResource Include="SettingsWindow.xaml" />
+    <AvaloniaResource Include="images\**\*" />
+  </ItemGroup>
+
+  <!-- Include XAML files for compilation -->
+  <ItemGroup>
+    <UpToDateCheckInput Include="SettingsWindow.xaml" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,346 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOTNET_VERSION: '9.0.x'
+
+jobs:
+  # Get version from tag
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Extracted version: $VERSION"
+
+    - name: Validate version
+      run: |
+        if [[ ! "${{ steps.get_version.outputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          echo "Error: Invalid version format. Expected semver (e.g., 1.0.5), got: ${{ steps.get_version.outputs.version }}"
+          exit 1
+        fi
+
+  # Build pizzalib (cross-platform library)
+  build-pizzalib:
+    runs-on: ubuntu-latest
+    needs: get-version
+    strategy:
+      matrix:
+        include:
+          - runtime: win-x64
+            arch: x64
+            buildProfile: Release_X64_CUDA
+          - runtime: linux-x64
+            arch: x64
+            buildProfile: Release_X64_CUDA
+          - runtime: linux-arm64
+            arch: arm64
+            buildProfile: Default
+          - runtime: osx-x64
+            arch: x64
+            buildProfile: Release_X64_CUDA
+          - runtime: osx-arm64
+            arch: arm64
+            buildProfile: Default
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Build pizzalib (${{ matrix.runtime }})
+      env:
+        BuildProfile: ${{ matrix.buildProfile }}
+      run: |
+        dotnet publish pizzalib/pizzalib.csproj \
+          -c Release \
+          -r ${{ matrix.runtime }} \
+          --self-contained false \
+          -p:BuildProfile=${{ matrix.buildProfile }} \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
+          -o ./publish/pizzalib-${{ matrix.runtime }}
+    - name: Create archive
+      run: |
+        cd publish/pizzalib-${{ matrix.runtime }}
+        zip -r ../../pizzalib-${{ matrix.runtime }}-${{ needs.get-version.outputs.version }}.zip *
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pizzalib-${{ matrix.runtime }}
+        path: pizzalib-${{ matrix.runtime }}-${{ needs.get-version.outputs.version }}.zip
+        retention-days: 30
+
+  # Build pizzaui (Windows only - WinForms)
+  build-pizzaui:
+    runs-on: windows-latest
+    needs: get-version
+    strategy:
+      matrix:
+        include:
+          - runtime: win-x64
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Build pizzaui (${{ matrix.runtime }})
+      run: |
+        dotnet publish pizzaui/pizzaui.csproj `
+          -c Release `
+          -r ${{ matrix.runtime }} `
+          --self-contained false `
+          -p:Version=${{ needs.get-version.outputs.version }} `
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 `
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 `
+          -o ./publish/pizzaui-${{ matrix.runtime }}
+    - name: Create archive
+      run: |
+        cd publish/pizzaui-${{ matrix.runtime }}
+        Compress-Archive -Path * -DestinationPath ../../pizzaui-${{ matrix.runtime }}-${{ needs.get-version.outputs.version }}.zip
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pizzaui-${{ matrix.runtime }}
+        path: pizzaui-${{ matrix.runtime }}-${{ needs.get-version.outputs.version }}.zip
+        retention-days: 30
+
+  # Build pizzacmd (cross-platform CLI)
+  build-pizzacmd:
+    runs-on: ubuntu-latest
+    needs: get-version
+    strategy:
+      matrix:
+        include:
+          - runtime: win-x64
+            arch: x64
+            buildProfile: Release_X64_CUDA
+          - runtime: linux-x64
+            arch: x64
+            buildProfile: Release_X64_CUDA
+          - runtime: linux-arm64
+            arch: arm64
+            buildProfile: Default
+          - runtime: osx-x64
+            arch: x64
+            buildProfile: Release_X64_CUDA
+          - runtime: osx-arm64
+            arch: arm64
+            buildProfile: Default
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Build pizzacmd (${{ matrix.runtime }})
+      env:
+        BuildProfile: ${{ matrix.buildProfile }}
+      run: |
+        dotnet publish pizzacmd/pizzacmd.csproj \
+          -c Release \
+          -r ${{ matrix.runtime }} \
+          --self-contained false \
+          -p:BuildProfile=${{ matrix.buildProfile }} \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
+          -o ./publish/pizzacmd-${{ matrix.runtime }}
+    - name: Create archive
+      run: |
+        cd publish/pizzacmd-${{ matrix.runtime }}
+        zip -r ../../pizzacmd-${{ matrix.runtime }}-${{ needs.get-version.outputs.version }}.zip *
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pizzacmd-${{ matrix.runtime }}
+        path: pizzacmd-${{ matrix.runtime }}-${{ needs.get-version.outputs.version }}.zip
+        retention-days: 30
+
+  # Build pizzapi (Linux - Avalonia UI with .deb package)
+  build-pizzapi:
+    runs-on: ubuntu-latest
+    needs: get-version
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runtime: linux-arm64
+            deb-arch: arm64
+            buildProfile: Default
+          - arch: x64
+            runtime: linux-x64
+            deb-arch: amd64
+            buildProfile: Release_X64_CUDA
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Build pizzapi (linux-${{ matrix.arch }})
+      env:
+        BuildProfile: ${{ matrix.buildProfile }}
+      run: |
+        dotnet publish pizzapi/pizzapi.csproj \
+          -c Release \
+          -r linux-${{ matrix.arch }} \
+          --self-contained false \
+          -p:BuildProfile=${{ matrix.buildProfile }} \
+          -p:PublishSingleFile=false \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
+          -o ./publish/${{ matrix.arch }}
+    - name: Clean up unnecessary runtimes for ARM64
+      if: matrix.arch == 'arm64'
+      run: |
+        cd ./publish/${{ matrix.arch }}
+        # Remove CUDA and platform-specific runtimes for ARM64 builds
+        rm -rf runtimes/cuda
+        rm -rf runtimes/linux-x64
+        rm -rf runtimes/win-*
+        rm -rf runtimes/macos-*
+        rm -rf runtimes/linux-arm
+    - name: Create package directory structure
+      run: |
+        mkdir -p package/DEBIAN
+        mkdir -p package/opt/pizzapi
+        mkdir -p package/etc/pizzapi
+    - name: Copy binaries to package
+      run: |
+        cp -r ./publish/${{ matrix.arch }}/* package/opt/pizzapi/
+        chmod +x package/opt/pizzapi/pizzapi
+    - name: Create DEBIAN control file
+      run: |
+        cat > package/DEBIAN/control << 'EOF'
+        Package: pizzapi
+        Version: ${{ needs.get-version.outputs.version }}
+        Section: utils
+        Priority: optional
+        Architecture: ${{ matrix.deb-arch }}
+        Depends: libicu-dev, libssl3, zlib1g, libfontconfig1, libx11-6, libx11-xcb1, libxcb1, libxext6, libxfixes3, libxi6, libxrender1, libxtst6, libxcb-glx0, libxcb-dri2-0, libxcb-dri3-0, libxcb-present0, libxcb-randr0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libxshmfence1, libxxf86vm1, libdrm2, libgbm1, libasound2
+        Maintainer: PizzaWave Team
+        Description: PizzaWave API for Linux (${{ matrix.arch }})
+          A .NET-based API for radio scanning and call streaming.
+        Installed-Size: $(du -sk package/opt/pizzapi | cut -f1)
+        EOF
+    - name: Create preinst script
+      run: |
+        cat > package/DEBIAN/preinst << 'EOF'
+        #!/bin/bash
+        set -e
+        echo "Preparing to install PizzaPi UI..."
+        # Stop any running service (from old installations)
+        if systemctl is-active --quiet pizzapi 2>/dev/null; then
+          systemctl stop pizzapi
+        fi
+        # Remove old systemd service files
+        rm -f /usr/lib/systemd/system/pizzapi.service
+        rm -rf /etc/systemd/system/pizzapi.service.d/
+        rm -f /etc/systemd/system/pizzapi.service
+        systemctl daemon-reload 2>/dev/null || true
+        EOF
+        chmod 755 package/DEBIAN/preinst
+    - name: Create postinst script
+      run: |
+        cat > package/DEBIAN/postinst << 'EOF'
+        #!/bin/bash
+        set -e
+        echo "Installing PizzaPi UI dependencies..."
+        apt-get update
+        apt-get install -y libfontconfig1 libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 libxxf86vm1 libdrm2 libgbm1 libasound2 || true
+        mkdir -p /etc/pizzapi
+        if [ ! -f /etc/pizzapi/appsettings.json ]; then
+          cp /opt/pizzapi/appsettings.json.example /etc/pizzapi/appsettings.json 2>/dev/null || true
+        fi
+        echo ""
+        echo "PizzaPi UI installed successfully!"
+        echo ""
+        echo "To run PizzaPi:"
+        echo "  /opt/pizzapi/pizzapi"
+        echo ""
+        echo "Or create a desktop shortcut for easy access."
+        echo ""
+        EOF
+        chmod 755 package/DEBIAN/postinst
+    - name: Create prerm script
+      run: |
+        cat > package/DEBIAN/prerm << 'EOF'
+        #!/bin/bash
+        set -e
+        echo "Removing PizzaPi UI..."
+        # Clean up any old service files
+        rm -f /usr/lib/systemd/system/pizzapi.service
+        rm -rf /etc/systemd/system/pizzapi.service.d/
+        rm -f /etc/systemd/system/pizzapi.service
+        systemctl daemon-reload 2>/dev/null || true
+        EOF
+        chmod 755 package/DEBIAN/prerm
+    - name: Create postrm script
+      run: |
+        cat > package/DEBIAN/postrm << 'EOF'
+        #!/bin/bash
+        set -e
+        if [ "$1" = "purge" ]; then
+          echo "Removing PizzaPi UI configuration..."
+          rm -rf /etc/pizzapi
+          rm -rf /opt/pizzapi
+        fi
+        EOF
+        chmod 755 package/DEBIAN/postrm
+    - name: Create example config file
+      run: |
+        cat > package/etc/pizzapi/appsettings.json.example << 'EOF'
+        {
+          "Logging": {
+            "LogLevel": {
+              "Default": "Information",
+              "Microsoft.AspNetCore": "Warning"
+            }
+          },
+          "AllowedHosts": "*"
+        }
+        EOF
+    - name: Build .deb package
+      run: |
+        fakeroot dpkg-deb --build package pizzapi_${{ needs.get-version.outputs.version }}_${{ matrix.deb-arch }}.deb
+    - name: Upload .deb artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pizzapi-deb-${{ matrix.arch }}
+        path: pizzapi_${{ needs.get-version.outputs.version }}_${{ matrix.deb-arch }}.deb
+        retention-days: 30
+
+  # Create GitHub Release with all artifacts
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [get-version, build-pizzalib, build-pizzaui, build-pizzacmd, build-pizzapi]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+    - name: Prepare release files
+      run: |
+        mkdir -p ./release
+        cp ./artifacts/**/*.zip ./release/ 2>/dev/null || true
+        cp ./artifacts/**/*.deb ./release/ 2>/dev/null || true
+        ls -la ./release/
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ./release/*
+        generate_release_notes: true
+        append_body: true

@@ -20,6 +20,7 @@ using System.Net.Sockets;
 using System.Net;
 using System.Diagnostics;
 using System.Text;
+using System.Threading.Tasks;
 using static pizzalib.TraceLogger;
 
 namespace pizzalib
@@ -27,18 +28,21 @@ namespace pizzalib
     public class StreamServer : IDisposable
     {
         private CancellationTokenSource CancelSource;
-        private Func<WavStreamData, Task> NewCallDataCallback;
+        private Func<RawCallData, Task> NewCallDataCallback;
         private Settings m_Settings;
         private bool m_Started;
         private bool m_Disposed;
+        private readonly SemaphoreSlim m_ClientSemaphore;
+        private readonly int m_MaxConcurrentClients = 10;
 
         public StreamServer(
-            Func<WavStreamData, Task> NewCallDataCallback_,
+            Func<RawCallData, Task> NewCallDataCallback_,
             Settings Settings)
         {
             NewCallDataCallback = NewCallDataCallback_;
             CancelSource = new CancellationTokenSource();
             m_Settings = Settings;
+            m_ClientSemaphore = new SemaphoreSlim(m_MaxConcurrentClients, m_MaxConcurrentClients);
         }
 
         ~StreamServer()
@@ -57,7 +61,8 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Started = false;
-            CancelSource.Cancel();
+            CancelSource?.Cancel();
+            CancelSource?.Dispose();
         }
 
         public void Dispose()
@@ -76,6 +81,8 @@ namespace pizzalib
             var ipEndPoint = new IPEndPoint(IPAddress.Any, m_Settings.listenPort);
             TcpListener listener = new(ipEndPoint);
             List<Task> tasks = new List<Task>();
+            CancelSource?.Cancel();
+            CancelSource?.Dispose();
             CancelSource = new CancellationTokenSource();
 
             try
@@ -83,14 +90,30 @@ namespace pizzalib
                 var listenStr = $"Listening on port {m_Settings.listenPort}";
                 m_Settings.UpdateConnectionLabelCallback?.Invoke(listenStr);
                 Trace(TraceLoggerType.StreamServer, TraceEventType.Information, listenStr);
+                // Configure trace level based on platform - Linux/RPI needs less verbose logging
+                // to avoid high CPU usage from file I/O and console output
                 m_Started = true;
                 listener.Start();
                 while (!CancelSource.IsCancellationRequested)
                 {
                     var client = await listener.AcceptTcpClientAsync(CancelSource.Token);
-                    var task = Task.Run(async () => await HandleNewClient(client));
+                    // Rate limit: wait for a slot to be available
+                    await m_ClientSemaphore.WaitAsync(CancelSource.Token);
+                    var task = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await HandleNewClient(client);
+                        }
+                        finally
+                        {
+                            m_ClientSemaphore.Release();
+                        }
+                    });
                     tasks.Add(task);
-                }
+                    // Small delay to prevent busy polling on Linux/RPI
+                    // This reduces CPU usage when no clients are connecting
+                                    }
             }
             catch (AggregateException ae)
             {
@@ -119,8 +142,19 @@ namespace pizzalib
             }
             finally
             {
-                Task.WaitAll(tasks.ToArray());
+                try
+                {
+                    if (tasks.Count > 0)
+                    {
+                        Task.WaitAll(tasks.ToArray());
+                    }
+                }
+                catch (Exception)
+                {
+                    // tasks may have been cancelled
+                }
                 listener.Stop();
+                tasks.Clear();
                 m_Started = false;
             }
             return true;
@@ -133,11 +167,11 @@ namespace pizzalib
                   $"Received shutdown request.");
             if (block)
             {
-                CancelSource.Cancel();
+                CancelSource?.Cancel();
             }
             else
             {
-                CancelSource.CancelAsync();
+                CancelSource?.CancelAsync();
             }
         }
 
@@ -146,18 +180,27 @@ namespace pizzalib
             var clientEndpoint = Client.Client.RemoteEndPoint as IPEndPoint;
             var clientStr = $"{clientEndpoint!.Address}:{clientEndpoint!.Port}";
             Trace(TraceLoggerType.StreamServer,
-                  TraceEventType.Verbose,
-                  $"Receiving from {clientStr}");
-            m_Settings.UpdateConnectionLabelCallback?.Invoke($"Receiving from {clientStr}");
+                  TraceEventType.Information,
+                  $"Connection from {clientStr}");
+            m_Settings.UpdateConnectionLabelCallback?.Invoke($"Connection from {clientStr}");
             try
             {
                 using (var stream = Client.GetStream())
                 {
-                    var wavStream = new WavStreamData(m_Settings);
-                    var result = await wavStream.ProcessClientData(stream, CancelSource);
-                    if (result)
+                    var wavStream = new RawCallData(m_Settings);
+                    try
                     {
-                        _ = NewCallDataCallback(wavStream); // blocking
+                        var result = await wavStream.ProcessClientData(stream, CancelSource);
+                        if (result && !CancelSource.IsCancellationRequested)
+                        {
+                            // Await the callback to ensure wavStream isn't disposed prematurely
+                            await NewCallDataCallback(wavStream);
+                        }
+                    }
+                    finally
+                    {
+                        // Dispose after callback completes to release PCM buffer
+                        wavStream.Dispose();
                     }
                 }
             }
@@ -166,6 +209,7 @@ namespace pizzalib
                 Trace(TraceLoggerType.StreamServer,
                       TraceEventType.Error,
                       $"HandleNewClient() exception: {ex.Message}");
+                return false;
             }
             return true;
         }

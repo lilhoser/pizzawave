@@ -1,0 +1,110 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:pizzapi"
+        x:Class="pizzapi.SettingsWindow"
+        x:Name="settingsWindow"
+        Title="PizzaPi Settings"
+        Width="600"
+        Height="700"
+        WindowStartupLocation="CenterScreen">
+    <Border Padding="20">
+        <DockPanel>
+            <TextBlock Text="Settings"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       DockPanel.Dock="Top"
+                       Margin="0,0,0,15" />
+
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10"
+                        DockPanel.Dock="Bottom"
+                        Margin="0,15,0,0">
+                <Button x:Name="SaveButton" Content="Save" Width="100" />
+                <Button x:Name="CancelButton" Content="Cancel" Width="100" />
+            </StackPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="15">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Listen Port" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="ListenPortTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Whisper Model File Path" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="WhisperModelTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Gmail User" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="GmailUserTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Gmail Password" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="GmailPasswordTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Alert Audio" FontSize="14" FontWeight="Bold" />
+                        <CheckBox x:Name="AutoplayAlertsCheckBox"
+                                  Content="Enable autoplay audio for alert matches"
+                                  FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Snooze duration:" VerticalAlignment="Center" />
+                            <ComboBox x:Name="SnoozeDurationComboBox" Width="125">
+                                <ComboBoxItem Content="5 minutes" />
+                                <ComboBoxItem Content="15 minutes" />
+                                <ComboBoxItem Content="30 minutes" />
+                                <ComboBoxItem Content="1 hour" />
+                            </ComboBox>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Talkgroups" FontSize="14" FontWeight="Bold" />
+                        <Button x:Name="ImportTalkgroupsButton"
+                                Content="Import talkgroups..."
+                                Width="200"
+                                HorizontalAlignment="Left" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Memory Management" FontSize="14" FontWeight="Bold" />
+                        <CheckBox x:Name="AutoCleanupCallsCheckBox"
+                                  Content="Auto-cleanup old calls (prevents memory leaks)"
+                                  FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Max calls to keep:" VerticalAlignment="Center" />
+                            <TextBox x:Name="MaxCallsToKeepTextBox"
+                                     Width="60"
+                                     FontSize="14"
+                                     HorizontalAlignment="Left" />
+                            <TextBlock Text="(0 = unlimited)"
+                                       VerticalAlignment="Center"
+                                       Foreground="Gray"
+                                       FontSize="12" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Logging" FontSize="14" FontWeight="Bold" />
+                        <TextBlock Text="Trace level:" FontSize="14" Margin="0,5,0,0" />
+                        <ComboBox x:Name="TraceLevelComboBox" Width="200" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="Error" />
+                            <ComboBoxItem Content="Warning" />
+                            <ComboBoxItem Content="Information" />
+                            <ComboBoxItem Content="Verbose" />
+                        </ComboBox>
+                        <TextBlock FontSize="11"
+                                   Foreground="Gray"
+                                   Text="Verbose logging creates detailed logs but uses more disk space"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

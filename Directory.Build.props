@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\$(MSBuildProjectName)\bin</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+
+    <!-- Default build profile - no CUDA -->
+    <BuildProfile Condition="'$(BuildProfile)' == ''">Default</BuildProfile>
+  </PropertyGroup>
+
+</Project>

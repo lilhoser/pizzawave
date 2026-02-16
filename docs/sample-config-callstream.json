@@ -74,7 +74,23 @@
                     "TGID":0,
                     "shortName":"whiteoakmt"
                 }
-            ]
+            ],
+			"audio_filtering": {
+				"enabled": true,
+				"spike_clipping": {
+					"enabled": true,
+					"threshold_percent": 85,
+					"clip_factor": 0.9
+				},
+				"smoothing": {
+					"enabled": false,
+					"window_size": 5
+				},
+				"high_pass_filter": {
+					"enabled": false,
+					"cutoff_hz": 200
+				}
+			}
         }
     ]
 }

@@ -4,6 +4,17 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Configurations>Debug;Release;DEBUG_X64_CUDA;RELEASE_X64_CUDA</Configurations>
+  </PropertyGroup>
+
+  <!-- Debug_X64_CUDA configuration with CUDA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug_X64_CUDA'">
+    <BuildProfile>Debug_X64_CUDA</BuildProfile>
+  </PropertyGroup>
+
+  <!-- Release_X64_CUDA configuration with CUDA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_X64_CUDA'">
+    <BuildProfile>Release_X64_CUDA</BuildProfile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,12 +27,19 @@
 
     <ItemGroup>
         <PackageReference Include="CsvHelper" Version="33.1.0" />
+        <PackageReference Include="FFMpegCore" Version="5.4.0" />
+        <PackageReference Include="FFMpegCore.Extensions.Downloader" Version="5.0.0" />
         <PackageReference Include="NAudio" Version="2.2.1" />
-        <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-        <PackageReference Include="Whisper.net" Version="1.9.0-preview2" />
-        <PackageReference Include="Whisper.net.Runtime" Version="1.9.0-preview2" />
-        <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.0-preview2" />
-        <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.0-preview2" />
+        <PackageReference Include="NAudio.Core" Version="2.2.1" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.5-beta1" />
+        <PackageReference Include="Whisper.net" Version="1.9.1-preview1" />
+        <PackageReference Include="Whisper.net.Runtime" Version="1.9.1-preview1" />
+    </ItemGroup>
+
+    <!-- CUDA packages - only included for x64 builds with BuildProfile=Release_X64_CUDA or Debug_X64_CUDA -->
+    <ItemGroup Condition="'$(BuildProfile)' == 'Release_X64_CUDA' OR '$(BuildProfile)' == 'Debug_X64_CUDA'">
+        <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.1-preview1" />
+        <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.1-preview1" />
     </ItemGroup>
 
 </Project>
