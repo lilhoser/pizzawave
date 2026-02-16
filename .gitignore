@@ -1,0 +1,107 @@
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Centralized build output
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pidb
+*.cache
+*.slnx
+*.slnx.user
+
+# Visual Studio Code
+.vscode/
+
+# Rider
+.idea/
+*.sln.iml
+
+# Build artifacts
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lastcodeanalysissucceeded
+*.nupkg
+*.snupkg
+*.symbols.nupkg
+
+# Publish output
+publish/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+TestResult.xml
+nunit-*.xml
+coverage*.xml
+coverage*.json
+*.coverage
+*.coveragexml
+coverage.json
+coverage.xml
+
+# NuGet
+packages/
+*.nuget.props
+*.nuget.targets
+.nuget/
+
+# .NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Node/npm (if any web UI uses it)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+*.log
+
+# Release packages (keep source, not binaries)
+releases/*.zip
+releases/*.deb
+releases/*.rpm
+releases/*.tar.gz
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE settings (optional)
+*.iml

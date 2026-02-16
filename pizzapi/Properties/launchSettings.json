@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "pizzapi": {
+      "commandName": "Project"
+    },
+    "pizzaui": {
+      "commandName": "Project",
+      "projectPath": "../pizzaui/pizzaui.csproj"
+    }
+  }
+}

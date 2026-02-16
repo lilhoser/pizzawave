@@ -120,11 +120,11 @@ namespace pizzalib
             {
                 try
                 {
-                    var m = new MailAddress(email);
+                    _ = new MailAddress(email);
                 }
-                catch (FormatException ex)
+                catch (FormatException)
                 {
-                    throw new Exception($"Alert email address {email} is invalid: {ex.Message}");
+                    throw new Exception($"Alert email address {email} is invalid");
                 }
             }
         }

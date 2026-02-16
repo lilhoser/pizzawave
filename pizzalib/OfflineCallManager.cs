@@ -27,8 +27,8 @@ namespace pizzalib
         private string m_OfflineFilesPath;
         private bool m_Initialized;
         private bool m_Disposed;
-        private Settings m_Settings;
-        private CancellationTokenSource CancelSource;
+        private Settings? m_Settings;
+        private CancellationTokenSource? CancelSource;
 
         public OfflineCallManager(
             string OfflineFilesPath,
@@ -36,7 +36,6 @@ namespace pizzalib
         {
             m_OfflineFilesPath = OfflineFilesPath;
             m_Initialized = false;
-            CancelSource = new CancellationTokenSource();
         }
 
         ~OfflineCallManager()
@@ -168,14 +167,14 @@ namespace pizzalib
             throw new Exception("OfflineCallManager does not support re-initialization");
         }
 
-        protected override async Task HandleNewCall(WavStreamData CallData)
+        protected override Task HandleNewCall(WavStreamData CallData)
         {
             if (!m_Initialized)
             {
                 throw new Exception("OfflineCallManager not initialized");
             }
 
-            await base.HandleNewCall(CallData);
+            return base.HandleNewCall(CallData);
         }
 
         protected override void ProcessAlerts(TranscribedCall Call)

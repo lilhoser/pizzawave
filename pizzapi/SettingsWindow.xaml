@@ -1,0 +1,52 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:pizzapi"
+        x:Class="pizzapi.SettingsWindow"
+        x:Name="settingsWindow"
+        Title="PizzaPi Settings"
+        Width="600"
+        Height="500"
+        WindowStartupLocation="CenterScreen">
+    <Border Padding="20">
+        <DockPanel>
+            <TextBlock Text="Settings"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       DockPanel.Dock="Top"
+                       Margin="0,0,0,15" />
+
+            <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="15">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Listen Port" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="ListenPortTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Whisper Model File Path" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="WhisperModelTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Gmail User" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="GmailUserTextBox" FontSize="14" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Gmail Password" FontSize="14" FontWeight="Bold" />
+                        <TextBox x:Name="GmailPasswordTextBox" FontSize="14" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10"
+                        DockPanel.Dock="Bottom"
+                        Margin="0,15,0,0">
+                <Button x:Name="SaveButton" Content="Save" Width="100" />
+                <Button x:Name="CancelButton" Content="Cancel" Width="100" />
+            </StackPanel>
+        </DockPanel>
+    </Border>
+</Window>

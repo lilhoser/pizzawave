@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pizzacmd", "pizzacmd\pizzac
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pizzaui", "pizzaui\pizzaui.csproj", "{80994598-1AA9-42DD-A5B6-E2A8A3138D62}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pizzapi", "pizzapi\pizzapi.csproj", "{2814B77E-C02A-45D7-A346-E902F9D0338D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,10 @@ Global
 		{80994598-1AA9-42DD-A5B6-E2A8A3138D62}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{80994598-1AA9-42DD-A5B6-E2A8A3138D62}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{80994598-1AA9-42DD-A5B6-E2A8A3138D62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2814B77E-C02A-45D7-A346-E902F9D0338D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2814B77E-C02A-45D7-A346-E902F9D0338D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2814B77E-C02A-45D7-A346-E902F9D0338D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2814B77E-C02A-45D7-A346-E902F9D0338D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

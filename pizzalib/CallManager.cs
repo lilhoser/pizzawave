@@ -199,14 +199,14 @@ namespace pizzalib
             try
             {
                 var jsonObject = CallData.GetJsonObject();
-                call.StopTime = jsonObject["StopTime"]!.ToObject<long>();
-                call.StartTime = jsonObject["StartTime"]!.ToObject<long>();
-                call.CallId = jsonObject["CallId"]!.ToObject<long>();
-                call.Source = jsonObject["Source"]!.ToObject<int>();
-                call.Talkgroup = jsonObject["Talkgroup"]!.ToObject<long>();
-                call.PatchedTalkgroups = jsonObject["PatchedTalkgroups"]!.ToObject<List<long>>();
-                call.Frequency = jsonObject["Frequency"]!.ToObject<double>();
-                call.SystemShortName = jsonObject["SystemShortName"]!.ToObject<string>();
+                call.StopTime = jsonObject["StopTime"]!.ToObject<long>()!;
+                call.StartTime = jsonObject["StartTime"]!.ToObject<long>()!;
+                call.CallId = jsonObject["CallId"]!.ToObject<long>()!;
+                call.Source = jsonObject["Source"]!.ToObject<int>()!;
+                call.Talkgroup = jsonObject["Talkgroup"]!.ToObject<long>()!;
+                call.PatchedTalkgroups = jsonObject["PatchedTalkgroups"]!.ToObject<List<long>>()!;
+                call.Frequency = jsonObject["Frequency"]!.ToObject<double>()!;
+                call.SystemShortName = jsonObject["SystemShortName"]!.ToObject<string>()!;
             }
             catch (Exception ex)
             {

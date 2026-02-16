@@ -1,0 +1,175 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:pizzapi"
+        xmlns:models="using:pizzalib"
+        x:Class="pizzapi.MainWindow"
+        Title="PizzaPi"
+        Width="800"
+        Height="600"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <local:BoolToDoubleConverter x:Key="BoolToDoubleConverter" />
+        <local:BoolToStringConverter x:Key="BoolToStringConverter" />
+        <local:BoolToColorConverter x:Key="BoolToColorConverter" />
+    </Window.Resources>
+    <Grid>
+        <!-- Main Content Area -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <Border Padding="10">
+                <StackPanel Spacing="8">
+                    <!-- Recent Calls List -->
+                    <ItemsControl ItemsSource="{Binding Calls}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#3a3a3a"
+                                        BorderBrush="#555"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="0"
+                                        Padding="10"
+                                        Margin="0,4,0,0"
+                                        Cursor="Hand"
+                                        PointerReleased="OnCallRowClicked">
+                                    <StackPanel Spacing="4">
+                                        <!-- Header Row - Talkgroup + Frequency -->
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Text="{Binding FriendlyTalkgroup}"
+                                                       FontSize="14"
+                                                       FontWeight="Bold"
+                                                       Foreground="#00d2ff" />
+                                            <TextBlock Text="{Binding FriendlyFrequency}"
+                                                       FontSize="14"
+                                                       Foreground="#ffaa00" />
+                                        </StackPanel>
+
+                                        <!-- Transcription -->
+                                        <TextBlock Text="{Binding Transcription}"
+                                                   TextWrapping="Wrap"
+                                                   FontSize="14"
+                                                   Foreground="White"
+                                                   MaxWidth="700" />
+
+                                        <!-- Status Row - Play icon on the right -->
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding CallTime}"
+                                                       FontSize="11"
+                                                       Foreground="Gray" />
+                                            <!-- Play/Pause icon -->
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding IsAudioPlaying, Converter={StaticResource BoolToStringConverter}, ConverterParameter='⏸|▶'}"
+                                                       FontSize="16"
+                                                       Foreground="{Binding IsAudioPlaying, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#f44336|#4CAF50'}"
+                                                       Margin="10,0,0,0" />
+                                            <TextBlock Grid.Column="3">
+                                                <TextBlock.Text>
+                                                    <MultiBinding StringFormat="{}{0}s">
+                                                        <Binding Path="Duration" />
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                                <TextBlock.FontSize>
+                                                    11
+                                                </TextBlock.FontSize>
+                                                <TextBlock.Foreground>
+                                                    #888
+                                                </TextBlock.Foreground>
+                                                <TextBlock.Margin>
+                                                    10,0,0,0
+                                                </TextBlock.Margin>
+                                            </TextBlock>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+
+        <!-- Footer Status (bottom) -->
+        <Border VerticalAlignment="Bottom"
+                Background="#222"
+                Padding="8"
+                BorderBrush="#444"
+                BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="15">
+                <TextBlock Text="Calls: "
+                           Foreground="White" />
+                <TextBlock Text="{Binding CallsReceivedCount}"
+                           Foreground="#00d2ff"
+                           FontWeight="Bold" />
+                <TextBlock Text="Alerts: "
+                           Foreground="White" />
+                <TextBlock Text="{Binding AlertsTriggeredCount}"
+                           Foreground="#ffaa00"
+                           FontWeight="Bold" />
+                <TextBlock Text="Status: "
+                           Foreground="Gray" />
+                <TextBlock Text="{Binding StatusText}"
+                           Foreground="#00ff00" />
+            </StackPanel>
+        </Border>
+
+        <!-- Menu Container (overlay) - placed last in Grid to be on top -->
+        <StackPanel HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Margin="5,5,0,0">
+            <!-- Hamburger Menu Button -->
+            <Button x:Name="HamburgerButton"
+                    Content="☰"
+                    FontSize="20"
+                    Click="OnMenuButtonClicked"
+                    Background="Transparent"
+                    Foreground="White"
+                    Width="40"
+                    Height="40"
+                    Padding="0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top" />
+        </StackPanel>
+
+        <!-- Menu Panel (overlay, appears below hamburger button) - placed last in Grid to be on top -->
+        <Border x:Name="MenuPanel"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="5,45,0,0"
+                Width="200"
+                MaxHeight="250"
+                Background="#2d2d2d"
+                BorderThickness="1"
+                BorderBrush="#555"
+                Padding="10"
+                Opacity="{Binding MenuVisible, Converter={StaticResource BoolToDoubleConverter}}">
+            <StackPanel>
+                <TextBlock Text="MENU"
+                           FontSize="16"
+                           FontWeight="Bold"
+                           Foreground="White"
+                           Margin="0,0,0,10" />
+
+                <Button Content="Import Talkgroups..."
+                        Width="180"
+                        Margin="0,5,0,0"
+                        Click="OnImportTalkgroupsClicked"
+                        Tag="Import Talkgroups" />
+
+                <Button Content="Settings..."
+                        Width="180"
+                        Margin="0,5,0,0"
+                        Click="OnSettingsClicked" />
+
+                <Button Content="Exit"
+                        Width="180"
+                        Margin="0,5,0,0"
+                        Click="OnExitClicked" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

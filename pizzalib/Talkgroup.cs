@@ -27,22 +27,22 @@ namespace pizzalib
         [Index(0)]
         public long Id { get; set; }
         [Index(1)]
-        public string Mode { get; set; }
+        public string? Mode { get; set; }
         [Index(2)]
-        public string AlphaTag { get; set; }
+        public string? AlphaTag { get; set; }
         [Index(3)]
-        public string Description { get; set; }
+        public string? Description { get; set; }
         [Index(4)]
-        public string Tag { get; set; }
+        public string? Tag { get; set; }
         [Index(5)]
-        public string Category { get; set; }
+        public string? Category { get; set; }
 
-        public int CompareTo(Talkgroup obj)
+        public int CompareTo(Talkgroup? obj)
         {
             //
             // Sorting Talkgroup objects is by Id
             //
-            return Id.CompareTo(obj.Id);
+            return Id.CompareTo(obj?.Id);
         }
 
         public override string ToString()
@@ -108,14 +108,15 @@ namespace pizzalib
 
         public static Talkgroup? LookupTalkgroup(Settings Settings, long Talkgroup)
         {
-            if (Settings.talkgroups == null || Settings.talkgroups.Count == 0)
+            if (Settings.Talkgroups == null || Settings.Talkgroups.Count == 0)
             {
                 return null;
             }
-            return Settings.talkgroups.FirstOrDefault(t => t.Id == Talkgroup);
+            var result = Settings.Talkgroups.FirstOrDefault(t => t.Id == Talkgroup);
+            return result;
         }
 
-        public static string FormatTalkgroup(Settings Settings, long Talkgroup, bool ShortFormat = false)
+        public static string? FormatTalkgroup(Settings Settings, long Talkgroup, bool ShortFormat = false)
         {
             var talkgroup = LookupTalkgroup(Settings, Talkgroup);
             if (talkgroup == null)

@@ -50,7 +50,61 @@ namespace pizzalib
         public int analogChannels;
         public int analogBitDepth;
         public int analogSamplingRate;
+        //
+        // Backing field for Talkgroups property (for JSON serialization)
+        //
         public List<Talkgroup>? talkgroups;
+        //
+        // Public property wrappers for compatibility
+        //
+        [JsonIgnore]
+        public int ListenPort
+        {
+            get => listenPort;
+            set => listenPort = value;
+        }
+        [JsonIgnore]
+        public int AnalogChannels
+        {
+            get => analogChannels;
+            set => analogChannels = value;
+        }
+        [JsonIgnore]
+        public int AnalogBitDepth
+        {
+            get => analogBitDepth;
+            set => analogBitDepth = value;
+        }
+        [JsonIgnore]
+        public int AnalogSamplingRate
+        {
+            get => analogSamplingRate;
+            set => analogSamplingRate = value;
+        }
+        [JsonIgnore]
+        public string? WhisperModelFile
+        {
+            get => whisperModelFile;
+            set => whisperModelFile = value;
+        }
+        [JsonIgnore]
+        public string? GmailUser
+        {
+            get => gmailUser;
+            set => gmailUser = value;
+        }
+        [JsonIgnore]
+        public string? GmailPassword
+        {
+            get => gmailPassword;
+            set => gmailPassword = value;
+        }
+        [JsonIgnore]
+        public List<Talkgroup>? Talkgroups
+        {
+            get => talkgroups;
+            set => talkgroups = value;
+        }
         //
         // whisper.net settings
         //
@@ -113,14 +167,14 @@ namespace pizzalib
             return TraceLevelApp == Other.TraceLevelApp &&
                 Alerts == Other.Alerts &&
                 AutostartListener == Other.AutostartListener &&
-                gmailUser == Other.gmailUser &&
-                gmailPassword == Other.gmailPassword &&
-                listenPort == Other.listenPort &&
-                analogChannels == Other.analogChannels &&
-                analogBitDepth == Other.analogBitDepth &&
-                analogSamplingRate == Other.analogSamplingRate &&
-                talkgroups == Other.talkgroups &&
-                whisperModelFile == Other.whisperModelFile;
+                GmailUser == Other.GmailUser &&
+                GmailPassword == Other.GmailPassword &&
+                ListenPort == Other.ListenPort &&
+                AnalogChannels == Other.AnalogChannels &&
+                AnalogBitDepth == Other.AnalogBitDepth &&
+                AnalogSamplingRate == Other.AnalogSamplingRate &&
+                Talkgroups == Other.Talkgroups &&
+                WhisperModelFile == Other.WhisperModelFile;
         }
 
         public static bool operator ==(Settings? Settings1, Settings? Settings2)
@@ -142,14 +196,14 @@ namespace pizzalib
             return (TraceLevelApp,
                 Alerts,
                 AutostartListener,
-                gmailUser,
-                gmailPassword,
-                listenPort,
-                analogBitDepth,
-                analogChannels,
-                analogSamplingRate,
-                talkgroups,
-                whisperModelFile
+                GmailUser,
+                GmailPassword,
+                ListenPort,
+                AnalogBitDepth,
+                AnalogChannels,
+                AnalogSamplingRate,
+                Talkgroups,
+                WhisperModelFile
                 ).GetHashCode();
         }
 
@@ -169,35 +223,32 @@ namespace pizzalib
 
         public virtual void Validate()
         {
-            if (!string.IsNullOrEmpty(whisperModelFile) &&
-                !File.Exists(whisperModelFile))
+            if (!string.IsNullOrEmpty(WhisperModelFile) &&
+                !File.Exists(WhisperModelFile))
             {
-                throw new Exception($"Invalid whisper model file: {whisperModelFile}");
+                throw new Exception($"Invalid whisper model file: {WhisperModelFile}");
             }
 
-            if (!string.IsNullOrEmpty(gmailUser))
+            if (!string.IsNullOrEmpty(GmailUser))
             {
-                if (string.IsNullOrEmpty(gmailPassword))
+                if (string.IsNullOrEmpty(GmailPassword))
                 {
                     throw new Exception("Gmail password is required");
                 }
             }
-            else if (!string.IsNullOrEmpty(gmailPassword))
+            else if (!string.IsNullOrEmpty(GmailPassword))
             {
-                if (string.IsNullOrEmpty(gmailUser))
+                if (string.IsNullOrEmpty(GmailUser))
                 {
                     throw new Exception("Gmail user is required");
                 }
             }
         }
 
-        public void SaveToFile(string? Target)
+        public void SaveToFile(string? target = null)
         {
-            var target = Target;
-            if (string.IsNullOrEmpty(target))
-            {
-                target = Settings.DefaultSettingsFileLocation;
-            }
+            if (target == null)
+                target = DefaultSettingsFileLocation;
 
             try
             {
@@ -209,6 +260,28 @@ namespace pizzalib
             {
                 throw new Exception($"Could not save the Settings object " +
                     $"to JSON: {ex.Message}");
+            }
+        }
+
+        public static Settings LoadFromFile(string? path = null)
+        {
+            var settingsPath = path ?? DefaultSettingsFileLocation;
+
+            if (!File.Exists(settingsPath))
+            {
+                var settings = new Settings();
+                settings.SaveToFile(settingsPath);
+                return settings;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(settingsPath);
+                return JsonConvert.DeserializeObject<Settings>(json) ?? new Settings();
+            }
+            catch (Exception)
+            {
+                return new Settings();
             }
         }
     }

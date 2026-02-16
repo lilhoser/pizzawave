@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <MauiEnableXamlCompilation>false</MauiEnableXamlCompilation>
+    <ApplicationIcon></ApplicationIcon>
+    <AssemblyName>pizzapi</AssemblyName>
+    <RootNamespace>pizzapi</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\pizzalib\pizzalib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia.ReactiveUI" Version="11.2.3" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="App.xaml" />
+    <AvaloniaResource Include="MainWindow.xaml" />
+    <AvaloniaResource Include="SettingsWindow.xaml" />
+  </ItemGroup>
+
+  <!-- Include XAML files for compilation -->
+  <ItemGroup>
+    <UpToDateCheckInput Include="SettingsWindow.xaml" />
+  </ItemGroup>
+
+</Project>
