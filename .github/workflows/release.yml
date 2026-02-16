@@ -57,6 +57,9 @@ jobs:
           -c Release \
           -r ${{ matrix.runtime }} \
           --self-contained true \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
           -o ./publish/pizzalib-${{ matrix.runtime }}
     - name: Create archive
       run: |
@@ -88,6 +91,9 @@ jobs:
           -c Release `
           -r ${{ matrix.runtime }} `
           --self-contained false `
+          -p:Version=${{ needs.get-version.outputs.version }} `
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 `
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 `
           -o ./publish/pizzaui-${{ matrix.runtime }}
     - name: Create archive
       run: |
@@ -128,6 +134,9 @@ jobs:
           -c Release \
           -r ${{ matrix.runtime }} \
           --self-contained true \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
           -o ./publish/pizzacmd-${{ matrix.runtime }}
     - name: Create archive
       run: |
@@ -166,6 +175,9 @@ jobs:
           --self-contained true \
           -p:PublishSingleFile=true \
           -p:IncludeNativeLibrariesForSelfExtract=true \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
           -o ./publish/${{ matrix.arch }}
     - name: Build pizzalib for pizzapi (linux-${{ matrix.arch }})
       run: |
@@ -173,6 +185,9 @@ jobs:
           -c Release \
           -r linux-${{ matrix.arch }} \
           --self-contained true \
+          -p:Version=${{ needs.get-version.outputs.version }} \
+          -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
+          -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
           -o ./publish/${{ matrix.arch }}
     - name: Create package directory structure
       run: |
