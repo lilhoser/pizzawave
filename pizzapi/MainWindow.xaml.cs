@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using Avalonia.Threading;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -115,6 +116,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _connectionStatus = "Connection: Disconnected";
     private string _infoText = "Waiting for calls...";
     private Settings _settings = new Settings();
+    private string _versionString;
 
     // Audio playback
     private WaveOutEvent? _waveOut;
@@ -128,18 +130,85 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         set { _menuVisible = value; RaisePropertyChanged(); }
     }
 
+    public string VersionString
+    {
+        get { return _versionString; }
+        set { _versionString = value; RaisePropertyChanged(); }
+    }
+
     public ObservableCollection<TranscribedCall> Calls { get; } = new ObservableCollection<TranscribedCall>();
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
+        
+        // Get version from git describe (works for both CI and local builds)
+        _versionString = GetVersionFromGit();
+        RaisePropertyChanged(nameof(VersionString));
+        
         InitializeAsync();
+    }
+
+    private string GetVersionFromGit()
+    {
+        try
+        {
+            // Try to get version from git describe
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "describe --tags --long",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                CreateNoWindow = true
+            };
+
+            using (var process = System.Diagnostics.Process.Start(startInfo))
+            {
+                if (process != null)
+                {
+                    var output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+                    
+                    if (!string.IsNullOrEmpty(output))
+                    {
+                        // Parse git describe output: v1.0.6-2-g98ce57b
+                        var match = System.Text.RegularExpressions.Regex.Match(output.Trim(), @"v?(\d+\.\d+\.\d+)(?:-(\d+)-g([a-f0-9]+))?");
+                        if (match.Success)
+                        {
+                            var version = match.Groups[1].Value;
+                            var commits = match.Groups[2].Value;
+                            var hash = match.Groups[3].Value;
+                            
+                            if (!string.IsNullOrEmpty(commits) && commits != "0")
+                            {
+                                return $"PizzaPi v{version}+{commits} commits ({hash})";
+                            }
+                            return $"PizzaPi v{version}";
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Git not available or not a git repo, fall through to assembly version
+        }
+
+        // Fallback to assembly version
+        var assemblyVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        return $"PizzaPi v{assemblyVersion?.ToString(3) ?? "1.0.0"}";
     }
 
     private async void InitializeAsync()
     {
         StatusText = "Initializing..";
+
+        // Initialize trace logging to file
+        TraceLogger.Initialize(RedirectToStdout: false);
+        pizzalib.TraceLogger.Initialize(RedirectToStdout: false);
 
         // Settings are already loaded in constructor, just validate/load defaults
         try
@@ -150,6 +219,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             // Use default settings
         }
+
+        // Set trace level from settings
+        TraceLogger.SetLevel(_settings.TraceLevelApp);
+        pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
 
         _callManager = new LiveCallManager(OnNewCall);
 
@@ -331,6 +404,50 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Create and show settings window
         var settingsWindow = new SettingsWindow(_settings);
         settingsWindow.Show(this);
+        HideMenu();
+    }
+
+    private void OnViewLogClicked(object? sender, RoutedEventArgs e)
+    {
+        // Open the log file in default text editor
+        var logPath = Path.Combine(Settings.DefaultWorkingDirectory, "Logs");
+        if (Directory.Exists(logPath))
+        {
+            // Find the most recent log file (both .txt and .log)
+            var logFiles = Directory.GetFiles(logPath, "*.*")
+                .Where(f => f.EndsWith(".txt") || f.EndsWith(".log"))
+                .OrderByDescending(f => File.GetLastWriteTime(f))
+                .FirstOrDefault();
+            if (!string.IsNullOrEmpty(logFiles) && File.Exists(logFiles))
+            {
+                // Open in default text editor
+                try
+                {
+                    var proc = new System.Diagnostics.Process
+                    {
+                        StartInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = logFiles,
+                            UseShellExecute = true
+                        }
+                    };
+                    proc.Start();
+                    StatusText = $"Opened log: {Path.GetFileName(logFiles)}";
+                }
+                catch (Exception ex)
+                {
+                    StatusText = $"Error opening log: {ex.Message}";
+                }
+            }
+            else
+            {
+                StatusText = "No log files found. Enable verbose logging in settings.";
+            }
+        }
+        else
+        {
+            StatusText = "Log directory not found";
+        }
         HideMenu();
     }
 

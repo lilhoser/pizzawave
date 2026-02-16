@@ -99,22 +99,27 @@
                 Padding="8"
                 BorderBrush="#444"
                 BorderThickness="0,1,0,0">
-            <StackPanel Orientation="Horizontal" Spacing="15">
-                <TextBlock Text="Calls: "
-                           Foreground="White" />
-                <TextBlock Text="{Binding CallsReceivedCount}"
-                           Foreground="#00d2ff"
-                           FontWeight="Bold" />
-                <TextBlock Text="Alerts: "
-                           Foreground="White" />
-                <TextBlock Text="{Binding AlertsTriggeredCount}"
-                           Foreground="#ffaa00"
-                           FontWeight="Bold" />
-                <TextBlock Text="Status: "
-                           Foreground="Gray" />
-                <TextBlock Text="{Binding StatusText}"
-                           Foreground="#00ff00" />
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <!-- Left side: Stats -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="15">
+                    <TextBlock Text="Calls: " Foreground="White" />
+                    <TextBlock Text="{Binding CallsReceivedCount}" Foreground="#00d2ff" FontWeight="Bold" />
+                    <TextBlock Text="Alerts: " Foreground="White" />
+                    <TextBlock Text="{Binding AlertsTriggeredCount}" Foreground="#ffaa00" FontWeight="Bold" />
+                    <TextBlock Text="Status: " Foreground="Gray" />
+                    <TextBlock Text="{Binding StatusText}" Foreground="#00ff00" />
+                </StackPanel>
+                <!-- Right side: Version -->
+                <TextBlock Grid.Column="2"
+                           Text="{Binding VersionString}"
+                           Foreground="#888"
+                           FontSize="11" />
+            </Grid>
         </Border>
 
         <!-- Menu Container (overlay) - placed last in Grid to be on top -->
@@ -141,7 +146,7 @@
                 VerticalAlignment="Top"
                 Margin="5,45,0,0"
                 Width="200"
-                MaxHeight="250"
+                MaxHeight="300"
                 Background="#2d2d2d"
                 BorderThickness="1"
                 BorderBrush="#555"
@@ -164,6 +169,11 @@
                         Width="180"
                         Margin="0,5,0,0"
                         Click="OnSettingsClicked" />
+
+                <Button Content="View Log"
+                        Width="180"
+                        Margin="0,5,0,0"
+                        Click="OnViewLogClicked" />
 
                 <Button Content="Exit"
                         Width="180"
