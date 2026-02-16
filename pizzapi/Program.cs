@@ -6,6 +6,22 @@ namespace pizzapi;
 
 class Program
 {
+    static async Task<int> Main(string[] args)
+    {
+        // Check for headless mode argument
+        if (args.Length > 0 && (args[0].ToLower() == "--headless" || args[0].ToLower() == "-headless"))
+        {
+            var headless = new HeadlessMode();
+            return await headless.Run(args);
+        }
+        else
+        {
+            // Start Avalonia UI
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            return 0;
+        }
+    }
+
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
@@ -13,12 +29,4 @@ class Program
             .WithInterFont()
             .LogToTrace()
             .UseReactiveUI();
-
-    // Initialization code. Don't use any Avalonia, third-party APIs or any SynchronizationContext
-    // rely on the .NET runtime to launch the app
-    static void Main(string[] args)
-    {
-        BuildAvaloniaApp()
-            .StartWithClassicDesktopLifetime(args);
-    }
 }

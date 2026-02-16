@@ -279,7 +279,7 @@ jobs:
 
         [Service]
         Type=exec
-        ExecStart=/opt/pizzapi/pizzapi
+        ExecStart=/opt/pizzapi/pizzapi --headless
         WorkingDirectory=/opt/pizzapi
         Restart=always
         RestartSec=10
