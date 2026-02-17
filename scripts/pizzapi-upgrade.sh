@@ -1,10 +1,10 @@
 #!/bin/bash
-# pizzapi-upgrade.sh - Upgrade pizzapi on Raspberry Pi
+# pizzapi-upgrade.sh - Upgrade pizzapi UI on Raspberry Pi
 #
 # Usage:
 #   curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh | sudo bash
 #   # Or specify a version:
-#   curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh | sudo -s bash - v1.0.6
+#   curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh | sudo -s bash - v1.0.7
 
 set -e
 
@@ -12,7 +12,7 @@ VERSION="${1:-latest}"
 DOWNLOAD_DIR="/tmp"
 
 echo "=========================================="
-echo "  PizzaPi API Upgrade"
+echo "  PizzaPi UI Upgrade"
 echo "=========================================="
 
 # Get latest version if not specified
@@ -33,18 +33,21 @@ echo "Installing..."
 sudo dpkg -i "$DEB_FILE" || sudo apt-get install -f -y
 
 echo ""
-echo "Restarting service..."
-sudo systemctl daemon-reload
-sudo systemctl restart pizzapi
+echo "Cleaning up old systemd service files..."
+sudo rm -f /usr/lib/systemd/system/pizzapi.service
+sudo rm -rf /etc/systemd/system/pizzapi.service.d/
+sudo rm -f /etc/systemd/system/pizzapi.service
+sudo systemctl daemon-reload 2>/dev/null || true
 
 echo ""
 echo "=========================================="
 echo "  Upgrade Complete!"
 echo "=========================================="
 echo ""
-sudo systemctl status pizzapi --no-pager -l
+echo "PizzaPi is a UI application - not a service."
+echo "Run it from the desktop or terminal:"
 echo ""
-echo "Logs: journalctl -u pizzapi -f"
+echo "  /opt/pizzapi/pizzapi"
 echo ""
-
-rm -f "$DEB_FILE"
+echo "Config: /etc/pizzapi/appsettings.json"
+echo ""

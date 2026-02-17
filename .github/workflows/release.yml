@@ -197,7 +197,6 @@ jobs:
       run: |
         mkdir -p package/DEBIAN
         mkdir -p package/opt/pizzapi
-        mkdir -p package/usr/lib/systemd/system
         mkdir -p package/etc/pizzapi
     - name: Copy binaries to package
       run: |
@@ -222,10 +221,16 @@ jobs:
         cat > package/DEBIAN/preinst << 'EOF'
         #!/bin/bash
         set -e
-        echo "Preparing to install PizzaPi API..."
+        echo "Preparing to install PizzaPi UI..."
+        # Stop any running service (from old installations)
         if systemctl is-active --quiet pizzapi 2>/dev/null; then
           systemctl stop pizzapi
         fi
+        # Remove old systemd service files
+        rm -f /usr/lib/systemd/system/pizzapi.service
+        rm -rf /etc/systemd/system/pizzapi.service.d/
+        rm -f /etc/systemd/system/pizzapi.service
+        systemctl daemon-reload 2>/dev/null || true
         EOF
         chmod 755 package/DEBIAN/preinst
     - name: Create postinst script
@@ -233,7 +238,7 @@ jobs:
         cat > package/DEBIAN/postinst << 'EOF'
         #!/bin/bash
         set -e
-        echo "Installing PizzaPi API dependencies..."
+        echo "Installing PizzaPi UI dependencies..."
         apt-get update
         apt-get install -y libfontconfig1 libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 libxxf86vm1 libdrm2 libgbm1 libasound2 || true
         mkdir -p /etc/pizzapi
@@ -241,9 +246,12 @@ jobs:
           cp /opt/pizzapi/appsettings.json.example /etc/pizzapi/appsettings.json 2>/dev/null || true
         fi
         echo ""
-        echo "PizzaPi API installed successfully!"
-        echo "Configuration: /etc/pizzapi/appsettings.json"
-        echo "Run: /opt/pizzapi/pizzapi"
+        echo "PizzaPi UI installed successfully!"
+        echo ""
+        echo "To run PizzaPi:"
+        echo "  /opt/pizzapi/pizzapi"
+        echo ""
+        echo "Or create a desktop shortcut for easy access."
         echo ""
         EOF
         chmod 755 package/DEBIAN/postinst
@@ -252,10 +260,12 @@ jobs:
         cat > package/DEBIAN/prerm << 'EOF'
         #!/bin/bash
         set -e
-        echo "Stopping PizzaPi API service..."
-        if systemctl is-active --quiet pizzapi; then
-          systemctl stop pizzapi
-        fi
+        echo "Removing PizzaPi UI..."
+        # Clean up any old service files
+        rm -f /usr/lib/systemd/system/pizzapi.service
+        rm -rf /etc/systemd/system/pizzapi.service.d/
+        rm -f /etc/systemd/system/pizzapi.service
+        systemctl daemon-reload 2>/dev/null || true
         EOF
         chmod 755 package/DEBIAN/prerm
     - name: Create postrm script
@@ -264,34 +274,12 @@ jobs:
         #!/bin/bash
         set -e
         if [ "$1" = "purge" ]; then
-          echo "Removing PizzaPi API configuration..."
+          echo "Removing PizzaPi UI configuration..."
           rm -rf /etc/pizzapi
           rm -rf /opt/pizzapi
         fi
         EOF
         chmod 755 package/DEBIAN/postrm
-    - name: Create systemd service file
-      run: |
-        cat > package/usr/lib/systemd/system/pizzapi.service << 'EOF'
-        [Unit]
-        Description=PizzaWave API Service
-        After=network.target
-
-        [Service]
-        Type=exec
-        ExecStart=/opt/pizzapi/pizzapi --headless
-        WorkingDirectory=/opt/pizzapi
-        Restart=always
-        RestartSec=10
-        StandardOutput=journal
-        StandardError=journal
-        SyslogIdentifier=pizzapi
-        User=root
-        Environment=DOTNET_ENVIRONMENT=Production
-
-        [Install]
-        WantedBy=multi-user.target
-        EOF
     - name: Create example config file
       run: |
         cat > package/etc/pizzapi/appsettings.json.example << 'EOF'

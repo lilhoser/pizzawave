@@ -267,7 +267,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now trunk-recorder.service
 ```
 
-## 8. PizzaPi Desktop Autostart (GUI)
+## 8. Setup PizzaPi to view Calls
+
+### Download and run the PizzaPi upgrade script
+```
+curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/pizzapi-upgrade.sh > pizzapi-upgrade.sh
+
+chmod +x pizzapi-upgrade.sh
+
+sudo ./pizzapi-upgrade.sh
+```
+
+### Autostart the PizzaPi UI on boot
 
 ```
 mkdir -p ~/.config/autostart
@@ -281,7 +292,9 @@ X-GNOME-Autostart-enabled=true
 EOF
 ```
 
-## 9. Live Logs with tmux (Auto-starts on boot)
+## 9. Troubleshooting
+
+### Setup Live Logs with tmux (Auto-starts on boot)
 
 ```
 cat > ~/start-trunk-logs.sh << 'EOF'
@@ -308,17 +321,15 @@ Add this line at the bottom:
 @reboot /home/sdrhero/start-trunk-logs.sh >> /home/sdrhero/tmux-start.log 2>&1
 ```
 
-## Daily Use Commands
-
-### Check services
-```sudo systemctl status trunk-recorder```
-
-### Live logs
+To view live logs, attach to the session:
 ```tmux attach -t trunklogs```
 
 detach: `Ctrl+B then D`
 
-# Restart everything
+### Services
+
+```sudo systemctl status trunk-recorder```
+
 ```
 sudo systemctl restart trunk-recorder
 tmux ls
