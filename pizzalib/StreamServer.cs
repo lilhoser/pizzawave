@@ -153,11 +153,19 @@ namespace pizzalib
             {
                 using (var stream = Client.GetStream())
                 {
-                    var wavStream = new WavStreamData(m_Settings);
-                    var result = await wavStream.ProcessClientData(stream, CancelSource);
-                    if (result)
+                    // Process multiple calls over the same connection
+                    // trunk-recorder keeps the connection open and sends calls sequentially
+                    while (!CancelSource.IsCancellationRequested)
                     {
-                        _ = NewCallDataCallback(wavStream); // blocking
+                        var wavStream = new WavStreamData(m_Settings);
+                        var result = await wavStream.ProcessClientData(stream, CancelSource);
+                        if (!result)
+                        {
+                            // End of stream or error
+                            break;
+                        }
+                        // Invoke callback for this call
+                        _ = NewCallDataCallback(wavStream);
                     }
                 }
             }
