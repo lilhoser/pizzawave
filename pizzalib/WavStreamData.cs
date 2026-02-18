@@ -92,9 +92,15 @@ namespace pizzalib
             }
 
             //
+            // Clear previous call data
+            //
+            m_JsonData.SetLength(0);
+            m_WavData?.Dispose();
+            m_WavData = new MemoryStream();
+
+            //
             // Read in JSON data
             //
-            m_JsonData.SetLength(0); // Clear previous JSON data
             byte[] dataBuffer = new byte[jsonLength];
             var bytesRead = await ClientStream.ReadAtLeastAsync(dataBuffer, dataBuffer.Length, true, CancelSource.Token);
             if (bytesRead != jsonLength)
