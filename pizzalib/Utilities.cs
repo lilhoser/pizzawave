@@ -17,12 +17,12 @@ specific language governing permissions and limitations
 under the License.
 */
 using System.Diagnostics;
+using static pizzalib.TraceLogger;
 
 namespace pizzalib
 {
     public static class Utilities
     {
-
         public static void LaunchFile(string FileName)
         {
             if (!File.Exists(FileName))
@@ -33,6 +33,32 @@ namespace pizzalib
             psi.FileName = FileName;
             psi.UseShellExecute = true;
             Process.Start(psi);
+        }
+
+        public static async Task<bool> IsFfmpegInPathAsync()
+        {
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg",
+                    Arguments = "-version",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process == null) return false;
+
+                await process.WaitForExitAsync();   // .NET 6+
+                return process.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

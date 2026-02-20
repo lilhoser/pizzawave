@@ -16,9 +16,8 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-using static pizzalib.TraceLogger;
 using System.Diagnostics;
-using Newtonsoft.Json;
+using static pizzalib.TraceLogger;
 
 namespace pizzalib
 {
@@ -74,7 +73,10 @@ namespace pizzalib
             try
             {
                 CancelSource = new CancellationTokenSource();
-                await base.Initialize(Settings);
+                // Don't call base.Initialize() - we don't want to create a new capture folder
+                // Just initialize whisper for transcription
+                m_Whisper = new Whisper(Settings);
+                _ = await m_Whisper.Initialize();
                 m_Initialized = true;
             }
             catch (Exception ex)
@@ -101,8 +103,6 @@ namespace pizzalib
 
         public override async Task<bool> Start(bool block = false)
         {
-            await base.Start(block);
-
             if (!m_Initialized)
             {
                 throw new Exception("Offline call manager not initialized");
@@ -115,37 +115,146 @@ namespace pizzalib
             //
             await Task.Run(async () =>
             {
-                m_Settings.UpdateProgressLabelCallback?.Invoke($"Reading folder {m_OfflineFilesPath}...");
+                m_Settings!.UpdateProgressLabelCallback?.Invoke($"Reading folder {m_OfflineFilesPath}...");
+                
+                // Try to load .bin files first (SFTP backup format)
                 var targets = Directory.GetFiles(
                     m_OfflineFilesPath, "*.bin", SearchOption.AllDirectories).ToList();
+                
+                // If no .bin files, try .mp3 files (live capture format)
+                if (targets.Count == 0)
+                {
+                    targets = Directory.GetFiles(
+                        m_OfflineFilesPath, "*.mp3", SearchOption.AllDirectories).ToList();
+                }
+                
                 m_Settings.SetProgressBarCallback?.Invoke(targets.Count, 1);
                 if (targets.Count == 0)
                 {
-                    throw new Exception("No call records found. Make sure this is an SFTP offline backup.");
+                    throw new Exception("No call records found. Supported formats:\n• .mp3 files (from live captures)\n• .bin files (from Trunk-Recorder SFTP backup)");
                 }
                 var i = 1;
                 foreach (var file in targets)
                 {
-                    if (CancelSource.IsCancellationRequested)
+                    if (CancelSource!.IsCancellationRequested)
                     {
                         break;
                     }
                     m_Settings.ProgressBarStepCallback?.Invoke();
                     m_Settings.UpdateProgressLabelCallback?.Invoke(
                         $"Loading offline records from {m_OfflineFilesPath}...{i++} of {targets.Count}");
-                    using (var stream = new MemoryStream(File.ReadAllBytes(file)))
+                    
+                    if (file.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
                     {
-                        var wavStream = new WavStreamData(m_Settings);
-                        var cancelSource = new CancellationTokenSource();
-                        var result = await wavStream.ProcessClientData(stream, cancelSource);
-                        if (result)
+                        // Process .bin file (SFTP backup format)
+                        using (var stream = new MemoryStream(File.ReadAllBytes(file)))
                         {
-                            await HandleNewCall(wavStream);
+                            var wavStream = new RawCallData(m_Settings);
+                            var cancelSource = new CancellationTokenSource();
+                            var result = await wavStream.ProcessClientData(stream, cancelSource);
+                            if (result)
+                            {
+                                await HandleNewCall(wavStream);
+                            }
                         }
+                    }
+                    else if (file.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Process .mp3 file (live capture format) - create minimal call from filename
+                        await LoadMp3File(file);
                     }
                 }
             });
             return true;
+        }
+
+        private async Task LoadMp3File(string mp3Path)
+        {
+            try
+            {
+                // Extract metadata from filename: audio-2026-02-18-210053.25.mp3
+                var fileName = Path.GetFileNameWithoutExtension(mp3Path);
+                var match = System.Text.RegularExpressions.Regex.Match(fileName, @"audio-(\d{4}-\d{2}-\d{2}-\d{6})\.(\d+)");
+
+                var call = new TranscribedCall();
+                call.UniqueId = Guid.NewGuid();
+                call.Location = mp3Path;
+                call.Transcription = string.Empty; // Default to empty string
+
+                if (match.Success)
+                {
+                    // Parse timestamp from filename
+                    var timestampStr = match.Groups[1].Value;
+                    if (DateTime.TryParseExact(timestampStr, "yyyy-MM-dd-HHmmss",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var timestamp))
+                    {
+                        var startTime = new DateTimeOffset(timestamp).ToUnixTimeSeconds();
+                        call.StartTime = startTime;
+                        call.StopTime = startTime + 30; // Default 30 second duration
+                    }
+                }
+                else
+                {
+                    // Use file modification time as fallback
+                    var fileInfo = new FileInfo(mp3Path);
+                    var startTime = new DateTimeOffset(fileInfo.LastWriteTime).ToUnixTimeSeconds();
+                    call.StartTime = startTime;
+                    call.StopTime = startTime + 30;
+                }
+
+                // Try to load transcription from calljournal.json if it exists
+                var journalPath = Path.Combine(m_OfflineFilesPath, "calljournal.json");
+                if (File.Exists(journalPath))
+                {
+                    try
+                    {
+                        var journalLines = await File.ReadAllLinesAsync(journalPath);
+                        var mp3FileName = Path.GetFileName(mp3Path);
+                        
+                        foreach (var line in journalLines)
+                        {
+                            // Match by filename in the Location field
+                            if (line.Contains(mp3FileName))
+                            {
+                                var journalCall = Newtonsoft.Json.JsonConvert.DeserializeObject<TranscribedCall>(line);
+                                if (journalCall != null)
+                                {
+                                    call.Transcription = journalCall.Transcription ?? string.Empty;
+                                    call.Talkgroup = journalCall.Talkgroup;
+                                    call.Frequency = journalCall.Frequency;
+                                    call.CallId = journalCall.CallId;
+                                    call.IsAlertMatch = journalCall.IsAlertMatch;
+                                    call.IsPinned = journalCall.IsPinned;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace(TraceLoggerType.OfflineCallManager, TraceEventType.Warning,
+                            $"Failed to read journal {journalPath}: {ex.Message}");
+                    }
+                }
+
+                // Ensure transcription is never null
+                if (string.IsNullOrEmpty(call.Transcription))
+                {
+                    call.Transcription = "[No transcription available]";
+                }
+
+                // Process alerts
+                ProcessAlerts(call);
+
+                // Notify the UI
+                m_NewTranscribedCallCallback?.Invoke(call);
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.OfflineCallManager, TraceEventType.Error,
+                    $"Failed to load MP3 file {mp3Path}: {ex.Message}");
+            }
         }
 
         public override void Stop(bool block = true)
@@ -154,27 +263,48 @@ namespace pizzalib
 
             if (block)
             {
-                CancelSource.Cancel();
+                CancelSource!.Cancel();
             }
             else
             {
-                CancelSource.CancelAsync();
+                CancelSource!.CancelAsync();
             }
         }
 
-        protected override async Task<bool> Reinitialize(Settings Settings)
+        protected override Task<bool> Reinitialize(Settings Settings)
         {
             throw new Exception("OfflineCallManager does not support re-initialization");
         }
 
-        protected override Task HandleNewCall(WavStreamData CallData)
+        protected override Task HandleNewCall(RawCallData CallData)
         {
             if (!m_Initialized)
             {
                 throw new Exception("OfflineCallManager not initialized");
             }
 
-            return base.HandleNewCall(CallData);
+            // For offline mode, we just transcribe and notify - don't save files or write journal
+            return ProcessOfflineCall(CallData);
+        }
+
+        private async Task ProcessOfflineCall(RawCallData CallData)
+        {
+            try
+            {
+                // Transcribe the call
+                var call = await GetTranscribedCall(CallData);
+
+                // Process alerts (visual only, no emails)
+                ProcessAlerts(call);
+
+                // Notify the UI
+                m_NewTranscribedCallCallback?.Invoke(call);
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.OfflineCallManager, TraceEventType.Error, $"{ex.Message}");
+                throw;
+            }
         }
 
         protected override void ProcessAlerts(TranscribedCall Call)
@@ -184,7 +314,7 @@ namespace pizzalib
             // is noted in the TranscribedCall object - no actual alerts are sent
             // in terms of emails, phone notifications, etc.
             //
-            Alerter.ProcessAlertsOffline(Call, m_Settings.Alerts);
+            Alerter.ProcessAlertsOffline(Call, m_Settings!.Alerts);
             base.ProcessAlerts(Call);
         }
     }

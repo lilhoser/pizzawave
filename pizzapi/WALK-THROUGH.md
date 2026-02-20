@@ -1,16 +1,72 @@
 # Dual RTL-SDR Blog V4 + Trunk-Recorder + PizzaPi on Raspberry Pi 5
 
-## 0. Research
+## 0. Pre-requisites and Considerations
 
-### Pick a system to monitor.
-Use [RadioReference](https://www.radioreference.com/) to find frequencies, talkgroups, and system details for your area. For this example, we’ll use the [White Oak Mountain / Hamilton County P25 system in Tennessee](https://www.radioreference.com/db/sid/6355).
+### Software
+
+Your RPI 5 will be the computing platform that will run Trunk-Recorder and the Callstream plugin, and serve the PizzaPi interface:
+
+1. **Trunk-Recorder**: The core software that will handle the SDR input, decode the trunked system, and manage recordings.
+1. **Callstream Plugin**: A plugin for Trunk-Recorder that streams decoded audio and metadata to clients (like PizzaPi) in real-time.
+1. **PizzaPi**: A user-friendly interface that displays live and recorded trunked radio communications, allowing you to listen to calls and view talkgroup information.
+
+### Hardware
+1. **Compute**: While other variations might work, I chose to be lazy and selected [this CanaKit Raspberry Pi 5 8GB bundle](https://www.canakit.com/canakit-raspberry-pi-5-desktop-pc-with-ssd.html) (`PI5-8GB-PC512-C4-BLK`) with a pre-installed 512GB microSD card and a nice case with cooling.
+1. **SDR**: Software-defined radio hardware that will receive the radio signals from the trunked system. The V4 model is chosen for its native bias tee support, which is essential for powering certain types of antennas. Other SDRs might work, but for my project, you'll need one or more [RTL-SDR Blog V4 dongles](https://www.rtl-sdr.com/buy-rtl-sdr-dvb-t-dongles/) (the only ones with native bias tee support). You'll need to first read the `Pick a system to monitor` section below to know how many dongles you will need to cover the frequencies of your target system. For my example, I needed 2 dongles to cover the 4 control channels of the White Oak Mountain / Hamilton County P25 system.
+1. **Powered USB hub**: High-quality power is extremely important to ensure stable power delivery to multiple dongles. I've had success with the [Atolla Powered USB Hub](https://www.amazon.com/dp/B083XTKV8V) (4 ports, 5V/2A per port). This allows me to power both RTL-SDR Blog V4 dongles and have a couple of spare ports for future expansion. There is also a 10-port version of this hub.
+1. **Antenna**: A good wideband antenna is crucial for receiving clear signals. In my primary SDR rig, I use this [Discone Antenna](https://www.amazon.com/dp/B00QVPGKHU) mounted on a mast on top of my building. For this project, I am trying out [this smaller portable radio antenna](https://www.amazon.com/dp/B08W8TWTL4). If you buy the RTL-SDR Blog dongle kit, it comes with a small telescopic antenna that can work for testing and very strong local signals, but I recommend upgrading to a better antenna for optimal performance. It goes without saying, but I'll say it: you need access to a window or open air to receive signals. If you try to use this setup in a basement or somewhere with no signal access, you will be very sad.
+1. **Cables and adapters**: Depending on your setup, you may need additional SMA cables, USB extension cables, or adapters to connect your SDRs to the antenna and the Raspberry Pi. Make sure to get high-quality cables to minimize signal loss. Always ensure you use [DirecTV splitters](https://www.amazon.com/dp/B01G9AZ78E) for best performance when splitting antenna signals to multiple SDRs. You will need [SMA to F jumpers](https://www.amazon.com/dp/B09GVSHQJX).
+
+Optional display: I chose to be fancy and install a RPI touch display on top of the PI 5 system and house it in a really fancy mount.
+* [7" Raspberry Pi Touchscreen Display](https://www.adafruit.com/product/6079)
+* [Articulated Pi Display V2 Mount](https://learn.adafruit.com/pi-wall-mount)
+* [M2.5 screw variety pack](https://www.amazon.com/dp/B075QKZ8PY) - mostly for the longer 20mm screws needed to mount the display to the mount.
+
+A few thoughts on the printing and assembly process for this display mount:
+* The Adafruit mount is really nice and sturdy, but the instructions miss several steps and important requirements. For one, the included screws are not long enough to go through the display, mount, and into the Pi 5 case. I had to buy a variety pack of M2.5 screws and ended up using 20mm length screws to get everything securely fastened.
+* The instructions do not mention installing the articulation hinges.
+* The printed hinge pins have caps on either end, one must be cut off
+* The tolerance between the pin and the hinges is very loose, causing the display to wobble a lot when touched. I ended up wrapping the pins in electrical tape to create a snug fit and eliminate the wobble. You might need to reprint the pins a few times to get a better fit.
+* The weight of the USB cable and other wiring will fight you on a level/plum display. You will need to play around with the articulation hinges and the placement of the cables to find a good balance that allows the display to stay level when touched.
+* I chose to use the tabletop mount as opposed to the wall mount
+* Adafruit's [`3mf` model file](https://adafruit2.autodesk360.com/g/shares/SH30dd5QT870c25f12fc83693632449530a0) contains all of the parts assembled into one object. You will need to use slicer software to decompose the monolithic object into its constituent parts for printing. I used PrusaSlicer and found it pretty easy to do.
+
+### Pick a system to monitor
+Use [RadioReference](https://www.radioreference.com/) to find frequencies, talkgroups, and system details for your area. Start with browsing the map to drill down to your state, county and city. Then find the trunked system you want to monitor and click on it to view details.
+
+For this example, we’ll use the [White Oak Mountain / Hamilton County P25 system in Tennessee](https://www.radioreference.com/db/sid/6355).
 
 ### Find center frequencies and control channels.
 
-Copy all channels and control channels from RadioReference table into this page:
-https://alertapi.alertpage.net/sdr/
+The center frequencies and control channels are essential for configuring Trunk Recorder to properly tune into the trunked system.
 
-You'll use the green highlighted center frequencies and control channels in your config file later.
+On the city/county details page you found above, you'll see a large table "Sites and Frequencies", with the frequencies listed in table cells to the far right. Simply highlight/select the frequencies for your system of interest, copy them, and paste them into [this website](https://alertapi.alertpage.net/sdr/).
+
+This website will output the center frequencies and control channels for your system, which you will need to input into your config file later. The center frequencies are the ones highlighted in green, and the control channels are listed in the "Control Channels" section below the table.
+
+### Create a talkgroups file
+
+A talkgroup is simply a virtual channel within the trunked system that groups related users together. For example, all police dispatch communications might be on one talkgroup, while fire dispatch is on another. By creating a talkgroups file and linking it in your config, you can have the PizzaPi UI display the talkgroup names and descriptions instead of just showing "Unknown Talkgroup 12345" for every call.
+
+Talkgroups are listed on the RadioReference page for your system. You can copy and paste them into a CSV file with the following format:
+```
+Id,Mode,AlphaTag,Description,Tag,Category
+1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
+2,D,FDISPATCH2,Fire Dispatch 2,Fire,Dispatch
+3,D,PDISPATCH,Police Dispatch,Police,Dispatch
+```
+
+And then update your config file to point to this talkgroups file:
+```JSON
+
+{
+  "talkgroups": [
+    {"Id": 1, "Mode": "D", "AlphaTag": "FDISPATCH", "Description": "Fire Dispatch", "Tag": "Fire", "Category": "Dispatch"},
+    {"Id": 2, "Mode": "D", "AlphaTag": "FDISPATCH2", "Description": "Fire Dispatch 2", "Tag": "Fire", "Category": "Dispatch"},
+    {"Id": 3, "Mode": "D", "AlphaTag": "PDISPATCH", "Description": "Police Dispatch", "Tag": "Police", "Category": "Dispatch"}
+  ]
+}
+```
 
 ## 1. System Preparation
 

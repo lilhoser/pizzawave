@@ -1,0 +1,147 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:pizzapi"
+        x:Class="pizzapi.CleanupWindow"
+        x:DataType="local:CleanupWindow"
+        Title="Cleanup Captured Audio"
+        Width="500"
+        Height="450"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        CanResize="False">
+    <Border Padding="20">
+        <DockPanel>
+            <TextBlock Text="Cleanup Captured Audio"
+                       FontSize="20"
+                       FontWeight="Bold"
+                       DockPanel.Dock="Top"
+                       Margin="0,0,0,15" />
+
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10"
+                        DockPanel.Dock="Bottom"
+                        Margin="0,15,0,0">
+                <Button x:Name="CancelButton" Content="Cancel" Width="100" />
+                <Button x:Name="CleanupButton" 
+                        Content="Cleanup" 
+                        Width="100"
+                        Background="#4CAF50"
+                        Foreground="White" />
+            </StackPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="20">
+                    <!-- Current Usage -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Current Storage Usage"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#00d2ff" />
+                            <TextBlock x:Name="CurrentUsageText"
+                                       FontSize="14"
+                                       Foreground="White" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Time Range Selection -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Cleanup Scope"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#ffaa00" />
+                            <TextBlock FontSize="12"
+                                       Foreground="Gray"
+                                       Text="Select which files to cleanup based on age" />
+                            
+                            <RadioButton x:Name="AllFilesRadio"
+                                         Content="All files"
+                                         GroupName="TimeRange"
+                                         IsChecked="False"
+                                         Foreground="White" />
+                            <RadioButton x:Name="OlderThanDayRadio"
+                                         Content="Older than 1 day"
+                                         GroupName="TimeRange"
+                                         Foreground="White" />
+                            <RadioButton x:Name="OlderThanWeekRadio"
+                                         Content="Older than 1 week"
+                                         GroupName="TimeRange"
+                                         IsChecked="True"
+                                         Foreground="White" />
+                            <RadioButton x:Name="OlderThanMonthRadio"
+                                         Content="Older than 1 month"
+                                         GroupName="TimeRange"
+                                         Foreground="White" />
+                            <RadioButton x:Name="OlderThan3MonthsRadio"
+                                         Content="Older than 3 months"
+                                         GroupName="TimeRange"
+                                         Foreground="White" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Action Selection -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Action"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#00ff00" />
+                            <TextBlock FontSize="12"
+                                       Foreground="Gray"
+                                       Text="Choose what to do with selected files" />
+                            
+                            <RadioButton x:Name="WipeRadio"
+                                         Content="Delete permanently"
+                                         GroupName="Action"
+                                         IsChecked="True"
+                                         Foreground="White" />
+                            <TextBlock FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="20,0,0,0"
+                                       Text="Files will be permanently deleted" />
+                            
+                            <RadioButton x:Name="ArchiveRadio"
+                                         Content="Archive to ZIP then delete"
+                                         GroupName="Action"
+                                         Foreground="White" />
+                            <StackPanel Margin="20,5,0,0" Spacing="5">
+                                <TextBlock FontSize="11"
+                                           Foreground="Gray"
+                                           Text="Creates a ZIP archive before deletion" />
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Text="Archive name:" 
+                                               FontSize="12"
+                                               Foreground="Gray"
+                                               VerticalAlignment="Center" />
+                                    <TextBox x:Name="ArchiveNameTextBox"
+                                             Width="250"
+                                             FontSize="12"
+                                             Text="pizzawave-archive-{}.zip"
+                                             PlaceholderText="pizzawave-archive-{date}.zip" />
+                                </StackPanel>
+                                <TextBlock FontSize="10"
+                                           Foreground="Gray"
+                                           Text="{}{date} will be replaced with current date" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Estimated Space -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Estimated space to be freed:"
+                                       FontSize="14"
+                                       Foreground="White" />
+                            <TextBlock x:Name="EstimatedFreeText"
+                                       FontSize="18"
+                                       FontWeight="Bold"
+                                       Foreground="#00ff00" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

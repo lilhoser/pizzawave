@@ -150,6 +150,7 @@ namespace pizzaui
                 foreach (var line in lines)
                 {
                     var call = (TranscribedCall)JsonConvert.DeserializeObject(line, typeof(TranscribedCall))!;
+                    PopulateFriendlyFields(call);
                     calls.Add(call);
                 }
                 ShowAllCalls(); // clear any existing filter
@@ -162,6 +163,12 @@ namespace pizzaui
             {
                 MessageBox.Show($"Unable to load capture: {ex.Message}");
             }
+        }
+
+        private void PopulateFriendlyFields(TranscribedCall call)
+        {
+            call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(m_Settings, call.Talkgroup) ?? $"{call.Talkgroup}";
+            call.FriendlyFrequency = FormatFrequency(call.Frequency);
         }
 
         private async void openOfflineCaptureToolStripMenuItem_Click(object sender, EventArgs e)
@@ -187,6 +194,7 @@ namespace pizzaui
             using (m_OfflineCallManager = new OfflineCallManager(fbd.SelectedPath,
                 (TranscribedCall call) =>
                 {
+                    PopulateFriendlyFields(call);
                     calls.Add(call);
                 }))
             {
@@ -723,6 +731,16 @@ namespace pizzaui
                 return;
             }
 
+            // Repopulate friendly fields for existing calls with new settings
+            if (transcriptionListview.Objects != null)
+            {
+                var calls = transcriptionListview.Objects.Cast<TranscribedCall>().ToList();
+                foreach (var call in calls)
+                {
+                    PopulateFriendlyFields(call);
+                }
+            }
+
             InitializeListview();
 
             //
@@ -787,10 +805,21 @@ namespace pizzaui
 
         private void NewCallTranscribed(TranscribedCall Call)
         {
+            // Populate friendly talkgroup and frequency for display
+            Call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(m_Settings, Call.Talkgroup) ?? $"{Call.Talkgroup}";
+            Call.FriendlyFrequency = FormatFrequency(Call.Frequency);
+
             transcriptionListview.Invoke((MethodInvoker)(() =>
             {
                 transcriptionListview.AddObject(Call);
             }));
+        }
+
+        private string FormatFrequency(double frequency)
+        {
+            // Convert Hz to MHz for display
+            double mhz = frequency / 1_000_000.0;
+            return $"{mhz:F3}mhz";
         }
 
         #endregion

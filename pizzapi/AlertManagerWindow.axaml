@@ -1,0 +1,177 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:pizzapi"
+        xmlns:models="using:pizzalib"
+        x:Class="pizzapi.AlertManagerWindow"
+        x:DataType="local:AlertManagerWindow"
+        Title="Alert Manager"
+        Width="700"
+        Height="650"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <Border Padding="20">
+        <DockPanel>
+            <TextBlock Text="Alert Manager"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       DockPanel.Dock="Top"
+                       Margin="0,0,0,15" />
+
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10"
+                        DockPanel.Dock="Bottom"
+                        Margin="0,15,0,0">
+                <Button x:Name="CloseButton" Content="Close" Width="100" />
+            </StackPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="15">
+                    <!-- Alert Configuration Section -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Alert Configuration"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#00d2ff" />
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Alert Name" FontSize="14" FontWeight="Bold" />
+                                <TextBox x:Name="AlertNameTextBox" 
+                                         PlaceholderText="Enter alert name"
+                                         FontSize="14" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Email Recipient(s) (Optional)" FontSize="14" FontWeight="Bold" />
+                                <TextBox x:Name="AlertEmailTextBox"
+                                         PlaceholderText="Leave empty for UI-only alerts, or enter email@example.com"
+                                         FontSize="14" />
+                                <TextBlock FontSize="11"
+                                           Foreground="Gray"
+                                           Text="If empty, alerts will only pin matching calls in the UI" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Keywords" FontSize="14" FontWeight="Bold" />
+                                <TextBox x:Name="AlertKeywordsTextBox" 
+                                         PlaceholderText="comma, separated, keywords"
+                                         FontSize="14" />
+                                <TextBlock FontSize="11" 
+                                           Foreground="Gray"
+                                           Text="Alert triggers when transcription contains any of these keywords" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Frequency" FontSize="14" FontWeight="Bold" />
+                                <ComboBox x:Name="AlertFrequencyComboBox" 
+                                          FontSize="14"
+                                          HorizontalAlignment="Left"
+                                          Width="200">
+                                    <ComboBoxItem Content="RealTime (immediate)" />
+                                    <ComboBoxItem Content="Hourly (max once per hour)" />
+                                    <ComboBoxItem Content="Daily (max once per day)" />
+                                </ComboBox>
+                            </StackPanel>
+
+                            <CheckBox x:Name="EnabledCheckBox"
+                                      Content="Enable this alert"
+                                      FontSize="14"
+                                      IsChecked="True" />
+
+                            <CheckBox x:Name="AutoplayCheckBox"
+                                      Content="Autoplay audio for this alert (when enabled globally)"
+                                      FontSize="14"
+                                      IsChecked="True" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Talkgroup Selection Section -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Talkgroups"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#ffaa00" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="15">
+                                <RadioButton x:Name="AllTalkgroupsRadio" 
+                                             Content="All Talkgroups"
+                                             GroupName="TalkgroupScope"
+                                             IsChecked="True" />
+                                <RadioButton x:Name="SelectedTalkgroupsRadio" 
+                                             Content="Selected Talkgroups"
+                                             GroupName="TalkgroupScope" />
+                            </StackPanel>
+
+                            <Border x:Name="TalkgroupListBorder"
+                                    Background="#1a1a1a"
+                                    CornerRadius="4"
+                                    Padding="10"
+                                    MaxHeight="200">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="TalkgroupCheckboxesPanel" />
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Action Buttons -->
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button x:Name="AddUpdateButton" 
+                                Content="Add Alert" 
+                                Width="120"
+                                Background="#4CAF50"
+                                Foreground="White" />
+                        <Button x:Name="ClearFormButton" 
+                                Content="Clear Form" 
+                                Width="120" />
+                    </StackPanel>
+
+                    <!-- Existing Alerts List -->
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Existing Alerts"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Foreground="#00ff00" />
+
+                            <ListBox x:Name="AlertsListBox"
+                                     MaxHeight="200"
+                                     Background="#1a1a1a"
+                                     SelectionMode="Single">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="models:Alert">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Foreground="#00ff00">
+                                                <TextBlock.Text>
+                                                    <MultiBinding StringFormat="{}{0} ({1})">
+                                                        <Binding Path="Name" />
+                                                        <Binding Path="Enabled">
+                                                            <Binding.Converter>
+                                                                <local:EnabledStatusConverter />
+                                                            </Binding.Converter>
+                                                        </Binding>
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
+                                            <TextBlock Foreground="Gray"
+                                                       Text="{Binding Keywords}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <Button x:Name="DeleteButton" 
+                                    Content="Delete Selected Alert" 
+                                    Width="180"
+                                    HorizontalAlignment="Left"
+                                    Background="#f44336"
+                                    Foreground="White" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

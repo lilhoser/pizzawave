@@ -36,6 +36,7 @@ namespace pizzalib
         public AlertFrequency Frequency { get; set; }
         public List<long> Talkgroups { get; set; }
         public bool Enabled { get; set; }
+        public bool Autoplay { get; set; }
 
         public Alert()
         {
@@ -44,6 +45,7 @@ namespace pizzalib
             Keywords = string.Empty;
             Id = Guid.NewGuid();
             Talkgroups = new List<long>();
+            Autoplay = true;
         }
 
         public override string ToString()
@@ -73,7 +75,8 @@ namespace pizzalib
                 Keywords == Other.Keywords &&
                 Frequency == Other.Frequency &&
                 Talkgroups == Other.Talkgroups &&
-                Enabled == Other.Enabled;
+                Enabled == Other.Enabled &&
+                Autoplay == Other.Autoplay;
         }
 
         public static bool operator ==(Alert? Alert1, Alert? Alert2)
@@ -92,7 +95,7 @@ namespace pizzalib
 
         public override int GetHashCode()
         {
-            return (Name, Email, Keywords, Frequency, Talkgroups, Enabled
+            return (Name, Email, Keywords, Frequency, Talkgroups, Enabled, Autoplay
                 ).GetHashCode();
         }
 
@@ -103,28 +106,29 @@ namespace pizzalib
                 throw new Exception("Name is required");
             }
 
-            if (string.IsNullOrEmpty(Email))
-            {
-                throw new Exception("Email is required");
-            }
             if (string.IsNullOrEmpty(Keywords))
             {
                 throw new Exception("Keywords are required");
             }
-            var emails = GetEmailRecipients();
-            if (emails.Count == 0)
+
+            // Email is optional - if provided, validate format
+            if (!string.IsNullOrEmpty(Email))
             {
-                throw new Exception("Email is required");
-            }
-            foreach (var email in emails)
-            {
-                try
+                var emails = GetEmailRecipients();
+                if (emails.Count == 0)
                 {
-                    _ = new MailAddress(email);
+                    throw new Exception("Email is required");
                 }
-                catch (FormatException)
+                foreach (var email in emails)
                 {
-                    throw new Exception($"Alert email address {email} is invalid");
+                    try
+                    {
+                        _ = new MailAddress(email);
+                    }
+                    catch (FormatException)
+                    {
+                        throw new Exception($"Alert email address {email} is invalid");
+                    }
                 }
             }
         }

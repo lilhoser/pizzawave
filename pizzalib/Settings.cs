@@ -44,6 +44,16 @@ namespace pizzalib
         public string? gmailUser;
         public string? gmailPassword;
         //
+        // Alert audio settings
+        //
+        public bool AutoplayAlerts;
+        public int SnoozeDurationMinutes;
+        //
+        // UI display settings
+        //
+        public int SortMode;  // 0=newest first, 1=oldest first, 2=talkgroup
+        public int GroupMode; // 0=none, 1=talkgroup, 2=time of day, 3=source
+        //
         // TrunkRecorder settings
         //
         public int listenPort;
@@ -100,6 +110,18 @@ namespace pizzalib
             set => gmailPassword = value;
         }
         [JsonIgnore]
+        public bool IsAutoplayAlertsEnabled
+        {
+            get => AutoplayAlerts;
+            set => AutoplayAlerts = value;
+        }
+        [JsonIgnore]
+        public int AlertSnoozeDurationMinutes
+        {
+            get => SnoozeDurationMinutes;
+            set => SnoozeDurationMinutes = value;
+        }
+        [JsonIgnore]
         public List<Talkgroup>? Talkgroups
         {
             get => talkgroups;
@@ -142,6 +164,10 @@ namespace pizzalib
             Alerts = new List<Alert>();
             TraceLevelApp = SourceLevels.Error;
             AutostartListener = true;
+            AutoplayAlerts = false;
+            SnoozeDurationMinutes = 15;
+            SortMode = 0;  // Default: newest first
+            GroupMode = 0; // Default: no grouping
             listenPort = 9123;
             analogSamplingRate = 8000;
             analogBitDepth = 16;
@@ -169,6 +195,10 @@ namespace pizzalib
                 AutostartListener == Other.AutostartListener &&
                 GmailUser == Other.GmailUser &&
                 GmailPassword == Other.GmailPassword &&
+                AutoplayAlerts == Other.AutoplayAlerts &&
+                SnoozeDurationMinutes == Other.SnoozeDurationMinutes &&
+                SortMode == Other.SortMode &&
+                GroupMode == Other.GroupMode &&
                 ListenPort == Other.ListenPort &&
                 AnalogChannels == Other.AnalogChannels &&
                 AnalogBitDepth == Other.AnalogBitDepth &&
@@ -198,6 +228,10 @@ namespace pizzalib
                 AutostartListener,
                 GmailUser,
                 GmailPassword,
+                AutoplayAlerts,
+                SnoozeDurationMinutes,
+                SortMode,
+                GroupMode,
                 ListenPort,
                 AnalogBitDepth,
                 AnalogChannels,
@@ -247,7 +281,7 @@ namespace pizzalib
 
         public void SaveToFile(string? target = null)
         {
-            if (target == null)
+            if (string.IsNullOrEmpty(target))
                 target = DefaultSettingsFileLocation;
 
             try
@@ -277,7 +311,13 @@ namespace pizzalib
             try
             {
                 var json = File.ReadAllText(settingsPath);
-                return JsonConvert.DeserializeObject<Settings>(json) ?? new Settings();
+                var settings = JsonConvert.DeserializeObject<Settings>(json) ?? new Settings();
+                // Ensure Alerts is initialized
+                if (settings.Alerts == null)
+                {
+                    settings.Alerts = new List<Alert>();
+                }
+                return settings;
             }
             catch (Exception)
             {

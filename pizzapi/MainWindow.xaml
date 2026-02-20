@@ -2,92 +2,153 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:pizzapi"
         xmlns:models="using:pizzalib"
+        xmlns:ToolTip="using:Avalonia.Controls"
         x:Class="pizzapi.MainWindow"
+        x:DataType="local:MainWindow"
         Title="PizzaPi"
         Width="800"
         Height="600"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Icon="/images/logo-small.png">
     <Window.Resources>
         <local:BoolToDoubleConverter x:Key="BoolToDoubleConverter" />
         <local:BoolToStringConverter x:Key="BoolToStringConverter" />
         <local:BoolToColorConverter x:Key="BoolToColorConverter" />
+        <local:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        
+        <!-- Data template for group headers -->
+        <DataTemplate x:Key="HeaderTemplate" x:DataType="local:CallGroupItem">
+            <Border Background="#1a4a1a"
+                    Padding="10,8"
+                    Margin="0,4,0,0"
+                    Cursor="Hand"
+                    PointerReleased="OnGroupHeaderClicked">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="{Binding IsExpanded, Converter={StaticResource BoolToStringConverter}, ConverterParameter='▼|▶'}"
+                               FontSize="12"
+                               Foreground="#00ff00"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding HeaderText}"
+                               FontSize="14"
+                               FontWeight="Bold"
+                               Foreground="#00ff00" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+        
+        <!-- Data template for call items -->
+        <DataTemplate x:Key="CallTemplate" x:DataType="local:CallGroupItem">
+            <Border Background="{Binding Call.IsAlertMatch, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|#3a3a3a'}"
+                    BorderBrush="#555"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="0"
+                    Padding="10"
+                    Margin="0,4,0,0"
+                    Cursor="Hand"
+                    PointerReleased="OnCallRowClicked">
+                <StackPanel Spacing="4">
+                    <!-- Header Row - Talkgroup + Frequency (hide when grouped by talkgroup) -->
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="{Binding Call.FriendlyTalkgroup}"
+                                   FontSize="{DynamicResource CurrentFontSize}"
+                                   FontWeight="Bold"
+                                   Foreground="#00d2ff"
+                                   IsVisible="{Binding ShowTalkgroup}" />
+                        <TextBlock Text="{Binding Call.FriendlyFrequency}"
+                                   FontSize="{DynamicResource CurrentFontSize}"
+                                   Foreground="#ffaa00" />
+                    </StackPanel>
+
+                    <!-- Transcription -->
+                    <TextBlock Text="{Binding Call.Transcription}"
+                               TextWrapping="Wrap"
+                               FontSize="{DynamicResource CurrentFontSize}"
+                               Foreground="White"
+                               MaxWidth="700" />
+
+                    <!-- Status Row - Play icon and Pin icon on the right -->
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding Call.CallTime}"
+                                   FontSize="11"
+                                   Foreground="Gray" />
+                        <!-- Pin icon (always visible) -->
+                        <TextBlock Grid.Column="2"
+                                   Text="📌"
+                                   FontSize="16"
+                                   Foreground="{Binding Call.IsPinned, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#ff6b6b|#666666'}"
+                                   Margin="10,0,0,0"
+                                   Cursor="Hand"
+                                   PointerReleased="OnPinClicked"
+                                   ToolTip.Tip="Click to pin/unpin this call"/>
+                        <!-- Save icon -->
+                        <TextBlock Grid.Column="3"
+                                   Text="💾"
+                                   FontSize="16"
+                                   Foreground="#4CAF50"
+                                   Margin="10,0,0,0"
+                                   Cursor="Hand"
+                                   PointerReleased="OnSaveClicked"
+                                   ToolTip.Tip="Save audio and transcription to folder"/>
+                        <!-- Copy icon -->
+                        <TextBlock Grid.Column="4"
+                                   Text="📋"
+                                   FontSize="16"
+                                   Foreground="#2196F3"
+                                   Margin="10,0,0,0"
+                                   Cursor="Hand"
+                                   PointerReleased="OnCopyClicked"
+                                   ToolTip.Tip="Copy transcription to clipboard"/>
+                        <!-- Play/Stop icon -->
+                        <TextBlock Grid.Column="5"
+                                   Text="{Binding Call.IsAudioPlaying, Converter={StaticResource BoolToStringConverter}, ConverterParameter='⏹|▶'}"
+                                   FontSize="16"
+                                   Foreground="{Binding Call.IsAudioPlaying, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#f44336|#4CAF50'}"
+                                   Margin="10,0,0,0" />
+                        <TextBlock Grid.Column="6">
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="{}{0}s">
+                                    <Binding Path="Call.Duration" />
+                                </MultiBinding>
+                            </TextBlock.Text>
+                            <TextBlock.FontSize>
+                                11
+                            </TextBlock.FontSize>
+                            <TextBlock.Foreground>
+                                #888
+                            </TextBlock.Foreground>
+                            <TextBlock.Margin>
+                                10,0,0,0
+                            </TextBlock.Margin>
+                        </TextBlock>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+        
+        <!-- Data template selector -->
+        <local:CallGroupItemTemplateSelector x:Key="CallGroupTemplateSelector"
+                                             HeaderTemplate="{StaticResource HeaderTemplate}"
+                                             CallTemplate="{StaticResource CallTemplate}" />
     </Window.Resources>
     <Grid>
         <!-- Main Content Area -->
         <ScrollViewer VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
-            <Border Padding="10">
+            <Border Padding="10,10,10,80">
                 <StackPanel Spacing="8">
                     <!-- Recent Calls List -->
-                    <ItemsControl ItemsSource="{Binding Calls}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="#3a3a3a"
-                                        BorderBrush="#555"
-                                        BorderThickness="0,0,0,1"
-                                        CornerRadius="0"
-                                        Padding="10"
-                                        Margin="0,4,0,0"
-                                        Cursor="Hand"
-                                        PointerReleased="OnCallRowClicked">
-                                    <StackPanel Spacing="4">
-                                        <!-- Header Row - Talkgroup + Frequency -->
-                                        <StackPanel Orientation="Horizontal" Spacing="10">
-                                            <TextBlock Text="{Binding FriendlyTalkgroup}"
-                                                       FontSize="14"
-                                                       FontWeight="Bold"
-                                                       Foreground="#00d2ff" />
-                                            <TextBlock Text="{Binding FriendlyFrequency}"
-                                                       FontSize="14"
-                                                       Foreground="#ffaa00" />
-                                        </StackPanel>
-
-                                        <!-- Transcription -->
-                                        <TextBlock Text="{Binding Transcription}"
-                                                   TextWrapping="Wrap"
-                                                   FontSize="14"
-                                                   Foreground="White"
-                                                   MaxWidth="700" />
-
-                                        <!-- Status Row - Play icon on the right -->
-                                        <Grid Margin="0,4,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0"
-                                                       Text="{Binding CallTime}"
-                                                       FontSize="11"
-                                                       Foreground="Gray" />
-                                            <!-- Play/Pause icon -->
-                                            <TextBlock Grid.Column="2"
-                                                       Text="{Binding IsAudioPlaying, Converter={StaticResource BoolToStringConverter}, ConverterParameter='⏸|▶'}"
-                                                       FontSize="16"
-                                                       Foreground="{Binding IsAudioPlaying, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#f44336|#4CAF50'}"
-                                                       Margin="10,0,0,0" />
-                                            <TextBlock Grid.Column="3">
-                                                <TextBlock.Text>
-                                                    <MultiBinding StringFormat="{}{0}s">
-                                                        <Binding Path="Duration" />
-                                                    </MultiBinding>
-                                                </TextBlock.Text>
-                                                <TextBlock.FontSize>
-                                                    11
-                                                </TextBlock.FontSize>
-                                                <TextBlock.Foreground>
-                                                    #888
-                                                </TextBlock.Foreground>
-                                                <TextBlock.Margin>
-                                                    10,0,0,0
-                                                </TextBlock.Margin>
-                                            </TextBlock>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
+                    <ItemsControl ItemsSource="{Binding GroupedCalls}"
+                                  ItemTemplate="{StaticResource CallGroupTemplateSelector}">
                     </ItemsControl>
                 </StackPanel>
             </Border>
@@ -102,23 +163,64 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="300" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <!-- Left side: Stats -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="15">
-                    <TextBlock Text="Calls: " Foreground="White" />
-                    <TextBlock Text="{Binding CallsReceivedCount}" Foreground="#00d2ff" FontWeight="Bold" />
-                    <TextBlock Text="Alerts: " Foreground="White" />
-                    <TextBlock Text="{Binding AlertsTriggeredCount}" Foreground="#ffaa00" FontWeight="Bold" />
-                    <TextBlock Text="Status: " Foreground="Gray" />
-                    <TextBlock Text="{Binding StatusText}" Foreground="#00ff00" />
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <TextBlock Text="Calls:" Foreground="White" />
+                        <TextBlock Text="{Binding CallsReceivedCount}" Foreground="#00d2ff" FontWeight="Bold" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <TextBlock Text="Alerts:" Foreground="White" />
+                        <TextBlock Text="{Binding AlertsTriggeredCount}" Foreground="#ffaa00" FontWeight="Bold" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <TextBlock Text="{Binding UsageText}" Foreground="White" />
+                    </StackPanel>
                 </StackPanel>
+                <!-- Status text (truncated) -->
+                <TextBlock Grid.Column="1"
+                           Text="{Binding StatusText}"
+                           Foreground="#00ff00"
+                           TextTrimming="CharacterEllipsis"
+                           TextAlignment="Left"
+                           Margin="15,0,0,0" />
+                <!-- Spacer -->
+                <Grid Grid.Column="2" />
+                <!-- Mode indicator -->
+                <Border Grid.Column="3"
+                        Background="{Binding ModeIndicatorColor}"
+                        CornerRadius="4"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        Margin="15,0,5,0">
+                    <TextBlock Text="{Binding ModeIndicatorText}"
+                               Foreground="Black"
+                               FontWeight="Bold"
+                               FontSize="11" />
+                </Border>
+                <!-- Bell icon -->
+                <TextBlock Grid.Column="4"
+                           Text="🔔"
+                           ToolTip.Tip="{Binding BellToolTipText}"
+                           Foreground="{Binding BellColor}"
+                           FontSize="16"
+                           Margin="5,0,5,0"
+                           VerticalAlignment="Center"
+                           Cursor="Hand"
+                           PointerReleased="OnBellClicked" />
                 <!-- Right side: Version -->
-                <TextBlock Grid.Column="2"
+                <TextBlock Grid.Column="5"
                            Text="{Binding VersionString}"
                            Foreground="#888"
-                           FontSize="11" />
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="5,0,0,0" />
             </Grid>
         </Border>
 
@@ -145,8 +247,8 @@
                 HorizontalAlignment="Left"
                 VerticalAlignment="Top"
                 Margin="5,45,0,0"
-                Width="200"
-                MaxHeight="300"
+                Width="220"
+                MaxHeight="500"
                 Background="#2d2d2d"
                 BorderThickness="1"
                 BorderBrush="#555"
@@ -160,23 +262,193 @@
                            Margin="0,0,0,10" />
 
                 <Button Content="Import Talkgroups..."
-                        Width="180"
+                        Width="200"
                         Margin="0,5,0,0"
                         Click="OnImportTalkgroupsClicked"
                         Tag="Import Talkgroups" />
 
                 <Button Content="Settings..."
-                        Width="180"
+                        Width="200"
                         Margin="0,5,0,0"
                         Click="OnSettingsClicked" />
 
-                <Button Content="View Log"
-                        Width="180"
+                <Button Content="Alerts..."
+                        Width="200"
                         Margin="0,5,0,0"
-                        Click="OnViewLogClicked" />
+                        Click="OnAlertsClicked" />
+
+                <Button x:Name="OpenOfflineButton"
+                        Content="Open Offline Capture..."
+                        Width="200"
+                        Margin="0,5,0,0"
+                        Click="OnOpenOfflineCaptureClicked"
+                        ToolTip.Tip="Load historical calls from a capture folder" />
+
+                <Button x:Name="ReturnToLiveButton"
+                        Content="Return to Live Mode"
+                        Width="200"
+                        Margin="0,5,0,0"
+                        Click="OnReturnToLiveModeClicked"
+                        ToolTip.Tip="Return to live call monitoring"
+                        IsVisible="False" />
+
+                <Button Content="Cleanup..."
+                        Width="200"
+                        Margin="0,5,0,0"
+                        Click="OnCleanupClicked"
+                        ToolTip.Tip="Cleanup captured audio files" />
+
+                <!-- View button with popup submenu -->
+                <Button x:Name="ViewButton"
+                        Content="View →"
+                        Width="200"
+                        Margin="0,5,0,0"
+                        Click="OnViewButtonClicked"
+                        Focusable="False" />
+
+                <Popup x:Name="ViewSubMenuPopup"
+                       PlacementTarget="{Binding ElementName=ViewButton}"
+                       Placement="Right"
+                       IsOpen="False"
+                       Focusable="False">
+                    <Border Background="#2d2d2d"
+                            BorderThickness="1"
+                            BorderBrush="#555"
+                            CornerRadius="4"
+                            Padding="5"
+                            Focusable="False">
+                        <Grid Focusable="False">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="200" />
+                            </Grid.ColumnDefinitions>
+                            <!-- Left column: Main menu -->
+                            <StackPanel Grid.Column="0" Focusable="False">
+                                <Button Content="Clear Calls"
+                                        Width="190"
+                                        HorizontalContentAlignment="Left"
+                                        Click="OnClearClicked"
+                                        Focusable="False" />
+                                <Button Content="Log"
+                                        Width="190"
+                                        HorizontalContentAlignment="Left"
+                                        Click="OnViewLogClicked"
+                                        Focusable="False" />
+                                <Separator Margin="0,5" Focusable="False" />
+                                <Button Content="Sort →"
+                                        Width="190"
+                                        HorizontalContentAlignment="Left"
+                                        Click="OnSortButtonClicked"
+                                        Focusable="False" />
+                                <Button Content="Group By →"
+                                        Width="190"
+                                        HorizontalContentAlignment="Left"
+                                        Click="OnGroupByButtonClicked"
+                                        Focusable="False" />
+                                <Separator Margin="0,5" Focusable="False" />
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0" Focusable="False">
+                                    <Button Content="A-"
+                                            Width="60"
+                                            ToolTip.Tip="Decrease font size"
+                                            Click="OnDecreaseFontSizeClicked"
+                                            Focusable="False" />
+                                    <Button Content="A+"
+                                            Width="60"
+                                            Margin="5,0,0,0"
+                                            ToolTip.Tip="Increase font size"
+                                            Click="OnIncreaseFontSizeClicked"
+                                            Focusable="False" />
+                                </StackPanel>
+                                <Separator Margin="0,5" Focusable="False" />
+                                <Button Content="Collapse/Expand All"
+                                        Width="190"
+                                        HorizontalContentAlignment="Left"
+                                        PointerReleased="OnCollapseExpandAllPointerReleased"
+                                        Focusable="False" />
+                            </StackPanel>
+                            <!-- Right column: Sort submenu -->
+                            <Border x:Name="SortSubMenuBorder"
+                                    Grid.Column="1"
+                                    Background="#2d2d2d"
+                                    BorderThickness="1"
+                                    BorderBrush="#555"
+                                    CornerRadius="4"
+                                    Padding="5"
+                                    IsVisible="False"
+                                    Margin="5,0,0,0"
+                                    Focusable="False">
+                                <StackPanel Focusable="False">
+                                    <Button x:Name="SortNewestButton"
+                                            Content="✓ Time (newest first)"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnSortByTimeNewestClicked"
+                                            Focusable="False" />
+                                    <Button x:Name="SortOldestButton"
+                                            Content="  Time (oldest first)"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnSortByTimeOldestClicked"
+                                            Focusable="False" />
+                                    <Button x:Name="SortTalkgroupButton"
+                                            Content="  Talkgroup (A-Z)"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnSortByTalkgroupClicked"
+                                            Focusable="False" />
+                                    <Separator Margin="0,5" />
+                                    <Button x:Name="AlwaysPinAlertsButton"
+                                            Content="✓ Always pin alert matches"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnAlwaysPinAlertsClicked"
+                                            Focusable="False" />
+                                </StackPanel>
+                            </Border>
+                            <!-- Right column: Group By submenu -->
+                            <Border x:Name="GroupBySubMenuBorder"
+                                    Grid.Column="1"
+                                    Background="#2d2d2d"
+                                    BorderThickness="1"
+                                    BorderBrush="#555"
+                                    CornerRadius="4"
+                                    Padding="5"
+                                    IsVisible="False"
+                                    Margin="5,0,0,0"
+                                    Focusable="False">
+                                <StackPanel Focusable="False">
+                                    <Button x:Name="GroupNoneButton"
+                                            Content="✓ None (flat list)"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnGroupByNoneClicked"
+                                            Focusable="False" />
+                                    <Button x:Name="GroupTalkgroupButton"
+                                            Content="  Talkgroup"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnGroupByTalkgroupClicked"
+                                            Focusable="False" />
+                                    <Button x:Name="GroupTimeOfDayButton"
+                                            Content="  Time of Day"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnGroupByTimeOfDayClicked"
+                                            Focusable="False" />
+                                    <Button x:Name="GroupSourceButton"
+                                            Content="  Source"
+                                            Width="170"
+                                            HorizontalContentAlignment="Left"
+                                            Click="OnGroupBySourceClicked"
+                                            Focusable="False" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Popup>
 
                 <Button Content="Exit"
-                        Width="180"
+                        Width="200"
                         Margin="0,5,0,0"
                         Click="OnExitClicked" />
             </StackPanel>

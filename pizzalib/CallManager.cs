@@ -16,21 +16,26 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-using static pizzalib.TraceLogger;
-using System.Diagnostics;
+using FFMpegCore;
+using FFMpegCore.Extensions.Downloader;
 using Newtonsoft.Json;
+using System.Diagnostics;
+using static pizzalib.TraceLogger;
 
 namespace pizzalib
 {
     public abstract class CallManager : IDisposable
     {
-        private Whisper? m_Whisper;
+        protected Whisper? m_Whisper;
         private bool m_Initialized;
         private bool m_Disposed;
         private StreamWriter? m_JournalFile;
         private string m_CaptureRoot;
         public static readonly string s_CallJournalFile = "calljournal.json";
-        private Action<TranscribedCall> m_NewTranscribedCallCallback;
+        protected Action<TranscribedCall> m_NewTranscribedCallCallback;
+        private bool _ffmpegReady = false;
+        private static readonly SemaphoreSlim _ffmpegSemaphore = new SemaphoreSlim(1, 1);
+        private static string _ffmpegBinFolder = Path.Combine(AppContext.BaseDirectory, "ffmpeg-bin");
 
         public CallManager(Action<TranscribedCall> NewTranscribedCallCallback)
         {
@@ -81,7 +86,7 @@ namespace pizzalib
                 Directory.CreateDirectory(m_CaptureRoot);
                 string name = new DirectoryInfo(m_CaptureRoot).Name;
                 var journal = Path.Join(m_CaptureRoot, s_CallJournalFile);
-                m_JournalFile = new StreamWriter(journal);
+                m_JournalFile = new StreamWriter(journal) { AutoFlush = true };
 
                 //
                 // Initialize whisper
@@ -89,6 +94,11 @@ namespace pizzalib
                 m_Whisper = new Whisper(Settings);
                 _ = await m_Whisper.Initialize();
                 m_Initialized = true;
+
+                //
+                // Download ffmpeg if needed
+                //
+                await EnsureFfmpegExists();
             }
             catch (Exception ex)
             {
@@ -96,6 +106,49 @@ namespace pizzalib
                 throw new Exception(err);
             }
             return true;
+        }
+
+        private async Task EnsureFfmpegExists()
+        {
+            if (_ffmpegReady) return;
+            await _ffmpegSemaphore.WaitAsync();
+            try
+            {
+                if (_ffmpegReady)
+                    return;
+                if (File.Exists(Path.Combine(_ffmpegBinFolder, "ffmpeg.exe")))
+                {
+                    GlobalFFOptions.Configure(options => options.BinaryFolder = _ffmpegBinFolder);
+                    _ffmpegReady = true;
+                    Trace(TraceLoggerType.CallManager, TraceEventType.Information,
+                          "FFmpeg binaries already exist in ffmpeg-bin folder");
+                    return;
+                }
+                if (await Utilities.IsFfmpegInPathAsync())
+                {
+                    GlobalFFOptions.Configure(options => options.BinaryFolder = string.Empty); // use PATH
+                    _ffmpegReady = true;
+                    Trace(TraceLoggerType.CallManager, TraceEventType.Information,
+                          "Using system FFmpeg from PATH (no download needed)");
+                    return;
+                }
+                Trace(TraceLoggerType.CallManager, TraceEventType.Information,
+                      "Downloading FFmpeg (~80 MB, one-time only)...");
+                GlobalFFOptions.Configure(options => options.BinaryFolder = _ffmpegBinFolder);
+                string ffmpegExe = Path.Combine(_ffmpegBinFolder, "ffmpeg.exe");
+                if (!File.Exists(ffmpegExe))
+                {
+                    Directory.CreateDirectory(_ffmpegBinFolder);
+                    await FFMpegDownloader.DownloadBinaries();
+                }
+
+                Trace(TraceLoggerType.CallManager, TraceEventType.Information, "FFmpeg download complete.");
+                _ffmpegReady = true;
+            }
+            finally
+            {
+                _ffmpegSemaphore.Release();
+            }
         }
 
         protected void DeleteCaptureRoot()
@@ -115,10 +168,10 @@ namespace pizzalib
 
         public virtual async Task<bool> Start(bool block = false)
         {
-            return true;
+            return await Task.FromResult(true);
         }
 
-        public virtual async void Stop(bool block = true)
+        public virtual void Stop(bool block = true)
         {
             m_JournalFile?.Close();
         }
@@ -145,7 +198,7 @@ namespace pizzalib
             return await Initialize(Settings);
         }
 
-        protected virtual async Task HandleNewCall(WavStreamData CallData)
+        protected virtual async Task HandleNewCall(RawCallData CallData)
         {
             try
             {
@@ -155,16 +208,16 @@ namespace pizzalib
                 var call = await GetTranscribedCall(CallData);
 
                 //
+                // Write the call mp3 to disk first (so it's available for alert emails)
+                //
+                var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
+                await CallData.DumpStreamToFile(m_CaptureRoot, fileName, OutputFileFormat.Mp3);
+                call.Location = Path.Combine(m_CaptureRoot, fileName);
+
+                //
                 // Send any alerts on the transcription and update call meta data with matches.
                 //
                 ProcessAlerts(call);
-
-                //
-                // Write the call mp3 to disk and update call journal.
-                //
-                var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
-                CallData.DumpStreamToFile(m_CaptureRoot, fileName, OutputFileFormat.Mp3);
-                call.Location = Path.Combine(m_CaptureRoot, fileName);
 
                 var journalJson = JsonConvert.SerializeObject(call, Formatting.None);
                 m_JournalFile?.WriteLine(journalJson);
@@ -186,7 +239,7 @@ namespace pizzalib
             return;
         }
 
-        private async Task<TranscribedCall> GetTranscribedCall(WavStreamData CallData)
+        protected async Task<TranscribedCall> GetTranscribedCall(RawCallData CallData)
         {
             if (!m_Initialized || m_Whisper == null)
             {
@@ -218,10 +271,12 @@ namespace pizzalib
             try
             {
                 //
-                // Transcribe the wav audio
+                // Transcribe the raw audio (Whisper requires 16KHz)
                 //
-                call.Transcription = await m_Whisper.TranscribeCall(CallData.GetRawStream());
-                CallData.RewindStream();
+                using (var audioStream = await CallData.GetAudioStreamForWhisperAsync())
+                {
+                    call.Transcription = await m_Whisper.TranscribeCall(audioStream);
+                }
             }
             catch (Exception ex)
             {

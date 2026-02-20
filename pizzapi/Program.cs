@@ -1,18 +1,18 @@
-using System;
 using Avalonia;
-using Avalonia.ReactiveUI;
 
 namespace pizzapi;
 
 class Program
 {
-    static async Task<int> Main(string[] args)
+    [STAThread]
+    static int Main(string[] args)
     {
         // Check for headless mode argument
         if (args.Length > 0 && (args[0].ToLower() == "--headless" || args[0].ToLower() == "-headless"))
         {
             var headless = new HeadlessMode();
-            return await headless.Run(args);
+            headless.Run(args).Wait();
+            return 0;
         }
         else
         {
@@ -27,6 +27,5 @@ class Program
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
-            .LogToTrace()
-            .UseReactiveUI();
+            .LogToTrace();
 }

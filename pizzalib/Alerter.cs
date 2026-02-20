@@ -38,6 +38,7 @@ namespace pizzalib
         public void ProcessAlerts(TranscribedCall Call)
         {
             Call.IsAlertMatch = false;
+            Call.ShouldAutoplay = false;
             foreach (var alert in m_Settings.Alerts)
             {
                 Trace(TraceLoggerType.Alerts,
@@ -53,12 +54,15 @@ namespace pizzalib
                 var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
                 foreach (var keyword in keywords)
                 {
-                    if (Call.Transcription.ToLower().Contains(keyword.ToLower()))
+                    if (!string.IsNullOrEmpty(Call.Transcription) &&
+                        Call.Transcription.ToLower().Contains(keyword.ToLower()))
                     {
                         Trace(TraceLoggerType.Alerts,
                               TraceEventType.Information,
                               $"Alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
-                        Call.IsAlertMatch = true;                        
+                        Call.IsAlertMatch = true;
+                        Call.IsPinned = true; // Auto-pin alert matches
+                        Call.ShouldAutoplay = alert.Autoplay;
                         TriggerAlertEvent(alert, Call);
                         break;
                     }
@@ -88,12 +92,14 @@ namespace pizzalib
                 var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
                 foreach (var keyword in keywords)
                 {
-                    if (Call.Transcription.ToLower().Contains(keyword.ToLower()))
+                    if (!string.IsNullOrEmpty(Call.Transcription) &&
+                        Call.Transcription.ToLower().Contains(keyword.ToLower()))
                     {
                         Trace(TraceLoggerType.Alerts,
                               TraceEventType.Information,
                               $"Offline alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
                         Call.IsAlertMatch = true;
+                        Call.IsPinned = true; // Auto-pin alert matches
                         break;
                     }
                 }
@@ -183,12 +189,21 @@ namespace pizzalib
                 alertEvent.LastTriggered = DateTime.Now;
                 alertEvent.TriggerCountLastInterval++;
 
+                // Send email notification only if alert has email AND Gmail is configured
                 if (!string.IsNullOrEmpty(Alert.Email) &&
                     !string.IsNullOrEmpty(m_Settings.gmailUser) &&
                     !string.IsNullOrEmpty(m_Settings.gmailPassword))
                 {
                     alertEvent.Unlock(); // don't hold lock, email could block
                     SendEmailNotification(Alert, alertEvent, Call);
+                }
+                else
+                {
+                    // UI-only alert (call is already pinned and marked as alert match)
+                    Trace(TraceLoggerType.Alerts,
+                          TraceEventType.Information,
+                          $"Alert {Alert.Name}: UI notification only (no email configured)");
+                    alertEvent.Unlock();
                 }
             }
             finally
@@ -226,10 +241,14 @@ namespace pizzalib
                         $"<P><I>{Call.Transcription}</I></P>"
                 })
                 {
-                    var contentType = new ContentType();
-                    contentType.MediaType = MediaTypeNames.Application.Octet;
-                    contentType.Name = Path.GetFileName(Call.Location);
-                    message.Attachments.Add(new Attachment(Call.Location, contentType));
+                    // Attach audio file if location is available
+                    if (!string.IsNullOrEmpty(Call.Location))
+                    {
+                        var contentType = new ContentType();
+                        contentType.MediaType = MediaTypeNames.Application.Octet;
+                        contentType.Name = Path.GetFileName(Call.Location);
+                        message.Attachments.Add(new Attachment(Call.Location, contentType));
+                    }
                     smtp.Send(message);
                 }
             }

@@ -75,9 +75,15 @@ namespace pizzalib
             m_Settings.UpdateProgressLabelCallback?.Invoke("Initializing Whisper model...");
 
             LogProvider.AddLogger(delegate (WhisperLogLevel arg1, string? arg2) {
-                Trace(TraceLoggerType.Whisper,
-                      TraceEventType.Information,
-                      $"{arg2}");
+                // Only log errors and warnings after initial setup
+                if (!m_Initialized || 
+                    arg1 == WhisperLogLevel.Error || 
+                    arg1 == WhisperLogLevel.Warning)
+                {
+                    Trace(TraceLoggerType.Whisper,
+                          TraceEventType.Information,
+                          $"{arg2}");
+                }
             });
 
             if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))

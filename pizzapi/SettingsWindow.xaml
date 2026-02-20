@@ -36,6 +36,22 @@
                         <TextBlock Text="Gmail Password" FontSize="14" FontWeight="Bold" />
                         <TextBox x:Name="GmailPasswordTextBox" FontSize="14" />
                     </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Alert Audio" FontSize="14" FontWeight="Bold" />
+                        <CheckBox x:Name="AutoplayAlertsCheckBox"
+                                  Content="Enable autoplay audio for alert matches"
+                                  FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Snooze duration:" VerticalAlignment="Center" />
+                            <ComboBox x:Name="SnoozeDurationComboBox" Width="100">
+                                <ComboBoxItem Content="5 minutes" />
+                                <ComboBoxItem Content="15 minutes" />
+                                <ComboBoxItem Content="30 minutes" />
+                                <ComboBoxItem Content="1 hour" />
+                            </ComboBox>
+                        </StackPanel>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 

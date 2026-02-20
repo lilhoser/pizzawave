@@ -178,7 +178,7 @@ namespace pizzalib
             return await Initialize(Settings);
         }
 
-        protected override async Task HandleNewCall(WavStreamData CallData)
+        protected override async Task HandleNewCall(RawCallData CallData)
         {
             if (!m_Initialized || m_StreamServer == null || m_Alerter == null)
             {
@@ -191,7 +191,7 @@ namespace pizzalib
             // NOTE: This method is invoked PER CALL, and calls can happen in parallel.
             //
 
-            await base.HandleNewCall(CallData);            
+            await base.HandleNewCall(CallData);
         }
 
         protected override void ProcessAlerts(TranscribedCall Call)

@@ -16,11 +16,18 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 
 namespace pizzalib
 {
-    public class TranscribedCall
+    public class TranscribedCall : INotifyPropertyChanged
     {
+        private bool _isAudioPlaying;
+        private bool _isPinned;
+        private bool _isAlertMatch;
+        private bool _shouldAutoplay;
+
         public long StartTime { get; set; }
         public long StopTime { get; set; }
         public int Source { get; set; }
@@ -32,10 +39,30 @@ namespace pizzalib
         public string? Location { get; set; }
         public string? Transcription { get; set; }
         [Newtonsoft.Json.JsonIgnore]
-        public bool IsAudioPlaying { get; set; } // Used to track when the call is being played in the UI
+        public bool IsAudioPlaying
+        {
+            get => _isAudioPlaying;
+            set { _isAudioPlaying = value; RaisePropertyChanged(); }
+        }
         public Guid UniqueId { get; set; }
         [Newtonsoft.Json.JsonIgnore]
-        public bool IsAlertMatch { get; set; } // must be re-evaluated on every load or change in alerts
+        public bool IsAlertMatch
+        {
+            get => _isAlertMatch;
+            set { _isAlertMatch = value; RaisePropertyChanged(); }
+        }
+        [Newtonsoft.Json.JsonIgnore]
+        public bool IsPinned
+        {
+            get => _isPinned;
+            set { _isPinned = value; RaisePropertyChanged(); }
+        }
+        [Newtonsoft.Json.JsonIgnore]
+        public bool ShouldAutoplay
+        {
+            get => _shouldAutoplay;
+            set { _shouldAutoplay = value; RaisePropertyChanged(); }
+        }
 
         [Newtonsoft.Json.JsonIgnore]
         public string FriendlyTalkgroup { get; set; } = string.Empty;
@@ -65,6 +92,13 @@ namespace pizzalib
             DateTime date = DateTimeOffset.FromUnixTimeSeconds(StartTime).ToLocalTime().DateTime;
             var dateStr = $"{date:M/d/yyyy h:mm tt}";
             return $"[{talkgroup}]:{dateStr}: {Transcription}";
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        protected void RaisePropertyChanged([CallerMemberName] string? propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
     }
 }

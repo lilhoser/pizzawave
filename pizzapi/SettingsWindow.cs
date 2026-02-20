@@ -12,6 +12,8 @@ public class SettingsWindow : Window
     private TextBox? _whisperModelFilePathTextBox;
     private TextBox? _gmailUserTextBox;
     private TextBox? _gmailPasswordTextBox;
+    private CheckBox? _autoplayAlertsCheckBox;
+    private ComboBox? _snoozeDurationComboBox;
 
     // Parameterless constructor for XAML loading
     public SettingsWindow()
@@ -38,11 +40,14 @@ public class SettingsWindow : Window
         _whisperModelFilePathTextBox = this.FindControl<TextBox>("WhisperModelTextBox");
         _gmailUserTextBox = this.FindControl<TextBox>("GmailUserTextBox");
         _gmailPasswordTextBox = this.FindControl<TextBox>("GmailPasswordTextBox");
+        _autoplayAlertsCheckBox = this.FindControl<CheckBox>("AutoplayAlertsCheckBox");
+        _snoozeDurationComboBox = this.FindControl<ComboBox>("SnoozeDurationComboBox");
         var saveButton = this.FindControl<Button>("SaveButton");
         var cancelButton = this.FindControl<Button>("CancelButton");
 
         if (_listenPortTextBox != null && _whisperModelFilePathTextBox != null &&
             _gmailUserTextBox != null && _gmailPasswordTextBox != null &&
+            _autoplayAlertsCheckBox != null && _snoozeDurationComboBox != null &&
             saveButton != null && cancelButton != null)
         {
             var settings = _settings ??= new Settings();
@@ -51,6 +56,17 @@ public class SettingsWindow : Window
             _whisperModelFilePathTextBox.Text = settings.WhisperModelFile ?? string.Empty;
             _gmailUserTextBox.Text = settings.GmailUser ?? string.Empty;
             _gmailPasswordTextBox.Text = settings.GmailPassword ?? string.Empty;
+            _autoplayAlertsCheckBox.IsChecked = settings.AutoplayAlerts;
+
+            // Set snooze duration combo box based on settings
+            _snoozeDurationComboBox.SelectedIndex = settings.SnoozeDurationMinutes switch
+            {
+                5 => 0,
+                15 => 1,
+                30 => 2,
+                60 => 3,
+                _ => 1 // Default to 15 minutes
+            };
 
             saveButton.Click += (s, e) =>
             {
@@ -71,7 +87,16 @@ public class SettingsWindow : Window
                         ListenPort = settings.ListenPort,
                         WhisperModelFile = settings.WhisperModelFile,
                         GmailUser = settings.GmailUser,
-                        GmailPassword = settings.GmailPassword
+                        GmailPassword = settings.GmailPassword,
+                        AutoplayAlerts = _autoplayAlertsCheckBox.IsChecked ?? false,
+                        SnoozeDurationMinutes = _snoozeDurationComboBox.SelectedIndex switch
+                        {
+                            0 => 5,
+                            1 => 15,
+                            2 => 30,
+                            3 => 60,
+                            _ => 15
+                        }
                     };
 
                     // Apply new values to copy for validation
@@ -92,6 +117,8 @@ public class SettingsWindow : Window
                     settings.WhisperModelFile = settingsCopy.WhisperModelFile;
                     settings.GmailUser = settingsCopy.GmailUser;
                     settings.GmailPassword = settingsCopy.GmailPassword;
+                    settings.AutoplayAlerts = settingsCopy.AutoplayAlerts;
+                    settings.SnoozeDurationMinutes = settingsCopy.SnoozeDurationMinutes;
 
                     settings.SaveToFile();
                     Close();

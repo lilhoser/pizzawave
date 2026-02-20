@@ -27,13 +27,13 @@ namespace pizzalib
     public class StreamServer : IDisposable
     {
         private CancellationTokenSource CancelSource;
-        private Func<WavStreamData, Task> NewCallDataCallback;
+        private Func<RawCallData, Task> NewCallDataCallback;
         private Settings m_Settings;
         private bool m_Started;
         private bool m_Disposed;
 
         public StreamServer(
-            Func<WavStreamData, Task> NewCallDataCallback_,
+            Func<RawCallData, Task> NewCallDataCallback_,
             Settings Settings)
         {
             NewCallDataCallback = NewCallDataCallback_;
@@ -153,17 +153,10 @@ namespace pizzalib
             {
                 using (var stream = Client.GetStream())
                 {
-                    // Process multiple calls over the same connection
-                    // trunk-recorder keeps the connection open and sends calls sequentially
-                    while (!CancelSource.IsCancellationRequested)
+                    var wavStream = new RawCallData(m_Settings);
+                    var result = await wavStream.ProcessClientData(stream, CancelSource);
+                    if (result)
                     {
-                        var wavStream = new WavStreamData(m_Settings);
-                        var result = await wavStream.ProcessClientData(stream, CancelSource);
-                        if (!result)
-                        {
-                            // End of stream or error
-                            break;
-                        }
                         // Invoke callback for this call
                         _ = NewCallDataCallback(wavStream);
                     }

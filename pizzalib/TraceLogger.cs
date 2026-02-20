@@ -33,7 +33,7 @@ namespace pizzalib
             new SourceSwitch("pizzalibSwitch", "Verbose");
         private static TraceSource[] Sources = {
             new TraceSource("StreamServer", SourceLevels.Verbose),
-            new TraceSource("WavStreamData", SourceLevels.Verbose),
+            new TraceSource("RawCallData", SourceLevels.Verbose),
             new TraceSource("Settings", SourceLevels.Verbose),
             new TraceSource("Whisper", SourceLevels.Verbose),
             new TraceSource("Alerts", SourceLevels.Verbose),
@@ -48,7 +48,7 @@ namespace pizzalib
         public enum TraceLoggerType
         {
             StreamServer,
-            WavStreamData,
+            RawCallData,
             Settings,
             Whisper,
             Alerts,
