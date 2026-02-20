@@ -148,9 +148,10 @@ public class BoolToColorConverter : IValueConverter
         if (value is bool isVisible && parameter is string @params && @params.Contains('|'))
         {
             var split = @params.Split('|');
-            return isVisible ? split[0] : split[1];
+            var colorHex = isVisible ? split[0] : split[1];
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
         }
-        return parameter is string p ? p.Split('|')[1] : "#4CAF50"; // Default to green
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#4CAF50"));
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
@@ -179,7 +180,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private object? _audioReader;
 
     // Alert autoplay and snooze
-    private DateTime? _snoozeUntil;
+    private DateTime? _snoozeUntil = null;  // Explicitly initialize to null
     private bool _alwaysPinAlertMatches = true;
     private int _currentSortMode = 0; // 0=newest first, 1=oldest first, 2=talkgroup
     private int _currentGroupMode = 0; // 0=none, 1=talkgroup, 2=time of day, 3=source
@@ -197,7 +198,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Button? _groupTimeOfDayButton;
     private Button? _groupSourceButton;
     // Track expanded group headers
-    private HashSet<string> _expandedGroups = new HashSet<string>();
+    private HashSet<string> _collapsedGroups = new HashSet<string>();
     // Flag to prevent re-entrancy in collapse/expand
     private bool _isCollapsingExpanding = false;
 
@@ -227,7 +228,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    public string BellColor
+    public Avalonia.Media.SolidColorBrush BellColor
     {
         get
         {
@@ -235,13 +236,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (_snoozeUntil.HasValue && DateTime.Now >= _snoozeUntil.Value)
             {
                 _snoozeUntil = null;
+                RaisePropertyChanged(nameof(IsAlertSnoozed));
+                RaisePropertyChanged(nameof(BellToolTipText));
             }
+
+            // Determine color based on current state
+            // Gray when disabled, orange when snoozed, green when enabled
+            bool alertsEnabled = _settings?.AutoplayAlerts ?? false;
+            bool isSnoozed = _snoozeUntil.HasValue;
             
-            if (!_settings.AutoplayAlerts)
-                return "#666666"; // Gray when disabled
-            if (IsAlertSnoozed)
-                return "#ffaa00"; // Orange when snoozed
-            return "#00ff00"; // Green when enabled
+            var colorHex = !alertsEnabled
+                ? "#666666"  // Gray when disabled
+                : isSnoozed
+                    ? "#ffaa00"  // Orange when snoozed
+                    : "#00ff00"; // Green when enabled
+
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
         }
     }
 
@@ -460,56 +470,46 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         HideMenu();
     }
 
-    private void OnGroupHeaderClicked(object? sender, PointerReleasedEventArgs e)
+    private void OnGroupHeaderClicked(object? sender, RoutedEventArgs e)
     {
-        if (sender is Border border && border.DataContext is CallGroupItem header && header.HeaderText != null)
+        if (sender is Button button && button.DataContext is CallGroupItem header && header.HeaderText != null)
         {
-            // Toggle expansion state
-            if (_expandedGroups.Contains(header.HeaderText))
-            {
-                _expandedGroups.Remove(header.HeaderText);
-            }
+            if (_collapsedGroups.Contains(header.HeaderText))
+                _collapsedGroups.Remove(header.HeaderText);   // expand
             else
-            {
-                _expandedGroups.Add(header.HeaderText);
-            }
-            ApplyGrouping(); // Rebuild the view with updated expansion state
-            e.Handled = true; // Prevent event from bubbling up
+                _collapsedGroups.Add(header.HeaderText);      // collapse
+
+            ApplyGrouping();
+            e.Handled = true;
         }
     }
 
-    private void OnCollapseExpandAllPointerReleased(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
+    private void OnCollapseExpandAllClicked(object? sender, RoutedEventArgs e)
     {
         if (_isCollapsingExpanding) return;
         _isCollapsingExpanding = true;
-        
+
         try
         {
-            e.Handled = true; // Prevent further event handling
-            
-            // Close popup first
-            if (_viewSubMenuPopup != null)
-            {
-                _viewSubMenuPopup.IsOpen = false;
-            }
+            // Close popups first...
+            if (_viewSubMenuPopup != null) _viewSubMenuPopup.IsOpen = false;
             HideSubMenus();
-            
-            bool shouldExpand = _expandedGroups.Count == 0;
+            HideMenu();
 
-            if (shouldExpand)
-            {
-                foreach (var item in GroupedCalls.Where(i => i.IsHeader && i.HeaderText != null))
-                {
-                    _expandedGroups.Add(item.HeaderText);
-                }
-            }
+            bool shouldExpandAll = _collapsedGroups.Count > 0;   // if anything is collapsed → expand all
+
+            if (shouldExpandAll)
+                _collapsedGroups.Clear();           // expand everything
             else
             {
-                _expandedGroups.Clear();
+                // collapse everything
+                _collapsedGroups.Clear();
+                foreach (var item in GroupedCalls.Where(i => i.IsHeader && i.HeaderText != null))
+                    _collapsedGroups.Add(item.HeaderText!);
             }
 
             ApplyGrouping();
-            StatusText = shouldExpand ? "Groups expanded" : "Groups collapsed";
+            StatusText = shouldExpandAll ? "All groups expanded" : "All groups collapsed";
         }
         finally
         {
@@ -522,10 +522,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         GroupedCalls.Clear();
 
         // First, sort the Calls collection based on current sort mode
-        // But always put pinned calls (alert matches) at top if always pin is enabled
+        // Always put manually pinned calls at top
         List<TranscribedCall> sortedCalls;
 
-        if (_alwaysPinAlertMatches)
+        // Check if any calls are manually pinned
+        bool hasPinnedCalls = Calls.Any(c => c.IsPinned);
+
+        if (hasPinnedCalls)
         {
             // Pinned calls at top (sorted by selected sort mode), then non-pinned (sorted by selected sort mode)
             var pinnedCalls = Calls.Where(c => c.IsPinned).ToList();
@@ -545,7 +548,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            // No special pinning - just sort by selected mode
+            // No pinned calls - just sort by selected mode
             sortedCalls = _currentSortMode switch
             {
                 0 => Calls.OrderByDescending(c => c.StartTime).ToList(),
@@ -563,30 +566,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = call, ShowTalkgroup = true });
             }
             StatusText = "Grouping: None (flat list)";
-            return;
         }
-
-        // Group calls based on mode
-        var grouped = _currentGroupMode switch
+        else
         {
-            1 => GroupByTalkgroup(sortedCalls),
-            2 => GroupByTimeOfDay(sortedCalls),
-            3 => GroupBySource(sortedCalls),
-            _ => sortedCalls.Select(c => new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true }).ToList()
-        };
+            // Group calls based on mode
+            var grouped = _currentGroupMode switch
+            {
+                1 => GroupByTalkgroup(sortedCalls),
+                2 => GroupByTimeOfDay(sortedCalls),
+                3 => GroupBySource(sortedCalls),
+                _ => sortedCalls.Select(c => new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true }).ToList()
+            };
 
-        foreach (var item in grouped)
-        {
-            GroupedCalls.Add(item);
+            foreach (var item in grouped)
+            {
+                GroupedCalls.Add(item);
+            }
+
+            StatusText = _currentGroupMode switch
+            {
+                1 => "Grouping: Talkgroup",
+                2 => "Grouping: Time of Day",
+                3 => "Grouping: Source",
+                _ => "Grouping: None"
+            };
         }
-
-        StatusText = _currentGroupMode switch
-        {
-            1 => "Grouping: Talkgroup",
-            2 => "Grouping: Time of Day",
-            3 => "Grouping: Source",
-            _ => "Grouping: None"
-        };
+        
+        // Force UI refresh
+        RaisePropertyChanged(nameof(GroupedCalls));
     }
 
     private List<CallGroupItem> GroupByTalkgroup(List<TranscribedCall> calls)
@@ -597,12 +604,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         foreach (var group in grouped)
         {
-            // New groups are expanded by default
-            if (!_expandedGroups.Contains(group.Key ?? ""))
-            {
-                _expandedGroups.Add(group.Key ?? "");
-            }
-            bool isExpanded = _expandedGroups.Contains(group.Key ?? "");
+            bool isExpanded = !_collapsedGroups.Contains(group.Key ?? "");
             result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, IsExpanded = isExpanded });
             if (isExpanded)
             {
@@ -633,12 +635,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         foreach (var group in grouped)
         {
-            // New groups are expanded by default
-            if (!_expandedGroups.Contains(group.Key ?? ""))
-            {
-                _expandedGroups.Add(group.Key ?? "");
-            }
-            bool isExpanded = _expandedGroups.Contains(group.Key ?? "");
+            bool isExpanded = !_collapsedGroups.Contains(group.Key ?? "");
             result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, IsExpanded = isExpanded });
             if (isExpanded)
             {
@@ -659,12 +656,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         foreach (var group in grouped)
         {
-            // New groups are expanded by default
-            if (!_expandedGroups.Contains(group.Key ?? ""))
-            {
-                _expandedGroups.Add(group.Key ?? "");
-            }
-            bool isExpanded = _expandedGroups.Contains(group.Key ?? "");
+            bool isExpanded = !_collapsedGroups.Contains(group.Key ?? "");
             result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, IsExpanded = isExpanded });
             if (isExpanded)
             {
@@ -745,6 +737,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch
         {
             // Use default settings
+            _settings = new Settings();
         }
 
         // Set trace level from settings
@@ -756,6 +749,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _currentGroupMode = _settings.GroupMode;
         UpdateSortCheckmarks();
         UpdateGroupCheckmarks();
+
+        // Force refresh bell icon state after settings are loaded
+        RaisePropertyChanged(nameof(IsAlertSnoozed));
+        RaisePropertyChanged(nameof(BellColor));
+        RaisePropertyChanged(nameof(BellToolTipText));
 
         _callManager = new LiveCallManager(OnNewCall);
 
@@ -1203,6 +1201,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void OnClearClicked(object? sender, RoutedEventArgs e)
     {
         Calls.Clear();
+        GroupedCalls.Clear();
+        _collapsedGroups.Clear();
+        _callsReceivedCount = 0;
+        _alertsTriggeredCount = 0;
+        RaisePropertyChanged(nameof(CallsReceivedCount));
+        RaisePropertyChanged(nameof(AlertsTriggeredCount));
         StatusText = "Calls cleared";
         HideMenu();
     }
@@ -1213,18 +1217,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var offlineWindow = new OfflineModeWindow(_settings);
         await offlineWindow.ShowDialog(this);
 
+        // Debug: log what we got from the dialog
+        System.Diagnostics.Debug.WriteLine($"[MainWindow] Dialog returned: SelectedPath={offlineWindow.SelectedPath}, LoadedCalls={(offlineWindow.LoadedCalls != null ? offlineWindow.LoadedCalls.Count.ToString() : "null")}");
+
         // Only switch to offline mode if loading was successful
         if (offlineWindow.SelectedPath != null && offlineWindow.LoadedCalls != null && offlineWindow.LoadedCalls.Count > 0)
         {
             // Stop any audio playback first
             StopAudio();
-            
+
             // User selected a folder and loading succeeded - now stop live capture if running
             if (!_isOfflineMode && _callManager != null && _callManager.IsStarted())
             {
                 _callManager.Stop();
                 StatusText = "Live capture stopped";
             }
+
+            // Clear live calls before loading offline captures
+            Calls.Clear();
 
             // Switch to offline mode (or load new offline capture if already in offline mode)
             _isOfflineMode = true;
@@ -1239,17 +1249,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _offlineCallManager = new OfflineCallManager(offlineWindow.SelectedPath, OnNewCall);
 
             // Load calls into UI with proper sorting (pinned first)
-            Calls.Clear();
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Loading {offlineWindow.LoadedCalls.Count} calls into UI");
             foreach (var call in offlineWindow.LoadedCalls)
             {
                 call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
                 call.FriendlyFrequency = FormatFrequency(call.Frequency);
                 call.PlayAudioCommand = (c) => PlayAudio(c);
-                
+
                 // Use GetInsertIndex to properly sort pinned calls to top
                 int insertIndex = GetInsertIndex(call);
                 Calls.Insert(insertIndex, call);
             }
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Calls.Count after load: {Calls.Count}");
+
+            // Apply grouping to update GroupedCalls (the UI binds to GroupedCalls, not Calls)
+            if (_useGrouping)
+            {
+                ApplyGrouping();
+            }
+            else
+            {
+                // When not grouping, also update GroupedCalls to mirror Calls
+                GroupedCalls.Clear();
+                foreach (var c in Calls)
+                {
+                    GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
+                }
+            }
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] GroupedCalls.Count after load: {GroupedCalls.Count}");
+
+            // Update call and alert counts to reflect loaded offline captures
+            _callsReceivedCount = offlineWindow.LoadedCalls.Count;
+            _alertsTriggeredCount = offlineWindow.LoadedCalls.Count(c => c.IsAlertMatch);
+            RaisePropertyChanged(nameof(CallsReceivedCount));
+            RaisePropertyChanged(nameof(AlertsTriggeredCount));
+            CallCountText = $"Calls: {_callsReceivedCount}";
 
             // Update UI
             RaisePropertyChanged(nameof(ModeIndicatorText));
@@ -1266,6 +1300,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         else if (offlineWindow.SelectedPath != null)
         {
             // User selected a folder but loading failed or no calls found
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Offline load failed - no calls loaded");
             StatusText = "Offline load failed - no calls loaded";
         }
         // else: user cancelled - do nothing, stay in current mode
@@ -1441,6 +1476,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     {
                         newCall.IsPinned = false;
                         RepositionCall(newCall);
+
+                        if (_useGrouping)
+                            ApplyGrouping();
+                        else
+                        {
+                            GroupedCalls.Clear();
+                            foreach (var c in Calls)
+                                GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
+                        }
                     }
                     StatusText = "Playback complete";
                     var index = Calls.IndexOf(newCall);
@@ -1472,6 +1516,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StopAudio();
     }
 
+    protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        // Close menu when clicking outside of it
+        if (MenuVisible)
+        {
+            var point = e.GetCurrentPoint(this);
+            var menuPanel = this.FindControl<Border>("MenuPanel");
+            var hamburgerButton = this.FindControl<Button>("HamburgerButton");
+            
+            if (menuPanel != null && hamburgerButton != null)
+            {
+                var menuBounds = new Avalonia.Rect(menuPanel.Bounds.Size);
+                var hamburgerBounds = new Avalonia.Rect(hamburgerButton.Bounds.Size);
+                
+                var clickPosition = point.Position;
+                var menuPosition = menuPanel.TranslatePoint(new Avalonia.Point(0, 0), this);
+                var hamburgerPosition = hamburgerButton.TranslatePoint(new Avalonia.Point(0, 0), this);
+                
+                if (menuPosition.HasValue && hamburgerPosition.HasValue)
+                {
+                    var menuRect = new Avalonia.Rect(menuPosition.Value.X, menuPosition.Value.Y, menuBounds.Width, menuBounds.Height);
+                    var hamburgerRect = new Avalonia.Rect(hamburgerPosition.Value.X, hamburgerPosition.Value.Y, hamburgerBounds.Width, hamburgerBounds.Height);
+                    
+                    if (!menuRect.Contains(clickPosition) && !hamburgerRect.Contains(clickPosition))
+                    {
+                        HideMenu();
+                    }
+                }
+            }
+        }
+    }
+
     private void OnExitClicked(object? sender, RoutedEventArgs e)
     {
         Close();
@@ -1479,6 +1556,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnCallRowClicked(object? sender, PointerReleasedEventArgs e)
     {
+        e.Handled = true;
+
         if (sender is Border border && border.DataContext is CallGroupItem groupItem && groupItem.Call != null)
         {
             var call = groupItem.Call;
@@ -1498,6 +1577,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 // Start playing this call - pin it to the top
                 call.IsPinned = true;
                 RepositionCall(call);
+
+                if (_useGrouping)
+                    ApplyGrouping();                    // grouped mode
+                else
+                {
+                    // flat mode - mirror the new order
+                    GroupedCalls.Clear();
+                    foreach (var c in Calls)
+                        GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
+                }
+
                 PlayAudio(call);
             }
         }
@@ -1505,22 +1595,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnPinClicked(object? sender, PointerReleasedEventArgs e)
     {
-        // Toggle pin state when pin icon is clicked
-        if (sender is TextBlock textBlock && textBlock.DataContext is CallGroupItem groupItem && groupItem.Call != null)
+        e.Handled = true;
+
+        if (sender is Control control && control.DataContext is CallGroupItem groupItem && groupItem.Call != null)
         {
             groupItem.Call.IsPinned = !groupItem.Call.IsPinned;
-            RepositionCall(groupItem.Call);
-            e.Handled = true; // Prevent row click from firing
+            ApplyGrouping();   // rebuilds list with pinned items at top
         }
     }
 
     private async void OnSaveClicked(object? sender, PointerReleasedEventArgs e)
     {
-        if (sender is TextBlock textBlock && textBlock.DataContext is CallGroupItem groupItem && groupItem.Call != null)
+        e.Handled = true;
+
+        e.Handled = true;
+
+        if (sender is Control control && control.DataContext is CallGroupItem groupItem && groupItem.Call != null)
         {
             var call = groupItem.Call;
-            e.Handled = true; // Prevent row click from firing
-
             if (string.IsNullOrEmpty(call.Location))
             {
                 StatusText = "Error: Audio file not available";
@@ -1543,7 +1635,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             var folders = await storageProvider.OpenFolderPickerAsync(options);
             var folder = folders?.FirstOrDefault();
-            
+
             if (folder == null)
             {
                 StatusText = "Save cancelled";
@@ -1555,7 +1647,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 // Create filename base from talkgroup and time
                 var safeName = $"{call.FriendlyTalkgroup}_{call.StartTime}";
                 safeName = new string(safeName.Where(c => !Path.GetInvalidFileNameChars().Contains(c)).ToArray());
-                
+
                 // Copy audio file
                 var sourceAudio = call.Location;
                 var destAudio = Path.Combine(folder.Path.LocalPath, $"{safeName}.mp3");
@@ -1581,10 +1673,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void OnCopyClicked(object? sender, PointerReleasedEventArgs e)
     {
-        if (sender is TextBlock textBlock && textBlock.DataContext is CallGroupItem groupItem && groupItem.Call != null)
+        e.Handled = true;
+
+        if (sender is Control control && control.DataContext is CallGroupItem groupItem && groupItem.Call != null)
         {
             var call = groupItem.Call;
-            e.Handled = true; // Prevent row click from firing
 
             if (string.IsNullOrEmpty(call.Transcription))
             {
@@ -1596,9 +1689,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             try
             {
                 var clipboard = this.Clipboard;
-                var data = new DataTransfer();
-                data.Add(DataTransferItem.CreateText(call.Transcription));
-                await clipboard.SetDataAsync(data);
+                await clipboard.SetTextAsync(call.Transcription);
                 StatusText = "Transcription copied to clipboard";
             }
             catch (Exception ex)

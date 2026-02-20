@@ -153,6 +153,16 @@ public partial class OfflineModeWindow : Window
                 }
 
                 await offlineManager.Start();
+                
+                // Debug: log how many calls were loaded
+                System.Diagnostics.Debug.WriteLine($"[OfflineModeWindow] Loaded {_loadedCalls.Count} calls");
+            }
+
+            // Verify we have calls before closing
+            if (_loadedCalls.Count == 0)
+            {
+                ShowError("No calls were loaded from the selected folder. Check the logs for errors.");
+                return;
             }
 
             // Success - close dialog
@@ -161,7 +171,7 @@ public partial class OfflineModeWindow : Window
         catch (Exception ex)
         {
             ShowError($"Failed to load offline records: {ex.Message}");
-            
+
             // Hide progress UI
             var progressBorder = this.FindControl<Border>("ProgressBorder");
             var openButton = this.FindControl<Button>("OpenButton");

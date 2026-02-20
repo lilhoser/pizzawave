@@ -113,58 +113,73 @@ namespace pizzalib
             // whenever the live server sends a call, we process the list of
             // offline call records immediately and return.
             //
-            await Task.Run(async () =>
+            try
             {
-                m_Settings!.UpdateProgressLabelCallback?.Invoke($"Reading folder {m_OfflineFilesPath}...");
-                
-                // Try to load .bin files first (SFTP backup format)
-                var targets = Directory.GetFiles(
-                    m_OfflineFilesPath, "*.bin", SearchOption.AllDirectories).ToList();
-                
-                // If no .bin files, try .mp3 files (live capture format)
-                if (targets.Count == 0)
+                await Task.Run(async () =>
                 {
-                    targets = Directory.GetFiles(
-                        m_OfflineFilesPath, "*.mp3", SearchOption.AllDirectories).ToList();
-                }
-                
-                m_Settings.SetProgressBarCallback?.Invoke(targets.Count, 1);
-                if (targets.Count == 0)
-                {
-                    throw new Exception("No call records found. Supported formats:\n• .mp3 files (from live captures)\n• .bin files (from Trunk-Recorder SFTP backup)");
-                }
-                var i = 1;
-                foreach (var file in targets)
-                {
-                    if (CancelSource!.IsCancellationRequested)
+                    m_Settings!.UpdateProgressLabelCallback?.Invoke($"Reading folder {m_OfflineFilesPath}...");
+
+                    // Try to load .bin files first (SFTP backup format)
+                    var targets = Directory.GetFiles(
+                        m_OfflineFilesPath, "*.bin", SearchOption.AllDirectories).ToList();
+
+                    // If no .bin files, try .mp3 files (live capture format)
+                    if (targets.Count == 0)
                     {
-                        break;
+                        targets = Directory.GetFiles(
+                            m_OfflineFilesPath, "*.mp3", SearchOption.AllDirectories).ToList();
                     }
-                    m_Settings.ProgressBarStepCallback?.Invoke();
-                    m_Settings.UpdateProgressLabelCallback?.Invoke(
-                        $"Loading offline records from {m_OfflineFilesPath}...{i++} of {targets.Count}");
-                    
-                    if (file.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+
+                    m_Settings.SetProgressBarCallback?.Invoke(targets.Count, 1);
+                    if (targets.Count == 0)
                     {
-                        // Process .bin file (SFTP backup format)
-                        using (var stream = new MemoryStream(File.ReadAllBytes(file)))
+                        throw new Exception("No call records found. Supported formats:\n• .mp3 files (from live captures)\n• .bin files (from Trunk-Recorder SFTP backup)");
+                    }
+                    var i = 1;
+                    foreach (var file in targets)
+                    {
+                        if (CancelSource!.IsCancellationRequested)
                         {
-                            var wavStream = new RawCallData(m_Settings);
-                            var cancelSource = new CancellationTokenSource();
-                            var result = await wavStream.ProcessClientData(stream, cancelSource);
-                            if (result)
+                            break;
+                        }
+                        m_Settings.ProgressBarStepCallback?.Invoke();
+                        m_Settings.UpdateProgressLabelCallback?.Invoke(
+                            $"Loading offline records from {m_OfflineFilesPath}...{i++} of {targets.Count}");
+
+                        if (file.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Process .bin file (SFTP backup format)
+                            using (var stream = new MemoryStream(File.ReadAllBytes(file)))
                             {
-                                await HandleNewCall(wavStream);
+                                var wavStream = new RawCallData(m_Settings);
+                                var cancelSource = new CancellationTokenSource();
+                                var result = await wavStream.ProcessClientData(stream, cancelSource);
+                                if (result)
+                                {
+                                    await HandleNewCall(wavStream);
+                                }
                             }
                         }
+                        else if (file.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Process .mp3 file (live capture format) - create minimal call from filename
+                            await LoadMp3File(file);
+                        }
                     }
-                    else if (file.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Process .mp3 file (live capture format) - create minimal call from filename
-                        await LoadMp3File(file);
-                    }
-                }
-            });
+                });
+            }
+            catch (OperationCanceledException ex)
+            {
+                Trace(TraceLoggerType.OfflineCallManager, TraceEventType.Warning,
+                    $"Offline load cancelled: {ex.Message}");
+                // Don't rethrow - allow partial results
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.OfflineCallManager, TraceEventType.Error,
+                    $"Failed to load offline captures: {ex.Message}");
+                throw;
+            }
             return true;
         }
 
@@ -259,6 +274,11 @@ namespace pizzalib
 
         public override void Stop(bool block = true)
         {
+            if (CancelSource == null)
+            {
+                return;
+            }
+
             base.Stop(block);
 
             if (block)

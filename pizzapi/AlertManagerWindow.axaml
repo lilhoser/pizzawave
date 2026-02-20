@@ -37,15 +37,15 @@
 
                             <StackPanel Spacing="5">
                                 <TextBlock Text="Alert Name" FontSize="14" FontWeight="Bold" />
-                                <TextBox x:Name="AlertNameTextBox" 
-                                         PlaceholderText="Enter alert name"
+                                <TextBox x:Name="AlertNameTextBox"
+                                         Watermark="Enter alert name"
                                          FontSize="14" />
                             </StackPanel>
 
                             <StackPanel Spacing="5">
                                 <TextBlock Text="Email Recipient(s) (Optional)" FontSize="14" FontWeight="Bold" />
                                 <TextBox x:Name="AlertEmailTextBox"
-                                         PlaceholderText="Leave empty for UI-only alerts, or enter email@example.com"
+                                         Watermark="Leave empty for UI-only alerts, or enter email@example.com"
                                          FontSize="14" />
                                 <TextBlock FontSize="11"
                                            Foreground="Gray"
@@ -54,10 +54,10 @@
 
                             <StackPanel Spacing="5">
                                 <TextBlock Text="Keywords" FontSize="14" FontWeight="Bold" />
-                                <TextBox x:Name="AlertKeywordsTextBox" 
-                                         PlaceholderText="comma, separated, keywords"
+                                <TextBox x:Name="AlertKeywordsTextBox"
+                                         Watermark="comma, separated, keywords"
                                          FontSize="14" />
-                                <TextBlock FontSize="11" 
+                                <TextBlock FontSize="11"
                                            Foreground="Gray"
                                            Text="Alert triggers when transcription contains any of these keywords" />
                             </StackPanel>

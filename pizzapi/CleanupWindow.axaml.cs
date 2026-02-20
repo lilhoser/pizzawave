@@ -284,7 +284,7 @@ public partial class CleanupWindow : Window
             var archiveName = archiveNameText?.Text ?? "";
             if (string.IsNullOrEmpty(archiveName) || archiveName == "pizzawave-archive-{}.zip")
             {
-                archiveName = archiveNameText?.PlaceholderText ?? "pizzawave-archive-{date}.zip";
+                archiveName = "pizzawave-archive-{date}.zip";
             }
 
             // Replace {date} placeholder

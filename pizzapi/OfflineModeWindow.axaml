@@ -44,10 +44,10 @@
                                        Text="Select a folder containing captured calls (.bin files)" />
                             
                             <Grid ColumnDefinitions="*,Auto" Margin="0,10,0,0">
-                                <TextBox x:Name="FolderPathTextBox" 
+                                <TextBox x:Name="FolderPathTextBox"
                                          Grid.Column="0"
                                          IsReadOnly="True"
-                                         PlaceholderText="Select a folder..." />
+                                         Watermark="Select a folder..." />
                                 <Button x:Name="BrowseButton"
                                         Grid.Column="1"
                                         Content="Browse..."
