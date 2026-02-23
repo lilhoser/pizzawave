@@ -313,8 +313,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _groupTimeOfDayButton = this.FindControl<Button>("GroupTimeOfDayButton");
         _groupSourceButton = this.FindControl<Button>("GroupSourceButton");
 
-        // Get version from git describe (works for both CI and local builds)
-        _versionString = GetVersionFromGit();
+        // Get version from assembly metadata (populated by CI from git tag)
+        _versionString = GetAssemblyVersion();
         RaisePropertyChanged(nameof(VersionString));
 
         // Initialize font size resource
@@ -673,63 +673,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return result;
     }
 
-    private string GetVersionFromGit()
+    private string GetAssemblyVersion()
     {
-        try
-        {
-            var workingDir = AppDomain.CurrentDomain.BaseDirectory;
-
-            // Quick check - if there's no .git folder, don't even try
-            if (!Directory.Exists(Path.Combine(workingDir, ".git")))
-            {
-                throw new Exception("Not a git repository");
-            }
-
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = "describe --tags --long",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,     // ← IMPORTANT: suppress the fatal message
-                UseShellExecute = false,
-                WorkingDirectory = workingDir,
-                CreateNoWindow = true
-            };
-
-            using var process = System.Diagnostics.Process.Start(startInfo);
-            if (process == null)
-                throw new Exception("Failed to start git");
-
-            var output = process.StandardOutput.ReadToEnd().Trim();
-            var error = process.StandardError.ReadToEnd().Trim();  // discard any error output
-
-            process.WaitForExit();
-
-            if (process.ExitCode == 0 && !string.IsNullOrEmpty(output))
-            {
-                // Parse git describe output: v1.0.6-2-g98ce57b
-                var match = System.Text.RegularExpressions.Regex.Match(output, @"v?(\d+\.\d+\.\d+)(?:-(\d+)-g([a-f0-9]+))?");
-                if (match.Success)
-                {
-                    var version = match.Groups[1].Value;
-                    var commits = match.Groups[2].Value;
-                    var hash = match.Groups[3].Value;
-
-                    if (!string.IsNullOrEmpty(commits) && commits != "0")
-                        return $"PizzaPi v{version}+{commits} commits ({hash})";
-
-                    return $"PizzaPi v{version}";
-                }
-            }
-        }
-        catch
-        {
-            // Git not available, not a git repo, or any other failure → silent fallback
-        }
-
-        // Fallback to assembly version (this is what you see in the footer)
+        // Use assembly version - populated by CI from git tag at build time
         var assemblyVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-        return $"PizzaPi v{assemblyVersion?.ToString(3) ?? "1.0.0"}";
+        var version = assemblyVersion?.ToString(3) ?? "1.0.0";
+        return $"PizzaPi v{version}";
     }
 
     private async void InitializeAsync()
@@ -755,9 +704,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         TraceLogger.SetLevel(_settings.TraceLevelApp);
         pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
 
-        // Apply saved sort and group settings
+        // Apply saved sort, group, and font size settings
         _currentSortMode = _settings.SortMode;
         _currentGroupMode = _settings.GroupMode;
+        FontSize = _settings.FontSize;
         UpdateSortCheckmarks();
         UpdateGroupCheckmarks();
 
@@ -1135,58 +1085,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         });
 
         menu.Open(this);
-    }
-
-    private async void OnImportTalkgroupsClicked(object? sender, RoutedEventArgs e)
-    {
-        var topLevel = TopLevel.GetTopLevel(this);
-        var storageProvider = topLevel?.StorageProvider;
-        if (storageProvider == null)
-        {
-            StatusText = "Error: Could not access file picker";
-            return;
-        }
-
-        // Create storage providers for CSV files
-        var csvProvider = new FilePickerFileType("CSV Files")
-        {
-            Patterns = new[] { "*.csv" }
-        };
-
-        var options = new FilePickerOpenOptions
-        {
-            Title = "Import Talkgroups CSV",
-            FileTypeFilter = new[] { csvProvider }
-        };
-
-        var files = await storageProvider.OpenFilePickerAsync(options);
-
-        if (files?.Count > 0)
-        {
-            var file = files[0];
-            var path = file.Path.LocalPath;
-            ImportTalkgroupsFromCsv(path);
-        }
-    }
-
-    private void ImportTalkgroupsFromCsv(string csvPath)
-    {
-        try
-        {
-            // Load CSV file and update settings
-            _settings.Talkgroups = TalkgroupHelper.GetTalkgroupsFromCsv(csvPath);
-            var count = _settings.Talkgroups.Count;
-
-            // Save settings
-            _settings.SaveToFile();
-
-            StatusText = $"Imported {count} talkgroups from {Path.GetFileName(csvPath)}";
-            HideMenu();
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Error importing talkgroups: {ex.Message}";
-        }
     }
 
     private async void OnSettingsClicked(object? sender, RoutedEventArgs e)
@@ -1773,6 +1671,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (FontSize < 24)
         {
             FontSize += 2;
+            _settings.FontSize = FontSize;
+            _settings.SaveToFile();
         }
         HideMenu();
     }
@@ -1782,6 +1682,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (FontSize > 10)
         {
             FontSize -= 2;
+            _settings.FontSize = FontSize;
+            _settings.SaveToFile();
         }
         HideMenu();
     }

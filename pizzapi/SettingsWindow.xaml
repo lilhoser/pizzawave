@@ -5,7 +5,7 @@
         x:Name="settingsWindow"
         Title="PizzaPi Settings"
         Width="600"
-        Height="500"
+        Height="525"
         WindowStartupLocation="CenterScreen">
     <Border Padding="20">
         <DockPanel>
@@ -44,13 +44,21 @@
                                   FontSize="14" />
                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
                             <TextBlock Text="Snooze duration:" VerticalAlignment="Center" />
-                            <ComboBox x:Name="SnoozeDurationComboBox" Width="100">
+                            <ComboBox x:Name="SnoozeDurationComboBox" Width="125">
                                 <ComboBoxItem Content="5 minutes" />
                                 <ComboBoxItem Content="15 minutes" />
                                 <ComboBoxItem Content="30 minutes" />
                                 <ComboBoxItem Content="1 hour" />
                             </ComboBox>
                         </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Talkgroups" FontSize="14" FontWeight="Bold" />
+                        <Button x:Name="ImportTalkgroupsButton"
+                                Content="Import talkgroups..."
+                                Width="200"
+                                HorizontalAlignment="Left" />
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>

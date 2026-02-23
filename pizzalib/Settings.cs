@@ -53,6 +53,7 @@ namespace pizzalib
         //
         public int SortMode;  // 0=newest first, 1=oldest first, 2=talkgroup
         public int GroupMode; // 0=none, 1=talkgroup, 2=time of day, 3=source
+        public double FontSize; // Default 14.0
         //
         // TrunkRecorder settings
         //
@@ -168,6 +169,7 @@ namespace pizzalib
             SnoozeDurationMinutes = 15;
             SortMode = 0;  // Default: newest first
             GroupMode = 0; // Default: no grouping
+            FontSize = 14.0; // Default font size
             listenPort = 9123;
             analogSamplingRate = 8000;
             analogBitDepth = 16;
@@ -199,6 +201,7 @@ namespace pizzalib
                 SnoozeDurationMinutes == Other.SnoozeDurationMinutes &&
                 SortMode == Other.SortMode &&
                 GroupMode == Other.GroupMode &&
+                FontSize == Other.FontSize &&
                 ListenPort == Other.ListenPort &&
                 AnalogChannels == Other.AnalogChannels &&
                 AnalogBitDepth == Other.AnalogBitDepth &&
@@ -232,6 +235,7 @@ namespace pizzalib
                 SnoozeDurationMinutes,
                 SortMode,
                 GroupMode,
+                FontSize,
                 ListenPort,
                 AnalogBitDepth,
                 AnalogChannels,

@@ -19,21 +19,23 @@
         <!-- Data template for group headers -->
         <DataTemplate x:Key="HeaderTemplate" x:DataType="local:CallGroupItem">
             <Button Background="#1a4a1a"
-                    Padding="10,8"
-                    Margin="0,4,0,0"
+                    Padding="0"
+                    Margin="0"
                     Cursor="Hand"
                     Click="OnGroupHeaderClicked"
                     HorizontalAlignment="Stretch"
                     HorizontalContentAlignment="Left"
+                    VerticalContentAlignment="Center"
                     Classes="header-button">
                 <Button.Styles>
                     <Style Selector="Button.header-button">
                         <Setter Property="BorderThickness" Value="0"/>
                         <Setter Property="Background" Value="#1a4a1a"/>
-                        <Setter Property="Padding" Value="10,8"/>
-                        <Setter Property="Margin" Value="0,4,0,0"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="0"/>
                         <Setter Property="HorizontalAlignment" Value="Stretch"/>
                         <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                        <Setter Property="VerticalContentAlignment" Value="Center"/>
                     </Style>
                     <Style Selector="Button.header-button:pointerover">
                         <Setter Property="Background" Value="#2a5a2a"/>
@@ -46,9 +48,9 @@
                         <Setter Property="BorderThickness" Value="0"/>
                     </Style>
                 </Button.Styles>
-                <StackPanel Orientation="Horizontal" Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
                     <!-- Expand/Collapse chevron - use two paths with visibility toggle to prevent shift -->
-                    <Grid Width="16" Height="16">
+                    <Grid Width="16" Height="16" VerticalAlignment="Center" Margin="4,0,0,0">
                         <!-- Collapsed state: chevron pointing right -->
                         <Path Data="M8.59 16.58L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.42z"
                               Fill="#00ff00"
@@ -65,7 +67,8 @@
                     <TextBlock Text="{Binding HeaderText}"
                                FontSize="14"
                                FontWeight="Bold"
-                               Foreground="#00ff00" />
+                               Foreground="#00ff00"
+                               VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
         </DataTemplate>
@@ -76,8 +79,6 @@
             BorderBrush="#555"
             BorderThickness="0,0,0,1"
             CornerRadius="0"
-            Padding="4,8,8,8"
-            Margin="0,4,0,0"
             Cursor="Hand"
             PointerReleased="OnCallRowClicked"
             HorizontalAlignment="Stretch">
@@ -105,6 +106,7 @@
                        FontWeight="Bold"
                        Foreground="#00d2ff"
                        IsVisible="{Binding ShowTalkgroup}"
+					   Padding="10"
                        HorizontalAlignment="Left"/>
 
             <!-- Transcription - flush left to window edge, spans full width under icons -->
@@ -113,10 +115,9 @@
                        TextWrapping="Wrap"
                        FontSize="{DynamicResource CurrentFontSize}"
                        Foreground="White"
-                       MaxWidth="900"
                        HorizontalAlignment="Left"
                        TextAlignment="Left"
-                       Margin="0,8,0,4"/>
+                       Margin="0,0,0,0"/>
 
             <!-- Timestamp + Frequency -->
             <StackPanel Grid.Row="2" Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -214,13 +215,15 @@
                                   ItemTemplate="{StaticResource CallGroupTemplateSelector}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel Spacing="8" Orientation="Vertical"/>
+                                <StackPanel Spacing="4" Orientation="Vertical"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.Styles>
                             <Style Selector="ContentPresenter">
                                 <Setter Property="HorizontalAlignment" Value="Stretch"/>
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Margin" Value="0"/>
                             </Style>
                         </ItemsControl.Styles>
                     </ItemsControl>
@@ -350,12 +353,6 @@
                            FontWeight="Bold"
                            Foreground="White"
                            Margin="0,0,0,10" />
-
-                <Button Content="Import Talkgroups..."
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnImportTalkgroupsClicked"
-                        Tag="Import Talkgroups" />
 
                 <Button Content="Settings..."
                         Width="200"

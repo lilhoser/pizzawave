@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using pizzalib;
 
 namespace pizzapi;
@@ -14,6 +15,7 @@ public class SettingsWindow : Window
     private TextBox? _gmailPasswordTextBox;
     private CheckBox? _autoplayAlertsCheckBox;
     private ComboBox? _snoozeDurationComboBox;
+    private Button? _importTalkgroupsButton;
 
     // Parameterless constructor for XAML loading
     public SettingsWindow()
@@ -23,9 +25,10 @@ public class SettingsWindow : Window
         LoadSettings();
     }
 
-    public SettingsWindow(Settings settings) : this()
+    public SettingsWindow(Settings settings)
     {
         _settings = settings;
+        InitializeComponent();
         LoadSettings();
     }
 
@@ -42,6 +45,7 @@ public class SettingsWindow : Window
         _gmailPasswordTextBox = this.FindControl<TextBox>("GmailPasswordTextBox");
         _autoplayAlertsCheckBox = this.FindControl<CheckBox>("AutoplayAlertsCheckBox");
         _snoozeDurationComboBox = this.FindControl<ComboBox>("SnoozeDurationComboBox");
+        _importTalkgroupsButton = this.FindControl<Button>("ImportTalkgroupsButton");
         var saveButton = this.FindControl<Button>("SaveButton");
         var cancelButton = this.FindControl<Button>("CancelButton");
 
@@ -67,6 +71,15 @@ public class SettingsWindow : Window
                 60 => 3,
                 _ => 1 // Default to 15 minutes
             };
+
+            // Import Talkgroups button handler
+            if (_importTalkgroupsButton != null)
+            {
+                _importTalkgroupsButton.Click += async (s, e) =>
+                {
+                    await ImportTalkgroupsFromCsv();
+                };
+            }
 
             saveButton.Click += (s, e) =>
             {
@@ -134,6 +147,67 @@ public class SettingsWindow : Window
             };
 
             cancelButton.Click += (s, e) => Close();
+        }
+    }
+
+    private async System.Threading.Tasks.Task ImportTalkgroupsFromCsv()
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        var storageProvider = topLevel?.StorageProvider;
+        if (storageProvider == null)
+        {
+            return;
+        }
+
+        // Create storage providers for CSV files
+        var csvProvider = new FilePickerFileType("CSV Files")
+        {
+            Patterns = new[] { "*.csv" }
+        };
+
+        var options = new FilePickerOpenOptions
+        {
+            Title = "Import Talkgroups CSV",
+            FileTypeFilter = new[] { csvProvider }
+        };
+
+        var files = await storageProvider.OpenFilePickerAsync(options);
+
+        if (files?.Count > 0)
+        {
+            var file = files[0];
+            var path = file.Path.LocalPath;
+            try
+            {
+                // Load CSV file and update settings
+                _settings!.Talkgroups = TalkgroupHelper.GetTalkgroupsFromCsv(path);
+                var count = _settings.Talkgroups.Count;
+
+                // Save settings
+                _settings.SaveToFile();
+
+                // Show success message
+                var infoLabel = new TextBlock { Text = $"Imported {count} talkgroups from {System.IO.Path.GetFileName(path)}", Foreground = Brushes.Green };
+                infoLabel.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+                infoLabel.Margin = new Avalonia.Thickness(0, 10, 0, 0);
+                var panel = this.Content as StackPanel;
+                if (panel != null)
+                {
+                    panel.Children.Add(infoLabel);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Display error message
+                var errorLabel = new TextBlock { Text = $"Error importing talkgroups: {ex.Message}", Foreground = Brushes.Red };
+                errorLabel.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+                errorLabel.Margin = new Avalonia.Thickness(0, 10, 0, 0);
+                var panel = this.Content as StackPanel;
+                if (panel != null)
+                {
+                    panel.Children.Add(errorLabel);
+                }
+            }
         }
     }
 }
