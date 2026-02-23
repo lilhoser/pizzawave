@@ -1606,28 +1606,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (sender is Border border && border.DataContext is CallGroupItem groupItem && groupItem.Call != null)
         {
             var call = groupItem.Call;
+
             if (call.IsAudioPlaying)
             {
-                // Stop playback
+                // === MANUAL STOP (click row while playing) ===
                 StopAudio();
                 call.IsAudioPlaying = false;
                 StatusText = "Playback stopped";
-                // Notify UI by replacing the item in the collection
+
+                if (!call.IsAlertMatch)
+                {
+                    call.IsPinned = false;
+                    RepositionCall(call);
+
+                    if (_useGrouping)
+                        ApplyGrouping();
+                    else
+                    {
+                        GroupedCalls.Clear();
+                        foreach (var c in Calls)
+                            GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
+                    }
+                }
+
+                // Force UI refresh of this call (updates pin icon + play/stop icon)
                 var index = Calls.IndexOf(call);
                 if (index >= 0)
                     Calls[index] = call;
             }
             else
             {
-                // Start playing this call - pin it to the top
+                // === START PLAYING ===
+                // Pin it to the top
                 call.IsPinned = true;
                 RepositionCall(call);
 
                 if (_useGrouping)
-                    ApplyGrouping();                    // grouped mode
+                    ApplyGrouping();
                 else
                 {
-                    // flat mode - mirror the new order
                     GroupedCalls.Clear();
                     foreach (var c in Calls)
                         GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });

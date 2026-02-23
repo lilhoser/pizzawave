@@ -35,7 +35,6 @@ namespace pizzalib
         private Settings m_Settings;
         private bool m_Disposed;
         private WhisperFactory? m_Factory;
-        private WhisperProcessor? m_Processor;
 
         public Whisper(Settings Settings)
         {
@@ -61,7 +60,6 @@ namespace pizzalib
             m_Disposed = true;
             m_Initialized = false;
             m_Factory?.Dispose();
-            m_Processor?.Dispose();
         }
 
         public void Dispose()
@@ -136,16 +134,12 @@ namespace pizzalib
             }
 
             //
-            // Build the factory & processor once! This consumes MASSIVE memory depending on model.
+            // Build the factory once! This consumes MASSIVE memory depending on model.
+            // Individual transcription processors are created frequently, per-call later.
             //
             try
             {
                 m_Factory = WhisperFactory.FromPath(m_ModelFile);
-                m_Processor = m_Factory.CreateBuilder().
-                    WithLanguage("auto").
-                    WithNoContext().    // important: prevents whisper from trying to use previous audio to influence new transcriptions
-                    WithSingleSegment().    // important: prevents whisper from trying to process multiple segments of audio at once
-                    Build();
             }
             catch (Exception ex)
             {
@@ -162,15 +156,20 @@ namespace pizzalib
 
         public async Task<string> TranscribeCall(MemoryStream WavData)
         {
-            if (!m_Initialized || m_Processor == null)
+            if (!m_Initialized || m_Factory == null)
             {
                 throw new Exception("Whisper model is not initialized.");
             }           
 
             try
             {
+                using var processor = m_Factory.CreateBuilder().
+                    WithLanguage("auto").
+                    WithNoContext().
+                    WithSingleSegment().
+                    Build();
                 var sb = new StringBuilder();
-                await foreach (var result in m_Processor.ProcessAsync(WavData))
+                await foreach (var result in processor.ProcessAsync(WavData))
                 {
                     sb.Append($"{result.Text} ");
                 }
