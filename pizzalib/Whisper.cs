@@ -141,7 +141,11 @@ namespace pizzalib
             try
             {
                 m_Factory = WhisperFactory.FromPath(m_ModelFile);
-                m_Processor = m_Factory.CreateBuilder().WithLanguage("auto").Build();
+                m_Processor = m_Factory.CreateBuilder().
+                    WithLanguage("auto").
+                    WithNoContext().    // important: prevents whisper from trying to use previous audio to influence new transcriptions
+                    WithSingleSegment().    // important: prevents whisper from trying to process multiple segments of audio at once
+                    Build();
             }
             catch (Exception ex)
             {

@@ -1,20 +1,22 @@
-using System.Collections.ObjectModel;
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
-using Avalonia.Threading;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
-using Avalonia.Interactivity;
-using Avalonia.Input;
-using Avalonia.Markup.Xaml;
-using pizzalib;
 using Avalonia.Data.Converters;
-using System.Globalization;
-using NAudio.Wave;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using NAudio.Wave;
+using pizzalib;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace pizzapi;
 
@@ -178,6 +180,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // Audio playback
     private WaveOutEvent? _waveOut;
     private object? _audioReader;
+    private Process? _currentAudioProcess;     // for Linux ffplay
+    private readonly bool _isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
     // Alert autoplay and snooze
     private DateTime? _snoozeUntil = null;  // Explicitly initialize to null
@@ -1412,85 +1416,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void PlayAudio(TranscribedCall newCall)
     {
-        // Stop any currently playing audio
-        StopAudio();
+        StopAudio(); // always stop anything currently playing first
 
         var audioFilePath = newCall.Location;
-        StatusText = $"Audio path: {audioFilePath}";
-
-        if (string.IsNullOrEmpty(audioFilePath))
+        if (string.IsNullOrEmpty(audioFilePath) || !File.Exists(audioFilePath))
         {
-            StatusText = "Error: Audio location is empty";
+            StatusText = "Error: Audio file not found";
             return;
         }
 
-        if (!File.Exists(audioFilePath))
+        StatusText = $"Playing: {newCall.FriendlyTalkgroup} @ {newCall.FriendlyFrequency}";
+
+        if (_isLinux)
         {
-            StatusText = $"Error: Audio file not found: {audioFilePath}";
+            PlayAudioLinux(audioFilePath, newCall);
             return;
         }
 
+        // === Windows path ===
         try
         {
-            // First, reset IsAudioPlaying for all other calls
-            foreach (var c in Calls)
+            // Reset all playing flags first
+            foreach (var c in Calls.ToList())   // .ToList() makes a snapshot so we can safely set properties
             {
-                c.IsAudioPlaying = false;
+                c.IsAudioPlaying = (c.UniqueId == newCall.UniqueId);
             }
 
-            // Use MediaFoundationReader which handles MP3, AAC, etc.
             _audioReader = new MediaFoundationReader(audioFilePath);
             _waveOut = new WaveOutEvent();
             _waveOut.Init((IWaveProvider)_audioReader);
             _waveOut.Play();
 
-            StatusText = $"Playing: {newCall.FriendlyTalkgroup} @ {newCall.FriendlyFrequency}";
-
-            // Set_IsAudioPlaying to true for the new call
-            Dispatcher.UIThread.Post(() =>
-            {
-                // Reset all other calls first
-                for (int i = 0; i < Calls.Count; i++)
-                {
-                    var c = Calls[i];
-                    c.IsAudioPlaying = (c.UniqueId == newCall.UniqueId);
-                    if (!c.IsAudioPlaying)
-                        Calls[i] = c;  // Replace to trigger notification
-                }
-                // Now set the new call as playing and notify
-                newCall.IsAudioPlaying = true;
-                var index = Calls.IndexOf(newCall);
-                if (index >= 0)
-                    Calls[index] = newCall;
-            });
-
-            // When playback completes, clean up
+            // Playback complete handler
             _waveOut.PlaybackStopped += (sender, e) =>
             {
                 StopAudio();
-                Dispatcher.UIThread.Post(() =>
-                {
-                    newCall.IsAudioPlaying = false;
-                    // Only unpin if it wasn't an alert match (alert matches stay pinned)
-                    if (!newCall.IsAlertMatch)
-                    {
-                        newCall.IsPinned = false;
-                        RepositionCall(newCall);
-
-                        if (_useGrouping)
-                            ApplyGrouping();
-                        else
-                        {
-                            GroupedCalls.Clear();
-                            foreach (var c in Calls)
-                                GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
-                        }
-                    }
-                    StatusText = "Playback complete";
-                    var index = Calls.IndexOf(newCall);
-                    if (index >= 0)
-                        Calls[index] = newCall;
-                });
+                HandlePlaybackComplete(newCall);
             };
         }
         catch (Exception ex)
@@ -1501,12 +1462,96 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void StopAudio()
     {
+        // Linux path
+        if (_currentAudioProcess != null)
+        {
+            try
+            {
+                if (!_currentAudioProcess.HasExited)
+                    _currentAudioProcess.Kill();
+            }
+            catch { }
+            _currentAudioProcess.Dispose();
+            _currentAudioProcess = null;
+        }
+
+        // Windows path
         _waveOut?.Stop();
         _waveOut?.Dispose();
         _waveOut = null;
 
         (_audioReader as IDisposable)?.Dispose();
         _audioReader = null;
+    }
+
+    private void PlayAudioLinux(string filePath, TranscribedCall call)
+    {
+        try
+        {
+            _currentAudioProcess = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "ffplay",
+                    Arguments = $"-nodisp -autoexit -loglevel quiet \"{filePath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                },
+                EnableRaisingEvents = true
+            };
+
+            _currentAudioProcess.Exited += (sender, e) =>
+                Dispatcher.UIThread.Post(() => HandlePlaybackComplete(call));
+
+            _currentAudioProcess.Start();
+
+            // Set playing flag safely (use .ToList() snapshot)
+            Dispatcher.UIThread.Post(() =>
+            {
+                foreach (var c in Calls.ToList())
+                {
+                    c.IsAudioPlaying = (c.UniqueId == call.UniqueId);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error starting ffplay: {ex.Message}\n\nInstall ffmpeg with:\nsudo apt install ffmpeg";
+            _currentAudioProcess = null;
+        }
+    }
+
+    private void HandlePlaybackComplete(TranscribedCall call)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            call.IsAudioPlaying = false;
+
+            // Only unpin if it wasn't an alert match
+            if (!call.IsAlertMatch)
+            {
+                call.IsPinned = false;
+                RepositionCall(call);
+
+                if (_useGrouping)
+                    ApplyGrouping();
+                else
+                {
+                    GroupedCalls.Clear();
+                    foreach (var c in Calls)
+                        GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
+                }
+            }
+
+            StatusText = "Playback complete";
+
+            // Force UI refresh of this call
+            var index = Calls.IndexOf(call);
+            if (index >= 0)
+                Calls[index] = call;
+        });
     }
 
     protected override void OnClosed(EventArgs e)
