@@ -677,50 +677,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            // Try to get version from git describe
+            var workingDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Quick check - if there's no .git folder, don't even try
+            if (!Directory.Exists(Path.Combine(workingDir, ".git")))
+            {
+                throw new Exception("Not a git repository");
+            }
+
             var startInfo = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "git",
                 Arguments = "describe --tags --long",
                 RedirectStandardOutput = true,
+                RedirectStandardError = true,     // ← IMPORTANT: suppress the fatal message
                 UseShellExecute = false,
-                WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                WorkingDirectory = workingDir,
                 CreateNoWindow = true
             };
 
-            using (var process = System.Diagnostics.Process.Start(startInfo))
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process == null)
+                throw new Exception("Failed to start git");
+
+            var output = process.StandardOutput.ReadToEnd().Trim();
+            var error = process.StandardError.ReadToEnd().Trim();  // discard any error output
+
+            process.WaitForExit();
+
+            if (process.ExitCode == 0 && !string.IsNullOrEmpty(output))
             {
-                if (process != null)
+                // Parse git describe output: v1.0.6-2-g98ce57b
+                var match = System.Text.RegularExpressions.Regex.Match(output, @"v?(\d+\.\d+\.\d+)(?:-(\d+)-g([a-f0-9]+))?");
+                if (match.Success)
                 {
-                    var output = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit();
-                    
-                    if (!string.IsNullOrEmpty(output))
-                    {
-                        // Parse git describe output: v1.0.6-2-g98ce57b
-                        var match = System.Text.RegularExpressions.Regex.Match(output.Trim(), @"v?(\d+\.\d+\.\d+)(?:-(\d+)-g([a-f0-9]+))?");
-                        if (match.Success)
-                        {
-                            var version = match.Groups[1].Value;
-                            var commits = match.Groups[2].Value;
-                            var hash = match.Groups[3].Value;
-                            
-                            if (!string.IsNullOrEmpty(commits) && commits != "0")
-                            {
-                                return $"PizzaPi v{version}+{commits} commits ({hash})";
-                            }
-                            return $"PizzaPi v{version}";
-                        }
-                    }
+                    var version = match.Groups[1].Value;
+                    var commits = match.Groups[2].Value;
+                    var hash = match.Groups[3].Value;
+
+                    if (!string.IsNullOrEmpty(commits) && commits != "0")
+                        return $"PizzaPi v{version}+{commits} commits ({hash})";
+
+                    return $"PizzaPi v{version}";
                 }
             }
         }
         catch
         {
-            // Git not available or not a git repo, fall through to assembly version
+            // Git not available, not a git repo, or any other failure → silent fallback
         }
 
-        // Fallback to assembly version
+        // Fallback to assembly version (this is what you see in the footer)
         var assemblyVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
         return $"PizzaPi v{assemblyVersion?.ToString(3) ?? "1.0.0"}";
     }
