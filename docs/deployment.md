@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying pizzawave applications to various platforms, with focus on `pizzapi` for Linux/macOS and `pizzacmd` for headless operation.
+This guide covers deploying pizzawave applications to various platforms, with focus on `pizzapi` for Linux/macOS GUI deployments and `pizzacmd` for headless operation.
 
 ## Target Platforms
 
@@ -8,7 +8,7 @@ This guide covers deploying pizzawave applications to various platforms, with fo
 |----------|-------------|--------------|--------------|
 | Raspberry Pi 5 | pizzapi | .deb | ARM64 |
 | WSL2 (Windows) | pizzapi | .deb | x64 |
-| Linux Server | pizzacmd/pizzapi | Manual | x64/ARM64 |
+| Linux Server | pizzacmd | Manual | x64/ARM64 |
 | macOS | pizzapi | Manual | ARM64/x64 |
 | Windows | pizzaui | Manual | x64 |
 
@@ -155,25 +155,13 @@ sudo apt-get update
 sudo apt-get install -f -y
 ```
 
-### Step 4: Run (GUI Mode)
+### Step 4: Run
 
 WSL2 with WSLg supports GUI applications:
 
 ```bash
 # Launch pizzapi with display
 pizzapi
-```
-
-### Step 5: Run (Headless Mode)
-
-For background operation:
-
-```bash
-# Run in background
-pizzapi --headless &
-
-# Or use nohup
-nohup pizzapi --headless > pizzapi.log 2>&1 &
 ```
 
 ### Network Configuration
@@ -191,9 +179,9 @@ Configure trunk-recorder to connect to this IP address.
 
 ---
 
-## Linux Server Deployment (Headless)
+## Linux Server Deployment
 
-For servers without a desktop environment, use `pizzacmd` or run `pizzapi` in headless mode.
+For servers without a desktop environment, use `pizzacmd`. Note that `pizzapi` is a GUI application and requires a display environment.
 
 ### Option A: Using pizzacmd
 
@@ -232,23 +220,6 @@ WantedBy=multi-user.target
 sudo systemctl daemon-reload
 sudo systemctl enable pizzacmd
 sudo systemctl start pizzacmd
-```
-
-### Option B: Using pizzapi Headless
-
-```bash
-# Install as shown in Raspberry Pi section
-sudo dpkg -i pizzapi_*.deb
-
-# Edit systemd service for headless mode
-sudo nano /etc/systemd/system/pizzapi.service
-```
-
-Ensure service file has:
-```ini
-[Service]
-ExecStart=/opt/pizzapi/pizzapi --headless
-Environment=DOTNET_ENVIRONMENT=Production
 ```
 
 ---
@@ -295,7 +266,6 @@ Content:
     <key>ProgramArguments</key>
     <array>
         <string>/Applications/pizzapi/pizzapi</string>
-        <string>--headless</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -315,6 +285,8 @@ Content:
 # Load the daemon
 sudo launchctl load /Library/LaunchDaemons/com.pizzawave.pizzapi.plist
 ```
+
+> **Note**: `pizzapi` requires a display environment and is not suitable for headless server deployments. Use `pizzacmd` for headless deployments.
 
 ---
 

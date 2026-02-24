@@ -7,6 +7,17 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Configurations>Debug;Release;DEBUG_X64_CUDA;RELEASE_X64_CUDA</Configurations>
+  </PropertyGroup>
+
+  <!-- Debug_X64_CUDA configuration with CUDA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug_X64_CUDA'">
+    <BuildProfile>Debug_X64_CUDA</BuildProfile>
+  </PropertyGroup>
+
+  <!-- Release_X64_CUDA configuration with CUDA -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_X64_CUDA'">
+    <BuildProfile>Release_X64_CUDA</BuildProfile>
   </PropertyGroup>
 
   <ItemGroup>

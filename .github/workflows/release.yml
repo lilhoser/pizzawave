@@ -42,25 +42,33 @@ jobs:
         include:
           - runtime: win-x64
             arch: x64
+            buildProfile: Release_X64_CUDA
           - runtime: linux-x64
             arch: x64
+            buildProfile: Release_X64_CUDA
           - runtime: linux-arm64
             arch: arm64
+            buildProfile: Default
           - runtime: osx-x64
             arch: x64
+            buildProfile: Release_X64_CUDA
           - runtime: osx-arm64
             arch: arm64
+            buildProfile: Default
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     - name: Build pizzalib (${{ matrix.runtime }})
+      env:
+        BuildProfile: ${{ matrix.buildProfile }}
       run: |
         dotnet publish pizzalib/pizzalib.csproj \
           -c Release \
           -r ${{ matrix.runtime }} \
           --self-contained false \
+          -p:BuildProfile=${{ matrix.buildProfile }} \
           -p:Version=${{ needs.get-version.outputs.version }} \
           -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
           -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
@@ -119,25 +127,33 @@ jobs:
         include:
           - runtime: win-x64
             arch: x64
+            buildProfile: Release_X64_CUDA
           - runtime: linux-x64
             arch: x64
+            buildProfile: Release_X64_CUDA
           - runtime: linux-arm64
             arch: arm64
+            buildProfile: Default
           - runtime: osx-x64
             arch: x64
+            buildProfile: Release_X64_CUDA
           - runtime: osx-arm64
             arch: arm64
+            buildProfile: Default
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     - name: Build pizzacmd (${{ matrix.runtime }})
+      env:
+        BuildProfile: ${{ matrix.buildProfile }}
       run: |
         dotnet publish pizzacmd/pizzacmd.csproj \
           -c Release \
           -r ${{ matrix.runtime }} \
           --self-contained false \
+          -p:BuildProfile=${{ matrix.buildProfile }} \
           -p:Version=${{ needs.get-version.outputs.version }} \
           -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
           -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
@@ -163,25 +179,40 @@ jobs:
           - arch: arm64
             runtime: linux-arm64
             deb-arch: arm64
+            buildProfile: Default
           - arch: x64
             runtime: linux-x64
             deb-arch: amd64
+            buildProfile: Release_X64_CUDA
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     - name: Build pizzapi (linux-${{ matrix.arch }})
+      env:
+        BuildProfile: ${{ matrix.buildProfile }}
       run: |
         dotnet publish pizzapi/pizzapi.csproj \
           -c Release \
           -r linux-${{ matrix.arch }} \
           --self-contained false \
+          -p:BuildProfile=${{ matrix.buildProfile }} \
           -p:PublishSingleFile=false \
           -p:Version=${{ needs.get-version.outputs.version }} \
           -p:AssemblyVersion=${{ needs.get-version.outputs.version }}.0 \
           -p:FileVersion=${{ needs.get-version.outputs.version }}.0 \
           -o ./publish/${{ matrix.arch }}
+    - name: Clean up unnecessary runtimes for ARM64
+      if: matrix.arch == 'arm64'
+      run: |
+        cd ./publish/${{ matrix.arch }}
+        # Remove CUDA and platform-specific runtimes for ARM64 builds
+        rm -rf runtimes/cuda
+        rm -rf runtimes/linux-x64
+        rm -rf runtimes/win-*
+        rm -rf runtimes/macos-*
+        rm -rf runtimes/linux-arm
     - name: Create package directory structure
       run: |
         mkdir -p package/DEBIAN

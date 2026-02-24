@@ -321,8 +321,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Initialize font size resource
         if (Application.Current != null)
             Application.Current.Resources["CurrentFontSize"] = FontSize;
+    }
 
-        InitializeAsync();
+    private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
+    {
+        await InitializeAsync();
     }
 
     private void OnViewButtonClicked(object? sender, RoutedEventArgs e)
@@ -682,7 +685,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"PizzaPi v{version}";
     }
 
-    private async void InitializeAsync()
+    private async Task InitializeAsync()
     {
         StatusText = "Initializing..";
 

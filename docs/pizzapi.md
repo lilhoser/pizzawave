@@ -110,18 +110,6 @@ See [pizzalib README](../pizzalib/README.md) for complete settings reference.
 - **View → Export → CSV** - Export all calls as CSV
 - Right-click any call to copy or save individually
 
-## Running Headless
-
-`pizzapi` can run without a GUI for server deployments:
-
-```bash
-pizzapi --headless
-```
-
-Optional parameters:
-- `--settings=<path>` - Custom settings file location
-- `--help` - Show all command-line options
-
 ## Running as a Service
 
 ### systemd (Linux)
@@ -152,7 +140,6 @@ Create `/Library/LaunchDaemons/com.pizzawave.pizzapi.plist`:
     <key>ProgramArguments</key>
     <array>
         <string>/opt/pizzapi/pizzapi</string>
-        <string>--headless</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
