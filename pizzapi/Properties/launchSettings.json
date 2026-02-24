@@ -1,11 +1,10 @@
 {
   "profiles": {
     "pizzapi": {
-      "commandName": "Project"
-    },
-    "pizzaui": {
-      "commandName": "Project",
-      "projectPath": "../pizzaui/pizzaui.csproj"
+        "commandName": "Project",
+        "remoteDebugEnabled": false,
+        "remoteDebugMachine": "192.168.2.190:22",
+        "authenticationMode": "Windows"
     }
   }
 }

@@ -9,6 +9,8 @@
     <ApplicationIcon></ApplicationIcon>
     <AssemblyName>pizzapi</AssemblyName>
     <RootNamespace>pizzapi</RootNamespace>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>

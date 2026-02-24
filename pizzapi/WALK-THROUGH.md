@@ -390,3 +390,70 @@ detach: `Ctrl+B then D`
 sudo systemctl restart trunk-recorder
 tmux ls
 ```
+
+### Remote debugging with Visual Studio
+
+**Prerequisites**
+
+1. On your Windows PC:
+ * Visual Studio 2022 with ".NET desktop development" and "C++ CMake tools" workloads
+ * SSH client (included with Git for Windows or Windows 10/11)
+2. On your Raspberry Pi:
+ * .NET 9.0 Runtime (already installed if pizzapi runs)
+ * SSH server (usually pre-installed on Raspbian)
+
+**Step 1: Configure Visual Studio**
+
+See [this link](https://learn.microsoft.com/en-us/visualstudio/debugger/remote-debugging-dotnet-core-linux-with-ssh?view=visualstudio) for more details.
+
+Add SSH Connection:
+
+    1. Tools → Options → Cross Platform → Connection Manager
+    2. Click Add
+    3. Fill in:
+    - Name: Raspberry Pi (or any name)
+    - Hostname: 192.168.x.x (your RPi IP)
+    - Port: 22
+    - Username: pi (or your RPi username)
+    - Authentication: Private Key (recommended) or Password
+
+    4. Click Connect to test
+
+Step 2: Deploy and Debug
+
+1. Deploy manually via SCP/SFTP:
+
+```
+# From Windows PowerShell
+scp -r artifacts\pizzapi\bin\Debug\net9.0\ pi@192.168.x.x:~/pizzapi
+```
+
+2. In Visual Studio:
+- Debug → Attach to Process
+- Connection type: SSH
+- Connection: Select your RPi
+- Process: Find pizzapi in the list
+- Click Attach
+
+**Alternative: Use VS Code (Lighter Weight)**
+
+1. Install VS Code with C# extension
+1. Create `.vscode/launch.json`:
+```
+{
+"version": "0.2.0",
+"configurations": [ {
+    "name": ".NET Core Launch (Remote)",
+    "type": "coreclr",
+    "request": "attach",
+    "pipeTransport": {
+        "pipeCwd": "${workspaceRoot}",
+        "pipeProgram": "ssh",
+        "pipeArgs": ["pi@192.168.x.x"],
+        "debuggerPath": "~/vsdbg/vsdbg"
+    },
+    "processId": ""
+    }]
+}
+```
+3. Deploy and attach using the SSH terminal
