@@ -5,7 +5,7 @@
         x:Name="settingsWindow"
         Title="PizzaPi Settings"
         Width="600"
-        Height="525"
+        Height="700"
         WindowStartupLocation="CenterScreen">
     <Border Padding="20">
         <DockPanel>
@@ -15,7 +15,16 @@
                        DockPanel.Dock="Top"
                        Margin="0,0,0,15" />
 
-            <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto">
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="10"
+                        DockPanel.Dock="Bottom"
+                        Margin="0,15,0,0">
+                <Button x:Name="SaveButton" Content="Save" Width="100" />
+                <Button x:Name="CancelButton" Content="Cancel" Width="100" />
+            </StackPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Spacing="15">
                     <StackPanel Spacing="5">
                         <TextBlock Text="Listen Port" FontSize="14" FontWeight="Bold" />
@@ -60,17 +69,42 @@
                                 Width="200"
                                 HorizontalAlignment="Left" />
                     </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Memory Management" FontSize="14" FontWeight="Bold" />
+                        <CheckBox x:Name="AutoCleanupCallsCheckBox"
+                                  Content="Auto-cleanup old calls (prevents memory leaks)"
+                                  FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Max calls to keep:" VerticalAlignment="Center" />
+                            <TextBox x:Name="MaxCallsToKeepTextBox"
+                                     Width="60"
+                                     FontSize="14"
+                                     HorizontalAlignment="Left" />
+                            <TextBlock Text="(0 = unlimited)"
+                                       VerticalAlignment="Center"
+                                       Foreground="Gray"
+                                       FontSize="12" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Logging" FontSize="14" FontWeight="Bold" />
+                        <TextBlock Text="Trace level:" FontSize="14" Margin="0,5,0,0" />
+                        <ComboBox x:Name="TraceLevelComboBox" Width="200" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="Error" />
+                            <ComboBoxItem Content="Warning" />
+                            <ComboBoxItem Content="Information" />
+                            <ComboBoxItem Content="Verbose" />
+                        </ComboBox>
+                        <TextBlock FontSize="11"
+                                   Foreground="Gray"
+                                   Text="Verbose logging creates detailed logs but uses more disk space"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
-
-            <StackPanel Orientation="Horizontal"
-                        HorizontalAlignment="Right"
-                        Spacing="10"
-                        DockPanel.Dock="Bottom"
-                        Margin="0,15,0,0">
-                <Button x:Name="SaveButton" Content="Save" Width="100" />
-                <Button x:Name="CancelButton" Content="Cancel" Width="100" />
-            </StackPanel>
         </DockPanel>
     </Border>
 </Window>

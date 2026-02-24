@@ -86,9 +86,18 @@ namespace pizzalib
 
             if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
             {
-                m_ModelFile = m_Settings.whisperModelFile; // nothing to do
+                m_ModelFile = m_Settings.whisperModelFile;
+                // Check if configured model exists
+                if (!File.Exists(m_ModelFile))
+                {
+                    Trace(TraceLoggerType.Whisper, TraceEventType.Warning,
+                          $"Configured model file not found: {m_ModelFile}");
+                    // Fall through to auto-download logic
+                    m_ModelFile = string.Empty;
+                }
             }
-            else
+            
+            if (string.IsNullOrEmpty(m_ModelFile))
             {
                 if (!Directory.Exists(s_ModelFolder))
                 {
@@ -106,7 +115,40 @@ namespace pizzalib
                     }
                 }
 
-                m_ModelFile = Path.Combine(s_ModelFolder, "ggml-base.bin");
+                // Determine model type from filename or default to base
+                string modelFilename = "ggml-base.bin";
+                GgmlType modelType = GgmlType.Base;
+                
+                // If user had a configured model, try to download that type
+                if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
+                {
+                    var configuredModel = Path.GetFileName(m_Settings.whisperModelFile);
+                    if (configuredModel.Contains("large-v3"))
+                    {
+                        modelFilename = configuredModel;
+                        modelType = GgmlType.LargeV3;
+                    }
+                    else if (configuredModel.Contains("medium"))
+                    {
+                        modelFilename = configuredModel;
+                        modelType = GgmlType.Medium;
+                    }
+                    else if (configuredModel.Contains("small"))
+                    {
+                        modelFilename = configuredModel;
+                        modelType = GgmlType.Small;
+                    }
+                    else if (configuredModel.Contains("tiny"))
+                    {
+                        modelFilename = configuredModel;
+                        modelType = GgmlType.Tiny;
+                    }
+                    // else keep default base model
+                    Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                          $"Attempting to download configured model: {modelFilename}");
+                }
+                
+                m_ModelFile = Path.Combine(s_ModelFolder, modelFilename);
 
                 if (!File.Exists(m_ModelFile))
                 {
@@ -118,9 +160,11 @@ namespace pizzalib
                           $"Downloading model file to {m_ModelFile}");
                     try
                     {
-                        var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(GgmlType.Base);
+                        var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(modelType);
                         var fileWriter = File.OpenWrite(m_ModelFile);
                         await modelStream.CopyToAsync(fileWriter);
+                        Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                              $"Model download complete: {m_ModelFile}");
                     }
                     catch (Exception ex)
                     {

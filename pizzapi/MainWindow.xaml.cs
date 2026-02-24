@@ -17,6 +17,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using static pizzapi.TraceLogger;
 
 namespace pizzapi;
 
@@ -688,21 +689,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Initialize trace logging to file
         TraceLogger.Initialize(RedirectToStdout: false);
         pizzalib.TraceLogger.Initialize(RedirectToStdout: false);
+        TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "PizzaPi UI starting...");
 
         // Settings are already loaded in constructor, just validate/load defaults
         try
         {
             _settings = Settings.LoadFromFile();
+            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Settings loaded from file");
         }
         catch
         {
             // Use default settings
             _settings = new Settings();
+            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Warning, "Using default settings (file not found)");
         }
 
         // Set trace level from settings
         TraceLogger.SetLevel(_settings.TraceLevelApp);
         pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+        TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Trace level set to {_settings.TraceLevelApp}");
 
         // Apply saved sort, group, and font size settings
         _currentSortMode = _settings.SortMode;
@@ -725,6 +730,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _serverStatusText = "Server: Running on port " + _settings.ListenPort;
             ServerInfo = $"Port {_settings.ListenPort}";
             _connectionStatus = "Connection: Ready";
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Server initialized on port {_settings.ListenPort}");
 
             // Start listening on port 9123
             _ = _callManager.Start();
@@ -757,6 +763,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             StatusText = $"New call: {call.FriendlyTalkgroup} @ {call.FriendlyFrequency}";
             CallCountText = $"Calls: {_callsReceivedCount + 1}";
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, 
+                $"Call received: {call.FriendlyTalkgroup} @ {call.FriendlyFrequency} ({call.Duration}s)");
 
             // Insert at correct position: pinned calls at top, then by recency
             int insertIndex = GetInsertIndex(call);
@@ -765,6 +773,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // Autoplay audio for alert matches (if enabled globally, not snoozed, and alert has autoplay enabled)
             if (call.IsAlertMatch && call.ShouldAutoplay && _settings.AutoplayAlerts && !IsAlertSnoozed)
             {
+                TraceLogger.Trace(TraceLoggerType.Alerts, TraceEventType.Information, 
+                    $"Alert triggered: {call.FriendlyTalkgroup} - autoplaying audio");
                 PlayAudio(call);
             }
 
@@ -777,6 +787,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 _alertsTriggeredCount++;
                 RaisePropertyChanged(nameof(AlertsTriggeredCount));
+                TraceLogger.Trace(TraceLoggerType.Alerts, TraceEventType.Information, 
+                    $"Alert match #{_alertsTriggeredCount}: {call.FriendlyTalkgroup}");
             }
 
             // If always pin alert matches is enabled, ensure the call stays pinned
@@ -800,6 +812,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
                 }
             }
+
+            // Cleanup old calls to prevent memory leaks
+            CleanupOldCalls();
         });
     }
 
@@ -851,6 +866,35 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             Calls.RemoveAt(currentIndex);
             Calls.Insert(newIndex, call);
+        }
+    }
+
+    /// <summary>
+    /// Removes oldest non-pinned calls to prevent memory leaks on long-running sessions.
+    /// Only applies to live mode (not offline call loading).
+    /// MaxCallsToKeep = 0 means unlimited (no cleanup).
+    /// </summary>
+    private void CleanupOldCalls()
+    {
+        // Only cleanup in live mode when auto-cleanup is enabled and limit > 0
+        if (!_isOfflineMode && _settings.AutoCleanupCalls && _settings.MaxCallsToKeep > 0)
+        {
+            // Remove oldest non-pinned calls if we exceed the limit
+            while (Calls.Count > _settings.MaxCallsToKeep)
+            {
+                // Find oldest non-pinned call (at the end since sorted newest first)
+                for (int i = Calls.Count - 1; i >= 0; i--)
+                {
+                    if (!Calls[i].IsPinned)
+                    {
+                        Calls.RemoveAt(i);
+                        break;
+                    }
+                }
+                // If all remaining calls are pinned, stop removing
+                if (Calls.All(c => c.IsPinned))
+                    break;
+            }
         }
     }
 
@@ -1349,15 +1393,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             _audioReader = new MediaFoundationReader(audioFilePath);
             _waveOut = new WaveOutEvent();
-            _waveOut.Init((IWaveProvider)_audioReader);
-            _waveOut.Play();
-
-            // Playback complete handler
-            _waveOut.PlaybackStopped += (sender, e) =>
+            
+            // Create explicit handler so we can unsubscribe (prevents memory leak)
+            EventHandler<StoppedEventArgs>? playbackHandler = null;
+            playbackHandler = (sender, e) =>
             {
+                // Unsubscribe first to prevent leak
+                if (_waveOut != null)
+                    _waveOut.PlaybackStopped -= playbackHandler;
+                
                 StopAudio();
                 HandlePlaybackComplete(newCall);
             };
+            
+            _waveOut.PlaybackStopped += playbackHandler;
+            _waveOut.Init((IWaveProvider)_audioReader);
+            _waveOut.Play();
         }
         catch (Exception ex)
         {
@@ -1391,9 +1442,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void PlayAudioLinux(string filePath, TranscribedCall call)
     {
+        Process? process = null;
+        EventHandler? processExited = null;
+
         try
         {
-            _currentAudioProcess = new Process
+            process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
@@ -1407,10 +1461,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 EnableRaisingEvents = true
             };
 
-            _currentAudioProcess.Exited += (sender, e) =>
+            // Create explicit handler so we can unsubscribe
+            processExited = (sender, e) =>
+            {
+                // Unsubscribe to prevent memory leak
+                if (process != null)
+                    process.Exited -= processExited;
+                
                 Dispatcher.UIThread.Post(() => HandlePlaybackComplete(call));
+            };
 
-            _currentAudioProcess.Start();
+            process.Exited += processExited;
+            _currentAudioProcess = process;
+            process.Start();
 
             // Set playing flag safely (use .ToList() snapshot)
             Dispatcher.UIThread.Post(() =>
@@ -1424,6 +1487,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception ex)
         {
             StatusText = $"Error starting ffplay: {ex.Message}\n\nInstall ffmpeg with:\nsudo apt install ffmpeg";
+            process?.Dispose();
             _currentAudioProcess = null;
         }
     }
@@ -1461,9 +1525,49 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     protected override void OnClosed(EventArgs e)
     {
-        base.OnClosed(e);
-        // Clean up audio resources when window is closed
+        // Stop audio playback first
         StopAudio();
+
+        // Stop live call manager and wait for background threads
+        if (_callManager != null && _callManager.IsStarted())
+        {
+            try
+            {
+                _callManager.Stop(block: true);
+                _callManager.Dispose();
+            }
+            catch (Exception ex)
+            {
+                // Log but don't crash on shutdown errors
+                System.Diagnostics.Debug.WriteLine($"Shutdown error: {ex.Message}");
+            }
+            _callManager = null;
+        }
+
+        // Stop offline call manager if active
+        if (_offlineCallManager != null)
+        {
+            try
+            {
+                _offlineCallManager.Stop();
+                _offlineCallManager.Dispose();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Shutdown error: {ex.Message}");
+            }
+            _offlineCallManager = null;
+        }
+
+        // Flush and close trace logs
+        try
+        {
+            TraceLogger.Shutdown();
+            pizzalib.TraceLogger.Shutdown();
+        }
+        catch { }
+
+        base.OnClosed(e);
     }
 
     protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)

@@ -232,6 +232,11 @@ namespace pizzalib
                 Trace(TraceLoggerType.LiveCallManager, TraceEventType.Error, $"{ex.Message}");
                 throw; // back up to worker thread
             }
+            finally
+            {
+                // Dispose RawCallData to release large PCM buffer (prevents memory leak)
+                CallData?.Dispose();
+            }
         }
 
         protected virtual void ProcessAlerts(TranscribedCall Call)

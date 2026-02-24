@@ -54,6 +54,8 @@ namespace pizzalib
         public int SortMode;  // 0=newest first, 1=oldest first, 2=talkgroup
         public int GroupMode; // 0=none, 1=talkgroup, 2=time of day, 3=source
         public double FontSize; // Default 14.0
+        public bool AutoCleanupCalls; // Auto-cleanup old calls to prevent memory leaks
+        public int MaxCallsToKeep; // Number of calls to keep before auto-cleanup
         //
         // TrunkRecorder settings
         //
@@ -170,6 +172,8 @@ namespace pizzalib
             SortMode = 0;  // Default: newest first
             GroupMode = 0; // Default: no grouping
             FontSize = 14.0; // Default font size
+            AutoCleanupCalls = true; // Default: enabled (prevents memory leaks)
+            MaxCallsToKeep = 100; // Default: keep 100 calls
             listenPort = 9123;
             analogSamplingRate = 8000;
             analogBitDepth = 16;
@@ -202,6 +206,8 @@ namespace pizzalib
                 SortMode == Other.SortMode &&
                 GroupMode == Other.GroupMode &&
                 FontSize == Other.FontSize &&
+                AutoCleanupCalls == Other.AutoCleanupCalls &&
+                MaxCallsToKeep == Other.MaxCallsToKeep &&
                 ListenPort == Other.ListenPort &&
                 AnalogChannels == Other.AnalogChannels &&
                 AnalogBitDepth == Other.AnalogBitDepth &&
@@ -236,6 +242,8 @@ namespace pizzalib
                 SortMode,
                 GroupMode,
                 FontSize,
+                AutoCleanupCalls,
+                MaxCallsToKeep,
                 ListenPort,
                 AnalogBitDepth,
                 AnalogChannels,

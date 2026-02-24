@@ -154,11 +154,19 @@ namespace pizzalib
                 using (var stream = Client.GetStream())
                 {
                     var wavStream = new RawCallData(m_Settings);
-                    var result = await wavStream.ProcessClientData(stream, CancelSource);
-                    if (result)
+                    try
                     {
-                        // Invoke callback for this call
-                        _ = NewCallDataCallback(wavStream);
+                        var result = await wavStream.ProcessClientData(stream, CancelSource);
+                        if (result && !CancelSource.IsCancellationRequested)
+                        {
+                            // Await the callback to ensure wavStream isn't disposed prematurely
+                            await NewCallDataCallback(wavStream);
+                        }
+                    }
+                    finally
+                    {
+                        // Dispose after callback completes to release PCM buffer
+                        wavStream.Dispose();
                     }
                 }
             }

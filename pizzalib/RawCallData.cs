@@ -35,7 +35,7 @@ namespace pizzalib
         Mp3
     }
 
-    public class RawCallData
+    public class RawCallData : IDisposable
     {
         private readonly static int PIZZA_MAGIC = 0x415A5A50; // pzza
         private readonly static int MAX_JSON_LENGTH = 4096 * 2;
@@ -44,11 +44,37 @@ namespace pizzalib
 
         private MemoryStream m_JsonData;
         private Settings m_Settings;
+        private bool m_Disposed;
 
         public RawCallData(Settings settings)
         {
             m_JsonData = new MemoryStream();
             m_Settings = settings;
+        }
+
+        ~RawCallData()
+        {
+            Dispose(false);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (m_Disposed) return;
+            m_Disposed = true;
+
+            if (disposing)
+            {
+                m_JsonData?.Dispose();
+            }
+
+            m_rawPcmData = null; // Release large PCM buffer
+            m_JsonData = null!;
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         public async Task<bool> ProcessClientData(Stream ClientStream, CancellationTokenSource CancelSource)

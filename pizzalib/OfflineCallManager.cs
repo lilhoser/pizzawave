@@ -152,11 +152,18 @@ namespace pizzalib
                             using (var stream = new MemoryStream(File.ReadAllBytes(file)))
                             {
                                 var wavStream = new RawCallData(m_Settings);
-                                var cancelSource = new CancellationTokenSource();
-                                var result = await wavStream.ProcessClientData(stream, cancelSource);
-                                if (result)
+                                try
                                 {
-                                    await HandleNewCall(wavStream);
+                                    var cancelSource = new CancellationTokenSource();
+                                    var result = await wavStream.ProcessClientData(stream, cancelSource);
+                                    if (result)
+                                    {
+                                        await HandleNewCall(wavStream);
+                                    }
+                                }
+                                finally
+                                {
+                                    wavStream.Dispose(); // Release PCM buffer
                                 }
                             }
                         }

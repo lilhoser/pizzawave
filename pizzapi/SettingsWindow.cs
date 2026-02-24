@@ -16,6 +16,9 @@ public class SettingsWindow : Window
     private CheckBox? _autoplayAlertsCheckBox;
     private ComboBox? _snoozeDurationComboBox;
     private Button? _importTalkgroupsButton;
+    private CheckBox? _autoCleanupCallsCheckBox;
+    private TextBox? _maxCallsToKeepTextBox;
+    private ComboBox? _traceLevelComboBox;
 
     // Parameterless constructor for XAML loading
     public SettingsWindow()
@@ -46,12 +49,17 @@ public class SettingsWindow : Window
         _autoplayAlertsCheckBox = this.FindControl<CheckBox>("AutoplayAlertsCheckBox");
         _snoozeDurationComboBox = this.FindControl<ComboBox>("SnoozeDurationComboBox");
         _importTalkgroupsButton = this.FindControl<Button>("ImportTalkgroupsButton");
+        _autoCleanupCallsCheckBox = this.FindControl<CheckBox>("AutoCleanupCallsCheckBox");
+        _maxCallsToKeepTextBox = this.FindControl<TextBox>("MaxCallsToKeepTextBox");
+        _traceLevelComboBox = this.FindControl<ComboBox>("TraceLevelComboBox");
         var saveButton = this.FindControl<Button>("SaveButton");
         var cancelButton = this.FindControl<Button>("CancelButton");
 
         if (_listenPortTextBox != null && _whisperModelFilePathTextBox != null &&
             _gmailUserTextBox != null && _gmailPasswordTextBox != null &&
             _autoplayAlertsCheckBox != null && _snoozeDurationComboBox != null &&
+            _autoCleanupCallsCheckBox != null && _maxCallsToKeepTextBox != null &&
+            _traceLevelComboBox != null &&
             saveButton != null && cancelButton != null)
         {
             var settings = _settings ??= new Settings();
@@ -61,6 +69,18 @@ public class SettingsWindow : Window
             _gmailUserTextBox.Text = settings.GmailUser ?? string.Empty;
             _gmailPasswordTextBox.Text = settings.GmailPassword ?? string.Empty;
             _autoplayAlertsCheckBox.IsChecked = settings.AutoplayAlerts;
+            _autoCleanupCallsCheckBox.IsChecked = settings.AutoCleanupCalls;
+            _maxCallsToKeepTextBox.Text = settings.MaxCallsToKeep.ToString();
+
+            // Set trace level combo box based on settings
+            _traceLevelComboBox.SelectedIndex = settings.TraceLevelApp switch
+            {
+                System.Diagnostics.SourceLevels.Error => 0,
+                System.Diagnostics.SourceLevels.Warning => 1,
+                System.Diagnostics.SourceLevels.Information => 2,
+                System.Diagnostics.SourceLevels.Verbose => 3,
+                _ => 0 // Default to Error
+            };
 
             // Set snooze duration combo box based on settings
             _snoozeDurationComboBox.SelectedIndex = settings.SnoozeDurationMinutes switch
@@ -102,6 +122,16 @@ public class SettingsWindow : Window
                         GmailUser = settings.GmailUser,
                         GmailPassword = settings.GmailPassword,
                         AutoplayAlerts = _autoplayAlertsCheckBox.IsChecked ?? false,
+                        AutoCleanupCalls = _autoCleanupCallsCheckBox.IsChecked ?? true,
+                        MaxCallsToKeep = int.TryParse(_maxCallsToKeepTextBox.Text, out int maxCalls) ? maxCalls : 100,
+                        TraceLevelApp = _traceLevelComboBox.SelectedIndex switch
+                        {
+                            0 => System.Diagnostics.SourceLevels.Error,
+                            1 => System.Diagnostics.SourceLevels.Warning,
+                            2 => System.Diagnostics.SourceLevels.Information,
+                            3 => System.Diagnostics.SourceLevels.Verbose,
+                            _ => System.Diagnostics.SourceLevels.Error
+                        },
                         SnoozeDurationMinutes = _snoozeDurationComboBox.SelectedIndex switch
                         {
                             0 => 5,
@@ -131,6 +161,9 @@ public class SettingsWindow : Window
                     settings.GmailUser = settingsCopy.GmailUser;
                     settings.GmailPassword = settingsCopy.GmailPassword;
                     settings.AutoplayAlerts = settingsCopy.AutoplayAlerts;
+                    settings.AutoCleanupCalls = settingsCopy.AutoCleanupCalls;
+                    settings.MaxCallsToKeep = settingsCopy.MaxCallsToKeep;
+                    settings.TraceLevelApp = settingsCopy.TraceLevelApp;
                     settings.SnoozeDurationMinutes = settingsCopy.SnoozeDurationMinutes;
 
                     settings.SaveToFile();
