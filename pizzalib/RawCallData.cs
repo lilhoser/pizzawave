@@ -204,8 +204,17 @@ namespace pizzalib
 
         public JObject GetJsonObject()
         {
-            var json = Encoding.UTF8.GetString(m_JsonData.GetBuffer(), 0, (int)m_JsonData.Length);
+            // UseToArray() to avoid buffer overflow - only get the actual written data
+            var json = Encoding.UTF8.GetString(m_JsonData.ToArray(), 0, (int)m_JsonData.Length);
             return JObject.Parse(json);
+        }
+
+        /// <summary>
+        /// Safely extracts JSON string from buffer, ensuring only written data is used.
+        /// </summary>
+        public string GetJsonString()
+        {
+            return Encoding.UTF8.GetString(m_JsonData.ToArray(), 0, (int)m_JsonData.Length);
         }
 
         public async Task DumpStreamToFile(string BaseDir, string FileName, OutputFileFormat Format)

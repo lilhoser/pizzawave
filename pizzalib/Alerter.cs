@@ -27,7 +27,9 @@ namespace pizzalib
     public class Alerter
     {
         private Dictionary<Guid, AlertEvent> m_AlertEvents;
+        private const int MaxAlertEvents = 100;
         private Settings m_Settings;
+        private readonly object m_AlertLock = new object();
 
         public Alerter(Settings Settings)
         {
@@ -37,9 +39,11 @@ namespace pizzalib
 
         public void ProcessAlerts(TranscribedCall Call)
         {
-            Call.IsAlertMatch = false;
-            Call.ShouldAutoplay = false;
-            foreach (var alert in m_Settings.Alerts)
+            lock (m_AlertLock)
+            {
+                Call.IsAlertMatch = false;
+                Call.ShouldAutoplay = false;
+                foreach (var alert in m_Settings.Alerts)
             {
                 Trace(TraceLoggerType.Alerts,
                       TraceEventType.Verbose,
@@ -70,6 +74,7 @@ namespace pizzalib
                 if (Call.IsAlertMatch)
                 {
                     break;
+                }
                 }
             }
         }
@@ -123,7 +128,17 @@ namespace pizzalib
             }
             else
             {
+                // Evict oldest entries if we've reached the limit
+                if (m_AlertEvents.Count >= MaxAlertEvents)
+                {
+                    var oldestKey = m_AlertEvents.Keys.FirstOrDefault();
+                    if (oldestKey != Guid.Empty)
+                    {
+                        m_AlertEvents.Remove(oldestKey);
+                    }
+                }
                 alertEvent = new AlertEvent(Alert.Id);
+                m_AlertEvents.Add(Alert.Id, alertEvent);
             }
 
             //

@@ -20,6 +20,7 @@ using System.Net.Sockets;
 using System.Net;
 using System.Diagnostics;
 using System.Text;
+using System.Threading.Tasks;
 using static pizzalib.TraceLogger;
 
 namespace pizzalib
@@ -31,6 +32,8 @@ namespace pizzalib
         private Settings m_Settings;
         private bool m_Started;
         private bool m_Disposed;
+        private readonly SemaphoreSlim m_ClientSemaphore;
+        private readonly int m_MaxConcurrentClients = 10;
 
         public StreamServer(
             Func<RawCallData, Task> NewCallDataCallback_,
@@ -39,6 +42,7 @@ namespace pizzalib
             NewCallDataCallback = NewCallDataCallback_;
             CancelSource = new CancellationTokenSource();
             m_Settings = Settings;
+            m_ClientSemaphore = new SemaphoreSlim(m_MaxConcurrentClients, m_MaxConcurrentClients);
         }
 
         ~StreamServer()
@@ -57,7 +61,8 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Started = false;
-            CancelSource.Cancel();
+            CancelSource?.Cancel();
+            CancelSource?.Dispose();
         }
 
         public void Dispose()
@@ -76,6 +81,8 @@ namespace pizzalib
             var ipEndPoint = new IPEndPoint(IPAddress.Any, m_Settings.listenPort);
             TcpListener listener = new(ipEndPoint);
             List<Task> tasks = new List<Task>();
+            CancelSource?.Cancel();
+            CancelSource?.Dispose();
             CancelSource = new CancellationTokenSource();
 
             try
@@ -88,7 +95,19 @@ namespace pizzalib
                 while (!CancelSource.IsCancellationRequested)
                 {
                     var client = await listener.AcceptTcpClientAsync(CancelSource.Token);
-                    var task = Task.Run(async () => await HandleNewClient(client));
+                    // Rate limit: wait for a slot to be available
+                    await m_ClientSemaphore.WaitAsync(CancelSource.Token);
+                    var task = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await HandleNewClient(client);
+                        }
+                        finally
+                        {
+                            m_ClientSemaphore.Release();
+                        }
+                    });
                     tasks.Add(task);
                 }
             }
@@ -119,8 +138,19 @@ namespace pizzalib
             }
             finally
             {
-                Task.WaitAll(tasks.ToArray());
+                try
+                {
+                    if (tasks.Count > 0)
+                    {
+                        Task.WaitAll(tasks.ToArray());
+                    }
+                }
+                catch (Exception)
+                {
+                    // tasks may have been cancelled
+                }
                 listener.Stop();
+                tasks.Clear();
                 m_Started = false;
             }
             return true;
@@ -133,11 +163,11 @@ namespace pizzalib
                   $"Received shutdown request.");
             if (block)
             {
-                CancelSource.Cancel();
+                CancelSource?.Cancel();
             }
             else
             {
-                CancelSource.CancelAsync();
+                CancelSource?.CancelAsync();
             }
         }
 
@@ -175,6 +205,7 @@ namespace pizzalib
                 Trace(TraceLoggerType.StreamServer,
                       TraceEventType.Error,
                       $"HandleNewClient() exception: {ex.Message}");
+                return false;
             }
             return true;
         }

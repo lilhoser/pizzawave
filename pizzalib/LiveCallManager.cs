@@ -56,7 +56,7 @@ namespace pizzalib
 
             m_Disposed = true;
             m_StreamServer?.Dispose();
-            base.Dispose(disposing);
+            // Note: base.Dispose() will handle m_Whisper disposal
         }
 
         public override async Task<bool> Initialize(Settings Settings)

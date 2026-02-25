@@ -174,6 +174,8 @@ namespace pizzalib
         public virtual void Stop(bool block = true)
         {
             m_JournalFile?.Close();
+            m_JournalFile?.Dispose();
+            m_JournalFile = null;
         }
 
         protected virtual async Task<bool> Reinitialize(Settings Settings)

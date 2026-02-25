@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 using System.Diagnostics;
+using System.IO;
 
 namespace pizzalib
 {
@@ -31,6 +32,9 @@ namespace pizzalib
         private static ConsoleTraceListener m_ConsoleTraceListener = new ConsoleTraceListener();
         private static SourceSwitch m_Switch =
             new SourceSwitch("pizzalibSwitch", "Verbose");
+        // Log rotation settings
+        private static readonly long m_MaxLogFileSize = 10 * 1024 * 1024; // 10MB
+        private static readonly int m_MaxLogFiles = 5;
         private static TraceSource[] Sources = {
             new TraceSource("StreamServer", SourceLevels.Verbose),
             new TraceSource("RawCallData", SourceLevels.Verbose),
@@ -91,8 +95,8 @@ namespace pizzalib
 
         public static void Shutdown()
         {
-            m_TextWriterTraceListener.Close();
-            m_ConsoleTraceListener.Close();
+            m_TextWriterTraceListener?.Close();
+            m_ConsoleTraceListener?.Close();
         }
 
         public static void SetLevel(SourceLevels Level)
@@ -106,15 +110,75 @@ namespace pizzalib
             {
                 throw new Exception("Invalid logger type");
             }
+
+            // Structured logging format: timestamp|level|type|message
+            var structuredMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}|{(int)EventType}|{Type}|{Message}";
             using (GetColorContext(EventType))
             {
-                Sources[(int)Type].TraceEvent(EventType, 1, $"{DateTime.Now:M/d/yyyy h:mm tt}: {Message}");
+                Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
             }
+
+            // Rotate log file if needed
+            RotateLogFile();
         }
 
         public static void OpenTraceLog()
         {
             Utilities.LaunchFile(m_Location);
+        }
+
+        private static void RotateLogFile()
+        {
+            try
+            {
+                if (File.Exists(m_Location))
+                {
+                    var fileInfo = new FileInfo(m_Location);
+                    if (fileInfo.Length > m_MaxLogFileSize)
+                    {
+                        RotateLogFiles();
+                        m_Location = Path.Combine(m_TraceFileDir,
+                            $"pizzalib-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt");
+                        m_TextWriterTraceListener = new TextWriterTraceListener(m_Location, "pizzalibTextWriterListener");
+                        foreach (var source in Sources)
+                        {
+                            source.Listeners.Add(m_TextWriterTraceListener);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Swallow rotation errors
+            }
+        }
+
+        private static void RotateLogFiles()
+        {
+            try
+            {
+                var dir = new DirectoryInfo(m_TraceFileDir);
+                var logFiles = dir.GetFiles("pizzalib-*.txt")
+                    .OrderByDescending(f => f.CreationTime)
+                    .Skip(m_MaxLogFiles - 1)
+                    .ToArray();
+
+                foreach (var file in logFiles)
+                {
+                    try
+                    {
+                        file.Delete();
+                    }
+                    catch
+                    {
+                        // Swallow deletion errors
+                    }
+                }
+            }
+            catch
+            {
+                // Swallow rotation errors
+            }
         }
 
         private static ColorContext GetColorContext(TraceEventType eventType)

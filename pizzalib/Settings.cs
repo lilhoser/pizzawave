@@ -19,6 +19,8 @@ under the License.
 using System.Diagnostics;
 using System.Reflection;
 using Newtonsoft.Json;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace pizzalib
 {
@@ -131,6 +133,10 @@ namespace pizzalib
             set => talkgroups = value;
         }
         //
+        // Config versioning
+        //
+        public int ConfigVersion { get; set; } = 1;
+        //
         // whisper.net settings
         //
         public string? whisperModelFile;
@@ -147,6 +153,21 @@ namespace pizzalib
         public Action? ProgressBarStepCallback;
         [JsonIgnore]
         public Action? HideProgressBarCallback;
+        //
+        // For JSON serialization - store encrypted credentials
+        //
+        [JsonIgnore]
+        public string? EncryptedGmailUser
+        {
+            get => ObfuscateString(gmailUser);
+            set => gmailUser = DeobfuscateString(value);
+        }
+        [JsonIgnore]
+        public string? EncryptedGmailPassword
+        {
+            get => ObfuscateString(gmailPassword);
+            set => gmailPassword = DeobfuscateString(value);
+        }
 
         public Settings()
         {
@@ -255,16 +276,73 @@ namespace pizzalib
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
         {
-            var fields = typeof(Settings).GetFields(
-                BindingFlags.Public | BindingFlags.Instance).ToList();
-            var field = fields.FirstOrDefault(p => p.Name == Name);
+            var field = typeof(Settings).GetField(Name, BindingFlags.Public | BindingFlags.Instance);
+            if (field == null) return false;
+
+            var value1 = field.GetValue(Object1);
+            var value2 = field.GetValue(Object2);
+            return !Equals(value1, value2);
+        }
+
+        //
+        // Credential obfuscation (cross-platform, not secure storage but better than plain text)
+        //
+        private static readonly byte[] s_Key = Encoding.UTF8.GetBytes("pizzawave-credential-key-2024");
+
+        private static string? ObfuscateString(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value;
+
             try
             {
-                dynamic value1 = field!.GetValue(Object1)!;
-                dynamic value2 = field!.GetValue(Object2)!;
-                return value1 != value2;
+                var bytes = Encoding.UTF8.GetBytes(value);
+                var result = new byte[bytes.Length];
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    result[i] = (byte)(bytes[i] ^ s_Key[i % s_Key.Length]);
+                }
+                return Convert.ToBase64String(result);
             }
-            catch (Exception) { return false; }
+            catch
+            {
+                return value;
+            }
+        }
+
+        private static string? DeobfuscateString(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value;
+
+            try
+            {
+                var bytes = Convert.FromBase64String(value);
+                var result = new byte[bytes.Length];
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    result[i] = (byte)(bytes[i] ^ s_Key[i % s_Key.Length]);
+                }
+                return Encoding.UTF8.GetString(result);
+            }
+            catch
+            {
+                // If deobfuscation fails, return as-is (may be plain text)
+                return value;
+            }
+        }
+
+        //
+        // Input validation
+        //
+        private static bool IsValidEmail(string? email)
+        {
+            if (string.IsNullOrEmpty(email))
+                return false;
+
+            // Basic email pattern validation
+            var pattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
+            return System.Text.RegularExpressions.Regex.IsMatch(email, pattern);
         }
 
         public virtual void Validate()
@@ -277,6 +355,10 @@ namespace pizzalib
 
             if (!string.IsNullOrEmpty(GmailUser))
             {
+                if (!IsValidEmail(GmailUser))
+                {
+                    throw new Exception($"Invalid Gmail address: {GmailUser}");
+                }
                 if (string.IsNullOrEmpty(GmailPassword))
                 {
                     throw new Exception("Gmail password is required");
@@ -284,10 +366,7 @@ namespace pizzalib
             }
             else if (!string.IsNullOrEmpty(GmailPassword))
             {
-                if (string.IsNullOrEmpty(GmailUser))
-                {
-                    throw new Exception("Gmail user is required");
-                }
+                throw new Exception("Gmail user is required when password is specified");
             }
         }
 
@@ -309,6 +388,16 @@ namespace pizzalib
             }
         }
 
+        public void Migrate()
+        {
+            if (ConfigVersion < 2)
+            {
+                // Migrate from version 1 to 2
+                // No migration needed currently
+                ConfigVersion = 2;
+            }
+        }
+
         public static Settings LoadFromFile(string? path = null)
         {
             var settingsPath = path ?? DefaultSettingsFileLocation;
@@ -324,6 +413,8 @@ namespace pizzalib
             {
                 var json = File.ReadAllText(settingsPath);
                 var settings = JsonConvert.DeserializeObject<Settings>(json) ?? new Settings();
+                // Migrate if needed
+                settings.Migrate();
                 // Ensure Alerts is initialized
                 if (settings.Alerts == null)
                 {

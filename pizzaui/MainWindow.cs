@@ -57,7 +57,7 @@ namespace pizzaui
                 try
                 {
                     var json = File.ReadAllText(settingsPath);
-                    m_Settings = (Settings)JsonConvert.DeserializeObject(json, typeof(Settings))!;
+                    m_Settings = JsonConvert.DeserializeObject<Settings>(json) ?? new Settings();
                     SetUiCallbacks();
                 }
                 catch (Exception ex)

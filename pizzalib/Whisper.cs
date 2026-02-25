@@ -43,6 +43,8 @@ namespace pizzalib
             m_Settings = Settings;
         }
 
+        private IDisposable? m_LoggerSubscription;
+
         ~Whisper()
         {
             Dispose(false);
@@ -59,6 +61,7 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Initialized = false;
+            m_LoggerSubscription?.Dispose();
             m_Factory?.Dispose();
         }
 
@@ -72,10 +75,10 @@ namespace pizzalib
         {
             m_Settings.UpdateProgressLabelCallback?.Invoke("Initializing Whisper model...");
 
-            LogProvider.AddLogger(delegate (WhisperLogLevel arg1, string? arg2) {
+            m_LoggerSubscription = LogProvider.AddLogger(delegate (WhisperLogLevel arg1, string? arg2) {
                 // Only log errors and warnings after initial setup
-                if (!m_Initialized || 
-                    arg1 == WhisperLogLevel.Error || 
+                if (!m_Initialized ||
+                    arg1 == WhisperLogLevel.Error ||
                     arg1 == WhisperLogLevel.Warning)
                 {
                     Trace(TraceLoggerType.Whisper,
@@ -160,8 +163,8 @@ namespace pizzalib
                           $"Downloading model file to {m_ModelFile}");
                     try
                     {
-                        var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(modelType);
-                        var fileWriter = File.OpenWrite(m_ModelFile);
+                        using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(modelType);
+                        using var fileWriter = File.OpenWrite(m_ModelFile);
                         await modelStream.CopyToAsync(fileWriter);
                         Trace(TraceLoggerType.Whisper, TraceEventType.Information,
                               $"Model download complete: {m_ModelFile}");

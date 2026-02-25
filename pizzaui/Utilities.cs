@@ -45,34 +45,30 @@ namespace pizzaui
 
         public static string Wordwrap(string LongString, int MaxLineLength)
         {
-            if (LongString.Length < MaxLineLength)
-            {
+            if (string.IsNullOrEmpty(LongString))
                 return LongString;
-            }
-            var lineLength = (int)Math.Sqrt((double)LongString.Length) * 2;
-            var sb = new StringBuilder();
-            var currentLinePosition = 0;
-            for (int textIndex = 0; textIndex < LongString.Length; textIndex++)
-            {
-                if (currentLinePosition >= lineLength && char.IsWhiteSpace(LongString[textIndex]))
-                {
-                    sb.Append(Environment.NewLine);
-                    currentLinePosition = 0;
-                }
-                if (currentLinePosition == 0)
-                {
-                    while (textIndex < LongString.Length && char.IsWhiteSpace(LongString[textIndex]))
-                    {
-                        textIndex++;
-                    }
-                }
 
-                if (textIndex < LongString.Length)
+            var words = LongString.Split(' ');
+            var sb = new StringBuilder();
+            var currentLine = new StringBuilder();
+
+            foreach (var word in words)
+            {
+                if (currentLine.Length + word.Length + 1 > MaxLineLength)
                 {
-                    sb.Append(LongString[textIndex]);
+                    if (sb.Length > 0) sb.AppendLine();
+                    sb.Append(currentLine.ToString().Trim());
+                    currentLine.Clear();
                 }
-                currentLinePosition++;
+                currentLine.Append(word + " ");
             }
+
+            if (currentLine.Length > 0)
+            {
+                if (sb.Length > 0) sb.AppendLine();
+                sb.Append(currentLine.ToString().Trim());
+            }
+
             return sb.ToString();
         }
     }
