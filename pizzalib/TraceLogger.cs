@@ -35,6 +35,9 @@ namespace pizzalib
         // Log rotation settings
         private static readonly long m_MaxLogFileSize = 10 * 1024 * 1024; // 10MB
         private static readonly int m_MaxLogFiles = 5;
+        private static readonly TimeSpan m_RotationCheckInterval = TimeSpan.FromSeconds(5);
+        private static DateTime m_LastRotationCheck = DateTime.MinValue;
+        private static long m_LastFileLength = 0;
         private static TraceSource[] Sources = {
             new TraceSource("StreamServer", SourceLevels.Verbose),
             new TraceSource("RawCallData", SourceLevels.Verbose),
@@ -95,8 +98,22 @@ namespace pizzalib
 
         public static void Shutdown()
         {
-            m_TextWriterTraceListener?.Close();
-            m_ConsoleTraceListener?.Close();
+            try
+            {
+                m_TextWriterTraceListener?.Close();
+            }
+            catch
+            {
+                // Ignore errors during shutdown
+            }
+            try
+            {
+                m_ConsoleTraceListener?.Close();
+            }
+            catch
+            {
+                // Ignore errors during shutdown - on Linux this can crash if console is already closed
+            }
         }
 
         public static void SetLevel(SourceLevels Level)
@@ -118,8 +135,8 @@ namespace pizzalib
                 Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
             }
 
-            // Rotate log file if needed
-            RotateLogFile();
+            // Rotate log file if needed (only check every few seconds to reduce I/O overhead)
+            MaybeRotateLogFile();
         }
 
         public static void OpenTraceLog()
@@ -127,14 +144,25 @@ namespace pizzalib
             Utilities.LaunchFile(m_Location);
         }
 
-        private static void RotateLogFile()
+        private static void MaybeRotateLogFile()
         {
+            // Only check for log rotation every few seconds to reduce I/O overhead
+            // This is critical for Linux/RPI where file system operations are slower
+            var now = DateTime.Now;
+            if ((now - m_LastRotationCheck) < m_RotationCheckInterval)
+            {
+                return;
+            }
+
+            m_LastRotationCheck = now;
+
             try
             {
                 if (File.Exists(m_Location))
                 {
                     var fileInfo = new FileInfo(m_Location);
-                    if (fileInfo.Length > m_MaxLogFileSize)
+                    // Only rotate if file has grown since last check
+                    if (fileInfo.Length > m_MaxLogFileSize && fileInfo.Length != m_LastFileLength)
                     {
                         RotateLogFiles();
                         m_Location = Path.Combine(m_TraceFileDir,
@@ -145,6 +173,7 @@ namespace pizzalib
                             source.Listeners.Add(m_TextWriterTraceListener);
                         }
                     }
+                    m_LastFileLength = fileInfo.Length;
                 }
             }
             catch

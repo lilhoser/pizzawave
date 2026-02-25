@@ -20,6 +20,7 @@ using FFMpegCore;
 using FFMpegCore.Extensions.Downloader;
 using Newtonsoft.Json;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using static pizzalib.TraceLogger;
 
 namespace pizzalib
@@ -61,6 +62,23 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Initialized = false;
+
+            // Clean up FFmpeg on Linux to prevent core dump on exit
+            // FFmpeg can leave behind processes or shared resources that cause crashes
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                try
+                {
+                    // Force FFmpeg to clean up any remaining processes
+                    GlobalFFOptions.Configure(options => options.BinaryFolder = string.Empty);
+                    Trace(TraceLoggerType.CallManager, TraceEventType.Information, "FFmpeg cleanup performed on Linux");
+                }
+                catch
+                {
+                    // Swallow cleanup errors
+                }
+            }
+
             m_Whisper?.Dispose();
             m_JournalFile?.Dispose();
         }

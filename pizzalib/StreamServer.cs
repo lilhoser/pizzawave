@@ -90,6 +90,8 @@ namespace pizzalib
                 var listenStr = $"Listening on port {m_Settings.listenPort}";
                 m_Settings.UpdateConnectionLabelCallback?.Invoke(listenStr);
                 Trace(TraceLoggerType.StreamServer, TraceEventType.Information, listenStr);
+                // Configure trace level based on platform - Linux/RPI needs less verbose logging
+                // to avoid high CPU usage from file I/O and console output
                 m_Started = true;
                 listener.Start();
                 while (!CancelSource.IsCancellationRequested)
@@ -109,6 +111,9 @@ namespace pizzalib
                         }
                     });
                     tasks.Add(task);
+                    // Small delay to prevent busy polling on Linux/RPI
+                    // This reduces CPU usage when no clients are connecting
+                    await Task.Delay(10, CancelSource.Token);
                 }
             }
             catch (AggregateException ae)
@@ -176,9 +181,9 @@ namespace pizzalib
             var clientEndpoint = Client.Client.RemoteEndPoint as IPEndPoint;
             var clientStr = $"{clientEndpoint!.Address}:{clientEndpoint!.Port}";
             Trace(TraceLoggerType.StreamServer,
-                  TraceEventType.Verbose,
-                  $"Receiving from {clientStr}");
-            m_Settings.UpdateConnectionLabelCallback?.Invoke($"Receiving from {clientStr}");
+                  TraceEventType.Information,
+                  $"Connection from {clientStr}");
+            m_Settings.UpdateConnectionLabelCallback?.Invoke($"Connection from {clientStr}");
             try
             {
                 using (var stream = Client.GetStream())
