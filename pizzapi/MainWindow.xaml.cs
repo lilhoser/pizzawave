@@ -189,6 +189,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _alwaysPinAlertMatches = true;
     private int _currentSortMode = 0; // 0=newest first, 1=oldest first, 2=talkgroup
     private int _currentGroupMode = 0; // 0=none, 1=talkgroup, 2=time of day, 3=source
+    private bool _isAlertSnoozed = false;
+    private string _bellToolTipText = "Alert audio: Enabled (click to snooze)";
+    private Avalonia.Media.SolidColorBrush? _bellColor = null;
     private Button? _alwaysPinAlertsButton;
     private Popup? _viewSubMenuPopup;
     private Border? _sortSubMenuBorder;
@@ -207,7 +210,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // Flag to prevent re-entrancy in collapse/expand
     private bool _isCollapsingExpanding = false;
 
-    public bool IsAlertSnoozed => _snoozeUntil.HasValue && DateTime.Now < _snoozeUntil.Value;
+    // Timer for periodic usage text updates
+    private DispatcherTimer? _usageTextTimer;
+
+    public bool IsAlertSnoozed
+    {
+        get => _isAlertSnoozed;
+        set { _isAlertSnoozed = value; RaisePropertyChanged(); }
+    }
 
     public bool IsOfflineMode => _isOfflineMode;
 
@@ -217,47 +227,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public string BellToolTipText
     {
-        get
-        {
-            // Check if snooze has expired
-            if (_snoozeUntil.HasValue && DateTime.Now >= _snoozeUntil.Value)
-            {
-                _snoozeUntil = null;
-            }
-            
-            if (!_settings.AutoplayAlerts)
-                return "Alert audio: Disabled (click to enable)";
-            if (IsAlertSnoozed)
-                return $"Alert audio: Snoozed until {_snoozeUntil.Value:t} (click to change)";
-            return $"Alert audio: Enabled (click to snooze)";
-        }
+        get => _bellToolTipText;
+        set { _bellToolTipText = value; RaisePropertyChanged(); }
     }
 
     public Avalonia.Media.SolidColorBrush BellColor
     {
-        get
-        {
-            // Check if snooze has expired
-            if (_snoozeUntil.HasValue && DateTime.Now >= _snoozeUntil.Value)
-            {
-                _snoozeUntil = null;
-                RaisePropertyChanged(nameof(IsAlertSnoozed));
-                RaisePropertyChanged(nameof(BellToolTipText));
-            }
-
-            // Determine color based on current state
-            // Gray when disabled, orange when snoozed, green when enabled
-            bool alertsEnabled = _settings?.AutoplayAlerts ?? false;
-            bool isSnoozed = _snoozeUntil.HasValue;
-            
-            var colorHex = !alertsEnabled
-                ? "#666666"  // Gray when disabled
-                : isSnoozed
-                    ? "#ffaa00"  // Orange when snoozed
-                    : "#00ff00"; // Green when enabled
-
-            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
-        }
+        get => _bellColor;
+        set { _bellColor = value; RaisePropertyChanged(); }
     }
 
     // Menu visibility
@@ -287,10 +264,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         set { _versionString = value; RaisePropertyChanged(); }
     }
 
-    public string UsageText
-    {
-        get { return GetCaptureFolderSize(); }
-    }
+    // Cached usage text - updated periodically via timer
+    private string _usageText = "Usage: 0mb";
+
+    public string UsageText => _usageText;
 
     public ObservableCollection<TranscribedCall> Calls { get; } = new ObservableCollection<TranscribedCall>();
     public ObservableCollection<CallGroupItem> GroupedCalls { get; } = new ObservableCollection<CallGroupItem>();
@@ -321,6 +298,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Initialize font size resource
         if (Application.Current != null)
             Application.Current.Resources["CurrentFontSize"] = FontSize;
+
+        // Start periodic usage text update (every 5 seconds)
+        _usageTextTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(5)
+        };
+        _usageTextTimer.Tick += (s, e) => UpdateUsageText();
+        _usageTextTimer.Start();
     }
 
     private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
@@ -720,9 +705,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateGroupCheckmarks();
 
         // Force refresh bell icon state after settings are loaded
-        RaisePropertyChanged(nameof(IsAlertSnoozed));
-        RaisePropertyChanged(nameof(BellColor));
-        RaisePropertyChanged(nameof(BellToolTipText));
+        UpdateBellState();
 
         _callManager = new LiveCallManager(OnNewCall);
 
@@ -908,6 +891,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{mhz:F3}mhz";
     }
 
+    // Update usage text periodically (called by timer)
+    private void UpdateUsageText()
+    {
+        try
+        {
+            var capturePath = Settings.DefaultLiveCaptureDirectory;
+            if (!Directory.Exists(capturePath))
+            {
+                _usageText = "Usage: 0mb";
+            }
+            else
+            {
+                var size = GetDirectorySize(capturePath);
+                var mb = size / (1024.0 * 1024.0);
+                _usageText = $"Usage: {mb:F0}mb";
+            }
+        }
+        catch
+        {
+            _usageText = "Usage: ?mb";
+        }
+        RaisePropertyChanged(nameof(UsageText));
+    }
+
     private string GetCaptureFolderSize()
     {
         try
@@ -1039,19 +1046,60 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void SnoozeAlerts(int minutes)
     {
         _snoozeUntil = DateTime.Now.AddMinutes(minutes);
-        RaisePropertyChanged(nameof(IsAlertSnoozed));
-        RaisePropertyChanged(nameof(BellToolTipText));
-        RaisePropertyChanged(nameof(BellColor));
+        UpdateBellState();
         StatusText = $"Snoozed for {minutes} min";
     }
 
     private void EnableAlertAudio()
     {
         _snoozeUntil = null;
+        UpdateBellState();
+        StatusText = "Enabled";
+    }
+
+    // Update bell icon state - called when snooze or autoplay settings change
+    private void UpdateBellState()
+    {
+        // Check if snooze has expired
+        if (_snoozeUntil.HasValue && DateTime.Now >= _snoozeUntil.Value)
+        {
+            _snoozeUntil = null;
+            _isAlertSnoozed = false;
+        }
+        else
+        {
+            _isAlertSnoozed = _snoozeUntil.HasValue;
+        }
+
+        // Determine tooltip text
+        if (!_settings.AutoplayAlerts)
+        {
+            _bellToolTipText = "Alert audio: Disabled (click to enable)";
+        }
+        else if (_isAlertSnoozed)
+        {
+            _bellToolTipText = $"Alert audio: Snoozed until {_snoozeUntil.Value:t} (click to change)";
+        }
+        else
+        {
+            _bellToolTipText = "Alert audio: Enabled (click to snooze)";
+        }
+
+        // Determine color
+        bool alertsEnabled = _settings?.AutoplayAlerts ?? false;
+        bool isSnoozed = _isAlertSnoozed;
+        string colorHex = !alertsEnabled
+            ? "#666666"  // Gray when disabled
+            : isSnoozed
+                ? "#ffaa00"  // Orange when snoozed
+                : "#00ff00"; // Green when enabled
+
+        _bellColor = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
+
+        // Raise property changed notifications
         RaisePropertyChanged(nameof(IsAlertSnoozed));
         RaisePropertyChanged(nameof(BellToolTipText));
         RaisePropertyChanged(nameof(BellColor));
-        StatusText = "Enabled";
     }
 
     private void ToggleSnoozeMenu()
@@ -1069,8 +1117,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 {
                     _settings.AutoplayAlerts = true;
                     _settings.SaveToFile();
-                    RaisePropertyChanged(nameof(BellToolTipText));
-                    RaisePropertyChanged(nameof(BellColor));
+                    UpdateBellState();
                     StatusText = "Enabled";
                 })
             });
@@ -1125,8 +1172,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 _settings.AutoplayAlerts = false;
                 _settings.SaveToFile();
-                RaisePropertyChanged(nameof(BellToolTipText));
-                RaisePropertyChanged(nameof(BellColor));
+                UpdateBellState();
                 StatusText = "Disabled";
             })
         });
@@ -1141,8 +1187,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await settingsWindow.ShowDialog(this);
         // Reload settings from file and refresh bell icon state after dialog closes
         _settings = Settings.LoadFromFile();
-        RaisePropertyChanged(nameof(BellToolTipText));
-        RaisePropertyChanged(nameof(BellColor));
+        UpdateBellState();
         HideMenu();
     }
 
@@ -1530,6 +1575,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         // Stop audio playback first
         StopAudio();
+
+        // Stop usage text update timer
+        _usageTextTimer?.Stop();
+        _usageTextTimer = null;
 
         // Stop live call manager and wait for background threads
         if (_callManager != null && _callManager.IsStarted())
