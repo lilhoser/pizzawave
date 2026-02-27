@@ -305,13 +305,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Interval = TimeSpan.FromSeconds(5)
         };
         _usageTextTimer.Tick += (s, e) => UpdateUsageText();
-        _usageTextTimer.Start();
+        //_usageTextTimer.Start();
     }
 
-    private void OnWindowLoaded(object? sender, RoutedEventArgs e)
+    protected override void OnOpened(EventArgs e)
     {
         // Start initialization in background to avoid blocking UI thread
         _ = InitializeAsync();
+
+        base.OnOpened(e);
     }
 
     private void OnViewButtonClicked(object? sender, RoutedEventArgs e)

@@ -55,7 +55,9 @@ namespace pizzapi
 
         public static void Initialize(bool RedirectToStdout = false)
         {
-            System.Diagnostics.Trace.AutoFlush = true;
+            // Disable AutoFlush to prevent excessive disk I/O on Linux/RPI
+            // Traces will be flushed when Shutdown() is called or manually
+            System.Diagnostics.Trace.AutoFlush = false;
             foreach (var source in Sources)
             {
                 source.Listeners.Add(m_TextWriterTraceListener);

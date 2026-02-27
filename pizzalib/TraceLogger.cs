@@ -63,7 +63,9 @@ namespace pizzalib
 
         public static void Initialize(bool RedirectToStdout = false)
         {
-            System.Diagnostics.Trace.AutoFlush = true;
+            // Disable AutoFlush to prevent excessive disk I/O on Linux/RPI
+            // Traces will be flushed when Shutdown() is called or manually
+            System.Diagnostics.Trace.AutoFlush = false;
             foreach (var source in Sources)
             {
                 source.Listeners.Add(m_TextWriterTraceListener);
@@ -110,6 +112,7 @@ namespace pizzalib
             }
 
             // Structured logging format: timestamp|level|type|message
+            // Note: AutoFlush is disabled to prevent excessive disk I/O on Linux/RPI
             var structuredMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}|{(int)EventType}|{Type}|{Message}";
             Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
         }

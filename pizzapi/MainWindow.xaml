@@ -9,8 +9,7 @@
         Width="800"
         Height="600"
         WindowStartupLocation="CenterScreen"
-        Icon="/images/logo-small.png"
-		Loaded="OnWindowLoaded">
+        Icon="/images/logo-small.png">
     <Window.Resources>
         <local:BoolToDoubleConverter x:Key="BoolToDoubleConverter" />
         <local:BoolToStringConverter x:Key="BoolToStringConverter" />

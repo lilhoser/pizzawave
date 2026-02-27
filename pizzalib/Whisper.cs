@@ -42,13 +42,9 @@ namespace pizzalib
             m_ModelFile = string.Empty;
             m_Settings = Settings;
         }
-
-        private IDisposable? m_LoggerSubscription;
-
-        ~Whisper()
-        {
-            Dispose(false);
-        }
+        
+        // Removed finalizer - native resources must be explicitly disposed
+        // Finalizers on Linux can cause segfaults when cleaning up native libraries
 
         protected virtual void Dispose(bool disposing)
         {
@@ -61,7 +57,6 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Initialized = false;
-            m_LoggerSubscription?.Dispose();
             m_Factory?.Dispose();
         }
 
@@ -74,18 +69,6 @@ namespace pizzalib
         public async Task<bool> Initialize()
         {
             m_Settings.UpdateProgressLabelCallback?.Invoke("Initializing Whisper model...");
-
-            m_LoggerSubscription = LogProvider.AddLogger(delegate (WhisperLogLevel arg1, string? arg2) {
-                // Only log errors and warnings after initial setup
-                if (!m_Initialized ||
-                    arg1 == WhisperLogLevel.Error ||
-                    arg1 == WhisperLogLevel.Warning)
-                {
-                    Trace(TraceLoggerType.Whisper,
-                          TraceEventType.Information,
-                          $"{arg2}");
-                }
-            });
 
             if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
             {
