@@ -27,77 +27,18 @@ namespace pizzalib
         Daily
     }
 
-    public class Alert : IEquatable<Alert>
+    public class Alert
     {
-        public Guid Id { get; set; }
-        public string Name { get; set; }
-        public string Email { get; set; }
-        public string Keywords { get; set; }
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Keywords { get; set; } = string.Empty;
         public AlertFrequency Frequency { get; set; }
-        public List<long> Talkgroups { get; set; }
+        public List<long> Talkgroups { get; set; } = [];
         public bool Enabled { get; set; }
-        public bool Autoplay { get; set; }
+        public bool Autoplay { get; set; } = true;
 
-        public Alert()
-        {
-            Name = string.Empty;
-            Email = string.Empty;
-            Keywords = string.Empty;
-            Id = Guid.NewGuid();
-            Talkgroups = new List<long>();
-            Autoplay = true;
-        }
-
-        public override string ToString()
-        {
-            return $"{Name}({(Enabled ? "on" : "off")}: {Keywords}";
-        }
-
-        public override bool Equals(object? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            var field = Other as Alert;
-            return Equals(field);
-        }
-
-        public bool Equals(Alert? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            return Id == Other.Id &&
-                Name == Other.Name &&
-                Email == Other.Email &&
-                Keywords == Other.Keywords &&
-                Frequency == Other.Frequency &&
-                Talkgroups == Other.Talkgroups &&
-                Enabled == Other.Enabled &&
-                Autoplay == Other.Autoplay;
-        }
-
-        public static bool operator ==(Alert? Alert1, Alert? Alert2)
-        {
-            if ((object)Alert1 == null || (object)Alert2 == null)
-                return Equals(Alert1, Alert2);
-            return Alert1.Equals(Alert2);
-        }
-
-        public static bool operator !=(Alert? Alert1, Alert? Alert2)
-        {
-            if ((object)Alert1 == null || (object)Alert2 == null)
-                return !Equals(Alert1, Alert2);
-            return !(Alert1.Equals(Alert2));
-        }
-
-        public override int GetHashCode()
-        {
-            return (Name, Email, Keywords, Frequency, Talkgroups, Enabled, Autoplay
-                ).GetHashCode();
-        }
+        public override string ToString() => $"{Name}({(Enabled ? "on" : "off")}: {Keywords}";
 
         public void Validate()
         {

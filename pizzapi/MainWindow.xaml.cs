@@ -308,9 +308,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _usageTextTimer.Start();
     }
 
-    private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
+    private void OnWindowLoaded(object? sender, RoutedEventArgs e)
     {
-        await InitializeAsync();
+        // Start initialization in background to avoid blocking UI thread
+        _ = InitializeAsync();
     }
 
     private void OnViewButtonClicked(object? sender, RoutedEventArgs e)
@@ -672,67 +673,84 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task InitializeAsync()
     {
-        StatusText = "Initializing..";
-
-        // Initialize trace logging to file
-        TraceLogger.Initialize(RedirectToStdout: false);
-        pizzalib.TraceLogger.Initialize(RedirectToStdout: false);
-        TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "PizzaPi UI starting...");
-
-        // Settings are already loaded in constructor, just validate/load defaults
-        try
+        // Run initialization on background thread to avoid blocking UI
+        await Task.Run(async () =>
         {
-            _settings = Settings.LoadFromFile();
-            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Settings loaded from file");
-        }
-        catch
-        {
-            // Use default settings
-            _settings = new Settings();
-            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Warning, "Using default settings (file not found)");
-        }
+            StatusText = "Initializing..";
 
-        // Set trace level from settings
-        TraceLogger.SetLevel(_settings.TraceLevelApp);
-        pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
-        TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Trace level set to {_settings.TraceLevelApp}");
+            // Initialize trace logging to file
+            TraceLogger.Initialize(RedirectToStdout: false);
+            pizzalib.TraceLogger.Initialize(RedirectToStdout: false);
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "PizzaPi UI starting...");
 
-        // Apply saved sort, group, and font size settings
-        _currentSortMode = _settings.SortMode;
-        _currentGroupMode = _settings.GroupMode;
-        FontSize = _settings.FontSize;
-        UpdateSortCheckmarks();
-        UpdateGroupCheckmarks();
+            // Settings are already loaded in constructor, just validate/load defaults
+            try
+            {
+                _settings = Settings.LoadFromFile();
+                TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Settings loaded from file");
+            }
+            catch
+            {
+                // Use default settings
+                _settings = new Settings();
+                TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Warning, "Using default settings (file not found)");
+            }
 
-        // Force refresh bell icon state after settings are loaded
-        UpdateBellState();
+            // Set trace level from settings
+            TraceLogger.SetLevel(_settings.TraceLevelApp);
+            pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Trace level set to {_settings.TraceLevelApp}");
 
-        _callManager = new LiveCallManager(OnNewCall);
+            // Apply saved sort, group, and font size settings
+            _currentSortMode = _settings.SortMode;
+            _currentGroupMode = _settings.GroupMode;
+            FontSize = _settings.FontSize;
 
-        try
-        {
-            await _callManager.Initialize(_settings);
-            StatusText = "Ready to receive calls";
-            _serverStatusText = "Server: Running on port " + _settings.ListenPort;
-            ServerInfo = $"Port {_settings.ListenPort}";
-            _connectionStatus = "Connection: Ready";
-            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Server initialized on port {_settings.ListenPort}");
+            _callManager = new LiveCallManager(OnNewCall);
 
-            // Start listening on port 9123
-            _ = _callManager.Start();
-            _infoText = "PizzaPi is listening on port " + _settings.ListenPort + " for trunk-recorder calls";
-            RaisePropertyChanged(nameof(ServerStatusText));
-            RaisePropertyChanged(nameof(ConnectionStatus));
-            RaisePropertyChanged(nameof(ServerInfo));
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Error: {ex.Message}";
-            _serverStatusText = "Server: Error - " + ex.Message;
-            ServerInfo = "Error: " + ex.Message;
-            RaisePropertyChanged(nameof(ServerStatusText));
-            RaisePropertyChanged(nameof(ServerInfo));
-        }
+            try
+            {
+                await _callManager.Initialize(_settings);
+
+                // Update UI on dispatcher thread
+                Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = "Ready to receive calls";
+                    _serverStatusText = "Server: Running on port " + _settings.ListenPort;
+                    ServerInfo = $"Port {_settings.ListenPort}";
+                    _connectionStatus = "Connection: Ready";
+                    TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Server initialized on port {_settings.ListenPort}");
+
+                    // Start listening on port 9123
+                    _ = _callManager.Start();
+                    _infoText = "PizzaPi is listening on port " + _settings.ListenPort + " for trunk-recorder calls";
+                    RaisePropertyChanged(nameof(ServerStatusText));
+                    RaisePropertyChanged(nameof(ConnectionStatus));
+                    RaisePropertyChanged(nameof(ServerInfo));
+
+                    UpdateSortCheckmarks();
+                    UpdateGroupCheckmarks();
+                    UpdateBellState();
+                });
+            }
+            catch (Exception ex)
+            {
+                var errorMsg = $"Error: {ex.Message}";
+                var errorServerStatus = $"Server: Error - " + ex.Message;
+                var errorInfo = "Error: " + ex.Message;
+
+                // Update UI on dispatcher thread
+                Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = errorMsg;
+                    _serverStatusText = errorServerStatus;
+                    ServerInfo = errorInfo;
+                    RaisePropertyChanged(nameof(ServerStatusText));
+                    RaisePropertyChanged(nameof(ServerInfo));
+                });
+                TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Error, errorMsg);
+            }
+        });
     }
 
     private void OnNewCall(TranscribedCall call)
@@ -1466,17 +1484,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void StopAudio()
     {
-        // Linux path
+        // Linux path - ffplay process
         if (_currentAudioProcess != null)
         {
             try
             {
                 if (!_currentAudioProcess.HasExited)
+                {
                     _currentAudioProcess.Kill();
+                    // Wait for process to exit gracefully with timeout
+                    _currentAudioProcess.WaitForExit(2000);
+                }
             }
             catch { }
-            _currentAudioProcess.Dispose();
-            _currentAudioProcess = null;
+            finally
+            {
+                _currentAudioProcess.Dispose();
+                _currentAudioProcess = null;
+            }
         }
 
         // Windows path

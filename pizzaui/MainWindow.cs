@@ -367,7 +367,7 @@ namespace pizzaui
             // While it's possible to allow alert creation without talkgroups, it makes the
             // experience much worse and adds unnecessary complexity.
             //
-            if (m_Settings.talkgroups == null || m_Settings.talkgroups.Count == 0)
+            if (m_Settings.Talkgroups == null || m_Settings.Talkgroups.Count == 0)
             {
                 MessageBox.Show("Please import talkgroups in the Settings Window before creating alerts.");
                 return;

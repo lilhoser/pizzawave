@@ -23,16 +23,10 @@ namespace pizzalib
 {
     public static class Utilities
     {
-        public static void LaunchFile(string FileName)
+        public static void LaunchFile(string fileName)
         {
-            if (!File.Exists(FileName))
-            {
-                return;
-            }
-            var psi = new ProcessStartInfo();
-            psi.FileName = FileName;
-            psi.UseShellExecute = true;
-            Process.Start(psi);
+            if (!File.Exists(fileName)) return;
+            Process.Start(new ProcessStartInfo { FileName = fileName, UseShellExecute = true });
         }
 
         public static async Task<bool> IsFfmpegInPathAsync()

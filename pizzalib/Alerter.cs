@@ -37,194 +37,172 @@ namespace pizzalib
             m_AlertEvents = new Dictionary<Guid, AlertEvent>();
         }
 
-        public void ProcessAlerts(TranscribedCall Call)
+        public void ProcessAlerts(TranscribedCall call)
         {
             lock (m_AlertLock)
             {
-                Call.IsAlertMatch = false;
-                Call.ShouldAutoplay = false;
+                call.IsAlertMatch = false;
+                call.ShouldAutoplay = false;
+
                 foreach (var alert in m_Settings.Alerts)
-            {
-                Trace(TraceLoggerType.Alerts,
-                      TraceEventType.Verbose,
-                      $"Processing alert {alert.Name} for call ID {Call.CallId}");
-                if (!alert.Enabled)
                 {
-                    Trace(TraceLoggerType.Alerts,
-                          TraceEventType.Information,
-                          $"Alert {alert.Name} is disabled, skipping.");
-                    continue;
-                }
-                var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
-                foreach (var keyword in keywords)
-                {
-                    if (!string.IsNullOrEmpty(Call.Transcription) &&
-                        Call.Transcription.ToLower().Contains(keyword.ToLower()))
+                    Trace(TraceLoggerType.Alerts, TraceEventType.Verbose,
+                          $"Processing alert {alert.Name} for call ID {call.CallId}");
+
+                    if (!alert.Enabled)
                     {
-                        Trace(TraceLoggerType.Alerts,
-                              TraceEventType.Information,
-                              $"Alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
-                        Call.IsAlertMatch = true;
-                        Call.IsPinned = true; // Auto-pin alert matches
-                        Call.ShouldAutoplay = alert.Autoplay;
-                        TriggerAlertEvent(alert, Call);
-                        break;
+                        Trace(TraceLoggerType.Alerts, TraceEventType.Information,
+                              $"Alert {alert.Name} is disabled, skipping.");
+                        continue;
                     }
-                }
-                if (Call.IsAlertMatch)
-                {
-                    break;
-                }
+
+                    var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var keyword in keywords)
+                    {
+                        if (!string.IsNullOrEmpty(call.Transcription) &&
+                            call.Transcription.ToLower().Contains(keyword.ToLower()))
+                        {
+                            Trace(TraceLoggerType.Alerts, TraceEventType.Information,
+                                  $"Alert {alert.Name} keyword {keyword} matches call ID {call.CallId} transcription.");
+                            call.IsAlertMatch = true;
+                            call.IsPinned = true;
+                            call.ShouldAutoplay = alert.Autoplay;
+                            TriggerAlertEvent(alert, call);
+                            break;
+                        }
+                    }
+
+                    if (call.IsAlertMatch) break;
                 }
             }
         }
 
-        public static void ProcessAlertsOffline(TranscribedCall Call, List<Alert> Alerts)
+        public static void ProcessAlertsOffline(TranscribedCall call, List<Alert> alerts)
         {
-            Call.IsAlertMatch = false;
-            foreach (var alert in Alerts)
+            call.IsAlertMatch = false;
+
+            foreach (var alert in alerts)
             {
-                Trace(TraceLoggerType.Alerts,
-                      TraceEventType.Verbose,
-                      $"Processing offline alert {alert.Name} for call ID {Call.CallId}");
+                Trace(TraceLoggerType.Alerts, TraceEventType.Verbose,
+                      $"Processing offline alert {alert.Name} for call ID {call.CallId}");
+
                 if (!alert.Enabled)
                 {
-                    Trace(TraceLoggerType.Alerts,
-                          TraceEventType.Information,
+                    Trace(TraceLoggerType.Alerts, TraceEventType.Information,
                           $"Offline alert {alert.Name} is disabled, skipping.");
                     continue;
                 }
-                var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+
+                var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries);
                 foreach (var keyword in keywords)
                 {
-                    if (!string.IsNullOrEmpty(Call.Transcription) &&
-                        Call.Transcription.ToLower().Contains(keyword.ToLower()))
+                    if (!string.IsNullOrEmpty(call.Transcription) &&
+                        call.Transcription.ToLower().Contains(keyword.ToLower()))
                     {
-                        Trace(TraceLoggerType.Alerts,
-                              TraceEventType.Information,
-                              $"Offline alert {alert.Name} keyword {keyword} matches call ID {Call.CallId} transcription.");
-                        Call.IsAlertMatch = true;
-                        Call.IsPinned = true; // Auto-pin alert matches
+                        Trace(TraceLoggerType.Alerts, TraceEventType.Information,
+                              $"Offline alert {alert.Name} keyword {keyword} matches call ID {call.CallId} transcription.");
+                        call.IsAlertMatch = true;
+                        call.IsPinned = true;
                         break;
                     }
                 }
-                if (Call.IsAlertMatch)
-                {
-                    break;
-                }
+
+                if (call.IsAlertMatch) break;
             }
         }
 
-        private void TriggerAlertEvent(Alert Alert, TranscribedCall Call)
+        private void TriggerAlertEvent(Alert alert, TranscribedCall call)
         {
-            //
-            // If this alert has triggered before, pull its record, otherwise create
-            // create a new event tracker.
-            //
-            AlertEvent alertEvent;
-            if (m_AlertEvents.ContainsKey(Alert.Id))
-            {
-                alertEvent = m_AlertEvents[Alert.Id];
-            }
-            else
-            {
-                // Evict oldest entries if we've reached the limit
-                if (m_AlertEvents.Count >= MaxAlertEvents)
-                {
-                    var oldestKey = m_AlertEvents.Keys.FirstOrDefault();
-                    if (oldestKey != Guid.Empty)
-                    {
-                        m_AlertEvents.Remove(oldestKey);
-                    }
-                }
-                alertEvent = new AlertEvent(Alert.Id);
-                m_AlertEvents.Add(Alert.Id, alertEvent);
-            }
+            // Get or create alert event tracker
+            var alertEvent = m_AlertEvents.GetValueOrDefault(alert.Id) ?? CreateAlertEvent(alert.Id);
 
-            //
-            // Because this function can be invoked by multiple threads processing different
-            // calls, we must acquire the AlertEvent lock exclusive (writer).
-            //
             alertEvent.LockExclusive();
-
             try
             {
-                if (alertEvent.LastTriggered != DateTime.MinValue)
-                {
-                    int diff;
-                    switch (Alert.Frequency)
-                    {
-                        case AlertFrequency.Daily:
-                            {
-                                diff = (int)(DateTime.Now - alertEvent.LastTriggered).TotalDays;
-                                break;
-                            }
-                        case AlertFrequency.Hourly:
-                            {
-                                diff = (int)(DateTime.Now - alertEvent.LastTriggered).TotalHours;
-                                break;
-                            }
-                        case AlertFrequency.RealTime:
-                            {
-                                diff = (int)(DateTime.Now - alertEvent.LastTriggered).TotalSeconds;
-                                if (alertEvent.TriggerCountLastInterval > AlertEvent.s_RealtimeThresholdPerInterval)
-                                {
-                                    if (diff <= AlertEvent.s_RealtimeIntervalSec)
-                                    {
-                                        Trace(TraceLoggerType.Alerts,
-                                              TraceEventType.Warning,
-                                              $"NOT triggering: Alert set to real-time has been triggered " +
-                                              $"{alertEvent.TriggerCountLastInterval} times in the past {diff} seconds.");
-                                        return;
-                                    }
-                                    alertEvent.TriggerCountLastInterval = 0; // reset the count
-                                }
-                                diff = 1;
-                                break;
-                            }
-                        default:
-                            {
-                                Trace(TraceLoggerType.Alerts,
-                                      TraceEventType.Error,
-                                      $"Unrecognized alert frequency {Alert.Frequency}");
-                                return;
-                            }
-                    }
-
-                    if (diff < 1)
-                    {
-                        Trace(TraceLoggerType.Alerts,
-                              TraceEventType.Warning,
-                              $"NOT triggering: Alert set to {Alert.Frequency}, last triggered " +
-                              $"{alertEvent.LastTriggered:M/d/yyyy h:mm tt}");
-                        return;
-                    }
-                }
+                if (!ShouldTriggerAlert(alert, alertEvent)) return;
 
                 alertEvent.LastTriggered = DateTime.Now;
                 alertEvent.TriggerCountLastInterval++;
 
                 // Send email notification only if alert has email AND Gmail is configured
-                if (!string.IsNullOrEmpty(Alert.Email) &&
+                if (!string.IsNullOrEmpty(alert.Email) &&
                     !string.IsNullOrEmpty(m_Settings.gmailUser) &&
                     !string.IsNullOrEmpty(m_Settings.gmailPassword))
                 {
-                    alertEvent.Unlock(); // don't hold lock, email could block
-                    SendEmailNotification(Alert, alertEvent, Call);
+                    alertEvent.Unlock();
+                    SendEmailNotification(alert, alertEvent, call);
+                    alertEvent.LockExclusive();
                 }
                 else
                 {
-                    // UI-only alert (call is already pinned and marked as alert match)
-                    Trace(TraceLoggerType.Alerts,
-                          TraceEventType.Information,
-                          $"Alert {Alert.Name}: UI notification only (no email configured)");
-                    alertEvent.Unlock();
+                    Trace(TraceLoggerType.Alerts, TraceEventType.Information,
+                          $"Alert {alert.Name}: UI notification only (no email configured)");
                 }
             }
             finally
             {
                 alertEvent.Unlock();
             }
+        }
+
+        private AlertEvent CreateAlertEvent(Guid alertId)
+        {
+            // Evict oldest entries if we've reached the limit
+            if (m_AlertEvents.Count >= MaxAlertEvents)
+            {
+                var oldestKey = m_AlertEvents.Keys.FirstOrDefault();
+                if (oldestKey != Guid.Empty) m_AlertEvents.Remove(oldestKey);
+            }
+
+            var alertEvent = new AlertEvent(alertId);
+            m_AlertEvents.Add(alertId, alertEvent);
+            return alertEvent;
+        }
+
+        private bool ShouldTriggerAlert(Alert alert, AlertEvent alertEvent)
+        {
+            if (alertEvent.LastTriggered == DateTime.MinValue) return true;
+
+            var now = DateTime.Now;
+            int diff;
+            bool shouldTrigger = true;
+
+            switch (alert.Frequency)
+            {
+                case AlertFrequency.Daily:
+                    diff = (int)(now - alertEvent.LastTriggered).TotalDays;
+                    break;
+                case AlertFrequency.Hourly:
+                    diff = (int)(now - alertEvent.LastTriggered).TotalHours;
+                    break;
+                case AlertFrequency.RealTime:
+                    var seconds = (int)(now - alertEvent.LastTriggered).TotalSeconds;
+                    if (alertEvent.TriggerCountLastInterval > AlertEvent.s_RealtimeThresholdPerInterval &&
+                        seconds <= AlertEvent.s_RealtimeIntervalSec)
+                    {
+                        Trace(TraceLoggerType.Alerts, TraceEventType.Warning,
+                              $"NOT triggering: Alert set to real-time has been triggered " +
+                              $"{alertEvent.TriggerCountLastInterval} times in the past {seconds} seconds.");
+                        return false;
+                    }
+                    if (seconds > AlertEvent.s_RealtimeIntervalSec) alertEvent.TriggerCountLastInterval = 0;
+                    diff = 1;
+                    break;
+                default:
+                    Trace(TraceLoggerType.Alerts, TraceEventType.Error,
+                          $"Unrecognized alert frequency {alert.Frequency}");
+                    return false;
+            }
+
+            if (diff < 1)
+            {
+                Trace(TraceLoggerType.Alerts, TraceEventType.Warning,
+                      $"NOT triggering: Alert set to {alert.Frequency}, last triggered " +
+                      $"{alertEvent.LastTriggered:M/d/yyyy h:mm tt}");
+                return false;
+            }
+
+            return true;
         }
 
         private void SendEmailNotification(Alert Alert, AlertEvent AlertEvent, TranscribedCall Call)

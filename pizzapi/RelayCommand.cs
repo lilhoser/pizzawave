@@ -1,4 +1,5 @@
 using System;
+using Avalonia.Input;
 using System.Windows.Input;
 
 namespace pizzapi;
@@ -12,20 +13,11 @@ public class RelayCommand : ICommand
         _execute = execute;
     }
 
-    public bool CanExecute(object? parameter)
-    {
-        return true;
-    }
+    public bool CanExecute(object? parameter) => true;
 
-    public void Execute(object? parameter)
-    {
-        _execute();
-    }
+    public void Execute(object? parameter) => _execute();
 
     public event EventHandler? CanExecuteChanged;
 
-    public void RaiseCanExecuteChanged()
-    {
-        CanExecuteChanged?.Invoke(this, EventArgs.Empty);
-    }
+    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }

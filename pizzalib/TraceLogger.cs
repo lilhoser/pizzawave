@@ -1,4 +1,4 @@
-﻿/* 
+/*
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -29,15 +29,8 @@ namespace pizzalib
                             $"pizzalib-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
         private static TextWriterTraceListener m_TextWriterTraceListener =
             new TextWriterTraceListener(m_Location, "pizzalibTextWriterListener");
-        private static ConsoleTraceListener m_ConsoleTraceListener = new ConsoleTraceListener();
         private static SourceSwitch m_Switch =
             new SourceSwitch("pizzalibSwitch", "Verbose");
-        // Log rotation settings
-        private static readonly long m_MaxLogFileSize = 10 * 1024 * 1024; // 10MB
-        private static readonly int m_MaxLogFiles = 5;
-        private static readonly TimeSpan m_RotationCheckInterval = TimeSpan.FromSeconds(5);
-        private static DateTime m_LastRotationCheck = DateTime.MinValue;
-        private static long m_LastFileLength = 0;
         private static TraceSource[] Sources = {
             new TraceSource("StreamServer", SourceLevels.Verbose),
             new TraceSource("RawCallData", SourceLevels.Verbose),
@@ -75,10 +68,6 @@ namespace pizzalib
             {
                 source.Listeners.Add(m_TextWriterTraceListener);
                 source.Switch = m_Switch;
-                if (RedirectToStdout)
-                {
-                    source.Listeners.Add(m_ConsoleTraceListener);
-                }
             }
 
             if (Directory.Exists(Settings.DefaultWorkingDirectory))
@@ -106,14 +95,6 @@ namespace pizzalib
             {
                 // Ignore errors during shutdown
             }
-            try
-            {
-                m_ConsoleTraceListener?.Close();
-            }
-            catch
-            {
-                // Ignore errors during shutdown - on Linux this can crash if console is already closed
-            }
         }
 
         public static void SetLevel(SourceLevels Level)
@@ -130,147 +111,12 @@ namespace pizzalib
 
             // Structured logging format: timestamp|level|type|message
             var structuredMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}|{(int)EventType}|{Type}|{Message}";
-            using (GetColorContext(EventType))
-            {
-                Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
-            }
-
-            // Rotate log file if needed (only check every few seconds to reduce I/O overhead)
-            MaybeRotateLogFile();
+            Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
         }
 
         public static void OpenTraceLog()
         {
             Utilities.LaunchFile(m_Location);
-        }
-
-        private static void MaybeRotateLogFile()
-        {
-            // Only check for log rotation every few seconds to reduce I/O overhead
-            // This is critical for Linux/RPI where file system operations are slower
-            var now = DateTime.Now;
-            if ((now - m_LastRotationCheck) < m_RotationCheckInterval)
-            {
-                return;
-            }
-
-            m_LastRotationCheck = now;
-
-            try
-            {
-                if (File.Exists(m_Location))
-                {
-                    var fileInfo = new FileInfo(m_Location);
-                    // Only rotate if file has grown since last check
-                    if (fileInfo.Length > m_MaxLogFileSize && fileInfo.Length != m_LastFileLength)
-                    {
-                        RotateLogFiles();
-                        m_Location = Path.Combine(m_TraceFileDir,
-                            $"pizzalib-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt");
-                        m_TextWriterTraceListener = new TextWriterTraceListener(m_Location, "pizzalibTextWriterListener");
-                        foreach (var source in Sources)
-                        {
-                            source.Listeners.Add(m_TextWriterTraceListener);
-                        }
-                    }
-                    m_LastFileLength = fileInfo.Length;
-                }
-            }
-            catch
-            {
-                // Swallow rotation errors
-            }
-        }
-
-        private static void RotateLogFiles()
-        {
-            try
-            {
-                var dir = new DirectoryInfo(m_TraceFileDir);
-                var logFiles = dir.GetFiles("pizzalib-*.txt")
-                    .OrderByDescending(f => f.CreationTime)
-                    .Skip(m_MaxLogFiles - 1)
-                    .ToArray();
-
-                foreach (var file in logFiles)
-                {
-                    try
-                    {
-                        file.Delete();
-                    }
-                    catch
-                    {
-                        // Swallow deletion errors
-                    }
-                }
-            }
-            catch
-            {
-                // Swallow rotation errors
-            }
-        }
-
-        private static ColorContext GetColorContext(TraceEventType eventType)
-        {
-            switch (eventType)
-            {
-                case TraceEventType.Verbose:
-                    return new ColorContext(ConsoleColor.DarkGray);
-                case TraceEventType.Information:
-                    return new ColorContext(ConsoleColor.Gray);
-                case TraceEventType.Critical:
-                    return new ColorContext(ConsoleColor.DarkRed);
-                case TraceEventType.Error:
-                    return new ColorContext(ConsoleColor.Red);
-                case TraceEventType.Warning:
-                    return new ColorContext(ConsoleColor.Yellow);
-                case TraceEventType.Start:
-                    return new ColorContext(ConsoleColor.DarkGreen);
-                case TraceEventType.Stop:
-                    return new ColorContext(ConsoleColor.DarkMagenta);
-                case TraceEventType.Transfer:
-                    return new ColorContext(ConsoleColor.DarkYellow);
-                default:
-                    return new ColorContext();
-            }
-        }
-    }
-
-    internal sealed class ColorContext : IDisposable
-    {
-        private readonly ConsoleColor previousBackgroundColor;
-        private readonly ConsoleColor previousForegroundColor;
-        private bool isDisposed;
-
-        public ColorContext()
-            : this(Console.ForegroundColor, Console.BackgroundColor)
-        {
-        }
-
-        public ColorContext(ConsoleColor foregroundColor)
-            : this(foregroundColor, Console.BackgroundColor)
-        {
-        }
-
-        public ColorContext(ConsoleColor foregroundColor, ConsoleColor backgroundColor)
-        {
-            this.isDisposed = false;
-            this.previousForegroundColor = Console.ForegroundColor;
-            this.previousBackgroundColor = Console.BackgroundColor;
-            Console.ForegroundColor = foregroundColor;
-            Console.BackgroundColor = backgroundColor;
-        }
-
-        public void Dispose()
-        {
-            if (this.isDisposed)
-            {
-                return;
-            }
-
-            Console.ForegroundColor = this.previousForegroundColor;
-            Console.BackgroundColor = this.previousBackgroundColor;
-            this.isDisposed = true;
         }
     }
 }

@@ -119,36 +119,31 @@ namespace pizzalib
                 }
 
                 // Determine model type from filename or default to base
+                var modelMap = new Dictionary<string, (string filename, GgmlType type)>(StringComparer.OrdinalIgnoreCase)
+                {
+                    { "large-v3", ("ggml-large-v3.bin", GgmlType.LargeV3) },
+                    { "medium", ("ggml-medium.bin", GgmlType.Medium) },
+                    { "small", ("ggml-small.bin", GgmlType.Small) },
+                    { "tiny", ("ggml-tiny.bin", GgmlType.Tiny) }
+                };
+
                 string modelFilename = "ggml-base.bin";
                 GgmlType modelType = GgmlType.Base;
-                
-                // If user had a configured model, try to download that type
+
                 if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
                 {
                     var configuredModel = Path.GetFileName(m_Settings.whisperModelFile);
-                    if (configuredModel.Contains("large-v3"))
+                    foreach (var kvp in modelMap)
                     {
-                        modelFilename = configuredModel;
-                        modelType = GgmlType.LargeV3;
+                        if (configuredModel.Contains(kvp.Key))
+                        {
+                            modelFilename = kvp.Value.filename;
+                            modelType = kvp.Value.type;
+                            Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                                  $"Attempting to download configured model: {modelFilename}");
+                            break;
+                        }
                     }
-                    else if (configuredModel.Contains("medium"))
-                    {
-                        modelFilename = configuredModel;
-                        modelType = GgmlType.Medium;
-                    }
-                    else if (configuredModel.Contains("small"))
-                    {
-                        modelFilename = configuredModel;
-                        modelType = GgmlType.Small;
-                    }
-                    else if (configuredModel.Contains("tiny"))
-                    {
-                        modelFilename = configuredModel;
-                        modelType = GgmlType.Tiny;
-                    }
-                    // else keep default base model
-                    Trace(TraceLoggerType.Whisper, TraceEventType.Information,
-                          $"Attempting to download configured model: {modelFilename}");
                 }
                 
                 m_ModelFile = Path.Combine(s_ModelFolder, modelFilename);

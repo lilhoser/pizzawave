@@ -100,7 +100,7 @@ namespace pizzaui
             //
             // Load talkgroups from settings
             //
-            talkgroupsListview.SetObjects(m_Settings.talkgroups);
+            talkgroupsListview.SetObjects(m_Settings.Talkgroups);
 
             alertsListview.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
             alertsListview.AutoResizeColumns(ColumnHeaderAutoResizeStyle.HeaderSize);
@@ -248,7 +248,7 @@ namespace pizzaui
 
         private void AlertManagerWindow_Shown(object sender, EventArgs e)
         {
-            if (m_Settings.talkgroups == null || m_Settings.talkgroups.Count == 0)
+            if (m_Settings.Talkgroups == null || m_Settings.Talkgroups.Count == 0)
             {
                 MessageBox.Show("Unable to load alert manager: no talkgroups");
                 Close();

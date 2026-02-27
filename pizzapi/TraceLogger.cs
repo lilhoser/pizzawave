@@ -29,7 +29,6 @@ namespace pizzapi
                             $"pizzapi-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
         private static TextWriterTraceListener m_TextWriterTraceListener =
             new TextWriterTraceListener(m_Location, "pizzapiTextWriterListener");
-        private static ConsoleTraceListener m_ConsoleTraceListener = new ConsoleTraceListener();
         private static SourceSwitch m_Switch =
             new SourceSwitch("pizzapiSwitch", "Verbose");
         private static TraceSource[] Sources = {
@@ -61,10 +60,6 @@ namespace pizzapi
             {
                 source.Listeners.Add(m_TextWriterTraceListener);
                 source.Switch = m_Switch;
-                if (RedirectToStdout)
-                {
-                    source.Listeners.Add(m_ConsoleTraceListener);
-                }
             }
 
             if (Directory.Exists(pizzalib.Settings.DefaultWorkingDirectory))
@@ -92,14 +87,6 @@ namespace pizzapi
             {
                 // Ignore errors during shutdown
             }
-            try
-            {
-                m_ConsoleTraceListener?.Close();
-            }
-            catch
-            {
-                // Ignore errors during shutdown - on Linux this can crash if console is already closed
-            }
         }
 
         public static void SetLevel(SourceLevels Level)
@@ -113,58 +100,12 @@ namespace pizzapi
             {
                 throw new Exception("Invalid logger type");
             }
-            using (GetColorContext(EventType))
-            {
-                Sources[(int)Type].TraceEvent(EventType, 1, $"{DateTime.Now:M/d/yyyy h:mm tt}: {Message}");
-            }
+            Sources[(int)Type].TraceEvent(EventType, 1, $"{DateTime.Now:M/d/yyyy h:mm tt}: {Message}");
         }
 
         public static void OpenTraceLog()
         {
             Utilities.LaunchFile(m_Location);
-        }
-
-        private static ColorContext GetColorContext(TraceEventType eventType)
-        {
-            switch (eventType)
-            {
-                case TraceEventType.Verbose:
-                    return new ColorContext(ConsoleColor.DarkGray);
-                case TraceEventType.Information:
-                    return new ColorContext(ConsoleColor.Gray);
-                case TraceEventType.Critical:
-                    return new ColorContext(ConsoleColor.DarkRed);
-                case TraceEventType.Error:
-                    return new ColorContext(ConsoleColor.Red);
-                case TraceEventType.Warning:
-                    return new ColorContext(ConsoleColor.Yellow);
-                case TraceEventType.Start:
-                    return new ColorContext(ConsoleColor.DarkGreen);
-                case TraceEventType.Stop:
-                    return new ColorContext(ConsoleColor.Green);
-                case TraceEventType.Suspend:
-                    return new ColorContext(ConsoleColor.DarkYellow);
-                case TraceEventType.Resume:
-                    return new ColorContext(ConsoleColor.Yellow);
-                default:
-                    return new ColorContext(ConsoleColor.White);
-            }
-        }
-
-        private class ColorContext : IDisposable
-        {
-            public ColorContext(ConsoleColor NewColor)
-            {
-                m_OriginalColor = Console.ForegroundColor;
-                Console.ForegroundColor = NewColor;
-            }
-
-            public void Dispose()
-            {
-                Console.ForegroundColor = m_OriginalColor;
-            }
-
-            private ConsoleColor m_OriginalColor;
         }
     }
 }

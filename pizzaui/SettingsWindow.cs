@@ -46,7 +46,7 @@ namespace pizzaui
                 saveButton.Enabled = false;
             }
 
-            m_LoadedTalkgroups = CurrentSettings.talkgroups;
+            m_LoadedTalkgroups = CurrentSettings.Talkgroups;
 
             if (m_LoadedTalkgroups != null)
             {
@@ -116,7 +116,7 @@ namespace pizzaui
             {
                 throw new Exception("Invalid bit depth");
             }
-            settings.talkgroups = m_LoadedTalkgroups;
+            settings.Talkgroups = m_LoadedTalkgroups;
             //
             // Whisper.net settings
             //

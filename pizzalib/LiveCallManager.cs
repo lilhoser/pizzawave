@@ -23,14 +23,12 @@ namespace pizzalib
 {
     public class LiveCallManager : CallManager, IDisposable
     {
-        private bool m_Initialized;
         private Alerter? m_Alerter;
         private StreamServer? m_StreamServer;
         private bool m_Disposed;
 
         public LiveCallManager(Action<TranscribedCall> newTranscribedCallCallback) : base(newTranscribedCallCallback)
         {
-            m_Initialized = false;
         }
 
         ~LiveCallManager()
@@ -61,7 +59,7 @@ namespace pizzalib
 
         public override async Task<bool> Initialize(Settings Settings)
         {
-            if (m_Initialized)
+            if (IsStarted())
             {
                 return await Reinitialize(Settings);
             }
@@ -71,7 +69,6 @@ namespace pizzalib
                 await base.Initialize(Settings);
                 m_Alerter = new Alerter(Settings);
                 m_StreamServer = new StreamServer(HandleNewCall, Settings);
-                m_Initialized = true;
             }
             catch (Exception ex)
             {
@@ -83,11 +80,7 @@ namespace pizzalib
 
         public override bool IsStarted()
         {
-            if (!m_Initialized || !base.IsStarted())
-            {
-                return false;
-            }
-            if (m_StreamServer == null)
+            if (!base.IsStarted() || m_StreamServer == null)
             {
                 return false;
             }
@@ -157,12 +150,10 @@ namespace pizzalib
 
         protected override async Task<bool> Reinitialize(Settings Settings)
         {
-            if (!m_Initialized)
+            if (!IsStarted())
             {
                 throw new Exception("Invalid LiveCallManager state for re-initialize");
             }
-
-            m_Initialized = false;
 
             try
             {

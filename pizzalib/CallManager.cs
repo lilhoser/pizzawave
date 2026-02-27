@@ -28,7 +28,7 @@ namespace pizzalib
     public abstract class CallManager : IDisposable
     {
         protected Whisper? m_Whisper;
-        private bool m_Initialized;
+        protected bool m_Initialized;
         private bool m_Disposed;
         private StreamWriter? m_JournalFile;
         private string m_CaptureRoot;
@@ -63,14 +63,14 @@ namespace pizzalib
             m_Disposed = true;
             m_Initialized = false;
 
-            // Clean up FFmpeg on Linux to prevent core dump on exit
+            // Clean up FFmpeg on Linux to prevent segfault on exit
             // FFmpeg can leave behind processes or shared resources that cause crashes
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
                 try
                 {
-                    // Force FFmpeg to clean up any remaining processes
-                    GlobalFFOptions.Configure(options => options.BinaryFolder = string.Empty);
+                    // Kill any orphaned FFmpeg processes before shutdown
+                    KillOrphanedFfmpegProcesses();
                     Trace(TraceLoggerType.CallManager, TraceEventType.Information, "FFmpeg cleanup performed on Linux");
                 }
                 catch
@@ -81,6 +81,38 @@ namespace pizzalib
 
             m_Whisper?.Dispose();
             m_JournalFile?.Dispose();
+        }
+
+        /// <summary>
+        /// Kills any orphaned FFmpeg processes to prevent segfault on Linux shutdown.
+        /// This is a Linux-specific issue where FFmpeg processes can remain running
+        /// after the application exits, causing crashes.
+        /// </summary>
+        private void KillOrphanedFfmpegProcesses()
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("ffmpeg");
+                foreach (var proc in processes)
+                {
+                    try
+                    {
+                        if (!proc.HasExited)
+                        {
+                            proc.Kill();
+                            proc.WaitForExit(1000); // Wait up to 1 second for graceful exit
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore errors for individual processes
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore errors in process enumeration
+            }
         }
 
         public virtual void Dispose()

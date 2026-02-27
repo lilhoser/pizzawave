@@ -1,4 +1,4 @@
-﻿/* 
+/*
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -29,120 +29,78 @@ namespace pizzalib
     public class Settings : IEquatable<Settings>
     {
         public static readonly string DefaultWorkingDirectory = Path.Combine(
-            new string[] { Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "pizzawave"});
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "pizzawave");
         public static string DefaultSettingsFileName = "settings.json";
         public static string DefaultLiveCaptureDirectory = Path.Combine(DefaultWorkingDirectory, "captures");
         public static string DefaultOfflineCaptureDirectory = Path.Combine(DefaultWorkingDirectory, "offline");
-        public static string DefaultSettingsFileLocation = Path.Combine(
-            DefaultWorkingDirectory, DefaultSettingsFileName);
+        public static string DefaultSettingsFileLocation = Path.Combine(DefaultWorkingDirectory, DefaultSettingsFileName);
         public static string DefaultAlertWavLocation = Path.Combine(DefaultWorkingDirectory, "alerts");
-        //
+
         // pizzalib library settings
-        //
         public SourceLevels TraceLevelApp;
-        public List<Alert> Alerts;
+        public List<Alert> Alerts = [];
         public bool AutostartListener;
         public string? gmailUser;
         public string? gmailPassword;
-        //
-        // Alert audio settings
-        //
-        public bool AutoplayAlerts;
-        public int SnoozeDurationMinutes;
-        //
-        // UI display settings
-        //
-        public int SortMode;  // 0=newest first, 1=oldest first, 2=talkgroup
-        public int GroupMode; // 0=none, 1=talkgroup, 2=time of day, 3=source
-        public double FontSize; // Default 14.0
-        public bool AutoCleanupCalls; // Auto-cleanup old calls to prevent memory leaks
-        public int MaxCallsToKeep; // Number of calls to keep before auto-cleanup
-        //
-        // TrunkRecorder settings
-        //
-        public int listenPort;
-        public int analogChannels;
-        public int analogBitDepth;
-        public int analogSamplingRate;
-        //
-        // Backing field for Talkgroups property (for JSON serialization)
-        //
-        public List<Talkgroup>? talkgroups;
-        //
-        // Public property wrappers for compatibility
-        //
-        [JsonIgnore]
+
+        // Public properties for UI access
         public int ListenPort
         {
             get => listenPort;
             set => listenPort = value;
         }
-        [JsonIgnore]
-        public int AnalogChannels
-        {
-            get => analogChannels;
-            set => analogChannels = value;
-        }
-        [JsonIgnore]
-        public int AnalogBitDepth
-        {
-            get => analogBitDepth;
-            set => analogBitDepth = value;
-        }
-        [JsonIgnore]
-        public int AnalogSamplingRate
-        {
-            get => analogSamplingRate;
-            set => analogSamplingRate = value;
-        }
-        [JsonIgnore]
         public string? WhisperModelFile
         {
             get => whisperModelFile;
             set => whisperModelFile = value;
         }
-        [JsonIgnore]
         public string? GmailUser
         {
             get => gmailUser;
             set => gmailUser = value;
         }
-        [JsonIgnore]
         public string? GmailPassword
         {
             get => gmailPassword;
             set => gmailPassword = value;
         }
-        [JsonIgnore]
-        public bool IsAutoplayAlertsEnabled
-        {
-            get => AutoplayAlerts;
-            set => AutoplayAlerts = value;
-        }
-        [JsonIgnore]
-        public int AlertSnoozeDurationMinutes
-        {
-            get => SnoozeDurationMinutes;
-            set => SnoozeDurationMinutes = value;
-        }
-        [JsonIgnore]
+
+        // Alert audio settings
+        public bool AutoplayAlerts;
+        public int SnoozeDurationMinutes;
+
+        // UI display settings
+        public int SortMode;  // 0=newest first, 1=oldest first, 2=talkgroup
+        public int GroupMode; // 0=none, 1=talkgroup, 2=time of day, 3=source
+        public double FontSize; // Default 14.0
+        public bool AutoCleanupCalls; // Auto-cleanup old calls to prevent memory leaks
+        public int MaxCallsToKeep; // Number of calls to keep before auto-cleanup
+
+        // TrunkRecorder settings
+        public int listenPort;
+        public int analogChannels;
+        public int analogBitDepth;
+        public int analogSamplingRate;
+
+        // Backing field for Talkgroups property (for JSON serialization)
+        private List<Talkgroup>? talkgroups;
+
+        /// <summary>
+        /// Public property for Talkgroups list (for JSON serialization)
+        /// </summary>
         public List<Talkgroup>? Talkgroups
         {
             get => talkgroups;
             set => talkgroups = value;
         }
-        //
-        // Config versioning
-        //
-        public int ConfigVersion { get; set; } = 1;
-        //
+
         // whisper.net settings
-        //
         public string? whisperModelFile;
-        //
+
+        // Config versioning
+        public int ConfigVersion { get; set; } = 1;
+
         // Non-serializable fields
-        //
         [JsonIgnore]
         public Action<string>? UpdateProgressLabelCallback;
         [JsonIgnore]
@@ -153,9 +111,8 @@ namespace pizzalib
         public Action? ProgressBarStepCallback;
         [JsonIgnore]
         public Action? HideProgressBarCallback;
-        //
+
         // For JSON serialization - store encrypted credentials
-        //
         [JsonIgnore]
         public string? EncryptedGmailUser
         {
@@ -173,105 +130,50 @@ namespace pizzalib
         {
             if (!Directory.Exists(DefaultWorkingDirectory))
             {
-                try
-                {
-                    Directory.CreateDirectory(DefaultWorkingDirectory);
-                }
+                try { Directory.CreateDirectory(DefaultWorkingDirectory); }
                 catch (Exception ex)
                 {
-                    Trace(TraceLoggerType.Settings,
-                          TraceEventType.Warning,
-                          $"Unable to create settings directory " +
-                          $"'{DefaultWorkingDirectory}': {ex.Message}");
+                    Trace(TraceLoggerType.Settings, TraceEventType.Warning,
+                          $"Unable to create settings directory '{DefaultWorkingDirectory}': {ex.Message}");
                 }
             }
-            Alerts = new List<Alert>();
+
             TraceLevelApp = SourceLevels.Error;
             AutostartListener = true;
             AutoplayAlerts = false;
             SnoozeDurationMinutes = 15;
-            SortMode = 0;  // Default: newest first
-            GroupMode = 0; // Default: no grouping
-            FontSize = 14.0; // Default font size
-            AutoCleanupCalls = true; // Default: enabled (prevents memory leaks)
-            MaxCallsToKeep = 100; // Default: keep 100 calls
+            SortMode = 0;
+            GroupMode = 0;
+            FontSize = 14.0;
+            AutoCleanupCalls = true;
+            MaxCallsToKeep = 100;
             listenPort = 9123;
             analogSamplingRate = 8000;
             analogBitDepth = 16;
             analogChannels = 1;
         }
 
-        public override bool Equals(object? Other)
+        public bool Equals(Settings? other)
         {
-            if (Other == null)
-            {
-                return false;
-            }
-            var field = Other as Settings;
-            return Equals(field);
-        }
-
-        public bool Equals(Settings? Other)
-        {
-            if (Other == null)
-            {
-                return false;
-            }
-            return TraceLevelApp == Other.TraceLevelApp &&
-                Alerts == Other.Alerts &&
-                AutostartListener == Other.AutostartListener &&
-                GmailUser == Other.GmailUser &&
-                GmailPassword == Other.GmailPassword &&
-                AutoplayAlerts == Other.AutoplayAlerts &&
-                SnoozeDurationMinutes == Other.SnoozeDurationMinutes &&
-                SortMode == Other.SortMode &&
-                GroupMode == Other.GroupMode &&
-                FontSize == Other.FontSize &&
-                AutoCleanupCalls == Other.AutoCleanupCalls &&
-                MaxCallsToKeep == Other.MaxCallsToKeep &&
-                ListenPort == Other.ListenPort &&
-                AnalogChannels == Other.AnalogChannels &&
-                AnalogBitDepth == Other.AnalogBitDepth &&
-                AnalogSamplingRate == Other.AnalogSamplingRate &&
-                Talkgroups == Other.Talkgroups &&
-                WhisperModelFile == Other.WhisperModelFile;
-        }
-
-        public static bool operator ==(Settings? Settings1, Settings? Settings2)
-        {
-            if ((object)Settings1 == null || (object)Settings2 == null)
-                return Equals(Settings1, Settings2);
-            return Settings1.Equals(Settings2);
-        }
-
-        public static bool operator !=(Settings? Settings1, Settings? Settings2)
-        {
-            if ((object)Settings1 == null || (object)Settings2 == null)
-                return !Equals(Settings1, Settings2);
-            return !(Settings1.Equals(Settings2));
-        }
-
-        public override int GetHashCode()
-        {
-            return (TraceLevelApp,
-                Alerts,
-                AutostartListener,
-                GmailUser,
-                GmailPassword,
-                AutoplayAlerts,
-                SnoozeDurationMinutes,
-                SortMode,
-                GroupMode,
-                FontSize,
-                AutoCleanupCalls,
-                MaxCallsToKeep,
-                ListenPort,
-                AnalogBitDepth,
-                AnalogChannels,
-                AnalogSamplingRate,
-                Talkgroups,
-                WhisperModelFile
-                ).GetHashCode();
+            if (other == null) return false;
+            return TraceLevelApp == other.TraceLevelApp &&
+                Alerts.SequenceEqual(other.Alerts) &&
+                AutostartListener == other.AutostartListener &&
+                gmailUser == other.gmailUser &&
+                gmailPassword == other.gmailPassword &&
+                AutoplayAlerts == other.AutoplayAlerts &&
+                SnoozeDurationMinutes == other.SnoozeDurationMinutes &&
+                SortMode == other.SortMode &&
+                GroupMode == other.GroupMode &&
+                FontSize == other.FontSize &&
+                AutoCleanupCalls == other.AutoCleanupCalls &&
+                MaxCallsToKeep == other.MaxCallsToKeep &&
+                listenPort == other.listenPort &&
+                analogChannels == other.analogChannels &&
+                analogBitDepth == other.analogBitDepth &&
+                analogSamplingRate == other.analogSamplingRate &&
+                talkgroups?.SequenceEqual(other.talkgroups) == true &&
+                whisperModelFile == other.whisperModelFile;
         }
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
@@ -347,24 +249,24 @@ namespace pizzalib
 
         public virtual void Validate()
         {
-            if (!string.IsNullOrEmpty(WhisperModelFile) &&
-                !File.Exists(WhisperModelFile))
+            if (!string.IsNullOrEmpty(whisperModelFile) &&
+                !File.Exists(whisperModelFile))
             {
-                throw new Exception($"Invalid whisper model file: {WhisperModelFile}");
+                throw new Exception($"Invalid whisper model file: {whisperModelFile}");
             }
 
-            if (!string.IsNullOrEmpty(GmailUser))
+            if (!string.IsNullOrEmpty(gmailUser))
             {
-                if (!IsValidEmail(GmailUser))
+                if (!IsValidEmail(gmailUser))
                 {
-                    throw new Exception($"Invalid Gmail address: {GmailUser}");
+                    throw new Exception($"Invalid Gmail address: {gmailUser}");
                 }
-                if (string.IsNullOrEmpty(GmailPassword))
+                if (string.IsNullOrEmpty(gmailPassword))
                 {
                     throw new Exception("Gmail password is required");
                 }
             }
-            else if (!string.IsNullOrEmpty(GmailPassword))
+            else if (!string.IsNullOrEmpty(gmailPassword))
             {
                 throw new Exception("Gmail user is required when password is specified");
             }
@@ -429,4 +331,3 @@ namespace pizzalib
         }
     }
 }
-
