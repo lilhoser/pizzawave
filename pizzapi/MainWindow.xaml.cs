@@ -211,8 +211,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isCollapsingExpanding = false;
 
     // Timer for periodic usage text updates
-    private DispatcherTimer? _usageTextTimer;
-
+    
     public bool IsAlertSnoozed
     {
         get => _isAlertSnoozed;
@@ -233,7 +232,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public Avalonia.Media.SolidColorBrush BellColor
     {
-        get => _bellColor;
+        get => _bellColor ?? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#666666"));
         set { _bellColor = value; RaisePropertyChanged(); }
     }
 
@@ -299,13 +298,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (Application.Current != null)
             Application.Current.Resources["CurrentFontSize"] = FontSize;
 
-        // Start periodic usage text update (every 5 seconds)
-        _usageTextTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(5)
-        };
-        _usageTextTimer.Tick += (s, e) => UpdateUsageText();
-        //_usageTextTimer.Start();
     }
 
     protected override void OnOpened(EventArgs e)
@@ -691,11 +683,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _settings = Settings.LoadFromFile();
                 TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Settings loaded from file");
             }
-            catch
+            catch (Exception ex)
             {
                 // Use default settings
                 _settings = new Settings();
-                TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Warning, "Using default settings (file not found)");
+                TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Warning,
+                    $"Using default settings: {ex.Message}");
             }
 
             // Set trace level from settings
@@ -725,6 +718,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
                     // Start listening on port 9123
                     _ = _callManager.Start();
+                    // Populate usage text once at startup
+                    _usageText = GetCaptureFolderSize();
+                    RaisePropertyChanged(nameof(UsageText));
                     _infoText = "PizzaPi is listening on port " + _settings.ListenPort + " for trunk-recorder calls";
                     RaisePropertyChanged(nameof(ServerStatusText));
                     RaisePropertyChanged(nameof(ConnectionStatus));
@@ -928,8 +924,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _usageText = $"Usage: {mb:F0}mb";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Warning,
+                $"Error calculating usage: {ex.Message}");
             _usageText = "Usage: ?mb";
         }
         RaisePropertyChanged(nameof(UsageText));
@@ -947,8 +945,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var mb = size / (1024.0 * 1024.0);
             return $"Usage: {mb:F0}mb";
         }
-        catch
+        catch (Exception ex)
         {
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Warning,
+                $"Error calculating capture size: {ex.Message}");
             return "Usage: ?mb";
         }
     }
@@ -1098,7 +1098,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else if (_isAlertSnoozed)
         {
-            _bellToolTipText = $"Alert audio: Snoozed until {_snoozeUntil.Value:t} (click to change)";
+            _bellToolTipText = $"Alert audio: Snoozed until {_snoozeUntil!.Value:t} (click to change)";
         }
         else
         {
@@ -1142,7 +1142,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 })
             });
         }
-        else if (IsAlertSnoozed)
+        else if (IsAlertSnoozed && _snoozeUntil.HasValue)
         {
             // Alert audio is snoozed - show enable option
             menu.Items.Add(new MenuItem
@@ -1361,7 +1361,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (returnToLiveBtn != null) returnToLiveBtn.IsVisible = false;
 
         // Restart live call manager
-        InitializeAsync();
+        _ = InitializeAsync();
 
         Title = "PizzaPi";
         StatusText = "Returned to live mode";
@@ -1604,8 +1604,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StopAudio();
 
         // Stop usage text update timer
-        _usageTextTimer?.Stop();
-        _usageTextTimer = null;
 
         // Stop live call manager and wait for background threads
         if (_callManager != null && _callManager.IsStarted())
@@ -1644,7 +1642,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             TraceLogger.Shutdown();
             pizzalib.TraceLogger.Shutdown();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Error,
+                $"Error during shutdown: {ex.Message}");
+        }
 
         base.OnClosed(e);
     }
@@ -1839,6 +1841,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             try
             {
                 var clipboard = this.Clipboard;
+                if (clipboard == null)
+                {
+                    StatusText = "Error: Clipboard not available";
+                    return;
+                }
                 await clipboard.SetTextAsync(call.Transcription);
                 StatusText = "Transcription copied to clipboard";
             }

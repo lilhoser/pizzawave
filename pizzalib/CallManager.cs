@@ -142,13 +142,13 @@ namespace pizzalib
                 // Initialize whisper
                 //
                 m_Whisper = new Whisper(Settings);
-                _ = await m_Whisper.Initialize();
+                _ = await m_Whisper.Initialize().ConfigureAwait(false);
                 m_Initialized = true;
 
                 //
                 // Download ffmpeg if needed
                 //
-                await EnsureFfmpegExists();
+                await EnsureFfmpegExists(AsyncHelpers.GlobalCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -158,10 +158,10 @@ namespace pizzalib
             return true;
         }
 
-        private async Task EnsureFfmpegExists()
+        private async Task EnsureFfmpegExists(CancellationToken ct = default)
         {
             if (_ffmpegReady) return;
-            await _ffmpegSemaphore.WaitAsync();
+            await _ffmpegSemaphore.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 if (_ffmpegReady)

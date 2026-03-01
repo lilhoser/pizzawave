@@ -113,8 +113,7 @@ namespace pizzalib
                     tasks.Add(task);
                     // Small delay to prevent busy polling on Linux/RPI
                     // This reduces CPU usage when no clients are connecting
-                    await Task.Delay(10, CancelSource.Token);
-                }
+                                    }
             }
             catch (AggregateException ae)
             {

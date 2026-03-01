@@ -35,6 +35,8 @@ namespace pizzalib
         private Settings m_Settings;
         private bool m_Disposed;
         private WhisperFactory? m_Factory;
+        private WhisperProcessor? m_Processor;
+        private readonly SemaphoreSlim m_ProcessorLock = new SemaphoreSlim(1, 1);
 
         public Whisper(Settings Settings)
         {
@@ -57,7 +59,9 @@ namespace pizzalib
 
             m_Disposed = true;
             m_Initialized = false;
+            m_Processor?.Dispose();
             m_Factory?.Dispose();
+            m_ProcessorLock?.Dispose();
         }
 
         public void Dispose()
@@ -141,7 +145,7 @@ namespace pizzalib
                           $"Downloading model file to {m_ModelFile}");
                     try
                     {
-                        using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(modelType);
+                        using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(modelType).ConfigureAwait(false);
                         using var fileWriter = File.OpenWrite(m_ModelFile);
                         await modelStream.CopyToAsync(fileWriter);
                         Trace(TraceLoggerType.Whisper, TraceEventType.Information,
@@ -160,7 +164,6 @@ namespace pizzalib
 
             //
             // Build the factory once! This consumes MASSIVE memory depending on model.
-            // Individual transcription processors are created frequently, per-call later.
             //
             try
             {
@@ -172,6 +175,23 @@ namespace pizzalib
                 Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
                 throw new Exception(err);
             }
+
+            //
+            // Create a persistent processor. This keeps the Whisper thread pool
+            // alive but stable, avoiding the overhead of creating/destroying
+            // processors for each call (which was causing high CPU on Linux).
+            // The processor will be reused for all transcriptions.
+            //
+            m_Processor = m_Factory.CreateBuilder()
+                .WithLanguage("auto")
+                .WithNoContext()
+                .WithSingleSegment()
+                .Build();
+
+            // Reset semaphore to allow concurrent access (it was created with 1, 1)
+            // This is fine since we only allow one wait at a time
+            await m_ProcessorLock.WaitAsync();
+            m_ProcessorLock.Release();
 
             m_Initialized = true;
             m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
@@ -188,30 +208,35 @@ namespace pizzalib
 
             try
             {
-                using var processor = m_Factory.CreateBuilder().
-                    WithLanguage("auto").
-                    WithNoContext().
-                    WithSingleSegment().
-                    Build();
-                var sb = new StringBuilder();
-                await foreach (var result in processor.ProcessAsync(WavData))
+                // Use the persistent processor, protected by a semaphore to prevent
+                // concurrent use from multiple threads (which caused transcription bleed).
+                await m_ProcessorLock.WaitAsync();
+                try
                 {
-                    sb.Append($"{result.Text} ");
+                    var sb = new StringBuilder();
+                    await foreach (var result in m_Processor!.ProcessAsync(WavData))
+                    {
+                        sb.Append($"{result.Text} ");
+                    }
+                    var transcription = sb.ToString();
+                    if (string.IsNullOrEmpty(transcription))
+                    {
+                        var err = $"Transcription was empty";
+                        Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
+                    }
+                    else
+                    {
+                        var length = Math.Min(25, transcription.Length);
+                        var snippet = transcription.Substring(0, length);
+                        Trace(TraceLoggerType.Whisper,
+                              TraceEventType.Verbose,
+                              $"Transcription: \"{snippet}...\"");
+                        return transcription;
+                    }
                 }
-                var transcription = sb.ToString();
-                if (string.IsNullOrEmpty(transcription))
+                finally
                 {
-                    var err = $"Transcription was empty";
-                    Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
-                }
-                else
-                {
-                    var length = Math.Min(25, transcription.Length);
-                    var snippet = transcription.Substring(0, length);
-                    Trace(TraceLoggerType.Whisper,
-                          TraceEventType.Verbose,
-                          $"Transcription: \"{snippet}...\"");
-                    return transcription;
+                    m_ProcessorLock.Release();
                 }
             }
             catch (Exception ex)

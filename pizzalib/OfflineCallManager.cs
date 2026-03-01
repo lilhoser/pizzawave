@@ -24,7 +24,6 @@ namespace pizzalib
     public class OfflineCallManager : CallManager, IDisposable
     {
         private string m_OfflineFilesPath;
-        private bool m_Initialized;
         private bool m_Disposed;
         private Settings? m_Settings;
         private CancellationTokenSource? CancelSource;

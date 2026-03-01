@@ -48,9 +48,9 @@
                         <Setter Property="BorderThickness" Value="0"/>
                     </Style>
                 </Button.Styles>
-                <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Top">
                     <!-- Expand/Collapse chevron - use two paths with visibility toggle to prevent shift -->
-                    <Grid Width="16" Height="16" VerticalAlignment="Center" Margin="4,0,0,0">
+                    <Grid Width="16" Height="16" VerticalAlignment="Top" Margin="4,-5,10,15">
                         <!-- Collapsed state: chevron pointing right -->
                         <Path Data="M8.59 16.58L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.42z"
                               Fill="#00ff00"
@@ -68,7 +68,7 @@
                                FontSize="14"
                                FontWeight="Bold"
                                Foreground="#00ff00"
-                               VerticalAlignment="Center"/>
+                               VerticalAlignment="Top"/>
                 </StackPanel>
             </Button>
         </DataTemplate>

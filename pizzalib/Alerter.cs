@@ -165,7 +165,6 @@ namespace pizzalib
 
             var now = DateTime.Now;
             int diff;
-            bool shouldTrigger = true;
 
             switch (alert.Frequency)
             {

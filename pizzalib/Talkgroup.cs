@@ -52,10 +52,20 @@ namespace pizzalib
             return settings.Talkgroups?.FirstOrDefault(t => t.Id == talkgroupId);
         }
 
-        public static string? FormatTalkgroup(Settings settings, long talkgroupId, bool shortFormat = false)
+        public static string FormatTalkgroup(Settings settings, long talkgroupId, bool shortFormat = true)
         {
             var talkgroup = LookupTalkgroup(settings, talkgroupId);
-            return talkgroup != null ? (shortFormat ? talkgroup.AlphaTag : talkgroup.ToString()) : $"{talkgroupId}";
+            if (talkgroup == null)
+            {
+                return $"{talkgroupId}";
+            }
+            if (shortFormat)
+            {
+                // Return empty string if AlphaTag is null to avoid CS8603
+                //return talkgroup.AlphaTag ?? string.Empty;
+                return $"{talkgroup.Category} ({talkgroup.AlphaTag})";
+            }
+            return talkgroup.ToString();
         }
     }
 }

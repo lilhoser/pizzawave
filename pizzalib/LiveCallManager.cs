@@ -102,17 +102,18 @@ namespace pizzalib
 
             if (!block)
             {
-                _ = Task.Run(async () =>
+                var fireForgetTask = Task.Run(async () =>
                 {
                     try
                     {
-                        _ = await m_StreamServer.Listen();
+                        await m_StreamServer.Listen().ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         Trace(TraceLoggerType.LiveCallManager, TraceEventType.Error, $"{ex.Message}");
                     }
                 });
+                AsyncHelpers.Register(fireForgetTask);
                 return true;
             }
             else
