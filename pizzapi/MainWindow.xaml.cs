@@ -807,12 +807,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             else
             {
-                // When not grouping, also update GroupedCalls to mirror Calls
-                GroupedCalls.Clear();
-                foreach (var c in Calls)
-                {
-                    GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
-                }
+                // When not grouping, just insert the single new item at the same position
+                GroupedCalls.Insert(insertIndex, new CallGroupItem
+                    { IsHeader = false, Call = call, ShowTalkgroup = true });
             }
 
             // Cleanup old calls to prevent memory leaks

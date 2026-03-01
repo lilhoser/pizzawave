@@ -20,7 +20,7 @@
         <DataTemplate x:Key="HeaderTemplate" x:DataType="local:CallGroupItem">
             <Button Background="#1a4a1a"
                     Padding="0"
-                    Margin="0"
+                    Margin="0,4,0,0"
                     Cursor="Hand"
                     Click="OnGroupHeaderClicked"
                     HorizontalAlignment="Stretch"
@@ -32,7 +32,7 @@
                         <Setter Property="BorderThickness" Value="0"/>
                         <Setter Property="Background" Value="#1a4a1a"/>
                         <Setter Property="Padding" Value="0"/>
-                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="Margin" Value="0,4,0,0"/>
                         <Setter Property="HorizontalAlignment" Value="Stretch"/>
                         <Setter Property="HorizontalContentAlignment" Value="Left"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -81,7 +81,8 @@
             CornerRadius="0"
             Cursor="Hand"
             PointerReleased="OnCallRowClicked"
-            HorizontalAlignment="Stretch">
+            HorizontalAlignment="Stretch"
+            Margin="0,4,0,0">
 
         <Grid HorizontalAlignment="Stretch">
             <Grid.RowDefinitions>
@@ -215,7 +216,7 @@
                                   ItemTemplate="{StaticResource CallGroupTemplateSelector}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel Spacing="4" Orientation="Vertical"/>
+                                <VirtualizingStackPanel Orientation="Vertical"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.Styles>
