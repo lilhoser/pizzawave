@@ -69,11 +69,11 @@
         {
 	        "name":"callstream",
             "library":"libcallstream.so",
+            "address":"192.168.1.122",
+            "port":9123,
             "streams":[
                 {
                     "TGID":0,
-                    "address":"192.168.1.122",
-                    "port":9123,
                     "shortName":"whiteoakmt"
                 }
             ]

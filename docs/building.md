@@ -2,6 +2,20 @@
 
 This guide covers building pizzawave from source on all supported platforms.
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Build Output Structure](#build-output-structure)
+- [Platform-Specific Builds](#platform-specific-builds)
+- [Building Individual Projects](#building-individual-projects)
+- [Development Workflow](#development-workflow)
+- [Clean Build](#clean-build)
+- [Running Tests](#running-tests)
+- [Creating Release Packages](#creating-release-packages)
+- [Troubleshooting](#troubleshooting)
+- [Performance Tips](#performance-tips)
+
 ## Prerequisites
 
 ### All Platforms

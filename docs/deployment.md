@@ -2,6 +2,17 @@
 
 This guide covers deploying pizzawave applications to various platforms, with focus on `pizzapi` for Linux/macOS GUI deployments and `pizzacmd` for headless operation.
 
+## Table of Contents
+
+- [Target Platforms](#target-platforms)
+- [Raspberry Pi Deployment](#raspberry-pi-deployment)
+- [WSL2 Deployment Testing](#wsl2-deployment-testing)
+- [Linux Server Deployment](#linux-server-deployment)
+- [macOS Deployment](#macos-deployment)
+- [Troubleshooting](#troubleshooting)
+- [Updating](#updating)
+- [Backup and Restore](#backup-and-restore)
+
 ## Target Platforms
 
 | Platform | Application | Package Type | Architecture |

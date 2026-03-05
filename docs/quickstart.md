@@ -8,8 +8,37 @@ Before starting, ensure you have:
 
 - [ ] A trunk-recorder system with callstream plugin configured
 - [ ] A Linux system (or WSL2) to run pizzawave
+- [ ] System dependencies installed (see below)
 - [ ] .NET 9.0 runtime installed
 - [ ] Network connectivity between trunk-recorder and pizzawave
+
+## System Dependencies
+
+Install required system packages before proceeding. These are needed for Whisper AI and other components:
+
+### Ubuntu/Debian
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libicu-dev libssl3 zlib1g
+```
+
+### For pizzapi (GUI) on Linux with X11
+
+If running `pizzapi` with a display, you also need X11 libraries:
+
+```bash
+sudo apt-get install -y libx11-6 libxext6 libxrender1 libxtst6 libxi6
+```
+
+### WSL2
+
+WSL2 requires additional configuration for GUI applications:
+
+```bash
+# Install VcXsrv or X410 on Windows host, then:
+export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
+```
 
 ## Step 1: Install .NET 9.0
 
@@ -143,6 +172,83 @@ Restart trunk-recorder:
 
 ```bash
 sudo systemctl restart trunk-recorder
+```
+
+## Step 5.1: Connection Troubleshooting
+
+If trunk-recorder cannot connect to pizzawave, check the following:
+
+### Callstream Plugin Not Found
+
+```bash
+# On trunk-recorder system, verify plugin is compiled and in place
+ls -la /usr/local/lib/libcallstream.so
+
+# Check trunk-recorder logs for plugin loading errors
+sudo journalctl -u trunk-recorder -f | grep -i callstream
+```
+
+If the plugin is missing, rebuild trunk-recorder with the callstream plugin:
+```bash
+cd ~/trunk-build
+cmake ../trunk-recorder
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+```
+
+### Port 9123 Already in Use
+
+```bash
+# Check what's using port 9123
+sudo lsof -i :9123
+# or
+sudo netstat -tlnp | grep 9123
+```
+
+If another process is using the port, either stop it or change pizzawave's listen port in `settings.json`:
+```json
+{"listenPort": 9124}
+```
+
+### Wrong or Changing IP Address
+
+```bash
+# On pizzawave system, verify IP address
+ip addr show | grep inet
+
+# For a static IP, configure in your network settings
+# Or use hostname if on same network:
+hostname
+```
+
+If your IP changes frequently, consider:
+1. Setting a static IP for the pizzawave system
+2. Using a hostname instead of IP (if on same local network)
+3. Setting up DNS or /etc/hosts entries
+
+### Firewall Blocking Connection
+
+```bash
+# On pizzawave system, allow port 9123
+sudo ufw allow 9123/tcp
+
+# Check firewall status
+sudo ufw status
+```
+
+### Verify trunk-recorder Configuration
+
+Ensure your trunk-recorder config has the correct settings:
+```json
+{
+  "audioStreaming": true,
+  "plugins": [{
+    "name": "callstream",
+    "address": "<pizzawave-ip>",  // Must match pizzawave system IP
+    "port": 9123
+  }]
+}
 ```
 
 ## Step 6: Verify Connection

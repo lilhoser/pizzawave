@@ -2,6 +2,9 @@
     "ver": 2,
     "defaultMode": "digital",
     "logFile": true,
+	"captureDir": "/var/lib/trunk-recorder/recordings",
+    "logDir": "/var/log/trunk-recorder",
+    "tempDir": "/var/lib/trunk-recorder/tmp",
     "frequencyFormat": "mhz",
     "callTimeout": 3,
     "controlWarnRate": 10,
@@ -13,7 +16,7 @@
         {
             "shortName": "whiteoakmt",
             "type": "p25",
-            "talkgroupsFile": "chatt_talkgroups.csv",
+            "talkgroupsFile": "/etc/trunk-recorder/talkgroups.csv",
             "control_channels": [
                 855212500,
                 856237500,

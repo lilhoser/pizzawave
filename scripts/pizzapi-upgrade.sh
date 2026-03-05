@@ -32,19 +32,28 @@ echo ""
 echo "Installing..."
 sudo dpkg -i "$DEB_FILE" || sudo apt-get install -f -y
 
-echo ""
-echo "Cleaning up old systemd service files..."
-sudo rm -f /usr/lib/systemd/system/pizzapi.service
-sudo rm -rf /etc/systemd/system/pizzapi.service.d/
-sudo rm -f /etc/systemd/system/pizzapi.service
-sudo systemctl daemon-reload 2>/dev/null || true
+# Setup autostart
+AUTOSTART_DIR="$HOME/.config/autostart"
+mkdir -p "$AUTOSTART_DIR"
+
+cat > "$AUTOSTART_DIR/pizzapi.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=PizzaPi
+Exec=/opt/pizzapi/pizzapi
+Path=/opt/pizzapi
+Terminal=false
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+StartupNotify=false
+EOF
+
+echo "PizzaPi autostart file created at $AUTOSTART_DIR/pizzapi.desktop"
 
 echo ""
 echo "=========================================="
 echo "  Upgrade Complete!"
 echo "=========================================="
-echo ""
-echo "PizzaPi is a UI application - not a service."
 echo "Run it from the desktop or terminal:"
 echo ""
 echo "  /opt/pizzapi/pizzapi"

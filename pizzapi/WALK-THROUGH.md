@@ -1,5 +1,17 @@
 # Dual RTL-SDR Blog V4 + Trunk-Recorder + PizzaPi on Raspberry Pi 5
 
+## Table of Contents
+
+- [0. Pre-requisites and Considerations](#0-pre-requisites-and-considerations)
+- [1. System Preparation](#1-system-preparation)
+- [2. Install RTL-SDR Blog V4 Drivers](#2-install-rtl-sdr-blog-v4-drivers)
+- [3. Set Unique Serial Numbers on Both V4s](#3-set-unique-serial-numbers-on-both-v4s)
+- [4. Calibrating PPM Error with GQRX](#4-calibrating-ppm-error-with-gqrx-important)
+- [5. Create a Config File](#5-create-a-config-file-sdrhero_pizzapijson)
+- [6. Build Trunk-Recorder + callstream Plugin](#6-build-trunk-recorder--callstream-plugin)
+- [7. Setup PizzaPi to view Calls](#7-setup-pizzapi-to-view-calls)
+- [8. Troubleshooting](#8-troubleshooting)
+
 ## 0. Pre-requisites and Considerations
 
 ### Software
@@ -81,7 +93,7 @@ sudo nano /etc/modprobe.d/blacklist-rtl.conf
 
 Paste:
 ```
-textblacklist dvb_usb_rtl28xxu
+blacklist dvb_usb_rtl28xxu
 blacklist rtl2832
 blacklist rtl2830
 ```
@@ -120,45 +132,7 @@ sudo rtl_eeprom -d 0 -s 00000001   # First dongle
 sudo rtl_eeprom -d 0 -s 00000002   # Second dongle (after swapping)
 ```
 
-## 4. Build Trunk-Recorder + callstream Plugin
-```bash
-
-sudo apt install -y gnuradio gnuradio-dev gr-osmosdr libboost-all-dev \
-  libusb-1.0-0-dev libsndfile1-dev libcurl4-openssl-dev fdkaac sox libssl-dev
-```
-
-UHD fix if needed:
-```sudo apt install libuhd-dev -y```
-
-```
-cd ~/tr5
-git clone https://github.com/TrunkRecorder/trunk-recorder.git
-```
-
-Add callstream plugin
-
-```
-git clone https://github.com/lilhoser/callstream.git
-mkdir -p trunk-recorder/plugins/callstream
-cp -r callstream/* trunk-recorder/plugins/callstream/
-
-nano trunk-recorder/CMakeLists.txt
-→ Add this line in the plugins section:
-cmakeadd_subdirectory(plugins/callstream)
-```
-
-Build
-
-```bash
-
-cd ~/tr5/trunk-build
-cmake ../trunk-recorder
-make -j4
-sudo make install
-sudo ldconfig
-```
-
-## 5. Calibrating PPM Error with GQRX (Important!)
+## 4. Calibrating PPM Error with GQRX (Important!)
 
 RTL-SDR Blog V4 dongles can vary in accuracy and it's important to calibrate the PPM error for each dongle to ensure accurate frequency tuning and decoding. Here's how to do it using GQRX on Raspberry Pi OS.
 
@@ -205,13 +179,7 @@ Examples:
 
 Round to nearest 10 Hz.
 
-## 6. Final Config File (sdrhero_pizzapi.json)
-
-```bash
-
-cd ~/tr5/trunk-build
-nano sdrhero_pizzapi.json
-```
+## 5. Create a Config File (sdrhero_pizzapi.json)
 
 Full final config (with error: 0 on both dongles):
 
@@ -281,49 +249,39 @@ Full final config (with error: 0 on both dongles):
             "library": "libcallstream.so",
             "clients": [{"address": "127.0.0.1", "port": 9123}],
             "port": 9123,
-            "streams": [{"TGID": 0, "shortName": "whiteoakmt-hamilton"}]
+            "streams": [{"TGID": 0, "shortName": "whiteoakmt-hamilton"}],
+            "audio_filtering": {
+                "enabled": true,
+                "spike_clipping": {
+                    "enabled": true,
+                    "threshold_percent": 85,
+                    "clip_factor": 0.9
+                },
+                "smoothing": {
+                    "enabled": false,
+                    "window_size": 5
+                },
+                "high_pass_filter": {
+                    "enabled": false,
+                    "cutoff_hz": 200
+                }
+            }
         }
     ]
 }
 ```
 
-## 7. Systemd Service for Trunk-Recorder
+## 6. Build Trunk-Recorder + callstream Plugin
 
+Please use the [official build script](scripts/setup_trunk_recorder.sh):
 ```bash
 
-sudo nano /etc/systemd/system/trunk-recorder.service
+bash setup_trunk_recorder.sh --config <CONFIG> --talkgroups-file <TALKGROUPS_FILE>
 ```
 
-Paste:
-```
-ini[Unit]
-Description=Trunk Recorder - White Oak Mt / Hamilton Co P25
-After=network.target
+This script will setup all pre-requisites, build trunk-recorder and the callstream plugin, and install the final binaries, config file and talkgroups file as a persistent service. It will also autostart a tmux session on boot to show live trunk-recorder logs in a terminal window. The script can also be used to check installation status and clean a prior installation (if an update is needed).
 
-[Service]
-Type=simple
-User=sdrhero
-Group=plugdev
-WorkingDirectory=/home/sdrhero/tr5/trunk-build
-ExecStart=/home/sdrhero/tr5/trunk-build/trunk-recorder --config=sdrhero_pizzapi.json
-Restart=always
-RestartSec=3
-Nice=-10
-LimitNOFILE=65535
-Environment="LD_LIBRARY_PATH=/usr/local/lib"
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now trunk-recorder.service
-```
-
-## 8. Setup PizzaPi to view Calls
+## 7. Setup PizzaPi to view Calls
 
 ### Download and run the PizzaPi upgrade script
 ```
@@ -348,7 +306,7 @@ X-GNOME-Autostart-enabled=true
 EOF
 ```
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
 ### Setup Live Logs with tmux (Auto-starts on boot)
 

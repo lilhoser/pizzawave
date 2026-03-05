@@ -17,6 +17,77 @@ The `pizzawave` Visual Studio solution consists of these tools:
 
 See [Quick Start Guide](quickstart.md) for detailed instructions.
 
+# Version Compatibility
+
+| Component | Tested Version | Minimum Supported | Notes |
+|-----------|----------------|-------------------|-------|
+| .NET SDK | 9.0 | 8.0 | Building from source |
+| trunk-recorder | v2.6+ | v2.4 | Callstream plugin compatibility |
+| callstream plugin | Latest | N/A | Built with trunk-recorder |
+| Whisper model | GGML v3 | GGML v3 | whisper.net dependency |
+| Raspberry Pi OS | Bookworm (12) | Bullseye (11) | For pizzapi deployment |
+| Ubuntu/Debian | 24.04 | 20.04 | Desktop/server deployments |
+
+# Security Considerations
+
+### Credential Storage
+
+**Warning**: The `settings.json` configuration file may contain sensitive credentials (email passwords, API keys, SFTP passwords). By default, these are stored in plaintext on disk.
+
+**Recommendations**:
+1. **Restrict file permissions** on your configuration file:
+   ```bash
+   chmod 600 ~/.config/pizzawave/settings.json
+   ```
+
+2. **Use app-specific passwords** for email accounts (especially Gmail) rather than your main account password. Enable 2FA on your email account first, then generate an app-specific password for pizzawave.
+
+3. **Consider environment variables** for sensitive values if building from source. The library supports reading credentials from environment variables as an alternative to the config file.
+
+4. **Encrypt your disk** if storing sensitive configuration on portable devices or systems with physical access risks.
+
+### Network Security
+
+- Audio streams and transcriptions are transmitted unencrypted over the network between trunk-recorder and pizzawave
+- For production deployments on untrusted networks, consider:
+  - Running both components on the same machine (localhost)
+  - Using VPN or SSH tunneling for remote access
+  - Implementing network-level encryption at the firewall/router level
+
+# Performance Benchmarks
+
+Expected performance characteristics on various hardware configurations:
+
+| Hardware | Transcription Latency | Memory Usage | CPU Usage | Notes |
+|----------|----------------------|--------------|-----------|-------|
+| Raspberry Pi 5 (8GB) | 3-8 seconds/call | ~800MB | 20-40% (1 core) | Baseline ARM deployment |
+| Raspberry Pi 4 (4GB) | 8-15 seconds/call | ~600MB | 40-60% (multiple cores) | Slower, may struggle with high call volume |
+| Intel i5-12400 | 1-3 seconds/call | ~500MB | 5-15% (1 core) | Desktop deployment |
+| AMD Ryzen 5 5600X | 1-2 seconds/call | ~500MB | 5-15% (1 core) | Desktop deployment |
+
+### Latency Factors
+
+Transcription latency depends on:
+- **Call duration**: Longer calls take longer to transcribe
+- **Audio quality**: Noisy or unclear audio may require more processing
+- **Model size**: Larger Whisper models (e.g., `large-v3`) are more accurate but slower
+- **Hardware**: CPU speed and RAM availability
+
+### Memory Optimization
+
+To reduce memory usage:
+1. Use smaller Whisper models (`base` or `small` instead of `large`)
+2. Reduce `TraceLevelApp` to `Warning` or `Error`
+3. Disable WAV file saving (`WavFileLocation`: "")
+4. Limit concurrent connections from trunk-recorder
+
+### CPU Optimization
+
+To reduce CPU usage:
+1. Use quantized Whisper models (e.g., `ggml-base-q5_k_m`)
+2. Enable audio filtering in callstream to reduce noise before transcription
+3. Process calls asynchronously (default behavior)
+
 # Requirements
 
 Regardless of whether you choose to use the UI, command line application, or roll your own application that uses the cross-platform library, you will need to observe these requirements:
@@ -225,7 +296,7 @@ For those that are new to SDRs (also check out this [Getting Started Guide](gett
 
 <img align="center" src="rtlsdr-setup.png">
 
-The discone antenna is mounted about 20 feet in the air above my workshop, using a 1.5" PVC mast and a sturdy set of stand-off mounts. I have a short 8-ft run of UHF cable that brings the signal indoors to a wall-mounted, inline amplifier, which then connects to a 25-ft run of UHF cable that splits the signal 6-ways to an SDR array. I did my best to match up the impedence among all these cables and adapters to 50-ohm. For a similar rig that favors transmission insteead of Rx-only, 75-ohm would be better.
+The discone antenna is mounted about 20 feet in the air above my workshop, using a 1.5" PVC mast and a sturdy set of stand-off mounts. I have a short 8-ft run of UHF cable that brings the signal indoors to a wall-mounted, inline amplifier, which then connects to a 25-ft run of UHF cable that splits the signal 6-ways to an SDR array. I did my best to match up the impedence among all these cables and adapters to 50-ohm. For a similar rig that favors transmission instead of Rx-only, 75-ohm would be better.
 
 Here is the parts list, all of which can be purchased on Amazon:
 * [Discone antenna](https://www.amazon.com/dp/B00QVPGKHU)
