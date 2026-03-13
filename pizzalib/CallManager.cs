@@ -27,7 +27,7 @@ namespace pizzalib
 {
     public abstract class CallManager : IDisposable
     {
-        protected Whisper? m_Whisper;
+        protected ITranscriber? m_Transcriber;
         protected bool m_Initialized;
         private bool m_Disposed;
         private StreamWriter? m_JournalFile;
@@ -36,6 +36,8 @@ namespace pizzalib
         protected Action<TranscribedCall> m_NewTranscribedCallCallback;
         private bool _ffmpegReady = false;
         private static readonly SemaphoreSlim _ffmpegSemaphore = new SemaphoreSlim(1, 1);
+        // Keep full transcription pipeline (resample + whisper) single-file on low-power devices.
+        private static readonly SemaphoreSlim _transcriptionPipelineSemaphore = new SemaphoreSlim(1, 1);
         private static string _ffmpegBinFolder = Path.Combine(AppContext.BaseDirectory, "ffmpeg-bin");
 
         public CallManager(Action<TranscribedCall> NewTranscribedCallCallback)
@@ -79,7 +81,7 @@ namespace pizzalib
                 }
             }
 
-            m_Whisper?.Dispose();
+            m_Transcriber?.Dispose();
             m_JournalFile?.Dispose();
         }
 
@@ -139,10 +141,12 @@ namespace pizzalib
                 m_JournalFile = new StreamWriter(journal) { AutoFlush = true };
 
                 //
-                // Initialize whisper
-                //
-                m_Whisper = new Whisper(Settings);
-                _ = await m_Whisper.Initialize().ConfigureAwait(false);
+                // Initialize configured transcription engine
+                Trace(TraceLoggerType.CallManager, TraceEventType.Information,
+                    $"Transcription engine requested: '{Settings.TranscriptionEngine}', " +
+                    $"WhisperModelFile='{Settings.WhisperModelFile}', VoskModelPath='{Settings.VoskModelPath}'");
+                m_Transcriber = CreateTranscriber(Settings);
+                _ = await m_Transcriber.Initialize().ConfigureAwait(false);
                 m_Initialized = true;
 
                 //
@@ -239,7 +243,7 @@ namespace pizzalib
 
             try
             {
-                m_Whisper?.Dispose();
+                m_Transcriber?.Dispose();
             }
             catch (Exception ex)
             {
@@ -262,9 +266,16 @@ namespace pizzalib
                 //
                 // Write the call mp3 to disk first (so it's available for alert emails)
                 //
-                var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
-                await CallData.DumpStreamToFile(m_CaptureRoot, fileName, OutputFileFormat.Mp3);
-                call.Location = Path.Combine(m_CaptureRoot, fileName);
+                if (!RuntimeFlags.DisableAudioEncoding)
+                {
+                    var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
+                    await CallData.DumpStreamToFile(m_CaptureRoot, fileName, OutputFileFormat.Mp3);
+                    call.Location = Path.Combine(m_CaptureRoot, fileName);
+                }
+                else
+                {
+                    call.Location = string.Empty;
+                }
 
                 //
                 // Send any alerts on the transcription and update call meta data with matches.
@@ -298,7 +309,7 @@ namespace pizzalib
 
         protected async Task<TranscribedCall> GetTranscribedCall(RawCallData CallData)
         {
-            if (!m_Initialized || m_Whisper == null)
+            if (!m_Initialized || m_Transcriber == null)
             {
                 throw new Exception("CallManager not initialized");
             }
@@ -330,9 +341,26 @@ namespace pizzalib
                 //
                 // Transcribe the raw audio (Whisper requires 16KHz)
                 //
-                using (var audioStream = await CallData.GetAudioStreamForWhisperAsync())
+                if (RuntimeFlags.DisableTranscription)
                 {
-                    call.Transcription = await m_Whisper.TranscribeCall(audioStream);
+                    call.Transcription = string.Empty;
+                }
+                else
+                {
+                    await _transcriptionPipelineSemaphore.WaitAsync().ConfigureAwait(false);
+                    try
+                    {
+                        // Serialize resampling and model inference to prevent multiple concurrent
+                        // ffmpeg resample jobs from saturating CPU on ARM devices.
+                        using (var audioStream = await CallData.GetAudioStreamForWhisperAsync())
+                        {
+                            call.Transcription = await m_Transcriber.TranscribeCall(audioStream);
+                        }
+                    }
+                    finally
+                    {
+                        _transcriptionPipelineSemaphore.Release();
+                    }
                 }
             }
             catch (Exception ex)
@@ -342,6 +370,19 @@ namespace pizzalib
             }
 
             return call;
+        }
+
+        protected virtual ITranscriber CreateTranscriber(Settings settings)
+        {
+            var engine = (settings.TranscriptionEngine ?? "whisper").Trim().ToLowerInvariant();
+            ITranscriber transcriber = engine switch
+            {
+                "vosk" => new VoskTranscriber(settings),
+                _ => new Whisper(settings)
+            };
+            Trace(TraceLoggerType.CallManager, TraceEventType.Information,
+                $"Transcription engine selected: {transcriber.GetType().Name}");
+            return transcriber;
         }
     }
 }

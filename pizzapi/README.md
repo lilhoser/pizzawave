@@ -16,4 +16,4 @@ PizzaPi provides a real-time display of trunked radio communications, allowing u
 
 ## Setup on Raspberry Pi
 
-For complete installation and configuration instructions, see [WALK-THROUGH.md](./WALK-THROUGH.md).
+For complete installation and configuration instructions, see the Raspberry Pi walk-through guide in [WALK-THROUGH.md](./WALK-THROUGH.md).

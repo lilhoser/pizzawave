@@ -331,11 +331,13 @@ if [[ $DO_SERVICE -eq 1 ]]; then
 
     chown -R "$USER_NAME:$USER_NAME" /var/lib/trunk-recorder/home
     chmod 700 /var/lib/trunk-recorder/home
-	
+
     echo "=== Preparing directories ==="
     mkdir -p "$ETC_TR_DIR" "$VAR_LIB"/{recordings,tmp} "$VAR_LOG"
     chown -R "$USER_NAME:$USER_NAME" "$VAR_LIB" "$VAR_LOG" "$ETC_TR_DIR"
-    chmod -R 750 "$VAR_LIB" "$VAR_LOG"
+    chmod -R 755 "$VAR_LIB" "$VAR_LOG"
+    chmod 755 "$VAR_LIB/recordings" "$VAR_LOG"
+    chmod -R 644 "$VAR_LIB" "$VAR_LOG"
 
     echo "=== Copying config ==="
     rm -f "$CONFIG_PATH"
@@ -363,6 +365,7 @@ ExecStart=$BINARY --config=$CONFIG_PATH
 WorkingDirectory=$VAR_LIB
 Restart=always
 RestartSec=10
+UMask=022
 StandardOutput=journal
 StandardError=journal
 

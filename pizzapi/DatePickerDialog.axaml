@@ -1,0 +1,40 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="pizzapi.DatePickerDialog"
+        Title="Pick Date Range"
+        Width="400"
+        Height="300"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <StackPanel Margin="20" Spacing="15">
+        <TextBlock Text="Select date range:" 
+                   FontSize="16" 
+                   FontWeight="Bold"
+                   HorizontalAlignment="Center"/>
+        
+        <StackPanel Spacing="10">
+            <StackPanel>
+                <TextBlock Text="From:" Margin="0,0,0,5"/>
+                <DatePicker x:Name="StartDatePicker" Width="150"/>
+            </StackPanel>
+            
+            <StackPanel>
+                <TextBlock Text="To:" Margin="0,0,0,5"/>
+                <DatePicker x:Name="EndDatePicker" Width="150"/>
+            </StackPanel>
+        </StackPanel>
+        
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+            <Button Content="Cancel" 
+                    Width="80" 
+                    Click="OnCancelClicked"
+                    Background="#444"
+                    Foreground="White"/>
+            <Button Content="OK" 
+                    Width="80" 
+                    Click="OnOkClicked"
+                    Background="#ffaa00"
+                    Foreground="Black"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

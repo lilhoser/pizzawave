@@ -18,6 +18,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 using static pizzapi.TraceLogger;
 
 namespace pizzapi;
@@ -30,6 +31,8 @@ public class CallGroupItem
     public TranscribedCall? Call { get; set; }
     public bool ShowTalkgroup { get; set; } = true;
     public bool IsExpanded { get; set; } = true; // For collapsible groups
+    public bool IsSearchMatch { get; set; }  // For search highlighting
+    public int MatchIndex { get; set; }      // Position among matches for navigation
 }
 
 public class CallGroupItemTemplateSelector : IDataTemplate
@@ -149,13 +152,19 @@ public class BoolToColorConverter : IValueConverter
 {
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
+        // Handle alert match with parameterized colors (#4a2a2a for matches, #3a3a3a for non-matches)
         if (value is bool isVisible && parameter is string @params && @params.Contains('|'))
         {
             var split = @params.Split('|');
             var colorHex = isVisible ? split[0] : split[1];
             return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
         }
-        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#4CAF50"));
+        
+        // Default alert match color
+        if (value is bool isMatch && isMatch)
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#4a2a2a"));
+            
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("Transparent"));
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
@@ -163,6 +172,142 @@ public class BoolToColorConverter : IValueConverter
         // Not used for color conversion
         return false;
     }
+}
+
+public class BoolToBrushConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        bool isTrue = value is bool b && b;
+        string trueColor = "#ffa500";
+        string falseColor = "#555555";
+
+        if (parameter is string param)
+        {
+            var parts = param.Contains('|') ? param.Split('|') : param.Split(',');
+            if (parts.Length >= 2)
+            {
+                trueColor = parts[0].Trim();
+                falseColor = parts[1].Trim();
+            }
+        }
+
+        var colorHex = isTrue ? trueColor : falseColor;
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return false;
+    }
+}
+
+public class AlertSearchBackgroundConverter : IValueConverter
+{
+    // Combines alert match background with search highlighting
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var item = value as CallGroupItem;
+        
+        // Search highlight takes precedence - lime green for matches
+        if (item?.IsSearchMatch == true)
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#00ff00"));
+        
+        // Alert match background
+        if (item?.Call?.IsAlertMatch == true)
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#4a2a2a"));
+            
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("Transparent"));
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class IntGreaterThanZeroConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is int count)
+            return count > 0;
+        return false;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class SearchHighlightConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is bool isMatch && isMatch)
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#00ff00"));
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("Transparent"));
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class SearchTextForegroundConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        // Black text for search matches (lime green background needs black text)
+        if (value is bool isMatch && isMatch)
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#000000"));
+        
+        // White text for alert matches and normal items
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("White"));
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class ButtonActiveStateConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is string filterType && parameter is string compareType)
+        {
+            bool isActive = filterType == compareType;
+            
+            // Return a dictionary with both styles so we can select based on active state
+            var styleDict = new Dictionary<string, string>
+            {
+                {"active", "ActiveButtonStyle"},
+                {"inactive", "InactiveButtonStyle"}
+            };
+            
+            return isActive ? styleDict["active"] : styleDict["inactive"];
+        }
+        return "InactiveButtonStyle";
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public enum RightPaneType
+{
+    None,
+    View,
+    Settings,
+    Alerts,
+    Cleanup,
+    Range
 }
 
 public partial class MainWindow : Window, INotifyPropertyChanged
@@ -178,6 +323,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Settings _settings = new Settings();
     private string _versionString;
     private double _fontSize = 14;
+    private string _currentSettingsPath = Settings.DefaultSettingsFileLocation;
 
     // Audio playback
     private WaveOutEvent? _waveOut;
@@ -194,9 +340,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _bellToolTipText = "Alert audio: Enabled (click to snooze)";
     private Avalonia.Media.SolidColorBrush? _bellColor = null;
     private Button? _alwaysPinAlertsButton;
-    private Popup? _viewSubMenuPopup;
-    private Border? _sortSubMenuBorder;
-    private Border? _groupBySubMenuBorder;
     // Sort menu buttons for updating checkmarks
     private Button? _sortNewestButton;
     private Button? _sortOldestButton;
@@ -206,12 +349,81 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Button? _groupTalkgroupButton;
     private Button? _groupTimeOfDayButton;
     private Button? _groupSourceButton;
+
+    // Right pane content
+    private RightPaneType _activePane = RightPaneType.None;
+    private Control? _activePaneContent;
+    private SettingsPanel? _settingsPanel;
+    private AlertManagerPanel? _alertsPanel;
+    private CleanupPanel? _cleanupPanel;
+    private ViewPanel? _viewPanel;
+    private OfflineRangePanel? _offlineRangePanel;
+    
+    // Time range filter state for persistent button bar
+    private string _currentFilter = "all"; // all, 24h, 2d, week, custom
+    
+    public string CurrentFilter
+    {
+        get => _currentFilter;
+        set { _currentFilter = value; RaisePropertyChanged(); }
+    }
+    
+    // Button state properties for styling
+    public bool IsLiveActive => _currentFilter == "all";
+    public bool Is24hActive => _currentFilter == "24h";
+    public bool Is2dActive => _currentFilter == "2d";
+    public bool IsWeekActive => _currentFilter == "week";
+    public bool IsRangeActive => _currentFilter == "custom";
+
+    public bool IsPaneOpen => _activePane != RightPaneType.None;
+    public bool IsViewPaneOpen => _activePane == RightPaneType.View;
+    public bool IsSettingsPaneOpen => _activePane == RightPaneType.Settings;
+    public bool IsAlertsPaneOpen => _activePane == RightPaneType.Alerts;
+    public bool IsCleanupPaneOpen => _activePane == RightPaneType.Cleanup;
+    public bool IsRangePaneOpen => _activePane == RightPaneType.Range;
+
+    public Control? ActivePaneContent
+    {
+        get => _activePaneContent;
+        private set { _activePaneContent = value; RaisePropertyChanged(); }
+    }
+    
+    // Custom date range for Pick Range button
+    private DateTime? _customStartDate;
+    private DateTime? _customEndDate;
+    public DateTime? CustomStartDate
+    {
+        get => _customStartDate;
+        set { _customStartDate = value; RaisePropertyChanged(); }
+    }
+    public DateTime? CustomEndDate
+    {
+        get => _customEndDate;
+        set { _customEndDate = value; RaisePropertyChanged(); }
+    }
+    
     // Track expanded group headers
     private HashSet<string> _collapsedGroups = new HashSet<string>();
     // Flag to prevent re-entrancy in collapse/expand
     private bool _isCollapsingExpanding = false;
 
+    // Search bar UI references and state
+    private TextBox? _searchTextBox;
+    private Button? _clearSearchButton;
+    private TextBlock? _searchPlaceholder;
+    private int _currentMatchIndex = -1;
+    private bool _isApplyingSettings;
+    public bool IsApplyingSettings
+    {
+        get => _isApplyingSettings;
+        private set { _isApplyingSettings = value; RaisePropertyChanged(); }
+    }
+
     // Timer for periodic usage text updates
+    private CancellationTokenSource? _usageTimerCts;
+    private Task? _usageTimerTask;
+    private readonly SemaphoreSlim _usageUpdateLock = new SemaphoreSlim(1, 1);
+    private bool _isClosing;
     
     public bool IsAlertSnoozed
     {
@@ -235,14 +447,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         get => _bellColor ?? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#666666"));
         set { _bellColor = value; RaisePropertyChanged(); }
-    }
-
-    // Menu visibility
-    private bool _menuVisible;
-    public bool MenuVisible
-    {
-        get { return _menuVisible; }
-        set { _menuVisible = value; RaisePropertyChanged(); }
     }
 
     public new double FontSize
@@ -269,8 +473,350 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public string UsageText => _usageText;
 
+    // Search functionality
+    private string _searchText = "";
+    
+    // Search text property for XAML binding (inverted logic - true when NOT searching)
+    public bool IsSearching => !string.IsNullOrEmpty(_searchText);
+
+    public string SearchText
+    {
+        get => _searchText;
+        set 
+        { 
+            _searchText = value; 
+            RaisePropertyChanged(nameof(IsSearching));
+            RaisePropertyChanged(nameof(SearchText));
+        }
+    }
+    
+    private readonly ObservableCollection<TranscribedCall> _allCalls = new ObservableCollection<TranscribedCall>();
     public ObservableCollection<TranscribedCall> Calls { get; } = new ObservableCollection<TranscribedCall>();
     public ObservableCollection<CallGroupItem> GroupedCalls { get; } = new ObservableCollection<CallGroupItem>();
+    
+    // Time range filtering methods
+    private void ApplyTimeRangeFilter()
+    {
+        var now = DateTimeOffset.Now;
+        long? minStartTime = null, maxEndTime = null;
+        
+        switch (_currentFilter)
+        {
+            case "24h":
+                minStartTime = now.AddHours(-24).ToUnixTimeSeconds();
+                maxEndTime = now.ToUnixTimeSeconds();
+                break;
+            case "2d":
+                minStartTime = now.AddHours(-48).ToUnixTimeSeconds();
+                maxEndTime = now.ToUnixTimeSeconds();
+                break;
+            case "week":
+                minStartTime = now.AddDays(-7).ToUnixTimeSeconds();
+                maxEndTime = now.ToUnixTimeSeconds();
+                break;
+            case "custom":
+                if (_customStartDate.HasValue && _customEndDate.HasValue)
+                {
+                    var startOffset = new DateTimeOffset(_customStartDate.Value);
+                    var endOffset = new DateTimeOffset(_customEndDate.Value.AddDays(1));
+                    minStartTime = startOffset.ToUnixTimeSeconds();
+                    maxEndTime = endOffset.ToUnixTimeSeconds();
+                }
+                break;
+        }
+        
+        // Rebuild Calls with filter applied if needed
+        var filteredCalls = new List<TranscribedCall>();
+
+        if (minStartTime.HasValue && maxEndTime.HasValue)
+        {
+            foreach (var call in _allCalls)
+            {
+                // Check if call is within the time range
+                bool afterMinStart = call.StartTime >= minStartTime.Value;
+                bool beforeMaxEnd = call.StopTime <= maxEndTime.Value;
+
+                if (afterMinStart && beforeMaxEnd)
+                    filteredCalls.Add(call);
+            }
+        }
+        else
+        {
+            // No filter - use all calls
+            filteredCalls = _allCalls.ToList();
+        }
+        
+        // Update the Calls collection
+        Calls.Clear();
+        foreach (var call in filteredCalls)
+            Calls.Add(call);
+            
+        // Update grouped view
+        if (_useGrouping)
+        {
+            ApplyGrouping();
+        }
+        else
+        {
+            GroupedCalls.Clear();
+            foreach (var call in Calls)
+                GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = call, ShowTalkgroup = true });
+        }
+        
+        StatusText = _currentFilter switch
+        {
+            "all" => $"Showing all calls ({Calls.Count})",
+            "24h" => $"Last 24 hours ({Calls.Count})",
+            "2d" => $"Last 2 days ({Calls.Count})",
+            "week" => $"Last week ({Calls.Count})",
+            "custom" => _customStartDate.HasValue && _customEndDate.HasValue
+                ? $"Custom range: {_customStartDate.Value:d} - {_customEndDate.Value:d} ({Calls.Count})"
+                : $"Showing all calls ({Calls.Count})",
+            _ => $"Showing {Calls.Count} calls"
+        };
+        
+        // Update button states
+        RaisePropertyChanged(nameof(IsLiveActive));
+        RaisePropertyChanged(nameof(Is24hActive));
+        RaisePropertyChanged(nameof(Is2dActive));
+        RaisePropertyChanged(nameof(IsWeekActive));
+        RaisePropertyChanged(nameof(IsRangeActive));
+    }
+    
+    public void SetTimeRangeFilter(string filterType)
+    {
+        _currentFilter = filterType;
+        
+        switch (filterType)
+        {
+            case "all":
+                _customStartDate = null;
+                _customEndDate = null;
+                break;
+            case "24h":
+            case "2d":
+            case "week":
+                // No custom dates needed for preset ranges
+                break;
+            case "custom":
+                if (!_customStartDate.HasValue)
+                    _customStartDate = DateTime.Now.AddDays(-7);
+                if (!_customEndDate.HasValue)
+                    _customEndDate = DateTime.Now;
+                break;
+        }
+        
+        ApplyTimeRangeFilter();
+        RaisePropertyChanged(nameof(CurrentFilter));
+        RaisePropertyChanged(nameof(IsLiveActive));
+        RaisePropertyChanged(nameof(Is24hActive));
+        RaisePropertyChanged(nameof(Is2dActive));
+        RaisePropertyChanged(nameof(IsWeekActive));
+        RaisePropertyChanged(nameof(IsRangeActive));
+    }
+
+    private void ClearVisibleCalls()
+    {
+        Calls.Clear();
+        GroupedCalls.Clear();
+        _currentMatchIndex = -1;
+    }
+
+    private void SwitchToLiveMode()
+    {
+        StopAudio();
+
+        if (_offlineCallManager != null)
+        {
+            _offlineCallManager.Stop();
+            _offlineCallManager.Dispose();
+            _offlineCallManager = null;
+        }
+
+        _isOfflineMode = false;
+        RaisePropertyChanged(nameof(IsOfflineMode));
+        RaisePropertyChanged(nameof(ModeIndicatorText));
+        RaisePropertyChanged(nameof(ModeIndicatorColor));
+
+        _allCalls.Clear();
+        ClearVisibleCalls();
+
+        _currentFilter = "all";
+        _customStartDate = null;
+        _customEndDate = null;
+        UpdateButtonStates();
+
+        if (_callManager == null || !_callManager.IsStarted())
+        {
+            _ = InitializeAsync();
+        }
+
+        Title = "PizzaPi";
+        StatusText = "Live mode";
+    }
+
+    private void SwitchToOfflineHistory(DateTime start, DateTime end, string filterLabel)
+    {
+        StopAudio();
+
+        if (_callManager != null && _callManager.IsStarted())
+        {
+            _callManager.Stop();
+        }
+
+        if (_offlineCallManager != null)
+        {
+            _offlineCallManager.Stop();
+            _offlineCallManager.Dispose();
+            _offlineCallManager = null;
+        }
+
+        _isOfflineMode = true;
+        RaisePropertyChanged(nameof(IsOfflineMode));
+        RaisePropertyChanged(nameof(ModeIndicatorText));
+        RaisePropertyChanged(nameof(ModeIndicatorColor));
+
+        _allCalls.Clear();
+        ClearVisibleCalls();
+
+        _currentFilter = filterLabel;
+        if (filterLabel == "custom")
+        {
+            _customStartDate = start;
+            _customEndDate = end;
+        }
+        else
+        {
+            _customStartDate = null;
+            _customEndDate = null;
+        }
+
+        var loadedCalls = LoadOfflineCallsFromHistory(start, end);
+        foreach (var call in loadedCalls)
+        {
+            call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
+            call.FriendlyFrequency = FormatFrequency(call.Frequency);
+            call.PlayAudioCommand = (c) => PlayAudio(c);
+
+            int insertIndex = GetInsertIndexInList(_allCalls, call);
+            _allCalls.Insert(insertIndex, call);
+        }
+
+        _callsReceivedCount = loadedCalls.Count;
+        _alertsTriggeredCount = loadedCalls.Count(c => c.IsAlertMatch);
+        RaisePropertyChanged(nameof(CallsReceivedCount));
+        RaisePropertyChanged(nameof(AlertsTriggeredCount));
+
+        ApplyTimeRangeFilter();
+        UpdateButtonStates();
+
+        Title = "PizzaPi - Offline History";
+    }
+
+    private List<TranscribedCall> LoadOfflineCallsFromHistory(DateTime start, DateTime end)
+    {
+        var capturesRoot = Settings.DefaultLiveCaptureDirectory;
+        if (!Directory.Exists(capturesRoot))
+        {
+            StatusText = $"Captures directory not found: {capturesRoot}";
+            return new List<TranscribedCall>();
+        }
+
+        var candidateFolders = Directory.EnumerateDirectories(capturesRoot)
+            .Where(dir => ShouldIncludeFolderForRange(dir, start, end))
+            .ToList();
+
+        if (candidateFolders.Count == 0)
+        {
+            StatusText = "No capture folders found for the selected date range";
+            return new List<TranscribedCall>();
+        }
+
+        var loadedCalls = new List<TranscribedCall>();
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var folder in candidateFolders)
+        {
+            var journalPath = Path.Combine(folder, "calljournal.json");
+            if (!File.Exists(journalPath))
+                continue;
+
+            try
+            {
+                foreach (var line in File.ReadLines(journalPath))
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    TranscribedCall? call;
+                    try { call = Newtonsoft.Json.JsonConvert.DeserializeObject<TranscribedCall>(line); }
+                    catch { continue; }
+
+                    if (call == null)
+                        continue;
+
+                    var key = call.Location ?? call.UniqueId.ToString();
+                    if (seenKeys.Add(key))
+                        loadedCalls.Add(call);
+                }
+            }
+            catch
+            {
+                // Skip folders with unreadable journals
+            }
+        }
+
+        var startUnix = new DateTimeOffset(DateTime.SpecifyKind(start, DateTimeKind.Local)).ToUnixTimeSeconds();
+        var endUnix = new DateTimeOffset(DateTime.SpecifyKind(end, DateTimeKind.Local)).ToUnixTimeSeconds();
+
+        return loadedCalls
+            .Where(c => c.StartTime >= startUnix && c.StartTime <= endUnix)
+            .ToList();
+    }
+
+    private bool ShouldIncludeFolderForRange(string folder, DateTime start, DateTime end)
+    {
+        try
+        {
+            var folderName = Path.GetFileName(folder);
+            var match = System.Text.RegularExpressions.Regex.Match(folderName, @"^(?<date>\d{4}-\d{2}-\d{2})-(?<time>\d{6})");
+            if (match.Success)
+            {
+                var datePart = match.Groups["date"].Value;
+                var timePart = match.Groups["time"].Value;
+
+                if (DateTime.TryParseExact($"{datePart} {timePart}", "yyyy-MM-dd HHmmss",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var folderTimestamp))
+                {
+                    return folderTimestamp >= start && folderTimestamp <= end;
+                }
+
+                if (DateTime.TryParseExact(datePart, "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var folderDate))
+                {
+                    return folderDate.Date >= start.Date && folderDate.Date <= end.Date;
+                }
+            }
+
+            var lastWrite = Directory.GetLastWriteTime(folder);
+            return lastWrite >= start.AddDays(-1) && lastWrite <= end.AddDays(1);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+    
+    public void SetCustomDateRange(DateTime? start, DateTime? end)
+    {
+        _customStartDate = start;
+        _customEndDate = end;
+        _currentFilter = "custom";
+        ApplyTimeRangeFilter();
+        RaisePropertyChanged(nameof(CurrentFilter));
+    }
     private bool _useGrouping => _currentGroupMode > 0;
 
     public MainWindow()
@@ -278,18 +824,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InitializeComponent();
         DataContext = this;
 
-        // Get reference to menu items
-        _alwaysPinAlertsButton = this.FindControl<Button>("AlwaysPinAlertsButton");
-        _viewSubMenuPopup = this.FindControl<Popup>("ViewSubMenuPopup");
-        _sortSubMenuBorder = this.FindControl<Border>("SortSubMenuBorder");
-        _groupBySubMenuBorder = this.FindControl<Border>("GroupBySubMenuBorder");
-        _sortNewestButton = this.FindControl<Button>("SortNewestButton");
-        _sortOldestButton = this.FindControl<Button>("SortOldestButton");
-        _sortTalkgroupButton = this.FindControl<Button>("SortTalkgroupButton");
-        _groupNoneButton = this.FindControl<Button>("GroupNoneButton");
-        _groupTalkgroupButton = this.FindControl<Button>("GroupTalkgroupButton");
-        _groupTimeOfDayButton = this.FindControl<Button>("GroupTimeOfDayButton");
-        _groupSourceButton = this.FindControl<Button>("GroupSourceButton");
+        InitializeRightPanePanels();
 
         // Get version from assembly metadata (populated by CI from git tag)
         _versionString = GetAssemblyVersion();
@@ -299,55 +834,268 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (Application.Current != null)
             Application.Current.Resources["CurrentFontSize"] = FontSize;
 
+        // Get search bar elements
+        _searchTextBox = this.FindControl<TextBox>("SearchTextBox");
+        _clearSearchButton = this.FindControl<Button>("ClearSearchButton");
+        _searchPlaceholder = this.FindControl<TextBlock>("SearchPlaceholder");
+        
+// Register converters in Application.Resources for use in XAML bindings
+        if (Application.Current != null)
+        {
+            Application.Current.Resources["IntGreaterThanZeroConverter"] = new IntGreaterThanZeroConverter();
+            Application.Current.Resources["SearchHighlightConverter"] = new SearchHighlightConverter();
+            Application.Current.Resources["SearchTextForegroundConverter"] = new SearchTextForegroundConverter();
+            Application.Current.Resources["AlertSearchBackgroundConverter"] = new AlertSearchBackgroundConverter();
+        }
+
     }
 
     protected override void OnOpened(EventArgs e)
     {
         // Start initialization in background to avoid blocking UI thread
         _ = InitializeAsync();
+        StartUsageTimer();
 
         base.OnOpened(e);
+    }
+    
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        if (_isClosing)
+        {
+            base.OnClosing(e);
+            return;
+        }
+
+        e.Cancel = true;
+        _ = CloseAfterStoppingAsync();
+    }
+    
+    private async Task CloseAfterStoppingAsync()
+    {
+        try
+        {
+            await StopUsageTimerAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _isClosing = true;
+                Close();
+            });
+        }
     }
 
     private void OnViewButtonClicked(object? sender, RoutedEventArgs e)
     {
-        // Close submenus when opening View menu
-        HideSubMenus();
-        
-        if (_viewSubMenuPopup != null)
+        TogglePane(RightPaneType.View);
+    }
+
+    private void InitializeRightPanePanels()
+    {
+        _settingsPanel = new SettingsPanel(_settings);
+        _alertsPanel = new AlertManagerPanel(_settings);
+        _cleanupPanel = new CleanupPanel();
+        _viewPanel = new ViewPanel();
+        _offlineRangePanel = new OfflineRangePanel(_settings);
+
+        _settingsPanel.RequestClose += (_, _) => ClosePane(reloadSettings: true);
+        _settingsPanel.ApplySettingsRequested += ApplySettingsAndRestartAsync;
+        _settingsPanel.SettingsPathChanged += path =>
         {
-            _viewSubMenuPopup.IsOpen = !_viewSubMenuPopup.IsOpen;
+            _currentSettingsPath = path;
+            _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
+        };
+        _alertsPanel.RequestClose += (_, _) => ClosePane(reloadSettings: true);
+        _cleanupPanel.RequestClose += (_, _) => ClosePane(reloadSettings: false);
+        _cleanupPanel.CleanupCompleted += async (_, _) => await UpdateUsageTextAsync();
+        _offlineRangePanel.RequestClose += (_, _) => ClosePane(reloadSettings: false);
+        _offlineRangePanel.OfflineLoaded += (_, result) =>
+        {
+            SwitchToOfflineHistory(result.Start, result.End, "custom");
+            ClosePane(reloadSettings: false);
+        };
+
+        WireViewPanelButtons(_viewPanel);
+        ActivePaneContent = null;
+    }
+
+    private void WireViewPanelButtons(ViewPanel panel)
+    {
+        _alwaysPinAlertsButton = panel.FindControl<Button>("AlwaysPinAlertsButton");
+        _sortNewestButton = panel.FindControl<Button>("SortNewestButton");
+        _sortOldestButton = panel.FindControl<Button>("SortOldestButton");
+        _sortTalkgroupButton = panel.FindControl<Button>("SortTalkgroupButton");
+        _groupNoneButton = panel.FindControl<Button>("GroupNoneButton");
+        _groupTalkgroupButton = panel.FindControl<Button>("GroupTalkgroupButton");
+        _groupTimeOfDayButton = panel.FindControl<Button>("GroupTimeOfDayButton");
+        _groupSourceButton = panel.FindControl<Button>("GroupSourceButton");
+
+        var clearCallsButton = panel.FindControl<Button>("ClearCallsButton");
+        var viewLogButton = panel.FindControl<Button>("ViewLogButton");
+        var decreaseFontButton = panel.FindControl<Button>("DecreaseFontButton");
+        var increaseFontButton = panel.FindControl<Button>("IncreaseFontButton");
+        var collapseExpandButton = panel.FindControl<Button>("CollapseExpandButton");
+
+        if (_sortNewestButton != null) _sortNewestButton.Click += OnSortByTimeNewestClicked;
+        if (_sortOldestButton != null) _sortOldestButton.Click += OnSortByTimeOldestClicked;
+        if (_sortTalkgroupButton != null) _sortTalkgroupButton.Click += OnSortByTalkgroupClicked;
+        if (_groupNoneButton != null) _groupNoneButton.Click += OnGroupByNoneClicked;
+        if (_groupTalkgroupButton != null) _groupTalkgroupButton.Click += OnGroupByTalkgroupClicked;
+        if (_groupTimeOfDayButton != null) _groupTimeOfDayButton.Click += OnGroupByTimeOfDayClicked;
+        if (_groupSourceButton != null) _groupSourceButton.Click += OnGroupBySourceClicked;
+        if (_alwaysPinAlertsButton != null) _alwaysPinAlertsButton.Click += OnAlwaysPinAlertsClicked;
+
+        if (clearCallsButton != null) clearCallsButton.Click += OnClearClicked;
+        if (viewLogButton != null) viewLogButton.Click += OnViewLogClicked;
+        if (decreaseFontButton != null) decreaseFontButton.Click += OnDecreaseFontSizeClicked;
+        if (increaseFontButton != null) increaseFontButton.Click += OnIncreaseFontSizeClicked;
+        if (collapseExpandButton != null) collapseExpandButton.Click += OnCollapseExpandAllClicked;
+    }
+
+    private void TogglePane(RightPaneType pane)
+    {
+        if (_activePane == pane)
+        {
+            ClosePane(reloadSettings: false);
+            return;
+        }
+
+        _activePane = pane;
+        ActivePaneContent = pane switch
+        {
+            RightPaneType.View => _viewPanel,
+            RightPaneType.Settings => _settingsPanel,
+            RightPaneType.Alerts => _alertsPanel,
+            RightPaneType.Cleanup => _cleanupPanel,
+            RightPaneType.Range => _offlineRangePanel,
+            _ => null
+        };
+
+        if (pane == RightPaneType.View)
+        {
+            UpdateSortCheckmarks();
+            UpdateGroupCheckmarks();
+            UpdateAlwaysPinLabel();
+        }
+
+        RaisePaneStateChanged();
+    }
+
+    private void ClosePane(bool reloadSettings)
+    {
+        _activePane = RightPaneType.None;
+        ActivePaneContent = null;
+        RaisePaneStateChanged();
+
+        if (reloadSettings)
+        {
+            _settings = Settings.LoadFromFile(_currentSettingsPath);
+            _settingsPanel?.SetSettings(_settings);
+            _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
+            UpdateBellState();
+        }
+    }
+
+    private void RaisePaneStateChanged()
+    {
+        RaisePropertyChanged(nameof(IsPaneOpen));
+        RaisePropertyChanged(nameof(IsViewPaneOpen));
+        RaisePropertyChanged(nameof(IsSettingsPaneOpen));
+        RaisePropertyChanged(nameof(IsAlertsPaneOpen));
+        RaisePropertyChanged(nameof(IsCleanupPaneOpen));
+        RaisePropertyChanged(nameof(IsRangePaneOpen));
+    }
+
+    private async Task ApplySettingsAndRestartAsync(Settings newSettings)
+    {
+        if (IsApplyingSettings)
+            return;
+
+        IsApplyingSettings = true;
+        // Update settings and UI state
+        _settings = newSettings;
+        TraceLogger.SetLevel(_settings.TraceLevelApp);
+        pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+
+        _currentSortMode = _settings.SortMode;
+        _currentGroupMode = _settings.GroupMode;
+        FontSize = _settings.FontSize;
+
+        UpdateSortCheckmarks();
+        UpdateGroupCheckmarks();
+        UpdateBellState();
+        _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
+
+        if (_isOfflineMode)
+        {
+            _isApplyingSettings = false;
+            return;
+        }
+
+        try
+        {
+            StatusText = "Applying settings...";
+
+            if (_callManager != null && _callManager.IsStarted())
+            {
+                await Task.Run(() =>
+                {
+                    _callManager.Stop(block: true);
+                    _callManager.Dispose();
+                });
+                _callManager = null;
+            }
+
+            _callManager = new LiveCallManager(OnNewCall);
+            await Task.Run(async () => await _callManager.Initialize(_settings));
+            _ = _callManager.Start();
+
+            StatusText = "Settings applied";
+            _serverStatusText = "Server: Running on port " + _settings.ListenPort;
+            ServerInfo = $"Port {_settings.ListenPort}";
+            RaisePropertyChanged(nameof(ServerStatusText));
+            RaisePropertyChanged(nameof(ServerInfo));
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error applying settings: {ex.Message}";
+        }
+        finally
+        {
+            IsApplyingSettings = false;
+        }
+    }
+
+    private void UpdateAlwaysPinLabel()
+    {
+        if (_alwaysPinAlertsButton != null)
+        {
+            _alwaysPinAlertsButton.Content = _alwaysPinAlertMatches ? "✓ Always pin alert matches" : "  Always pin alert matches";
         }
     }
 
     private void HideSubMenus()
     {
-        if (_sortSubMenuBorder != null) _sortSubMenuBorder.IsVisible = false;
-        if (_groupBySubMenuBorder != null) _groupBySubMenuBorder.IsVisible = false;
     }
 
     private void OnSortButtonClicked(object? sender, RoutedEventArgs e)
     {
-        // Hide Group By submenu, show Sort submenu
-        if (_groupBySubMenuBorder != null) _groupBySubMenuBorder.IsVisible = false;
-        if (_sortSubMenuBorder != null) _sortSubMenuBorder.IsVisible = !_sortSubMenuBorder.IsVisible;
+        // No-op: sort controls are now hosted in the right pane.
     }
 
     private void OnGroupByButtonClicked(object? sender, RoutedEventArgs e)
     {
-        // Hide Sort submenu, show Group By submenu
-        if (_sortSubMenuBorder != null) _sortSubMenuBorder.IsVisible = false;
-        if (_groupBySubMenuBorder != null) _groupBySubMenuBorder.IsVisible = !_groupBySubMenuBorder.IsVisible;
+        // No-op: group-by controls are now hosted in the right pane.
     }
 
     private void CloseSortSubMenu()
     {
-        if (_sortSubMenuBorder != null) _sortSubMenuBorder.IsVisible = false;
     }
 
     private void CloseGroupBySubMenu()
     {
-        if (_groupBySubMenuBorder != null) _groupBySubMenuBorder.IsVisible = false;
     }
 
     private void UpdateSortCheckmarks()
@@ -415,6 +1163,129 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Don't close menu for toggle - user might want to change other settings
     }
 
+    private void ApplySearchFilter(string searchText)
+    {
+        _searchText = searchText ?? "";
+
+        ApplyTimeRangeFilter();
+    }
+
+    private void OnSearchTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        var textBox = (TextBox)sender!;
+        bool hadFocus = textBox.IsFocused;
+        
+        // Update search text field
+        _searchText = textBox.Text ?? "";
+        
+        // Show/hide clear button based on whether searching
+        if (_clearSearchButton != null)
+            _clearSearchButton.IsVisible = !string.IsNullOrEmpty(_searchText);
+        
+        // Control watermark visibility
+        if (_searchPlaceholder != null)
+        {
+            _searchPlaceholder.IsVisible = string.IsNullOrEmpty(_searchText);
+        }
+        
+        // Apply time range + search filter
+        ApplyTimeRangeFilter();
+
+        if (hadFocus)
+        {
+            Dispatcher.UIThread.Post(() => textBox.Focus());
+        }
+    }
+
+    private void OnClearSearchClicked(object? sender, RoutedEventArgs e)
+    {
+        _searchText = "";
+
+        if (_searchTextBox != null)
+            _searchTextBox.Text = "";
+
+        if (_clearSearchButton != null)
+            _clearSearchButton.IsVisible = false;
+
+        _currentMatchIndex = -1;
+        StatusText = "No search filter";
+
+        ApplyTimeRangeFilter();
+    }
+
+    private void OnSearchTextBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter || e.Key == Key.Return)
+        {
+            // Check shift key state from event
+            var modifiers = e.KeyModifiers;
+            bool shiftPressed = (modifiers & KeyModifiers.Shift) != 0;
+            NavigateToMatch(shiftPressed);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            // Clear search on Escape key
+            _searchText = "";
+            
+            if (_searchTextBox != null)
+                _searchTextBox.Text = "";
+            
+            if (_clearSearchButton != null)
+                _clearSearchButton.IsVisible = false;
+            
+            _currentMatchIndex = -1;
+            StatusText = "No search filter";
+            
+            ApplyGrouping();
+        }
+    }
+
+    private void OnSearchTextBoxGotFocus(object? sender, RoutedEventArgs e)
+    {
+        // Show watermark when textbox is empty and focused
+        if (_searchTextBox != null && string.IsNullOrEmpty(_searchTextBox.Text))
+        {
+            _searchText = "";
+            ApplyGrouping();
+        }
+    }
+
+    private void OnSearchTextBoxLostFocus(object? sender, RoutedEventArgs e)
+    {
+        // Hide watermark when textbox loses focus and is empty
+        if (_searchTextBox != null && string.IsNullOrEmpty(_searchTextBox.Text))
+        {
+            _searchText = "";
+            ApplyGrouping();
+        }
+    }
+
+    private void NavigateToMatch(bool goPrevious)
+    {
+        // Only navigate if currently searching
+        if (string.IsNullOrEmpty(_searchText)) return;
+        
+        var matches = GroupedCalls.Where(i => i.IsSearchMatch && !i.IsHeader).ToList();
+        int matchCount = matches.Count;
+        
+        if (matchCount == 0) return;
+        
+        // Remove orange border from all items first
+        foreach (var item in GroupedCalls.Where(i => !i.IsHeader))
+            if (item.Call != null) item.Call.IsCurrentMatch = false;
+        
+        // Calculate next index with wrap-around
+        _currentMatchIndex = goPrevious 
+            ? (_currentMatchIndex - 1 + matchCount) % matchCount
+            : (_currentMatchIndex + 1) % matchCount;
+        
+        // Apply orange border to new match
+        var matchedItem = matches[_currentMatchIndex];
+        if (matchedItem.Call != null)
+            matchedItem.Call.IsCurrentMatch = true;
+    }
+
     private void OnGroupByNoneClicked(object? sender, RoutedEventArgs e)
     {
         _currentGroupMode = 0;
@@ -480,8 +1351,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
-            // Close popups first...
-            if (_viewSubMenuPopup != null) _viewSubMenuPopup.IsOpen = false;
+            // Close transient menus first...
             HideSubMenus();
             HideMenu();
 
@@ -508,6 +1378,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyGrouping()
     {
+        // Always group the visible calls; search only affects highlighting
+        var callsToGroup = Calls.ToList();  // Convert to list for consistency
+
         GroupedCalls.Clear();
 
         // First, sort the Calls collection based on current sort mode
@@ -515,13 +1388,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         List<TranscribedCall> sortedCalls;
 
         // Check if any calls are manually pinned
-        bool hasPinnedCalls = Calls.Any(c => c.IsPinned);
+        bool hasPinnedCalls = callsToGroup.Any(c => c.IsPinned);
 
         if (hasPinnedCalls)
         {
             // Pinned calls at top (sorted by selected sort mode), then non-pinned (sorted by selected sort mode)
-            var pinnedCalls = Calls.Where(c => c.IsPinned).ToList();
-            var nonPinnedCalls = Calls.Where(c => !c.IsPinned).ToList();
+            var pinnedCalls = callsToGroup.Where(c => c.IsPinned).ToList();
+            var nonPinnedCalls = callsToGroup.Where(c => !c.IsPinned).ToList();
 
             sortedCalls = _currentSortMode switch
             {
@@ -540,10 +1413,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // No pinned calls - just sort by selected mode
             sortedCalls = _currentSortMode switch
             {
-                0 => Calls.OrderByDescending(c => c.StartTime).ToList(),
-                1 => Calls.OrderBy(c => c.StartTime).ToList(),
-                2 => Calls.OrderBy(c => c.FriendlyTalkgroup).ThenByDescending(c => c.StartTime).ToList(),
-                _ => Calls.OrderByDescending(c => c.StartTime).ToList()
+                0 => callsToGroup.OrderByDescending(c => c.StartTime).ToList(),
+                1 => callsToGroup.OrderBy(c => c.StartTime).ToList(),
+                2 => callsToGroup.OrderBy(c => c.FriendlyTalkgroup).ThenByDescending(c => c.StartTime).ToList(),
+                _ => callsToGroup.OrderByDescending(c => c.StartTime).ToList()
             };
         }
 
@@ -579,6 +1452,32 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 3 => "Grouping: Source",
                 _ => "Grouping: None"
             };
+        }
+        
+        // Set search match indicators on GroupedCalls items if searching
+        if (!string.IsNullOrEmpty(_searchText))
+        {
+            int matchCounter = -1;
+            foreach (var item in GroupedCalls.Where(i => !i.IsHeader))
+            {
+                bool isMatch = item.Call?.Transcription?.ToLowerInvariant().Contains(_searchText.ToLowerInvariant()) == true;
+                
+                if (isMatch && !string.IsNullOrEmpty(_searchText))
+                    matchCounter++;
+                
+                item.IsSearchMatch = isMatch;
+                item.MatchIndex = isMatch ? matchCounter : -1;
+            }
+            
+            // Update status text with match count
+            var matchingCount = GroupedCalls.Count(i => i.IsSearchMatch && !i.IsHeader);
+            StatusText = $"Search: '{_searchText}' - {matchingCount} matches";
+        }
+        else
+        {
+            // Clear match indicators when no search active
+            foreach (var item in GroupedCalls.Where(i => !i.IsHeader))
+                item.IsSearchMatch = false;
         }
         
         // Force UI refresh
@@ -681,7 +1580,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // Settings are already loaded in constructor, just validate/load defaults
             try
             {
-                _settings = Settings.LoadFromFile();
+                _settings = Settings.LoadFromFile(_currentSettingsPath);
                 TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Settings loaded from file");
             }
             catch (Exception ex)
@@ -702,6 +1601,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _currentGroupMode = _settings.GroupMode;
             FontSize = _settings.FontSize;
 
+            // Update settings panel with loaded settings
+            Dispatcher.UIThread.Post(() =>
+            {
+                _settingsPanel?.SetSettings(_settings);
+            });
+
             _callManager = new LiveCallManager(OnNewCall);
 
             try
@@ -720,8 +1625,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     // Start listening on port 9123
                     _ = _callManager.Start();
                     // Populate usage text once at startup
-                    _usageText = GetCaptureFolderSize();
-                    RaisePropertyChanged(nameof(UsageText));
+                    _ = UpdateUsageTextAsync();
                     _infoText = "PizzaPi is listening on port " + _settings.ListenPort + " for trunk-recorder calls";
                     RaisePropertyChanged(nameof(ServerStatusText));
                     RaisePropertyChanged(nameof(ConnectionStatus));
@@ -770,8 +1674,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 $"Call received: {call.FriendlyTalkgroup} @ {call.FriendlyFrequency} ({call.Duration}s)");
 
             // Insert at correct position: pinned calls at top, then by recency
-            int insertIndex = GetInsertIndex(call);
-            Calls.Insert(insertIndex, call);
+            int insertIndexAll = GetInsertIndexInList(_allCalls, call);
+            _allCalls.Insert(insertIndexAll, call);
+            ApplyTimeRangeFilter();
 
             // Autoplay audio for alert matches (if enabled globally, not snoozed, and alert has autoplay enabled)
             if (call.IsAlertMatch && call.ShouldAutoplay && _settings.AutoplayAlerts && !IsAlertSnoozed)
@@ -801,18 +1706,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 RepositionCall(call);
             }
 
-            // Apply grouping if enabled
-            if (_useGrouping)
-            {
-                ApplyGrouping();
-            }
-            else
-            {
-                // When not grouping, just insert the single new item at the same position
-                GroupedCalls.Insert(insertIndex, new CallGroupItem
-                    { IsHeader = false, Call = call, ShowTalkgroup = true });
-            }
-
             // Cleanup old calls to prevent memory leaks
             CleanupOldCalls();
         });
@@ -824,20 +1717,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// </summary>
     private int GetInsertIndex(TranscribedCall call)
     {
+        return GetInsertIndexInList(Calls, call);
+    }
+
+    private int GetInsertIndexInList(IList<TranscribedCall> list, TranscribedCall call)
+    {
         if (call.IsPinned)
         {
             // Pinned: insert at the top, before all non-pinned items
-            for (int i = 0; i < Calls.Count; i++)
+            for (int i = 0; i < list.Count; i++)
             {
-                if (!Calls[i].IsPinned)
+                if (!list[i].IsPinned)
                     return i;
             }
-            return Calls.Count; // All are pinned, add at end of pinned section
+            return list.Count; // All are pinned, add at end of pinned section
         }
         else
         {
             // Non-pinned: insert after all pinned items (at end of list)
-            return Calls.Count;
+            return list.Count;
         }
     }
 
@@ -847,25 +1745,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// </summary>
     private void RepositionCall(TranscribedCall call)
     {
-        int currentIndex = Calls.IndexOf(call);
+        RepositionCallInList(Calls, call);
+        RepositionCallInList(_allCalls, call);
+    }
+
+    private void RepositionCallInList(IList<TranscribedCall> list, TranscribedCall call)
+    {
+        int currentIndex = list.IndexOf(call);
         if (currentIndex < 0) return;
 
-        // Calculate new index based on pinned state
-        // Note: GetInsertIndex uses the current state of Calls (which still includes this call)
-        int newIndex = GetInsertIndex(call);
-        
-        // Adjust newIndex to account for the removal that will happen
+        int newIndex = GetInsertIndexInList(list, call);
         if (newIndex > currentIndex)
-            newIndex--; // Removal shifts everything after currentIndex down by 1
-        
-        // Clamp to valid range
-        newIndex = Math.Max(0, Math.Min(newIndex, Calls.Count - 1));
+            newIndex--;
 
-        // Only move if position changed
+        newIndex = Math.Max(0, Math.Min(newIndex, list.Count - 1));
+
         if (currentIndex != newIndex)
         {
-            Calls.RemoveAt(currentIndex);
-            Calls.Insert(newIndex, call);
+            list.RemoveAt(currentIndex);
+            list.Insert(newIndex, call);
         }
     }
 
@@ -905,30 +1803,84 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{mhz:F3}mhz";
     }
 
-    // Update usage text periodically (called by timer)
-    private void UpdateUsageText()
+    private async Task UpdateUsageTextAsync()
     {
+        await _usageUpdateLock.WaitAsync();
         try
         {
-            var capturePath = Settings.DefaultLiveCaptureDirectory;
-            if (!Directory.Exists(capturePath))
+            string usageText = await Task.Run(GetCaptureFolderSize);
+            Dispatcher.UIThread.Post(() =>
             {
-                _usageText = "Usage: 0mb";
-            }
-            else
-            {
-                var size = GetDirectorySize(capturePath);
-                var mb = size / (1024.0 * 1024.0);
-                _usageText = $"Usage: {mb:F0}mb";
-            }
+                _usageText = usageText;
+                RaisePropertyChanged(nameof(UsageText));
+            });
         }
         catch (Exception ex)
         {
             TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Warning,
                 $"Error calculating usage: {ex.Message}");
-            _usageText = "Usage: ?mb";
+            Dispatcher.UIThread.Post(() =>
+            {
+                _usageText = "Usage: ?mb";
+                RaisePropertyChanged(nameof(UsageText));
+            });
         }
-        RaisePropertyChanged(nameof(UsageText));
+        finally
+        {
+            _usageUpdateLock.Release();
+        }
+    }
+    
+    private void StartUsageTimer()
+    {
+        if (_usageTimerCts != null)
+            return;
+        _usageTimerCts = new CancellationTokenSource();
+        _usageTimerTask = RunUsageTimerAsync(_usageTimerCts.Token);
+    }
+
+    private async Task RunUsageTimerAsync(CancellationToken token)
+    {
+        await UpdateUsageTextAsync();
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMinutes(10), token);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+
+            if (token.IsCancellationRequested)
+                break;
+
+            await UpdateUsageTextAsync();
+        }
+    }
+
+    private async Task StopUsageTimerAsync()
+    {
+        if (_usageTimerCts == null)
+            return;
+
+        _usageTimerCts.Cancel();
+
+        if (_usageTimerTask != null)
+        {
+            try
+            {
+                await _usageTimerTask;
+            }
+            catch (TaskCanceledException)
+            {
+            }
+        }
+
+        _usageTimerCts.Dispose();
+        _usageTimerCts = null;
+        _usageTimerTask = null;
     }
 
     private string GetCaptureFolderSize()
@@ -1035,25 +1987,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void HideMenu()
     {
-        MenuVisible = false;
-        HideSubMenus();
-        if (_viewSubMenuPopup != null) _viewSubMenuPopup.IsOpen = false;
-    }
-
-    private void OnMenuButtonClicked(object? sender, RoutedEventArgs e)
-    {
-        if (MenuVisible)
-        {
-            // Menu is open, closing it
-            MenuVisible = false;
-            HideSubMenus();
-            if (_viewSubMenuPopup != null) _viewSubMenuPopup.IsOpen = false;
-        }
-        else
-        {
-            // Menu is closed, opening it
-            MenuVisible = true;
-        }
     }
 
     private void OnBellClicked(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
@@ -1198,27 +2131,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         menu.Open(this);
     }
 
-    private async void OnSettingsClicked(object? sender, RoutedEventArgs e)
+    private void OnSettingsClicked(object? sender, RoutedEventArgs e)
     {
-        // Create and show settings window
-        var settingsWindow = new SettingsWindow(_settings);
-        await settingsWindow.ShowDialog(this);
-        // Reload settings from file and refresh bell icon state after dialog closes
-        _settings = Settings.LoadFromFile();
-        UpdateBellState();
-        HideMenu();
+        TogglePane(RightPaneType.Settings);
     }
 
     private void OnAlertsClicked(object? sender, RoutedEventArgs e)
     {
-        // Create and show alert manager window
-        var alertManagerWindow = new AlertManagerWindow(_settings);
-        alertManagerWindow.Show(this);
-        HideMenu();
+        TogglePane(RightPaneType.Alerts);
     }
 
     private void OnClearClicked(object? sender, RoutedEventArgs e)
     {
+        _allCalls.Clear();
         Calls.Clear();
         GroupedCalls.Clear();
         _collapsedGroups.Clear();
@@ -1253,6 +2178,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             // Clear live calls before loading offline captures
+            _allCalls.Clear();
             Calls.Clear();
 
             // Switch to offline mode (or load new offline capture if already in offline mode)
@@ -1276,25 +2202,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 call.PlayAudioCommand = (c) => PlayAudio(c);
 
                 // Use GetInsertIndex to properly sort pinned calls to top
-                int insertIndex = GetInsertIndex(call);
-                Calls.Insert(insertIndex, call);
+                int insertIndex = GetInsertIndexInList(_allCalls, call);
+                _allCalls.Insert(insertIndex, call);
             }
             System.Diagnostics.Debug.WriteLine($"[MainWindow] Calls.Count after load: {Calls.Count}");
 
-            // Apply grouping to update GroupedCalls (the UI binds to GroupedCalls, not Calls)
-            if (_useGrouping)
-            {
-                ApplyGrouping();
-            }
-            else
-            {
-                // When not grouping, also update GroupedCalls to mirror Calls
-                GroupedCalls.Clear();
-                foreach (var c in Calls)
-                {
-                    GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
-                }
-            }
+            ApplyTimeRangeFilter();
             System.Diagnostics.Debug.WriteLine($"[MainWindow] GroupedCalls.Count after load: {GroupedCalls.Count}");
 
             // Update call and alert counts to reflect loaded offline captures
@@ -1308,10 +2221,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             RaisePropertyChanged(nameof(ModeIndicatorText));
             RaisePropertyChanged(nameof(ModeIndicatorColor));
             RaisePropertyChanged(nameof(IsOfflineMode));
-
-            // Update menu visibility - keep Open Offline enabled so user can load another
-            var returnToLiveBtn = this.FindControl<Button>("ReturnToLiveButton");
-            if (returnToLiveBtn != null) returnToLiveBtn.IsVisible = true;
 
             Title = $"PizzaPi - Offline: {offlineWindow.SelectedPath}";
             StatusText = $"Loaded {offlineWindow.LoadedCalls.Count} offline calls";
@@ -1342,6 +2251,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _offlineCallManager = null;
 
         // Clear calls
+        _allCalls.Clear();
         Calls.Clear();
 
         // Switch back to live mode
@@ -1351,12 +2261,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RaisePropertyChanged(nameof(ModeIndicatorText));
         RaisePropertyChanged(nameof(ModeIndicatorColor));
         RaisePropertyChanged(nameof(IsOfflineMode));
-
-        // Update menu visibility
-        var openOfflineBtn = this.FindControl<Button>("OpenOfflineButton");
-        var returnToLiveBtn = this.FindControl<Button>("ReturnToLiveButton");
-        if (openOfflineBtn != null) openOfflineBtn.IsEnabled = true;
-        if (returnToLiveBtn != null) returnToLiveBtn.IsVisible = false;
 
         // Restart live call manager
         _ = InitializeAsync();
@@ -1369,9 +2273,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnCleanupClicked(object? sender, RoutedEventArgs e)
     {
-        var cleanupWindow = new CleanupWindow();
-        cleanupWindow.ShowDialog(this);
-        HideMenu();
+        TogglePane(RightPaneType.Cleanup);
     }
 
     private void OnViewLogClicked(object? sender, RoutedEventArgs e)
@@ -1422,11 +2324,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         Refresh();
         HideMenu();
-    }
-
-    private void OnCloseMenuClicked(object? sender, RoutedEventArgs e)
-    {
-        MenuVisible = false;
     }
 
     private void PlayAudio(TranscribedCall newCall)
@@ -1661,34 +2558,64 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        // Close menu when clicking outside of it
-        if (MenuVisible)
-        {
-            var point = e.GetCurrentPoint(this);
-            var menuPanel = this.FindControl<Border>("MenuPanel");
-            var hamburgerButton = this.FindControl<Button>("HamburgerButton");
-            
-            if (menuPanel != null && hamburgerButton != null)
-            {
-                var menuBounds = new Avalonia.Rect(menuPanel.Bounds.Size);
-                var hamburgerBounds = new Avalonia.Rect(hamburgerButton.Bounds.Size);
-                
-                var clickPosition = point.Position;
-                var menuPosition = menuPanel.TranslatePoint(new Avalonia.Point(0, 0), this);
-                var hamburgerPosition = hamburgerButton.TranslatePoint(new Avalonia.Point(0, 0), this);
-                
-                if (menuPosition.HasValue && hamburgerPosition.HasValue)
-                {
-                    var menuRect = new Avalonia.Rect(menuPosition.Value.X, menuPosition.Value.Y, menuBounds.Width, menuBounds.Height);
-                    var hamburgerRect = new Avalonia.Rect(hamburgerPosition.Value.X, hamburgerPosition.Value.Y, hamburgerBounds.Width, hamburgerBounds.Height);
-                    
-                    if (!menuRect.Contains(clickPosition) && !hamburgerRect.Contains(clickPosition))
-                    {
-                        HideMenu();
-                    }
-                }
-            }
-        }
+    }
+
+    // Time range filter button handlers
+    private void OnLiveModeClicked(object? sender, RoutedEventArgs e)
+    {
+        SwitchToLiveMode();
+    }
+
+    private void OnLast24hClicked(object? sender, RoutedEventArgs e)
+    {
+        var end = DateTime.Now;
+        var start = end.AddHours(-24);
+        SwitchToOfflineHistory(start, end, "24h");
+    }
+
+    private void OnLast2dClicked(object? sender, RoutedEventArgs e)
+    {
+        var end = DateTime.Now;
+        var start = end.AddHours(-48);
+        SwitchToOfflineHistory(start, end, "2d");
+    }
+
+    private void OnLastWeekClicked(object? sender, RoutedEventArgs e)
+    {
+        var end = DateTime.Now;
+        var start = end.AddDays(-7);
+        SwitchToOfflineHistory(start, end, "week");
+    }
+
+    private void OnPickRangeClicked(object? sender, RoutedEventArgs e)
+    {
+        TogglePane(RightPaneType.Range);
+    }
+
+    private void OnViewClicked(object? sender, RoutedEventArgs e)
+    {
+        // Toggle View submenu (same as existing behavior)
+        OnViewButtonClicked(sender, e);
+    }
+
+    private void OnAlertsClicked2(object? sender, RoutedEventArgs e)
+    {
+        OnAlertsClicked(sender, e);
+    }
+
+    private void OnSettingsClicked2(object? sender, RoutedEventArgs e)
+    {
+        OnSettingsClicked(sender, e);
+    }
+
+    private void OnCleanupClicked2(object? sender, RoutedEventArgs e)
+    {
+        OnCleanupClicked(sender, e);
+    }
+
+    private void OnExitClicked2(object? sender, RoutedEventArgs e)
+    {
+        Close();
     }
 
     private void OnExitClicked(object? sender, RoutedEventArgs e)
@@ -1902,5 +2829,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
+        
+        // Set initial button states
+        UpdateButtonStates();
+    }
+    
+    private void OnWindowLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        // Initialize time range filter to 'all' (live mode)
+        _currentFilter = "all";
+        _customStartDate = null;
+        _customEndDate = null;
+        
+        UpdateButtonStates();
+        ApplyTimeRangeFilter();
+    }
+    
+    private void UpdateButtonStates()
+    {
+        RaisePropertyChanged(nameof(IsLiveActive));
+        RaisePropertyChanged(nameof(Is24hActive));
+        RaisePropertyChanged(nameof(Is2dActive));
+        RaisePropertyChanged(nameof(IsWeekActive));
+        RaisePropertyChanged(nameof(IsRangeActive));
     }
 }

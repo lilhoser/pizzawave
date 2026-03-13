@@ -60,9 +60,15 @@ This website will output the center frequencies and control channels for your sy
 
 A talkgroup is simply a virtual channel within the trunked system that groups related users together. For example, all police dispatch communications might be on one talkgroup, while fire dispatch is on another. By creating a talkgroups file and linking it in your config, you can have the PizzaPi UI display the talkgroup names and descriptions instead of just showing "Unknown Talkgroup 12345" for every call.
 
-Talkgroups are listed on the RadioReference page for your system. You can copy and paste them into a CSV file with the following format:
+Talkgroups are listed on the RadioReference page for your system. To generate the CSV:
+1. Visit the RadioReference talkgroups section for the system you are monitoring (example: https://www.radioreference.com/db/sid/4879).
+1. Copy the HTML table for the talkgroups you want.
+1. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
+1. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
+
+The CSV must include this header line:
 ```
-Id,Mode,AlphaTag,Description,Tag,Category
+Decimal,Mode,Alpha Tag,Description,Tag,Category
 1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
 2,D,FDISPATCH2,Fire Dispatch 2,Fire,Dispatch
 3,D,PDISPATCH,Police Dispatch,Police,Dispatch

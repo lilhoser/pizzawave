@@ -23,17 +23,39 @@ namespace pizzalib
 {
     public class OfflineCallManager : CallManager, IDisposable
     {
-        private string m_OfflineFilesPath;
+        private List<string> m_OfflineRoots;
+        private string? m_PrimaryOfflinePath;
         private bool m_Disposed;
         private Settings? m_Settings;
         private CancellationTokenSource? CancelSource;
+        private Func<string, bool>? m_FileFilter;
 
         public OfflineCallManager(
             string OfflineFilesPath,
             Action<TranscribedCall> newTranscribedCallCallback) : base(newTranscribedCallCallback)
         {
-            m_OfflineFilesPath = OfflineFilesPath;
+            m_OfflineRoots = [];
+            SetOfflineRoots([OfflineFilesPath]);
             m_Initialized = false;
+            m_FileFilter = null;
+        }
+
+        public OfflineCallManager(
+            string OfflineFilesPath,
+            Action<TranscribedCall> newTranscribedCallCallback,
+            Func<string, bool>? fileFilter) : base(newTranscribedCallCallback)
+        {
+            m_OfflineRoots = [];
+            SetOfflineRoots([OfflineFilesPath]);
+            m_Initialized = false;
+            m_FileFilter = fileFilter;
+        }
+
+        public OfflineCallManager(Action<TranscribedCall> newTranscribedCallCallback) : base(newTranscribedCallCallback)
+        {
+            m_OfflineRoots = [];
+            m_Initialized = false;
+            m_FileFilter = null;
         }
 
         ~OfflineCallManager()
@@ -66,16 +88,16 @@ namespace pizzalib
             m_Settings = Settings;
             if (m_Initialized)
             {
-                return await Reinitialize(Settings);
+                return true;
             }
 
             try
             {
                 CancelSource = new CancellationTokenSource();
-                // Don't call base.Initialize() - we don't want to create a new capture folder
-                // Just initialize whisper for transcription
-                m_Whisper = new Whisper(Settings);
-                _ = await m_Whisper.Initialize();
+                // Don't call base.Initialize() - we don't want to create a new capture folder.
+                // Initialize configured transcription engine only.
+                m_Transcriber = CreateTranscriber(Settings);
+                _ = await m_Transcriber.Initialize();
                 m_Initialized = true;
             }
             catch (Exception ex)
@@ -84,6 +106,26 @@ namespace pizzalib
                 throw new Exception(err);
             }
             return true;
+        }
+
+        public void SetOfflineRoots(IEnumerable<string> roots)
+        {
+            m_OfflineRoots = roots
+                .Where(r => !string.IsNullOrWhiteSpace(r))
+                .Select(r => r.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            m_PrimaryOfflinePath = m_OfflineRoots.FirstOrDefault();
+        }
+
+        public void SetFileFilter(Func<string, bool>? fileFilter)
+        {
+            m_FileFilter = fileFilter;
+        }
+
+        public void SetNewTranscribedCallCallback(Action<TranscribedCall> callback)
+        {
+            m_NewTranscribedCallCallback = callback;
         }
 
         public void DeleteCapture()
@@ -107,6 +149,9 @@ namespace pizzalib
                 throw new Exception("Offline call manager not initialized");
             }
 
+            CancelSource?.Dispose();
+            CancelSource = new CancellationTokenSource();
+
             //
             // Instead of blocking on StreamServer which invokes HandleNewCall
             // whenever the live server sends a call, we process the list of
@@ -116,17 +161,37 @@ namespace pizzalib
             {
                 await Task.Run(async () =>
                 {
-                    m_Settings!.UpdateProgressLabelCallback?.Invoke($"Reading folder {m_OfflineFilesPath}...");
+                    var roots = (m_OfflineRoots.Count > 0) ? m_OfflineRoots : (m_PrimaryOfflinePath != null ? [m_PrimaryOfflinePath] : []);
+                    if (roots.Count == 0)
+                    {
+                        throw new Exception("No offline folders configured.");
+                    }
+
+                    m_Settings!.UpdateProgressLabelCallback?.Invoke("Scanning offline folders...");
 
                     // Try to load .bin files first (SFTP backup format)
-                    var targets = Directory.GetFiles(
-                        m_OfflineFilesPath, "*.bin", SearchOption.AllDirectories).ToList();
+                    var targets = new List<string>();
+                    foreach (var root in roots)
+                    {
+                        if (!Directory.Exists(root))
+                            continue;
+                        targets.AddRange(Directory.GetFiles(root, "*.bin", SearchOption.AllDirectories));
+                    }
 
                     // If no .bin files, try .mp3 files (live capture format)
                     if (targets.Count == 0)
                     {
-                        targets = Directory.GetFiles(
-                            m_OfflineFilesPath, "*.mp3", SearchOption.AllDirectories).ToList();
+                        foreach (var root in roots)
+                        {
+                            if (!Directory.Exists(root))
+                                continue;
+                            targets.AddRange(Directory.GetFiles(root, "*.mp3", SearchOption.AllDirectories));
+                        }
+                    }
+
+                    if (m_FileFilter != null)
+                    {
+                        targets = targets.Where(m_FileFilter).ToList();
                     }
 
                     m_Settings.SetProgressBarCallback?.Invoke(targets.Count, 1);
@@ -143,7 +208,7 @@ namespace pizzalib
                         }
                         m_Settings.ProgressBarStepCallback?.Invoke();
                         m_Settings.UpdateProgressLabelCallback?.Invoke(
-                            $"Loading offline records from {m_OfflineFilesPath}...{i++} of {targets.Count}");
+                            $"Loading offline records...{i++} of {targets.Count}");
 
                         if (file.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
                         {
@@ -225,7 +290,7 @@ namespace pizzalib
                 }
 
                 // Try to load transcription from calljournal.json if it exists
-                var journalPath = Path.Combine(m_OfflineFilesPath, "calljournal.json");
+                var journalPath = Path.Combine(Path.GetDirectoryName(mp3Path) ?? string.Empty, "calljournal.json");
                 if (File.Exists(journalPath))
                 {
                     try

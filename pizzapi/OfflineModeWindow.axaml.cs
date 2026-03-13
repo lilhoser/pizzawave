@@ -21,6 +21,11 @@ public partial class OfflineModeWindow : Window
     public string? SelectedPath => _selectedPath;
     public List<TranscribedCall>? LoadedCalls => _loadedCalls;
 
+    public OfflineModeWindow()
+        : this(Settings.LoadFromFile())
+    {
+    }
+
     public OfflineModeWindow(Settings settings)
     {
         _settings = settings;

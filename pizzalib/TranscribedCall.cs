@@ -27,6 +27,7 @@ namespace pizzalib
         private bool _isPinned;
         private bool _isAlertMatch;
         private bool _shouldAutoplay;
+        private bool _isCurrentMatch;
 
         public long StartTime { get; set; }
         public long StopTime { get; set; }
@@ -62,6 +63,13 @@ namespace pizzalib
         {
             get => _shouldAutoplay;
             set { _shouldAutoplay = value; RaisePropertyChanged(); }
+        }
+
+        [Newtonsoft.Json.JsonIgnore]
+        public bool IsCurrentMatch
+        {
+            get => _isCurrentMatch;
+            set { _isCurrentMatch = value; RaisePropertyChanged(); }
         }
 
         [Newtonsoft.Json.JsonIgnore]

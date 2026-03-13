@@ -1,40 +1,33 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="using:pizzapi"
-        x:Class="pizzapi.CleanupWindow"
-        x:DataType="local:CleanupWindow"
-        Title="Cleanup Captured Audio"
-        Width="500"
-        Height="450"
-        WindowStartupLocation="CenterOwner"
-        ShowInTaskbar="False"
-        CanResize="False">
-    <Border Padding="20">
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:pizzapi"
+             x:Class="pizzapi.CleanupPanel"
+             x:DataType="local:CleanupPanel">
+    <Border Padding="10">
         <DockPanel>
-            <TextBlock Text="Cleanup Captured Audio"
-                       FontSize="20"
-                       FontWeight="Bold"
-                       DockPanel.Dock="Top"
-                       Margin="0,0,0,15" />
+<TextBlock Text="Cleanup Captured Audio"
+                        FontSize="18"
+                        FontWeight="Bold"
+                        DockPanel.Dock="Top"
+                        Margin="0,0,0,10" />
 
             <StackPanel Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         Spacing="10"
                         DockPanel.Dock="Bottom"
-                        Margin="0,15,0,0">
-                <Button x:Name="CancelButton" Content="Cancel" Width="100" />
-                <Button x:Name="CleanupButton" 
-                        Content="Cleanup" 
+                        Margin="0,10,0,0">
+                <Button x:Name="CancelButton" Content="Close" Width="90" />
+                <Button x:Name="CleanupButton"
+                        Content="Cleanup"
                         Width="100"
                         Background="#4CAF50"
                         Foreground="White" />
             </StackPanel>
 
             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Spacing="20">
-                    <!-- Current Usage -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
-                        <StackPanel Spacing="10">
+                <StackPanel Spacing="16">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="8">
                             <TextBlock Text="Current Storage Usage"
                                        FontSize="16"
                                        FontWeight="Bold"
@@ -45,9 +38,8 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Time Range Selection -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
-                        <StackPanel Spacing="10">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="8">
                             <TextBlock Text="Cleanup Scope"
                                        FontSize="16"
                                        FontWeight="Bold"
@@ -55,7 +47,7 @@
                             <TextBlock FontSize="12"
                                        Foreground="Gray"
                                        Text="Select which files to cleanup based on age" />
-                            
+
                             <RadioButton x:Name="AllFilesRadio"
                                          Content="All files"
                                          GroupName="TimeRange"
@@ -81,9 +73,8 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Action Selection -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
-                        <StackPanel Spacing="10">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="8">
                             <TextBlock Text="Action"
                                        FontSize="16"
                                        FontWeight="Bold"
@@ -91,7 +82,7 @@
                             <TextBlock FontSize="12"
                                        Foreground="Gray"
                                        Text="Choose what to do with selected files" />
-                            
+
                             <RadioButton x:Name="WipeRadio"
                                          Content="Delete permanently"
                                          GroupName="Action"
@@ -101,7 +92,7 @@
                                        Foreground="Gray"
                                        Margin="20,0,0,0"
                                        Text="Files will be permanently deleted" />
-                            
+
                             <RadioButton x:Name="ArchiveRadio"
                                          Content="Archive to ZIP then delete"
                                          GroupName="Action"
@@ -116,7 +107,7 @@
                                                Foreground="Gray"
                                                VerticalAlignment="Center" />
                                     <TextBox x:Name="ArchiveNameTextBox"
-                                             Width="250"
+                                             Width="200"
                                              FontSize="12"
                                              Text="pizzawave-archive-{}.zip"
                                              PlaceholderText="pizzawave-archive-{date}.zip" />
@@ -128,8 +119,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Estimated Space -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
                         <StackPanel Spacing="5">
                             <TextBlock Text="Estimated space to be freed:"
                                        FontSize="14"
@@ -144,4 +134,4 @@
             </ScrollViewer>
         </DockPanel>
     </Border>
-</Window>
+</UserControl>

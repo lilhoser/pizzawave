@@ -49,10 +49,29 @@ namespace pizzalib
             get => listenPort;
             set => listenPort = value;
         }
+        [JsonIgnore]
         public string? WhisperModelFile
         {
             get => whisperModelFile;
             set => whisperModelFile = value;
+        }
+        [JsonProperty("transcriptionEngine")]
+        public string TranscriptionEngine
+        {
+            get => transcriptionEngine;
+            set => transcriptionEngine = value;
+        }
+        [JsonProperty("transcriptionModelPreset")]
+        public string TranscriptionModelPreset
+        {
+            get => transcriptionModelPreset;
+            set => transcriptionModelPreset = value;
+        }
+        [JsonIgnore]
+        public string? VoskModelPath
+        {
+            get => voskModelPath;
+            set => voskModelPath = value;
         }
         public string? GmailUser
         {
@@ -95,7 +114,14 @@ namespace pizzalib
         }
 
         // whisper.net settings
+        [JsonIgnore]
         public string? whisperModelFile;
+        [JsonIgnore]
+        public string transcriptionEngine = "whisper";
+        [JsonIgnore]
+        public string transcriptionModelPreset = string.Empty;
+        [JsonIgnore]
+        public string? voskModelPath;
 
         // Config versioning
         public int ConfigVersion { get; set; } = 1;
@@ -173,7 +199,10 @@ namespace pizzalib
                 analogBitDepth == other.analogBitDepth &&
                 analogSamplingRate == other.analogSamplingRate &&
                 talkgroups?.SequenceEqual(other.talkgroups) == true &&
-                whisperModelFile == other.whisperModelFile;
+                whisperModelFile == other.whisperModelFile &&
+                transcriptionEngine == other.transcriptionEngine &&
+                transcriptionModelPreset == other.transcriptionModelPreset &&
+                voskModelPath == other.voskModelPath;
         }
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
@@ -249,10 +278,24 @@ namespace pizzalib
 
         public virtual void Validate()
         {
-            if (!string.IsNullOrEmpty(whisperModelFile) &&
+            var engine = (transcriptionEngine ?? "whisper").Trim().ToLowerInvariant();
+            if (engine != "whisper" && engine != "vosk")
+            {
+                throw new Exception("TranscriptionEngine must be 'whisper' or 'vosk'");
+            }
+
+            if (engine == "whisper" &&
+                !string.IsNullOrEmpty(whisperModelFile) &&
+                !IsWhisperModelAlias(whisperModelFile) &&
                 !File.Exists(whisperModelFile))
             {
                 throw new Exception($"Invalid whisper model file: {whisperModelFile}");
+            }
+            if (engine == "vosk" &&
+                !string.IsNullOrEmpty(voskModelPath) &&
+                !Directory.Exists(voskModelPath))
+            {
+                throw new Exception($"Invalid vosk model directory: {voskModelPath}");
             }
 
             if (!string.IsNullOrEmpty(gmailUser))
@@ -317,6 +360,14 @@ namespace pizzalib
                 var settings = JsonConvert.DeserializeObject<Settings>(json) ?? new Settings();
                 // Migrate if needed
                 settings.Migrate();
+                if (string.IsNullOrWhiteSpace(settings.transcriptionEngine))
+                {
+                    settings.transcriptionEngine = "whisper";
+                }
+                if (settings.transcriptionModelPreset == null)
+                {
+                    settings.transcriptionModelPreset = string.Empty;
+                }
                 // Ensure Alerts is initialized
                 if (settings.Alerts == null)
                 {
@@ -328,6 +379,13 @@ namespace pizzalib
             {
                 return new Settings();
             }
+        }
+
+        private static bool IsWhisperModelAlias(string model)
+        {
+            var normalized = Path.GetFileName(model).Trim().ToLowerInvariant();
+            return normalized is "tiny" or "small" or "medium" or "base" or "large-v3" ||
+                   normalized.StartsWith("ggml-");
         }
     }
 }

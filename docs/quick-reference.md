@@ -123,8 +123,15 @@ sudo dpkg -r pizzapi
 
 ## Talkgroups CSV Format
 
+Generate the talkgroups CSV manually:
+1. Visit the RadioReference talkgroups section for the system you are monitoring (example: https://www.radioreference.com/db/sid/4879).
+2. Copy the HTML table for the talkgroups you want.
+3. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
+4. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
+
+The CSV must include this header line:
 ```csv
-Id,Mode,AlphaTag,Description,Tag,Category
+Decimal,Mode,Alpha Tag,Description,Tag,Category
 1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
 2,D,FDISPATCH2,Fire Dispatch 2,Fire,Dispatch
 3,D,PDISPATCH,Police Dispatch,Police,Dispatch
@@ -132,9 +139,9 @@ Id,Mode,AlphaTag,Description,Tag,Category
 
 | Column | Description |
 |--------|-------------|
-| `Id` | Talkgroup ID (decimal) |
+| `Decimal` | Talkgroup ID (decimal) |
 | `Mode` | D=Digital, A=Analog |
-| `AlphaTag` | Short display name |
+| `Alpha Tag` | Short display name |
 | `Description` | Full description |
 | `Tag` | Category tag for filtering |
 | `Category` | Sub-category |

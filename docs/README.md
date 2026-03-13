@@ -171,6 +171,10 @@ See [Deployment Guide](deployment.md) for detailed instructions on deploying to:
 * **Raspberry Pi** - Deploy using .deb package for ARM64 devices
 * **Linux servers** - Run as a systemd service
 
+If you want automation, start with the `scripts` folder:
+* `pizzapi-upgrade.sh` - Automates installing/deploying the latest `pizzapi` UI `.deb` package
+* `setup_trunk_recorder.sh` - Automates building, installing, and configuring trunk-recorder
+
 ## Quick Deploy Reference
 
 ### Raspberry Pi (ARM64)

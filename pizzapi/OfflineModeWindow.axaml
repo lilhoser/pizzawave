@@ -47,7 +47,7 @@
                                 <TextBox x:Name="FolderPathTextBox"
                                          Grid.Column="0"
                                          IsReadOnly="True"
-                                         Watermark="Select a folder..." />
+                                         PlaceholderText="Select a folder..." />
                                 <Button x:Name="BrowseButton"
                                         Grid.Column="1"
                                         Content="Browse..."

@@ -196,15 +196,6 @@ sudo chmod +x /opt/pizzapi/pizzapi
 | Service | systemd, launchd | Windows Service |
 | Performance | Similar | Similar |
 
-**Recommendation**: Use `pizzapi` for Linux/macOS deployments. Use `pizzaui` for Windows-only environments.
-
-## Screenshots
-
-### Main Window
-<img src="screenshot1.png" alt="pizzapi Main Window">
-
-### Settings Editor
-<img src="screenshot2.png" alt="pizzapi Settings">
 
 ## See Also
 

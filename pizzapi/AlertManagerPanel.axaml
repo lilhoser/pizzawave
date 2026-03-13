@@ -1,35 +1,29 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="using:pizzapi"
-        xmlns:models="using:pizzalib"
-        x:Class="pizzapi.AlertManagerWindow"
-        x:DataType="local:AlertManagerWindow"
-        Title="Alert Manager"
-        Width="700"
-        Height="650"
-        WindowStartupLocation="CenterOwner"
-        ShowInTaskbar="False">
-    <Border Padding="20">
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:pizzapi"
+             xmlns:models="using:pizzalib"
+             x:Class="pizzapi.AlertManagerPanel"
+             x:DataType="local:AlertManagerPanel">
+    <Border Padding="10">
         <DockPanel>
-            <TextBlock Text="Alert Manager"
-                       FontSize="24"
-                       FontWeight="Bold"
-                       DockPanel.Dock="Top"
-                       Margin="0,0,0,15" />
+<TextBlock Text="Alert Manager"
+                        FontSize="20"
+                        FontWeight="Bold"
+                        DockPanel.Dock="Top"
+                        Margin="0,0,0,10" />
 
             <StackPanel Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         Spacing="10"
                         DockPanel.Dock="Bottom"
-                        Margin="0,15,0,0">
-                <Button x:Name="CloseButton" Content="Close" Width="100" />
+                        Margin="0,10,0,0">
+                <Button x:Name="CloseButton" Content="Close" Width="90" />
             </StackPanel>
 
             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Spacing="15">
-                    <!-- Alert Configuration Section -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
-                        <StackPanel Spacing="12">
+                <StackPanel Spacing="12">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="10">
                             <TextBlock Text="Alert Configuration"
                                        FontSize="16"
                                        FontWeight="Bold"
@@ -64,7 +58,7 @@
 
                             <StackPanel Spacing="5">
                                 <TextBlock Text="Frequency" FontSize="14" FontWeight="Bold" />
-                                <ComboBox x:Name="AlertFrequencyComboBox" 
+                                <ComboBox x:Name="AlertFrequencyComboBox"
                                           FontSize="14"
                                           HorizontalAlignment="Left"
                                           Width="200">
@@ -86,20 +80,19 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Talkgroup Selection Section -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
-                        <StackPanel Spacing="12">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="10">
                             <TextBlock Text="Talkgroups"
                                        FontSize="16"
                                        FontWeight="Bold"
                                        Foreground="#ffaa00" />
 
                             <StackPanel Orientation="Horizontal" Spacing="15">
-                                <RadioButton x:Name="AllTalkgroupsRadio" 
+                                <RadioButton x:Name="AllTalkgroupsRadio"
                                              Content="All Talkgroups"
                                              GroupName="TalkgroupScope"
                                              IsChecked="True" />
-                                <RadioButton x:Name="SelectedTalkgroupsRadio" 
+                                <RadioButton x:Name="SelectedTalkgroupsRadio"
                                              Content="Selected Talkgroups"
                                              GroupName="TalkgroupScope" />
                             </StackPanel>
@@ -108,7 +101,7 @@
                                     Background="#1a1a1a"
                                     CornerRadius="4"
                                     Padding="10"
-                                    MaxHeight="200">
+                                    MaxHeight="180">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <StackPanel x:Name="TalkgroupCheckboxesPanel" />
                                 </ScrollViewer>
@@ -116,28 +109,26 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Action Buttons -->
                     <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button x:Name="AddUpdateButton" 
-                                Content="Add Alert" 
+                        <Button x:Name="AddUpdateButton"
+                                Content="Add Alert"
                                 Width="120"
                                 Background="#4CAF50"
                                 Foreground="White" />
-                        <Button x:Name="ClearFormButton" 
-                                Content="Clear Form" 
+                        <Button x:Name="ClearFormButton"
+                                Content="Clear Form"
                                 Width="120" />
                     </StackPanel>
 
-                    <!-- Existing Alerts List -->
-                    <Border Background="#2d2d2d" CornerRadius="8" Padding="15">
-                        <StackPanel Spacing="12">
+                    <Border Background="#2d2d2d" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="10">
                             <TextBlock Text="Existing Alerts"
                                        FontSize="16"
                                        FontWeight="Bold"
                                        Foreground="#00ff00" />
 
                             <ListBox x:Name="AlertsListBox"
-                                     MaxHeight="200"
+                                     MaxHeight="180"
                                      Background="#1a1a1a"
                                      SelectionMode="Single">
                                 <ListBox.ItemTemplate>
@@ -162,8 +153,8 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <Button x:Name="DeleteButton" 
-                                    Content="Delete Selected Alert" 
+                            <Button x:Name="DeleteButton"
+                                    Content="Delete Selected Alert"
                                     Width="180"
                                     HorizontalAlignment="Left"
                                     Background="#f44336"
@@ -174,4 +165,4 @@
             </ScrollViewer>
         </DockPanel>
     </Border>
-</Window>
+</UserControl>

@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+              x:Class="pizzapi.ViewPanel">
+    <Border Padding="10">
+        <StackPanel Spacing="10">
+            <TextBlock Text="View"
+                        FontSize="18"
+                        FontWeight="Bold" />
+
+            <Button x:Name="ClearCallsButton" Content="Clear Calls" Width="220" HorizontalAlignment="Left" />
+            <Button x:Name="ViewLogButton" Content="Log" Width="220" HorizontalAlignment="Left" />
+
+            <Separator />
+
+            <TextBlock Text="Sort" FontSize="14" FontWeight="Bold" />
+            <Button x:Name="SortNewestButton" Content="Time (newest first)" Width="220" HorizontalAlignment="Left" />
+            <Button x:Name="SortOldestButton" Content="Time (oldest first)" Width="220" HorizontalAlignment="Left" />
+            <Button x:Name="SortTalkgroupButton" Content="Talkgroup (A-Z)" Width="220" HorizontalAlignment="Left" />
+
+            <Separator />
+
+            <TextBlock Text="Group By" FontSize="14" FontWeight="Bold" />
+            <Button x:Name="GroupNoneButton" Content="None (flat list)" Width="220" HorizontalAlignment="Left" />
+            <Button x:Name="GroupTalkgroupButton" Content="Talkgroup" Width="220" HorizontalAlignment="Left" />
+            <Button x:Name="GroupTimeOfDayButton" Content="Time of Day" Width="220" HorizontalAlignment="Left" />
+            <Button x:Name="GroupSourceButton" Content="Source" Width="220" HorizontalAlignment="Left" />
+
+            <Separator />
+
+            <Button x:Name="AlwaysPinAlertsButton" Content="Always pin alert matches" Width="220" HorizontalAlignment="Left" />
+
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button x:Name="DecreaseFontButton" Content="A-" Width="60" />
+                <Button x:Name="IncreaseFontButton" Content="A+" Width="60" />
+                <Button x:Name="CollapseExpandButton" Content="Collapse/Expand All" Width="160" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

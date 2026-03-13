@@ -8,19 +8,59 @@
         Title="PizzaPi"
         Width="800"
         Height="600"
+        WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
-        Icon="/images/logo-small.png">
+        Icon="/images/logo-small.png"
+        Loaded="OnWindowLoaded">
     <Window.Resources>
         <local:BoolToDoubleConverter x:Key="BoolToDoubleConverter" />
         <local:BoolToStringConverter x:Key="BoolToStringConverter" />
         <local:BoolToColorConverter x:Key="BoolToColorConverter" />
         <local:InvertedBoolConverter x:Key="InvertedBoolConverter" />
         
+        <!-- Dynamic button style with active state support -->
+        <Style x:Key="TouchButtonStyle" Selector="Button">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="MinWidth" Value="70"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+        </Style>
+        
+        <!-- Active button style (orange) -->
+        <Style x:Key="ActiveButtonStyle" Selector="Button">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="MinWidth" Value="70"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Background" Value="#ffaa00"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+        
+        <!-- Inactive button style (gray) -->
+        <Style x:Key="InactiveButtonStyle" Selector="Button">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="MinWidth" Value="70"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Background" Value="#4a4a4a"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        
         <!-- Data template for group headers -->
         <DataTemplate x:Key="HeaderTemplate" x:DataType="local:CallGroupItem">
             <Button Background="#1a4a1a"
-                    Padding="0"
                     Margin="0,4,0,0"
+                    Padding="0"
                     Cursor="Hand"
                     Click="OnGroupHeaderClicked"
                     HorizontalAlignment="Stretch"
@@ -32,7 +72,6 @@
                         <Setter Property="BorderThickness" Value="0"/>
                         <Setter Property="Background" Value="#1a4a1a"/>
                         <Setter Property="Padding" Value="0"/>
-                        <Setter Property="Margin" Value="0,4,0,0"/>
                         <Setter Property="HorizontalAlignment" Value="Stretch"/>
                         <Setter Property="HorizontalContentAlignment" Value="Left"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -42,10 +81,6 @@
                     </Style>
                     <Style Selector="Button.header-button:pressed">
                         <Setter Property="Background" Value="#3a6a3a"/>
-                    </Style>
-                    <Style Selector="Button.header-button:focus">
-                        <Setter Property="Background" Value="#1a4a1a"/>
-                        <Setter Property="BorderThickness" Value="0"/>
                     </Style>
                 </Button.Styles>
                 <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Top">
@@ -75,8 +110,8 @@
         
 		<!-- Data template for call items -->
 <DataTemplate x:Key="CallTemplate" x:DataType="local:CallGroupItem">
-    <Border Background="{Binding Call.IsAlertMatch, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|#3a3a3a'}"
-            BorderBrush="#555"
+    <Border Background="{Binding IsSearchMatch, Converter={StaticResource SearchHighlightConverter}, FallbackValue=Transparent}"
+            BorderBrush="{Binding Call.IsCurrentMatch, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ffa500,#555'}"
             BorderThickness="0,0,0,1"
             CornerRadius="0"
             Cursor="Hand"
@@ -115,7 +150,7 @@
                        Text="{Binding Call.Transcription}"
                        TextWrapping="Wrap"
                        FontSize="{DynamicResource CurrentFontSize}"
-                       Foreground="White"
+                       Foreground="{Binding IsSearchMatch, Converter={StaticResource SearchTextForegroundConverter}, FallbackValue=White}"
                        HorizontalAlignment="Left"
                        TextAlignment="Left"
                        Margin="0,0,0,0"/>
@@ -200,14 +235,226 @@
 </DataTemplate>
 
 		        
-        <!-- Data template selector -->
+<!-- Data template selector -->
         <local:CallGroupItemTemplateSelector x:Key="CallGroupTemplateSelector"
-                                             HeaderTemplate="{StaticResource HeaderTemplate}"
-                                             CallTemplate="{StaticResource CallTemplate}" />
+                                              HeaderTemplate="{StaticResource HeaderTemplate}"
+                                              CallTemplate="{StaticResource CallTemplate}" />
+        
+        <!-- Search bar visibility converter -->
+        <local:IntGreaterThanZeroConverter x:Key="IntGreaterThanZeroConverter"/>
+        <local:SearchHighlightConverter x:Key="SearchHighlightConverter"/>
+        <local:SearchTextForegroundConverter x:Key="SearchTextForegroundConverter"/>
+        <local:BoolToBrushConverter x:Key="BoolToBrushConverter"/>
+        <local:AlertSearchBackgroundConverter x:Key="AlertSearchBackgroundConverter"/>
+        <local:ButtonActiveStateConverter x:Key="ButtonActiveStateConverter"/>
     </Window.Resources>
-    <Grid>
+    
+    <DockPanel>
+        <!-- Persistent Top Button Bar -->
+        <Border Background="#333" 
+                BorderBrush="#555" 
+                BorderThickness="0,0,0,1"
+                Padding="8,4"
+                DockPanel.Dock="Top">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <WrapPanel Grid.Column="0" Orientation="Horizontal">
+                <!-- Live Mode Button -->
+                <Button Content="📡 Live"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsLiveActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsLiveActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Switch to live mode (real-time monitoring)"
+                        Click="OnLiveModeClicked"/>
+                
+                <!-- Last 24h Button -->
+                <Button Content="⏰ 24h"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding Is24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding Is24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Show calls from last 24 hours"
+                        Click="OnLast24hClicked"/>
+                
+                <!-- Last 2d Button -->
+                <Button Content="📅 2d"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding Is2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding Is2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Show calls from last 2 days"
+                        Click="OnLast2dClicked"/>
+                
+                <!-- Last Week Button -->
+                <Button Content="🗓️ Week"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Show calls from last week"
+                        Click="OnLastWeekClicked"/>
+                
+                <!-- Pick Range Button -->
+                <Button Content="📅 Range"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsRangeActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRangeActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Select custom date range for filtering"
+                        Click="OnPickRangeClicked"/>
+                
+                <!-- View Button -->
+                <Button x:Name="ViewButton"
+                        Content="👁️ View"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsViewPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff9900,#4a4a4a'}"
+                        Foreground="{Binding IsViewPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="View options (sort, group, clear calls)"
+                        Click="OnViewClicked"/>
+                
+                <!-- Alerts Button -->
+                <Button Content="🔔 Alerts"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsAlertsPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff9900,#4a4a4a'}"
+                        Foreground="{Binding IsAlertsPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Manage alert rules and notifications"
+                        Click="OnAlertsClicked2"/>
+                
+                <!-- Settings Button -->
+                <Button Content="⚙️ Settings"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsSettingsPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff9900,#4a4a4a'}"
+                        Foreground="{Binding IsSettingsPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Configure application settings"
+                        Click="OnSettingsClicked2"/>
+                
+                <!-- Cleanup Button -->
+                <Button Content="🧹 Cleanup"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="{Binding IsCleanupPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff9900,#4a4a4a'}"
+                        Foreground="{Binding IsCleanupPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Clean up captured audio files"
+                        Click="OnCleanupClicked2"/>
+                
+                <!-- Exit Button -->
+                <Button Content="❌ Exit"
+                        Height="44"
+                        MinWidth="70"
+                        Padding="12,8"
+                        FontSize="13"
+                        Cursor="Hand"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,0,6,6"
+                        Background="#4a4a4a"
+                        Foreground="White"
+                        ToolTip.Tip="Exit application"
+                        Click="OnExitClicked2"/>
+                </WrapPanel>
+
+                <!-- Search (top right) -->
+                <Grid Grid.Column="1"
+                      VerticalAlignment="Center"
+                      Margin="8,0,0,0"
+                      IsVisible="{Binding Calls.Count, Converter={StaticResource IntGreaterThanZeroConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="SearchTextBox"
+                             Grid.Column="0"
+                             Width="160"
+                             Height="22"
+                             Background="#1a1a1a"
+                             Foreground="White"
+                             BorderBrush="#333"
+                             BorderThickness="1"
+                             CornerRadius="4"
+                             Padding="6,0"
+                             FontSize="11"
+                             PlaceholderText="Search..."
+                             TextChanged="OnSearchTextChanged"
+                             KeyDown="OnSearchTextBoxKeyDown"
+                             LostFocus="OnSearchTextBoxLostFocus"/>
+                </Grid>
+</Grid>
+        </Border>
+        
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
         <!-- Main Content Area -->
-        <ScrollViewer VerticalScrollBarVisibility="Auto"
+        <ScrollViewer Grid.Row="0"
+                      Grid.Column="0"
+                      VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <Border Padding="10,10,10,80">
                 <StackPanel Spacing="8">
@@ -233,7 +480,8 @@
         </ScrollViewer>
 
         <!-- Footer Status (bottom) -->
-        <Border VerticalAlignment="Bottom"
+        <Border Grid.Row="1"
+                Grid.Column="0"
                 Background="#222"
                 Padding="8"
                 BorderBrush="#444"
@@ -302,244 +550,50 @@
                            Margin="5,0,0,0" />
             </Grid>
         </Border>
+        
+        <!-- Applying settings overlay -->
+        <Grid Grid.Row="0"
+              Grid.Column="0"
+              Grid.RowSpan="2"
+              Grid.ColumnSpan="2"
+              IsVisible="{Binding IsApplyingSettings}"
+              IsHitTestVisible="True"
+              Panel.ZIndex="100">
+            <Border Background="#80000000"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    IsHitTestVisible="True"/>
+            <Border Background="#2a2a2a"
+                    BorderBrush="#555"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsHitTestVisible="True">
+                <StackPanel Spacing="8" HorizontalAlignment="Center">
+                    <TextBlock Text="Applying settings..."
+                               Foreground="White"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"/>
+                    <ProgressBar IsIndeterminate="True" Width="220" Height="8"/>
+                </StackPanel>
+            </Border>
+        </Grid>
 
-        <!-- Menu Container (overlay) - placed last in Grid to be on top -->
-        <StackPanel HorizontalAlignment="Left"
-                    VerticalAlignment="Top"
-                    Margin="5,5,0,0">
-            <!-- Hamburger Menu Button -->
-            <Button x:Name="HamburgerButton"
-                    Content=""
-                    Click="OnMenuButtonClicked"
-                    Background="Transparent"
-                    Foreground="White"
-                    Width="40"
-                    Height="40"
-                    Padding="0"
-					Cursor="Hand"
-                    HorizontalAlignment="Left"
-                    VerticalAlignment="Top">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="4">
-                            <Path Data="M3 6H21V8H3V6M3 11H21V13H3V11M3 16H21V18H3V16Z"
-                                  Fill="White"
-                                  Width="24"
-                                  Height="24"/>
-                        </Border>
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
-        </StackPanel>
-
-        <!-- Menu Panel (overlay, appears below hamburger button) - placed last in Grid to be on top -->
-        <Border x:Name="MenuPanel"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                Margin="5,45,0,0"
-                Width="220"
-                MaxHeight="500"
-                Background="#2d2d2d"
-                BorderThickness="1"
-                BorderBrush="#555"
-                Padding="10"
-                IsVisible="{Binding MenuVisible}"
-                Opacity="{Binding MenuVisible, Converter={StaticResource BoolToDoubleConverter}}">
-            <StackPanel>
-                <TextBlock Text="MENU"
-                           FontSize="16"
-                           FontWeight="Bold"
-                           Foreground="White"
-                           Margin="0,0,0,10" />
-
-                <Button Content="Settings..."
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnSettingsClicked" />
-
-                <Button Content="Alerts..."
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnAlertsClicked" />
-
-                <Button x:Name="OpenOfflineButton"
-                        Content="Open Offline Capture..."
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnOpenOfflineCaptureClicked"
-                        ToolTip.Tip="Load historical calls from a capture folder" />
-
-                <Button x:Name="ReturnToLiveButton"
-                        Content="Return to Live Mode"
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnReturnToLiveModeClicked"
-                        ToolTip.Tip="Return to live call monitoring"
-                        IsVisible="False" />
-
-                <Button Content="Cleanup..."
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnCleanupClicked"
-                        ToolTip.Tip="Cleanup captured audio files" />
-
-                <!-- View button with popup submenu -->
-                <Button x:Name="ViewButton"
-                        Content="View →"
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnViewButtonClicked"
-                        Focusable="False" />
-
-                <Popup x:Name="ViewSubMenuPopup"
-                       PlacementTarget="{Binding ElementName=ViewButton}"
-                       Placement="Right"
-                       IsOpen="False"
-                       Focusable="False">
-                    <Border Background="#2d2d2d"
-                            BorderThickness="1"
-                            BorderBrush="#555"
-                            CornerRadius="4"
-                            Padding="5"
-                            Focusable="False">
-                        <Grid Focusable="False">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="200" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <!-- Left column: Main menu -->
-                            <StackPanel Grid.Column="0" Focusable="False">
-                                <Button Content="Clear Calls"
-                                        Width="190"
-                                        HorizontalContentAlignment="Left"
-                                        Click="OnClearClicked"
-                                        Focusable="False" />
-                                <Button Content="Log"
-                                        Width="190"
-                                        HorizontalContentAlignment="Left"
-                                        Click="OnViewLogClicked"
-                                        Focusable="False" />
-                                <Separator Margin="0,5" Focusable="False" />
-                                <Button Content="Sort →"
-                                        Width="190"
-                                        HorizontalContentAlignment="Left"
-                                        Click="OnSortButtonClicked"
-                                        Focusable="False" />
-                                <Button Content="Group By →"
-                                        Width="190"
-                                        HorizontalContentAlignment="Left"
-                                        Click="OnGroupByButtonClicked"
-                                        Focusable="False" />
-                                <Separator Margin="0,5" Focusable="False" />
-                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0" Focusable="False">
-                                    <Button Content="A-"
-                                            Width="60"
-                                            ToolTip.Tip="Decrease font size"
-                                            Click="OnDecreaseFontSizeClicked"
-                                            Focusable="False" />
-                                    <Button Content="A+"
-                                            Width="60"
-                                            Margin="5,0,0,0"
-                                            ToolTip.Tip="Increase font size"
-                                            Click="OnIncreaseFontSizeClicked"
-                                            Focusable="False" />
-                                </StackPanel>
-                                <Separator Margin="0,5" Focusable="False" />
-                                <Button Content="Collapse/Expand All"
-                                        Width="190"
-                                        HorizontalContentAlignment="Left"
-                                        Click="OnCollapseExpandAllClicked"
-                                        Focusable="False" />
-                            </StackPanel>
-                            <!-- Right column: Sort submenu -->
-                            <Border x:Name="SortSubMenuBorder"
-                                    Grid.Column="1"
-                                    Background="#2d2d2d"
-                                    BorderThickness="1"
-                                    BorderBrush="#555"
-                                    CornerRadius="4"
-                                    Padding="5"
-                                    IsVisible="False"
-                                    Margin="5,0,0,0"
-                                    Focusable="False">
-                                <StackPanel Focusable="False">
-                                    <Button x:Name="SortNewestButton"
-                                            Content="✓ Time (newest first)"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnSortByTimeNewestClicked"
-                                            Focusable="False" />
-                                    <Button x:Name="SortOldestButton"
-                                            Content="  Time (oldest first)"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnSortByTimeOldestClicked"
-                                            Focusable="False" />
-                                    <Button x:Name="SortTalkgroupButton"
-                                            Content="  Talkgroup (A-Z)"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnSortByTalkgroupClicked"
-                                            Focusable="False" />
-                                    <Separator Margin="0,5" />
-                                    <Button x:Name="AlwaysPinAlertsButton"
-                                            Content="✓ Always pin alert matches"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnAlwaysPinAlertsClicked"
-                                            Focusable="False" />
-                                </StackPanel>
-                            </Border>
-                            <!-- Right column: Group By submenu -->
-                            <Border x:Name="GroupBySubMenuBorder"
-                                    Grid.Column="1"
-                                    Background="#2d2d2d"
-                                    BorderThickness="1"
-                                    BorderBrush="#555"
-                                    CornerRadius="4"
-                                    Padding="5"
-                                    IsVisible="False"
-                                    Margin="5,0,0,0"
-                                    Focusable="False">
-                                <StackPanel Focusable="False">
-                                    <Button x:Name="GroupNoneButton"
-                                            Content="✓ None (flat list)"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnGroupByNoneClicked"
-                                            Focusable="False" />
-                                    <Button x:Name="GroupTalkgroupButton"
-                                            Content="  Talkgroup"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnGroupByTalkgroupClicked"
-                                            Focusable="False" />
-                                    <Button x:Name="GroupTimeOfDayButton"
-                                            Content="  Time of Day"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnGroupByTimeOfDayClicked"
-                                            Focusable="False" />
-                                    <Button x:Name="GroupSourceButton"
-                                            Content="  Source"
-                                            Width="170"
-                                            HorizontalContentAlignment="Left"
-                                            Click="OnGroupBySourceClicked"
-                                            Focusable="False" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </Border>
-                </Popup>
-
-                <Button Content="Exit"
-                        Width="200"
-                        Margin="0,5,0,0"
-                        Click="OnExitClicked" />
-            </StackPanel>
+        <!-- Right-side pane -->
+        <Border Grid.Column="1"
+                Grid.Row="0"
+                Grid.RowSpan="3"
+                Width="415"
+                Background="#252525"
+                BorderBrush="#444"
+                BorderThickness="1,0,0,0"
+                IsVisible="{Binding IsPaneOpen}">
+            <ContentControl Content="{Binding ActivePaneContent}"/>
         </Border>
-    </Grid>
+
+        </Grid>
+    </DockPanel>
 </Window>
+

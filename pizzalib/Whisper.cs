@@ -26,7 +26,7 @@ namespace pizzalib
 {
     using static TraceLogger;
 
-    public class Whisper : IDisposable
+    public class Whisper : ITranscriber
     {
         private string m_ModelFile;
         private readonly string s_ModelFolder = Path.Combine(
@@ -73,6 +73,17 @@ namespace pizzalib
         public async Task<bool> Initialize()
         {
             m_Settings.UpdateProgressLabelCallback?.Invoke("Initializing Whisper model...");
+
+            if (string.IsNullOrEmpty(m_Settings.whisperModelFile))
+            {
+                var presetAlias = GetWhisperPresetAlias(m_Settings.TranscriptionModelPreset);
+                if (!string.IsNullOrEmpty(presetAlias))
+                {
+                    m_Settings.whisperModelFile = presetAlias;
+                    Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                        $"Whisper preset selected: '{presetAlias}'");
+                }
+            }
 
             if (!string.IsNullOrEmpty(m_Settings.whisperModelFile))
             {
@@ -183,7 +194,9 @@ namespace pizzalib
             // The processor will be reused for all transcriptions.
             //
             m_Processor = m_Factory.CreateBuilder()
-                .WithLanguage("auto")
+                // Auto language detection adds extra inference cost; default to English
+                // for scanner traffic to reduce sustained CPU on low-power ARM devices.
+                .WithLanguage("en")
                 .WithNoContext()
                 .WithSingleSegment()
                 .Build();
@@ -195,8 +208,27 @@ namespace pizzalib
 
             m_Initialized = true;
             m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
-            Trace(TraceLoggerType.Whisper, TraceEventType.Information, "Model initialized.");
+            Trace(TraceLoggerType.Whisper, TraceEventType.Information,
+                $"Whisper initialized. ModelPath='{m_ModelFile}', Language='en'");
             return true;
+        }
+
+        private static string GetWhisperPresetAlias(string? preset)
+        {
+            if (string.IsNullOrWhiteSpace(preset))
+            {
+                return string.Empty;
+            }
+
+            return preset.Trim().ToLowerInvariant() switch
+            {
+                "whisper-tiny" => "tiny",
+                "whisper-base" => "base",
+                "whisper-small" => "small",
+                "whisper-medium" => "medium",
+                "whisper-large-v3" => "large-v3",
+                _ => string.Empty
+            };
         }
 
         public async Task<string> TranscribeCall(MemoryStream WavData)

@@ -1,51 +1,31 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
-using Avalonia.Data.Converters;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using pizzalib;
-using System.Globalization;
 
 namespace pizzapi;
 
-public class EnabledStatusConverter : IValueConverter
-{
-    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is bool enabled)
-        {
-            return enabled ? "on" : "off";
-        }
-        return "off";
-    }
-
-    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is string str)
-        {
-            return str.Equals("on", StringComparison.OrdinalIgnoreCase);
-        }
-        return false;
-    }
-}
-
-public partial class AlertManagerWindow : Window
+public partial class AlertManagerPanel : UserControl
 {
     private Settings _settings;
+    private string _settingsPath = Settings.DefaultSettingsFileLocation;
     private Alert? _editingAlert;
     private ObservableCollection<Talkgroup> _talkgroups;
     private ObservableCollection<Alert> _alertsCollection;
     private HashSet<long> _selectedTalkgroupIds;
     private Dictionary<long, CheckBox> _talkgroupCheckboxes;
 
-    public AlertManagerWindow()
-        : this(Settings.LoadFromFile())
+    public event EventHandler? RequestClose;
+
+    public AlertManagerPanel() : this(new Settings())
     {
     }
 
-    public AlertManagerWindow(Settings settings)
+    public AlertManagerPanel(Settings settings)
     {
         _settings = settings;
+        _settingsPath = Settings.DefaultSettingsFileLocation;
         _talkgroups = new ObservableCollection<Talkgroup>(_settings.Talkgroups ?? new List<Talkgroup>());
         _alertsCollection = new ObservableCollection<Alert>(_settings.Alerts ?? new List<Alert>());
         _selectedTalkgroupIds = new HashSet<long>();
@@ -107,7 +87,7 @@ public partial class AlertManagerWindow : Window
         var alertsListBox = this.FindControl<ListBox>("AlertsListBox");
 
         if (closeBtn != null)
-            closeBtn.Click += (s, e) => Close();
+            closeBtn.Click += (s, e) => RequestClose?.Invoke(this, EventArgs.Empty);
 
         if (addUpdateBtn != null)
             addUpdateBtn.Click += OnAddUpdateClicked;
@@ -139,14 +119,12 @@ public partial class AlertManagerWindow : Window
                 }
             };
 
-        // Initialize talkgroup list visibility
         if (talkgroupBorder != null)
             talkgroupBorder.IsVisible = false;
 
-        // Set default frequency selection
         var freqCombo = this.FindControl<ComboBox>("AlertFrequencyComboBox");
         if (freqCombo != null)
-            freqCombo.SelectedIndex = 0; // RealTime by default
+            freqCombo.SelectedIndex = 0;
     }
 
     private void OnAlertsListSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -158,7 +136,6 @@ public partial class AlertManagerWindow : Window
         }
         else
         {
-            // No selection or alert no longer exists - reset the form
             ResetForm();
         }
     }
@@ -172,6 +149,22 @@ public partial class AlertManagerWindow : Window
         }
     }
 
+    public void SetSettings(Settings settings, string? settingsPath = null)
+    {
+        _settings = settings;
+        if (!string.IsNullOrWhiteSpace(settingsPath))
+            _settingsPath = settingsPath;
+
+        _talkgroups = new ObservableCollection<Talkgroup>(_settings.Talkgroups ?? new List<Talkgroup>());
+        _alertsCollection = new ObservableCollection<Alert>(_settings.Alerts ?? new List<Alert>());
+        _selectedTalkgroupIds.Clear();
+        _editingAlert = null;
+
+        LoadAlertsList();
+        LoadTalkgroupCheckboxes();
+        ResetForm();
+    }
+
     private void OnAddUpdateClicked(object? sender, RoutedEventArgs e)
     {
         try
@@ -181,7 +174,6 @@ public partial class AlertManagerWindow : Window
 
             if (_editingAlert != null)
             {
-                // Update existing alert - find by ID and update in both collection and settings
                 var existingAlert = _alertsCollection.FirstOrDefault(a => a.Id == _editingAlert.Id);
                 if (existingAlert != null)
                 {
@@ -192,8 +184,7 @@ public partial class AlertManagerWindow : Window
                     existingAlert.Enabled = alert.Enabled;
                     existingAlert.Autoplay = alert.Autoplay;
                     existingAlert.Talkgroups = alert.Talkgroups;
-                    
-                    // Also update in settings list
+
                     var settingsIndex = _settings.Alerts.IndexOf(existingAlert);
                     if (settingsIndex >= 0)
                     {
@@ -203,12 +194,11 @@ public partial class AlertManagerWindow : Window
             }
             else
             {
-                // Add new alert to both collection and settings
                 _alertsCollection.Add(alert);
                 _settings.Alerts.Add(alert);
             }
 
-            _settings.SaveToFile();
+            _settings.SaveToFile(_settingsPath);
             ResetForm();
         }
         catch (Exception ex)
@@ -222,12 +212,10 @@ public partial class AlertManagerWindow : Window
         var listBox = this.FindControl<ListBox>("AlertsListBox");
         if (listBox?.SelectedItem is Alert selectedAlert)
         {
-            // Remove from both collection and settings
             _alertsCollection.Remove(selectedAlert);
             _settings.Alerts.Remove(selectedAlert);
-            _settings.SaveToFile();
-            
-            // Clear selection and reset form
+            _settings.SaveToFile(_settingsPath);
+
             listBox.SelectedItem = null;
             ResetForm();
         }
@@ -257,7 +245,6 @@ public partial class AlertManagerWindow : Window
             Autoplay = autoplay
         };
 
-        // Only set talkgroups if "Selected Talkgroups" is chosen
         if (allRadio?.IsChecked == false)
         {
             alert.Talkgroups = _selectedTalkgroupIds.ToList();
@@ -287,7 +274,6 @@ public partial class AlertManagerWindow : Window
         if (enabled != null) enabled.IsChecked = alert.Enabled;
         if (autoplay != null) autoplay.IsChecked = alert.Autoplay;
 
-        // Handle talkgroup selection
         if (alert.Talkgroups.Count > 0)
         {
             selectedRadio!.IsChecked = true;
@@ -303,7 +289,6 @@ public partial class AlertManagerWindow : Window
             _selectedTalkgroupIds.Clear();
         }
 
-        // Update checkbox states
         foreach (var kvp in _talkgroupCheckboxes)
         {
             kvp.Value.IsChecked = _selectedTalkgroupIds.Contains(kvp.Key);
@@ -340,7 +325,6 @@ public partial class AlertManagerWindow : Window
         talkgroupBorder!.IsVisible = false;
         _selectedTalkgroupIds.Clear();
 
-        // Reset checkbox states
         foreach (var kvp in _talkgroupCheckboxes)
         {
             kvp.Value.IsChecked = false;
@@ -384,6 +368,14 @@ public partial class AlertManagerWindow : Window
         var okButton = (Button)((StackPanel)errorWindow.Content!).Children[1];
         okButton.Click += (s, e) => errorWindow.Close();
 
-        errorWindow.Show(this);
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner != null)
+        {
+            errorWindow.ShowDialog(owner);
+        }
+        else
+        {
+            errorWindow.Show();
+        }
     }
 }

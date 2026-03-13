@@ -1,7 +1,10 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using pizzalib;
 
 namespace pizzapi;
@@ -10,7 +13,8 @@ public class SettingsWindow : Window
 {
     private Settings? _settings;
     private TextBox? _listenPortTextBox;
-    private TextBox? _whisperModelFilePathTextBox;
+    private ComboBox? _transcriptionModelComboBox;
+    private ComboBox? _transcriptionEngineComboBox;
     private TextBox? _gmailUserTextBox;
     private TextBox? _gmailPasswordTextBox;
     private CheckBox? _autoplayAlertsCheckBox;
@@ -43,7 +47,8 @@ public class SettingsWindow : Window
     private void LoadSettings()
     {
         _listenPortTextBox = this.FindControl<TextBox>("ListenPortTextBox");
-        _whisperModelFilePathTextBox = this.FindControl<TextBox>("WhisperModelTextBox");
+        _transcriptionModelComboBox = this.FindControl<ComboBox>("TranscriptionModelComboBox");
+        _transcriptionEngineComboBox = this.FindControl<ComboBox>("TranscriptionEngineComboBox");
         _gmailUserTextBox = this.FindControl<TextBox>("GmailUserTextBox");
         _gmailPasswordTextBox = this.FindControl<TextBox>("GmailPasswordTextBox");
         _autoplayAlertsCheckBox = this.FindControl<CheckBox>("AutoplayAlertsCheckBox");
@@ -55,7 +60,8 @@ public class SettingsWindow : Window
         var saveButton = this.FindControl<Button>("SaveButton");
         var cancelButton = this.FindControl<Button>("CancelButton");
 
-        if (_listenPortTextBox != null && _whisperModelFilePathTextBox != null &&
+        if (_listenPortTextBox != null && _transcriptionModelComboBox != null &&
+            _transcriptionEngineComboBox != null &&
             _gmailUserTextBox != null && _gmailPasswordTextBox != null &&
             _autoplayAlertsCheckBox != null && _snoozeDurationComboBox != null &&
             _autoCleanupCallsCheckBox != null && _maxCallsToKeepTextBox != null &&
@@ -65,7 +71,10 @@ public class SettingsWindow : Window
             var settings = _settings ??= new Settings();
 
             _listenPortTextBox.Text = settings.ListenPort.ToString();
-            _whisperModelFilePathTextBox.Text = settings.WhisperModelFile ?? string.Empty;
+            _transcriptionModelComboBox.SelectedIndex =
+                GetModelPresetIndex(settings.TranscriptionModelPreset);
+            _transcriptionEngineComboBox.SelectedIndex =
+                string.Equals(settings.TranscriptionEngine, "vosk", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
             _gmailUserTextBox.Text = settings.GmailUser ?? string.Empty;
             _gmailPasswordTextBox.Text = settings.GmailPassword ?? string.Empty;
             _autoplayAlertsCheckBox.IsChecked = settings.AutoplayAlerts;
@@ -118,7 +127,10 @@ public class SettingsWindow : Window
                     var settingsCopy = new Settings
                     {
                         ListenPort = settings.ListenPort,
+                        TranscriptionEngine = settings.TranscriptionEngine,
+                        TranscriptionModelPreset = settings.TranscriptionModelPreset,
                         WhisperModelFile = settings.WhisperModelFile,
+                        VoskModelPath = settings.VoskModelPath,
                         GmailUser = settings.GmailUser,
                         GmailPassword = settings.GmailPassword,
                         AutoplayAlerts = _autoplayAlertsCheckBox.IsChecked ?? false,
@@ -148,16 +160,39 @@ public class SettingsWindow : Window
                         settingsCopy.ListenPort = port;
                     }
 
-                    settingsCopy.WhisperModelFile = _whisperModelFilePathTextBox.Text;
+                    settingsCopy.TranscriptionModelPreset =
+                        GetModelPresetValue(_transcriptionModelComboBox.SelectedIndex);
+                    settingsCopy.TranscriptionEngine =
+                        _transcriptionEngineComboBox.SelectedIndex == 1 ? "vosk" : "whisper";
                     settingsCopy.GmailUser = newUser;
                     settingsCopy.GmailPassword = newPass;
+
+                    // If a model preset was chosen, align engine with model family.
+                    if (settingsCopy.TranscriptionModelPreset.StartsWith("vosk-",
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        settingsCopy.TranscriptionEngine = "vosk";
+                    }
+                    else if (settingsCopy.TranscriptionModelPreset.StartsWith("whisper-",
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        settingsCopy.TranscriptionEngine = "whisper";
+                    }
+
+                    // If a preset is chosen, clear any persisted model path so the preset takes effect.
+                    if (!string.IsNullOrWhiteSpace(settingsCopy.TranscriptionModelPreset))
+                    {
+                        settingsCopy.VoskModelPath = string.Empty;
+                        settingsCopy.WhisperModelFile = string.Empty;
+                    }
 
                     // Validate the copy
                     settingsCopy.Validate();
 
                     // If validation passes, apply to real settings and save
                     settings.ListenPort = settingsCopy.ListenPort;
-                    settings.WhisperModelFile = settingsCopy.WhisperModelFile;
+                    settings.TranscriptionEngine = settingsCopy.TranscriptionEngine;
+                    settings.TranscriptionModelPreset = settingsCopy.TranscriptionModelPreset;
                     settings.GmailUser = settingsCopy.GmailUser;
                     settings.GmailPassword = settingsCopy.GmailPassword;
                     settings.AutoplayAlerts = settingsCopy.AutoplayAlerts;
@@ -167,6 +202,7 @@ public class SettingsWindow : Window
                     settings.SnoozeDurationMinutes = settingsCopy.SnoozeDurationMinutes;
 
                     settings.SaveToFile();
+                    StartBackgroundModelPreload(settings);
                     Close();
                 }
                 catch (Exception ex)
@@ -181,6 +217,55 @@ public class SettingsWindow : Window
 
             cancelButton.Click += (s, e) => Close();
         }
+    }
+
+    private void StartBackgroundModelPreload(Settings settings)
+    {
+        _ = Task.Run(async () =>
+        {
+            await TranscriberPreloader.PreloadAsync(settings, SetMainWindowStatus).ConfigureAwait(false);
+        });
+    }
+
+    private void SetMainWindowStatus(string message)
+    {
+        var desktop = Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;
+        if (desktop?.MainWindow is MainWindow mainWindow)
+        {
+            Dispatcher.UIThread.Post(() => mainWindow.StatusText = message);
+        }
+    }
+
+    private static int GetModelPresetIndex(string? preset)
+    {
+        return preset?.Trim().ToLowerInvariant() switch
+        {
+            "whisper-tiny" => 1,
+            "whisper-base" => 2,
+            "whisper-small" => 3,
+            "whisper-medium" => 4,
+            "whisper-large-v3" => 5,
+            "vosk-model-small-en-us-0.15" => 6,
+            "vosk-model-en-us-0.22" => 7,
+            "vosk-model-en-us-0.22-lgraph" => 8,
+            _ => 0
+        };
+    }
+
+    private static string GetModelPresetValue(int? selectedIndex)
+    {
+        return selectedIndex switch
+        {
+            1 => "whisper-tiny",
+            2 => "whisper-base",
+            3 => "whisper-small",
+            4 => "whisper-medium",
+            5 => "whisper-large-v3",
+            6 => "vosk-model-small-en-us-0.15",
+            7 => "vosk-model-en-us-0.22",
+            8 => "vosk-model-en-us-0.22-lgraph",
+            _ => string.Empty
+        };
     }
 
     private async System.Threading.Tasks.Task ImportTalkgroupsFromCsv()

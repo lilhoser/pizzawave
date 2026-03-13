@@ -118,14 +118,21 @@ nano ~/.config/pizzawave/settings.json
 
 ### Optional: Add Talkgroups
 
-Create a talkgroups CSV file:
+Create a talkgroups CSV file. The header line must be:
+`Decimal,Mode,Alpha Tag,Description,Tag,Category`
+
+One way to generate it manually:
+1. Visit the RadioReference talkgroups section for the system you are monitoring (example: https://www.radioreference.com/db/sid/4879).
+2. Copy the HTML table for the talkgroups you want.
+3. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
+4. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
 
 ```bash
 nano ~/talkgroups.csv
 ```
 
 ```csv
-Id,Mode,AlphaTag,Description,Tag,Category
+Decimal,Mode,Alpha Tag,Description,Tag,Category
 1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
 2,D,FDISPATCH2,Fire Dispatch 2,Fire,Dispatch
 3,D,PDISPATCH,Police Dispatch,Police,Dispatch

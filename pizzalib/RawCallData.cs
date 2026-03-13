@@ -166,7 +166,9 @@ namespace pizzalib
                 .FromPipeInput(new RawS16lePipeSource(m_rawPcmData, sourceSampleRate))
                 .OutputToPipe(new StreamPipeSink(wavStream), options => options
                     .ForceFormat("wav")
-                    .WithCustomArgument($"-ar {targetSampleRate} -acodec pcm_s16le")
+                    // Keep ffmpeg resample single-threaded to avoid saturating CPU
+                    // when calls arrive close together on ARM devices.
+                    .WithCustomArgument($"-ar {targetSampleRate} -acodec pcm_s16le -threads 1")
                 )
                 .ProcessAsynchronously();
 
