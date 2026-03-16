@@ -18,15 +18,21 @@ namespace pizzalib
         public static readonly CancellationTokenSource GlobalCts = new CancellationTokenSource();
 
         // Thread‑safe collection of fire‑and‑forget tasks.
-        private static readonly ConcurrentBag<Task> RunningTasks = new ConcurrentBag<Task>();
+        private static readonly ConcurrentDictionary<int, Task> RunningTasks = new ConcurrentDictionary<int, Task>();
 
         /// <summary>
         /// Register a fire‑and‑forget task so it can be awaited/cancelled on shutdown.
         /// </summary>
         public static void Register(Task task)
         {
-            if (task != null)
-                RunningTasks.Add(task);
+            if (task == null)
+                return;
+
+            RunningTasks[task.Id] = task;
+            task.ContinueWith(_ =>
+            {
+                RunningTasks.TryRemove(task.Id, out _);
+            }, TaskScheduler.Default);
         }
 
         /// <summary>
@@ -38,7 +44,8 @@ namespace pizzalib
             {
                 GlobalCts.Cancel();
                 var delay = Task.Delay(timeout);
-                var whenAll = Task.WhenAll(RunningTasks.ToArray());
+                var snapshot = RunningTasks.Values.ToArray();
+                var whenAll = snapshot.Length == 0 ? Task.CompletedTask : Task.WhenAll(snapshot);
                 await Task.WhenAny(whenAll, delay).ConfigureAwait(false);
             }
             catch (Exception ex)

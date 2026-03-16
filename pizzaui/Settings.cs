@@ -56,14 +56,14 @@ namespace pizzaui
 
         public static bool operator ==(Settings? Settings1, Settings? Settings2)
         {
-            if ((object)Settings1 == null || (object)Settings2 == null)
+            if (ReferenceEquals(Settings1, null) || ReferenceEquals(Settings2, null))
                 return Equals(Settings1, Settings2);
             return Settings1.Equals(Settings2);
         }
 
         public static bool operator !=(Settings? Settings1, Settings? Settings2)
         {
-            if ((object)Settings1 == null || (object)Settings2 == null)
+            if (ReferenceEquals(Settings1, null) || ReferenceEquals(Settings2, null))
                 return !Equals(Settings1, Settings2);
             return !(Settings1.Equals(Settings2));
         }

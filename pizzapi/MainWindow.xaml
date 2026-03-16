@@ -29,25 +29,26 @@
             <Setter Property="VerticalAlignment" Value="Top"/>
         </Style>
         
-        <!-- Active button style (orange) -->
+<!-- Active button style (orange) -->
         <Style x:Key="ActiveButtonStyle" Selector="Button">
             <Setter Property="Height" Value="44"/>
             <Setter Property="MinWidth" Value="70"/>
-            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Padding" Value="16,8"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Top"/>
             <Setter Property="Background" Value="#ffaa00"/>
             <Setter Property="Foreground" Value="Black"/>
-            <Setter Property="FontWeight" Value="Bold"/>
         </Style>
+
+
         
         <!-- Inactive button style (gray) -->
         <Style x:Key="InactiveButtonStyle" Selector="Button">
             <Setter Property="Height" Value="44"/>
             <Setter Property="MinWidth" Value="70"/>
-            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Padding" Value="16,8"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
@@ -55,6 +56,7 @@
             <Setter Property="Background" Value="#4a4a4a"/>
             <Setter Property="Foreground" Value="White"/>
         </Style>
+
         
         <!-- Data template for group headers -->
         <DataTemplate x:Key="HeaderTemplate" x:DataType="local:CallGroupItem">
@@ -234,6 +236,69 @@
     </Border>
 </DataTemplate>
 
+        <DataTemplate x:Key="InsightCategoryTemplate" x:DataType="local:InsightCategorySection">
+            <StackPanel Spacing="4" Margin="0,4,0,6">
+                <Border Background="{Binding AccentColor}" CornerRadius="4" Padding="8,4">
+                    <TextBlock Foreground="White" FontWeight="Bold" FontSize="12">
+                        <Run Text="{Binding Icon}"/>
+                        <Run Text=" "/>
+                        <Run Text="{Binding DisplayName}"/>
+                    </TextBlock>
+                </Border>
+                <ItemsControl ItemsSource="{Binding Events}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel HorizontalAlignment="Stretch" Margin="0,6"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:InsightNotableEvent">
+                            <Border Background="{Binding CategoryTileBackground}" BorderBrush="{Binding CategoryAccentColor}" BorderThickness="1" CornerRadius="4" Margin="4,6" Padding="8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Foreground="{Binding CategoryAccentColor}" FontWeight="SemiBold" FontSize="{DynamicResource InsightsTileFontSize}" TextWrapping="Wrap">
+                                            <Run Text="{Binding CategoryIcon}"/>
+                                            <Run Text=" "/>
+                                            <Run Text="{Binding Title}"/>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding TimestampDisplay}" Foreground="#9ac7e8" FontSize="{DynamicResource CurrentFontSize}"/>
+                                        <TextBlock Text="{Binding Detail}" Foreground="#dddddd" FontSize="{DynamicResource InsightsTileFontSize}" TextWrapping="Wrap" MaxWidth="250"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Transcript"
+                                                    Classes="menu-btn"
+                                                    Padding="10,6"
+                                                    FontSize="12"
+                                                    MinHeight="34"
+                                                    Background="#2f2f2f"
+                                                    Foreground="#7dd3fc"
+                                                    Click="OnInsightTranscriptClicked"/>
+                                            <Button Content="Audio"
+                                                    Classes="menu-btn"
+                                                    Padding="10,6"
+                                                    FontSize="12"
+                                                    MinHeight="34"
+                                                    Background="#2f2f2f"
+                                                    Foreground="#7dd3fc"
+                                                    Click="OnInsightAudioClicked"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <Border Grid.Column="1" Margin="8,0,0,0" Width="12" Height="12" CornerRadius="6">
+                                        <Border.Background>
+                                            <SolidColorBrush Color="{Binding Confidence, Converter={StaticResource ConfidenceColorConverter}}"/>
+                                        </Border.Background>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+        
 		        
 <!-- Data template selector -->
         <local:CallGroupItemTemplateSelector x:Key="CallGroupTemplateSelector"
@@ -243,11 +308,23 @@
         <!-- Search bar visibility converter -->
         <local:IntGreaterThanZeroConverter x:Key="IntGreaterThanZeroConverter"/>
         <local:SearchHighlightConverter x:Key="SearchHighlightConverter"/>
-        <local:SearchTextForegroundConverter x:Key="SearchTextForegroundConverter"/>
+<local:SearchTextForegroundConverter x:Key="SearchTextForegroundConverter"/>
         <local:BoolToBrushConverter x:Key="BoolToBrushConverter"/>
         <local:AlertSearchBackgroundConverter x:Key="AlertSearchBackgroundConverter"/>
         <local:ButtonActiveStateConverter x:Key="ButtonActiveStateConverter"/>
+        <local:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
+        <local:ConfidenceColorConverter x:Key="ConfidenceColorConverter"/>
     </Window.Resources>
+
+    <Window.Styles>
+        <!-- Keep active/inactive menu button colors stable on hover/press -->
+        <Style Selector="Button.menu-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}"/>
+        </Style>
+        <Style Selector="Button.menu-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}"/>
+        </Style>
+    </Window.Styles>
     
     <DockPanel>
         <!-- Persistent Top Button Bar -->
@@ -261,9 +338,9 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <WrapPanel Grid.Column="0" Orientation="Horizontal">
+                <WrapPanel Grid.Column="0" Orientation="Horizontal" Classes="menu-row">
                 <!-- Live Mode Button -->
-                <Button Content="📡 Live"
+                <Button Classes="menu-btn" Content="&#x1F4E1; Radio"
                         Height="44"
                         MinWidth="70"
                         Padding="12,8"
@@ -272,74 +349,30 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Margin="0,0,6,6"
-                        Background="{Binding IsLiveActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
-                        Foreground="{Binding IsLiveActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Background="{Binding IsRadioMode, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRadioMode, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         ToolTip.Tip="Switch to live mode (real-time monitoring)"
                         Click="OnLiveModeClicked"/>
-                
-                <!-- Last 24h Button -->
-                <Button Content="⏰ 24h"
+
+                <!-- Insights Button -->
+                <Button Classes="menu-btn" Content="&#x1F4A1; Insights"
                         Height="44"
-                        MinWidth="70"
+                        MinWidth="80"
                         Padding="12,8"
                         FontSize="13"
                         Cursor="Hand"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Margin="0,0,6,6"
-                        Background="{Binding Is24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
-                        Foreground="{Binding Is24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
-                        ToolTip.Tip="Show calls from last 24 hours"
-                        Click="OnLast24hClicked"/>
-                
-                <!-- Last 2d Button -->
-                <Button Content="📅 2d"
-                        Height="44"
-                        MinWidth="70"
-                        Padding="12,8"
-                        FontSize="13"
-                        Cursor="Hand"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
-                        Margin="0,0,6,6"
-                        Background="{Binding Is2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
-                        Foreground="{Binding Is2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
-                        ToolTip.Tip="Show calls from last 2 days"
-                        Click="OnLast2dClicked"/>
-                
-                <!-- Last Week Button -->
-                <Button Content="🗓️ Week"
-                        Height="44"
-                        MinWidth="70"
-                        Padding="12,8"
-                        FontSize="13"
-                        Cursor="Hand"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
-                        Margin="0,0,6,6"
-                        Background="{Binding IsWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
-                        Foreground="{Binding IsWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
-                        ToolTip.Tip="Show calls from last week"
-                        Click="OnLastWeekClicked"/>
-                
-                <!-- Pick Range Button -->
-                <Button Content="📅 Range"
-                        Height="44"
-                        MinWidth="70"
-                        Padding="12,8"
-                        FontSize="13"
-                        Cursor="Hand"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
-                        Margin="0,0,6,6"
-                        Background="{Binding IsRangeActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
-                        Foreground="{Binding IsRangeActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
-                        ToolTip.Tip="Select custom date range for filtering"
-                        Click="OnPickRangeClicked"/>
-                
+                        Background="{Binding IsInsightsMode, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsInsightsMode, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        ToolTip.Tip="Show AI insights summaries"
+                        IsEnabled="{Binding IsInsightsEnabled}"
+                        Click="OnInsightsClicked"/>
+
                 <!-- View Button -->
-                <Button x:Name="ViewButton"
-                        Content="👁️ View"
+                <Button Classes="menu-btn" x:Name="ViewButton"
+                        Content="&#x1F441; View"
                         Height="44"
                         MinWidth="70"
                         Padding="12,8"
@@ -352,9 +385,9 @@
                         Foreground="{Binding IsViewPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         ToolTip.Tip="View options (sort, group, clear calls)"
                         Click="OnViewClicked"/>
-                
+
                 <!-- Alerts Button -->
-                <Button Content="🔔 Alerts"
+                <Button Classes="menu-btn" Content="&#x1F514; Alerts"
                         Height="44"
                         MinWidth="70"
                         Padding="12,8"
@@ -367,9 +400,9 @@
                         Foreground="{Binding IsAlertsPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         ToolTip.Tip="Manage alert rules and notifications"
                         Click="OnAlertsClicked2"/>
-                
+
                 <!-- Settings Button -->
-                <Button Content="⚙️ Settings"
+                <Button Classes="menu-btn" Content="&#x2699; Settings"
                         Height="44"
                         MinWidth="70"
                         Padding="12,8"
@@ -382,9 +415,9 @@
                         Foreground="{Binding IsSettingsPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         ToolTip.Tip="Configure application settings"
                         Click="OnSettingsClicked2"/>
-                
+
                 <!-- Cleanup Button -->
-                <Button Content="🧹 Cleanup"
+                <Button Classes="menu-btn" Content="&#x1F9F9; Cleanup"
                         Height="44"
                         MinWidth="70"
                         Padding="12,8"
@@ -397,9 +430,9 @@
                         Foreground="{Binding IsCleanupPaneOpen, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         ToolTip.Tip="Clean up captured audio files"
                         Click="OnCleanupClicked2"/>
-                
+
                 <!-- Exit Button -->
-                <Button Content="❌ Exit"
+                <Button Classes="menu-btn" Content="&#x274C; Exit"
                         Height="44"
                         MinWidth="70"
                         Padding="12,8"
@@ -418,7 +451,7 @@
                 <Grid Grid.Column="1"
                       VerticalAlignment="Center"
                       Margin="8,0,0,0"
-                      IsVisible="{Binding Calls.Count, Converter={StaticResource IntGreaterThanZeroConverter}}">
+                      IsVisible="{Binding IsCallsMode}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
@@ -442,6 +475,83 @@
 </Grid>
         </Border>
         
+        <!-- Time Range Sub-Menu (Radio) -->
+        <Border Background="#2b2b2b"
+                BorderBrush="#555"
+                BorderThickness="0,0,0,1"
+                Padding="6,4"
+                DockPanel.Dock="Top"
+                IsVisible="{Binding IsCallsMode}">
+            <WrapPanel Orientation="Horizontal" Classes="menu-row">
+                <Button Classes="menu-btn" Content="Live"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsRangeLiveActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRangeLiveActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnRangeLiveClicked"/>
+                <Button Classes="menu-btn" Content="24h"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsRange24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRange24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnRange24hClicked"/>
+                <Button Classes="menu-btn" Content="2d"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsRange2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRange2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnRange2dClicked"/>
+                <Button Classes="menu-btn" Content="Week"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsRangeWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRangeWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnRangeWeekClicked"/>
+                <Button Classes="menu-btn" Content="Range"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsRangeCustomActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#00ff00,#4a4a4a'}"
+                        Foreground="{Binding IsRangeCustomActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnPickRangeClicked"/>
+            </WrapPanel>
+        </Border>
+
+        <!-- Time Range Sub-Menu (Insights) -->
+        <Border Background="#2b2b2b"
+                BorderBrush="#555"
+                BorderThickness="0,0,0,1"
+                Padding="6,4"
+                DockPanel.Dock="Top"
+                IsVisible="{Binding IsInsightsMode}">
+            <WrapPanel Orientation="Horizontal" Classes="menu-row">
+                <Button Classes="menu-btn" Content="Today"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsInsightsTodayActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsInsightsTodayActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnInsightsTodayClicked"
+                        IsEnabled="{Binding InsightsLoading, Converter={StaticResource InvertedBoolConverter}}"/>
+                <Button Classes="menu-btn" Content="24h"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsInsights24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsInsights24hActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnInsights24hClicked"
+                        IsEnabled="{Binding InsightsLoading, Converter={StaticResource InvertedBoolConverter}}"/>
+                <Button Classes="menu-btn" Content="2d"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsInsights2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsInsights2dActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnInsights2dClicked"
+                        IsEnabled="{Binding InsightsLoading, Converter={StaticResource InvertedBoolConverter}}"/>
+                <Button Classes="menu-btn" Content="Week"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsInsightsWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsInsightsWeekActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnInsightsWeekClicked"
+                        IsEnabled="{Binding InsightsLoading, Converter={StaticResource InvertedBoolConverter}}"/>
+                <Button Classes="menu-btn" Content="Range"
+                        Margin="0,0,6,0"
+                        Background="{Binding IsInsightsRangeActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsInsightsRangeActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnPickRangeClicked"
+                        IsEnabled="{Binding InsightsLoading, Converter={StaticResource InvertedBoolConverter}}"/>
+            </WrapPanel>
+        </Border>
+        
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -452,32 +562,78 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
         <!-- Main Content Area -->
-        <ScrollViewer Grid.Row="0"
-                      Grid.Column="0"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled">
-            <Border Padding="10,10,10,80">
-                <StackPanel Spacing="8">
-                    <!-- Recent Calls List -->
-                    <ItemsControl ItemsSource="{Binding GroupedCalls}"
-                                  ItemTemplate="{StaticResource CallGroupTemplateSelector}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <VirtualizingStackPanel Orientation="Vertical"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.Styles>
-                            <Style Selector="ContentPresenter">
-                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                <Setter Property="Padding" Value="0"/>
-                                <Setter Property="Margin" Value="0"/>
-                            </Style>
-                        </ItemsControl.Styles>
-                    </ItemsControl>
-                </StackPanel>
-            </Border>
-        </ScrollViewer>
+        <Grid Grid.Row="0" Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Calls list -->
+            <ScrollViewer Grid.Row="1"
+                          Grid.Column="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          IsVisible="{Binding IsCallsMode}">
+                <Border Padding="10,10,10,80">
+                    <StackPanel Spacing="8">
+                        <!-- Recent Calls List -->
+                        <ItemsControl ItemsSource="{Binding GroupedCalls}"
+                                      ItemTemplate="{StaticResource CallGroupTemplateSelector}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VirtualizingStackPanel Orientation="Vertical"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.Styles>
+                                <Style Selector="ContentPresenter">
+                                    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Setter Property="Margin" Value="0"/>
+                                </Style>
+                            </ItemsControl.Styles>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
+
+            <!-- Insights list -->
+            <Grid Grid.Row="1"
+                  Grid.Column="0"
+                  IsVisible="{Binding IsInsightsMode}">
+                <!-- Content area -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <Border Padding="10,10,10,80">
+                        <ItemsControl ItemsSource="{Binding InsightsCategorySections}"
+                                      ItemTemplate="{StaticResource InsightCategoryTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VirtualizingStackPanel Orientation="Vertical"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </Border>
+                </ScrollViewer>
+                
+                <!-- Loading overlay -->
+                <Border Background="#000000aa"
+                        IsVisible="{Binding InsightsLoading}"
+                        VerticalAlignment="Stretch"
+                        HorizontalAlignment="Stretch">
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="15">
+                        <ProgressBar Width="200" Height="4" Value="0" IsIndeterminate="True"/>
+                        <TextBlock Text="{Binding InsightsStatusText}"
+                                   Foreground="White"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
 
         <!-- Footer Status (bottom) -->
         <Border Grid.Row="1"
@@ -499,7 +655,7 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="15">
                     <StackPanel Orientation="Horizontal" Spacing="5">
                         <TextBlock Text="Calls:" Foreground="White" />
-                        <TextBlock Text="{Binding CallsReceivedCount}" Foreground="#00d2ff" FontWeight="Bold" />
+                        <TextBlock Text="{Binding VisibleCallCount}" Foreground="#00d2ff" FontWeight="Bold" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="5">
                         <TextBlock Text="Alerts:" Foreground="White" />
@@ -507,6 +663,9 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="5">
                         <TextBlock Text="{Binding UsageText}" Foreground="White" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5" IsVisible="{Binding IsInsightsEnabled}">
+                        <TextBlock Text="{Binding NextInsightStatusText}" Foreground="#7cc6ff" FontWeight="SemiBold" />
                     </StackPanel>
                 </StackPanel>
                 <!-- Status text (truncated) -->
@@ -596,4 +755,3 @@
         </Grid>
     </DockPanel>
 </Window>
-

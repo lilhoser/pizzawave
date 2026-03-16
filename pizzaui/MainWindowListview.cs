@@ -30,8 +30,6 @@ namespace pizzaui
         {
             public GroupKeyGetterDelegate? groupKeyGetterDelegate;
             public AspectToStringConverterDelegate? aspectToStringConverterDelegate;
-            public ImageGetterDelegate? imageGetterDelegate;
-            public AspectGetterDelegate? aspectGetterDelegate;
             public GroupFormatterDelegate? groupFormatterDelegate;
             public string? columnName;
         }
@@ -231,14 +229,6 @@ namespace pizzaui
                 if (table.aspectToStringConverterDelegate != null)
                 {
                     col.AspectToStringConverter = table.aspectToStringConverterDelegate;
-                }
-                if (table.imageGetterDelegate != null)
-                {
-                    col.ImageGetter = table.imageGetterDelegate;
-                }
-                if (table.aspectGetterDelegate != null)
-                {
-                    col.AspectGetter = table.aspectGetterDelegate;
                 }
                 if (table.groupFormatterDelegate != null)
                 {

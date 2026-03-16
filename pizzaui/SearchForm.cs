@@ -20,7 +20,7 @@ namespace pizzaui
 {
     public partial class SearchForm : Form
     {
-        public string m_SearchText;
+        public string m_SearchText = string.Empty;
 
         public SearchForm()
         {

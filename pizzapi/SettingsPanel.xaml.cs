@@ -32,6 +32,12 @@ public partial class SettingsPanel : UserControl
     private bool _handlersWired;
     private string _currentSettingsPath = Settings.DefaultSettingsFileLocation;
     private TextBlock? _settingsPathText;
+    private CheckBox? _lmLinkEnabledCheckBox;
+    private TextBox? _lmLinkBaseUrlTextBox;
+    private TextBox? _lmLinkApiKeyTextBox;
+    private TextBox? _lmLinkModelTextBox;
+    private TextBox? _lmLinkTimeoutTextBox;
+    private TextBox? _lmLinkRetriesTextBox;
 
     public event EventHandler? RequestClose;
     public event Func<Settings, Task>? ApplySettingsRequested;
@@ -81,6 +87,12 @@ public partial class SettingsPanel : UserControl
         _maxCallsToKeepTextBox = this.FindControl<TextBox>("MaxCallsToKeepTextBox");
         _traceLevelComboBox = this.FindControl<ComboBox>("TraceLevelComboBox");
         _settingsPathText = this.FindControl<TextBlock>("SettingsPathText");
+        _lmLinkEnabledCheckBox = this.FindControl<CheckBox>("LmLinkEnabledCheckBox");
+        _lmLinkBaseUrlTextBox = this.FindControl<TextBox>("LmLinkBaseUrlTextBox");
+        _lmLinkApiKeyTextBox = this.FindControl<TextBox>("LmLinkApiKeyTextBox");
+        _lmLinkModelTextBox = this.FindControl<TextBox>("LmLinkModelTextBox");
+        _lmLinkTimeoutTextBox = this.FindControl<TextBox>("LmLinkTimeoutTextBox");
+        _lmLinkRetriesTextBox = this.FindControl<TextBox>("LmLinkRetriesTextBox");
         var loadButton = this.FindControl<Button>("LoadButton");
         var saveButton = this.FindControl<Button>("SaveButton");
         var saveAsButton = this.FindControl<Button>("SaveAsButton");
@@ -124,6 +136,19 @@ public partial class SettingsPanel : UserControl
                 60 => 3,
                 _ => 1
             };
+            
+            if (_lmLinkEnabledCheckBox != null)
+                _lmLinkEnabledCheckBox.IsChecked = settings.LmLinkEnabled;
+            if (_lmLinkBaseUrlTextBox != null)
+                _lmLinkBaseUrlTextBox.Text = settings.LmLinkBaseUrl ?? string.Empty;
+            if (_lmLinkApiKeyTextBox != null)
+                _lmLinkApiKeyTextBox.Text = settings.LmLinkApiKey ?? string.Empty;
+            if (_lmLinkModelTextBox != null)
+                _lmLinkModelTextBox.Text = settings.LmLinkModel ?? string.Empty;
+            if (_lmLinkTimeoutTextBox != null)
+                _lmLinkTimeoutTextBox.Text = settings.LmLinkTimeoutMs.ToString();
+            if (_lmLinkRetriesTextBox != null)
+                _lmLinkRetriesTextBox.Text = settings.LmLinkMaxRetries.ToString();
             
             UpdateTalkgroupCount();
             UpdateSettingsPathText();
@@ -181,6 +206,12 @@ public partial class SettingsPanel : UserControl
                         TranscriptionModelPreset = currentSettings.TranscriptionModelPreset,
                         GmailUser = currentSettings.GmailUser,
                         GmailPassword = currentSettings.GmailPassword,
+                        LmLinkEnabled = currentSettings.LmLinkEnabled,
+                        LmLinkBaseUrl = currentSettings.LmLinkBaseUrl,
+                        LmLinkApiKey = currentSettings.LmLinkApiKey,
+                        LmLinkModel = currentSettings.LmLinkModel,
+                        LmLinkTimeoutMs = currentSettings.LmLinkTimeoutMs,
+                        LmLinkMaxRetries = currentSettings.LmLinkMaxRetries,
                         AutoplayAlerts = _autoplayAlertsCheckBox.IsChecked ?? false,
                         AutoCleanupCalls = _autoCleanupCallsCheckBox.IsChecked ?? true,
                         MaxCallsToKeep = int.TryParse(_maxCallsToKeepTextBox.Text, out int maxCalls) ? maxCalls : 100,
@@ -213,6 +244,12 @@ public partial class SettingsPanel : UserControl
                         _transcriptionEngineComboBox.SelectedIndex == 1 ? "vosk" : "whisper";
                     settingsCopy.GmailUser = newUser;
                     settingsCopy.GmailPassword = newPass;
+                    settingsCopy.LmLinkEnabled = _lmLinkEnabledCheckBox?.IsChecked ?? false;
+                    settingsCopy.LmLinkBaseUrl = _lmLinkBaseUrlTextBox?.Text ?? string.Empty;
+                    settingsCopy.LmLinkApiKey = _lmLinkApiKeyTextBox?.Text ?? string.Empty;
+                    settingsCopy.LmLinkModel = _lmLinkModelTextBox?.Text ?? string.Empty;
+                    settingsCopy.LmLinkTimeoutMs = int.TryParse(_lmLinkTimeoutTextBox?.Text, out var timeoutMs) ? timeoutMs : settingsCopy.LmLinkTimeoutMs;
+                    settingsCopy.LmLinkMaxRetries = int.TryParse(_lmLinkRetriesTextBox?.Text, out var retries) ? retries : settingsCopy.LmLinkMaxRetries;
 
                     if (settingsCopy.TranscriptionModelPreset.StartsWith("vosk-",
                         StringComparison.OrdinalIgnoreCase))
@@ -232,6 +269,12 @@ public partial class SettingsPanel : UserControl
                     currentSettings.TranscriptionModelPreset = settingsCopy.TranscriptionModelPreset;
                     currentSettings.GmailUser = settingsCopy.GmailUser;
                     currentSettings.GmailPassword = settingsCopy.GmailPassword;
+                    currentSettings.LmLinkEnabled = settingsCopy.LmLinkEnabled;
+                    currentSettings.LmLinkBaseUrl = settingsCopy.LmLinkBaseUrl;
+                    currentSettings.LmLinkApiKey = settingsCopy.LmLinkApiKey;
+                    currentSettings.LmLinkModel = settingsCopy.LmLinkModel;
+                    currentSettings.LmLinkTimeoutMs = settingsCopy.LmLinkTimeoutMs;
+                    currentSettings.LmLinkMaxRetries = settingsCopy.LmLinkMaxRetries;
                     currentSettings.AutoplayAlerts = settingsCopy.AutoplayAlerts;
                     currentSettings.AutoCleanupCalls = settingsCopy.AutoCleanupCalls;
                     currentSettings.MaxCallsToKeep = settingsCopy.MaxCallsToKeep;
@@ -306,15 +349,17 @@ public partial class SettingsPanel : UserControl
                 return;
             }
 
-            loaded.Validate();
-            _settings = loaded;
-            _currentSettingsPath = path;
-            LoadSettings();
+             loaded.Validate();
+             _settings = loaded;
+             _currentSettingsPath = path;
+             LoadSettings();
+            // Persist loaded settings to the app default so future launches use them
+            loaded.SaveToFile(Settings.DefaultSettingsFileLocation);
 
-            if (ApplySettingsRequested != null)
-            {
-                await ApplySettingsRequested.Invoke(loaded);
-            }
+             if (ApplySettingsRequested != null)
+             {
+                 await ApplySettingsRequested.Invoke(loaded);
+             }
         }
         catch (Exception ex)
         {
@@ -362,6 +407,12 @@ public partial class SettingsPanel : UserControl
             currentSettings.TranscriptionEngine = _transcriptionEngineComboBox?.SelectedIndex == 1 ? "vosk" : "whisper";
             currentSettings.GmailUser = _gmailUserTextBox?.Text;
             currentSettings.GmailPassword = _gmailPasswordTextBox?.Text;
+            currentSettings.LmLinkEnabled = _lmLinkEnabledCheckBox?.IsChecked ?? currentSettings.LmLinkEnabled;
+            currentSettings.LmLinkBaseUrl = _lmLinkBaseUrlTextBox?.Text ?? currentSettings.LmLinkBaseUrl;
+            currentSettings.LmLinkApiKey = _lmLinkApiKeyTextBox?.Text ?? currentSettings.LmLinkApiKey;
+            currentSettings.LmLinkModel = _lmLinkModelTextBox?.Text ?? currentSettings.LmLinkModel;
+            currentSettings.LmLinkTimeoutMs = int.TryParse(_lmLinkTimeoutTextBox?.Text, out var timeoutMs) ? timeoutMs : currentSettings.LmLinkTimeoutMs;
+            currentSettings.LmLinkMaxRetries = int.TryParse(_lmLinkRetriesTextBox?.Text, out var retries) ? retries : currentSettings.LmLinkMaxRetries;
             currentSettings.AutoplayAlerts = _autoplayAlertsCheckBox?.IsChecked ?? currentSettings.AutoplayAlerts;
             currentSettings.AutoCleanupCalls = _autoCleanupCallsCheckBox?.IsChecked ?? currentSettings.AutoCleanupCalls;
             currentSettings.MaxCallsToKeep = int.TryParse(_maxCallsToKeepTextBox?.Text, out int maxCalls) ? maxCalls : currentSettings.MaxCallsToKeep;

@@ -31,7 +31,7 @@ namespace pizzaui
             m_CallManager = new LiveCallManager(NewCallTranscribed);
         }
 
-        protected override void PrintUsage(string Message = null)
+        protected override void PrintUsage(string? Message = null)
         {
             if (!string.IsNullOrEmpty(Message))
             {

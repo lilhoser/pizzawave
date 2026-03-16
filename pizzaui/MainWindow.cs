@@ -33,7 +33,7 @@ namespace pizzaui
         private AudioPlayer m_AudioPlayer;
         private Settings m_Settings;
         private LiveCallManager m_LiveCallManager;
-        private OfflineCallManager m_OfflineCallManager;
+        private OfflineCallManager? m_OfflineCallManager;
 
         public MainWindow()
         {
@@ -200,15 +200,15 @@ namespace pizzaui
             {
                 try
                 {
-                    if (!await m_OfflineCallManager.Initialize(m_Settings))
+                    if (!await m_OfflineCallManager!.Initialize(m_Settings))
                     {
                         throw new Exception("Failed to initialize OfflineCallManager");
                     }
-                    await m_OfflineCallManager.Start();
+                    await m_OfflineCallManager!.Start();
                 }
                 catch (Exception ex)
                 {
-                    m_OfflineCallManager.DeleteCapture();
+                    m_OfflineCallManager!.DeleteCapture();
                     UpdateProgressLabel($"Failed to load offline records: {ex.Message}");
                     HideProgressBar();
                     cancelTaskButton.Visible = false;

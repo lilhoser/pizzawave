@@ -83,6 +83,20 @@ namespace pizzalib
             get => gmailPassword;
             set => gmailPassword = value;
         }
+        
+        // LM Link settings (Insights)
+        [JsonProperty("lmLinkEnabled")]
+        public bool LmLinkEnabled { get; set; }
+        [JsonProperty("lmLinkBaseUrl")]
+        public string? LmLinkBaseUrl { get; set; }
+        [JsonProperty("lmLinkApiKey")]
+        public string? LmLinkApiKey { get; set; }
+        [JsonProperty("lmLinkModel")]
+        public string? LmLinkModel { get; set; }
+        [JsonProperty("lmLinkTimeoutMs")]
+        public int LmLinkTimeoutMs { get; set; } = 600000;
+        [JsonProperty("lmLinkMaxRetries")]
+        public int LmLinkMaxRetries { get; set; } = 2;
 
         // Alert audio settings
         public bool AutoplayAlerts;
@@ -177,6 +191,12 @@ namespace pizzalib
             analogSamplingRate = 8000;
             analogBitDepth = 16;
             analogChannels = 1;
+            LmLinkEnabled = false;
+            LmLinkBaseUrl = string.Empty;
+            LmLinkApiKey = string.Empty;
+            LmLinkModel = string.Empty;
+LmLinkTimeoutMs = 600000;
+            LmLinkMaxRetries = 2;
         }
 
         public bool Equals(Settings? other)
@@ -202,7 +222,13 @@ namespace pizzalib
                 whisperModelFile == other.whisperModelFile &&
                 transcriptionEngine == other.transcriptionEngine &&
                 transcriptionModelPreset == other.transcriptionModelPreset &&
-                voskModelPath == other.voskModelPath;
+                voskModelPath == other.voskModelPath &&
+                LmLinkEnabled == other.LmLinkEnabled &&
+                LmLinkBaseUrl == other.LmLinkBaseUrl &&
+                LmLinkApiKey == other.LmLinkApiKey &&
+                LmLinkModel == other.LmLinkModel &&
+                LmLinkTimeoutMs == other.LmLinkTimeoutMs &&
+                LmLinkMaxRetries == other.LmLinkMaxRetries;
         }
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
@@ -313,6 +339,18 @@ namespace pizzalib
             {
                 throw new Exception("Gmail user is required when password is specified");
             }
+
+            if (LmLinkEnabled)
+            {
+                if (string.IsNullOrWhiteSpace(LmLinkBaseUrl))
+                    throw new Exception("LM Link base URL is required when enabled");
+                if (string.IsNullOrWhiteSpace(LmLinkModel))
+                    throw new Exception("LM Link model is required when enabled");
+                if (LmLinkTimeoutMs <= 0)
+                    throw new Exception("LM Link timeout must be > 0");
+                if (LmLinkMaxRetries < 0)
+                    throw new Exception("LM Link max retries must be >= 0");
+            }
         }
 
         public void SaveToFile(string? target = null)
@@ -367,6 +405,14 @@ namespace pizzalib
                 if (settings.transcriptionModelPreset == null)
                 {
                     settings.transcriptionModelPreset = string.Empty;
+                }
+                if (settings.LmLinkTimeoutMs <= 0)
+                {
+                    settings.LmLinkTimeoutMs = 60000;
+                }
+                if (settings.LmLinkMaxRetries < 0)
+                {
+                    settings.LmLinkMaxRetries = 0;
                 }
                 // Ensure Alerts is initialized
                 if (settings.Alerts == null)

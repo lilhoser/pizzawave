@@ -39,6 +39,7 @@ namespace pizzapi
             new TraceSource("Cleanup", SourceLevels.Verbose),
             new TraceSource("Audio", SourceLevels.Verbose),
             new TraceSource("Headless", SourceLevels.Verbose),
+            new TraceSource("Insights", SourceLevels.Information),
         };
 
         public enum TraceLoggerType
@@ -50,6 +51,7 @@ namespace pizzapi
             Cleanup,
             Audio,
             Headless,
+            Insights,
             Max
         }
 

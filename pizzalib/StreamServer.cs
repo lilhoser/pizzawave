@@ -21,6 +21,7 @@ using System.Net;
 using System.Diagnostics;
 using System.Text;
 using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using static pizzalib.TraceLogger;
 
 namespace pizzalib
@@ -80,7 +81,7 @@ namespace pizzalib
         {
             var ipEndPoint = new IPEndPoint(IPAddress.Any, m_Settings.listenPort);
             TcpListener listener = new(ipEndPoint);
-            List<Task> tasks = new List<Task>();
+            var activeTasks = new ConcurrentDictionary<int, Task>();
             CancelSource?.Cancel();
             CancelSource?.Dispose();
             CancelSource = new CancellationTokenSource();
@@ -110,7 +111,11 @@ namespace pizzalib
                             m_ClientSemaphore.Release();
                         }
                     });
-                    tasks.Add(task);
+                    activeTasks[task.Id] = task;
+                    task.ContinueWith(_ =>
+                    {
+                        activeTasks.TryRemove(task.Id, out _);
+                    }, TaskScheduler.Default);
                     // Small delay to prevent busy polling on Linux/RPI
                     // This reduces CPU usage when no clients are connecting
                                     }
@@ -144,9 +149,10 @@ namespace pizzalib
             {
                 try
                 {
-                    if (tasks.Count > 0)
+                    var snapshot = activeTasks.Values.ToArray();
+                    if (snapshot.Length > 0)
                     {
-                        Task.WaitAll(tasks.ToArray());
+                        Task.WaitAll(snapshot);
                     }
                 }
                 catch (Exception)
@@ -154,7 +160,6 @@ namespace pizzalib
                     // tasks may have been cancelled
                 }
                 listener.Stop();
-                tasks.Clear();
                 m_Started = false;
             }
             return true;

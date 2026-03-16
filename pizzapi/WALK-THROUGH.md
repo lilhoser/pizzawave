@@ -10,17 +10,19 @@
 - [5. Create a Config File](#5-create-a-config-file-sdrhero_pizzapijson)
 - [6. Build Trunk-Recorder + callstream Plugin](#6-build-trunk-recorder--callstream-plugin)
 - [7. Setup PizzaPi to view Calls](#7-setup-pizzapi-to-view-calls)
-- [8. Troubleshooting](#8-troubleshooting)
+- [8. Setup LM Studio for AI Insights](#8-setup-lm-studio-for-ai-insights)
+- [9. Troubleshooting](#8-troubleshooting)
 
 ## 0. Pre-requisites and Considerations
 
 ### Software
 
-Your RPI 5 will be the computing platform that will run Trunk-Recorder and the Callstream plugin, and serve the PizzaPi interface:
+Your RPI 5 will run the following software:
 
 1. **Trunk-Recorder**: The core software that will handle the SDR input, decode the trunked system, and manage recordings.
 1. **Callstream Plugin**: A plugin for Trunk-Recorder that streams decoded audio and metadata to clients (like PizzaPi) in real-time.
 1. **PizzaPi**: A user-friendly interface that displays live and recorded trunked radio communications, allowing you to listen to calls and view talkgroup information.
+1. **LMStudio** (optional): Used by Pizzapi to generate AI Insights summaries of call data throughout the day (requires LM Studio's LM Link feature to access an LLM on a remote machine).
 
 ### Hardware
 1. **Compute**: While other variations might work, I chose to be lazy and selected [this CanaKit Raspberry Pi 5 8GB bundle](https://www.canakit.com/canakit-raspberry-pi-5-desktop-pc-with-ssd.html) (`PI5-8GB-PC512-C4-BLK`) with a pre-installed 512GB microSD card and a nice case with cooling.
@@ -66,7 +68,7 @@ Talkgroups are listed on the RadioReference page for your system. To generate th
 1. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
 1. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
 
-The CSV must include this header line:
+Example:
 ```
 Decimal,Mode,Alpha Tag,Description,Tag,Category
 1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
@@ -74,17 +76,8 @@ Decimal,Mode,Alpha Tag,Description,Tag,Category
 3,D,PDISPATCH,Police Dispatch,Police,Dispatch
 ```
 
-And then update your config file to point to this talkgroups file:
-```JSON
+The talkgroup file will be used in both TR setup and PizzaPi setup, so save it somewhere persistent on your RPI (e.g. `/home/<USER>/tr5/talkgroups.csv`).
 
-{
-  "talkgroups": [
-    {"Id": 1, "Mode": "D", "AlphaTag": "FDISPATCH", "Description": "Fire Dispatch", "Tag": "Fire", "Category": "Dispatch"},
-    {"Id": 2, "Mode": "D", "AlphaTag": "FDISPATCH2", "Description": "Fire Dispatch 2", "Tag": "Fire", "Category": "Dispatch"},
-    {"Id": 3, "Mode": "D", "AlphaTag": "PDISPATCH", "Description": "Police Dispatch", "Tag": "Police", "Category": "Dispatch"}
-  ]
-}
-```
 
 ## 1. System Preparation
 
@@ -185,27 +178,34 @@ Examples:
 
 Round to nearest 10 Hz.
 
-## 5. Create a Config File (sdrhero_pizzapi.json)
+## 5. Create a Config File
 
-Full final config (with error: 0 on both dongles):
+Example:
 
 ```JSON
 {
     "ver": 2,
     "defaultMode": "digital",
     "logFile": true,
+	"captureDir": "/var/lib/trunk-recorder/recordings",
+    "logDir": "/var/log/trunk-recorder",
+    "tempDir": "/var/lib/trunk-recorder/tmp",
     "frequencyFormat": "mhz",
     "statusAsString": true,
     "broadcastSignals": true,
     "logLevel": "info",
     "audioStreaming": true,
-    "captureDir": "/home/sdrhero/tr5/recordings",
     "systems": [
         {
             "shortName": "whiteoakmt-hamilton",
             "type": "p25",
-            "talkgroupsFile": "/home/sdrhero/tr5/trunk-build/chatt_talkgroups.csv",
-            "control_channels": [855212500,856237500,856762500,857237500],
+            "talkgroupsFile": "/etc/trunk-recorder/talkgroups.csv",
+            "control_channels": [
+                855212500,
+                856237500,
+                856762500,
+                857237500
+            ],
             "modulation": "qpsk",
             "compressWav": false,
             "audioArchive": false,
@@ -221,28 +221,27 @@ Full final config (with error: 0 on both dongles):
             "minDuration": 5,
             "minTransmissionDuration": 0,
             "talkgroupDisplayFormat": "id_tag",
-            "multiSite": true,
-            "squelch": -60
+            "multiSite": true
         }
     ],
     "sources": [
         {
-            "center": 855309375,
-            "rate": 2064000,
+            "center":855309375,
+            "rate": 2048000,
             "error": 0,
             "gain": 45,
-            "digitalRecorders": 4,
+            "digitalRecorders": 5,
             "analogRecorders": 0,
             "driver": "osmosdr",
             "device": "rtl=0,bias=1,buflen=65536",
             "agc": false
         },
         {
-            "center": 857600000,
-            "rate": 2064000,
+            "center":857600000,
+            "rate": 2048000,
             "error": 0,
             "gain": 45,
-            "digitalRecorders": 3,
+            "digitalRecorders": 4,
             "analogRecorders": 0,
             "driver": "osmosdr",
             "device": "rtl=1,bias=1,buflen=65536",
@@ -251,26 +250,26 @@ Full final config (with error: 0 on both dongles):
     ],
     "plugins": [
         {
-            "name": "callstream",
-            "library": "libcallstream.so",
-            "clients": [{"address": "127.0.0.1", "port": 9123}],
-            "port": 9123,
-            "streams": [{"TGID": 0, "shortName": "whiteoakmt-hamilton"}],
-            "audio_filtering": {
-                "enabled": true,
-                "spike_clipping": {
-                    "enabled": true,
-                    "threshold_percent": 85,
-                    "clip_factor": 0.9
-                },
-                "smoothing": {
-                    "enabled": false,
-                    "window_size": 5
-                },
-                "high_pass_filter": {
-                    "enabled": false,
-                    "cutoff_hz": 200
+            "name":"callstream",
+            "library":"libcallstream.so",
+            "clients":[
+                {
+                    "address":"127.0.0.1",
+                    "port":9123
                 }
+            ],
+            "port":9123,
+            "streams":[
+                {
+                    "TGID":0,
+                    "shortName":"whiteoakmt-hamilton"
+                }
+            ],
+            "audio_filtering": {
+                "enabled": false,
+                "spike_clipping": { "enabled": true, "threshold_percent": 58, "clip_factor": 0.10 },
+                "smoothing": { "enabled": false, "window_size": 3 },
+                "high_pass_filter": { "enabled": true, "cutoff_hz": 45 }
             }
         }
     ]
@@ -280,9 +279,14 @@ Full final config (with error: 0 on both dongles):
 ## 6. Build Trunk-Recorder + callstream Plugin
 
 Please use the [official build script](scripts/setup_trunk_recorder.sh):
+
 ```bash
 
-bash setup_trunk_recorder.sh --config <CONFIG> --talkgroups-file <TALKGROUPS_FILE>
+curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/setup_trunk_recorder.sh > setup_trunk_recorder.sh
+
+chmod +x setup_trunk_recorder.sh
+
+sudo ./setup_trunk_recorder.sh --config <CONFIG> --talkgroups-file <TALKGROUPS_FILE>
 ```
 
 This script will setup all pre-requisites, build trunk-recorder and the callstream plugin, and install the final binaries, config file and talkgroups file as a persistent service. It will also autostart a tmux session on boot to show live trunk-recorder logs in a terminal window. The script can also be used to check installation status and clean a prior installation (if an update is needed).
@@ -298,64 +302,99 @@ chmod +x pizzapi-upgrade.sh
 sudo ./pizzapi-upgrade.sh
 ```
 
-### Autostart the PizzaPi UI on boot
+This will install PizzaPi to `/opt/pizzapi` with a default settings file and autostart it on login.
+
+You can start the application and manually update the settings file or use the one below.
 
 ```
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/pizzapi.desktop << EOF
-[Desktop Entry]
-Name=PizzaPi
-Exec=/opt/pizzapi/pizzapi
-Type=Application
-Terminal=false
-X-GNOME-Autostart-enabled=true
-EOF
+{
+  "ConfigVersion": 2,
+  "TraceLevelApp": 15,
+  "Alerts": [],
+  "AutostartListener": true,
+  "gmailUser": "",
+  "gmailPassword": "",
+  "AutoplayAlerts": true,
+  "SnoozeDurationMinutes": 15,
+  "SortMode": 0,
+  "GroupMode": 1,
+  "FontSize": 24.0,
+  "AutoCleanupCalls": false,
+  "MaxCallsToKeep": 100,
+  "listenPort": 9123,
+  "analogChannels": 1,
+  "analogBitDepth": 16,
+  "analogSamplingRate": 8000,
+  "ListenPort": 9123,
+  "transcriptionEngine": "whisper",
+  "transcriptionModelPreset": "whisper-base",
+  "lmLinkEnabled": true,
+  "lmLinkBaseUrl": "http://localhost:1234",
+  "lmLinkApiKey": "",
+  "lmLinkModel": "qwen/qwen3.5-35b-a3b",
+  "lmLinkTimeoutMs": 60000,
+  "lmLinkMaxRetries": 2,
+  "Talkgroups": []
+}
 ```
 
-## 8. Troubleshooting
+If you don't plan on using LM Studio, you can remove those options.
 
-### Setup Live Logs with tmux (Auto-starts on boot)
+You can manually populate Talkgroups array in the settings file, or use the settings pane in PizzaPi to import them from the same CSV file you used for trunk-recorder.
 
+Note: the model you choose for LM Link must be OpenAI-compatible and support structured output.
+
+## 8. Setup LM Studio for AI Insights (optional)
+
+**Runs entirely in a Virtual Private Network(VPN) using free models that run locally on a machine you control. Everything is end-to-end encrypted via Tailscale. Nothing ever goes to "the cloud".**
+
+### Overview
+
+If you want to use the AI Insights feature in PizzaPi, you will need to setup [LM Studio](https://lmstudio.ai/) and enable LM link on a beefy GPU machine running an LLM. Then you must do the same on the Raspberry Pi running PizzaPi and point it to the LM Studio instance. LM Studio internally uses [tailscale](https://login.tailscale.com/admin/machines) to create a secure network between the RPi and the machine running the LLM, so you will need to create a tailscale account and configure this in LM Studio. The LM Studio docs/instructions are easy and very clear, so I won't repeat this process here. Generally it works like this:
+1. LM Studio on the remote machine loads and hosts an LLM of your choice (I use Qwen 3.5 35B from the Qwen series by Alibaba, which is open and free to use on LM Studio). This machine joins the VPN network using Tailscale and LM Studio hosts a Llama server on localhost to respond to requests from the RPI (PizzaPi).
+1. LM Studio on the RPI is also configured via Tailscale to join the same private network, so it can see the remote machine running the LLM. LM Studio on the RPI runs a chat completion endpoint locally on localhost, that PizzaPi can send requests to, and it forwards those requests to the LLM server running on the remote machine. 
+
+In this manner, a low-end RPI can use a powerful LLM running on a remote machine to generate AI Insights summaries of call data, without needing to run the LLM locally (similar to just using ChatGPT or another cloud-based LLM, but with better performance and no recurring costs since LM Studio is free and the Qwen models are free).
+
+### Download LM Studio
+
+On the LLM system: [Download Winx64](https://lmstudio.ai/download/latest/win32/x64) or whatever OS
+
+On the RPI: [Download the latest ARM64 AppImage](https://lmstudio.ai/download/latest/linux/arm64?format=AppImage) or headless mode
+
+Note: On either system, you can also install the [headless mode version](https://lmstudio.ai/docs/developer/core/headless) if you don't want the LM Studio UI and just want to run the server in the background. This is a good option for the RPI since it doesn't need to run the UI, and it can save some resources by just running the server.
+
+### Setup LLM server on remote machine
+
+Install LM Studio on the remote machine and configure it to host your desired LLM (e.g. Qwen 3.5 35B). Make sure to enable LM Link in the settings and note the port number it uses (default is 1234). Join the Tailscale network and ensure this machine can communicate with the RPI via Tailscale.
+
+### Setup RPI server
+
+The RPI will run LM Studio in headless mode and just act as a relay to forward requests from PizzaPi to the LLM server running on the remote machine. Run the script `scripts\setup-lmstudio.sh` to setup LM Studio in headless mode (it follows the [official instructions](https://lmstudio.ai/docs/developer/core/headless)).
+
+```bash
+curl -sL https://raw.githubusercontent.com/lilhoser/pizzawave/main/scripts/setup-lmstudio.sh > setup-lmstudio.sh
+
+chmod +x setup-lmstudio.sh
+
+sudo ./setup-lmstudio.sh --skip-model-load --user <USER_NAME>
 ```
-cat > ~/start-trunk-logs.sh << 'EOF'
-#!/bin/bash
-sleep 25
-tmux kill-session -t trunklogs 2>/dev/null
-tmux new-session -d -s trunklogs "journalctl -u trunk-recorder -f --output=short --no-hostname"
-EOF
-```
 
-```
-chmod +x ~/start-trunk-logs.sh
-```
+## 9. Troubleshooting
 
-Add to crontab:
+### Trunk Recorder
+The `setup-trunk-recorder.sh` script will create a tmux session named `trunklogs` that automatically starts trunk-recorder and shows live logs in the terminal. This is very useful for troubleshooting and monitoring the system.
 
-```
-crontab -e
-```
+You can attach to the session at anytime via `tmux attach -t trunklogs`.  Detach with `Ctrl+B` then `d`
 
-Add this line at the bottom:
+Check server status with `sudo systemctl status trunk-recorder`
 
-```
-@reboot /home/sdrhero/start-trunk-logs.sh >> /home/sdrhero/tmux-start.log 2>&1
-```
+### PizzaPi
 
-To view live logs, attach to the session:
-```tmux attach -t trunklogs```
+#### Logs
+Application logs are located at `/var/log/pizzapi.log`. You can view them with `tail -f /var/log/pizzapi.log`
 
-detach: `Ctrl+B then D`
-
-### Services
-
-```sudo systemctl status trunk-recorder```
-
-```
-sudo systemctl restart trunk-recorder
-tmux ls
-```
-
-### Remote debugging with Visual Studio
+#### Remote debugging with Visual Studio
 
 **Prerequisites**
 

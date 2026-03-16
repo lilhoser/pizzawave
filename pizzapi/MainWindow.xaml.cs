@@ -9,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.Media;
 using NAudio.Wave;
 using pizzalib;
 using System.Collections.ObjectModel;
@@ -307,7 +308,8 @@ public enum RightPaneType
     Settings,
     Alerts,
     Cleanup,
-    Range
+    Range,
+    InsightTranscript
 }
 
 public partial class MainWindow : Window, INotifyPropertyChanged
@@ -375,6 +377,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public bool IsWeekActive => _currentFilter == "week";
     public bool IsRangeActive => _currentFilter == "custom";
 
+    // Radio menu active state - true when in offline mode or live with all filter
+    // Range button aliases for XAML binding compatibility
+    public bool IsRangeLiveActive => _currentFilter == "all";
+    public bool IsRange24hActive => _currentFilter == "24h";
+    public bool IsRange2dActive => _currentFilter == "2d";
+    public bool IsRangeWeekActive => _currentFilter == "week";
+    public bool IsRangeCustomActive => _currentFilter == "custom";
+
+    public bool IsRadioMode => _isOfflineMode || (_currentFilter == "all" && !_isInsightsMode);
+
+    // Insights mode button states
+    // Note: morning/afternoon/night are kept for auto-activation logic but not shown in UI
+    public bool IsInsightsMorningActive => _isInsightsMode && _insightsFilter == "morning";
+    public bool IsInsightsAfternoonActive => _isInsightsMode && _insightsFilter == "afternoon";
+    public bool IsInsightsNightActive => _isInsightsMode && _insightsFilter == "night";
+    public bool IsInsightsTodayActive => _isInsightsMode && _insightsFilter == "today";
+    public bool IsInsights24hActive => _isInsightsMode && _insightsFilter == "24h";
+    public bool IsInsights2dActive => _isInsightsMode && _insightsFilter == "2d";
+    public bool IsInsightsWeekActive => _isInsightsMode && _insightsFilter == "week";
+    public bool IsInsightsRangeActive => _isInsightsMode && _insightsFilter == "range";
+
     public bool IsPaneOpen => _activePane != RightPaneType.None;
     public bool IsViewPaneOpen => _activePane == RightPaneType.View;
     public bool IsSettingsPaneOpen => _activePane == RightPaneType.Settings;
@@ -424,6 +447,55 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Task? _usageTimerTask;
     private readonly SemaphoreSlim _usageUpdateLock = new SemaphoreSlim(1, 1);
     private bool _isClosing;
+
+    // Insights mode fields and properties
+    private InsightsService? _insightsService;
+    private readonly InsightsStorage _insightsStorage = new InsightsStorage();
+    private bool _isInsightsMode;
+    private string _insightsFilter = "today";
+    private DateTime? _insightsCustomStart;
+    private DateTime? _insightsCustomEnd;
+    private readonly Dictionary<string, List<TranscribedCall>> _insightsWindowCallCache = new Dictionary<string, List<TranscribedCall>>();
+    private readonly Dictionary<string, Dictionary<string, List<TranscribedCall>>> _insightsWindowCallIdCache = new Dictionary<string, Dictionary<string, List<TranscribedCall>>>();
+    private readonly Dictionary<string, Dictionary<string, List<TranscribedCall>>> _insightsWindowHashCache = new Dictionary<string, Dictionary<string, List<TranscribedCall>>>();
+    private const int MaxInsightsTilesPerCategory = 18;
+    private string? _activeInsightTranscriptKey;
+    private string? _activeInsightAudioKey;
+    private readonly Queue<DateTimeOffset> _liveCallArrivalTimes = new Queue<DateTimeOffset>();
+    private bool _liveUiRefreshScheduled;
+    private int _liveUiRefreshIntervalMs = 150;
+
+    // Real-time progress tracking for insights loading
+    public string InsightsProgressMessage => _insightsProgressStatus;
+    private string _insightsProgressStatus = "";
+
+    public bool IsInsightsMode => _isInsightsMode;
+    public bool IsCallsMode => !_isInsightsMode;
+    
+    // Insights loading state
+    public bool InsightsLoading { get; private set; }
+    public string InsightsStatusText 
+    { 
+        get => _insightsStatusText; 
+        set { _insightsStatusText = value; RaisePropertyChanged(); } 
+    }
+    private string _insightsStatusText = "";
+    public string NextInsightStatusText
+    {
+        get => _nextInsightStatusText;
+        set { _nextInsightStatusText = value; RaisePropertyChanged(); }
+    }
+    private string _nextInsightStatusText = "Insights disabled";
+    public ObservableCollection<InsightSummaryWindow> InsightsSummaries { get; } = new();
+    public ObservableCollection<InsightCategorySection> InsightsCategorySections { get; } = new();
+
+    public bool IsInsightsEnabled => _settings != null 
+                                     && _settings.LmLinkEnabled
+                                     && !string.IsNullOrWhiteSpace(_settings.LmLinkBaseUrl)
+                                     && !string.IsNullOrWhiteSpace(_settings.LmLinkModel);
+    
+    public bool IsRangeBarVisible => IsCallsMode || IsInsightsMode;
+
     
     public bool IsAlertSnoozed
     {
@@ -458,7 +530,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             RaisePropertyChanged();
             // Update the application resource so bindings can pick it up
             if (Application.Current != null)
+            {
                 Application.Current.Resources["CurrentFontSize"] = value;
+                Application.Current.Resources["InsightsTileFontSize"] = value + 1;
+            }
         }
     }
 
@@ -491,6 +566,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     
     private readonly ObservableCollection<TranscribedCall> _allCalls = new ObservableCollection<TranscribedCall>();
+    private readonly List<TranscribedCall> _liveCalls = new List<TranscribedCall>();
     public ObservableCollection<TranscribedCall> Calls { get; } = new ObservableCollection<TranscribedCall>();
     public ObservableCollection<CallGroupItem> GroupedCalls { get; } = new ObservableCollection<CallGroupItem>();
     
@@ -577,7 +653,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         
         // Update button states
         RaisePropertyChanged(nameof(IsLiveActive));
+        RaisePropertyChanged(nameof(IsRadioMode));
         RaisePropertyChanged(nameof(Is24hActive));
+        RaisePropertyChanged(nameof(IsRangeLiveActive));
+        RaisePropertyChanged(nameof(IsRange24hActive));
+        RaisePropertyChanged(nameof(IsRange2dActive));
         RaisePropertyChanged(nameof(Is2dActive));
         RaisePropertyChanged(nameof(IsWeekActive));
         RaisePropertyChanged(nameof(IsRangeActive));
@@ -609,9 +689,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ApplyTimeRangeFilter();
         RaisePropertyChanged(nameof(CurrentFilter));
         RaisePropertyChanged(nameof(IsLiveActive));
+        RaisePropertyChanged(nameof(IsRadioMode));
         RaisePropertyChanged(nameof(Is24hActive));
-        RaisePropertyChanged(nameof(Is2dActive));
-        RaisePropertyChanged(nameof(IsWeekActive));
+        RaisePropertyChanged(nameof(IsRangeLiveActive));
+        RaisePropertyChanged(nameof(IsRange24hActive));
+        RaisePropertyChanged(nameof(IsRange2dActive));
+RaisePropertyChanged(nameof(IsWeekActive));
+        RaisePropertyChanged(nameof(IsRangeWeekActive));
+        RaisePropertyChanged(nameof(IsRangeCustomActive));
         RaisePropertyChanged(nameof(IsRangeActive));
     }
 
@@ -634,17 +719,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         _isOfflineMode = false;
+        _isInsightsMode = false;
         RaisePropertyChanged(nameof(IsOfflineMode));
+        RaisePropertyChanged(nameof(IsInsightsMode));
+        RaisePropertyChanged(nameof(IsCallsMode));
         RaisePropertyChanged(nameof(ModeIndicatorText));
         RaisePropertyChanged(nameof(ModeIndicatorColor));
+        RaisePropertyChanged(nameof(IsInsightsEnabled));
 
         _allCalls.Clear();
+        foreach (var call in _liveCalls)
+        {
+            _allCalls.Add(call);
+        }
         ClearVisibleCalls();
 
         _currentFilter = "all";
         _customStartDate = null;
         _customEndDate = null;
+        _callsReceivedCount = _liveCalls.Count;
+        _alertsTriggeredCount = _liveCalls.Count(c => c.IsAlertMatch);
+        RaisePropertyChanged(nameof(CallsReceivedCount));
+        RaisePropertyChanged(nameof(AlertsTriggeredCount));
         UpdateButtonStates();
+        ApplyTimeRangeFilter();
 
         if (_callManager == null || !_callManager.IsStarted())
         {
@@ -653,6 +751,432 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         Title = "PizzaPi";
         StatusText = "Live mode";
+    }
+
+private void SwitchToInsightsMode()
+    {
+        Trace(TraceLoggerType.Insights, TraceEventType.Information, "SwitchToInsightsMode called");
+
+        StopAudio();
+
+        if (_offlineCallManager != null)
+        {
+            _offlineCallManager.Stop();
+            _offlineCallManager.Dispose();
+            _offlineCallManager = null;
+        }
+
+        _isOfflineMode = false;
+        _isInsightsMode = true;
+        RaisePropertyChanged(nameof(IsOfflineMode));
+        RaisePropertyChanged(nameof(IsInsightsMode));
+        RaisePropertyChanged(nameof(IsCallsMode));
+        RaisePropertyChanged(nameof(ModeIndicatorText));
+        RaisePropertyChanged(nameof(ModeIndicatorColor));
+        RaisePropertyChanged(nameof(IsRadioMode));
+
+        Title = "PizzaPi - Insights";
+        StatusText = "Insights mode";
+
+        // Default to the Today insights view when entering insights mode.
+        EnsureInsightsServiceStarted();
+        _insightsService?.UpdateSettings(_settings);
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            Trace(TraceLoggerType.Insights, TraceEventType.Information, "Posting Today insights load");
+            SetInsightsFilter("today");
+        });
+
+    }
+
+    private void OnInsightWindowSaved(InsightSummaryWindow window)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            // Match by actual window identity (start/end), not date only.
+            var existing = InsightsSummaries.FirstOrDefault(s => 
+                s.WindowStart == window.WindowStart && s.WindowEnd == window.WindowEnd);
+            if (existing != null)
+            {
+                // Update existing entry
+                int index = InsightsSummaries.IndexOf(existing);
+                InsightsSummaries[index] = FilterTopEvents(window, maxEvents: 20);
+            }
+            else
+            {
+                InsightsSummaries.Add(FilterTopEvents(window, maxEvents: 20));
+            }
+            RefreshInsightsCategorySections();
+            RefreshNextInsightStatus();
+        });
+    }
+
+    private void EnsureInsightsServiceStarted()
+    {
+        if (_insightsService != null)
+            return;
+
+        _insightsService = new InsightsService(_settings);
+        _insightsService.WindowSaved += OnInsightWindowSaved;
+        RefreshNextInsightStatus();
+    }
+
+    private void RefreshNextInsightStatus()
+    {
+        if (!IsInsightsEnabled || _insightsService == null)
+        {
+            NextInsightStatusText = "Insights disabled";
+            return;
+        }
+
+        NextInsightStatusText = _insightsService.GetNextSummaryStatusText();
+    }
+
+    private async Task LoadInsightsSummariesAsync()
+    {
+        try
+        {
+            Trace(TraceLoggerType.Insights, TraceEventType.Information, "LoadInsightsSummariesAsync called");
+            
+            if (InsightsLoading) return;
+            
+            InsightsLoading = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                RaisePropertyChanged(nameof(InsightsLoading));
+                InsightsStatusText = "Loading insights...";
+                Trace(TraceLoggerType.Insights, TraceEventType.Information, "Set InsightsLoading=true and status text");
+            });
+            Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Current filter: {_insightsFilter}");
+            Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Settings null? {_settings == null}, LmLinkEnabled? {_settings?.LmLinkEnabled}, BaseUrl? {_settings?.LmLinkBaseUrl}");
+            
+            var now = DateTimeOffset.Now;
+            DateTimeOffset start, end;
+            List<InsightSummaryWindow> summaries = new List<InsightSummaryWindow>();
+
+            if (_insightsFilter == "today")
+            {
+                var todayStart = new DateTimeOffset(now.Date);
+                InsightsSummaries.Clear();
+                
+                summaries = _insightsStorage.LoadDaily(todayStart, todayStart.AddDays(1));
+                InsightsStatusText = $"Loading daily summary for {now:yyyy-MM-dd}...";
+
+                // On some Linux/RPi timezone setups, "today" boundary checks can miss a valid
+                // recently generated window summary. Reuse recent summaries before generating.
+                if (summaries.Count == 0)
+                {
+                    var recentStart = now.AddHours(-12);
+                    var recent = _insightsStorage.LoadDaily(recentStart, now);
+                    if (recent.Count > 0)
+                    {
+                        summaries = recent
+                            .OrderByDescending(s => s.WindowEnd)
+                            .Take(3)
+                            .ToList();
+                        InsightsStatusText = "Loaded recent insights window(s)";
+                    }
+                }
+                
+                // If no summary exists and LM Link is enabled, generate it
+                if (summaries.Count == 0 && _settings.LmLinkEnabled)
+                {
+                    // Prevent repeat regeneration loops (observed on some RPi/Linux setups)
+                    // when summary files exist but day-window lookup returned empty.
+                    if (_insightsStorage.HasRecentSummaryFiles(TimeSpan.FromHours(10)))
+                    {
+                        Trace(TraceLoggerType.Insights, TraceEventType.Warning,
+                            "Recent insights summary files exist; skipping regeneration for Today.");
+                        InsightsStatusText = "Recent insights already exist; skipping regeneration";
+                    }
+                    else
+                    {
+                    Trace(TraceLoggerType.Insights, TraceEventType.Information, "No daily summary for today, triggering generation");
+
+                    var generationEnd = now;
+                    var generationStart = generationEnd.AddHours(-8);
+                    var allCalls = LoadOfflineCallsFromHistory(generationStart.DateTime, generationEnd.DateTime);
+                    if (allCalls.Count > 0)
+                    {
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            InsightsStatusText = $"Generating summary for {generationStart:HH:mm} - {generationEnd:HH:mm}...";
+                        });
+
+                        try
+                        {
+                            await _insightsService.FinalizeWindowAsync(generationStart, generationEnd, allCalls);
+                            summaries = _insightsStorage.LoadDaily(todayStart, todayStart.AddDays(1));
+                            
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                InsightsStatusText = $"Generated summary for {generationStart:HH:mm} - {generationEnd:HH:mm}";
+                                RaisePropertyChanged(nameof(InsightsStatusText));
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            Trace(TraceLoggerType.Insights, TraceEventType.Error, $"Error generating summary: {ex.Message}");
+                            summaries = new List<InsightSummaryWindow>
+                            {
+                                CreateInsightsErrorSummary(ex.Message, todayStart, todayStart.AddDays(1))
+                            };
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                InsightsStatusText = $"Error: {ex.Message}";
+                                RaisePropertyChanged(nameof(InsightsStatusText));
+                            });
+                        }
+                    }
+                    }
+                }
+                
+                InsightsSummaries.Clear();
+                foreach (var s in summaries)
+                {
+                    var filteredSummary = FilterTopEvents(s, maxEvents: 20);
+                    InsightsSummaries.Add(filteredSummary);
+                }
+                RefreshInsightsCategorySections();
+                return;
+            }
+            else if (_insightsFilter == "range")
+            {
+                start = _insightsCustomStart.HasValue ? new DateTimeOffset(_insightsCustomStart.Value) : now.AddHours(-24);
+                end = _insightsCustomEnd.HasValue
+                    ? new DateTimeOffset(_insightsCustomEnd.Value.AddDays(1))
+                    : now;
+            }
+            else
+            {
+                start = _insightsFilter switch
+                {
+                    "24h" => now.AddHours(-24),
+                    "2d" => now.AddDays(-2),
+                    "week" => now.AddDays(-7),
+                    _ => now.AddHours(-24)
+                };
+                end = now;
+            }
+
+            InsightsStatusText = $"Loading insights for {start:MM/dd HH:mm} to {end:MM/dd HH:mm}...";
+
+            summaries = new List<InsightSummaryWindow>();
+
+            Func<List<InsightSummaryWindow>> loadSummariesForFilter = () =>
+            {
+                if (_insightsFilter == "range")
+                    return LoadInsightsForRange(start, end);
+                return _insightsStorage.LoadDaily(start, end);
+            };
+
+            summaries = loadSummariesForFilter();
+            if (_insightsFilter != "range")
+                InsightsStatusText = $"Loading {summaries.Count} daily summary(ies)...";
+
+            Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Loaded {summaries.Count} summaries from storage");
+
+            // Historical filters are storage-only lookups.
+            // On-demand LLM generation is intentionally limited to "today" mode above.
+            
+            // Filter to top 20 high-confidence events per summary
+            InsightsSummaries.Clear();
+            foreach (var s in summaries)
+            {
+                var filteredSummary = FilterTopEvents(s, maxEvents: 20);
+                InsightsSummaries.Add(filteredSummary);
+                _insightsProgressStatus = $"Loaded {InsightsSummaries.Count}/{summaries.Count} summary(ies)";
+                InsightsStatusText = _insightsProgressStatus;
+            }
+            RefreshInsightsCategorySections();
+
+            if (summaries.Count == 0 && !InsightsStatusText.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+            {
+                InsightsStatusText = "No daily summaries available for this time range";
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace(TraceLoggerType.Insights, TraceEventType.Error, $"Insights load failed: {ex.Message}");
+            var errorSummary = CreateInsightsErrorSummary(ex.Message, DateTimeOffset.Now, DateTimeOffset.Now);
+            Dispatcher.UIThread.Post(() =>
+            {
+                InsightsSummaries.Clear();
+                InsightsSummaries.Add(errorSummary);
+                InsightsStatusText = $"Error: {ex.Message}";
+                RaisePropertyChanged(nameof(InsightsStatusText));
+                RefreshInsightsCategorySections();
+            });
+        }
+        finally
+        {
+            InsightsLoading = false;
+            Dispatcher.UIThread.Post(() =>
+            {
+                RaisePropertyChanged(nameof(InsightsLoading));
+                Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Insights loading complete. Status: {InsightsStatusText}");
+            });
+        }
+    }
+
+    private InsightSummaryWindow FilterTopEvents(InsightSummaryWindow summary, int maxEvents)
+    {
+        if (summary.NotableEvents == null || summary.NotableEvents.Count <= maxEvents)
+        {
+            AttachNotableEventParents(summary);
+            PopulateNotableEventMetadata(summary);
+            return summary;
+        }
+
+        var filtered = new InsightSummaryWindow
+        {
+            WindowStart = summary.WindowStart,
+            WindowEnd = summary.WindowEnd,
+            SummaryText = summary.SummaryText,
+            Model = summary.Model,
+            SourceCounts = summary.SourceCounts,
+            SourceHashes = summary.SourceHashes,
+            Error = summary.Error
+        };
+
+        filtered.NotableEvents = summary.NotableEvents
+            .OrderByDescending(e => e.HasAlertMatch)
+            .ThenByDescending(GetNotableSortKey)
+            .ThenByDescending(e => e.Confidence)
+            .Take(maxEvents)
+            .ToList();
+        AttachNotableEventParents(filtered);
+        PopulateNotableEventMetadata(filtered);
+
+        return filtered;
+    }
+
+    private void RefreshInsightsCategorySections()
+    {
+        var allEvents = InsightsSummaries
+            .Where(s => s.NotableEvents != null)
+            .SelectMany(s => s.NotableEvents)
+            .Where(e => e != null)
+            .ToList();
+
+        var grouped = allEvents
+            .GroupBy(e => e.CategoryKey)
+            .OrderBy(g => InsightCategoryPalette.Order(g.Key))
+            .Select(g => new InsightCategorySection
+            {
+                CategoryKey = g.Key,
+                DisplayName = InsightCategoryPalette.DisplayName(g.Key),
+                Icon = InsightCategoryPalette.Icon(g.Key),
+                AccentColor = InsightCategoryPalette.AccentColor(g.Key),
+                Events = g
+                    .OrderByDescending(e => e.HasAlertMatch)
+                    .ThenByDescending(GetNotableSortKey)
+                    .ThenByDescending(e => e.Confidence)
+                    .Take(MaxInsightsTilesPerCategory)
+                    .ToList()
+            })
+            .ToList();
+
+        InsightsCategorySections.Clear();
+        foreach (var section in grouped)
+            InsightsCategorySections.Add(section);
+    }
+
+    private static DateTimeOffset GetNotableSortKey(InsightNotableEvent notable)
+    {
+        var parent = notable.ParentSummary;
+        if (parent == null)
+            return DateTimeOffset.MinValue;
+
+        var baseLocal = parent.WindowStart.ToLocalTime();
+        if (!string.IsNullOrWhiteSpace(notable.Timestamp))
+        {
+            var raw = notable.Timestamp.Trim();
+            var formats = new[] { "HH:mm", "H:mm", "h:mm tt", "hh:mm tt", "h:mmtt", "hh:mmtt" };
+            if (DateTime.TryParseExact(raw, formats, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var parsed))
+            {
+                var combinedLocal = baseLocal.Date.Add(parsed.TimeOfDay);
+                return new DateTimeOffset(combinedLocal, baseLocal.Offset);
+            }
+        }
+
+        return parent.WindowStart;
+    }
+
+    private static void AttachNotableEventParents(InsightSummaryWindow summary)
+    {
+        if (summary.NotableEvents == null)
+            return;
+
+        foreach (var notable in summary.NotableEvents)
+        {
+            notable.ParentSummary = summary;
+        }
+    }
+
+    private void PopulateNotableEventMetadata(InsightSummaryWindow summary)
+    {
+        if (summary.NotableEvents == null)
+            return;
+
+        foreach (var notable in summary.NotableEvents)
+        {
+            var matchedCalls = ResolveCallsForNotable(notable);
+            notable.MatchedCallCount = matchedCalls.Count;
+            notable.HasAlertMatch = matchedCalls.Any(c => c.IsAlertMatch);
+            var best = matchedCalls.OrderByDescending(c => c.StartTime).FirstOrDefault();
+            if (best != null)
+            {
+                // Always anchor tile timestamp to matched transcript call time for consistency.
+                notable.Timestamp = DateTimeOffset.FromUnixTimeSeconds(best.StartTime)
+                    .ToLocalTime()
+                    .ToString("h:mm tt");
+            }
+        }
+    }
+
+    private static InsightSummaryWindow CreateInsightsErrorSummary(string errorMessage, DateTimeOffset start, DateTimeOffset end)
+    {
+        var message = string.IsNullOrWhiteSpace(errorMessage) ? "Unknown insights error." : errorMessage;
+        return new InsightSummaryWindow
+        {
+            WindowStart = start,
+            WindowEnd = end,
+            SummaryText = "Unable to generate insights for this range.",
+            Error = message,
+            Model = "error",
+            NotableEvents = new List<InsightNotableEvent>
+            {
+                new InsightNotableEvent
+                {
+                    Title = "Insights Error",
+                    Detail = message,
+                    Confidence = 1.0
+                }
+            }
+        };
+    }
+
+    private List<DateTimeOffset> GetDailyWindowsForPeriod(DateTimeOffset start, DateTimeOffset end)
+    {
+        var windows = new List<DateTimeOffset>();
+        var current = new DateTimeOffset(start.Year, start.Month, start.Day, 0, 0, 0, start.Offset);
+        
+        while (current.Date < end.Date.AddDays(1))
+        {
+            windows.Add(current);
+            current = current.AddDays(1);
+        }
+        
+        return windows;
+    }
+
+    private List<InsightSummaryWindow> LoadInsightsForRange(DateTimeOffset start, DateTimeOffset end)
+    {
+        var summaries = _insightsStorage.LoadDaily(start, end);
+        return summaries.Select(s => FilterTopEvents(s, maxEvents: 20)).ToList();
     }
 
     private void SwitchToOfflineHistory(DateTime start, DateTime end, string filterLabel)
@@ -672,9 +1196,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         _isOfflineMode = true;
+        _isInsightsMode = false;
         RaisePropertyChanged(nameof(IsOfflineMode));
+        RaisePropertyChanged(nameof(IsInsightsMode));
+        RaisePropertyChanged(nameof(IsCallsMode));
         RaisePropertyChanged(nameof(ModeIndicatorText));
         RaisePropertyChanged(nameof(ModeIndicatorColor));
+        RaisePropertyChanged(nameof(IsInsightsEnabled));
 
         _allCalls.Clear();
         ClearVisibleCalls();
@@ -832,7 +1360,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         // Initialize font size resource
         if (Application.Current != null)
+        {
             Application.Current.Resources["CurrentFontSize"] = FontSize;
+            Application.Current.Resources["InsightsTileFontSize"] = FontSize + 1;
+        }
 
         // Get search bar elements
         _searchTextBox = this.FindControl<TextBox>("SearchTextBox");
@@ -876,6 +1407,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             await StopUsageTimerAsync().ConfigureAwait(false);
+            _insightsService?.Dispose();
         }
         finally
         {
@@ -913,7 +1445,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _offlineRangePanel.RequestClose += (_, _) => ClosePane(reloadSettings: false);
         _offlineRangePanel.OfflineLoaded += (_, result) =>
         {
-            SwitchToOfflineHistory(result.Start, result.End, "custom");
+            if (_isInsightsMode)
+            {
+                _insightsCustomStart = result.Start;
+                _insightsCustomEnd = result.End;
+                SetInsightsFilter("range");
+            }
+            else
+            {
+                SwitchToOfflineHistory(result.Start, result.End, "custom");
+            }
             ClosePane(reloadSettings: false);
         };
 
@@ -985,6 +1526,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ClosePane(bool reloadSettings)
     {
+        if (_activePane == RightPaneType.InsightTranscript)
+            _activeInsightTranscriptKey = null;
+
         _activePane = RightPaneType.None;
         ActivePaneContent = null;
         RaisePaneStateChanged();
@@ -994,7 +1538,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _settings = Settings.LoadFromFile(_currentSettingsPath);
             _settingsPanel?.SetSettings(_settings);
             _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
+            EnsureInsightsServiceStarted();
+            _insightsService?.UpdateSettings(_settings);
             UpdateBellState();
+            RaisePropertyChanged(nameof(IsInsightsEnabled));
+            RefreshNextInsightStatus();
         }
     }
 
@@ -1016,6 +1564,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         IsApplyingSettings = true;
         // Update settings and UI state
         _settings = newSettings;
+        EnsureInsightsServiceStarted();
+        _insightsService?.UpdateSettings(_settings);
+        RefreshNextInsightStatus();
         TraceLogger.SetLevel(_settings.TraceLevelApp);
         pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
 
@@ -1591,6 +2142,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     $"Using default settings: {ex.Message}");
             }
 
+            RaisePropertyChanged(nameof(IsInsightsEnabled));
+            EnsureInsightsServiceStarted();
+            _insightsService?.UpdateSettings(_settings);
+            RefreshNextInsightStatus();
+
             // Set trace level from settings
             TraceLogger.SetLevel(_settings.TraceLevelApp);
             pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
@@ -1676,7 +2232,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // Insert at correct position: pinned calls at top, then by recency
             int insertIndexAll = GetInsertIndexInList(_allCalls, call);
             _allCalls.Insert(insertIndexAll, call);
-            ApplyTimeRangeFilter();
+            int insertIndexLive = GetInsertIndexInList(_liveCalls, call);
+            _liveCalls.Insert(insertIndexLive, call);
+            ScheduleAdaptiveLiveUiRefresh();
 
             // Autoplay audio for alert matches (if enabled globally, not snoozed, and alert has autoplay enabled)
             if (call.IsAlertMatch && call.ShouldAutoplay && _settings.AutoplayAlerts && !IsAlertSnoozed)
@@ -1708,7 +2266,38 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             // Cleanup old calls to prevent memory leaks
             CleanupOldCalls();
+
+            // Ingest call into insights service for real-time processing (if insights mode is active)
+            _insightsService?.IngestCall(call);
+            RefreshNextInsightStatus();
         });
+    }
+
+    private void ScheduleAdaptiveLiveUiRefresh()
+    {
+        var now = DateTimeOffset.Now;
+        _liveCallArrivalTimes.Enqueue(now);
+        while (_liveCallArrivalTimes.Count > 0 && (now - _liveCallArrivalTimes.Peek()) > TimeSpan.FromSeconds(10))
+            _liveCallArrivalTimes.Dequeue();
+
+        var callsPerSecond = _liveCallArrivalTimes.Count / 10.0;
+        _liveUiRefreshIntervalMs = callsPerSecond switch
+        {
+            >= 8 => 2000,
+            >= 4 => 1000,
+            >= 2 => 500,
+            _ => 120
+        };
+
+        if (_liveUiRefreshScheduled)
+            return;
+
+        _liveUiRefreshScheduled = true;
+        DispatcherTimer.RunOnce(() =>
+        {
+            _liveUiRefreshScheduled = false;
+            ApplyTimeRangeFilter();
+        }, TimeSpan.FromMilliseconds(_liveUiRefreshIntervalMs));
     }
 
     /// <summary>
@@ -1747,6 +2336,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         RepositionCallInList(Calls, call);
         RepositionCallInList(_allCalls, call);
+        RepositionCallInList(_liveCalls, call);
     }
 
     private void RepositionCallInList(IList<TranscribedCall> list, TranscribedCall call)
@@ -1777,23 +2367,37 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Only cleanup in live mode when auto-cleanup is enabled and limit > 0
         if (!_isOfflineMode && _settings.AutoCleanupCalls && _settings.MaxCallsToKeep > 0)
         {
-            // Remove oldest non-pinned calls if we exceed the limit
-            while (Calls.Count > _settings.MaxCallsToKeep)
+            var removedFromLive = TrimOldestNonPinned(_liveCalls, _settings.MaxCallsToKeep);
+            var removedFromAll = TrimOldestNonPinned(_allCalls, _settings.MaxCallsToKeep);
+            if (removedFromLive || removedFromAll)
             {
-                // Find oldest non-pinned call (at the end since sorted newest first)
-                for (int i = Calls.Count - 1; i >= 0; i--)
-                {
-                    if (!Calls[i].IsPinned)
-                    {
-                        Calls.RemoveAt(i);
-                        break;
-                    }
-                }
-                // If all remaining calls are pinned, stop removing
-                if (Calls.All(c => c.IsPinned))
-                    break;
+                ApplyTimeRangeFilter();
             }
         }
+    }
+
+    private static bool TrimOldestNonPinned(IList<TranscribedCall> calls, int maxCallsToKeep)
+    {
+        var removedAny = false;
+        while (calls.Count > maxCallsToKeep)
+        {
+            var removedThisPass = false;
+            for (int i = calls.Count - 1; i >= 0; i--)
+            {
+                if (!calls[i].IsPinned)
+                {
+                    calls.RemoveAt(i);
+                    removedAny = true;
+                    removedThisPass = true;
+                    break;
+                }
+            }
+
+            if (!removedThisPass)
+                break;
+        }
+
+        return removedAny;
     }
 
     private string FormatFrequency(double frequency)
@@ -1947,6 +2551,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         get { return _callCountText; }
         set { _callCountText = value; RaisePropertyChanged(); }
     }
+
+    public int VisibleCallCount => Calls.Count;
 
     private string _serverInfo = "Not running";
     public string ServerInfo
@@ -2144,6 +2750,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void OnClearClicked(object? sender, RoutedEventArgs e)
     {
         _allCalls.Clear();
+        _liveCalls.Clear();
+        _insightsWindowCallCache.Clear();
+        _insightsWindowCallIdCache.Clear();
+        _insightsWindowHashCache.Clear();
         Calls.Clear();
         GroupedCalls.Clear();
         _collapsedGroups.Clear();
@@ -2478,6 +3088,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.UIThread.Post(() =>
         {
             call.IsAudioPlaying = false;
+            _activeInsightAudioKey = null;
 
             // Only unpin if it wasn't an alert match
             if (!call.IsAlertMatch)
@@ -2502,6 +3113,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (index >= 0)
                 Calls[index] = call;
         });
+    }
+
+    private static string GetInsightNotableKey(InsightNotableEvent notable)
+    {
+        var parent = notable.ParentSummary;
+        var windowKey = parent == null
+            ? "no_window"
+            : $"{parent.WindowStart:O}|{parent.WindowEnd:O}";
+        return $"{windowKey}|{notable.Title}|{notable.Timestamp}|{notable.Detail}";
+    }
+
+    private bool IsInsightAudioPlaying()
+    {
+        if (_currentAudioProcess != null)
+            return true;
+        if (_waveOut != null)
+            return true;
+        return Calls.Any(c => c.IsAudioPlaying);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -2566,6 +3195,68 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SwitchToLiveMode();
     }
 
+    private void OnInsightsClicked(object? sender, RoutedEventArgs e)
+    {
+        Trace(TraceLoggerType.Insights, TraceEventType.Information, "OnInsightsClicked fired");
+        SwitchToInsightsMode();
+    }
+
+    private void OnInsightsMorningClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("morning");
+    }
+
+    private void OnInsightsAfternoonClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("afternoon");
+    }
+
+    private void OnInsightsNightClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("night");
+    }
+
+    private void OnInsights24hClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("24h");
+    }
+
+    private void OnInsights2dClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("2d");
+    }
+
+    private void OnInsightsWeekClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("week");
+    }
+
+    private void OnInsightsTodayClicked(object? sender, RoutedEventArgs e)
+    {
+        SetInsightsFilter("today");
+    }
+
+    private void SetInsightsFilter(string filterType)
+    {
+        _insightsFilter = filterType;
+        
+        // Update button states
+        RaisePropertyChanged(nameof(IsInsightsMorningActive));
+        RaisePropertyChanged(nameof(IsInsightsAfternoonActive));
+        RaisePropertyChanged(nameof(IsInsightsNightActive));
+        RaisePropertyChanged(nameof(IsInsightsTodayActive));
+        RaisePropertyChanged(nameof(IsInsights24hActive));
+        RaisePropertyChanged(nameof(IsInsights2dActive));
+        RaisePropertyChanged(nameof(IsInsightsWeekActive));
+        RaisePropertyChanged(nameof(IsInsightsRangeActive));
+
+        // Only load if not already loading (prevent duplicate calls)
+        if (!InsightsLoading)
+        {
+            _ = LoadInsightsSummariesAsync();
+        }
+    }
+
     private void OnLast24hClicked(object? sender, RoutedEventArgs e)
     {
         var end = DateTime.Now;
@@ -2587,9 +3278,383 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SwitchToOfflineHistory(start, end, "week");
     }
 
+    private void OnRangeLiveClicked(object? sender, RoutedEventArgs e)
+    {
+        SwitchToLiveMode();
+    }
+
+    private void OnRange24hClicked(object? sender, RoutedEventArgs e)
+    {
+        var end = DateTime.Now;
+        var start = end.AddHours(-24);
+        SwitchToOfflineHistory(start, end, "24h");
+    }
+
+    private void OnRange2dClicked(object? sender, RoutedEventArgs e)
+    {
+        var end = DateTime.Now;
+        var start = end.AddHours(-48);
+        SwitchToOfflineHistory(start, end, "2d");
+    }
+
+    private void OnRangeWeekClicked(object? sender, RoutedEventArgs e)
+    {
+        var end = DateTime.Now;
+        var start = end.AddDays(-7);
+        SwitchToOfflineHistory(start, end, "week");
+    }
+
     private void OnPickRangeClicked(object? sender, RoutedEventArgs e)
     {
         TogglePane(RightPaneType.Range);
+    }
+
+    private void OnInsightTranscriptClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.DataContext is not InsightNotableEvent notable)
+            return;
+
+        var notableKey = GetInsightNotableKey(notable);
+        if (_activePane == RightPaneType.InsightTranscript &&
+            string.Equals(_activeInsightTranscriptKey, notableKey, StringComparison.Ordinal))
+        {
+            ClosePane(reloadSettings: false);
+            StatusText = "Transcript pane closed.";
+            return;
+        }
+
+        var calls = ResolveCallsForNotable(notable);
+        if (calls.Count == 0)
+        {
+            StatusText = "No matching calls found for this insight.";
+            return;
+        }
+
+        _activePane = RightPaneType.InsightTranscript;
+        ActivePaneContent = BuildInsightTranscriptPane(notable, calls);
+        _activeInsightTranscriptKey = notableKey;
+        RaisePaneStateChanged();
+    }
+
+    private void OnInsightAudioClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.DataContext is not InsightNotableEvent notable)
+            return;
+
+        var notableKey = GetInsightNotableKey(notable);
+        if (string.Equals(_activeInsightAudioKey, notableKey, StringComparison.Ordinal) && IsInsightAudioPlaying())
+        {
+            StopAudio();
+            foreach (var c in Calls.ToList())
+                c.IsAudioPlaying = false;
+            _activeInsightAudioKey = null;
+            StatusText = "Audio stopped.";
+            return;
+        }
+
+        var calls = ResolveCallsForNotable(notable);
+        var playable = calls.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c.Location) && File.Exists(c.Location));
+        if (playable == null)
+        {
+            StatusText = "Audio not available for this insight.";
+            return;
+        }
+
+        PlayAudio(playable);
+        _activeInsightAudioKey = notableKey;
+    }
+
+    private Control BuildInsightTranscriptPane(InsightNotableEvent notable, List<TranscribedCall> calls)
+    {
+        var titleBlock = new TextBlock
+        {
+            Text = notable.Title,
+            Foreground = Brushes.White,
+            FontWeight = FontWeight.Bold,
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var subtitleBlock = new TextBlock
+        {
+            Text = $"Matched calls: {calls.Count}",
+            Foreground = Brushes.Gray
+        };
+
+        var transcriptBuilder = new System.Text.StringBuilder();
+        foreach (var call in calls.Take(25))
+        {
+            var localTime = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime().ToString("g");
+            transcriptBuilder.AppendLine($"[{localTime}] TG {call.Talkgroup}");
+            transcriptBuilder.AppendLine(call.Transcription ?? string.Empty);
+            transcriptBuilder.AppendLine();
+        }
+
+        var transcriptBox = new TextBox
+        {
+            Text = transcriptBuilder.ToString(),
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true,
+            Background = Brush.Parse("#1f1f1f"),
+            Foreground = Brushes.White,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+        };
+
+        var closeButton = new Button
+        {
+            Content = "Close",
+            Classes = { "menu-btn" },
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
+        };
+        closeButton.Click += (_, _) => ClosePane(reloadSettings: false);
+
+        var layoutGrid = new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"),
+            RowSpacing = 10
+        };
+        Grid.SetRow(titleBlock, 0);
+        Grid.SetRow(subtitleBlock, 1);
+        Grid.SetRow(transcriptBox, 2);
+        Grid.SetRow(closeButton, 3);
+        layoutGrid.Children.Add(titleBlock);
+        layoutGrid.Children.Add(subtitleBlock);
+        layoutGrid.Children.Add(transcriptBox);
+        layoutGrid.Children.Add(closeButton);
+
+        return new Border
+        {
+            Padding = new Thickness(12),
+            Child = layoutGrid
+        };
+    }
+
+    private List<TranscribedCall> ResolveCallsForNotable(InsightNotableEvent notable)
+    {
+        var summary = notable.ParentSummary;
+        if (summary == null)
+            return new List<TranscribedCall>();
+
+        var cacheKey = $"{summary.WindowStart:O}|{summary.WindowEnd:O}";
+        if (!_insightsWindowCallCache.TryGetValue(cacheKey, out var windowCalls))
+        {
+            windowCalls = LoadOfflineCallsFromHistory(summary.WindowStart.LocalDateTime, summary.WindowEnd.LocalDateTime);
+            foreach (var call in windowCalls)
+            {
+                call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
+                call.FriendlyFrequency = FormatFrequency(call.Frequency);
+                call.PlayAudioCommand = c => PlayAudio(c);
+            }
+
+            _insightsWindowCallCache[cacheKey] = windowCalls;
+            _insightsWindowCallIdCache[cacheKey] = BuildWindowCallIdMap(windowCalls);
+            _insightsWindowHashCache[cacheKey] = BuildWindowHashMap(windowCalls);
+            if (_insightsWindowCallCache.Count > 24)
+            {
+                var oldest = _insightsWindowCallCache.Keys.First();
+                _insightsWindowCallCache.Remove(oldest);
+                _insightsWindowCallIdCache.Remove(oldest);
+                _insightsWindowHashCache.Remove(oldest);
+            }
+        }
+
+        if (!_insightsWindowCallIdCache.TryGetValue(cacheKey, out var callIdMap))
+        {
+            callIdMap = BuildWindowCallIdMap(windowCalls);
+            _insightsWindowCallIdCache[cacheKey] = callIdMap;
+        }
+
+        if (!_insightsWindowHashCache.TryGetValue(cacheKey, out var hashMap))
+        {
+            hashMap = BuildWindowHashMap(windowCalls);
+            _insightsWindowHashCache[cacheKey] = hashMap;
+        }
+
+        var hasDeclaredCallIds = notable.CallIds != null && notable.CallIds.Count > 0;
+        if (hasDeclaredCallIds)
+        {
+            var callIdSet = new HashSet<string>(notable.CallIds!, StringComparer.OrdinalIgnoreCase);
+            var matchedByCallId = callIdSet
+                .Where(callIdMap.ContainsKey)
+                .SelectMany(id => callIdMap[id])
+                .Distinct()
+                .OrderByDescending(c => c.StartTime)
+                .ToList();
+            if (matchedByCallId.Count > 0)
+                return matchedByCallId;
+
+            // New summaries must map by call_ids only; do not widen matching if IDs fail.
+            return new List<TranscribedCall>();
+        }
+
+        var hasDeclaredHashes = notable.CallHashes != null && notable.CallHashes.Count > 0;
+        if (hasDeclaredHashes)
+        {
+            var hashSet = new HashSet<string>(notable.CallHashes!, StringComparer.OrdinalIgnoreCase);
+            var matchedByHash = hashSet
+                .Where(hashMap.ContainsKey)
+                .SelectMany(h => hashMap[h])
+                .Distinct()
+                .OrderByDescending(c => c.StartTime)
+                .ToList();
+            if (matchedByHash.Count > 0)
+                return matchedByHash;
+
+            // If model provided explicit call hashes but none matched, avoid broad keyword matches
+            // that can incorrectly attach unrelated calls.
+            return new List<TranscribedCall>();
+        }
+
+        var keywords = ExtractNotableKeywords(notable);
+        var hasTargetTime = TryGetNotableTargetUnix(notable, out var targetUnix);
+
+        var transcriptCalls = windowCalls
+            .Where(c => !string.IsNullOrWhiteSpace(c.Transcription))
+            .ToList();
+
+        if (keywords.Count == 0)
+        {
+            if (hasTargetTime)
+            {
+                return transcriptCalls
+                    .Select(c => new
+                    {
+                        Call = c,
+                        DistanceSeconds = Math.Abs(c.StartTime - targetUnix)
+                    })
+                    .Where(x => x.DistanceSeconds <= 20 * 60)
+                    .OrderBy(x => x.DistanceSeconds)
+                    .ThenByDescending(x => x.Call.StartTime)
+                    .Select(x => x.Call)
+                    .Take(3)
+                    .ToList();
+            }
+
+            return windowCalls.OrderByDescending(c => c.StartTime).Take(3).ToList();
+        }
+
+        var ranked = transcriptCalls
+            .Select(c =>
+            {
+                var matchCount = keywords.Count(k =>
+                    c.Transcription!.Contains(k, StringComparison.OrdinalIgnoreCase));
+                var distanceSeconds = hasTargetTime
+                    ? Math.Abs(c.StartTime - targetUnix)
+                    : long.MaxValue;
+                return new
+                {
+                    Call = c,
+                    MatchCount = matchCount,
+                    DistanceSeconds = distanceSeconds
+                };
+            })
+            .Where(x => x.MatchCount > 0)
+            .ToList();
+
+        if (hasTargetTime)
+        {
+            return ranked
+                .Where(x => x.DistanceSeconds <= 30 * 60)
+                .OrderByDescending(x => x.MatchCount)
+                .ThenBy(x => x.DistanceSeconds)
+                .ThenByDescending(x => x.Call.StartTime)
+                .Select(x => x.Call)
+                .Take(5)
+                .ToList();
+        }
+
+        return ranked
+            .Where(x => x.MatchCount >= 2)
+            .OrderByDescending(x => x.MatchCount)
+            .ThenByDescending(x => x.Call.StartTime)
+            .Select(x => x.Call)
+            .Take(5)
+            .ToList();
+    }
+
+    private static Dictionary<string, List<TranscribedCall>> BuildWindowHashMap(List<TranscribedCall> calls)
+    {
+        var map = new Dictionary<string, List<TranscribedCall>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var call in calls)
+        {
+            var hash = HashCallForInsight(call);
+            if (!map.TryGetValue(hash, out var bucket))
+            {
+                bucket = new List<TranscribedCall>();
+                map[hash] = bucket;
+            }
+            bucket.Add(call);
+        }
+        return map;
+    }
+
+    private static Dictionary<string, List<TranscribedCall>> BuildWindowCallIdMap(List<TranscribedCall> calls)
+    {
+        var map = new Dictionary<string, List<TranscribedCall>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var call in calls)
+        {
+            var callId = CallIdForInsight(call);
+            if (!map.TryGetValue(callId, out var bucket))
+            {
+                bucket = new List<TranscribedCall>();
+                map[callId] = bucket;
+            }
+            bucket.Add(call);
+        }
+        return map;
+    }
+
+    private static List<string> ExtractNotableKeywords(InsightNotableEvent notable)
+    {
+        var text = $"{notable.Title} {notable.Detail}";
+        var tokens = text
+            .Split(new[] { ' ', '\t', '\r', '\n', ',', '.', ':', ';', '!', '?', '-', '(', ')', '[', ']', '"' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => t.Trim())
+            .Where(t => t.Length >= 4)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        return tokens;
+    }
+
+    private static string HashCallForInsight(TranscribedCall call)
+    {
+        return CallHash.Compute(call);
+    }
+
+    private static string CallIdForInsight(TranscribedCall call)
+    {
+        return CallHash.ComputeCallId(call);
+    }
+
+    private static bool TryGetNotableTargetUnix(InsightNotableEvent notable, out long targetUnix)
+    {
+        targetUnix = 0;
+        var parent = notable.ParentSummary;
+        if (parent == null || string.IsNullOrWhiteSpace(notable.Timestamp))
+            return false;
+
+        var raw = notable.Timestamp.Trim();
+        var formats = new[] { "HH:mm", "H:mm", "h:mm tt", "hh:mm tt", "h:mmtt", "hh:mmtt" };
+        if (!DateTime.TryParseExact(raw, formats, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var parsed))
+            return false;
+
+        var startLocal = parent.WindowStart.ToLocalTime();
+        var endLocal = parent.WindowEnd.ToLocalTime();
+        var candidateLocal = startLocal.Date.Add(parsed.TimeOfDay);
+
+        if (candidateLocal < startLocal.DateTime && endLocal.Date > startLocal.Date)
+            candidateLocal = candidateLocal.AddDays(1);
+
+        var candidateOffset = new DateTimeOffset(candidateLocal, startLocal.Offset);
+        if (candidateOffset < parent.WindowStart)
+            candidateOffset = parent.WindowStart;
+        if (candidateOffset > parent.WindowEnd)
+            candidateOffset = parent.WindowEnd;
+
+        targetUnix = candidateOffset.ToUnixTimeSeconds();
+        return true;
     }
 
     private void OnViewClicked(object? sender, RoutedEventArgs e)
@@ -2848,9 +3913,49 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void UpdateButtonStates()
     {
         RaisePropertyChanged(nameof(IsLiveActive));
+        RaisePropertyChanged(nameof(IsRadioMode));
         RaisePropertyChanged(nameof(Is24hActive));
-        RaisePropertyChanged(nameof(Is2dActive));
+        RaisePropertyChanged(nameof(IsRangeLiveActive));
+        RaisePropertyChanged(nameof(IsRange24hActive));
+        RaisePropertyChanged(nameof(IsRange2dActive));
         RaisePropertyChanged(nameof(IsWeekActive));
+        RaisePropertyChanged(nameof(IsRangeWeekActive));
+        RaisePropertyChanged(nameof(IsRangeCustomActive));
         RaisePropertyChanged(nameof(IsRangeActive));
+    }
+}
+
+public class StringNotEmptyConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return value is string text && !string.IsNullOrWhiteSpace(text);
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class ConfidenceColorConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    {
+        if (value is double confidence)
+        {
+            string color;
+            if (confidence >= 0.75) color = "#00ff00";
+            else if (confidence >= 0.5) color = "#ffff00";
+            else color = "#ff4400";
+
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(color));
+        }
+        return Avalonia.Media.Colors.Gray;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    {
+        throw new NotImplementedException();
     }
 }

@@ -137,6 +137,33 @@
                                    TextWrapping="Wrap"
                                    Margin="0,5,0,0" />
                     </StackPanel>
+                    
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Insights (LM Link)" FontSize="14" FontWeight="Bold" />
+                        <CheckBox x:Name="LmLinkEnabledCheckBox"
+                                  Content="Enable Insights via LM Link"
+                                  FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Base URL:" VerticalAlignment="Center" Width="70" />
+                            <TextBox x:Name="LmLinkBaseUrlTextBox" Width="360" FontSize="14" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Model:" VerticalAlignment="Center" Width="70" />
+                            <TextBox x:Name="LmLinkModelTextBox" Width="200" FontSize="14" />
+                            <TextBlock Text="API Key:" VerticalAlignment="Center" Width="60" />
+                            <TextBox x:Name="LmLinkApiKeyTextBox" Width="180" FontSize="14" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                            <TextBlock Text="Timeout (ms):" VerticalAlignment="Center" Width="90" />
+                            <TextBox x:Name="LmLinkTimeoutTextBox" Width="80" FontSize="14" />
+                            <TextBlock Text="Retries:" VerticalAlignment="Center" Width="50" />
+                            <TextBox x:Name="LmLinkRetriesTextBox" Width="60" FontSize="14" />
+                        </StackPanel>
+                        <TextBlock Text="Base URL should point to LM Studio's LM Link (OpenAI-compatible) endpoint host."
+                                   FontSize="11"
+                                   Foreground="Gray"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
 
                     <StackPanel Spacing="5">
                         <TextBlock Text="Settings File" FontSize="14" FontWeight="Bold" />
