@@ -913,7 +913,7 @@ private void SwitchToInsightsMode()
         EnsureInsightsServiceStarted();
         _insightsService?.UpdateSettings(_settings);
 
-        Dispatcher.UIThread.Post(() =>
+        SafeUiPost(() =>
         {
             Trace(TraceLoggerType.Insights, TraceEventType.Information, "Posting Today insights load");
             SetInsightsFilter("today");
@@ -923,7 +923,7 @@ private void SwitchToInsightsMode()
 
     private void OnInsightWindowSaved(InsightSummaryWindow window)
     {
-        Dispatcher.UIThread.Post(() =>
+        SafeUiPost(() =>
         {
             // Match by actual window identity (start/end), not date only.
             var existing = InsightsSummaries.FirstOrDefault(s => 
@@ -973,7 +973,7 @@ private void SwitchToInsightsMode()
             if (InsightsLoading) return;
             
             InsightsLoading = true;
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 RaisePropertyChanged(nameof(InsightsLoading));
                 InsightsStatusText = "Loading insights...";
@@ -1030,7 +1030,7 @@ private void SwitchToInsightsMode()
                     var allCalls = LoadOfflineCallsFromHistory(generationStart.DateTime, generationEnd.DateTime);
                     if (allCalls.Count > 0)
                     {
-                        Dispatcher.UIThread.Post(() =>
+                        SafeUiPost(() =>
                         {
                             InsightsStatusText = $"Generating summary for {generationStart:HH:mm} - {generationEnd:HH:mm}...";
                         });
@@ -1050,7 +1050,7 @@ private void SwitchToInsightsMode()
                                 };
                             }
                             
-                            Dispatcher.UIThread.Post(() =>
+                            SafeUiPost(() =>
                             {
                                 InsightsStatusText = success
                                     ? $"Generated summary for {generationStart:HH:mm} - {generationEnd:HH:mm}"
@@ -1065,7 +1065,7 @@ private void SwitchToInsightsMode()
                             {
                                 CreateInsightsErrorSummary(ex.Message, todayStart, todayStart.AddDays(1))
                             };
-                            Dispatcher.UIThread.Post(() =>
+                            SafeUiPost(() =>
                             {
                                 InsightsStatusText = $"Error: {ex.Message}";
                                 RaisePropertyChanged(nameof(InsightsStatusText));
@@ -1143,7 +1143,7 @@ private void SwitchToInsightsMode()
         {
             Trace(TraceLoggerType.Insights, TraceEventType.Error, $"Insights load failed: {ex.Message}");
             var errorSummary = CreateInsightsErrorSummary(ex.Message, DateTimeOffset.Now, DateTimeOffset.Now);
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 InsightsSummaries.Clear();
                 InsightsSummaries.Add(errorSummary);
@@ -1155,7 +1155,7 @@ private void SwitchToInsightsMode()
         finally
         {
             InsightsLoading = false;
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 // Clear transient load/generation text so status line falls back to
                 // persistent next-summary status when work is complete.
@@ -1735,6 +1735,7 @@ private void SwitchToInsightsMode()
             return;
         }
 
+        _isClosing = true;
         e.Cancel = true;
         _ = CloseAfterStoppingAsync();
     }
@@ -1750,10 +1751,30 @@ private void SwitchToInsightsMode()
         {
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                _isClosing = true;
                 Close();
             });
         }
+    }
+
+    private void SafeUiPost(Action action)
+    {
+        if (_isClosing)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_isClosing)
+                return;
+
+            try
+            {
+                action();
+            }
+            catch
+            {
+                // Swallow UI-update races during teardown.
+            }
+        });
     }
 
     private void OnViewButtonClicked(object? sender, RoutedEventArgs e)
@@ -2081,7 +2102,7 @@ private void SwitchToInsightsMode()
 
         if (hadFocus)
         {
-            Dispatcher.UIThread.Post(() => textBox.Focus());
+            SafeUiPost(() => textBox.Focus());
         }
     }
 
@@ -2495,7 +2516,7 @@ private void SwitchToInsightsMode()
             FontSize = _settings.FontSize;
 
             // Update settings panel with loaded settings
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 _settingsPanel?.SetSettings(_settings);
             });
@@ -2507,7 +2528,7 @@ private void SwitchToInsightsMode()
                 await _callManager.Initialize(_settings);
 
                 // Update UI on dispatcher thread
-                Dispatcher.UIThread.Post(() =>
+                SafeUiPost(() =>
                 {
             RadioStatusText = "Ready to receive calls";
                     _serverStatusText = "Server: Running on port " + _settings.ListenPort;
@@ -2560,7 +2581,7 @@ private void SwitchToInsightsMode()
                 var errorInfo = "Error: " + ex.Message;
 
                 // Update UI on dispatcher thread
-                Dispatcher.UIThread.Post(() =>
+                SafeUiPost(() =>
                 {
                     StatusText = errorMsg;
                     _serverStatusText = errorServerStatus;
@@ -2576,7 +2597,7 @@ private void SwitchToInsightsMode()
     private void OnNewCall(TranscribedCall call)
     {
         // Marshal to UI thread for UI updates
-        Dispatcher.UIThread.Post(() =>
+        SafeUiPost(() =>
         {
             // Populate friendly fields
             call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
@@ -2804,7 +2825,7 @@ private void SwitchToInsightsMode()
         try
         {
             string usageText = await Task.Run(GetCaptureFolderSize);
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 _usageText = usageText;
                 RaisePropertyChanged(nameof(UsageText));
@@ -2814,7 +2835,7 @@ private void SwitchToInsightsMode()
         {
             TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Warning,
                 $"Error calculating usage: {ex.Message}");
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 _usageText = "Usage: ?mb";
                 RaisePropertyChanged(nameof(UsageText));
@@ -3458,7 +3479,7 @@ set { _statusText = value; RaisePropertyChanged(); }
                 if (process != null)
                     process.Exited -= processExited;
                 
-                Dispatcher.UIThread.Post(() => HandlePlaybackComplete(call));
+                SafeUiPost(() => HandlePlaybackComplete(call));
             };
 
             process.Exited += processExited;
@@ -3466,7 +3487,7 @@ set { _statusText = value; RaisePropertyChanged(); }
             process.Start();
 
             // Set playing flag safely (use .ToList() snapshot)
-            Dispatcher.UIThread.Post(() =>
+            SafeUiPost(() =>
             {
                 foreach (var c in Calls.ToList())
                 {
@@ -3484,7 +3505,7 @@ set { _statusText = value; RaisePropertyChanged(); }
 
     private void HandlePlaybackComplete(TranscribedCall call)
     {
-        Dispatcher.UIThread.Post(() =>
+        SafeUiPost(() =>
         {
             call.IsAudioPlaying = false;
             _activeInsightAudioKey = null;
@@ -4385,3 +4406,4 @@ public class ConfidenceColorConverter : IValueConverter
         throw new NotImplementedException();
     }
 }
+

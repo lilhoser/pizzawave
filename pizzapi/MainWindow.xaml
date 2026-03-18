@@ -736,13 +736,19 @@
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled">
                                 <ItemsControl ItemsSource="{Binding InsightsNarrativeSections}">
+                                    <ItemsControl.Styles>
+                                        <Style Selector="ContentPresenter">
+                                            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        </Style>
+                                    </ItemsControl.Styles>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="local:InsightsNarrativeSection">
-                                            <Border BorderBrush="#5f86a8"
-                                                    BorderThickness="0,0,0,2"
-                                                    Margin="0,0,0,10"
-                                                    Padding="0,0,0,8">
-                                                <StackPanel Spacing="4">
+                                            <Grid RowDefinitions="Auto,2"
+                                                  Margin="0,0,0,10">
+                                                <StackPanel Grid.Row="0"
+                                                            Spacing="4"
+                                                            Margin="0,0,0,8">
                                                     <SelectableTextBlock Text="{Binding Title}"
                                                                          Foreground="#d7ecff"
                                                                          FontWeight="SemiBold"
@@ -761,7 +767,12 @@
                                                         </ItemsControl.ItemTemplate>
                                                     </ItemsControl>
                                                 </StackPanel>
-                                            </Border>
+                                                <Rectangle Grid.Row="1"
+                                                           Fill="#7aaad6"
+                                                           Height="2"
+                                                           HorizontalAlignment="Stretch"
+                                                           VerticalAlignment="Center"/>
+                                            </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
