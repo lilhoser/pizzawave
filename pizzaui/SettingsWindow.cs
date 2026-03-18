@@ -1,4 +1,4 @@
-﻿/* 
+/* 
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -57,10 +57,10 @@ namespace pizzaui
             // Application settings
             //
             autostartListenerCheckbox.Checked = CurrentSettings.AutostartListener;
-            gmailUserTextbox.Text = CurrentSettings.gmailUser;
-            if (!string.IsNullOrEmpty(CurrentSettings.gmailPassword))
+            gmailUserTextbox.Text = CurrentSettings.EmailUser;
+            if (!string.IsNullOrEmpty(CurrentSettings.EmailPassword))
             {
-                gmailAppPasswordTextbox.Text = CurrentSettings.gmailPassword;
+                gmailAppPasswordTextbox.Text = CurrentSettings.EmailPassword;
             }
 
             //
@@ -95,8 +95,8 @@ namespace pizzaui
             // Application settings
             //
             settings.AutostartListener = autostartListenerCheckbox.Checked;
-            settings.gmailUser = gmailUserTextbox.Text;
-            settings.gmailPassword = gmailAppPasswordTextbox.Text;
+            settings.EmailUser = gmailUserTextbox.Text;
+            settings.EmailPassword = gmailAppPasswordTextbox.Text;
             //
             // TrunkRecorder settings
             //
@@ -205,3 +205,4 @@ namespace pizzaui
         }
     }
 }
+

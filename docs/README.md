@@ -3,8 +3,8 @@
 <img align="right" src="logo-med.png"> `pizzawave` is a set of cross-platform .NET applications and tools for processing audio data streamed by the [callstream plugin](https://github.com/lilhoser/callstream) of [trunk-recorder](https://github.com/robotastic/trunk-recorder). The audio data consists of calls recorded by trunk-recorder from conventional and trunked radio systems, such as local fire/rescue/EMS. `pizzawave` tooling transcribes these calls to text using [OpenAI's Whisper AI model](https://openai.com/research/whisper) as exposed through [whisper.net toolchain](https://github.com/sandrohanea/whisper.net). Among other features, the application allows you to monitor and set alerts for keywords of interest.
 
 The `pizzawave` Visual Studio solution consists of these tools:
-* **pizzaui** - Windows-only .NET Forms UI application ([README](../pizzaui/README.md))
-* **pizzapi** - Cross-platform Avalonia UI for Linux/macOS/Windows ([README](pizzapi.md))
+* **pizzapi** - Cross-platform Avalonia UI for Linux/macOS/Windows (**recommended UI**) ([README](pizzapi.md))
+* **pizzaui** - Windows-only .NET Forms UI (**deprecated; maintenance-only**) ([README](../pizzaui/README.md))
 * **pizzacmd** - Cross-platform .NET command line application ([README](../pizzacmd/README.md))
 * **pizzalib** - Cross-platform .NET library used by all applications ([README](../pizzalib/README.md))
 
@@ -42,7 +42,7 @@ See [Quick Start Guide](quickstart.md) for detailed instructions.
 
 2. **Use app-specific passwords** for email accounts (especially Gmail) rather than your main account password. Enable 2FA on your email account first, then generate an app-specific password for pizzawave.
 
-3. **Consider environment variables** for sensitive values if building from source. The library supports reading credentials from environment variables as an alternative to the config file.
+3. **Treat `settings.json` as sensitive**. Current builds persist email credentials in `settings.json`; do not assume environment-variable overrides are available.
 
 4. **Encrypt your disk** if storing sensitive configuration on portable devices or systems with physical access risks.
 
@@ -96,8 +96,8 @@ Regardless of whether you choose to use the UI, command line application, or rol
 * An operating system capable of running .NET 9.0 runtime (e.g, Win, Lin or Mac)
     * The pizzawave tools currently target .NET 9.0, but if you are building from source, earlier versions should work as well.
 * The requirements as specified in the tool of choice:
-    * `pizzaui`: Windows-only | [README](../pizzaui/README.md)
     * `pizzapi`: Cross-platform (Linux/macOS/Windows) | [README](pizzapi.md)
+    * `pizzaui`: Windows-only, deprecated (maintenance-only) | [README](../pizzaui/README.md)
     * `pizzacmd`: All supported platforms | [README](../pizzacmd/README.md)
     * `pizzalib`: All supported platforms | [README](../pizzalib/README.md)
 
@@ -105,7 +105,7 @@ Regardless of whether you choose to use the UI, command line application, or rol
 
 <img align="center" src="pizzawave-architecture.png">
 
-As shown in the illustration, pizzawave uses a `server`-`client` model, where the server is either the pizzawave UI (`pizzaui` on Windows, `pizzapi` on Linux/macOS) or command line application (`pizzacmd`), and the client is one or more trunk-recorder systems. This design allows pizzawave to accept radio transmissions from multiple instances of trunk-recorder, which might be recording audio data from separate SDR device arrays monitoring broadcasts from different trunked radio systems.
+As shown in the illustration, pizzawave uses a `server`-`client` model, where the server is typically `pizzapi` (recommended UI) or command line application (`pizzacmd`), and the client is one or more trunk-recorder systems. `pizzaui` remains available on Windows as a deprecated maintenance-only option. This design allows pizzawave to accept radio transmissions from multiple instances of trunk-recorder, which might be recording audio data from separate SDR device arrays monitoring broadcasts from different trunked radio systems.
 
 Pizzawave listens for audio data from trunk-recorder systems, translates the data into textual transcriptions using Whisper AI, and processes alert rules to notify you of interesting broadcasts.
 
@@ -158,6 +158,12 @@ Pizzawave configuration lives in `<user profile>/pizzawave/settings.json`. Locat
 
 Please see the READMEs for each individual tool you are using for what settings options are available and how to use them in your setup. `pizzaui` and `pizzapi` include a graphical settings editor, but you can always create the file manually. If you run the UI or command line application without a settings file, the default one will be created in the location specified above.
 
+Canonical references:
+* [Settings Schema](settings-schema.md)
+* [Insights Behavior Matrix](insights-behavior-matrix.md)
+* [Operational Limits](operational-limits.md)
+* [Email SMTP Troubleshooting](email-smtp-troubleshooting.md)
+
 _Important_: Make sure your `trunk-recorder` system is configured to connect to the right IP address. In an exotic scenario where you're running `pizzacmd` from both a Windows host system and a WSL2 Ubuntu system, the host system and the virtual Ubuntu system will have different IP addresses! In this scenario, you might forget to set the correct IP address on the `trunk-recorder` system, and only one of these machines will receive audio data, while the other might be stuck on this:
 
 ```
@@ -193,7 +199,7 @@ sudo apt-get install -f  # Install dependencies
 
 ## Live captures
 
-To create a live audio capture within PizzaUI, navigate to `File`->`Call Manager`->`Start`. This will connect to the `callstream` plugin running on your configured trunk-recorder system.
+To start live capture in current `pizzapi`/`pizzaui` builds, launch the app and switch to `Radio` if needed. With `AutostartListener=true` (default), the listener starts automatically and begins receiving callstream traffic. In `pizzapi`, Radio defaults to `24h`: startup primes the last 24 hours from capture history, then the in-memory 24h window rolls forward as new live calls arrive. Other Radio ranges are historical disk lookups.
 
 Whether you use `pizzaui`, `pizzacmd` or your own .NET application built on `pizzalib`, all calls streamed in real-time from a `callstream` server will be stored in a `capture`, which is a folder in the root working directory (`<user profile>\pizzawave\`). When you stop your live session with the `callstream` server, the `capture` is ended and a new capture will be created if you reconnect later. Older captures can be loaded in `pizzawave` tooling later by opening the `capture` folder directly.
 

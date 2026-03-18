@@ -40,10 +40,13 @@ namespace pizzalib
         public SourceLevels TraceLevelApp;
         public List<Alert> Alerts = [];
         public bool AutostartListener;
-        public string? gmailUser;
-        public string? gmailPassword;
+        [JsonIgnore]
+        public string? emailUser;
+        [JsonIgnore]
+        public string? emailPassword;
 
         // Public properties for UI access
+        [JsonProperty("listenPort")]
         public int ListenPort
         {
             get => listenPort;
@@ -73,15 +76,17 @@ namespace pizzalib
             get => voskModelPath;
             set => voskModelPath = value;
         }
-        public string? GmailUser
+        [JsonProperty("emailUser")]
+        public string? EmailUser
         {
-            get => gmailUser;
-            set => gmailUser = value;
+            get => emailUser;
+            set => emailUser = value;
         }
-        public string? GmailPassword
+        [JsonProperty("emailPassword")]
+        public string? EmailPassword
         {
-            get => gmailPassword;
-            set => gmailPassword = value;
+            get => emailPassword;
+            set => emailPassword = value;
         }
         
         // LM Link settings (Insights)
@@ -97,6 +102,10 @@ namespace pizzalib
         public int LmLinkTimeoutMs { get; set; } = 600000;
         [JsonProperty("lmLinkMaxRetries")]
         public int LmLinkMaxRetries { get; set; } = 2;
+        [JsonProperty("dailyInsightsDigestEnabled")]
+        public bool DailyInsightsDigestEnabled { get; set; }
+        [JsonProperty("emailProvider")]
+        public string EmailProvider { get; set; } = "gmail";
 
         // Alert audio settings
         public bool AutoplayAlerts;
@@ -110,6 +119,7 @@ namespace pizzalib
         public int MaxCallsToKeep; // Number of calls to keep before auto-cleanup
 
         // TrunkRecorder settings
+        [JsonIgnore]
         public int listenPort;
         public int analogChannels;
         public int analogBitDepth;
@@ -154,16 +164,16 @@ namespace pizzalib
 
         // For JSON serialization - store encrypted credentials
         [JsonIgnore]
-        public string? EncryptedGmailUser
+        public string? EncryptedEmailUser
         {
-            get => ObfuscateString(gmailUser);
-            set => gmailUser = DeobfuscateString(value);
+            get => ObfuscateString(emailUser);
+            set => emailUser = DeobfuscateString(value);
         }
         [JsonIgnore]
-        public string? EncryptedGmailPassword
+        public string? EncryptedEmailPassword
         {
-            get => ObfuscateString(gmailPassword);
-            set => gmailPassword = DeobfuscateString(value);
+            get => ObfuscateString(emailPassword);
+            set => emailPassword = DeobfuscateString(value);
         }
 
         public Settings()
@@ -195,8 +205,10 @@ namespace pizzalib
             LmLinkBaseUrl = string.Empty;
             LmLinkApiKey = string.Empty;
             LmLinkModel = string.Empty;
-LmLinkTimeoutMs = 600000;
+            LmLinkTimeoutMs = 600000;
             LmLinkMaxRetries = 2;
+            DailyInsightsDigestEnabled = false;
+            EmailProvider = "gmail";
         }
 
         public bool Equals(Settings? other)
@@ -205,8 +217,8 @@ LmLinkTimeoutMs = 600000;
             return TraceLevelApp == other.TraceLevelApp &&
                 Alerts.SequenceEqual(other.Alerts) &&
                 AutostartListener == other.AutostartListener &&
-                gmailUser == other.gmailUser &&
-                gmailPassword == other.gmailPassword &&
+                emailUser == other.emailUser &&
+                emailPassword == other.emailPassword &&
                 AutoplayAlerts == other.AutoplayAlerts &&
                 SnoozeDurationMinutes == other.SnoozeDurationMinutes &&
                 SortMode == other.SortMode &&
@@ -228,7 +240,9 @@ LmLinkTimeoutMs = 600000;
                 LmLinkApiKey == other.LmLinkApiKey &&
                 LmLinkModel == other.LmLinkModel &&
                 LmLinkTimeoutMs == other.LmLinkTimeoutMs &&
-                LmLinkMaxRetries == other.LmLinkMaxRetries;
+                LmLinkMaxRetries == other.LmLinkMaxRetries &&
+                DailyInsightsDigestEnabled == other.DailyInsightsDigestEnabled &&
+                EmailProvider == other.EmailProvider;
         }
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
@@ -324,20 +338,20 @@ LmLinkTimeoutMs = 600000;
                 throw new Exception($"Invalid vosk model directory: {voskModelPath}");
             }
 
-            if (!string.IsNullOrEmpty(gmailUser))
+            if (!string.IsNullOrEmpty(emailUser))
             {
-                if (!IsValidEmail(gmailUser))
+                if (!IsValidEmail(emailUser))
                 {
-                    throw new Exception($"Invalid Gmail address: {gmailUser}");
+                    throw new Exception($"Invalid email address: {emailUser}");
                 }
-                if (string.IsNullOrEmpty(gmailPassword))
+                if (string.IsNullOrEmpty(emailPassword))
                 {
-                    throw new Exception("Gmail password is required");
+                    throw new Exception("Email app password is required");
                 }
             }
-            else if (!string.IsNullOrEmpty(gmailPassword))
+            else if (!string.IsNullOrEmpty(emailPassword))
             {
-                throw new Exception("Gmail user is required when password is specified");
+                throw new Exception("Email user is required when email authentication is configured");
             }
 
             if (LmLinkEnabled)
@@ -350,6 +364,15 @@ LmLinkTimeoutMs = 600000;
                     throw new Exception("LM Link timeout must be > 0");
                 if (LmLinkMaxRetries < 0)
                     throw new Exception("LM Link max retries must be >= 0");
+            }
+
+            if (DailyInsightsDigestEnabled)
+            {
+                if (!LmLinkEnabled)
+                    throw new Exception("Daily insights digest requires LM Link to be enabled");
+                var hasAppPassword = !string.IsNullOrWhiteSpace(emailUser) && !string.IsNullOrWhiteSpace(emailPassword);
+                if (!hasAppPassword)
+                    throw new Exception("Daily insights digest requires email user and app password");
             }
         }
 
@@ -408,12 +431,17 @@ LmLinkTimeoutMs = 600000;
                 }
                 if (settings.LmLinkTimeoutMs <= 0)
                 {
-                    settings.LmLinkTimeoutMs = 60000;
+                    settings.LmLinkTimeoutMs = 600000;
                 }
                 if (settings.LmLinkMaxRetries < 0)
                 {
                     settings.LmLinkMaxRetries = 0;
                 }
+                if (settings.EmailProvider == null)
+                {
+                    settings.EmailProvider = "gmail";
+                }
+                settings.EmailProvider = NormalizeEmailProvider(settings.EmailProvider);
                 // Ensure Alerts is initialized
                 if (settings.Alerts == null)
                 {
@@ -433,5 +461,16 @@ LmLinkTimeoutMs = 600000;
             return normalized is "tiny" or "small" or "medium" or "base" or "large-v3" ||
                    normalized.StartsWith("ggml-");
         }
+
+        public static string NormalizeEmailProvider(string? provider)
+        {
+            var value = (provider ?? string.Empty).Trim().ToLowerInvariant();
+            return value switch
+            {
+                "yahoo" => "yahoo",
+                _ => "gmail"
+            };
+        }
     }
 }
+

@@ -70,18 +70,18 @@ Build output is organized in the `artifacts/` folder:
 
 ```
 artifacts/
-├── pizzalib/
-│   ├── bin/Debug/net9.0/
-│   └── obj/
-├── pizzacmd/
-│   ├── bin/Debug/net9.0/
-│   └── obj/
-├── pizzaui/
-│   ├── bin/Debug/net9.0-windows7.0/
-│   └── obj/
-└── pizzapi/
-    ├── bin/Debug/net9.0/
-    └── obj/
+|-- pizzalib/
+|   |-- bin/Debug/net9.0/
+|   `-- obj/
+|-- pizzacmd/
+|   |-- bin/Debug/net9.0/
+|   `-- obj/
+|-- pizzaui/
+|   |-- bin/Debug/net9.0-windows7.0/
+|   `-- obj/
+`-- pizzapi/
+    |-- bin/Debug/net9.0/
+    `-- obj/
 ```
 
 ## Platform-Specific Builds
@@ -158,7 +158,7 @@ dotnet build pizzacmd/pizzacmd.csproj -r linux-x64
 ### Visual Studio (Windows)
 
 1. Open `pizzawave.sln` in Visual Studio
-2. Set startup project (right-click solution → Set Startup Projects)
+2. Set startup project (right-click solution -> Set Startup Projects)
 3. Press F5 to debug, Ctrl+F5 to run without debugging
 
 ### VS Code (All Platforms)

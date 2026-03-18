@@ -42,10 +42,12 @@ Type=Application
 Name=PizzaPi
 Exec=/opt/pizzapi/pizzapi
 Path=/opt/pizzapi
+Icon=/opt/pizzapi/images/logo.png
 Terminal=false
 X-GNOME-Autostart-enabled=true
 NoDisplay=false
 StartupNotify=false
+StartupWMClass=pizzapi
 EOF
 
 echo "PizzaPi autostart file created at $AUTOSTART_DIR/pizzapi.desktop"

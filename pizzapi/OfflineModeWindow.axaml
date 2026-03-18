@@ -74,13 +74,13 @@
                                            Foreground="White"
                                            TextWrapping="Wrap"
                                            Margin="10,0,0,0">
-                                    • <Run Foreground="#00d2ff">.mp3 files</Run> - From prior live captures (select the capture session folder)
+                                    - <Run Foreground="#00d2ff">.mp3 files</Run> - From prior live captures (select the capture session folder)
                                 </TextBlock>
                                 <TextBlock FontSize="12"
                                            Foreground="White"
                                            TextWrapping="Wrap"
                                            Margin="10,0,0,0">
-                                    • <Run Foreground="#00d2ff">.bin files</Run> - From Trunk-Recorder SFTP offline backup
+                                    - <Run Foreground="#00d2ff">.bin files</Run> - From Trunk-Recorder SFTP offline backup
                                 </TextBlock>
                                 <TextBlock FontSize="12"
                                            Foreground="White"

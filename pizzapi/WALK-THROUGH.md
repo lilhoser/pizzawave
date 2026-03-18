@@ -48,7 +48,7 @@ A few thoughts on the printing and assembly process for this display mount:
 ### Pick a system to monitor
 Use [RadioReference](https://www.radioreference.com/) to find frequencies, talkgroups, and system details for your area. Start with browsing the map to drill down to your state, county and city. Then find the trunked system you want to monitor and click on it to view details.
 
-For this example, we’ll use the [White Oak Mountain / Hamilton County P25 system in Tennessee](https://www.radioreference.com/db/sid/6355).
+For this example, we'll use the [White Oak Mountain / Hamilton County P25 system in Tennessee](https://www.radioreference.com/db/sid/6355).
 
 ### Find center frequencies and control channels.
 
@@ -97,7 +97,7 @@ blacklist rtl2832
 blacklist rtl2830
 ```
 
-Save (Ctrl+O → Enter → Ctrl+X), then reboot:
+Save (Ctrl+O -> Enter -> Ctrl+X), then reboot:
 
 ```bash
 sudo reboot
@@ -142,7 +142,7 @@ RTL-SDR Blog V4 dongles can vary in accuracy and it's important to calibrate the
 1. Calibrate one dongle at a time (unplug the other dongle completely).
 1. Open GQRX and do this for dongle 0 first:
  * In the top Device box, type: `rtl=0`
- * Click the small gear icon (⚙) right next to it.
+ * Click the small gear icon ((gear)) right next to it.
  * In the Configure I/O devices window set:
    * Input rate: `2048000`
    * Decimation: `None` (or 1)
@@ -151,29 +151,29 @@ RTL-SDR Blog V4 dongles can vary in accuracy and it's important to calibrate the
  * Click OK.
 1. In the right-hand pane, switch to the Input controls tab.
 1. Set these values:
-  * Frequency (top of screen): `162550000` (NOAA WXK48 Chattanooga — very strong & accurate)
+  * Frequency (top of screen): `162550000` (NOAA WXK48 Chattanooga - very strong & accurate)
   * Mode: `WFM`
   * Filter width: `200000`
   * Gain: ~`45` (same as your config)
   * AGC: `OFF`
 1. In the Input controls tab, slowly adjust Freq. correction (ppm) until the strong NOAA signal spike is perfectly centered on the 0 Hz line in the waterfall/spectrum.
- * Let it settle 10–20 seconds after each adjustment.
+ * Let it settle 10-20 seconds after each adjustment.
  * Audio should sound clearest when perfectly centered.
 1. Write down the exact PPM value shown (e.g. 0.0, -2.3, +1.8, etc.).
-1. Repeat steps 3–7 for dongle 1 using device string rtl=1.
+1. Repeat steps 3-7 for dongle 1 using device string rtl=1.
 
 If the sound is clear and the signal spike is perfectly centered at 0 Hz with 0.0 ppm error, then your dongle is very accurate and you can set "error": 0 in the config for that dongle.
 
 If yours are not zero, use this formula to convert PPM to the error value (in Hz) for the config:
 ```
-error = PPM × Center_Frequency_in_MHz
+error = PPM x Center_Frequency_in_MHz
 ```
 
 Examples:
 
 ```
--7.5 ppm on 855.309375 MHz → error: -6415
-+4.2 ppm on 857.6 MHz → error: +3602
+-7.5 ppm on 855.309375 MHz -> error: -6415
++4.2 ppm on 857.6 MHz -> error: +3602
 ```
 
 Round to nearest 10 Hz.
@@ -312,8 +312,8 @@ You can start the application and manually update the settings file or use the o
   "TraceLevelApp": 15,
   "Alerts": [],
   "AutostartListener": true,
-  "gmailUser": "",
-  "gmailPassword": "",
+  "emailUser": "",
+  "emailPassword": "",
   "AutoplayAlerts": true,
   "SnoozeDurationMinutes": 15,
   "SortMode": 0,
@@ -325,9 +325,9 @@ You can start the application and manually update the settings file or use the o
   "analogChannels": 1,
   "analogBitDepth": 16,
   "analogSamplingRate": 8000,
-  "ListenPort": 9123,
   "transcriptionEngine": "whisper",
   "transcriptionModelPreset": "whisper-base",
+  "emailProvider": "gmail",
   "lmLinkEnabled": true,
   "lmLinkBaseUrl": "http://localhost:1234",
   "lmLinkApiKey": "",
@@ -411,7 +411,7 @@ See [this link](https://learn.microsoft.com/en-us/visualstudio/debugger/remote-d
 
 Add SSH Connection:
 
-    1. Tools → Options → Cross Platform → Connection Manager
+    1. Tools -> Options -> Cross Platform -> Connection Manager
     2. Click Add
     3. Fill in:
     - Name: Raspberry Pi (or any name)
@@ -432,7 +432,7 @@ scp -r artifacts\pizzapi\bin\Debug\net9.0\ pi@192.168.x.x:~/pizzapi
 ```
 
 2. In Visual Studio:
-- Debug → Attach to Process
+- Debug -> Attach to Process
 - Connection type: SSH
 - Connection: Select your RPi
 - Process: Find pizzapi in the list
@@ -460,3 +460,4 @@ scp -r artifacts\pizzapi\bin\Debug\net9.0\ pi@192.168.x.x:~/pizzapi
 }
 ```
 3. Deploy and attach using the SSH terminal
+

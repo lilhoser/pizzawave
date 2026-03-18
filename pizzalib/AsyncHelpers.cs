@@ -8,7 +8,7 @@ using static pizzalib.TraceLogger;
 namespace pizzalib
 {
     /// <summary>
-    /// Helper utilities for managing fire‑and‑forget tasks and global cancellation.
+    /// Helper utilities for managing fire-and-forget tasks and global cancellation.
     /// </summary>
     public static class AsyncHelpers
     {
@@ -17,11 +17,11 @@ namespace pizzalib
         /// </summary>
         public static readonly CancellationTokenSource GlobalCts = new CancellationTokenSource();
 
-        // Thread‑safe collection of fire‑and‑forget tasks.
+        // Thread-safe collection of fire-and-forget tasks.
         private static readonly ConcurrentDictionary<int, Task> RunningTasks = new ConcurrentDictionary<int, Task>();
 
         /// <summary>
-        /// Register a fire‑and‑forget task so it can be awaited/cancelled on shutdown.
+        /// Register a fire-and-forget task so it can be awaited/cancelled on shutdown.
         /// </summary>
         public static void Register(Task task)
         {

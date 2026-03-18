@@ -1,205 +1,106 @@
 # pizzapi - Cross-Platform UI
 
-<img align="right" src="logo-med.png">
+`pizzapi` is the Avalonia UI for PizzaWave on Linux, macOS, and Windows.
+It is the primary and recommended UI going forward.
 
-`pizzapi` is a cross-platform .NET UI application built on [Avalonia UI](https://avaloniaui.net/). It provides the same functionality as [`pizzaui`](../pizzaui/README.md) but runs on Linux, macOS, and Windows.
+## What It Does
+
+- Receives live callstream audio from trunk-recorder and transcribes calls
+- Shows live radio traffic with filtering, grouping, search, and export
+- Manages alerts and optional email notifications
+- Provides AI Insights summaries (LM Link) with persisted summary history
 
 ## Requirements
 
-* [.NET 9.0 runtime](https://dotnet.microsoft.com/download/dotnet/9.0)
-* Linux (with X11/Wayland), macOS, or Windows
-* For Raspberry Pi: Raspberry Pi OS (Debian-based) with desktop environment
+- .NET 9 runtime (or self-contained publish)
+- trunk-recorder + callstream plugin sending to your `listenPort` (default `9123`)
+- GUI environment (X11/Wayland on Linux)
 
-## Installation
+## Install
 
-### Raspberry Pi / Debian-based Linux (Recommended)
-
-Download and install the `.deb` package:
+### Debian / Raspberry Pi / Ubuntu (.deb)
 
 ```bash
-# Download the latest release
-wget https://github.com/lilhoser/pizzawave/releases/latest/download/pizzapi_*_arm64.deb
-
-# Install the package
-sudo dpkg -i pizzapi_*_arm64.deb
-
-# Fix any missing dependencies
+sudo dpkg -i pizzapi_*_arm64.deb   # or *_amd64.deb
 sudo apt-get install -f
 ```
 
-### WSL2 / Ubuntu (x64)
+### Build / publish from source
 
 ```bash
-# Download the x64 package
-wget https://github.com/lilhoser/pizzawave/releases/latest/download/pizzapi_*_amd64.deb
-
-# Install
-sudo dpkg -i pizzapi_*_amd64.deb
-sudo apt-get install -f
-```
-
-### Manual Installation (All Platforms)
-
-```bash
-# Build from source
 git clone https://github.com/lilhoser/pizzawave.git
 cd pizzawave
 dotnet publish pizzapi/pizzapi.csproj -c Release -r <RID> --self-contained true -o ./publish
-
-# Run
 ./publish/pizzapi
 ```
 
-Replace `<RID>` with your runtime identifier:
-- `linux-arm64` - Raspberry Pi 5, ARM64 Linux
-- `linux-x64` - Standard Linux (WSL2, Ubuntu, etc.)
-- `osx-arm64` - Apple Silicon Mac
-- `osx-x64` - Intel Mac
-- `win-x64` - Windows
+Common RIDs: `linux-arm64`, `linux-x64`, `osx-arm64`, `osx-x64`, `win-x64`.
 
 ## Configuration
 
-`pizzapi` shares the same configuration file as other pizzawave applications:
+Shared config file path:
 
-| Platform | Configuration Path |
-|----------|-------------------|
-| Linux | `~/.config/pizzawave/settings.json` |
-| macOS | `~/.config/pizzawave/settings.json` |
-| Windows | `%APPDATA%\pizzawave\settings.json` |
+- Windows: `%APPDATA%\pizzawave\settings.json`
+- Linux/macOS: `~/.config/pizzawave/settings.json`
 
-### First Run
+Important keys:
 
-On first run, `pizzapi` will create a default configuration file. You can edit it manually or use the built-in settings editor:
+- `listenPort`
+- `transcriptionEngine`, `transcriptionModelPreset`
+- `emailProvider` (`gmail` or `yahoo`), `emailUser`, `emailPassword` (app password)
+- `lmLinkEnabled`, `lmLinkBaseUrl`, `lmLinkModel`, `lmLinkApiKey`
+- `dailyInsightsDigestEnabled`
+- `AutoCleanupCalls`, `MaxCallsToKeep`
 
-1. Launch `pizzapi`
-2. Navigate to **Edit → Settings**
-3. Configure your trunk-recorder connection, talkgroups, and alerts
+## UI Overview
 
-### Key Settings
+Top menu buttons:
 
-* **Listen Port** (default: 9123) - Port for callstream plugin to connect
-* **Talkgroups** - CSV file with talkgroup definitions
-* **Alerts** - Rules for keyword-based notifications
-* **WavFileLocation** - Optional path to save call recordings
+- `Radio`: call views (`24h`, `2d`, `Week`, `Range`)
+- `Insights`: summary views (`Today`, `24h`, `2d`, `Week`, `Range`)
+- `View`, `Alerts`, `Settings`, `Cleanup`
 
-See [pizzalib README](../pizzalib/README.md) for complete settings reference.
+Notes:
 
-## Usage
+- `Radio` defaults to `24h`.
+- `Live` radio submenu option has been removed.
+- On startup, `24h` is primed from persisted capture history, then updated by incoming live calls.
+- `24h` view is a rolling in-memory window.
+- `2d`, `Week`, and `Range` are historical disk-backed views.
+- Opening `Insights` auto-selects `Today`.
+- `Today` can generate summaries from current live backlog if needed.
+- `24h/2d/Week/Range` load persisted summaries only.
 
-### Live Capture
+## Insights Behavior (Current)
 
-1. Launch `pizzapi`
-2. Navigate to **File → Call Manager → Start**
-3. Calls will appear as they are received from trunk-recorder
+- Summaries are persisted only to:
+  - `%APPDATA%/pizzawave/insights/<YYYY>/<MM>/<DD>/<HHmm>.json`
+- No separate `daily` or `index` folder is used for storage.
+- Live summarization is heuristic-driven:
+  - starts when 50 unsummarized live calls accumulate
+  - adaptive batch size at higher load
+  - retry backoff on LM failures
+- Failed LM runs are not persisted.
+- Footer status shows progress such as `Next insight in N calls`.
 
-### Open Existing Capture
+## Email
 
-1. Navigate to **File → Open Capture**
-2. Browse to a previous capture folder
-3. Review transcribed calls
+- Gmail and Yahoo are supported using SMTP + app passwords.
+- Use `Settings -> Test` to validate credentials.
+- Diagnostics include SMTP host/provider/status on failure.
 
-### Alerts
+## Runtime Flags
 
-1. Navigate to **Edit → Alerts**
-2. Create rules with keywords and talkgroups
-3. Matched calls are highlighted
+`pizzapi` supports optional command-line flags:
 
-### Export Data
-
-- **View → Export → JSON** - Export all calls as JSON
-- **View → Export → CSV** - Export all calls as CSV
-- Right-click any call to copy or save individually
-
-## Running as a Service
-
-### systemd (Linux)
-
-The `.deb` package installs a systemd service file. To enable:
-
-```bash
-sudo systemctl enable pizzapi
-sudo systemctl start pizzapi
-```
-
-View logs:
-```bash
-journalctl -u pizzapi -f
-```
-
-### Launchd (macOS)
-
-Create `/Library/LaunchDaemons/com.pizzawave.pizzapi.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.pizzawave.pizzapi</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/pizzapi/pizzapi</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-```
-
-```bash
-sudo launchctl load /Library/LaunchDaemons/com.pizzawave.pizzapi.plist
-```
-
-## Troubleshooting
-
-### Display Issues (Linux)
-
-If you see errors about missing displays:
-
-```bash
-# Ensure X11 is running
-echo $DISPLAY
-
-# For Wayland, try X11 session instead
-```
-
-### Missing Libraries
-
-```bash
-# Debian/Ubuntu
-sudo apt-get install libicu-dev libssl3 zlib1g libfontconfig1 libx11-6
-```
-
-### Permission Denied (Raspberry Pi)
-
-```bash
-# Ensure executable permission
-sudo chmod +x /opt/pizzapi/pizzapi
-```
-
-### No Audio from trunk-recorder
-
-1. Verify trunk-recorder callstream plugin is configured with correct IP
-2. Check firewall allows port 9123
-3. Verify `pizzapi` is listening: `netstat -tlnp | grep 9123`
-
-## Comparison with pizzaui
-
-| Feature | pizzapi | pizzaui |
-|---------|---------|---------|
-| Platform | Linux/macOS/Windows | Windows only |
-| UI Framework | Avalonia | WinForms |
-| Package | .deb, manual | MSI, manual |
-| Service | systemd, launchd | Windows Service |
-| Performance | Similar | Similar |
-
+- `--no-listener`
+- `--no-transcribe`
+- `--no-audio-encode`
+- Linux tuning: `--x11-tuned`, `--software-rendering`
 
 ## See Also
 
-* [Main README](README.md) - Overview of pizzawave project
-* [Deployment Guide](deployment.md) - Detailed deployment instructions
-* [Building Guide](building.md) - Build from source instructions
-* [pizzaui README](../pizzaui/README.md) - Windows UI alternative
+- [Main docs](README.md)
+- [pizzapi app README](../pizzapi/README.md)
+- [Raspberry Pi walk-through](../pizzapi/WALK-THROUGH.md)
+- [pizzalib settings](../pizzalib/README.md)

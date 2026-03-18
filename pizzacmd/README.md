@@ -1,148 +1,73 @@
 # pizzacmd - Command Line Application
 
-<img align="right" src="../docs/logo-med.png">
-
-`pizzacmd` is a .NET command line application built on top of the [`pizzalib`](../pizzalib/README.md) library.
-
-<img align="center" src="../docs/screenshot4.png" width="500">
+`pizzacmd` is the console host for PizzaWave, built on `pizzalib`.
 
 ## Requirements
 
-* [Requirements as specified in the `pizzawave` README](../docs/README.md)
-* [Requirements as specified in the `pizzalib` README](../pizzalib/README.md)
-* A supported operating system (Windows, Linux, macOS) running .NET 9.0 or later
+- .NET 9 runtime (or self-contained publish)
+- trunk-recorder + callstream plugin
+- valid `settings.json`
 
-## Installation
-
-### From Source
+## Build
 
 ```bash
-# Clone and build
 git clone https://github.com/lilhoser/pizzawave.git
 cd pizzawave
-dotnet publish pizzacmd/pizzacmd.csproj \
-  -c Release \
-  -r <RID> \
-  --self-contained true \
-  -o ./publish
+dotnet publish pizzacmd/pizzacmd.csproj -c Release -r <RID> --self-contained true -o ./publish
 ```
-
-Replace `<RID>` with your runtime identifier:
-- `win-x64` - Windows
-- `linux-x64` - Linux (WSL2, Ubuntu, etc.)
-- `linux-arm64` - Raspberry Pi 5
-- `osx-arm64` - Apple Silicon Mac
-- `osx-x64` - Intel Mac
-
-Build output is organized in the `artifacts/` folder by project.
 
 ## Usage
 
-### Basic Usage
-
 ```bash
-# Run with talkgroups file
-pizzacmd --talkgroups=/path/to/talkgroups.csv
-
-# Run with custom settings
+pizzacmd --help
 pizzacmd --settings=/path/to/settings.json
+pizzacmd --talkgroups=/path/to/talkgroups.csv
 ```
 
-### Command Line Options
+Notes:
 
-| Option | Description |
-|--------|-------------|
-| `--talkgroups=<path>` | Path to talkgroups CSV file |
-| `--settings=<path>` | Custom settings file location |
-| `--help` | Show help information |
+- `--settings` path must point to an existing file.
+- If no args are provided, the default settings path is used.
+- `--talkgroups` imports CSV talkgroups and persists them to settings.
+
+## CLI Caveats (Current Parser)
+
+- The current argument parser processes only the first recognized option in a run.
+- Example: `pizzacmd --settings=... --talkgroups=...` will apply only the first recognized argument.
+- Safest approach:
+  1. Run once with `--settings=...`
+  2. Run again with `--talkgroups=...`
+
+Example sequence:
+
+```bash
+pizzacmd --settings=/path/to/settings.json
+pizzacmd --talkgroups=/path/to/talkgroups.csv
+```
 
 ## Configuration
 
-`pizzacmd` uses the same configuration as other pizzawave applications:
+Shared path:
 
-| Platform | Configuration Path |
-|----------|-------------------|
-| Windows | `%APPDATA%\pizzawave\settings.json` |
-| Linux | `~/.config/pizzawave/settings.json` |
-| macOS | `~/.config/pizzawave/settings.json` |
+- Windows: `%APPDATA%\pizzawave\settings.json`
+- Linux/macOS: `~/.config/pizzawave/settings.json`
 
-See [`pizzalib` README](../pizzalib/README.md) for complete settings reference.
+Important settings include:
 
-## Running on WSL2
-
-### Port Forwarding
-
-Remember that `trunk-recorder` needs to be configured to communicate with the server. If you're running `pizzacmd` from within a Linux OS in WSL2 on Windows, you'll need to make sure the WSL2 instance is configured to receive the network traffic:
-
-```powershell
-# From Windows PowerShell (Admin)
-netsh interface portproxy add v4tov4 listenport=[PORT] listenaddress=0.0.0.0 connectport=[PORT] connectaddress=[WSL_IP]
-```
-
-Replace `[PORT]` with your listen port, such as `9123` and `[WSL_IP]` with your WSL instance IP address, e.g., `172.23.192.16`.
-
-### Running as a Service (WSL2/Linux)
-
-Create a systemd service file:
-
-```bash
-sudo nano /etc/systemd/system/pizzacmd.service
-```
-
-```ini
-[Unit]
-Description=Pizzawave Command Line
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/home/username/pizzacmd/pizzacmd --talkgroups=/home/username/talkgroups.csv
-WorkingDirectory=/home/username/pizzacmd
-Restart=always
-User=username
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable pizzacmd
-sudo systemctl start pizzacmd
-sudo systemctl status pizzacmd
-```
+- `listenPort`
+- `transcriptionEngine`, `transcriptionModelPreset`
+- `emailProvider`, `emailUser`, `emailPassword` (app password)
+- `Alerts`
+- optional Insights keys (`lmLink*`, `dailyInsightsDigestEnabled`)
 
 ## Troubleshooting
 
-### Whisper Runtime Issues
-
-If you receive an error like this:
-
-```
-Whisper Error: Failed to transcribe WAV data: Failed to load native whisper library. Error: Unknown error
-```
-
-It most likely means you have the wrong `Whisper.net` runtime installed. For Linux, you must install either:
-
-* `Whisper.net.Runtime.Cuda` - For NVIDIA GPUs with CUDA support
-* `Whisper.net.Runtime` - CPU-only inference (works everywhere)
-
-### Linux Dependencies
-
-```bash
-# Install required libraries
-sudo apt-get install -y libicu-dev libssl3 zlib1g
-```
-
-### No Audio from trunk-recorder
-
-1. Verify trunk-recorder callstream plugin is configured with correct IP
-2. Check firewall allows port 9123
-3. Verify `pizzacmd` is listening: `netstat -tlnp | grep 9123`
+- Verify listener port is open (`listenPort`, default `9123`).
+- Verify trunk-recorder points to the correct host/port.
+- If transcription fails, check runtime dependencies and model selection in settings.
 
 ## See Also
 
-* [pizzaui](../pizzaui/README.md) - Windows UI application
-* [pizzapi](../docs/pizzapi.md) - Cross-platform UI application
-* [pizzalib](../pizzalib/README.md) - Core library
-* [Main README](../docs/README.md) - Project overview
-* [Deployment Guide](../docs/deployment.md) - Deployment instructions
+- [Main docs](../docs/README.md)
+- [pizzapi docs](../docs/pizzapi.md)
+- [pizzalib docs](../pizzalib/README.md)

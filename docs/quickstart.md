@@ -363,10 +363,10 @@ If using `pizzapi` with a display:
 ```
 
 Navigate the UI:
-- **File → Call Manager → Start** - Start live capture
-- **Edit → Settings** - Configure settings
-- **Edit → Alerts** - Manage alert rules
-- **View → Export** - Export call data
+- **Radio** - Live calls and call ranges
+- **Settings** - Configure listener, model, email, and Insights
+- **Alerts** - Manage alert rules
+- **View** - Display options and export actions
 
 ## Troubleshooting
 

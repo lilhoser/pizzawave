@@ -75,8 +75,8 @@ public class SettingsWindow : Window
                 GetModelPresetIndex(settings.TranscriptionModelPreset);
             _transcriptionEngineComboBox.SelectedIndex =
                 string.Equals(settings.TranscriptionEngine, "vosk", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-            _gmailUserTextBox.Text = settings.GmailUser ?? string.Empty;
-            _gmailPasswordTextBox.Text = settings.GmailPassword ?? string.Empty;
+            _gmailUserTextBox.Text = settings.EmailUser ?? string.Empty;
+            _gmailPasswordTextBox.Text = settings.EmailPassword ?? string.Empty;
             _autoplayAlertsCheckBox.IsChecked = settings.AutoplayAlerts;
             _autoCleanupCallsCheckBox.IsChecked = settings.AutoCleanupCalls;
             _maxCallsToKeepTextBox.Text = settings.MaxCallsToKeep.ToString();
@@ -131,8 +131,8 @@ public class SettingsWindow : Window
                         TranscriptionModelPreset = settings.TranscriptionModelPreset,
                         WhisperModelFile = settings.WhisperModelFile,
                         VoskModelPath = settings.VoskModelPath,
-                        GmailUser = settings.GmailUser,
-                        GmailPassword = settings.GmailPassword,
+                        EmailUser = settings.EmailUser,
+                        EmailPassword = settings.EmailPassword,
                         AutoplayAlerts = _autoplayAlertsCheckBox.IsChecked ?? false,
                         AutoCleanupCalls = _autoCleanupCallsCheckBox.IsChecked ?? true,
                         MaxCallsToKeep = int.TryParse(_maxCallsToKeepTextBox.Text, out int maxCalls) ? maxCalls : 100,
@@ -164,8 +164,8 @@ public class SettingsWindow : Window
                         GetModelPresetValue(_transcriptionModelComboBox.SelectedIndex);
                     settingsCopy.TranscriptionEngine =
                         _transcriptionEngineComboBox.SelectedIndex == 1 ? "vosk" : "whisper";
-                    settingsCopy.GmailUser = newUser;
-                    settingsCopy.GmailPassword = newPass;
+                    settingsCopy.EmailUser = newUser;
+                    settingsCopy.EmailPassword = newPass;
 
                     // If a model preset was chosen, align engine with model family.
                     if (settingsCopy.TranscriptionModelPreset.StartsWith("vosk-",
@@ -193,8 +193,8 @@ public class SettingsWindow : Window
                     settings.ListenPort = settingsCopy.ListenPort;
                     settings.TranscriptionEngine = settingsCopy.TranscriptionEngine;
                     settings.TranscriptionModelPreset = settingsCopy.TranscriptionModelPreset;
-                    settings.GmailUser = settingsCopy.GmailUser;
-                    settings.GmailPassword = settingsCopy.GmailPassword;
+                    settings.EmailUser = settingsCopy.EmailUser;
+                    settings.EmailPassword = settingsCopy.EmailPassword;
                     settings.AutoplayAlerts = settingsCopy.AutoplayAlerts;
                     settings.AutoCleanupCalls = settingsCopy.AutoCleanupCalls;
                     settings.MaxCallsToKeep = settingsCopy.MaxCallsToKeep;
@@ -329,3 +329,5 @@ public class SettingsWindow : Window
         }
     }
 }
+
+
