@@ -197,7 +197,7 @@ namespace pizzalib
                     m_Settings.SetProgressBarCallback?.Invoke(targets.Count, 1);
                     if (targets.Count == 0)
                     {
-                        throw new Exception("No call records found. Supported formats:\n• .mp3 files (from live captures)\n• .bin files (from Trunk-Recorder SFTP backup)");
+                        throw new Exception("No call records found. Supported formats:\n- .mp3 files (from live captures)\n- .bin files (from Trunk-Recorder SFTP backup)");
                     }
                     var i = 1;
                     foreach (var file in targets)

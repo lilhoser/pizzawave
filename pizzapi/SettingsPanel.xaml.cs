@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -19,15 +20,15 @@ public partial class SettingsPanel : UserControl
     private TextBox? _listenPortTextBox;
     private ComboBox? _transcriptionModelComboBox;
     private ComboBox? _transcriptionEngineComboBox;
+    private ComboBox? _emailProviderComboBox;
     private TextBox? _gmailUserTextBox;
     private TextBox? _gmailPasswordTextBox;
+    private Button? _testEmailButton;
     private CheckBox? _autoplayAlertsCheckBox;
     private ComboBox? _snoozeDurationComboBox;
     private Button? _importTalkgroupsButton;
     private Button? _viewTalkgroupsButton;
     private TextBlock? _talkgroupCountText;
-    private CheckBox? _autoCleanupCallsCheckBox;
-    private TextBox? _maxCallsToKeepTextBox;
     private ComboBox? _traceLevelComboBox;
     private bool _handlersWired;
     private string _currentSettingsPath = Settings.DefaultSettingsFileLocation;
@@ -38,6 +39,7 @@ public partial class SettingsPanel : UserControl
     private TextBox? _lmLinkModelTextBox;
     private TextBox? _lmLinkTimeoutTextBox;
     private TextBox? _lmLinkRetriesTextBox;
+    private CheckBox? _dailyInsightsDigestCheckBox;
 
     public event EventHandler? RequestClose;
     public event Func<Settings, Task>? ApplySettingsRequested;
@@ -76,15 +78,15 @@ public partial class SettingsPanel : UserControl
         _listenPortTextBox = this.FindControl<TextBox>("ListenPortTextBox");
         _transcriptionModelComboBox = this.FindControl<ComboBox>("TranscriptionModelComboBox");
         _transcriptionEngineComboBox = this.FindControl<ComboBox>("TranscriptionEngineComboBox");
+        _emailProviderComboBox = this.FindControl<ComboBox>("EmailProviderComboBox");
         _gmailUserTextBox = this.FindControl<TextBox>("GmailUserTextBox");
         _gmailPasswordTextBox = this.FindControl<TextBox>("GmailPasswordTextBox");
+        _testEmailButton = this.FindControl<Button>("TestEmailButton");
         _autoplayAlertsCheckBox = this.FindControl<CheckBox>("AutoplayAlertsCheckBox");
         _snoozeDurationComboBox = this.FindControl<ComboBox>("SnoozeDurationComboBox");
         _importTalkgroupsButton = this.FindControl<Button>("ImportTalkgroupsButton");
         _viewTalkgroupsButton = this.FindControl<Button>("ViewTalkgroupsButton");
         _talkgroupCountText = this.FindControl<TextBlock>("TalkgroupCountText");
-        _autoCleanupCallsCheckBox = this.FindControl<CheckBox>("AutoCleanupCallsCheckBox");
-        _maxCallsToKeepTextBox = this.FindControl<TextBox>("MaxCallsToKeepTextBox");
         _traceLevelComboBox = this.FindControl<ComboBox>("TraceLevelComboBox");
         _settingsPathText = this.FindControl<TextBlock>("SettingsPathText");
         _lmLinkEnabledCheckBox = this.FindControl<CheckBox>("LmLinkEnabledCheckBox");
@@ -93,6 +95,7 @@ public partial class SettingsPanel : UserControl
         _lmLinkModelTextBox = this.FindControl<TextBox>("LmLinkModelTextBox");
         _lmLinkTimeoutTextBox = this.FindControl<TextBox>("LmLinkTimeoutTextBox");
         _lmLinkRetriesTextBox = this.FindControl<TextBox>("LmLinkRetriesTextBox");
+        _dailyInsightsDigestCheckBox = this.FindControl<CheckBox>("DailyInsightsDigestCheckBox");
         var loadButton = this.FindControl<Button>("LoadButton");
         var saveButton = this.FindControl<Button>("SaveButton");
         var saveAsButton = this.FindControl<Button>("SaveAsButton");
@@ -102,7 +105,6 @@ public partial class SettingsPanel : UserControl
             _transcriptionEngineComboBox != null &&
             _gmailUserTextBox != null && _gmailPasswordTextBox != null &&
             _autoplayAlertsCheckBox != null && _snoozeDurationComboBox != null &&
-            _autoCleanupCallsCheckBox != null && _maxCallsToKeepTextBox != null &&
             _traceLevelComboBox != null &&
             saveButton != null && cancelButton != null)
         {
@@ -113,11 +115,12 @@ public partial class SettingsPanel : UserControl
                 GetModelPresetIndex(settings.TranscriptionModelPreset);
             _transcriptionEngineComboBox.SelectedIndex =
                 string.Equals(settings.TranscriptionEngine, "vosk", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-            _gmailUserTextBox.Text = settings.GmailUser ?? string.Empty;
-            _gmailPasswordTextBox.Text = settings.GmailPassword ?? string.Empty;
+            var provider = Settings.NormalizeEmailProvider(settings.EmailProvider);
+            if (_emailProviderComboBox != null)
+                _emailProviderComboBox.SelectedIndex = provider == "yahoo" ? 1 : 0;
+            _gmailUserTextBox.Text = settings.EmailUser ?? string.Empty;
+            _gmailPasswordTextBox.Text = settings.EmailPassword ?? string.Empty;
             _autoplayAlertsCheckBox.IsChecked = settings.AutoplayAlerts;
-            _autoCleanupCallsCheckBox.IsChecked = settings.AutoCleanupCalls;
-            _maxCallsToKeepTextBox.Text = settings.MaxCallsToKeep.ToString();
 
             _traceLevelComboBox.SelectedIndex = settings.TraceLevelApp switch
             {
@@ -149,6 +152,9 @@ public partial class SettingsPanel : UserControl
                 _lmLinkTimeoutTextBox.Text = settings.LmLinkTimeoutMs.ToString();
             if (_lmLinkRetriesTextBox != null)
                 _lmLinkRetriesTextBox.Text = settings.LmLinkMaxRetries.ToString();
+            if (_dailyInsightsDigestCheckBox != null)
+                _dailyInsightsDigestCheckBox.IsChecked = settings.DailyInsightsDigestEnabled;
+            UpdateDailyDigestAvailability();
             
             UpdateTalkgroupCount();
             UpdateSettingsPathText();
@@ -194,9 +200,10 @@ public partial class SettingsPanel : UserControl
                     var newUser = _gmailUserTextBox.Text;
                     var newPass = _gmailPasswordTextBox.Text;
 
+                    var provider = SelectedEmailProvider();
                     if (!string.IsNullOrEmpty(newUser) && string.IsNullOrEmpty(newPass))
                     {
-                        throw new Exception("Gmail password is required when Gmail user is set");
+                        throw new Exception("Email password is required when email user is set");
                     }
 
                     var settingsCopy = new Settings
@@ -204,17 +211,17 @@ public partial class SettingsPanel : UserControl
                         ListenPort = currentSettings.ListenPort,
                         TranscriptionEngine = currentSettings.TranscriptionEngine,
                         TranscriptionModelPreset = currentSettings.TranscriptionModelPreset,
-                        GmailUser = currentSettings.GmailUser,
-                        GmailPassword = currentSettings.GmailPassword,
+                        EmailUser = currentSettings.EmailUser,
+                        EmailPassword = currentSettings.EmailPassword,
                         LmLinkEnabled = currentSettings.LmLinkEnabled,
                         LmLinkBaseUrl = currentSettings.LmLinkBaseUrl,
                         LmLinkApiKey = currentSettings.LmLinkApiKey,
                         LmLinkModel = currentSettings.LmLinkModel,
                         LmLinkTimeoutMs = currentSettings.LmLinkTimeoutMs,
                         LmLinkMaxRetries = currentSettings.LmLinkMaxRetries,
+                        DailyInsightsDigestEnabled = currentSettings.DailyInsightsDigestEnabled,
+                        EmailProvider = currentSettings.EmailProvider,
                         AutoplayAlerts = _autoplayAlertsCheckBox.IsChecked ?? false,
-                        AutoCleanupCalls = _autoCleanupCallsCheckBox.IsChecked ?? true,
-                        MaxCallsToKeep = int.TryParse(_maxCallsToKeepTextBox.Text, out int maxCalls) ? maxCalls : 100,
                         TraceLevelApp = _traceLevelComboBox.SelectedIndex switch
                         {
                             0 => System.Diagnostics.SourceLevels.Error,
@@ -242,14 +249,16 @@ public partial class SettingsPanel : UserControl
                         GetModelPresetValue(_transcriptionModelComboBox.SelectedIndex);
                     settingsCopy.TranscriptionEngine =
                         _transcriptionEngineComboBox.SelectedIndex == 1 ? "vosk" : "whisper";
-                    settingsCopy.GmailUser = newUser;
-                    settingsCopy.GmailPassword = newPass;
+                    settingsCopy.EmailUser = newUser;
+                    settingsCopy.EmailPassword = newPass;
                     settingsCopy.LmLinkEnabled = _lmLinkEnabledCheckBox?.IsChecked ?? false;
                     settingsCopy.LmLinkBaseUrl = _lmLinkBaseUrlTextBox?.Text ?? string.Empty;
                     settingsCopy.LmLinkApiKey = _lmLinkApiKeyTextBox?.Text ?? string.Empty;
                     settingsCopy.LmLinkModel = _lmLinkModelTextBox?.Text ?? string.Empty;
                     settingsCopy.LmLinkTimeoutMs = int.TryParse(_lmLinkTimeoutTextBox?.Text, out var timeoutMs) ? timeoutMs : settingsCopy.LmLinkTimeoutMs;
                     settingsCopy.LmLinkMaxRetries = int.TryParse(_lmLinkRetriesTextBox?.Text, out var retries) ? retries : settingsCopy.LmLinkMaxRetries;
+                    settingsCopy.DailyInsightsDigestEnabled = (_dailyInsightsDigestCheckBox?.IsChecked ?? false) && IsDailyDigestPrereqsMet();
+                    settingsCopy.EmailProvider = provider;
 
                     if (settingsCopy.TranscriptionModelPreset.StartsWith("vosk-",
                         StringComparison.OrdinalIgnoreCase))
@@ -267,17 +276,17 @@ public partial class SettingsPanel : UserControl
                     currentSettings.ListenPort = settingsCopy.ListenPort;
                     currentSettings.TranscriptionEngine = settingsCopy.TranscriptionEngine;
                     currentSettings.TranscriptionModelPreset = settingsCopy.TranscriptionModelPreset;
-                    currentSettings.GmailUser = settingsCopy.GmailUser;
-                    currentSettings.GmailPassword = settingsCopy.GmailPassword;
+                    currentSettings.EmailUser = settingsCopy.EmailUser;
+                    currentSettings.EmailPassword = settingsCopy.EmailPassword;
                     currentSettings.LmLinkEnabled = settingsCopy.LmLinkEnabled;
                     currentSettings.LmLinkBaseUrl = settingsCopy.LmLinkBaseUrl;
                     currentSettings.LmLinkApiKey = settingsCopy.LmLinkApiKey;
                     currentSettings.LmLinkModel = settingsCopy.LmLinkModel;
                     currentSettings.LmLinkTimeoutMs = settingsCopy.LmLinkTimeoutMs;
                     currentSettings.LmLinkMaxRetries = settingsCopy.LmLinkMaxRetries;
+                    currentSettings.DailyInsightsDigestEnabled = settingsCopy.DailyInsightsDigestEnabled;
+                    currentSettings.EmailProvider = settingsCopy.EmailProvider;
                     currentSettings.AutoplayAlerts = settingsCopy.AutoplayAlerts;
-                    currentSettings.AutoCleanupCalls = settingsCopy.AutoCleanupCalls;
-                    currentSettings.MaxCallsToKeep = settingsCopy.MaxCallsToKeep;
                     currentSettings.TraceLevelApp = settingsCopy.TraceLevelApp;
                     currentSettings.SnoozeDurationMinutes = settingsCopy.SnoozeDurationMinutes;
 
@@ -307,6 +316,145 @@ public partial class SettingsPanel : UserControl
         if (cancelButton != null)
         {
             cancelButton.Click += (s, e) => RequestClose?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (_lmLinkEnabledCheckBox != null)
+        {
+            _lmLinkEnabledCheckBox.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == ToggleButton.IsCheckedProperty)
+                    UpdateDailyDigestAvailability();
+            };
+        }
+        if (_lmLinkBaseUrlTextBox != null)
+            _lmLinkBaseUrlTextBox.TextChanged += (_, _) => UpdateDailyDigestAvailability();
+        if (_lmLinkModelTextBox != null)
+            _lmLinkModelTextBox.TextChanged += (_, _) => UpdateDailyDigestAvailability();
+        if (_gmailUserTextBox != null)
+            _gmailUserTextBox.TextChanged += (_, _) =>
+            {
+                AutoSelectProviderFromEmail();
+                UpdateDailyDigestAvailability();
+            };
+        if (_gmailPasswordTextBox != null)
+            _gmailPasswordTextBox.TextChanged += (_, _) => UpdateDailyDigestAvailability();
+        if (_emailProviderComboBox != null)
+        {
+            _emailProviderComboBox.SelectionChanged += (_, _) =>
+            {
+                UpdateDailyDigestAvailability();
+            };
+        }
+        if (_testEmailButton != null)
+        {
+            _testEmailButton.Click += (_, _) => SendTestEmail();
+        }
+    }
+
+    private bool IsDailyDigestPrereqsMet()
+    {
+        var lmEnabled = _lmLinkEnabledCheckBox?.IsChecked ?? false;
+        var baseUrl = _lmLinkBaseUrlTextBox?.Text;
+        var model = _lmLinkModelTextBox?.Text;
+        var emailUser = _gmailUserTextBox?.Text;
+        var emailPassword = _gmailPasswordTextBox?.Text;
+        var hasAppPassword = !string.IsNullOrWhiteSpace(emailUser)
+                             && !string.IsNullOrWhiteSpace(emailPassword);
+
+        return lmEnabled
+               && !string.IsNullOrWhiteSpace(baseUrl)
+               && !string.IsNullOrWhiteSpace(model)
+               && hasAppPassword;
+    }
+
+    private string SelectedEmailProvider()
+    {
+        return _emailProviderComboBox?.SelectedIndex == 1 ? "yahoo" : "gmail";
+    }
+
+    private void AutoSelectProviderFromEmail()
+    {
+        if (_emailProviderComboBox == null)
+            return;
+
+        var provider = InferProviderFromEmail(_gmailUserTextBox?.Text);
+        if (provider == null)
+            return;
+
+        var targetIndex = provider == "yahoo" ? 1 : 0;
+        if (_emailProviderComboBox.SelectedIndex != targetIndex)
+            _emailProviderComboBox.SelectedIndex = targetIndex;
+    }
+
+    private static string? InferProviderFromEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return null;
+
+        var at = email.LastIndexOf('@');
+        if (at < 0 || at == email.Length - 1)
+            return null;
+
+        var domain = email[(at + 1)..].Trim().ToLowerInvariant();
+        if (domain.EndsWith("gmail.com", StringComparison.Ordinal) ||
+            domain.EndsWith("googlemail.com", StringComparison.Ordinal))
+            return "gmail";
+
+        if (domain.EndsWith("yahoo.com", StringComparison.Ordinal) ||
+            domain.EndsWith("yahoo.co.uk", StringComparison.Ordinal) ||
+            domain.EndsWith("yahoo.ca", StringComparison.Ordinal) ||
+            domain.EndsWith("yahoo.com.au", StringComparison.Ordinal) ||
+            domain.EndsWith("yahoo.co.jp", StringComparison.Ordinal) ||
+            domain.EndsWith("ymail.com", StringComparison.Ordinal) ||
+            domain.EndsWith("rocketmail.com", StringComparison.Ordinal))
+            return "yahoo";
+
+        return null;
+    }
+
+    private void UpdateDailyDigestAvailability()
+    {
+        if (_dailyInsightsDigestCheckBox == null)
+            return;
+
+        var isAvailable = IsDailyDigestPrereqsMet();
+        _dailyInsightsDigestCheckBox.IsEnabled = isAvailable;
+        if (!isAvailable)
+            _dailyInsightsDigestCheckBox.IsChecked = false;
+    }
+
+    private void SendTestEmail()
+    {
+        try
+        {
+            var emailUser = _gmailUserTextBox?.Text?.Trim();
+            var emailPassword = _gmailPasswordTextBox?.Text;
+            var provider = SelectedEmailProvider();
+
+            if (string.IsNullOrWhiteSpace(emailUser))
+                throw new Exception("Set Email User before sending a test.");
+            if (string.IsNullOrWhiteSpace(emailPassword))
+                throw new Exception("Set Email Password before sending a test.");
+
+            var testSettings = new Settings
+            {
+                EmailUser = emailUser,
+                EmailPassword = emailPassword,
+                EmailProvider = provider
+            };
+
+            EmailSender.SendHtml(
+                testSettings,
+                "pizzawave test",
+                emailUser,
+                $"pizzawave test email ({provider})",
+                $"Test email sent at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} using provider '{provider}'.");
+
+            ShowMessage("Test Email Sent", $"Sent test email to {emailUser}");
+        }
+        catch (Exception ex)
+        {
+            ShowMessage("Test Email Failed", ex.Message);
         }
     }
 
@@ -405,17 +553,17 @@ public partial class SettingsPanel : UserControl
             currentSettings.ListenPort = int.TryParse(_listenPortTextBox?.Text, out int port) ? port : currentSettings.ListenPort;
             currentSettings.TranscriptionModelPreset = GetModelPresetValue(_transcriptionModelComboBox?.SelectedIndex);
             currentSettings.TranscriptionEngine = _transcriptionEngineComboBox?.SelectedIndex == 1 ? "vosk" : "whisper";
-            currentSettings.GmailUser = _gmailUserTextBox?.Text;
-            currentSettings.GmailPassword = _gmailPasswordTextBox?.Text;
+            currentSettings.EmailUser = _gmailUserTextBox?.Text;
+            currentSettings.EmailPassword = _gmailPasswordTextBox?.Text;
+            currentSettings.EmailProvider = SelectedEmailProvider();
             currentSettings.LmLinkEnabled = _lmLinkEnabledCheckBox?.IsChecked ?? currentSettings.LmLinkEnabled;
             currentSettings.LmLinkBaseUrl = _lmLinkBaseUrlTextBox?.Text ?? currentSettings.LmLinkBaseUrl;
             currentSettings.LmLinkApiKey = _lmLinkApiKeyTextBox?.Text ?? currentSettings.LmLinkApiKey;
             currentSettings.LmLinkModel = _lmLinkModelTextBox?.Text ?? currentSettings.LmLinkModel;
             currentSettings.LmLinkTimeoutMs = int.TryParse(_lmLinkTimeoutTextBox?.Text, out var timeoutMs) ? timeoutMs : currentSettings.LmLinkTimeoutMs;
             currentSettings.LmLinkMaxRetries = int.TryParse(_lmLinkRetriesTextBox?.Text, out var retries) ? retries : currentSettings.LmLinkMaxRetries;
+            currentSettings.DailyInsightsDigestEnabled = (_dailyInsightsDigestCheckBox?.IsChecked ?? false) && IsDailyDigestPrereqsMet();
             currentSettings.AutoplayAlerts = _autoplayAlertsCheckBox?.IsChecked ?? currentSettings.AutoplayAlerts;
-            currentSettings.AutoCleanupCalls = _autoCleanupCallsCheckBox?.IsChecked ?? currentSettings.AutoCleanupCalls;
-            currentSettings.MaxCallsToKeep = int.TryParse(_maxCallsToKeepTextBox?.Text, out int maxCalls) ? maxCalls : currentSettings.MaxCallsToKeep;
             currentSettings.TraceLevelApp = _traceLevelComboBox?.SelectedIndex switch
             {
                 0 => System.Diagnostics.SourceLevels.Error,
@@ -713,3 +861,5 @@ public partial class SettingsPanel : UserControl
         }
     }
 }
+
+

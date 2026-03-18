@@ -1,5 +1,5 @@
 using Newtonsoft.Json;
-
+using System.Linq;
 namespace pizzapi;
 
 public class InsightNotableEvent
@@ -29,18 +29,37 @@ public class InsightNotableEvent
     [JsonIgnore]
     public string CategoryIcon => InsightCategoryPalette.Icon(CategoryKey);
     [JsonIgnore]
+    public string DisplayTitle => NormalizeDisplayTitle(Title, CategoryKey);
+    [JsonIgnore]
     public string CategoryAccentColor => InsightCategoryPalette.AccentColor(CategoryKey);
     [JsonIgnore]
     public string CategoryTileBackground => InsightCategoryPalette.TileBackground(CategoryKey);
     [JsonIgnore]
     public bool HasAlertMatch { get; set; }
+    [JsonProperty("has_alert_match")]
+    public bool HasAlertMatchPersisted
+    {
+        get => HasAlertMatch;
+        set => HasAlertMatch = value;
+    }
     [JsonIgnore]
     public int MatchedCallCount { get; set; }
+    [JsonIgnore]
+    public string ConfidencePercent => $"{Math.Clamp((int)Math.Round(Confidence * 100.0), 0, 100)}%";
+    [JsonIgnore]
+    public bool IsErrorEvent =>
+        string.Equals(Title?.Trim(), "Insights Error", StringComparison.OrdinalIgnoreCase)
+        || (!string.IsNullOrWhiteSpace(ParentSummary?.Error));
+    [JsonIgnore]
+    public bool CanOpenSources => !IsErrorEvent;
     [JsonIgnore]
     public string TimestampDisplay
     {
         get
         {
+            if (IsErrorEvent)
+                return string.Empty;
+
             if (!string.IsNullOrWhiteSpace(Timestamp))
             {
                 var raw = Timestamp.Trim();
@@ -53,6 +72,53 @@ public class InsightNotableEvent
             }
 
             return ParentSummary != null ? ParentSummary.WindowStart.ToLocalTime().ToString("h:mm tt") : string.Empty;
+        }
+    }
+
+    private static string NormalizeDisplayTitle(string? rawTitle, string categoryKey)
+    {
+        var title = (rawTitle ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(title))
+            return string.Empty;
+
+        foreach (var token in GetCategoryPrefixTokens(categoryKey))
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                continue;
+
+            var normalizedToken = token.Trim();
+            if (title.StartsWith($"[{normalizedToken}]", StringComparison.OrdinalIgnoreCase))
+                title = title.Substring(normalizedToken.Length + 2).TrimStart(' ', ':', '-', '|');
+            else if (title.StartsWith($"{normalizedToken}:", StringComparison.OrdinalIgnoreCase) ||
+                     title.StartsWith($"{normalizedToken}-", StringComparison.OrdinalIgnoreCase) ||
+                     title.StartsWith($"{normalizedToken}|", StringComparison.OrdinalIgnoreCase))
+                title = title.Substring(normalizedToken.Length + 1).TrimStart();
+            else if (title.StartsWith($"{normalizedToken} ", StringComparison.OrdinalIgnoreCase))
+                title = title.Substring(normalizedToken.Length + 1).TrimStart();
+        }
+
+        // Final cleanup for residual separators after prefix stripping.
+        title = title.TrimStart(' ', '-', ':', '|', '•', '[', ']');
+        return title.TrimStart();
+    }
+
+    private static IEnumerable<string> GetCategoryPrefixTokens(string categoryKey)
+    {
+        yield return categoryKey;
+        yield return InsightCategoryPalette.DisplayName(categoryKey);
+
+        foreach (var token in categoryKey switch
+        {
+            "police" => new[] { "POL", "PD", "POLICE" },
+            "fire" => new[] { "FIRE", "FD" },
+            "ems" => new[] { "EMS", "MED", "MEDICAL" },
+            "traffic" => new[] { "TRAFFIC", "TRAF" },
+            "public_works" => new[] { "PUBLIC WORKS", "PW" },
+            "utilities" => new[] { "UTILITIES", "UTIL" },
+            _ => new[] { "OTHER" }
+        })
+        {
+            yield return token;
         }
     }
 }
@@ -105,26 +171,24 @@ public class InsightSummaryWindow
         get
         {
             var startLocal = WindowStart.ToLocalTime();
-            var endLocal = WindowEnd.ToLocalTime();
-            var startPart = GetDayPart(startLocal);
-            var endPart = GetDayPart(endLocal.AddMinutes(-1));
-            if (!string.Equals(startPart, endPart, StringComparison.Ordinal))
-            {
-                var totalHours = Math.Max(1, (int)Math.Round((WindowEnd - WindowStart).TotalHours));
-                return $"{startLocal:dddd MMMM d, yyyy} - Last {totalHours} hours";
-            }
-
-            return $"{startLocal:dddd MMMM d, yyyy} - {startPart}";
+            var midpoint = WindowStart + TimeSpan.FromTicks((WindowEnd - WindowStart).Ticks / 2);
+            var part = GetDayPart(midpoint.ToLocalTime());
+            return $"{startLocal:dddd MMMM d, yyyy} - {part}";
         }
     }
 
     private static string GetDayPart(DateTimeOffset ts)
     {
-        var hour = ts.Hour;
-        if (hour < 12) return "Morning";
-        if (hour < 17) return "Afternoon";
+        var hour = ts.Hour + (ts.Minute / 60.0);
+        if (hour < 4) return "Overnight";
+        if (hour < 7) return "Early morning";
+        if (hour < 10) return "Morning";
+        if (hour < 11.5) return "Late morning";
+        if (hour < 13.5) return "Around noon";
+        if (hour < 16) return "Afternoon";
+        if (hour < 18) return "Late afternoon";
         if (hour < 21) return "Evening";
-        return "Night";
+        return "Late night";
     }
 }
 
@@ -132,9 +196,34 @@ public class InsightCategorySection
 {
     public string CategoryKey { get; set; } = "other";
     public string DisplayName { get; set; } = "Other";
-    public string Icon { get; set; } = "•";
+    public string Icon { get; set; } = "*";
     public string AccentColor { get; set; } = "#5a5a5a";
     public List<InsightNotableEvent> Events { get; set; } = new();
+    public bool IsCollapsed { get; set; }
+    public bool ShowAll { get; set; }
+    public int PreviewCount { get; set; } = 3;
+
+    public int TotalCount => Events.Count;
+    public int HiddenCount => Math.Max(0, TotalCount - PreviewCount);
+    public bool HasHiddenEvents => !IsCollapsed && !ShowAll && HiddenCount > 0;
+    public bool CanShowFewer => !IsCollapsed && ShowAll && TotalCount > PreviewCount;
+    public List<InsightNotableEvent> VisibleEvents =>
+        IsCollapsed
+            ? new List<InsightNotableEvent>()
+            : (ShowAll ? Events.ToList() : Events.Take(PreviewCount).ToList());
+}
+
+public class InsightsNarrativeSection
+{
+    public string Title { get; set; } = string.Empty;
+    public List<InsightsNarrativeBullet> Bullets { get; set; } = new();
+}
+
+public class InsightsNarrativeBullet
+{
+    public string Lead { get; set; } = string.Empty;
+    public string Text { get; set; } = string.Empty;
+    public string DisplayText => string.IsNullOrWhiteSpace(Lead) ? Text : $"{Lead}: {Text}";
 }
 
 internal static class InsightCategoryPalette
@@ -186,13 +275,13 @@ internal static class InsightCategoryPalette
     {
         return Normalize(categoryKey) switch
         {
-            "police" => "🚓",
-            "fire" => "🚒",
-            "ems" => "🚑",
-            "traffic" => "🚦",
-            "public_works" => "🏗️",
-            "utilities" => "⚡",
-            _ => "📻"
+            "police" => "POL",
+            "fire" => "FIR",
+            "ems" => "EMS",
+            "traffic" => "TRF",
+            "public_works" => "PWK",
+            "utilities" => "UTL",
+            _ => "OTH"
         };
     }
 

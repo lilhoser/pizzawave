@@ -1,6 +1,6 @@
 # Quick Reference
 
-Common commands, paths, ports, environment variables, and other frequently-needed information for pizzawave.
+Common commands, paths, ports, and other frequently-needed information for pizzawave.
 
 ## Default Ports
 
@@ -113,13 +113,11 @@ sudo apt-get install -f -y
 sudo dpkg -r pizzapi
 ```
 
-## Environment Variables
+## CLI Caveat (`pizzacmd`)
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DOTNET_ENVIRONMENT` | Runtime environment | `Production` |
-| `DOTNET_ROOT` | .NET installation path | System default |
-| `DISPLAY` | X11 display (WSL2/GUI) | `:0` |
+`pizzacmd` currently applies only the first recognized option in a command invocation.
+
+Avoid combining `--settings` and `--talkgroups` in one run; invoke separately.
 
 ## Talkgroups CSV Format
 

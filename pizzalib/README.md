@@ -61,8 +61,9 @@ This file can be manipulated in `pizzaui`, `pizzapi`, and `pizzacmd`. The UI app
 | `WavFileLocation` | (empty) | Path to save call audio as MP3 files. Leave empty for in-memory only transcription. |
 | `Alerts` | (empty) | Array of alert rules (see below) |
 | `AutostartListener` | `true` | Automatically start listener when application starts |
-| `gmailUser` | (empty) | Gmail account for sending email alerts |
-| `gmailPassword` | (empty) | Gmail app password (not your account password!) |
+| `emailUser` | (empty) | Email account for sending alerts/digests |
+| `emailPassword` | (empty) | App password for selected provider |
+| `emailProvider` | `gmail` | `gmail` or `yahoo` |
 | `listenPort` | `9123` | Port for callstream plugin to connect |
 | `analogChannels` | `1` | Number of analog channels in received audio |
 | `analogBitDepth` | `16` | Bit depth of received audio |
@@ -108,10 +109,11 @@ Alerts are rules that tell `pizzalib` how to process audio data of interest.
 
 ### Getting Email Alerts
 
-1. [Create an app password](https://support.google.com/accounts/answer/185833) for your Gmail account
-2. Add it to `pizzalib` settings as `gmailUser` and `gmailPassword`
+1. Select `emailProvider` as `gmail` or `yahoo`
+2. Create an app password for that provider
+3. Set `emailUser` and `emailPassword` in settings
 
-**Important**: The Gmail app password is stored unencrypted on disk.
+**Important**: App passwords are stored in `settings.json`; protect file permissions on that file.
 
 ### Getting Phone Alerts (SMS)
 
@@ -151,3 +153,4 @@ Build output is organized in the `artifacts/` folder by project.
 * [pizzacmd](../pizzacmd/README.md) - Command line application
 * [Main README](../docs/README.md) - Project overview
 * [Building Guide](../docs/building.md) - Detailed build instructions
+

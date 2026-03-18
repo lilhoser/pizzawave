@@ -217,10 +217,12 @@ jobs:
       run: |
         mkdir -p package/DEBIAN
         mkdir -p package/opt/pizzapi
+        mkdir -p package/opt/pizzapi/images
         mkdir -p package/etc/pizzapi
     - name: Copy binaries to package
       run: |
         cp -r ./publish/${{ matrix.arch }}/* package/opt/pizzapi/
+        cp ./pizzapi/images/logo.png package/opt/pizzapi/images/logo.png
         chmod +x package/opt/pizzapi/pizzapi
     - name: Create DEBIAN control file
       run: |

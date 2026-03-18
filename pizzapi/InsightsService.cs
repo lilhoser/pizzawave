@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Net;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using pizzalib;
 using System.Diagnostics;
 using static pizzapi.TraceLogger;
@@ -24,6 +26,8 @@ public class InsightsService : IDisposable
     private int _consecutiveSummaryFailures;
     private string? _priorSummary;
     private DateTimeOffset _lastRetentionRun = DateTimeOffset.MinValue;
+    private DateOnly _lastDigestSentForDate = DateOnly.MinValue;
+    public string? LastFailureReason { get; private set; }
 
     public event Action<InsightSummaryWindow>? WindowSaved;
 
@@ -80,6 +84,9 @@ public class InsightsService : IDisposable
                 : $"Next insight in {remaining} calls (processing...)";
         }
 
+        if (remaining == 0)
+            return "Next insight due";
+
         return $"Next insight in {remaining} calls";
     }
 
@@ -103,6 +110,7 @@ public class InsightsService : IDisposable
             {
                 PumpHeuristicSummaryWorker();
                 await RunRetentionIfNeeded();
+                await RunDailyDigestIfNeeded();
             }
             catch
             {
@@ -137,7 +145,9 @@ public class InsightsService : IDisposable
 
     private void PumpHeuristicSummaryWorker()
     {
-        if (!_settings.LmLinkEnabled || string.IsNullOrWhiteSpace(_settings.LmLinkBaseUrl))
+        if (!_settings.LmLinkEnabled ||
+            string.IsNullOrWhiteSpace(_settings.LmLinkBaseUrl) ||
+            string.IsNullOrWhiteSpace(_settings.LmLinkModel))
             return;
 
         lock (_summaryWorkerLock)
@@ -160,7 +170,7 @@ public class InsightsService : IDisposable
             if (pendingCount < UnsummarizedBatchSize)
                 return;
 
-            var batchSize = ComputeAdaptiveBatchSize(pendingCount);
+            var batchSize = ComputeAdaptiveBatchSize(pendingCount, _consecutiveSummaryFailures);
             _activeSummaryTask = Task.Run(() => RunHeuristicSummaryBatchAsync(batchSize));
         }
     }
@@ -215,9 +225,10 @@ public class InsightsService : IDisposable
                 cooldownSeconds = Math.Min(300, 5 * (1 << Math.Min(failureStreak, 5)));
                 _nextSummaryAttemptAt = DateTimeOffset.UtcNow.AddSeconds(cooldownSeconds);
             }
+            RotateFailedBatchToTail(batchCalls);
 
             Trace(TraceLoggerType.Insights, TraceEventType.Warning,
-                $"Heuristic insights summary failed. Backing off for {cooldownSeconds}s (failure streak {failureStreak}).");
+                $"Heuristic insights summary failed for batch size {batchCalls.Count}. Rotated failed batch to queue tail and backing off for {cooldownSeconds}s (failure streak {failureStreak}).");
         }
         catch (Exception ex)
         {
@@ -231,8 +242,13 @@ public class InsightsService : IDisposable
         }
     }
 
-    private static int ComputeAdaptiveBatchSize(int pendingCount)
+    private static int ComputeAdaptiveBatchSize(int pendingCount, int failureStreak)
     {
+        // Recovery mode: after any failure, return to baseline batch size.
+        // This avoids repeatedly issuing oversized LM requests while backlog is high.
+        if (failureStreak > 0)
+            return UnsummarizedBatchSize;
+
         if (pendingCount >= 500)
             return 200;
         if (pendingCount >= 250)
@@ -242,20 +258,41 @@ public class InsightsService : IDisposable
         return UnsummarizedBatchSize;
     }
 
-    internal async Task FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls)
+    private void RotateFailedBatchToTail(List<TranscribedCall> failedBatch)
     {
-        await FinalizeWindowCoreAsync(start, end, calls, _settings);
+        if (failedBatch.Count == 0)
+            return;
+
+        lock (_pendingLiveCallsLock)
+        {
+            var moveCount = Math.Min(failedBatch.Count, _pendingLiveCalls.Count);
+            if (moveCount <= 0)
+                return;
+
+            var moved = _pendingLiveCalls.Take(moveCount).ToList();
+            _pendingLiveCalls.RemoveRange(0, moveCount);
+            _pendingLiveCalls.AddRange(moved);
+        }
+    }
+
+    internal async Task<bool> FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls)
+    {
+        return await FinalizeWindowCoreAsync(start, end, calls, _settings);
         }
 
-    internal async Task FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings)
+    internal async Task<bool> FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings)
     {
-        await FinalizeWindowCoreAsync(start, end, calls, settings);
+        return await FinalizeWindowCoreAsync(start, end, calls, settings);
     }
 
     private async Task<bool> FinalizeWindowCoreAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings)
     {
+        LastFailureReason = null;
         if (calls.Count == 0)
+        {
+            LastFailureReason = "No calls found in selected range.";
             return false;
+        }
 
         var summary = new InsightSummaryWindow
         {
@@ -266,8 +303,9 @@ public class InsightsService : IDisposable
 
         summary.SourceCounts["total_calls"] = calls.Count;
         summary.SourceCounts["alert_matches"] = calls.Count(c => c.IsAlertMatch);
-        summary.SourceHashes = calls.Select(CallHash.Compute).Distinct().ToList();
-        summary.SourceCallIds = calls.Select(CallHash.ComputeCallId).Distinct().ToList();
+        // Keep persisted summary compact; per-event call_ids carry deterministic linkage.
+        summary.SourceHashes = new List<string>();
+        summary.SourceCallIds = new List<string>();
 
         Trace(TraceLoggerType.Insights, TraceEventType.Information, 
             $"Finalizing window {start} to {end}, {calls.Count} calls");
@@ -281,6 +319,20 @@ public class InsightsService : IDisposable
                 var lmResult = await LmLinkClient.SummarizeWindowAsync(settings, start, end, calls, _priorSummary);
                 summary.SummaryText = lmResult.SummaryText;
                 summary.NotableEvents = lmResult.NotableEvents;
+                if (calls.Count >= 50 && summary.NotableEvents.Count == 0)
+                {
+                    summary.Error = "LM Link returned zero notable events for a high-volume window.";
+                    summary.SummaryText = "Insights unavailable (empty LM result).";
+                    LastFailureReason = summary.Error;
+                }
+                var alertByCallId = calls
+                    .GroupBy(CallHash.ComputeCallId)
+                    .ToDictionary(g => g.Key, g => g.Any(c => c.IsAlertMatch), StringComparer.OrdinalIgnoreCase);
+                foreach (var ev in summary.NotableEvents)
+                {
+                    ev.HasAlertMatch = ev.CallIds.Any(id =>
+                        alertByCallId.TryGetValue(id, out var isAlert) && isAlert);
+                }
                 _priorSummary = lmResult.SummaryText;
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, 
                     $"LM Link returned summary with {lmResult.NotableEvents.Count} notable events");
@@ -289,6 +341,7 @@ public class InsightsService : IDisposable
             {
                 summary.SummaryText = "Insights unavailable (LM Link error).";
                 summary.Error = ex.Message;
+                LastFailureReason = ex.Message;
                 Trace(TraceLoggerType.Insights, TraceEventType.Error, 
                     $"LM Link error for window {start}: {ex.Message}");
             }
@@ -301,6 +354,7 @@ public class InsightsService : IDisposable
 
         if (!string.IsNullOrWhiteSpace(summary.Error))
         {
+            LastFailureReason ??= summary.Error;
             Trace(TraceLoggerType.Insights, TraceEventType.Warning,
                 $"Skipping persistence for failed summary window {start} to {end}: {summary.Error}");
             return false;
@@ -309,6 +363,103 @@ public class InsightsService : IDisposable
         _storage.SaveWindowSummary(summary);
         WindowSaved?.Invoke(summary);
         return true;
+    }
+
+    private async Task RunDailyDigestIfNeeded()
+    {
+        if (!IsDailyDigestConfigured(_settings))
+            return;
+
+        var nowLocal = DateTimeOffset.Now;
+        if (nowLocal.TimeOfDay < TimeSpan.FromMinutes(10))
+            return;
+
+        var digestDate = DateOnly.FromDateTime(nowLocal.Date.AddDays(-1));
+        if (digestDate <= _lastDigestSentForDate)
+            return;
+
+        try
+        {
+            var sent = await Task.Run(() => TrySendDailyDigest(digestDate));
+            if (sent)
+                _lastDigestSentForDate = digestDate;
+        }
+        catch (Exception ex)
+        {
+            Trace(TraceLoggerType.Insights, TraceEventType.Warning,
+                $"Daily insights digest failed for {digestDate:yyyy-MM-dd}: {ex.Message}");
+        }
+    }
+
+    private bool TrySendDailyDigest(DateOnly digestDate)
+    {
+        var dayStart = new DateTimeOffset(digestDate.ToDateTime(TimeOnly.MinValue), TimeZoneInfo.Local.GetUtcOffset(digestDate.ToDateTime(TimeOnly.MinValue)));
+        var dayEnd = dayStart.AddDays(1);
+        var summaries = _storage.LoadDaily(dayStart, dayEnd);
+        if (summaries.Count == 0)
+            return false;
+
+        var grouped = summaries
+            .SelectMany(s => s.NotableEvents, (summary, ev) => new { Summary = summary, Event = ev })
+            .GroupBy(x => x.Event.CategoryKey)
+            .OrderBy(g => InsightCategoryPalette.Order(g.Key))
+            .ToList();
+
+        if (grouped.Count == 0)
+            return false;
+
+        var body = new StringBuilder();
+        body.Append("<html><body style=\"font-family:Segoe UI,Arial,sans-serif;\">");
+        body.Append($"<h2>PizzaWave Daily Insights Digest - {digestDate:MMMM d, yyyy}</h2>");
+
+        foreach (var categoryGroup in grouped)
+        {
+            var category = InsightCategoryPalette.DisplayName(categoryGroup.Key);
+            var icon = InsightCategoryPalette.Icon(categoryGroup.Key);
+            body.Append($"<h3>{icon} {WebUtility.HtmlEncode(category)}</h3><ol>");
+
+            foreach (var item in categoryGroup
+                         .OrderByDescending(x => (x.Event.Confidence) + (x.Event.HasAlertMatch ? 1.0 : 0.0))
+                         .ThenByDescending(x => x.Summary.WindowEnd)
+                         .Take(10))
+            {
+                var score = item.Event.Confidence + (item.Event.HasAlertMatch ? 1.0 : 0.0);
+                var alertBadge = item.Event.HasAlertMatch ? " [ALERT]" : string.Empty;
+                var detail = string.IsNullOrWhiteSpace(item.Event.Detail) ? item.Event.Title : item.Event.Detail;
+                var timeText = !string.IsNullOrWhiteSpace(item.Event.TimestampDisplay)
+                    ? item.Event.TimestampDisplay
+                    : item.Summary.WindowEnd.ToLocalTime().ToString("h:mm tt");
+                body.Append("<li>");
+                body.Append($"<b>{WebUtility.HtmlEncode(item.Event.Title)}</b>{WebUtility.HtmlEncode(alertBadge)}");
+                body.Append($"<br/><span>{WebUtility.HtmlEncode(detail)}</span>");
+                body.Append($"<br/><small>Time: {WebUtility.HtmlEncode(timeText)} | Confidence: {item.Event.Confidence:0.00} | Rank score: {score:0.00}</small>");
+                body.Append("</li>");
+            }
+
+            body.Append("</ol>");
+        }
+
+        body.Append("</body></html>");
+
+        EmailSender.SendHtml(
+            _settings,
+            "pizzawave insights",
+            _settings.EmailUser!,
+            $"PizzaWave daily insights digest ({digestDate:yyyy-MM-dd})",
+            body.ToString());
+        Trace(TraceLoggerType.Insights, TraceEventType.Information,
+            $"Sent daily insights digest for {digestDate:yyyy-MM-dd} with {grouped.Count} category sections.");
+        return true;
+    }
+
+    private static bool IsDailyDigestConfigured(Settings settings)
+    {
+        return settings.DailyInsightsDigestEnabled
+               && settings.LmLinkEnabled
+               && !string.IsNullOrWhiteSpace(settings.LmLinkBaseUrl)
+               && !string.IsNullOrWhiteSpace(settings.LmLinkModel)
+               && !string.IsNullOrWhiteSpace(settings.EmailUser)
+               && !string.IsNullOrWhiteSpace(settings.EmailPassword);
     }
 
     private async Task RunRetentionIfNeeded()
@@ -323,7 +474,18 @@ public class InsightsService : IDisposable
 internal static class LmLinkClient
 {
     private const int MaxPromptChars = 120_000;
-    private static readonly HttpClient SharedHttpClient = new HttpClient();
+    private const int MaxNotableEventsFromLm = 80;
+    private static readonly HttpClient SharedHttpClient = CreateSharedHttpClient();
+
+    private static HttpClient CreateSharedHttpClient()
+    {
+        var client = new HttpClient
+        {
+            // Use Settings.LmLinkTimeoutMs via per-request CTS; avoid HttpClient's 100s default timeout.
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        return client;
+    }
 
     public static async Task<(string SummaryText, List<InsightNotableEvent> NotableEvents)> SummarizeWindowAsync(
         Settings settings,
@@ -345,6 +507,7 @@ internal static class LmLinkClient
         {
             model = settings.LmLinkModel,
             temperature = 0.1, // Lower for more deterministic JSON output
+            max_tokens = 8000,
             response_format = new 
             {
                 type = "json_schema",
@@ -361,13 +524,14 @@ internal static class LmLinkClient
                             notable_events = new 
                             {
                                 type = "array",
+                                maxItems = 20,
                                 items = new 
                                 {
                                     type = "object",
                                      properties = new 
                                      {
-                                         title = new { type = "string" },
-                                         detail = new { type = "string" },
+                                         title = new { type = "string", maxLength = 120 },
+                                         detail = new { type = "string", maxLength = 240 },
                                          category = new { type = "string" },
                                          timestamp = new { type = "string" },
                                         confidence = new { type = "number" },
@@ -393,7 +557,7 @@ internal static class LmLinkClient
             },
             messages = new[]
             {
-                new { role = "system", content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 1-3 matching call_ids copied exactly from the provided call lines." },
+                new { role = "system", content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 1-3 matching call_ids copied exactly from the provided call lines. Do not collapse many distinct incidents into only a few bullets; include broad coverage across distinct incidents with strong evidence." },
                 new { role = "user", content = prompt }
             }
         };
@@ -427,6 +591,11 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
                     $"LM Link response received from attempt {attempt + 1}");
 
                 var parsedResponse = DeserializeChatCompletion(text);
+                var finishReason = parsedResponse?.Choices?.FirstOrDefault()?.FinishReason;
+                if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new Exception("LM Link output was truncated (finish_reason=length). Reduce requested event volume or increase completion token limit.");
+                }
                 if (parsedResponse?.Usage != null)
                 {
                     var promptTokens = parsedResponse.Usage.PromptTokens ?? parsedResponse.Usage.PromptTokensSnake ?? 0;
@@ -442,11 +611,19 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
                 }
 
                 var content = ExtractMessageContent(text);
-                var result = ParseSummary(content, 20);
+                var result = ParseSummary(content, MaxNotableEventsFromLm);
 
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, 
                     $"LM Link parsed window summary with {result.NotableEvents.Count} notable events");
                 return result;
+            }
+            catch (TaskCanceledException ex)
+            {
+                var timedOut = ex.CancellationToken.IsCancellationRequested;
+                var message = timedOut
+                    ? $"LM Link request timed out after {settings.LmLinkTimeoutMs} ms (server likely still processing when client canceled)."
+                    : "LM Link request was canceled/disconnected before response completed.";
+                throw new Exception(message, ex);
             }
             catch (Exception ex) when (attempt < retries)
             {
@@ -470,6 +647,14 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
     private static string BuildPrompt(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, string? priorSummary)
     {
         var sb = new StringBuilder();
+        var targetEventCount = calls.Count switch
+        {
+            >= 300 => 18,
+            >= 200 => 16,
+            >= 100 => 14,
+            >= 50 => 12,
+            _ => 8
+        };
         sb.AppendLine($"Window: {start} to {end}");
         if (!string.IsNullOrWhiteSpace(priorSummary))
         {
@@ -480,6 +665,7 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
         sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
         sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
         sb.AppendLine("Linkage guidance: each notable event must include 1-3 call_ids copied exactly from input lines.");
+        sb.AppendLine($"Coverage guidance: target about {targetEventCount} notable_events for this window when evidence supports it (never fewer than 6 unless there are truly fewer distinct incidents). Keep each detail concise (1 sentence).");
         
         // Prioritize alert calls, then include as many as fit prompt budget.
         var prioritizedCalls = calls
@@ -490,7 +676,7 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
         var usedChars = sb.Length;
         foreach (var call in prioritizedCalls)
         {
-            var time = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToString("T");
+            var time = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime().ToString("h:mm tt");
             var prefix = call.IsAlertMatch ? "[ALERT] " : "";
             var callId = CallHash.ComputeCallId(call);
             var line = $"- [id:{callId}] [{time}] TG {call.Talkgroup}: {prefix}{call.Transcription}";
@@ -501,7 +687,8 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
             usedChars += line.Length + Environment.NewLine.Length;
         }
 
-        sb.AppendLine($"Analyzing {lines.Count} calls (alerts prioritized, prompt budget {MaxPromptChars:N0} chars):");
+        var omitted = Math.Max(0, calls.Count - lines.Count);
+        sb.AppendLine($"Analyzing {lines.Count} calls (alerts prioritized, prompt budget {MaxPromptChars:N0} chars, omitted {omitted}):");
         foreach (var line in lines)
             sb.AppendLine(line);
 
@@ -512,8 +699,12 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
     {
         try
         {
-            var obj = DeserializeChatCompletion(responseJson);
-            var content = obj?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+            var root = JsonConvert.DeserializeObject<JObject>(responseJson);
+            var choice = root?["choices"]?.FirstOrDefault();
+            var contentToken = choice?["message"]?["content"];
+            var content = ExtractContentFromToken(contentToken);
+            if (string.IsNullOrWhiteSpace(content))
+                content = choice?["text"]?.ToString() ?? string.Empty;
             
             Trace(TraceLoggerType.Insights, TraceEventType.Information, 
                 $"ExtractMessageContent: extracted {content.Length} chars");
@@ -527,6 +718,28 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
             return responseJson;
         }
         }
+
+    private static string ExtractContentFromToken(JToken? token)
+    {
+        if (token == null)
+            return string.Empty;
+
+        if (token.Type == JTokenType.String)
+            return token.ToString();
+
+        if (token.Type == JTokenType.Array)
+        {
+            var parts = token.Children()
+                .Select(t => t?["text"]?.ToString() ?? t?.ToString() ?? string.Empty)
+                .Where(s => !string.IsNullOrWhiteSpace(s));
+            return string.Join(Environment.NewLine, parts);
+        }
+
+        if (token.Type == JTokenType.Object)
+            return token["text"]?.ToString() ?? token.ToString();
+
+        return token.ToString();
+    }
 
     internal static Uri BuildEndpoint(Settings settings)
     {
@@ -555,7 +768,7 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
         return text.Length > 300 ? text.Substring(0, 300) + "..." : text;
         }
 
-    internal static (string SummaryText, List<InsightNotableEvent> NotableEvents) ParseSummary(string content, int maxNotableEvents = 20)
+    internal static (string SummaryText, List<InsightNotableEvent> NotableEvents) ParseSummary(string content, int maxNotableEvents = MaxNotableEventsFromLm)
     {
         try
         {
@@ -803,6 +1016,8 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
     {
         [JsonProperty("message")]
         public LmMessage? Message { get; set; }
+        [JsonProperty("finish_reason")]
+        public string? FinishReason { get; set; }
     }
 
     private sealed class LmMessage
@@ -1000,3 +1215,4 @@ public async Task RunRetentionAsync()
         return parts[0].Length == 4 && parts[1].Length == 2 && parts[2].Length == 2;
     }
 }
+

@@ -1,4 +1,4 @@
-﻿/* 
+/* 
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -17,9 +17,6 @@ specific language governing permissions and limitations
 under the License.
 */
 using System.Diagnostics;
-using System.Net.Mail;
-using System.Net.Mime;
-using System.Net;
 using static pizzalib.TraceLogger;
 
 namespace pizzalib
@@ -124,10 +121,10 @@ namespace pizzalib
                 alertEvent.LastTriggered = DateTime.Now;
                 alertEvent.TriggerCountLastInterval++;
 
-                // Send email notification only if alert has email AND Gmail is configured
+                // Send email notification only if alert has email and app password auth is configured
                 if (!string.IsNullOrEmpty(alert.Email) &&
-                    !string.IsNullOrEmpty(m_Settings.gmailUser) &&
-                    !string.IsNullOrEmpty(m_Settings.gmailPassword))
+                    !string.IsNullOrEmpty(m_Settings.EmailUser) &&
+                    !string.IsNullOrEmpty(m_Settings.EmailPassword))
                 {
                     alertEvent.Unlock();
                     SendEmailNotification(alert, alertEvent, call);
@@ -207,43 +204,19 @@ namespace pizzalib
         private void SendEmailNotification(Alert Alert, AlertEvent AlertEvent, TranscribedCall Call)
         {
             var formattedTalkgroup = TalkgroupHelper.FormatTalkgroup(m_Settings, Call.Talkgroup);
-            var sender = new MailAddress(m_Settings.gmailUser!, "pizzawave notifications");
-            string password = m_Settings.gmailPassword!;
-            var smtp = new SmtpClient
-            {
-                Host = "smtp.gmail.com",
-                Port = 587,
-                EnableSsl = true,
-                DeliveryMethod = SmtpDeliveryMethod.Network,
-                Credentials = new NetworkCredential(sender.Address, password),
-                Timeout = 20000
-            };
             var recipients = Alert.GetEmailRecipients();
 
             foreach (var recipient in recipients)
             {
-                var recipientAddress = new MailAddress(recipient, null);
-                using (var message = new MailMessage(sender, recipientAddress)
-                {
-                    Subject = $"pizzawave alert: {Alert.Name}",
-                    IsBodyHtml = true,
-                    Body = $"The following audio transcription from talkgroup <b>{formattedTalkgroup}" +
-                        $"</b> has triggered your alert named <b>" +
-                        $"{Alert.Name}</b> on <b>{AlertEvent.LastTriggered:M/d/yyyy h:mm tt}</b>:" +
-                        $"<P><I>{Call.Transcription}</I></P>"
-                })
-                {
-                    // Attach audio file if location is available
-                    if (!string.IsNullOrEmpty(Call.Location))
-                    {
-                        var contentType = new ContentType();
-                        contentType.MediaType = MediaTypeNames.Application.Octet;
-                        contentType.Name = Path.GetFileName(Call.Location);
-                        message.Attachments.Add(new Attachment(Call.Location, contentType));
-                    }
-                    smtp.Send(message);
-                }
+                EmailSender.SendHtml(
+                    m_Settings,
+                    "pizzawave notifications",
+                    recipient,
+                    $"pizzawave alert: {Alert.Name}",
+                    $"The following audio transcription from talkgroup <b>{formattedTalkgroup}</b> has triggered your alert named <b>{Alert.Name}</b> on <b>{AlertEvent.LastTriggered:M/d/yyyy h:mm tt}</b>:<P><I>{Call.Transcription}</I></P>",
+                    Call.Location);
             }
         }
     }
 }
+
