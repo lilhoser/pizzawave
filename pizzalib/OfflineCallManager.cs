@@ -330,6 +330,11 @@ namespace pizzalib
                     call.Transcription = "[No transcription available]";
                 }
 
+                if (m_TranscribedCallFilter != null && !m_TranscribedCallFilter(call))
+                {
+                    return;
+                }
+
                 // Process alerts
                 ProcessAlerts(call);
 

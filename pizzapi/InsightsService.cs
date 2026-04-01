@@ -27,6 +27,9 @@ public class InsightsService : IDisposable
     private string? _priorSummary;
     private DateTimeOffset _lastRetentionRun = DateTimeOffset.MinValue;
     private DateOnly _lastDigestSentForDate = DateOnly.MinValue;
+    private readonly string _dailyDigestStatePath = Path.Combine(Settings.DefaultWorkingDirectory, "insights", "daily-digest-state.json");
+    private readonly object _dailyDigestStateLock = new();
+    private readonly LmUsageLedgerStore _lmUsageLedger = new();
     public string? LastFailureReason { get; private set; }
 
     public event Action<InsightSummaryWindow>? WindowSaved;
@@ -36,6 +39,7 @@ public class InsightsService : IDisposable
         _settings = settings;
         _storage = new InsightsStorage();
         _storage.EnsureDirectories();
+        LoadDailyDigestState();
         _worker = Task.Run(ProcessQueueAsync);
         
         Trace(TraceLoggerType.Insights, TraceEventType.Information, "InsightsService initialized");
@@ -199,7 +203,7 @@ public class InsightsService : IDisposable
             Trace(TraceLoggerType.Insights, TraceEventType.Information,
                 $"Generating heuristic insights summary for {batchCalls.Count} pending calls: {windowStart} to {windowEnd}");
 
-            var success = await FinalizeWindowCoreAsync(windowStart, windowEnd, batchCalls, _settings);
+            var success = await FinalizeWindowCoreAsync(windowStart, windowEnd, batchCalls, _settings, "periodic insights summary");
             if (success)
             {
                 lock (_pendingLiveCallsLock)
@@ -275,17 +279,17 @@ public class InsightsService : IDisposable
         }
     }
 
-    internal async Task<bool> FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls)
+    internal async Task<bool> FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, string triggerActivity = "other")
     {
-        return await FinalizeWindowCoreAsync(start, end, calls, _settings);
+        return await FinalizeWindowCoreAsync(start, end, calls, _settings, triggerActivity);
         }
 
-    internal async Task<bool> FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings)
+    internal async Task<bool> FinalizeWindowAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings, string triggerActivity = "other")
     {
-        return await FinalizeWindowCoreAsync(start, end, calls, settings);
+        return await FinalizeWindowCoreAsync(start, end, calls, settings, triggerActivity);
     }
 
-    private async Task<bool> FinalizeWindowCoreAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings)
+    private async Task<bool> FinalizeWindowCoreAsync(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, Settings settings, string triggerActivity)
     {
         LastFailureReason = null;
         if (calls.Count == 0)
@@ -316,7 +320,7 @@ public class InsightsService : IDisposable
             {
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, 
                     $"Calling LM Link for window {start} to {end}");
-                var lmResult = await LmLinkClient.SummarizeWindowAsync(settings, start, end, calls, _priorSummary);
+                var lmResult = await LmLinkClient.SummarizeWindowAsync(settings, start, end, calls, _priorSummary, triggerActivity, _lmUsageLedger);
                 summary.SummaryText = lmResult.SummaryText;
                 summary.NotableEvents = lmResult.NotableEvents;
                 if (calls.Count >= 50 && summary.NotableEvents.Count == 0)
@@ -382,7 +386,10 @@ public class InsightsService : IDisposable
         {
             var sent = await Task.Run(() => TrySendDailyDigest(digestDate));
             if (sent)
+            {
                 _lastDigestSentForDate = digestDate;
+                SaveDailyDigestState(digestDate);
+            }
         }
         catch (Exception ex)
         {
@@ -462,6 +469,52 @@ public class InsightsService : IDisposable
                && !string.IsNullOrWhiteSpace(settings.EmailPassword);
     }
 
+    private void LoadDailyDigestState()
+    {
+        lock (_dailyDigestStateLock)
+        {
+            try
+            {
+                if (!File.Exists(_dailyDigestStatePath))
+                    return;
+
+                var json = File.ReadAllText(_dailyDigestStatePath);
+                var state = JsonConvert.DeserializeObject<DailyDigestState>(json);
+                if (state == null || string.IsNullOrWhiteSpace(state.LastSentDigestDate))
+                    return;
+
+                if (DateOnly.TryParse(state.LastSentDigestDate, out var parsed))
+                    _lastDigestSentForDate = parsed;
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.Insights, TraceEventType.Warning,
+                    $"Failed to load daily digest state: {ex.Message}");
+            }
+        }
+    }
+
+    private void SaveDailyDigestState(DateOnly digestDate)
+    {
+        lock (_dailyDigestStateLock)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(_dailyDigestStatePath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                    Directory.CreateDirectory(dir);
+
+                var state = new DailyDigestState { LastSentDigestDate = digestDate.ToString("yyyy-MM-dd") };
+                File.WriteAllText(_dailyDigestStatePath, JsonConvert.SerializeObject(state, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                Trace(TraceLoggerType.Insights, TraceEventType.Warning,
+                    $"Failed to persist daily digest state: {ex.Message}");
+            }
+        }
+    }
+
     private async Task RunRetentionIfNeeded()
     {
         if (DateTimeOffset.UtcNow - _lastRetentionRun < TimeSpan.FromHours(24))
@@ -469,6 +522,12 @@ public class InsightsService : IDisposable
         _lastRetentionRun = DateTimeOffset.UtcNow;
         await _storage.RunRetentionAsync();
         }
+
+    private sealed class DailyDigestState
+    {
+        [JsonProperty("last_sent_digest_date")]
+        public string LastSentDigestDate { get; set; } = string.Empty;
+    }
 }
 
 internal static class LmLinkClient
@@ -492,7 +551,9 @@ internal static class LmLinkClient
         DateTimeOffset start,
         DateTimeOffset end,
         List<TranscribedCall> calls,
-        string? priorSummary)
+        string? priorSummary,
+        string triggerActivity,
+        LmUsageLedgerStore usageLedger)
     {
         var endpoint = BuildEndpoint(settings);
         Trace(TraceLoggerType.Insights, TraceEventType.Information, 
@@ -567,10 +628,12 @@ internal static class LmLinkClient
         Exception? lastError = null;
         for (int attempt = 0; attempt <= retries; attempt++)
         {
+            var attemptNumber = attempt + 1;
+            var attemptAtUtc = DateTime.UtcNow;
             try
             {
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, 
-                    $"LM Link request attempt {attempt + 1} to {endpoint}");
+                    $"LM Link request attempt {attemptNumber} to {endpoint}");
                 using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
                 {
                     Content = new StringContent(payload, Encoding.UTF8, "application/json")
@@ -590,19 +653,18 @@ internal static class LmLinkClient
 Trace(TraceLoggerType.Insights, TraceEventType.Information, 
                     $"LM Link response received from attempt {attempt + 1}");
 
+                var responseRoot = TryParseJsonObject(text);
                 var parsedResponse = DeserializeChatCompletion(text);
                 var finishReason = parsedResponse?.Choices?.FirstOrDefault()?.FinishReason;
                 if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new Exception("LM Link output was truncated (finish_reason=length). Reduce requested event volume or increase completion token limit.");
                 }
-                if (parsedResponse?.Usage != null)
+                var usage = ExtractUsageStats(responseRoot, parsedResponse);
+                if (usage.HasUsage)
                 {
-                    var promptTokens = parsedResponse.Usage.PromptTokens ?? parsedResponse.Usage.PromptTokensSnake ?? 0;
-                    var completionTokens = parsedResponse.Usage.CompletionTokens ?? parsedResponse.Usage.CompletionTokensSnake ?? 0;
-                    var totalTokens = parsedResponse.Usage.TotalTokens ?? 0;
                     Trace(TraceLoggerType.Insights, TraceEventType.Information,
-                        $"LM Link usage: prompt_tokens={promptTokens}, completion_tokens={completionTokens}, total_tokens={totalTokens}");
+                        $"LM Link usage: prompt_tokens={usage.PromptTokens}, completion_tokens={usage.CompletionTokens}, total_tokens={usage.TotalTokens}");
                 }
                 if (!string.IsNullOrWhiteSpace(parsedResponse?.Model))
                 {
@@ -612,6 +674,28 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
 
                 var content = ExtractMessageContent(text);
                 var result = ParseSummary(content, MaxNotableEventsFromLm);
+
+                usageLedger.Append(new LmUsageLedgerEntry
+                {
+                    TimestampUtc = attemptAtUtc,
+                    TriggerActivity = string.IsNullOrWhiteSpace(triggerActivity) ? "other" : triggerActivity.Trim(),
+                    RequestKind = "chat.completions",
+                    Attempt = attemptNumber,
+                    Success = true,
+                    Endpoint = endpoint.ToString(),
+                    RequestModel = settings.LmLinkModel ?? string.Empty,
+                    ResponseModel = parsedResponse?.Model ?? responseRoot?["model"]?.ToString() ?? string.Empty,
+                    ResponseId = responseRoot?["id"]?.ToString() ?? string.Empty,
+                    FinishReason = finishReason ?? string.Empty,
+                    ResponseCreatedUnix = responseRoot?["created"]?.Value<long?>() ?? 0,
+                    InputChars = prompt.Length,
+                    PayloadChars = payload.Length,
+                    PromptTokens = usage.PromptTokens,
+                    CompletionTokens = usage.CompletionTokens,
+                    TotalTokens = usage.TotalTokens,
+                    UsageJson = responseRoot?["usage"]?.ToString(Formatting.None) ?? string.Empty,
+                    StatsJson = responseRoot?["stats"]?.ToString(Formatting.None) ?? string.Empty
+                });
 
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, 
                     $"LM Link parsed window summary with {result.NotableEvents.Count} notable events");
@@ -623,10 +707,36 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
                 var message = timedOut
                     ? $"LM Link request timed out after {settings.LmLinkTimeoutMs} ms (server likely still processing when client canceled)."
                     : "LM Link request was canceled/disconnected before response completed.";
+                usageLedger.Append(new LmUsageLedgerEntry
+                {
+                    TimestampUtc = attemptAtUtc,
+                    TriggerActivity = string.IsNullOrWhiteSpace(triggerActivity) ? "other" : triggerActivity.Trim(),
+                    RequestKind = "chat.completions",
+                    Attempt = attemptNumber,
+                    Success = false,
+                    Error = message,
+                    Endpoint = endpoint.ToString(),
+                    RequestModel = settings.LmLinkModel ?? string.Empty,
+                    InputChars = prompt.Length,
+                    PayloadChars = payload.Length
+                });
                 throw new Exception(message, ex);
             }
             catch (Exception ex) when (attempt < retries)
             {
+                usageLedger.Append(new LmUsageLedgerEntry
+                {
+                    TimestampUtc = attemptAtUtc,
+                    TriggerActivity = string.IsNullOrWhiteSpace(triggerActivity) ? "other" : triggerActivity.Trim(),
+                    RequestKind = "chat.completions",
+                    Attempt = attemptNumber,
+                    Success = false,
+                    Error = ex.Message,
+                    Endpoint = endpoint.ToString(),
+                    RequestModel = settings.LmLinkModel ?? string.Empty,
+                    InputChars = prompt.Length,
+                    PayloadChars = payload.Length
+                });
                 lastError = ex;
                 Trace(TraceLoggerType.Insights, TraceEventType.Warning, 
                     $"LM Link window summary attempt {attempt + 1} failed: {ex.Message}");
@@ -634,6 +744,19 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
             }
             catch (Exception ex)
             {
+                usageLedger.Append(new LmUsageLedgerEntry
+                {
+                    TimestampUtc = attemptAtUtc,
+                    TriggerActivity = string.IsNullOrWhiteSpace(triggerActivity) ? "other" : triggerActivity.Trim(),
+                    RequestKind = "chat.completions",
+                    Attempt = attemptNumber,
+                    Success = false,
+                    Error = ex.Message,
+                    Endpoint = endpoint.ToString(),
+                    RequestModel = settings.LmLinkModel ?? string.Empty,
+                    InputChars = prompt.Length,
+                    PayloadChars = payload.Length
+                });
                 lastError = ex;
                 Trace(TraceLoggerType.Insights, TraceEventType.Error, 
                     $"LM Link window summary request failed after all attempts: {ex.Message}");
@@ -643,6 +766,46 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
 
         throw new Exception($"LM Link window summary request failed: {lastError?.Message ?? "unknown error"}");
         }
+
+    private static JObject? TryParseJsonObject(string text)
+    {
+        try
+        {
+            return JsonConvert.DeserializeObject<JObject>(text);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (bool HasUsage, int PromptTokens, int CompletionTokens, int TotalTokens) ExtractUsageStats(
+        JObject? responseRoot,
+        LmChatCompletionResponse? parsedResponse)
+    {
+        var prompt = parsedResponse?.Usage?.PromptTokens
+                     ?? parsedResponse?.Usage?.PromptTokensSnake
+                     ?? responseRoot?["usage"]?["prompt_tokens"]?.Value<int?>()
+                     ?? responseRoot?["usage"]?["promptTokens"]?.Value<int?>()
+                     ?? 0;
+
+        var completion = parsedResponse?.Usage?.CompletionTokens
+                         ?? parsedResponse?.Usage?.CompletionTokensSnake
+                         ?? responseRoot?["usage"]?["completion_tokens"]?.Value<int?>()
+                         ?? responseRoot?["usage"]?["completionTokens"]?.Value<int?>()
+                         ?? 0;
+
+        var total = parsedResponse?.Usage?.TotalTokens
+                    ?? responseRoot?["usage"]?["total_tokens"]?.Value<int?>()
+                    ?? responseRoot?["usage"]?["totalTokens"]?.Value<int?>()
+                    ?? 0;
+
+        if (total == 0 && (prompt > 0 || completion > 0))
+            total = prompt + completion;
+
+        var hasUsage = prompt > 0 || completion > 0 || total > 0;
+        return (hasUsage, prompt, completion, total);
+    }
 
     private static string BuildPrompt(DateTimeOffset start, DateTimeOffset end, List<TranscribedCall> calls, string? priorSummary)
     {
@@ -700,14 +863,61 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
         try
         {
             var root = JsonConvert.DeserializeObject<JObject>(responseJson);
-            var choice = root?["choices"]?.FirstOrDefault();
-            var contentToken = choice?["message"]?["content"];
-            var content = ExtractContentFromToken(contentToken);
-            if (string.IsNullOrWhiteSpace(content))
-                content = choice?["text"]?.ToString() ?? string.Empty;
+            if (root == null)
+                return string.Empty;
+
+            var candidates = new List<(string Text, string Source)>();
+
+            // If the payload itself is already the target schema, pass it through.
+            if (LooksLikeSummaryPayload(root))
+                candidates.Add((root.ToString(Formatting.None), "root"));
+
+            // chat.completions style.
+            var choices = root["choices"] as JArray;
+            if (choices != null)
+            {
+                foreach (var choice in choices)
+                {
+                    var message = choice?["message"];
+                    AddCandidate(candidates, ExtractContentFromToken(message?["content"]), "choices[].message.content");
+                    AddCandidate(candidates, ExtractContentFromToken(message?["reasoning_content"]), "choices[].message.reasoning_content");
+                    AddCandidate(candidates, choice?["text"]?.ToString(), "choices[].text");
+                    AddCandidate(candidates, message?["function_call"]?["arguments"]?.ToString(), "choices[].message.function_call.arguments");
+
+                    var toolArgs = message?["tool_calls"]?
+                        .Select(t => t?["function"]?["arguments"]?.ToString())
+                        .Where(s => !string.IsNullOrWhiteSpace(s));
+                    if (toolArgs != null)
+                    {
+                        foreach (var arg in toolArgs!)
+                            AddCandidate(candidates, arg, "choices[].message.tool_calls[].function.arguments");
+                    }
+                }
+            }
+
+            // responses API style.
+            AddCandidate(candidates, root["output_text"]?.ToString(), "output_text");
+            var outputs = root["output"] as JArray;
+            if (outputs != null)
+            {
+                foreach (var output in outputs)
+                {
+                    AddCandidate(candidates, ExtractContentFromToken(output?["content"]), "output[].content");
+                    AddCandidate(candidates, output?["text"]?.ToString(), "output[].text");
+                    AddCandidate(candidates, output?["arguments"]?.ToString(), "output[].arguments");
+                }
+            }
+
+            // Some providers wrap assistant message under response/message keys.
+            AddCandidate(candidates, ExtractContentFromToken(root["response"]?["output"]), "response.output");
+            AddCandidate(candidates, ExtractContentFromToken(root["message"]?["content"]), "message.content");
+
+            var best = ChooseBestCandidate(candidates);
+            var content = best.Text;
+            var source = best.Source;
             
             Trace(TraceLoggerType.Insights, TraceEventType.Information, 
-                $"ExtractMessageContent: extracted {content.Length} chars");
+                $"ExtractMessageContent: extracted {content.Length} chars from {source}");
             
             return content;
         }
@@ -717,7 +927,7 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
                 $"ExtractMessageContent failed to deserialize, returning raw response. Error: {ex.Message}");
             return responseJson;
         }
-        }
+    }
 
     private static string ExtractContentFromToken(JToken? token)
     {
@@ -730,15 +940,65 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
         if (token.Type == JTokenType.Array)
         {
             var parts = token.Children()
-                .Select(t => t?["text"]?.ToString() ?? t?.ToString() ?? string.Empty)
-                .Where(s => !string.IsNullOrWhiteSpace(s));
+                .Select(ExtractContentFromToken)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
             return string.Join(Environment.NewLine, parts);
         }
 
         if (token.Type == JTokenType.Object)
-            return token["text"]?.ToString() ?? token.ToString();
+        {
+            var text = token["text"];
+            if (text != null)
+            {
+                if (text.Type == JTokenType.String)
+                    return text.ToString();
+                if (text.Type == JTokenType.Object)
+                    return text["value"]?.ToString() ?? text.ToString();
+                return text.ToString();
+            }
+
+            var value = token["value"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+
+            var content = token["content"];
+            if (content != null)
+                return ExtractContentFromToken(content);
+
+            var arguments = token["arguments"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(arguments))
+                return arguments;
+
+            return token.ToString();
+        }
 
         return token.ToString();
+    }
+
+    private static void AddCandidate(List<(string Text, string Source)> candidates, string? text, string source)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        candidates.Add((text.Trim(), source));
+    }
+
+    private static (string Text, string Source) ChooseBestCandidate(List<(string Text, string Source)> candidates)
+    {
+        if (candidates.Count == 0)
+            return (string.Empty, "none");
+
+        foreach (var candidate in candidates)
+        {
+            if (ContainsSummaryPayload(candidate.Text))
+                return candidate;
+        }
+
+        // Fall back to longest non-empty candidate.
+        return candidates
+            .OrderByDescending(c => c.Text.Length)
+            .First();
     }
 
     internal static Uri BuildEndpoint(Settings settings)
@@ -788,7 +1048,12 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
             LmSummaryPayload? obj = null;
             try
             {
-                obj = JsonConvert.DeserializeObject<LmSummaryPayload>(cleanContent);
+                var token = JToken.Parse(cleanContent);
+                var payload = FindSummaryPayloadToken(token);
+                if (payload != null)
+                    obj = payload.ToObject<LmSummaryPayload>();
+                else
+                    obj = JsonConvert.DeserializeObject<LmSummaryPayload>(cleanContent);
             }
             catch (JsonReaderException ex)
             {
@@ -904,6 +1169,60 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
                 $"Failed to parse LM Link response envelope: {ex.Message}");
             return null;
         }
+    }
+
+    private static bool ContainsSummaryPayload(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        try
+        {
+            var token = JToken.Parse(text);
+            return FindSummaryPayloadToken(token) != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool LooksLikeSummaryPayload(JObject obj)
+    {
+        return obj["summary_text"] != null && obj["notable_events"] != null;
+    }
+
+    private static JToken? FindSummaryPayloadToken(JToken? token)
+    {
+        if (token == null)
+            return null;
+
+        if (token.Type == JTokenType.Object)
+        {
+            var obj = (JObject)token;
+            if (obj["summary_text"] != null && obj["notable_events"] != null)
+                return obj;
+
+            foreach (var property in obj.Properties())
+            {
+                var nested = FindSummaryPayloadToken(property.Value);
+                if (nested != null)
+                    return nested;
+            }
+            return null;
+        }
+
+        if (token.Type == JTokenType.Array)
+        {
+            foreach (var child in token.Children())
+            {
+                var nested = FindSummaryPayloadToken(child);
+                if (nested != null)
+                    return nested;
+            }
+        }
+
+        return null;
     }
 
     private static string StripThinkingBlocks(string content)
@@ -1024,6 +1343,8 @@ Trace(TraceLoggerType.Insights, TraceEventType.Information,
     {
         [JsonProperty("content")]
         public string? Content { get; set; }
+        [JsonProperty("reasoning_content")]
+        public string? ReasoningContent { get; set; }
     }
 
     private sealed class LmSummaryPayload
@@ -1085,16 +1406,19 @@ internal class InsightsStorage
 
 public void EnsureDirectories()
     {
-        Directory.CreateDirectory(_basePath);
+        lock (SharedCacheLock)
+        {
+            Directory.CreateDirectory(_basePath);
+        }
     }
 
     public void SaveWindowSummary(InsightSummaryWindow summary)
     {
-        var windowPath = GetWindowPath(summary.WindowEnd);
-        Directory.CreateDirectory(Path.GetDirectoryName(windowPath)!);
-        File.WriteAllText(windowPath, JsonConvert.SerializeObject(summary, Formatting.Indented));
         lock (SharedCacheLock)
         {
+            var windowPath = GetWindowPath(summary.WindowEnd);
+            Directory.CreateDirectory(Path.GetDirectoryName(windowPath)!);
+            File.WriteAllText(windowPath, JsonConvert.SerializeObject(summary, Formatting.Indented));
             SharedSummaryCache ??= new Dictionary<string, InsightSummaryWindow>(StringComparer.OrdinalIgnoreCase);
             SharedSummaryCache[windowPath] = summary;
         }
@@ -1104,7 +1428,9 @@ public void EnsureDirectories()
     {
         try
         {
-            var json = File.ReadAllText(path);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var json = reader.ReadToEnd();
             return JsonConvert.DeserializeObject<InsightSummaryWindow>(json);
         }
         catch (Exception ex)
@@ -1117,31 +1443,34 @@ public void EnsureDirectories()
 
     public bool HasRecentSummaryFiles(TimeSpan lookback)
     {
-        if (!Directory.Exists(_basePath))
-            return false;
-
-        var cutoff = DateTimeOffset.Now - lookback;
-        foreach (var file in Directory.EnumerateFiles(_basePath, "*.json", SearchOption.AllDirectories))
+        lock (SharedCacheLock)
         {
-            if (!IsSummaryPath(file))
-                continue;
+            if (!Directory.Exists(_basePath))
+                return false;
 
-            try
+            var cutoff = DateTimeOffset.Now - lookback;
+            foreach (var file in Directory.EnumerateFiles(_basePath, "*.json", SearchOption.AllDirectories))
             {
-                var write = File.GetLastWriteTime(file);
-                if (write >= cutoff.LocalDateTime)
-                    return true;
+                if (!IsSummaryPath(file))
+                    continue;
+
+                try
+                {
+                    var write = File.GetLastWriteTime(file);
+                    if (write >= cutoff.LocalDateTime)
+                        return true;
+                }
+                catch
+                {
+                    // Ignore IO errors while checking recency.
+                }
             }
-            catch
-            {
-                // Ignore IO errors while checking recency.
-            }
+
+            return false;
         }
-
-        return false;
     }
 
-public async Task RunRetentionAsync()
+    public async Task RunRetentionAsync()
     {
         await Task.Run(() =>
         {
@@ -1150,19 +1479,56 @@ public async Task RunRetentionAsync()
         InvalidateCache();
     }
 
+    public int DeleteBefore(DateTime cutoffLocal)
+    {
+        lock (SharedCacheLock)
+        {
+            if (!Directory.Exists(_basePath))
+                return 0;
+
+            var removed = 0;
+            foreach (var file in Directory.EnumerateFiles(_basePath, "*.json", SearchOption.AllDirectories))
+            {
+                if (!IsSummaryPath(file))
+                    continue;
+
+                try
+                {
+                    var info = new FileInfo(file);
+                    if (cutoffLocal == DateTime.MaxValue || info.LastWriteTime < cutoffLocal)
+                    {
+                        info.Delete();
+                        removed++;
+                    }
+                }
+                catch
+                {
+                    // Best-effort cleanup.
+                }
+            }
+
+            if (removed > 0)
+                SharedSummaryCache = null;
+            return removed;
+        }
+    }
+
     private void DeleteOlderThan(string root, TimeSpan age)
     {
-        if (!Directory.Exists(root)) return;
-        var cutoff = DateTimeOffset.Now - age;
-        foreach (var file in Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories))
+        lock (SharedCacheLock)
         {
-            try
+            if (!Directory.Exists(root)) return;
+            var cutoff = DateTimeOffset.Now - age;
+            foreach (var file in Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories))
             {
-                var info = new FileInfo(file);
-                if (info.LastWriteTime < cutoff)
-                    info.Delete();
+                try
+                {
+                    var info = new FileInfo(file);
+                    if (info.LastWriteTime < cutoff)
+                        info.Delete();
+                }
+                catch { }
             }
-            catch { }
         }
     }
 

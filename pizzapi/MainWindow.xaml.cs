@@ -10,7 +10,9 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using NAudio.Wave;
+using Newtonsoft.Json;
 using pizzalib;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -19,6 +21,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using static pizzapi.TraceLogger;
 
@@ -29,6 +32,7 @@ public class CallGroupItem
 {
     public bool IsHeader { get; set; }
     public string? HeaderText { get; set; }
+    public string? GroupKey { get; set; }
     public TranscribedCall? Call { get; set; }
     public bool ShowTalkgroup { get; set; } = true;
     public bool IsExpanded { get; set; } = true; // For collapsible groups
@@ -301,15 +305,19 @@ public class ButtonActiveStateConverter : IValueConverter
     }
 }
 
-public enum RightPaneType
+public sealed class LmUsageLedgerRow
 {
-    None,
-    View,
-    Settings,
-    Alerts,
-    Cleanup,
-    Range,
-    InsightTranscript
+    public string Timestamp { get; set; } = string.Empty;
+    public string Trigger { get; set; } = string.Empty;
+    public long PromptTokens { get; set; }
+    public long CompletionTokens { get; set; }
+    public long TotalTokens { get; set; }
+    public double CostStandard { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string PromptTokensDisplay => PromptTokens.ToString("N0");
+    public string CompletionTokensDisplay => CompletionTokens.ToString("N0");
+    public string TotalTokensDisplay => TotalTokens.ToString("N0");
+    public string CostStandardDisplay => CostStandard.ToString("F2");
 }
 
 public partial class MainWindow : Window, INotifyPropertyChanged
@@ -339,27 +347,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private int _currentSortMode = 0; // 0=newest first, 1=oldest first, 2=talkgroup
     private int _currentGroupMode = 0; // 0=none, 1=talkgroup, 2=time of day, 3=source
     private bool _isAlertSnoozed = false;
+    private bool _isAutoplayAlertAudioPlaying = false;
+    private bool _openBellMenuOnNextClick;
     private string _bellToolTipText = "Alert audio: Enabled (click to snooze)";
     private Avalonia.Media.SolidColorBrush? _bellColor = null;
-    private Button? _alwaysPinAlertsButton;
-    // Sort menu buttons for updating checkmarks
-    private Button? _sortNewestButton;
-    private Button? _sortOldestButton;
-    private Button? _sortTalkgroupButton;
-    // Group menu buttons for updating checkmarks
-    private Button? _groupNoneButton;
-    private Button? _groupTalkgroupButton;
-    private Button? _groupTimeOfDayButton;
-    private Button? _groupSourceButton;
-
-    // Right pane content
-    private RightPaneType _activePane = RightPaneType.None;
-    private Control? _activePaneContent;
-    private SettingsPanel? _settingsPanel;
+    // Legacy submenu button references removed with content-centric shell.
+    // Embedded settings tabs content
     private AlertManagerPanel? _alertsPanel;
     private CleanupPanel? _cleanupPanel;
-    private ViewPanel? _viewPanel;
-    private OfflineRangePanel? _offlineRangePanel;
+    private readonly TalkgroupMappingStore _talkgroupMappingStore = new();
+    private List<TalkgroupMapping> _talkgroupMappings = new();
+    private Dictionary<long, TalkgroupMapping> _talkgroupMappingIndex = new();
+    private readonly ObservableCollection<TalkgroupMappingRow> _talkgroupMappingRows = new();
+    private readonly ObservableCollection<TalkgroupMappingRow> _visibleTalkgroupMappingRows = new();
+    private DataGrid? _talkgroupMappingsDataGrid;
+    private CheckBox? _talkgroupSelectAllCheckBox;
+    private bool _suppressTalkgroupSelectionTracking;
+    private bool _shiftPressedDuringTalkgroupCheckboxPress;
+    private long? _talkgroupSelectionAnchorId;
+    private int _selectedTalkgroupRowCount;
+    private static readonly string[] _talkgroupOpsCategoryOptions = { "police", "fire", "ems", "traffic", "other" };
+    private static readonly string[] _talkgroupOpsCategoryFilterOptions = { "all", "police", "fire", "ems", "traffic", "other" };
+    private string _selectedTalkgroupOpsCategoryFilter = "all";
+    private string _talkgroupKeywordFilter = string.Empty;
+    private ProcessingProfile? _selectedTalkgroupAddProfile;
+    private TalkgroupLiveSnapshot _liveTalkgroupSnapshot = TalkgroupLiveSnapshot.Empty;
+    private int _talkgroupLiveSnapshotVersion;
+    private bool _isTalkgroupApplyBusy;
+    private bool _hasPendingTalkgroupMappingChanges;
+    private int _talkgroupRefreshRequestVersion;
+    private readonly ObservableCollection<Talkgroup> _wizardTalkgroupDraftRows = new();
+    private Talkgroup? _selectedSettingsTalkgroup;
+    private string _wizardDraftIdText = string.Empty;
+    private string _wizardDraftAlphaTag = string.Empty;
+    private string _wizardDraftDescription = string.Empty;
+    private string _wizardDraftCategory = string.Empty;
+    private string _wizardSourceUrl = string.Empty;
+    private string _talkgroupWizardStatusText = string.Empty;
+    private string _talkgroupAutoResolveStatusText = string.Empty;
+    private bool _talkgroupMappingEnabledInTr = true;
+    private bool _talkgroupMappingEnabledInPp = true;
+    private string _talkgroupMappingOpsCategory = string.Empty;
+    private string _talkgroupMappingNotes = string.Empty;
     
     // Time range filter state for persistent button bar
     private string _currentFilter = "24h"; // 24h, 2d, week, custom
@@ -418,30 +447,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ? "Radio source: memory + 24h capture folders"
                 : "Radio source: historical disk";
 
-    // Insights mode button states
-    // Note: morning/afternoon/night are kept for auto-activation logic but not shown in UI
-    public bool IsInsightsMorningActive => _isInsightsMode && _insightsFilter == "morning";
-    public bool IsInsightsAfternoonActive => _isInsightsMode && _insightsFilter == "afternoon";
-    public bool IsInsightsNightActive => _isInsightsMode && _insightsFilter == "night";
-    public bool IsInsightsTodayActive => _isInsightsMode && _insightsFilter == "today";
-    public bool IsInsights24hActive => _isInsightsMode && _insightsFilter == "24h";
-    public bool IsInsights2dActive => _isInsightsMode && _insightsFilter == "2d";
-    public bool IsInsightsWeekActive => _isInsightsMode && _insightsFilter == "week";
-    public bool IsInsightsRangeActive => _isInsightsMode && _insightsFilter == "range";
-
-    public bool IsPaneOpen => _activePane != RightPaneType.None;
-    public bool IsViewPaneOpen => _activePane == RightPaneType.View;
-    public bool IsSettingsPaneOpen => _activePane == RightPaneType.Settings;
-    public bool IsAlertsPaneOpen => _activePane == RightPaneType.Alerts;
-    public bool IsCleanupPaneOpen => _activePane == RightPaneType.Cleanup;
-    public bool IsRangePaneOpen => _activePane == RightPaneType.Range;
-
-    public Control? ActivePaneContent
-    {
-        get => _activePaneContent;
-        private set { _activePaneContent = value; RaisePropertyChanged(); }
-    }
-    
     // Custom date range for Pick Range button
     private DateTime? _customStartDate;
     private DateTime? _customEndDate;
@@ -457,7 +462,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     
     // Track expanded group headers
-    private HashSet<string> _collapsedGroups = new HashSet<string>();
+    private readonly HashSet<string> _collapsedLegacyGroups = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _collapsedCategoryGroups = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _seenCategoryGroupHeaders = new(StringComparer.OrdinalIgnoreCase);
     // Flag to prevent re-entrancy in collapse/expand
     private bool _isCollapsingExpanding = false;
 
@@ -465,6 +472,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private TextBox? _searchTextBox;
     private Button? _clearSearchButton;
     private TextBlock? _searchPlaceholder;
+    private DataGrid? _categoryCallsDataGrid;
     private int _currentMatchIndex = -1;
     private bool _isApplyingSettings;
     public bool IsApplyingSettings
@@ -478,6 +486,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Task? _usageTimerTask;
     private readonly SemaphoreSlim _usageUpdateLock = new SemaphoreSlim(1, 1);
     private bool _isClosing;
+    private readonly LmUsageLedgerStore _lmUsageLedgerStore = new();
+    private readonly DateTime _sessionStartedUtc = DateTime.UtcNow;
+    private long _sessionTotalTokens;
+    private string _lmUsageLedgerSummaryText = "No LM Link usage recorded yet.";
 
     // Insights mode fields and properties
     private InsightsService? _insightsService;
@@ -485,19 +497,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isInsightsMode;
     private bool _showRadioSubmenu;
     private bool _showInsightsSubmenu;
-    private string _insightsFilter = "today";
-    private DateTime? _insightsCustomStart;
-    private DateTime? _insightsCustomEnd;
+    private long _insightsLoadRequestVersion;
+    private bool _pendingInsightsReload;
     private readonly Dictionary<string, List<TranscribedCall>> _insightsWindowCallCache = new Dictionary<string, List<TranscribedCall>>();
     private readonly Dictionary<string, Dictionary<string, List<TranscribedCall>>> _insightsWindowCallIdCache = new Dictionary<string, Dictionary<string, List<TranscribedCall>>>();
     private readonly Dictionary<string, Dictionary<string, List<TranscribedCall>>> _insightsWindowHashCache = new Dictionary<string, Dictionary<string, List<TranscribedCall>>>();
-    private const int MaxInsightsTilesPerCategory = 18;
+    private readonly Dictionary<string, int> _insightCallNavigateIndex = new(StringComparer.Ordinal);
+    private const int MaxInsightsTilesPerCategory = 100;
     private const int MaxInsightsEventsPerSummary = 80;
-    private string? _activeInsightTranscriptKey;
     private string? _activeInsightAudioKey;
     private readonly Queue<DateTimeOffset> _liveCallArrivalTimes = new Queue<DateTimeOffset>();
     private bool _liveUiRefreshScheduled;
     private int _liveUiRefreshIntervalMs = 150;
+    private int _unreadAlertCount;
 
     // Real-time progress tracking for insights loading
     public string InsightsProgressMessage => _insightsProgressStatus;
@@ -520,6 +532,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         set { _nextInsightStatusText = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(InsightsStatusLineText)); }
     }
     private string _nextInsightStatusText = "Insights disabled";
+    private bool _isGeneratingInsightsNow;
     public string InsightsStatusLineText
     {
         get
@@ -530,6 +543,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return _nextInsightStatusText ?? string.Empty;
         }
     }
+    public bool IsGenerateNowVisible => _currentFilter == "24h" || _currentFilter == "2d";
+    public bool CanGenerateNow => IsGenerateNowVisible && !_isGeneratingInsightsNow;
+    public bool IsHighlightsEmpty => IsHighlightsSelected && !InsightsLoading && InsightsSummaries.Count == 0;
     public ObservableCollection<InsightSummaryWindow> InsightsSummaries { get; } = new();
     public ObservableCollection<InsightCategorySection> InsightsCategorySections { get; } = new();
     public ObservableCollection<InsightsNarrativeSection> InsightsNarrativeSections { get; } = new();
@@ -656,6 +672,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         set { _bellToolTipText = value; RaisePropertyChanged(); }
     }
 
+    public bool IsBellAlertState => _settings.AutoplayAlerts && _isAutoplayAlertAudioPlaying && IsInsightAudioPlaying();
+
     public Avalonia.Media.SolidColorBrush BellColor
     {
         get => _bellColor ?? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#666666"));
@@ -688,6 +706,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _usageText = "Usage: 0mb";
 
     public string UsageText => _usageText;
+    public string SessionTokenUsageText => FormatCompactTokenCount(_sessionTotalTokens);
+    public string LmUsageLedgerSummaryText
+    {
+        get => _lmUsageLedgerSummaryText;
+        private set { _lmUsageLedgerSummaryText = value; RaisePropertyChanged(); }
+    }
+    public string LmUsageLedgerPath => _lmUsageLedgerStore.LedgerPath;
+    public string LmUsageTierText => "Estimated OpenAI tiers per 1M tokens: budget in/out $0.15/$0.60, standard $2.00/$8.00, premium $5.00/$20.00";
+    public ObservableCollection<LmUsageLedgerRow> LmUsageLedgerRows { get; } = new();
+    public bool HasLmUsageLedgerRows => LmUsageLedgerRows.Count > 0;
+    public string LmUsage24hText { get; private set; } = "24h: tokens 0 | std $0.00";
+    public string LmUsage2dText { get; private set; } = "2d: tokens 0 | std $0.00";
+    public string LmUsageWeekText { get; private set; } = "Week: tokens 0 | std $0.00";
+    public string LmUsageMonthText { get; private set; } = "Month: tokens 0 | std $0.00";
 
     // Search functionality
     private string _searchText = "";
@@ -712,40 +744,61 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public ObservableCollection<CallGroupItem> GroupedCalls { get; } = new ObservableCollection<CallGroupItem>();
     
     // Time range filtering methods
-    private void ApplyTimeRangeFilter()
+    private (DateTime start, DateTime end) GetCurrentRangeBounds()
     {
         var now = DateTimeOffset.Now;
-        var filteredCalls = new List<TranscribedCall>();
-
-        if (_currentFilter == "24h")
+        var start = _currentFilter switch
         {
-            var start = now.AddHours(-24).LocalDateTime;
-            var end = now.LocalDateTime;
-            var folderCalls = LoadOfflineCallsFromHistory(start, end);
-
-            var merged = new List<TranscribedCall>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var call in _allCalls)
-            {
-                var key = GetCallDedupKey(call);
-                if (seen.Add(key))
-                    merged.Add(call);
-            }
-
-            foreach (var call in folderCalls)
-            {
-                var key = GetCallDedupKey(call);
-                if (seen.Add(key))
-                    merged.Add(call);
-            }
-
-            filteredCalls = merged;
-        }
-        else
+            "2d" => now.AddDays(-2).LocalDateTime,
+            "week" => now.AddDays(-7).LocalDateTime,
+            "custom" when _customStartDate.HasValue => _customStartDate.Value,
+            _ => now.AddHours(-24).LocalDateTime
+        };
+        var end = _currentFilter == "custom" && _customEndDate.HasValue
+            ? _customEndDate.Value
+            : now.LocalDateTime;
+        if (_currentFilter == "custom")
         {
-            filteredCalls = _historicalRangeCalls?.ToList() ?? new List<TranscribedCall>();
+            start = NormalizeCustomRangeStart(start);
+            end = NormalizeCustomRangeEnd(end);
         }
+
+        return (start, end);
+    }
+
+    private void ApplyTimeRangeFilter(List<TranscribedCall>? preloadedFolderCalls = null)
+    {
+        _insightCallNavigateIndex.Clear();
+        var (start, end) = GetCurrentRangeBounds();
+        var folderCalls = preloadedFolderCalls ?? LoadOfflineCallsFromHistory(start, end);
+        foreach (var call in folderCalls)
+        {
+            PopulateDerivedCallFields(call);
+        }
+        var merged = new List<TranscribedCall>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var call in _allCalls)
+        {
+            if (!IsCallInRange(call, start, end))
+                continue;
+            var key = GetCallDedupKey(call);
+            if (seen.Add(key))
+                merged.Add(call);
+        }
+
+        foreach (var call in folderCalls)
+        {
+            if (!IsCallInRange(call, start, end))
+                continue;
+            var key = GetCallDedupKey(call);
+            if (seen.Add(key))
+                merged.Add(call);
+        }
+
+        var filteredCalls = merged
+            .Where(ShouldIncludeCallForProfile)
+            .ToList();
         
         // Update the Calls collection
         Calls.Clear();
@@ -765,6 +818,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             foreach (var call in Calls)
                 GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = call, ShowTalkgroup = true });
         }
+
+        RefreshCategoryGroupedCalls(filteredCalls);
         
         RadioStatusText = _currentFilter switch
         {
@@ -788,6 +843,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RaisePropertyChanged(nameof(Is2dActive));
         RaisePropertyChanged(nameof(IsWeekActive));
         RaisePropertyChanged(nameof(IsRangeActive));
+        RaisePropertyChanged(nameof(IsGenerateNowVisible));
+        RaisePropertyChanged(nameof(CanGenerateNow));
+        RaisePropertyChanged(nameof(CompositeStatusText));
     }
     
     public void SetTimeRangeFilter(string filterType)
@@ -820,7 +878,88 @@ RaisePropertyChanged(nameof(IsWeekActive));
         RaisePropertyChanged(nameof(IsRangeWeekActive));
         RaisePropertyChanged(nameof(IsRangeCustomActive));
         RaisePropertyChanged(nameof(IsRangeActive));
+        RaisePropertyChanged(nameof(IsGenerateNowVisible));
+        RaisePropertyChanged(nameof(CanGenerateNow));
         RaisePropertyChanged(nameof(RadioDataSourceText));
+    }
+
+    private static bool IsCallInRange(TranscribedCall call, DateTime start, DateTime end)
+    {
+        var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).LocalDateTime;
+        return local >= start && local <= end;
+    }
+
+    private static DateTime NormalizeCustomRangeStart(DateTime start)
+    {
+        return start.TimeOfDay == TimeSpan.Zero ? start.Date : start;
+    }
+
+    private static DateTime NormalizeCustomRangeEnd(DateTime end)
+    {
+        if (end.TimeOfDay != TimeSpan.Zero)
+            return end;
+
+        return end.Date.AddDays(1).AddTicks(-1);
+    }
+
+    private bool ShouldIncludeCallForProfile(TranscribedCall call)
+    {
+        if (_activeProfile == null)
+            return true;
+        if (_activeProfile.HasTalkgroupScope && !_activeProfile.AllowedTalkgroups.Contains(call.Talkgroup))
+            return false;
+        var category = ResolveCategoryKeyFromTalkgroup(call.Talkgroup);
+        return IsCategoryEnabledForProfile(category);
+    }
+
+    private string? GetSelectedCategoryKey()
+    {
+        if (IsPoliceSelected) return "police";
+        if (IsFireSelected) return "fire";
+        if (IsEmsSelected) return "ems";
+        if (IsTrafficSelected) return "traffic";
+        if (IsOtherSelected) return "other";
+        return null;
+    }
+
+    private string GetInsightsRangeFilterKey() => _currentFilter == "custom" ? "range" : _currentFilter;
+
+    private void RefreshCategoryGroupedCalls(List<TranscribedCall> visibleCalls)
+    {
+        IEnumerable<TranscribedCall> calls = visibleCalls;
+        var selectedCategoryKey = GetSelectedCategoryKey();
+        if (!string.IsNullOrWhiteSpace(selectedCategoryKey))
+            calls = calls.Where(c => ResolveCategoryKeyFromTalkgroup(c.Talkgroup) == selectedCategoryKey);
+
+        var grouped = calls
+            .GroupBy(c => c.FriendlyTalkgroup)
+            .OrderBy(g => g.Key);
+
+        CategoryGroupedCalls.Clear();
+        foreach (var group in grouped)
+        {
+            var title = group.Key;
+            if (!_seenCategoryGroupHeaders.Contains(title))
+            {
+                _seenCategoryGroupHeaders.Add(title);
+                _collapsedCategoryGroups.Add(title);
+            }
+            bool isExpanded = !_collapsedCategoryGroups.Contains(title);
+            CategoryGroupedCalls.Add(new CallGroupItem
+            {
+                IsHeader = true,
+                GroupKey = title,
+                HeaderText = $"{title} ({group.Count()})",
+                IsExpanded = isExpanded
+            });
+            if (!isExpanded)
+                continue;
+            foreach (var call in group.OrderByDescending(c => c.StartTime))
+            {
+                CategoryGroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = call, ShowTalkgroup = false });
+            }
+        }
+        RaisePropertyChanged(nameof(IsCategoryRawCallsEmpty));
     }
 
     private void ClearVisibleCalls()
@@ -830,95 +969,6 @@ RaisePropertyChanged(nameof(IsWeekActive));
         _currentMatchIndex = -1;
         RaisePropertyChanged(nameof(VisibleCallCount));
         RaisePropertyChanged(nameof(VisibleAlertCount));
-    }
-
-    private void SwitchToLiveMode()
-    {
-        StopAudio();
-
-        if (_offlineCallManager != null)
-        {
-            _offlineCallManager.Stop();
-            _offlineCallManager.Dispose();
-            _offlineCallManager = null;
-        }
-
-        _isOfflineMode = false;
-        _isInsightsMode = false;
-        RaisePropertyChanged(nameof(IsOfflineMode));
-        RaisePropertyChanged(nameof(IsInsightsMode));
-        RaisePropertyChanged(nameof(IsCallsMode));
-        RaisePropertyChanged(nameof(ModeIndicatorText));
-        RaisePropertyChanged(nameof(ModeIndicatorColor));
-        RaisePropertyChanged(nameof(IsInsightsEnabled));
-        RaisePropertyChanged(nameof(RadioDataSourceText));
-
-        _allCalls.Clear();
-        foreach (var call in _liveCalls)
-        {
-            _allCalls.Add(call);
-        }
-        ClearVisibleCalls();
-
-        _currentFilter = "24h";
-        _historicalRangeCalls = null;
-        _customStartDate = null;
-        _customEndDate = null;
-        _callsReceivedCount = _liveCalls.Count;
-        _alertsTriggeredCount = _liveCalls.Count(c => c.IsAlertMatch);
-        RaisePropertyChanged(nameof(CallsReceivedCount));
-        RaisePropertyChanged(nameof(AlertsTriggeredCount));
-        UpdateButtonStates();
-        ApplyTimeRangeFilter();
-
-        if (_callManager == null || !_callManager.IsStarted())
-        {
-            _ = InitializeAsync();
-        }
-
-        Title = "PizzaPi";
-        RadioStatusText = "Live mode";
-    }
-
-private void SwitchToInsightsMode()
-    {
-        Trace(TraceLoggerType.Insights, TraceEventType.Information, "SwitchToInsightsMode called");
-
-        StopAudio();
-
-        if (_offlineCallManager != null)
-        {
-            _offlineCallManager.Stop();
-            _offlineCallManager.Dispose();
-            _offlineCallManager = null;
-        }
-
-        _isOfflineMode = false;
-        _isInsightsMode = true;
-        ShowRadioSubmenu = false;
-        RaisePropertyChanged(nameof(IsOfflineMode));
-        RaisePropertyChanged(nameof(IsInsightsMode));
-        RaisePropertyChanged(nameof(IsCallsMode));
-        RaisePropertyChanged(nameof(IsRadioSubmenuVisible));
-        RaisePropertyChanged(nameof(IsInsightsSubmenuVisible));
-        RaisePropertyChanged(nameof(ModeIndicatorText));
-        RaisePropertyChanged(nameof(ModeIndicatorColor));
-        RaisePropertyChanged(nameof(IsRadioMode));
-        RaisePropertyChanged(nameof(RadioDataSourceText));
-
-        Title = "PizzaPi - Insights";
-        StatusText = "Insights mode";
-
-        // Default to the Today insights view when entering insights mode.
-        EnsureInsightsServiceStarted();
-        _insightsService?.UpdateSettings(_settings);
-
-        SafeUiPost(() =>
-        {
-            Trace(TraceLoggerType.Insights, TraceEventType.Information, "Posting Today insights load");
-            SetInsightsFilter("today");
-        });
-
     }
 
     private void OnInsightWindowSaved(InsightSummaryWindow window)
@@ -958,172 +1008,67 @@ private void SwitchToInsightsMode()
         if (!IsInsightsEnabled || _insightsService == null)
         {
             NextInsightStatusText = "Insights disabled";
+            if (IsHighlightsSelected)
+                MenuSpecificStatusText = NextInsightStatusText;
             return;
         }
 
         NextInsightStatusText = _insightsService.GetNextSummaryStatusText();
+        if (IsHighlightsSelected)
+            MenuSpecificStatusText = NextInsightStatusText;
     }
 
     private async Task LoadInsightsSummariesAsync()
     {
+        var requestVersion = Interlocked.Increment(ref _insightsLoadRequestVersion);
+        await Task.Yield();
         try
         {
             Trace(TraceLoggerType.Insights, TraceEventType.Information, "LoadInsightsSummariesAsync called");
-            
-            if (InsightsLoading) return;
-            
+
+            if (InsightsLoading)
+            {
+                _pendingInsightsReload = true;
+                return;
+            }
+
             InsightsLoading = true;
             SafeUiPost(() =>
             {
                 RaisePropertyChanged(nameof(InsightsLoading));
+                RaisePropertyChanged(nameof(IsHighlightsEmpty));
                 InsightsStatusText = "Loading insights...";
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, "Set InsightsLoading=true and status text");
             });
-            Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Current filter: {_insightsFilter}");
+            var insightsRangeFilter = GetInsightsRangeFilterKey();
+            Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Current filter: {insightsRangeFilter}");
             Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Settings null? {_settings == null}, LmLinkEnabled? {_settings?.LmLinkEnabled}, BaseUrl? {_settings?.LmLinkBaseUrl}");
-            
+
             var now = DateTimeOffset.Now;
-            DateTimeOffset start, end;
-            List<InsightSummaryWindow> summaries = new List<InsightSummaryWindow>();
-
-            if (_insightsFilter == "today")
+            var start = insightsRangeFilter switch
             {
-                var todayStart = new DateTimeOffset(now.Date);
-                InsightsSummaries.Clear();
-                
-                summaries = _insightsStorage.LoadDaily(todayStart, todayStart.AddDays(1));
-                InsightsStatusText = $"Loading daily summary for {now:yyyy-MM-dd}...";
-
-                // On some Linux/RPi timezone setups, "today" boundary checks can miss a valid
-                // recently generated window summary. Reuse recent summaries before generating.
-                if (summaries.Count == 0)
-                {
-                    var recentStart = now.AddHours(-12);
-                    var recent = _insightsStorage.LoadDaily(recentStart, now);
-                    if (recent.Count > 0)
-                    {
-                        summaries = recent
-                            .OrderByDescending(s => s.WindowEnd)
-                            .Take(3)
-                            .ToList();
-                        InsightsStatusText = "Loaded recent insights window(s)";
-                    }
-                }
-                
-                // If no summary exists and LM Link is enabled, generate it
-                if (summaries.Count == 0 && _settings.LmLinkEnabled)
-                {
-                    // Prevent repeat regeneration loops (observed on some RPi/Linux setups)
-                    // when summary files exist but day-window lookup returned empty.
-                    if (_insightsStorage.HasRecentSummaryFiles(TimeSpan.FromHours(10)))
-                    {
-                        Trace(TraceLoggerType.Insights, TraceEventType.Warning,
-                            "Recent insights summary files exist; skipping regeneration for Today.");
-                        InsightsStatusText = "Recent insights already exist; skipping regeneration";
-                    }
-                    else
-                    {
-                    Trace(TraceLoggerType.Insights, TraceEventType.Information, "No daily summary for today, triggering generation");
-
-                    var generationEnd = now;
-                    var generationStart = todayStart;
-                    var allCalls = LoadOfflineCallsFromHistory(generationStart.DateTime, generationEnd.DateTime);
-                    if (allCalls.Count > 0)
-                    {
-                        SafeUiPost(() =>
-                        {
-                            InsightsStatusText = $"Generating summary for {generationStart:HH:mm} - {generationEnd:HH:mm}...";
-                        });
-
-                        try
-                        {
-                            var success = await _insightsService.FinalizeWindowAsync(generationStart, generationEnd, allCalls);
-                            summaries = _insightsStorage.LoadDaily(todayStart, todayStart.AddDays(1));
-                            if (!success && summaries.Count == 0)
-                            {
-                                var reason = string.IsNullOrWhiteSpace(_insightsService.LastFailureReason)
-                                    ? "LM Link returned no usable summary content."
-                                    : _insightsService.LastFailureReason!;
-                                summaries = new List<InsightSummaryWindow>
-                                {
-                                    CreateInsightsErrorSummary(reason, generationStart, generationEnd)
-                                };
-                            }
-                            
-                            SafeUiPost(() =>
-                            {
-                                InsightsStatusText = success
-                                    ? $"Generated summary for {generationStart:HH:mm} - {generationEnd:HH:mm}"
-                                    : $"Generation failed for {generationStart:HH:mm} - {generationEnd:HH:mm}";
-                                RaisePropertyChanged(nameof(InsightsStatusText));
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            Trace(TraceLoggerType.Insights, TraceEventType.Error, $"Error generating summary: {ex.Message}");
-                            summaries = new List<InsightSummaryWindow>
-                            {
-                                CreateInsightsErrorSummary(ex.Message, todayStart, todayStart.AddDays(1))
-                            };
-                            SafeUiPost(() =>
-                            {
-                                InsightsStatusText = $"Error: {ex.Message}";
-                                RaisePropertyChanged(nameof(InsightsStatusText));
-                            });
-                        }
-                    }
-                    }
-                }
-                
-                InsightsSummaries.Clear();
-                foreach (var s in summaries)
-                {
-                    var filteredSummary = FilterTopEvents(s, maxEvents: MaxInsightsEventsPerSummary);
-                    InsightsSummaries.Add(filteredSummary);
-                }
-                RefreshInsightsCategorySections();
-                return;
-            }
-            else if (_insightsFilter == "range")
-            {
-                start = _insightsCustomStart.HasValue ? new DateTimeOffset(_insightsCustomStart.Value) : now.AddHours(-24);
-                end = _insightsCustomEnd.HasValue
-                    ? new DateTimeOffset(_insightsCustomEnd.Value.AddDays(1))
-                    : now;
-            }
-            else
-            {
-                start = _insightsFilter switch
-                {
-                    "24h" => now.AddHours(-24),
-                    "2d" => now.AddDays(-2),
-                    "week" => now.AddDays(-7),
-                    _ => now.AddHours(-24)
-                };
-                end = now;
-            }
+                "2d" => now.AddDays(-2),
+                "week" => now.AddDays(-7),
+                "range" => _customStartDate.HasValue ? new DateTimeOffset(_customStartDate.Value) : now.AddHours(-24),
+                _ => now.AddHours(-24)
+            };
+            var end = insightsRangeFilter == "range" && _customEndDate.HasValue
+                ? new DateTimeOffset(NormalizeCustomRangeEnd(_customEndDate.Value))
+                : now;
 
             InsightsStatusText = $"Loading insights for {start:MM/dd HH:mm} to {end:MM/dd HH:mm}...";
 
-            summaries = new List<InsightSummaryWindow>();
-
-            Func<List<InsightSummaryWindow>> loadSummariesForFilter = () =>
-            {
-                if (_insightsFilter == "range")
-                    return LoadInsightsForRange(start, end);
-                return _insightsStorage.LoadDaily(start, end);
-            };
-
-            summaries = loadSummariesForFilter();
-            if (_insightsFilter != "range")
+            var summaries = insightsRangeFilter == "range"
+                ? LoadInsightsForRange(start, end)
+                : _insightsStorage.LoadDaily(start, end);
+            if (insightsRangeFilter != "range")
                 InsightsStatusText = $"Loading {summaries.Count} daily summary(ies)...";
 
             Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Loaded {summaries.Count} summaries from storage");
 
-            // Historical filters are storage-only lookups.
-            // On-demand LLM generation is intentionally limited to "today" mode above.
-            
-            // Filter to top 20 high-confidence events per summary
+            if (requestVersion != Volatile.Read(ref _insightsLoadRequestVersion))
+                return;
+
             InsightsSummaries.Clear();
             foreach (var s in summaries)
             {
@@ -1142,6 +1087,8 @@ private void SwitchToInsightsMode()
         catch (Exception ex)
         {
             Trace(TraceLoggerType.Insights, TraceEventType.Error, $"Insights load failed: {ex.Message}");
+            if (requestVersion != Volatile.Read(ref _insightsLoadRequestVersion))
+                return;
             var errorSummary = CreateInsightsErrorSummary(ex.Message, DateTimeOffset.Now, DateTimeOffset.Now);
             SafeUiPost(() =>
             {
@@ -1162,8 +1109,16 @@ private void SwitchToInsightsMode()
                 if (!InsightsLoading)
                     InsightsStatusText = string.Empty;
                 RaisePropertyChanged(nameof(InsightsLoading));
+                RaisePropertyChanged(nameof(IsHighlightsEmpty));
                 Trace(TraceLoggerType.Insights, TraceEventType.Information, $"Insights loading complete. Status: {InsightsStatusText}");
             });
+
+            var latestVersion = Volatile.Read(ref _insightsLoadRequestVersion);
+            if (_pendingInsightsReload || requestVersion < latestVersion)
+            {
+                _pendingInsightsReload = false;
+                _ = LoadInsightsSummariesAsync();
+            }
         }
     }
 
@@ -1236,12 +1191,12 @@ private void SwitchToInsightsMode()
                     : _resetInsightsPreviewOnNextRefresh
                         ? false
                     : priorStates.TryGetValue(g.Key, out state) && state.ShowAll,
-                Events = g
+                Events = AnnotateDateDividers(g
                     .OrderByDescending(e => e.HasAlertMatch)
                     .ThenByDescending(GetNotableSortKey)
                     .ThenByDescending(e => e.Confidence)
                     .Take(MaxInsightsTilesPerCategory)
-                    .ToList()
+                    .ToList())
             })
             .ToList();
 
@@ -1252,6 +1207,29 @@ private void SwitchToInsightsMode()
         _resetInsightsPreviewOnNextRefresh = false;
         BuildInsightsNarrativeSections();
         RaisePropertyChanged(nameof(InsightsOverviewText));
+        RaisePropertyChanged(nameof(IsCategoryInsightsEmpty));
+        RaisePropertyChanged(nameof(IsHighlightsEmpty));
+    }
+
+    private static List<InsightNotableEvent> AnnotateDateDividers(List<InsightNotableEvent> events)
+    {
+        DateTime? lastDate = null;
+        foreach (var evt in events)
+        {
+            var eventLocal = GetNotableSortKey(evt).ToLocalTime().Date;
+            if (!lastDate.HasValue || eventLocal != lastDate.Value)
+            {
+                evt.ShowDateDivider = true;
+                evt.DateDividerText = eventLocal.ToString("dddd, MMMM d");
+                lastDate = eventLocal;
+            }
+            else
+            {
+                evt.ShowDateDivider = false;
+                evt.DateDividerText = string.Empty;
+            }
+        }
+        return events;
     }
 
     private void BuildInsightsNarrativeSections()
@@ -1486,6 +1464,30 @@ private void SwitchToInsightsMode()
                     .ToLocalTime()
                     .ToString("h:mm tt");
             }
+
+            var normalizedCategory = InsightCategoryPalette.Normalize(notable.Category);
+            if (normalizedCategory == "other")
+            {
+                var derivedCategory = matchedCalls
+                    .Select(c => ResolveCategoryKeyFromTalkgroup(c.Talkgroup))
+                    .Where(c => !string.IsNullOrWhiteSpace(c))
+                    .GroupBy(c => c)
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => g.Key)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(derivedCategory) &&
+                    !string.Equals(derivedCategory, "other", StringComparison.OrdinalIgnoreCase))
+                {
+                    notable.Category = derivedCategory;
+                }
+                else
+                {
+                    var keywordDerived = ResolveCategoryFromKeywords($"{notable.Title} {notable.Detail}");
+                    if (!string.Equals(keywordDerived, "other", StringComparison.OrdinalIgnoreCase))
+                        notable.Category = keywordDerived;
+                }
+            }
         }
     }
 
@@ -1562,7 +1564,7 @@ private void SwitchToInsightsMode()
         _historicalRangeCalls = LoadOfflineCallsFromHistory(start, end);
         foreach (var call in _historicalRangeCalls)
         {
-            call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
+            call.FriendlyTalkgroup = FormatTalkgroupFromLiveSnapshot(call.Talkgroup);
             call.FriendlyFrequency = FormatFrequency(call.Frequency);
             call.PlayAudioCommand = (c) => PlayAudio(c);
         }
@@ -1571,8 +1573,11 @@ private void SwitchToInsightsMode()
         _alertsTriggeredCount = _allCalls.Count(c => c.IsAlertMatch);
         RaisePropertyChanged(nameof(CallsReceivedCount));
         RaisePropertyChanged(nameof(AlertsTriggeredCount));
+        RaisePropertyChanged(nameof(FooterCallsText));
+        RaisePropertyChanged(nameof(FooterAlertsText));
+        RaisePropertyChanged(nameof(CompositeStatusText));
 
-        ApplyTimeRangeFilter();
+        ApplyTimeRangeFilter(_historicalRangeCalls);
         UpdateButtonStates();
 
         Title = "PizzaPi - Radio History";
@@ -1583,7 +1588,6 @@ private void SwitchToInsightsMode()
         var capturesRoot = Settings.DefaultLiveCaptureDirectory;
         if (!Directory.Exists(capturesRoot))
         {
-            StatusText = $"Captures directory not found: {capturesRoot}";
             return new List<TranscribedCall>();
         }
 
@@ -1593,7 +1597,6 @@ private void SwitchToInsightsMode()
 
         if (candidateFolders.Count == 0)
         {
-            StatusText = "No capture folders found for the selected date range";
             return new List<TranscribedCall>();
         }
 
@@ -1608,8 +1611,15 @@ private void SwitchToInsightsMode()
 
             try
             {
-                foreach (var line in File.ReadLines(journalPath))
+                using var stream = new FileStream(
+                    journalPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                while (!reader.EndOfStream)
                 {
+                    var line = reader.ReadLine();
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
 
@@ -1619,7 +1629,12 @@ private void SwitchToInsightsMode()
 
                     if (call == null)
                         continue;
+                    if (!ShouldIncludeCallForProfile(call))
+                        continue;
+                    if (!IsCallInRange(call, start, end))
+                        continue;
 
+                    PopulateDerivedCallFields(call);
                     var key = GetCallDedupKey(call);
                     if (seenKeys.Add(key))
                         loadedCalls.Add(call);
@@ -1659,7 +1674,12 @@ private void SwitchToInsightsMode()
                 return false;
             }
 
-            return folderTimestamp >= start && folderTimestamp <= end;
+            // Lightweight range inclusion: avoid reading journal files during folder filtering.
+            // Include folders that start within a conservative buffered window so downstream
+            // per-call time checks can do the precise filtering.
+            var bufferedStart = start.AddDays(-1);
+            var bufferedEnd = end.AddHours(6);
+            return folderTimestamp >= bufferedStart && folderTimestamp <= bufferedEnd;
         }
         catch
         {
@@ -1673,7 +1693,10 @@ private void SwitchToInsightsMode()
         _customEndDate = end;
         if (start.HasValue && end.HasValue)
         {
-            SwitchToOfflineHistory(start.Value, end.Value.AddDays(1), "custom");
+            _currentFilter = "custom";
+            ApplyTimeRangeFilter();
+            if (IsHighlightsSelected)
+                _ = LoadInsightsSummariesAsync();
         }
         else
         {
@@ -1684,16 +1707,406 @@ private void SwitchToInsightsMode()
     }
     private bool _useGrouping => _currentGroupMode > 0;
 
+    private readonly ProfileStore _profileStore = new();
+    private readonly AlertHistoryStore _alertHistoryStore = new();
+    private MainSection _selectedSection = MainSection.Highlights;
+    private ProcessingProfile? _activeProfile;
+    private ProcessingProfile? _profileEditorSelectedProfile;
+    private string _menuSpecificStatusText = string.Empty;
+    private static readonly string[] _troubleshootTraceLevelOptions = { "Error", "Warning", "Information", "Debug" };
+    private string _selectedTroubleshootTraceLevel = "Information";
+    private const string CurrentPizzaPiLogOption = "Current";
+    private bool _isRefreshingPizzaPiLogOptions;
+    private string _selectedPizzaPiLogOption = CurrentPizzaPiLogOption;
+    private readonly Dictionary<string, string> _pizzaPiLogOptionPathMap = new(StringComparer.OrdinalIgnoreCase);
+    public ObservableCollection<ProcessingProfile> Profiles { get; } = new();
+    public ObservableCollection<ProcessingProfile> TalkgroupEditableProfiles { get; } = new();
+    public ObservableCollection<AlertMatchRecord> AlertHistory { get; } = new();
+    public ObservableCollection<string> PizzaPiLogOptions { get; } = new();
+    public ObservableCollection<CallGroupItem> CategoryGroupedCalls { get; } = new();
+    public ObservableCollection<Talkgroup> TalkgroupRows { get; } = new();
+    public ObservableCollection<TalkgroupMappingRow> TalkgroupMappingRows => _talkgroupMappingRows;
+    public ObservableCollection<TalkgroupMappingRow> VisibleTalkgroupMappingRows => _visibleTalkgroupMappingRows;
+    public IReadOnlyList<string> TalkgroupOpsCategoryOptions => _talkgroupOpsCategoryOptions;
+    public IReadOnlyList<string> TalkgroupOpsCategoryFilterOptions => _talkgroupOpsCategoryFilterOptions;
+    public ObservableCollection<Talkgroup> WizardTalkgroupDraftRows => _wizardTalkgroupDraftRows;
+    public string TalkgroupSummaryText => $"({TalkgroupRows.Count})";
+    public string TalkgroupCoverageText =>
+        $"Talkgroups: {_talkgroupMappings.Select(m => m.TalkgroupId).Distinct().Count()}";
+    public int SelectedTalkgroupRowCount
+    {
+        get => _selectedTalkgroupRowCount;
+        private set
+        {
+            if (_selectedTalkgroupRowCount == value)
+                return;
+            _selectedTalkgroupRowCount = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsTalkgroupAddProfileEnabled));
+            RaisePropertyChanged(nameof(CanAddSelectedTalkgroups));
+        }
+    }
+
+    public ProcessingProfile? SelectedTalkgroupAddProfile
+    {
+        get => _selectedTalkgroupAddProfile;
+        set
+        {
+            if (_selectedTalkgroupAddProfile?.Id == value?.Id)
+                return;
+            _selectedTalkgroupAddProfile = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanAddSelectedTalkgroups));
+        }
+    }
+
+    public bool IsTalkgroupAddProfileEnabled =>
+        TalkgroupEditableProfiles.Count > 0 &&
+        SelectedTalkgroupRowCount > 0 &&
+        !IsTalkgroupEditorBusy;
+
+    public bool CanAddSelectedTalkgroups =>
+        IsTalkgroupAddProfileEnabled &&
+        SelectedTalkgroupAddProfile != null;
+
+    public string WizardDraftIdText
+    {
+        get => _wizardDraftIdText;
+        set { _wizardDraftIdText = value; RaisePropertyChanged(); }
+    }
+
+    public string WizardDraftAlphaTag
+    {
+        get => _wizardDraftAlphaTag;
+        set { _wizardDraftAlphaTag = value; RaisePropertyChanged(); }
+    }
+
+    public string WizardDraftDescription
+    {
+        get => _wizardDraftDescription;
+        set { _wizardDraftDescription = value; RaisePropertyChanged(); }
+    }
+
+    public string WizardDraftCategory
+    {
+        get => _wizardDraftCategory;
+        set { _wizardDraftCategory = value; RaisePropertyChanged(); }
+    }
+
+    public string TalkgroupWizardStatusText
+    {
+        get => _talkgroupWizardStatusText;
+        set { _talkgroupWizardStatusText = value; RaisePropertyChanged(); }
+    }
+
+    public string SelectedTalkgroupOpsCategoryFilter
+    {
+        get => _selectedTalkgroupOpsCategoryFilter;
+        set
+        {
+            // ComboBox can emit transient null/blank values during focus/edit transitions.
+            // Ignore those so we do not accidentally reset the active filter to "all".
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            var normalized = NormalizeOpsCategoryFilter(value);
+            if (string.Equals(_selectedTalkgroupOpsCategoryFilter, normalized, StringComparison.Ordinal))
+                return;
+            _selectedTalkgroupOpsCategoryFilter = normalized;
+            RaisePropertyChanged();
+            RefreshVisibleTalkgroupRows();
+        }
+    }
+
+    public string TalkgroupKeywordFilter
+    {
+        get => _talkgroupKeywordFilter;
+        set
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            if (string.Equals(_talkgroupKeywordFilter, normalized, StringComparison.Ordinal))
+                return;
+            _talkgroupKeywordFilter = normalized;
+            RaisePropertyChanged();
+            RefreshVisibleTalkgroupRows();
+        }
+    }
+
+    public bool IsTalkgroupApplyBusy
+    {
+        get => _isTalkgroupApplyBusy;
+        set
+        {
+            if (_isTalkgroupApplyBusy == value) return;
+            _isTalkgroupApplyBusy = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsTalkgroupEditorBusy));
+            RaisePropertyChanged(nameof(IsTalkgroupApplyEnabled));
+            RaisePropertyChanged(nameof(IsTalkgroupAddProfileEnabled));
+            RaisePropertyChanged(nameof(CanAddSelectedTalkgroups));
+        }
+    }
+
+    public bool HasPendingTalkgroupMappingChanges
+    {
+        get => _hasPendingTalkgroupMappingChanges;
+        set
+        {
+            if (_hasPendingTalkgroupMappingChanges == value) return;
+            _hasPendingTalkgroupMappingChanges = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsTalkgroupApplyEnabled));
+        }
+    }
+
+    public bool IsTalkgroupEditorBusy => IsTalkgroupApplyBusy;
+    public bool IsTalkgroupApplyEnabled => HasPendingTalkgroupMappingChanges && !IsTalkgroupEditorBusy;
+
+    public string TalkgroupAutoResolveStatusText
+    {
+        get => _talkgroupAutoResolveStatusText;
+        set { _talkgroupAutoResolveStatusText = value; RaisePropertyChanged(); }
+    }
+
+    public string WizardSourceUrl
+    {
+        get => _wizardSourceUrl;
+        set { _wizardSourceUrl = value; RaisePropertyChanged(); }
+    }
+
+    public Talkgroup? SelectedSettingsTalkgroup
+    {
+        get => _selectedSettingsTalkgroup;
+        set
+        {
+            if (ReferenceEquals(_selectedSettingsTalkgroup, value))
+                return;
+            _selectedSettingsTalkgroup = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(SelectedTalkgroupDisplay));
+            LoadSelectedTalkgroupMappingIntoEditor();
+        }
+    }
+
+    public string SelectedTalkgroupDisplay
+    {
+        get
+        {
+            if (_selectedSettingsTalkgroup == null)
+                return "No talkgroup selected.";
+            return $"TG {_selectedSettingsTalkgroup.Id} | {_selectedSettingsTalkgroup.AlphaTag} | {_selectedSettingsTalkgroup.Description}";
+        }
+    }
+
+    public bool TalkgroupMappingEnabledInTr
+    {
+        get => _talkgroupMappingEnabledInTr;
+        set { _talkgroupMappingEnabledInTr = value; RaisePropertyChanged(); }
+    }
+
+    public bool TalkgroupMappingEnabledInPp
+    {
+        get => _talkgroupMappingEnabledInPp;
+        set { _talkgroupMappingEnabledInPp = value; RaisePropertyChanged(); }
+    }
+
+    public string TalkgroupMappingOpsCategory
+    {
+        get => _talkgroupMappingOpsCategory;
+        set { _talkgroupMappingOpsCategory = value; RaisePropertyChanged(); }
+    }
+
+    public string TalkgroupMappingNotes
+    {
+        get => _talkgroupMappingNotes;
+        set { _talkgroupMappingNotes = value; RaisePropertyChanged(); }
+    }
+
+    public MainSection SelectedSection
+    {
+        get => _selectedSection;
+        set
+        {
+            if (_selectedSection == value)
+                return;
+            _selectedSection = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsHighlightsSelected));
+            RaisePropertyChanged(nameof(IsAlertsSelected));
+            RaisePropertyChanged(nameof(IsPoliceSelected));
+            RaisePropertyChanged(nameof(IsFireSelected));
+            RaisePropertyChanged(nameof(IsEmsSelected));
+            RaisePropertyChanged(nameof(IsTrafficSelected));
+            RaisePropertyChanged(nameof(IsOtherSelected));
+            RaisePropertyChanged(nameof(IsSettingsSelected));
+            RaisePropertyChanged(nameof(IsTroubleshootSelected));
+            RaisePropertyChanged(nameof(IsAnyCategorySelected));
+            RaisePropertyChanged(nameof(IsCallsSectionVisible));
+            RaisePropertyChanged(nameof(IsInsightsSectionVisible));
+            RaisePropertyChanged(nameof(IsAlertsSectionVisible));
+            RaisePropertyChanged(nameof(IsSettingsSectionVisible));
+            RaisePropertyChanged(nameof(IsTroubleshootSectionVisible));
+            RaisePropertyChanged(nameof(IsCategoryInsightsEmpty));
+            RaisePropertyChanged(nameof(IsCategoryRawCallsEmpty));
+            RaisePropertyChanged(nameof(IsHighlightsEmpty));
+            RaisePropertyChanged(nameof(IsAlertsEmpty));
+            RaisePropertyChanged(nameof(CompositeStatusText));
+
+            if (value == MainSection.Alerts)
+            {
+                MarkAlertHistoryRead();
+            }
+        }
+    }
+
+    public bool IsHighlightsSelected => SelectedSection == MainSection.Highlights;
+    public bool IsAlertsSelected => SelectedSection == MainSection.Alerts;
+    public bool IsPoliceSelected => SelectedSection == MainSection.Police;
+    public bool IsFireSelected => SelectedSection == MainSection.Fire;
+    public bool IsEmsSelected => SelectedSection == MainSection.EMS;
+    public bool IsTrafficSelected => SelectedSection == MainSection.Traffic;
+    public bool IsOtherSelected => SelectedSection == MainSection.Other;
+    public bool IsSettingsSelected => SelectedSection == MainSection.Settings;
+    public bool IsTroubleshootSelected => SelectedSection == MainSection.Troubleshoot;
+    public bool IsAnyCategorySelected => IsPoliceSelected || IsFireSelected || IsEmsSelected || IsTrafficSelected || IsOtherSelected;
+    public bool IsCallsSectionVisible => IsAnyCategorySelected;
+    public bool IsInsightsSectionVisible => IsHighlightsSelected;
+    public bool IsAlertsSectionVisible => IsAlertsSelected;
+    public bool IsSettingsSectionVisible => IsSettingsSelected;
+    public bool IsTroubleshootSectionVisible => IsTroubleshootSelected;
+    public bool IsCategoryInsightsEmpty => IsAnyCategorySelected && InsightsCategorySections.Count == 0;
+    public bool IsCategoryRawCallsEmpty => IsAnyCategorySelected && CategoryGroupedCalls.Count == 0;
+    public bool IsAlertsEmpty => IsAlertsSelected && AlertHistory.Count == 0;
+
+    public string CurrentProfileName => _activeProfile?.Name ?? "Default";
+        public Control? AlertsPanelControl => _alertsPanel;
+    public Control? CleanupPanelControl => _cleanupPanel;
+    public bool IsTrunkTroubleshootVisible => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+    public string TrunkRecorderLogText { get; private set; } = "Trunk recorder log unavailable.";
+    public string PizzaPiLogText { get; private set; } = "PizzaPi log unavailable.";
+    public IReadOnlyList<string> TroubleshootTraceLevelOptions => _troubleshootTraceLevelOptions;
+    public string SelectedPizzaPiLogOption
+    {
+        get => _selectedPizzaPiLogOption;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? CurrentPizzaPiLogOption : value.Trim();
+            if (string.Equals(_selectedPizzaPiLogOption, normalized, StringComparison.Ordinal))
+                return;
+
+            _selectedPizzaPiLogOption = normalized;
+            RaisePropertyChanged();
+            if (!_isRefreshingPizzaPiLogOptions)
+                LoadSelectedPizzaPiLogText();
+        }
+    }
+    public string SelectedTroubleshootTraceLevel
+    {
+        get => _selectedTroubleshootTraceLevel;
+        set
+        {
+            var normalized = NormalizeTroubleshootTraceLevel(value);
+            if (string.Equals(_selectedTroubleshootTraceLevel, normalized, StringComparison.Ordinal))
+                return;
+
+            _selectedTroubleshootTraceLevel = normalized;
+            RaisePropertyChanged();
+            ApplyTroubleshootTraceLevelSelection(normalized);
+        }
+    }
+    public bool IsBellMenuVisible => _settings.AutoplayAlerts && _isAutoplayAlertAudioPlaying && IsInsightAudioPlaying();
+    public bool HasTroubleshootIssue { get; private set; }
+    public string TroubleshootMenuText => HasTroubleshootIssue ? "Troubleshoot (!)" : "Troubleshoot";
+
+    public ProcessingProfile? ActiveProfile
+    {
+        get => _activeProfile;
+        set
+        {
+            if (value == null || _activeProfile?.Id == value.Id)
+                return;
+            _activeProfile = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CurrentProfileName));
+            RaisePropertyChanged(nameof(FooterProfileText));
+            RefreshMenuVisibility();
+            ApplyActiveProfileToManagers();
+            ClearSectionCachesForProfileSwitch();
+            _profileStore.Save(Profiles.ToList(), _activeProfile.Id);
+            EnsureValidSelectedSection();
+            ApplyGlobalRangeForSelectedSection();
+            if (_profileEditorSelectedProfile == null || !Profiles.Any(p => p.Id == _profileEditorSelectedProfile.Id))
+                ProfileEditorSelectedProfile = _activeProfile;
+            EnsureTalkgroupAddProfileSelection();
+        }
+    }
+
+    public ProcessingProfile? ProfileEditorSelectedProfile
+    {
+        get => _profileEditorSelectedProfile;
+        set
+        {
+            if (_profileEditorSelectedProfile?.Id == value?.Id)
+                return;
+            _profileEditorSelectedProfile = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(HasProfileEditorSelection));
+            RaisePropertyChanged(nameof(CanDeleteSelectedProfile));
+            RefreshProfileEditorFromSelectedProfile();
+        }
+    }
+
+    public bool HasProfileEditorSelection => ProfileEditorSelectedProfile != null;
+
+    public bool CanDeleteSelectedProfile =>
+        ProfileEditorSelectedProfile != null &&
+        Profiles.Count > 1;
+
+    public bool IsPoliceMenuVisible => _activeProfile?.IncludePolice ?? true;
+    public bool IsFireMenuVisible => _activeProfile?.IncludeFire ?? true;
+    public bool IsEmsMenuVisible => _activeProfile?.IncludeEMS ?? true;
+    public bool IsTrafficMenuVisible => _activeProfile?.IncludeTraffic ?? true;
+    public bool IsOtherMenuVisible => _activeProfile?.IncludeOther ?? true;
+    public int UnreadAlertCount => _unreadAlertCount;
+    public string AlertsMenuText => UnreadAlertCount > 0 ? $"Alerts ({UnreadAlertCount})" : "Alerts";
+    public string CompositeStatusText => $"Calls: {CallsReceivedCount}  Alerts: {AlertsTriggeredCount}  Tokens: {SessionTokenUsageText} | {MenuSpecificStatusText}";
+    public string FooterProfileText => $"Profile: {CurrentProfileName}";
+    public string FooterCallsText => $"Calls: {CallsReceivedCount}";
+    public string FooterAlertsText => $"Alerts: {AlertsTriggeredCount}";
+    public string FooterTokensText => $"Tokens: {SessionTokenUsageText}";
+    public string FooterStatusText => MenuSpecificStatusText;
+    private void ApplyMenuStatusText(string value)
+    {
+        _menuSpecificStatusText = value;
+        RaisePropertyChanged(nameof(MenuSpecificStatusText));
+        RaisePropertyChanged(nameof(CompositeStatusText));
+        RaisePropertyChanged(nameof(FooterStatusText));
+    }
+
+    private void SetMenuStatus(string value) => ApplyMenuStatusText(value);
+
+    public string MenuSpecificStatusText
+    {
+        get => _menuSpecificStatusText;
+        set => ApplyMenuStatusText(value);
+    }
+
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
-
-        InitializeRightPanePanels();
+        _alertsPanel = new AlertManagerPanel(_settings);
+        _alertsPanel.RequestClose += (_, _) => { };
+        _cleanupPanel = new CleanupPanel();
+        _cleanupPanel.RequestClose += (_, _) => { };
+        _cleanupPanel.CleanupCompleted += async (_, _) => await OnCleanupCompletedAsync();
+        RaisePropertyChanged(nameof(AlertsPanelControl));
+        RaisePropertyChanged(nameof(CleanupPanelControl));
 
         // Get version from assembly metadata (populated by CI from git tag)
         _versionString = GetAssemblyVersion();
         RaisePropertyChanged(nameof(VersionString));
+        SyncTroubleshootTraceLevelFromSettings();
 
         // Initialize font size resource
         if (Application.Current != null)
@@ -1706,6 +2119,15 @@ private void SwitchToInsightsMode()
         _searchTextBox = this.FindControl<TextBox>("SearchTextBox");
         _clearSearchButton = this.FindControl<Button>("ClearSearchButton");
         _searchPlaceholder = this.FindControl<TextBlock>("SearchPlaceholder");
+        _categoryCallsDataGrid = this.FindControl<DataGrid>("CategoryCallsDataGrid");
+        _talkgroupMappingsDataGrid = this.FindControl<DataGrid>("TalkgroupMappingsDataGrid");
+        _talkgroupSelectAllCheckBox = this.FindControl<CheckBox>("TalkgroupSelectAllCheckBox");
+        _visibleTalkgroupMappingRows.CollectionChanged += (_, _) => UpdateTalkgroupSelectionUiState();
+        Profiles.CollectionChanged += (_, _) =>
+        {
+            RefreshTalkgroupEditableProfiles();
+            RaisePropertyChanged(nameof(CanDeleteSelectedProfile));
+        };
         
 // Register converters in Application.Resources for use in XAML bindings
         if (Application.Current != null)
@@ -1714,8 +2136,40 @@ private void SwitchToInsightsMode()
             Application.Current.Resources["SearchHighlightConverter"] = new SearchHighlightConverter();
             Application.Current.Resources["SearchTextForegroundConverter"] = new SearchTextForegroundConverter();
             Application.Current.Resources["AlertSearchBackgroundConverter"] = new AlertSearchBackgroundConverter();
+            Application.Current.Resources["InsightNavigateButtonTextConverter"] = new InsightNavigateButtonTextConverter();
         }
 
+        var profileLoad = _profileStore.Load();
+        Profiles.Clear();
+        foreach (var profile in profileLoad.Profiles)
+        {
+            Profiles.Add(profile);
+        }
+        RefreshTalkgroupEditableProfiles();
+        ActiveProfile = Profiles.FirstOrDefault(p => p.Id == profileLoad.ActiveProfileId) ?? Profiles.FirstOrDefault();
+        ProfileEditorSelectedProfile = ActiveProfile;
+        EnsureTalkgroupAddProfileSelection();
+
+        ReloadAlertHistory();
+        RefreshMenuVisibility();
+        EnsureValidSelectedSection();
+        MenuSpecificStatusText = "Ready";
+        _isInsightsMode = true;
+        LoadTalkgroupMappings();
+
+    }
+
+    private async Task OnCleanupCompletedAsync()
+    {
+        await UpdateUsageTextAsync();
+        ReloadAlertHistory();
+        await LoadInsightsSummariesAsync();
+    }
+
+    private void RefreshSettingsUiAndPanels()
+    {
+        RefreshSettingsTabsFromSettings();
+        _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
     }
 
     protected override void OnOpened(EventArgs e)
@@ -1725,6 +2179,890 @@ private void SwitchToInsightsMode()
         StartUsageTimer();
 
         base.OnOpened(e);
+    }
+
+    private void RefreshSettingsTabsFromSettings()
+    {
+        RequireControl<TextBox>("SettingsListenPortTextBox").Text = _settings.ListenPort.ToString();
+        RequireControl<ComboBox>("SettingsModelComboBox").SelectedIndex = ModelPresetToIndex(_settings.TranscriptionModelPreset);
+        RequireControl<ComboBox>("SettingsEngineComboBox").SelectedIndex =
+            string.Equals(_settings.TranscriptionEngine, "vosk", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        RequireControl<ComboBox>("SettingsEmailProviderComboBox").SelectedIndex =
+            string.Equals(_settings.EmailProvider, "yahoo", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        RequireControl<TextBox>("SettingsEmailUserTextBox").Text = _settings.EmailUser ?? string.Empty;
+        RequireControl<TextBox>("SettingsEmailPasswordTextBox").Text = _settings.EmailPassword ?? string.Empty;
+        RequireControl<CheckBox>("SettingsAutoplayAlertsCheckBox").IsChecked = _settings.AutoplayAlerts;
+        RequireControl<ComboBox>("SettingsSnoozeComboBox").SelectedIndex = _settings.SnoozeDurationMinutes switch
+        {
+            5 => 0,
+            15 => 1,
+            30 => 2,
+            60 => 3,
+            _ => 1
+        };
+        RequireControl<CheckBox>("SettingsLmLinkEnabledCheckBox").IsChecked = _settings.LmLinkEnabled;
+        RequireControl<CheckBox>("SettingsDailyDigestCheckBox").IsChecked = _settings.DailyInsightsDigestEnabled;
+        RequireControl<TextBox>("SettingsLmLinkBaseUrlTextBox").Text = _settings.LmLinkBaseUrl ?? string.Empty;
+        RequireControl<TextBox>("SettingsLmLinkModelTextBox").Text = _settings.LmLinkModel ?? string.Empty;
+        RequireControl<TextBox>("SettingsLmLinkApiKeyTextBox").Text = _settings.LmLinkApiKey ?? string.Empty;
+        RequireControl<TextBox>("SettingsLmLinkTimeoutTextBox").Text = _settings.LmLinkTimeoutMs.ToString();
+        RequireControl<TextBox>("SettingsLmLinkRetriesTextBox").Text = _settings.LmLinkMaxRetries.ToString();
+        LoadTalkgroupMappings();
+        RefreshTalkgroupRows();
+    }
+
+    private void ApplySettingsTabsToSettings()
+    {
+        var listenPortTextBox = RequireControl<TextBox>("SettingsListenPortTextBox");
+        if (int.TryParse(listenPortTextBox.Text, out var listenPort))
+            _settings.ListenPort = listenPort;
+
+        var modelCombo = RequireControl<ComboBox>("SettingsModelComboBox");
+        _settings.TranscriptionModelPreset = IndexToModelPreset(modelCombo.SelectedIndex);
+
+        var engineCombo = RequireControl<ComboBox>("SettingsEngineComboBox");
+        _settings.TranscriptionEngine = engineCombo.SelectedIndex == 1 ? "vosk" : "whisper";
+
+        var emailProviderCombo = RequireControl<ComboBox>("SettingsEmailProviderComboBox");
+        _settings.EmailProvider = emailProviderCombo.SelectedIndex == 1 ? "yahoo" : "gmail";
+
+        var emailUserTextBox = RequireControl<TextBox>("SettingsEmailUserTextBox");
+        _settings.EmailUser = emailUserTextBox.Text ?? string.Empty;
+
+        var emailPasswordTextBox = RequireControl<TextBox>("SettingsEmailPasswordTextBox");
+        _settings.EmailPassword = emailPasswordTextBox.Text ?? string.Empty;
+
+        var autoplayCheckBox = RequireControl<CheckBox>("SettingsAutoplayAlertsCheckBox");
+        _settings.AutoplayAlerts = autoplayCheckBox.IsChecked == true;
+
+        var snoozeCombo = RequireControl<ComboBox>("SettingsSnoozeComboBox");
+        _settings.SnoozeDurationMinutes = snoozeCombo.SelectedIndex switch
+        {
+            0 => 5,
+            1 => 15,
+            2 => 30,
+            3 => 60,
+            _ => _settings.SnoozeDurationMinutes
+        };
+
+        var lmEnabledCheckBox = RequireControl<CheckBox>("SettingsLmLinkEnabledCheckBox");
+        _settings.LmLinkEnabled = lmEnabledCheckBox.IsChecked == true;
+
+        var dailyDigestCheckBox = RequireControl<CheckBox>("SettingsDailyDigestCheckBox");
+        _settings.DailyInsightsDigestEnabled = dailyDigestCheckBox.IsChecked == true;
+
+        var lmBaseUrlTextBox = RequireControl<TextBox>("SettingsLmLinkBaseUrlTextBox");
+        _settings.LmLinkBaseUrl = lmBaseUrlTextBox.Text ?? string.Empty;
+
+        var lmModelTextBox = RequireControl<TextBox>("SettingsLmLinkModelTextBox");
+        _settings.LmLinkModel = lmModelTextBox.Text ?? string.Empty;
+
+        var lmApiKeyTextBox = RequireControl<TextBox>("SettingsLmLinkApiKeyTextBox");
+        _settings.LmLinkApiKey = lmApiKeyTextBox.Text ?? string.Empty;
+
+        var lmTimeoutTextBox = RequireControl<TextBox>("SettingsLmLinkTimeoutTextBox");
+        if (int.TryParse(lmTimeoutTextBox.Text, out var timeoutMs))
+            _settings.LmLinkTimeoutMs = timeoutMs;
+
+        var lmRetriesTextBox = RequireControl<TextBox>("SettingsLmLinkRetriesTextBox");
+        if (int.TryParse(lmRetriesTextBox.Text, out var retries))
+            _settings.LmLinkMaxRetries = retries;
+    }
+
+    private T RequireControl<T>(string name) where T : Control
+    {
+        var control = this.FindControl<T>(name);
+        if (control != null)
+            return control;
+
+        var message = $"Required settings control '{name}' ({typeof(T).Name}) was not found in the visual tree.";
+        TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Error, message);
+        throw new InvalidOperationException(message);
+    }
+
+    private void RefreshTalkgroupRows()
+    {
+        TalkgroupRows.Clear();
+        _talkgroupMappingRows.Clear();
+        _talkgroupSelectionAnchorId = null;
+        foreach (var mapping in _talkgroupMappings
+                     .GroupBy(m => m.TalkgroupId)
+                     .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+                     .OrderBy(m => m.TalkgroupId))
+        {
+            var tg = new Talkgroup
+            {
+                Id = mapping.TalkgroupId,
+                Mode = mapping.Mode,
+                AlphaTag = mapping.AlphaTag,
+                Description = mapping.Description,
+                Tag = mapping.Tag,
+                Category = mapping.Category
+            };
+            TalkgroupRows.Add(tg);
+            _talkgroupMappingRows.Add(new TalkgroupMappingRow
+            {
+                Id = tg.Id,
+                Mode = tg.Mode ?? string.Empty,
+                AlphaTag = tg.AlphaTag ?? string.Empty,
+                Description = tg.Description ?? string.Empty,
+                Category = tg.Category ?? string.Empty,
+                OpsCategory = ResolveOpsCategoryForMapping(mapping),
+                OnOpsCategoryChanged = OnTalkgroupMappingRowOpsCategoryChanged,
+                OnSelectionChanged = OnTalkgroupMappingRowSelectionChanged
+            });
+        }
+        RefreshVisibleTalkgroupRows();
+        UpdateTalkgroupSelectionUiState();
+        RaisePropertyChanged(nameof(TalkgroupSummaryText));
+        RaisePropertyChanged(nameof(TalkgroupCoverageText));
+        RaisePropertyChanged(nameof(TalkgroupMappingRows));
+        RaisePropertyChanged(nameof(VisibleTalkgroupMappingRows));
+        if (SelectedSettingsTalkgroup != null)
+        {
+            SelectedSettingsTalkgroup = TalkgroupRows.FirstOrDefault(t => t.Id == SelectedSettingsTalkgroup.Id);
+        }
+    }
+
+    private void OnTalkgroupMappingRowOpsCategoryChanged(TalkgroupMappingRow row)
+    {
+        var mapping = _talkgroupMappings.FirstOrDefault(m => m.TalkgroupId == row.Id);
+        if (mapping == null)
+            return;
+
+        var normalized = NormalizeOpsCategoryChoice(row.OpsCategory);
+        if (string.Equals(mapping.OpsCategory, normalized, StringComparison.Ordinal))
+            return;
+
+        mapping.OpsCategory = normalized;
+        mapping.UpdatedUtc = DateTime.UtcNow;
+        row.OpsCategory = normalized;
+        HasPendingTalkgroupMappingChanges = true;
+        UpdateVisibleTalkgroupRowForFilter(row);
+    }
+
+    private void OnTalkgroupMappingRowSelectionChanged(TalkgroupMappingRow _)
+    {
+        if (_suppressTalkgroupSelectionTracking)
+            return;
+        UpdateTalkgroupSelectionUiState();
+    }
+
+    private void UpdateTalkgroupSelectionUiState()
+    {
+        var selectedCount = _talkgroupMappingRows.Count(r => r.IsSelectedForProfile);
+        SelectedTalkgroupRowCount = selectedCount;
+
+        _talkgroupSelectAllCheckBox ??= this.FindControl<CheckBox>("TalkgroupSelectAllCheckBox");
+        if (_talkgroupSelectAllCheckBox == null)
+            return;
+
+        var visibleCount = _visibleTalkgroupMappingRows.Count;
+        var visibleSelectedCount = _visibleTalkgroupMappingRows.Count(r => r.IsSelectedForProfile);
+        bool? headerState = visibleCount == 0
+            ? false
+            : visibleSelectedCount == 0
+                ? false
+                : visibleSelectedCount == visibleCount
+                    ? true
+                    : null;
+        _talkgroupSelectAllCheckBox.IsChecked = headerState;
+    }
+
+    private void OnTalkgroupMappingsGridSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressTalkgroupSelectionTracking || sender is not DataGrid grid)
+            return;
+
+        var selected = new HashSet<long>(
+            (grid.SelectedItems ?? new List<object>())
+                .OfType<TalkgroupMappingRow>()
+                .Select(r => r.Id));
+
+        _suppressTalkgroupSelectionTracking = true;
+        try
+        {
+            foreach (var row in _visibleTalkgroupMappingRows)
+                row.IsSelectedForProfile = selected.Contains(row.Id);
+        }
+        finally
+        {
+            _suppressTalkgroupSelectionTracking = false;
+        }
+
+        var anchorRow = (grid.SelectedItems ?? new List<object>())
+            .OfType<TalkgroupMappingRow>()
+            .LastOrDefault();
+        if (anchorRow != null)
+            _talkgroupSelectionAnchorId = anchorRow.Id;
+        UpdateTalkgroupSelectionUiState();
+    }
+
+    private static bool IsDefaultProfile(ProcessingProfile profile)
+    {
+        return string.Equals(profile.Name?.Trim(), "Default", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RefreshTalkgroupEditableProfiles()
+    {
+        var selectedId = _selectedTalkgroupAddProfile?.Id;
+        TalkgroupEditableProfiles.Clear();
+        foreach (var profile in Profiles.Where(p => !IsDefaultProfile(p)))
+            TalkgroupEditableProfiles.Add(profile);
+
+        if (selectedId.HasValue)
+            SelectedTalkgroupAddProfile = TalkgroupEditableProfiles.FirstOrDefault(p => p.Id == selectedId.Value);
+        else
+            EnsureTalkgroupAddProfileSelection();
+
+        RaisePropertyChanged(nameof(IsTalkgroupAddProfileEnabled));
+        RaisePropertyChanged(nameof(CanAddSelectedTalkgroups));
+    }
+
+    private void EnsureTalkgroupAddProfileSelection()
+    {
+        if (_selectedTalkgroupAddProfile != null &&
+            TalkgroupEditableProfiles.Any(p => p.Id == _selectedTalkgroupAddProfile.Id))
+            return;
+
+        SelectedTalkgroupAddProfile = TalkgroupEditableProfiles.FirstOrDefault();
+    }
+
+    private void ApplyTalkgroupRangeSelection(TalkgroupMappingRow pivotRow, bool isChecked)
+    {
+        if (!_talkgroupSelectionAnchorId.HasValue)
+            return;
+
+        var rows = _visibleTalkgroupMappingRows;
+        var startIndex = rows
+            .Select((row, index) => new { row, index })
+            .FirstOrDefault(x => x.row.Id == _talkgroupSelectionAnchorId.Value)?.index ?? -1;
+        var endIndex = rows
+            .Select((row, index) => new { row, index })
+            .FirstOrDefault(x => x.row.Id == pivotRow.Id)?.index ?? -1;
+
+        if (startIndex < 0 || endIndex < 0)
+            return;
+
+        var lower = Math.Min(startIndex, endIndex);
+        var upper = Math.Max(startIndex, endIndex);
+        _suppressTalkgroupSelectionTracking = true;
+        try
+        {
+            for (var i = lower; i <= upper; i++)
+                rows[i].IsSelectedForProfile = isChecked;
+        }
+        finally
+        {
+            _suppressTalkgroupSelectionTracking = false;
+        }
+        UpdateTalkgroupSelectionUiState();
+    }
+
+    private void RefreshVisibleTalkgroupRows()
+    {
+        _visibleTalkgroupMappingRows.Clear();
+        var categoryFilter = NormalizeOpsCategoryFilter(_selectedTalkgroupOpsCategoryFilter);
+        var keywordFilter = _talkgroupKeywordFilter;
+        var rows = _talkgroupMappingRows
+            .Where(r => RowMatchesTalkgroupFilters(r, categoryFilter, keywordFilter));
+
+        foreach (var row in rows.OrderBy(r => r.Id))
+            _visibleTalkgroupMappingRows.Add(row);
+    }
+
+    private void UpdateVisibleTalkgroupRowForFilter(TalkgroupMappingRow row)
+    {
+        var categoryFilter = NormalizeOpsCategoryFilter(_selectedTalkgroupOpsCategoryFilter);
+        var keywordFilter = _talkgroupKeywordFilter;
+
+        var isVisible = _visibleTalkgroupMappingRows.Contains(row);
+        var matchesFilter = RowMatchesTalkgroupFilters(row, categoryFilter, keywordFilter);
+
+        if (isVisible && !matchesFilter)
+        {
+            _visibleTalkgroupMappingRows.Remove(row);
+            return;
+        }
+
+        if (!isVisible && matchesFilter)
+        {
+            var insertIndex = 0;
+            while (insertIndex < _visibleTalkgroupMappingRows.Count &&
+                   _visibleTalkgroupMappingRows[insertIndex].Id < row.Id)
+            {
+                insertIndex++;
+            }
+            _visibleTalkgroupMappingRows.Insert(insertIndex, row);
+        }
+    }
+
+    private static bool RowMatchesTalkgroupFilters(
+        TalkgroupMappingRow row,
+        string categoryFilter,
+        string keywordFilter)
+    {
+        if (!string.Equals(categoryFilter, "all", StringComparison.Ordinal) &&
+            !string.Equals(row.OpsCategory, categoryFilter, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(keywordFilter))
+            return true;
+
+        var keyword = keywordFilter.Trim();
+        return row.Id.ToString().Contains(keyword, StringComparison.OrdinalIgnoreCase)
+            || (row.Mode?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (row.AlphaTag?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (row.Description?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (row.Category?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (row.OpsCategory?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string NormalizeOpsCategoryFilter(string? raw)
+    {
+        var value = (raw ?? "all").Trim().ToLowerInvariant();
+        return _talkgroupOpsCategoryFilterOptions.Contains(value) ? value : "all";
+    }
+
+    private void RebuildTalkgroupMappingIndex()
+    {
+        _talkgroupMappingIndex = _talkgroupMappings
+            .GroupBy(m => m.TalkgroupId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+            .ToDictionary(m => m.TalkgroupId);
+        RaisePropertyChanged(nameof(TalkgroupCoverageText));
+    }
+
+    private void PublishLiveTalkgroupSnapshotFromStore()
+    {
+        var live = _talkgroupMappingStore.LoadAll();
+        var mappingsById = live
+            .GroupBy(m => m.TalkgroupId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+            .ToDictionary(m => m.TalkgroupId, CloneTalkgroupMapping);
+        var snapshot = new TalkgroupLiveSnapshot(
+            version: Interlocked.Increment(ref _talkgroupLiveSnapshotVersion),
+            mappingsById: mappingsById);
+        _liveTalkgroupSnapshot = snapshot;
+    }
+
+    private void LoadTalkgroupMappings()
+    {
+        _talkgroupMappings = _talkgroupMappingStore.LoadAll();
+        HasPendingTalkgroupMappingChanges = false;
+        RebuildTalkgroupMappingIndex();
+        RefreshTalkgroupRows();
+    }
+
+    private void LoadSelectedTalkgroupMappingIntoEditor()
+    {
+        if (SelectedSettingsTalkgroup == null)
+        {
+            TalkgroupMappingEnabledInTr = true;
+            TalkgroupMappingEnabledInPp = true;
+            TalkgroupMappingOpsCategory = string.Empty;
+            TalkgroupMappingNotes = string.Empty;
+            return;
+        }
+
+        if (_talkgroupMappingIndex.TryGetValue(SelectedSettingsTalkgroup.Id, out var mapping))
+        {
+            TalkgroupMappingEnabledInTr = mapping.EnabledInTr;
+            TalkgroupMappingEnabledInPp = mapping.EnabledInPp;
+            TalkgroupMappingOpsCategory = mapping.OpsCategory;
+            TalkgroupMappingNotes = mapping.Notes;
+        }
+        else
+        {
+            TalkgroupMappingEnabledInTr = true;
+            TalkgroupMappingEnabledInPp = true;
+            TalkgroupMappingOpsCategory = string.Empty;
+            TalkgroupMappingNotes = string.Empty;
+        }
+    }
+
+    private void SaveSelectedTalkgroupMapping()
+    {
+        if (SelectedSettingsTalkgroup == null)
+        {
+            TalkgroupWizardStatusText = "Select a talkgroup first.";
+            return;
+        }
+
+        var tgId = SelectedSettingsTalkgroup.Id;
+        var mapping = _talkgroupMappings.FirstOrDefault(m => m.TalkgroupId == tgId);
+        if (mapping == null)
+        {
+            mapping = new TalkgroupMapping { TalkgroupId = tgId };
+            _talkgroupMappings.Add(mapping);
+        }
+
+        mapping.EnabledInTr = TalkgroupMappingEnabledInTr;
+        mapping.EnabledInPp = TalkgroupMappingEnabledInPp;
+        mapping.OpsCategory = TalkgroupMappingOpsCategory?.Trim() ?? string.Empty;
+        mapping.Notes = TalkgroupMappingNotes?.Trim() ?? string.Empty;
+        mapping.UpdatedUtc = DateTime.UtcNow;
+
+        RebuildTalkgroupMappingIndex();
+        HasPendingTalkgroupMappingChanges = true;
+        TalkgroupWizardStatusText = $"Staged mapping update for TG {tgId}. Click Apply to make it live.";
+    }
+
+    private void AutoGenerateMappingsFromTalkgroups(
+        IEnumerable<Talkgroup> talkgroups,
+        bool replaceExistingMappings = false)
+    {
+        var sourceTalkgroups = (talkgroups ?? Enumerable.Empty<Talkgroup>())
+            .Where(t => t != null && t.Id > 0)
+            .GroupBy(t => t.Id)
+            .Select(g => g.First())
+            .ToList();
+
+        var changed = 0;
+        if (replaceExistingMappings)
+        {
+            var keepIds = new HashSet<long>(sourceTalkgroups.Select(t => t.Id));
+            var removed = _talkgroupMappings.RemoveAll(m => !keepIds.Contains(m.TalkgroupId));
+            changed += removed;
+        }
+
+        foreach (var tg in sourceTalkgroups)
+        {
+            var mapping = _talkgroupMappings.FirstOrDefault(m => m.TalkgroupId == tg.Id);
+            if (mapping == null)
+            {
+                mapping = new TalkgroupMapping
+                {
+                    TalkgroupId = tg.Id,
+                    Mode = tg.Mode ?? string.Empty,
+                    AlphaTag = tg.AlphaTag ?? string.Empty,
+                    Description = tg.Description ?? string.Empty,
+                    Tag = tg.Tag ?? string.Empty,
+                    Category = tg.Category ?? string.Empty,
+                    EnabledInTr = true,
+                    EnabledInPp = true,
+                    UpdatedUtc = DateTime.UtcNow
+                };
+                _talkgroupMappings.Add(mapping);
+                changed++;
+            }
+            else
+            {
+                var priorMode = mapping.Mode;
+                var priorAlpha = mapping.AlphaTag;
+                var priorDesc = mapping.Description;
+                var priorTag = mapping.Tag;
+                var priorCategory = mapping.Category;
+                mapping.Mode = tg.Mode ?? string.Empty;
+                mapping.AlphaTag = tg.AlphaTag ?? string.Empty;
+                mapping.Description = tg.Description ?? string.Empty;
+                mapping.Tag = tg.Tag ?? string.Empty;
+                mapping.Category = tg.Category ?? string.Empty;
+                if (!string.Equals(priorMode, mapping.Mode, StringComparison.Ordinal)
+                    || !string.Equals(priorAlpha, mapping.AlphaTag, StringComparison.Ordinal)
+                    || !string.Equals(priorDesc, mapping.Description, StringComparison.Ordinal)
+                    || !string.Equals(priorTag, mapping.Tag, StringComparison.Ordinal)
+                    || !string.Equals(priorCategory, mapping.Category, StringComparison.Ordinal))
+                {
+                    changed++;
+                }
+            }
+
+            var derivedOpsCategory = ResolveOpsCategoryForMapping(mapping);
+            var normalizedExistingOpsCategory = NormalizeOpsCategoryChoice(mapping.OpsCategory);
+            if (string.IsNullOrWhiteSpace(mapping.OpsCategory))
+            {
+                mapping.OpsCategory = derivedOpsCategory;
+                mapping.UpdatedUtc = DateTime.UtcNow;
+                changed++;
+            }
+            else if (!string.Equals(normalizedExistingOpsCategory, mapping.OpsCategory, StringComparison.Ordinal))
+            {
+                mapping.OpsCategory = normalizedExistingOpsCategory;
+                mapping.UpdatedUtc = DateTime.UtcNow;
+                changed++;
+            }
+
+        }
+
+        if (changed > 0)
+        {
+            RebuildTalkgroupMappingIndex();
+            HasPendingTalkgroupMappingChanges = true;
+        }
+        else
+        {
+            RaisePropertyChanged(nameof(TalkgroupCoverageText));
+        }
+    }
+
+    private static int ModelPresetToIndex(string? preset)
+    {
+        var value = (preset ?? string.Empty).Trim().ToLowerInvariant();
+        return value switch
+        {
+            "whisper-tiny" => 1,
+            "whisper-base" => 2,
+            "whisper-small" => 3,
+            "whisper-medium" => 4,
+            "whisper-large-v3" => 5,
+            "vosk-model-small-en-us-0.15" => 6,
+            "vosk-model-en-us-0.22" => 7,
+            "vosk-model-en-us-0.22-lgraph" => 8,
+            _ => 0
+        };
+    }
+
+    private static string IndexToModelPreset(int index)
+    {
+        return index switch
+        {
+            1 => "whisper-tiny",
+            2 => "whisper-base",
+            3 => "whisper-small",
+            4 => "whisper-medium",
+            5 => "whisper-large-v3",
+            6 => "vosk-model-small-en-us-0.15",
+            7 => "vosk-model-en-us-0.22",
+            8 => "vosk-model-en-us-0.22-lgraph",
+            _ => string.Empty
+        };
+    }
+
+    private void ReloadAlertHistory()
+    {
+        var (start, end) = GetCurrentRangeBounds();
+        var startOffset = new DateTimeOffset(start, TimeZoneInfo.Local.GetUtcOffset(start));
+        var endOffset = new DateTimeOffset(end, TimeZoneInfo.Local.GetUtcOffset(end));
+        var startUnix = startOffset.ToUnixTimeSeconds();
+        var endUnix = endOffset.ToUnixTimeSeconds();
+
+        AlertHistory.Clear();
+        var records = _alertHistoryStore.LoadAll();
+        foreach (var item in records)
+        {
+            if (item.TimestampUnix >= startUnix && item.TimestampUnix <= endUnix)
+                AlertHistory.Add(item);
+        }
+        _unreadAlertCount = records.Count(r => !r.IsRead);
+        RaisePropertyChanged(nameof(UnreadAlertCount));
+        RaisePropertyChanged(nameof(AlertsMenuText));
+        RaisePropertyChanged(nameof(IsAlertsEmpty));
+    }
+
+    private void MarkAlertHistoryRead()
+    {
+        if (_alertHistoryStore.MarkAllRead() > 0)
+        {
+            ReloadAlertHistory();
+        }
+    }
+
+    private void AppendAlertHistoryFromCall(TranscribedCall call)
+    {
+        if (!call.IsAlertMatch)
+            return;
+
+        var record = new AlertMatchRecord
+        {
+            MatchedAtUtc = DateTime.UtcNow,
+            CallHash = CallHash.ComputeCallId(call),
+            CallId = call.CallId,
+            AlertRuleId = call.MatchedAlertRuleId,
+            AlertRuleName = call.MatchedAlertRuleName,
+            AlertType = string.IsNullOrWhiteSpace(call.MatchedAlertType) ? "keyword" : call.MatchedAlertType,
+            TypeDetail = call.MatchedAlertDetail ?? string.Empty,
+            Transcription = call.Transcription ?? string.Empty,
+            DurationSec = call.Duration,
+            TimestampUnix = call.StartTime,
+            AudioPath = call.Location ?? string.Empty,
+            IsRead = SelectedSection == MainSection.Alerts,
+            ReadAtUtc = SelectedSection == MainSection.Alerts ? DateTime.UtcNow : null
+        };
+
+        _alertHistoryStore.Append(record);
+        var (start, end) = GetCurrentRangeBounds();
+        if (IsCallInRange(call, start, end))
+            AlertHistory.Insert(0, record);
+        if (!record.IsRead)
+            _unreadAlertCount++;
+        RaisePropertyChanged(nameof(UnreadAlertCount));
+        RaisePropertyChanged(nameof(AlertsMenuText));
+        RaisePropertyChanged(nameof(IsAlertsEmpty));
+        RaisePropertyChanged(nameof(CompositeStatusText));
+    }
+
+    private void RefreshMenuVisibility()
+    {
+        RaisePropertyChanged(nameof(IsPoliceMenuVisible));
+        RaisePropertyChanged(nameof(IsFireMenuVisible));
+        RaisePropertyChanged(nameof(IsEmsMenuVisible));
+        RaisePropertyChanged(nameof(IsTrafficMenuVisible));
+        RaisePropertyChanged(nameof(IsOtherMenuVisible));
+        RaisePropertyChanged(nameof(CurrentProfileName));
+        RaisePropertyChanged(nameof(FooterProfileText));
+    }
+
+    private void RefreshProfileEditorFromSelectedProfile()
+    {
+        if (_profileEditorSelectedProfile == null)
+            return;
+
+        this.FindControl<CheckBox>("ProfileIncludePoliceCheckBox")?.SetCurrentValue(ToggleButton.IsCheckedProperty, _profileEditorSelectedProfile.IncludePolice);
+        this.FindControl<CheckBox>("ProfileIncludeFireCheckBox")?.SetCurrentValue(ToggleButton.IsCheckedProperty, _profileEditorSelectedProfile.IncludeFire);
+        this.FindControl<CheckBox>("ProfileIncludeEmsCheckBox")?.SetCurrentValue(ToggleButton.IsCheckedProperty, _profileEditorSelectedProfile.IncludeEMS);
+        this.FindControl<CheckBox>("ProfileIncludeTrafficCheckBox")?.SetCurrentValue(ToggleButton.IsCheckedProperty, _profileEditorSelectedProfile.IncludeTraffic);
+        this.FindControl<CheckBox>("ProfileIncludeOtherCheckBox")?.SetCurrentValue(ToggleButton.IsCheckedProperty, _profileEditorSelectedProfile.IncludeOther);
+        this.FindControl<TextBox>("ProfileTalkgroupsTextBox")?.SetCurrentValue(TextBox.TextProperty,
+            string.Join(",", _profileEditorSelectedProfile.AllowedTalkgroups));
+    }
+
+    private void EnsureValidSelectedSection()
+    {
+        if (SelectedSection == MainSection.Police && !IsPoliceMenuVisible) SelectedSection = MainSection.Highlights;
+        if (SelectedSection == MainSection.Fire && !IsFireMenuVisible) SelectedSection = MainSection.Highlights;
+        if (SelectedSection == MainSection.EMS && !IsEmsMenuVisible) SelectedSection = MainSection.Highlights;
+        if (SelectedSection == MainSection.Traffic && !IsTrafficMenuVisible) SelectedSection = MainSection.Highlights;
+        if (SelectedSection == MainSection.Other && !IsOtherMenuVisible) SelectedSection = MainSection.Highlights;
+    }
+
+    private void ClearSectionCachesForProfileSwitch()
+    {
+        _insightsWindowCallCache.Clear();
+        _insightsWindowCallIdCache.Clear();
+        _insightsWindowHashCache.Clear();
+        Calls.Clear();
+        GroupedCalls.Clear();
+        CategoryGroupedCalls.Clear();
+    }
+
+    private void ApplyActiveProfileToManagers()
+    {
+        Func<RawCallData, bool> rawFilter = raw =>
+        {
+            if (_activeProfile == null)
+                return true;
+
+            try
+            {
+                var json = raw.GetJsonObject();
+                var tg = json["Talkgroup"]?.ToObject<long>() ?? 0;
+                if (_activeProfile.HasTalkgroupScope && !_activeProfile.AllowedTalkgroups.Contains(tg))
+                    return false;
+
+                var category = ResolveCategoryKeyFromTalkgroup(tg);
+                return IsCategoryEnabledForProfile(category);
+            }
+            catch
+            {
+                return true;
+            }
+        };
+
+        Func<TranscribedCall, bool> callFilter = call =>
+        {
+            if (_activeProfile == null)
+                return true;
+            if (_activeProfile.HasTalkgroupScope && !_activeProfile.AllowedTalkgroups.Contains(call.Talkgroup))
+                return false;
+            var category = ResolveCategoryKeyFromTalkgroup(call.Talkgroup);
+            return IsCategoryEnabledForProfile(category);
+        };
+
+        _callManager?.SetRawCallFilter(rawFilter);
+        _callManager?.SetTranscribedCallFilter(callFilter);
+        _offlineCallManager?.SetRawCallFilter(rawFilter);
+        _offlineCallManager?.SetTranscribedCallFilter(callFilter);
+    }
+
+    private bool IsCategoryEnabledForProfile(string categoryKey)
+    {
+        if (_activeProfile == null)
+            return true;
+
+        return categoryKey switch
+        {
+            "police" => _activeProfile.IncludePolice,
+            "fire" => _activeProfile.IncludeFire,
+            "ems" => _activeProfile.IncludeEMS,
+            "traffic" => _activeProfile.IncludeTraffic,
+            _ => _activeProfile.IncludeOther
+        };
+    }
+
+    private void PublishLiveTalkgroupSnapshotFromStaged()
+    {
+        var mappingsById = _talkgroupMappings
+            .GroupBy(m => m.TalkgroupId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+            .ToDictionary(m => m.TalkgroupId, CloneTalkgroupMapping);
+
+        var snapshot = new TalkgroupLiveSnapshot(
+            version: Interlocked.Increment(ref _talkgroupLiveSnapshotVersion),
+            mappingsById: mappingsById);
+        _liveTalkgroupSnapshot = snapshot;
+    }
+
+    private static TalkgroupMapping CloneTalkgroupMapping(TalkgroupMapping source)
+    {
+        return new TalkgroupMapping
+        {
+            TalkgroupId = source.TalkgroupId,
+            Mode = source.Mode ?? string.Empty,
+            AlphaTag = source.AlphaTag ?? string.Empty,
+            Description = source.Description ?? string.Empty,
+            Tag = source.Tag ?? string.Empty,
+            Category = source.Category ?? string.Empty,
+            EnabledInTr = source.EnabledInTr,
+            EnabledInPp = source.EnabledInPp,
+            OpsCategory = source.OpsCategory ?? string.Empty,
+            Notes = source.Notes ?? string.Empty,
+            UpdatedUtc = source.UpdatedUtc
+        };
+    }
+
+    private string FormatTalkgroupFromLiveSnapshot(long talkgroupId)
+    {
+        var snapshot = _liveTalkgroupSnapshot;
+        if (!snapshot.MappingsById.TryGetValue(talkgroupId, out var mapping))
+            return $"{talkgroupId}";
+        return $"{mapping.AlphaTag} - {mapping.Description} ({mapping.Category})";
+    }
+
+    private void PopulateDerivedCallFields(TranscribedCall call)
+    {
+        call.FriendlyTalkgroup = FormatTalkgroupFromLiveSnapshot(call.Talkgroup);
+        call.FriendlyFrequency = FormatFrequency(call.Frequency);
+        call.PlayAudioCommand = c => PlayAudio(c);
+    }
+
+    private void RefreshDerivedFieldsForLoadedCalls()
+    {
+        foreach (var call in _allCalls)
+            PopulateDerivedCallFields(call);
+        foreach (var call in _liveCalls)
+            PopulateDerivedCallFields(call);
+        foreach (var call in Calls)
+            PopulateDerivedCallFields(call);
+        if (_historicalRangeCalls != null)
+        {
+            foreach (var call in _historicalRangeCalls)
+                PopulateDerivedCallFields(call);
+        }
+    }
+
+    private string ResolveCategoryKeyFromTalkgroup(long talkgroupId)
+    {
+        var snapshot = _liveTalkgroupSnapshot;
+        if (!snapshot.MappingsById.TryGetValue(talkgroupId, out var mapping) || mapping == null)
+            return "other";
+        return NormalizeOpsCategoryChoice(mapping.OpsCategory);
+    }
+
+    private static string ResolveOpsCategoryForMapping(TalkgroupMapping? mapping)
+    {
+        if (mapping == null)
+            return "other";
+
+        if (!string.IsNullOrWhiteSpace(mapping.OpsCategory))
+            return NormalizeOpsCategoryChoice(mapping.OpsCategory);
+
+        var category = InsightCategoryPalette.Normalize(mapping.Category);
+        if (category != "other")
+            return category;
+
+        category = InsightCategoryPalette.Normalize(mapping.Tag);
+        if (category != "other")
+            return category;
+
+        var searchText = string.Join(" ",
+            mapping.Category ?? string.Empty,
+            mapping.Tag ?? string.Empty,
+            mapping.AlphaTag ?? string.Empty,
+            mapping.Description ?? string.Empty);
+
+        return NormalizeOpsCategoryChoice(ResolveCategoryFromKeywords(searchText));
+    }
+
+    private static string NormalizeOpsCategoryChoice(string? raw)
+    {
+        var canonical = InsightCategoryPalette.Normalize(raw) switch
+        {
+            "police" => "police",
+            "fire" => "fire",
+            "ems" => "ems",
+            "traffic" => "traffic",
+            _ => "other"
+        };
+
+        if (canonical != "other")
+            return canonical;
+
+        var fromKeywords = ResolveCategoryFromKeywords(raw ?? string.Empty);
+        return fromKeywords switch
+        {
+            "police" => "police",
+            "fire" => "fire",
+            "ems" => "ems",
+            "traffic" => "traffic",
+            _ => "other"
+        };
+    }
+
+    private static string ResolveCategoryFromKeywords(string raw)
+    {
+        var text = (raw ?? string.Empty).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(text))
+            return "other";
+
+        static bool HasWord(string source, string token) =>
+            System.Text.RegularExpressions.Regex.IsMatch(source, $@"\b{System.Text.RegularExpressions.Regex.Escape(token)}\b");
+
+        if (text.Contains("police") || text.Contains("sheriff") || text.Contains("law") || HasWord(text, "pd"))
+            return "police";
+        if (text.Contains("fire") || HasWord(text, "fd"))
+            return "fire";
+        if (text.Contains("ems") || text.Contains("medical") || text.Contains("medic") || text.Contains("ambulance") || text.Contains("hospital"))
+            return "ems";
+        if (text.Contains("traffic")
+            || text.Contains("accident")
+            || text.Contains("crash")
+            || text.Contains("road")
+            || text.Contains("highway")
+            || text.Contains("hwy")
+            || text.Contains("highway patrol")
+            || text.Contains("hwy patrol")
+            || text.Contains("state patrol")
+            || text.Contains("state highway patrol")
+            || text.Contains("state hwy patrol")
+            || HasWord(text, "dot"))
+            return "traffic";
+
+        return "other";
+    }
+
+    private void ApplyGlobalRangeForSelectedSection()
+    {
+        switch (_currentFilter)
+        {
+            case "24h":
+                OnRange24hClicked(this, new RoutedEventArgs());
+                break;
+            case "2d":
+                OnRange2dClicked(this, new RoutedEventArgs());
+                break;
+            case "week":
+                OnRangeWeekClicked(this, new RoutedEventArgs());
+                break;
+            case "custom":
+                OnPickRangeClicked(this, new RoutedEventArgs());
+                break;
+            default:
+                OnRange24hClicked(this, new RoutedEventArgs());
+                break;
+        }
     }
     
     protected override void OnClosing(WindowClosingEventArgs e)
@@ -1777,143 +3115,6 @@ private void SwitchToInsightsMode()
         });
     }
 
-    private void OnViewButtonClicked(object? sender, RoutedEventArgs e)
-    {
-        TogglePane(RightPaneType.View);
-    }
-
-    private void InitializeRightPanePanels()
-    {
-        _settingsPanel = new SettingsPanel(_settings);
-        _alertsPanel = new AlertManagerPanel(_settings);
-        _cleanupPanel = new CleanupPanel();
-        _viewPanel = new ViewPanel();
-        _offlineRangePanel = new OfflineRangePanel(_settings);
-
-        _settingsPanel.RequestClose += (_, _) => ClosePane(reloadSettings: true);
-        _settingsPanel.ApplySettingsRequested += ApplySettingsAndRestartAsync;
-        _settingsPanel.SettingsPathChanged += path =>
-        {
-            _currentSettingsPath = path;
-            _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
-        };
-        _alertsPanel.RequestClose += (_, _) => ClosePane(reloadSettings: true);
-        _cleanupPanel.RequestClose += (_, _) => ClosePane(reloadSettings: false);
-        _cleanupPanel.CleanupCompleted += async (_, _) => await UpdateUsageTextAsync();
-        _offlineRangePanel.RequestClose += (_, _) => ClosePane(reloadSettings: false);
-        _offlineRangePanel.OfflineLoaded += (_, result) =>
-        {
-            if (_isInsightsMode)
-            {
-                _insightsCustomStart = result.Start;
-                _insightsCustomEnd = result.End;
-                SetInsightsFilter("range");
-            }
-            else
-            {
-                SwitchToOfflineHistory(result.Start, result.End, "custom");
-            }
-            ClosePane(reloadSettings: false);
-        };
-
-        WireViewPanelButtons(_viewPanel);
-        ActivePaneContent = null;
-    }
-
-    private void WireViewPanelButtons(ViewPanel panel)
-    {
-        _alwaysPinAlertsButton = panel.FindControl<Button>("AlwaysPinAlertsButton");
-        _sortNewestButton = panel.FindControl<Button>("SortNewestButton");
-        _sortOldestButton = panel.FindControl<Button>("SortOldestButton");
-        _sortTalkgroupButton = panel.FindControl<Button>("SortTalkgroupButton");
-        _groupNoneButton = panel.FindControl<Button>("GroupNoneButton");
-        _groupTalkgroupButton = panel.FindControl<Button>("GroupTalkgroupButton");
-        _groupTimeOfDayButton = panel.FindControl<Button>("GroupTimeOfDayButton");
-        _groupSourceButton = panel.FindControl<Button>("GroupSourceButton");
-
-        var clearCallsButton = panel.FindControl<Button>("ClearCallsButton");
-        var viewLogButton = panel.FindControl<Button>("ViewLogButton");
-        var decreaseFontButton = panel.FindControl<Button>("DecreaseFontButton");
-        var increaseFontButton = panel.FindControl<Button>("IncreaseFontButton");
-        var collapseExpandButton = panel.FindControl<Button>("CollapseExpandButton");
-
-        if (_sortNewestButton != null) _sortNewestButton.Click += OnSortByTimeNewestClicked;
-        if (_sortOldestButton != null) _sortOldestButton.Click += OnSortByTimeOldestClicked;
-        if (_sortTalkgroupButton != null) _sortTalkgroupButton.Click += OnSortByTalkgroupClicked;
-        if (_groupNoneButton != null) _groupNoneButton.Click += OnGroupByNoneClicked;
-        if (_groupTalkgroupButton != null) _groupTalkgroupButton.Click += OnGroupByTalkgroupClicked;
-        if (_groupTimeOfDayButton != null) _groupTimeOfDayButton.Click += OnGroupByTimeOfDayClicked;
-        if (_groupSourceButton != null) _groupSourceButton.Click += OnGroupBySourceClicked;
-        if (_alwaysPinAlertsButton != null) _alwaysPinAlertsButton.Click += OnAlwaysPinAlertsClicked;
-
-        if (clearCallsButton != null) clearCallsButton.Click += OnClearClicked;
-        if (viewLogButton != null) viewLogButton.Click += OnViewLogClicked;
-        if (decreaseFontButton != null) decreaseFontButton.Click += OnDecreaseFontSizeClicked;
-        if (increaseFontButton != null) increaseFontButton.Click += OnIncreaseFontSizeClicked;
-        if (collapseExpandButton != null) collapseExpandButton.Click += OnCollapseExpandAllClicked;
-    }
-
-    private void TogglePane(RightPaneType pane)
-    {
-        if (_activePane == pane)
-        {
-            ClosePane(reloadSettings: false);
-            return;
-        }
-
-        _activePane = pane;
-        ActivePaneContent = pane switch
-        {
-            RightPaneType.View => _viewPanel,
-            RightPaneType.Settings => _settingsPanel,
-            RightPaneType.Alerts => _alertsPanel,
-            RightPaneType.Cleanup => _cleanupPanel,
-            RightPaneType.Range => _offlineRangePanel,
-            _ => null
-        };
-
-        if (pane == RightPaneType.View)
-        {
-            UpdateSortCheckmarks();
-            UpdateGroupCheckmarks();
-            UpdateAlwaysPinLabel();
-        }
-
-        RaisePaneStateChanged();
-    }
-
-    private void ClosePane(bool reloadSettings)
-    {
-        if (_activePane == RightPaneType.InsightTranscript)
-            _activeInsightTranscriptKey = null;
-
-        _activePane = RightPaneType.None;
-        ActivePaneContent = null;
-        RaisePaneStateChanged();
-
-        if (reloadSettings)
-        {
-            _settings = Settings.LoadFromFile(_currentSettingsPath);
-            _settingsPanel?.SetSettings(_settings);
-            _alertsPanel?.SetSettings(_settings, _currentSettingsPath);
-            EnsureInsightsServiceStarted();
-            _insightsService?.UpdateSettings(_settings);
-            UpdateBellState();
-            RaisePropertyChanged(nameof(IsInsightsEnabled));
-            RefreshNextInsightStatus();
-        }
-    }
-
-    private void RaisePaneStateChanged()
-    {
-        RaisePropertyChanged(nameof(IsPaneOpen));
-        RaisePropertyChanged(nameof(IsViewPaneOpen));
-        RaisePropertyChanged(nameof(IsSettingsPaneOpen));
-        RaisePropertyChanged(nameof(IsAlertsPaneOpen));
-        RaisePropertyChanged(nameof(IsCleanupPaneOpen));
-        RaisePropertyChanged(nameof(IsRangePaneOpen));
-    }
-
     private async Task ApplySettingsAndRestartAsync(Settings newSettings)
     {
         if (IsApplyingSettings)
@@ -1927,6 +3128,7 @@ private void SwitchToInsightsMode()
         RefreshNextInsightStatus();
         TraceLogger.SetLevel(_settings.TraceLevelApp);
         pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+        SyncTroubleshootTraceLevelFromSettings();
 
         _currentSortMode = _settings.SortMode;
         _currentGroupMode = _settings.GroupMode;
@@ -1958,6 +3160,7 @@ private void SwitchToInsightsMode()
             }
 
             _callManager = new LiveCallManager(OnNewCall);
+            ApplyActiveProfileToManagers();
             await Task.Run(async () => await _callManager.Initialize(_settings));
             _ = _callManager.Start();
 
@@ -1979,10 +3182,7 @@ private void SwitchToInsightsMode()
 
     private void UpdateAlwaysPinLabel()
     {
-        if (_alwaysPinAlertsButton != null)
-        {
-            _alwaysPinAlertsButton.Content = _alwaysPinAlertMatches ? "[x] Always pin alert matches" : "[ ] Always pin alert matches";
-        }
+        // No-op: legacy always-pin submenu button was removed.
     }
 
     private void HideSubMenus()
@@ -2009,24 +3209,12 @@ private void SwitchToInsightsMode()
 
     private void UpdateSortCheckmarks()
     {
-        if (_sortNewestButton != null)
-            _sortNewestButton.Content = _currentSortMode == 0 ? "[x] Time (newest first)" : "[ ] Time (newest first)";
-        if (_sortOldestButton != null)
-            _sortOldestButton.Content = _currentSortMode == 1 ? "[x] Time (oldest first)" : "[ ] Time (oldest first)";
-        if (_sortTalkgroupButton != null)
-            _sortTalkgroupButton.Content = _currentSortMode == 2 ? "[x] Talkgroup (A-Z)" : "[ ] Talkgroup (A-Z)";
+        // No-op: legacy sort submenu buttons were removed.
     }
 
     private void UpdateGroupCheckmarks()
     {
-        if (_groupNoneButton != null)
-            _groupNoneButton.Content = _currentGroupMode == 0 ? "[x] None (flat list)" : "[ ] None (flat list)";
-        if (_groupTalkgroupButton != null)
-            _groupTalkgroupButton.Content = _currentGroupMode == 1 ? "[x] Talkgroup" : "[ ] Talkgroup";
-        if (_groupTimeOfDayButton != null)
-            _groupTimeOfDayButton.Content = _currentGroupMode == 2 ? "[x] Time of Day" : "[ ] Time of Day";
-        if (_groupSourceButton != null)
-            _groupSourceButton.Content = _currentGroupMode == 3 ? "[x] Source" : "[ ] Source";
+        // No-op: legacy group-by submenu buttons were removed.
     }
 
     private void OnSortByTimeNewestClicked(object? sender, RoutedEventArgs e)
@@ -2065,10 +3253,6 @@ private void SwitchToInsightsMode()
     private void OnAlwaysPinAlertsClicked(object? sender, RoutedEventArgs e)
     {
         _alwaysPinAlertMatches = !_alwaysPinAlertMatches;
-        if (_alwaysPinAlertsButton != null)
-        {
-            _alwaysPinAlertsButton.Content = _alwaysPinAlertMatches ? "[x] Always pin alert matches" : "[ ] Always pin alert matches";
-        }
         // Don't close menu for toggle - user might want to change other settings
     }
 
@@ -2117,7 +3301,6 @@ private void SwitchToInsightsMode()
             _clearSearchButton.IsVisible = false;
 
         _currentMatchIndex = -1;
-        StatusText = "No search filter";
 
         ApplyTimeRangeFilter();
     }
@@ -2144,7 +3327,6 @@ private void SwitchToInsightsMode()
                 _clearSearchButton.IsVisible = false;
             
             _currentMatchIndex = -1;
-            StatusText = "No search filter";
             
             ApplyGrouping();
         }
@@ -2241,14 +3423,26 @@ private void SwitchToInsightsMode()
 
     private void OnGroupHeaderClicked(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button button && button.DataContext is CallGroupItem header && header.HeaderText != null)
+        if (sender is Button button && button.DataContext is CallGroupItem header)
         {
-            if (_collapsedGroups.Contains(header.HeaderText))
-                _collapsedGroups.Remove(header.HeaderText);   // expand
-            else
-                _collapsedGroups.Add(header.HeaderText);      // collapse
+            var groupKey = header.GroupKey ?? header.HeaderText;
+            if (string.IsNullOrWhiteSpace(groupKey))
+                return;
 
-            ApplyGrouping();
+            var collapsedSet = IsAnyCategorySelected ? _collapsedCategoryGroups : _collapsedLegacyGroups;
+            if (collapsedSet.Contains(groupKey))
+                collapsedSet.Remove(groupKey);   // expand
+            else
+                collapsedSet.Add(groupKey);      // collapse
+
+            if (IsAnyCategorySelected)
+            {
+                ApplyTimeRangeFilter();
+            }
+            else
+            {
+                ApplyGrouping();
+            }
             e.Handled = true;
         }
     }
@@ -2264,20 +3458,19 @@ private void SwitchToInsightsMode()
             HideSubMenus();
             HideMenu();
 
-        bool shouldExpandAll = _collapsedGroups.Count > 0;   // if anything is collapsed, expand all
+        bool shouldExpandAll = _collapsedLegacyGroups.Count > 0;   // if anything is collapsed, expand all
 
             if (shouldExpandAll)
-                _collapsedGroups.Clear();           // expand everything
+                _collapsedLegacyGroups.Clear();           // expand everything
             else
             {
                 // collapse everything
-                _collapsedGroups.Clear();
+                _collapsedLegacyGroups.Clear();
                 foreach (var item in GroupedCalls.Where(i => i.IsHeader && i.HeaderText != null))
-                    _collapsedGroups.Add(item.HeaderText!);
+                    _collapsedLegacyGroups.Add(item.HeaderText!);
             }
 
             ApplyGrouping();
-            StatusText = shouldExpandAll ? "All groups expanded" : "All groups collapsed";
         }
         finally
         {
@@ -2336,7 +3529,6 @@ private void SwitchToInsightsMode()
             {
                 GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = call, ShowTalkgroup = true });
             }
-            StatusText = "Grouping: None (flat list)";
         }
         else
         {
@@ -2353,14 +3545,6 @@ private void SwitchToInsightsMode()
             {
                 GroupedCalls.Add(item);
             }
-
-            StatusText = _currentGroupMode switch
-            {
-                1 => "Grouping: Talkgroup",
-                2 => "Grouping: Time of Day",
-                3 => "Grouping: Source",
-                _ => "Grouping: None"
-            };
         }
         
         // Set search match indicators on GroupedCalls items if searching
@@ -2378,9 +3562,6 @@ private void SwitchToInsightsMode()
                 item.MatchIndex = isMatch ? matchCounter : -1;
             }
             
-            // Update status text with match count
-            var matchingCount = GroupedCalls.Count(i => i.IsSearchMatch && !i.IsHeader);
-            StatusText = $"Search: '{_searchText}' - {matchingCount} matches";
         }
         else
         {
@@ -2401,8 +3582,9 @@ private void SwitchToInsightsMode()
 
         foreach (var group in grouped)
         {
-            bool isExpanded = !_collapsedGroups.Contains(group.Key ?? "");
-            result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, IsExpanded = isExpanded });
+            var groupKey = group.Key ?? string.Empty;
+            bool isExpanded = !_collapsedLegacyGroups.Contains(groupKey);
+            result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, GroupKey = groupKey, IsExpanded = isExpanded });
             if (isExpanded)
             {
                 foreach (var call in group)
@@ -2432,8 +3614,9 @@ private void SwitchToInsightsMode()
 
         foreach (var group in grouped)
         {
-            bool isExpanded = !_collapsedGroups.Contains(group.Key ?? "");
-            result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, IsExpanded = isExpanded });
+            var groupKey = group.Key ?? string.Empty;
+            bool isExpanded = !_collapsedLegacyGroups.Contains(groupKey);
+            result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, GroupKey = groupKey, IsExpanded = isExpanded });
             if (isExpanded)
             {
                 foreach (var call in group)
@@ -2453,8 +3636,9 @@ private void SwitchToInsightsMode()
 
         foreach (var group in grouped)
         {
-            bool isExpanded = !_collapsedGroups.Contains(group.Key ?? "");
-            result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, IsExpanded = isExpanded });
+            var groupKey = group.Key ?? string.Empty;
+            bool isExpanded = !_collapsedLegacyGroups.Contains(groupKey);
+            result.Add(new CallGroupItem { IsHeader = true, HeaderText = group.Key, GroupKey = groupKey, IsExpanded = isExpanded });
             if (isExpanded)
             {
                 foreach (var call in group)
@@ -2484,20 +3668,37 @@ private void SwitchToInsightsMode()
             // Initialize trace logging to file
             TraceLogger.Initialize(RedirectToStdout: false);
             pizzalib.TraceLogger.Initialize(RedirectToStdout: false);
-            TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "PizzaPi UI starting...");
 
             // Settings are already loaded in constructor, just validate/load defaults
             try
             {
                 _settings = Settings.LoadFromFile(_currentSettingsPath);
+                TraceLogger.SetLevel(_settings.TraceLevelApp);
+                pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+                PublishLiveTalkgroupSnapshotFromStore();
+                TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "PizzaPi UI starting...");
                 TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Settings loaded from file");
+                SafeUiPost(() =>
+                {
+                    RefreshSettingsUiAndPanels();
+                    SyncTroubleshootTraceLevelFromSettings();
+                });
             }
             catch (Exception ex)
             {
                 // Use default settings
                 _settings = new Settings();
+                TraceLogger.SetLevel(_settings.TraceLevelApp);
+                pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+                PublishLiveTalkgroupSnapshotFromStore();
+                TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, "PizzaPi UI starting...");
                 TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Warning,
                     $"Using default settings: {ex.Message}");
+                SafeUiPost(() =>
+                {
+                    RefreshSettingsUiAndPanels();
+                    SyncTroubleshootTraceLevelFromSettings();
+                });
             }
 
             RaisePropertyChanged(nameof(IsInsightsEnabled));
@@ -2509,19 +3710,18 @@ private void SwitchToInsightsMode()
             TraceLogger.SetLevel(_settings.TraceLevelApp);
             pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
             TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Trace level set to {_settings.TraceLevelApp}");
+            SafeUiPost(SyncTroubleshootTraceLevelFromSettings);
 
             // Apply saved sort, group, and font size settings
             _currentSortMode = _settings.SortMode;
             _currentGroupMode = _settings.GroupMode;
             FontSize = _settings.FontSize;
 
-            // Update settings panel with loaded settings
-            SafeUiPost(() =>
-            {
-                _settingsPanel?.SetSettings(_settings);
-            });
+            // Update settings-backed UI panels with loaded settings
+            SafeUiPost(RefreshSettingsUiAndPanels);
 
             _callManager = new LiveCallManager(OnNewCall);
+            ApplyActiveProfileToManagers();
 
             try
             {
@@ -2544,7 +3744,7 @@ private void SwitchToInsightsMode()
                     _liveCalls.Clear();
                     foreach (var call in primedCalls)
                     {
-                        call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
+                        call.FriendlyTalkgroup = FormatTalkgroupFromLiveSnapshot(call.Talkgroup);
                         call.FriendlyFrequency = FormatFrequency(call.Frequency);
                         call.PlayAudioCommand = c => PlayAudio(c);
                         _allCalls.Add(call);
@@ -2555,6 +3755,9 @@ private void SwitchToInsightsMode()
                     _alertsTriggeredCount = _allCalls.Count(c => c.IsAlertMatch);
                     RaisePropertyChanged(nameof(CallsReceivedCount));
                     RaisePropertyChanged(nameof(AlertsTriggeredCount));
+                    RaisePropertyChanged(nameof(FooterCallsText));
+                    RaisePropertyChanged(nameof(FooterAlertsText));
+                    RaisePropertyChanged(nameof(CompositeStatusText));
                     _currentFilter = "24h";
                     _historicalRangeCalls = null;
                     UpdateButtonStates();
@@ -2600,7 +3803,7 @@ private void SwitchToInsightsMode()
         SafeUiPost(() =>
         {
             // Populate friendly fields
-            call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
+            call.FriendlyTalkgroup = FormatTalkgroupFromLiveSnapshot(call.Talkgroup);
             call.FriendlyFrequency = FormatFrequency(call.Frequency);
 
             // Set up the play command for this call
@@ -2627,11 +3830,13 @@ private void SwitchToInsightsMode()
             {
                 TraceLogger.Trace(TraceLoggerType.Alerts, TraceEventType.Information, 
                     $"Alert triggered: {call.FriendlyTalkgroup} - autoplaying audio");
-                PlayAudio(call);
+                PlayAudio(call, autoplayAlertPlayback: true);
             }
 
             _callsReceivedCount++;
             RaisePropertyChanged(nameof(CallsReceivedCount));
+            RaisePropertyChanged(nameof(FooterCallsText));
+            RaisePropertyChanged(nameof(CompositeStatusText));
             RaisePropertyChanged(nameof(CallCountText));
 
             // Increment alert counter if this call matched an alert
@@ -2639,8 +3844,11 @@ private void SwitchToInsightsMode()
             {
                 _alertsTriggeredCount++;
                 RaisePropertyChanged(nameof(AlertsTriggeredCount));
+                RaisePropertyChanged(nameof(FooterAlertsText));
+                RaisePropertyChanged(nameof(CompositeStatusText));
                 TraceLogger.Trace(TraceLoggerType.Alerts, TraceEventType.Information, 
                     $"Alert match #{_alertsTriggeredCount}: {call.FriendlyTalkgroup}");
+                AppendAlertHistoryFromCall(call);
             }
 
             // If always pin alert matches is enabled, ensure the call stays pinned
@@ -2653,6 +3861,8 @@ private void SwitchToInsightsMode()
             // Ingest call into insights service for real-time processing (if insights mode is active)
             _insightsService?.IngestCall(call);
             RefreshNextInsightStatus();
+            if (call.IsAlertMatch)
+                MenuSpecificStatusText = $"Alert match: {call.MatchedAlertType} {call.MatchedAlertDetail}".Trim();
         });
     }
 
@@ -2825,10 +4035,39 @@ private void SwitchToInsightsMode()
         try
         {
             string usageText = await Task.Run(GetCaptureFolderSize);
+            var entries = await Task.Run(() => _lmUsageLedgerStore.LoadAll());
+            var sessionTokens = entries
+                .Where(e => e.TimestampUtc >= _sessionStartedUtc)
+                .Sum(e => (long)(e.TotalTokens > 0 ? e.TotalTokens : e.PromptTokens + e.CompletionTokens));
+            var ledgerSummary = BuildLmUsageLedgerSummary(entries);
+            var ledgerRows = BuildLmUsageLedgerRows(entries);
+            var aggregate24h = BuildAggregatePeriodText("24h", entries, DateTime.UtcNow.AddHours(-24));
+            var aggregate2d = BuildAggregatePeriodText("2d", entries, DateTime.UtcNow.AddDays(-2));
+            var aggregateWeek = BuildAggregatePeriodText("Week", entries, DateTime.UtcNow.AddDays(-7));
+            var aggregateMonth = BuildAggregatePeriodText("Month", entries, DateTime.UtcNow.AddDays(-30));
             SafeUiPost(() =>
             {
                 _usageText = usageText;
+                _sessionTotalTokens = sessionTokens;
+                LmUsageLedgerSummaryText = ledgerSummary;
+                LmUsage24hText = aggregate24h;
+                LmUsage2dText = aggregate2d;
+                LmUsageWeekText = aggregateWeek;
+                LmUsageMonthText = aggregateMonth;
+                LmUsageLedgerRows.Clear();
+                foreach (var row in ledgerRows)
+                    LmUsageLedgerRows.Add(row);
                 RaisePropertyChanged(nameof(UsageText));
+                RaisePropertyChanged(nameof(SessionTokenUsageText));
+                RaisePropertyChanged(nameof(FooterTokensText));
+                RaisePropertyChanged(nameof(LmUsageLedgerPath));
+                RaisePropertyChanged(nameof(LmUsageTierText));
+                RaisePropertyChanged(nameof(LmUsage24hText));
+                RaisePropertyChanged(nameof(LmUsage2dText));
+                RaisePropertyChanged(nameof(LmUsageWeekText));
+                RaisePropertyChanged(nameof(LmUsageMonthText));
+                RaisePropertyChanged(nameof(HasLmUsageLedgerRows));
+                RaisePropertyChanged(nameof(CompositeStatusText));
             });
         }
         catch (Exception ex)
@@ -2838,7 +4077,22 @@ private void SwitchToInsightsMode()
             SafeUiPost(() =>
             {
                 _usageText = "Usage: ?mb";
+                _sessionTotalTokens = 0;
+                LmUsageLedgerSummaryText = "LM usage stats unavailable.";
+                LmUsage24hText = "24h: unavailable";
+                LmUsage2dText = "2d: unavailable";
+                LmUsageWeekText = "Week: unavailable";
+                LmUsageMonthText = "Month: unavailable";
+                LmUsageLedgerRows.Clear();
                 RaisePropertyChanged(nameof(UsageText));
+                RaisePropertyChanged(nameof(SessionTokenUsageText));
+                RaisePropertyChanged(nameof(FooterTokensText));
+                RaisePropertyChanged(nameof(LmUsage24hText));
+                RaisePropertyChanged(nameof(LmUsage2dText));
+                RaisePropertyChanged(nameof(LmUsageWeekText));
+                RaisePropertyChanged(nameof(LmUsageMonthText));
+                RaisePropertyChanged(nameof(HasLmUsageLedgerRows));
+                RaisePropertyChanged(nameof(CompositeStatusText));
             });
         }
         finally
@@ -2862,7 +4116,7 @@ private void SwitchToInsightsMode()
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(10), token);
+                await Task.Delay(TimeSpan.FromSeconds(30), token);
             }
             catch (TaskCanceledException)
             {
@@ -2873,6 +4127,7 @@ private void SwitchToInsightsMode()
                 break;
 
             await UpdateUsageTextAsync();
+            LoadTroubleshootLogs();
         }
     }
 
@@ -2943,6 +4198,84 @@ private void SwitchToInsightsMode()
         return size;
     }
 
+    private string BuildLmUsageLedgerSummary(List<LmUsageLedgerEntry> entries)
+    {
+        if (entries.Count == 0)
+            return "No LM Link usage recorded yet.";
+        var totals = SummarizeBucket(entries);
+        return $"Entries: {entries.Count}, tokens: {totals.TotalTokens:N0}";
+    }
+
+    private static string NormalizeTriggerBucket(string? trigger)
+    {
+        var value = (trigger ?? string.Empty).Trim().ToLowerInvariant();
+        if (value.Contains("manual", StringComparison.Ordinal))
+            return "manual insights";
+        if (value.Contains("periodic", StringComparison.Ordinal) || value.Contains("auto", StringComparison.Ordinal))
+            return "auto insights";
+        return "other";
+    }
+
+    private static (int Requests, int Successes, int Failures, long InputChars, long PromptTokens, long CompletionTokens, long TotalTokens) SummarizeBucket(IEnumerable<LmUsageLedgerEntry> source)
+    {
+        var list = source.ToList();
+        return (
+            Requests: list.Count,
+            Successes: list.Count(x => x.Success),
+            Failures: list.Count(x => !x.Success),
+            InputChars: list.Sum(x => (long)x.InputChars),
+            PromptTokens: list.Sum(x => (long)x.PromptTokens),
+            CompletionTokens: list.Sum(x => (long)x.CompletionTokens),
+            TotalTokens: list.Sum(x => (long)(x.TotalTokens > 0 ? x.TotalTokens : x.PromptTokens + x.CompletionTokens))
+        );
+    }
+
+    private static string BuildAggregatePeriodText(string label, List<LmUsageLedgerEntry> entries, DateTime startUtc)
+    {
+        var scope = entries.Where(e => e.TimestampUtc >= startUtc).ToList();
+        var m = SummarizeBucket(scope);
+        var budget = EstimateCost(m.PromptTokens, m.CompletionTokens, 0.15, 0.60);
+        var standard = EstimateCost(m.PromptTokens, m.CompletionTokens, 2.00, 8.00);
+        var premium = EstimateCost(m.PromptTokens, m.CompletionTokens, 5.00, 20.00);
+        return $"{label}: {m.TotalTokens:N0} tokens  |  ${standard:F2} std  (${budget:F2} budget / ${premium:F2} premium)";
+    }
+
+    private List<LmUsageLedgerRow> BuildLmUsageLedgerRows(List<LmUsageLedgerEntry> entries)
+    {
+        return entries
+            .OrderByDescending(e => e.TimestampUtc)
+            .Take(500)
+            .Select(e => new LmUsageLedgerRow
+            {
+                Timestamp = e.TimestampUtc.ToLocalTime().ToString("g"),
+                Trigger = string.IsNullOrWhiteSpace(e.TriggerActivity) ? "other" : e.TriggerActivity,
+                PromptTokens = e.PromptTokens,
+                CompletionTokens = e.CompletionTokens,
+                TotalTokens = e.TotalTokens > 0 ? e.TotalTokens : e.PromptTokens + e.CompletionTokens,
+                CostStandard = EstimateCost(e.PromptTokens, e.CompletionTokens, 2.00, 8.00),
+                Status = e.Success ? "ok" : "fail"
+            })
+            .ToList();
+    }
+
+    private static double EstimateCost(long promptTokens, long completionTokens, double inputPerMillion, double outputPerMillion)
+    {
+        var inputCost = (promptTokens / 1_000_000.0) * inputPerMillion;
+        var outputCost = (completionTokens / 1_000_000.0) * outputPerMillion;
+        return inputCost + outputCost;
+    }
+
+    private static string FormatCompactTokenCount(long tokens)
+    {
+        if (tokens >= 1_000_000_000)
+            return $"{tokens / 1_000_000_000d:0.#}b";
+        if (tokens >= 1_000_000)
+            return $"{tokens / 1_000_000d:0.#}m";
+        if (tokens >= 1_000)
+            return $"{tokens / 1_000d:0.#}k";
+        return tokens.ToString("N0");
+    }
+
     public new event PropertyChangedEventHandler? PropertyChanged;
 
     private void RaisePropertyChanged([CallerMemberName] string? propertyName = null)
@@ -2953,8 +4286,13 @@ private void SwitchToInsightsMode()
 private string _statusText = "Initializing...";
     public string StatusText
     {
-get { return _statusText; }
-set { _statusText = value; RaisePropertyChanged(); }
+        get { return _statusText; }
+        set
+        {
+            _statusText = value;
+            RaisePropertyChanged();
+            SetMenuStatus(value);
+        }
     }
 
     private string _radioStatusText = "Radio idle";
@@ -2984,13 +4322,25 @@ set { _statusText = value; RaisePropertyChanged(); }
     public int CallsReceivedCount
     {
         get { return _callsReceivedCount; }
-        set { _callsReceivedCount = value; RaisePropertyChanged(); }
+        set
+        {
+            _callsReceivedCount = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CompositeStatusText));
+            RaisePropertyChanged(nameof(FooterCallsText));
+        }
     }
 
     public int AlertsTriggeredCount
     {
         get { return _alertsTriggeredCount; }
-        set { _alertsTriggeredCount = value; RaisePropertyChanged(); }
+        set
+        {
+            _alertsTriggeredCount = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CompositeStatusText));
+            RaisePropertyChanged(nameof(FooterAlertsText));
+        }
     }
 
     public string ServerStatusText
@@ -3008,7 +4358,6 @@ set { _statusText = value; RaisePropertyChanged(); }
     public void Refresh()
     {
         // Refresh logic would go here
-        StatusText = "Refreshing...";
     }
 
     private void HideMenu()
@@ -3017,7 +4366,7 @@ set { _statusText = value; RaisePropertyChanged(); }
 
     private void OnBellClicked(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
     {
-        ToggleSnoozeMenu();
+        OnBellMenuClicked(sender, new RoutedEventArgs());
     }
 
     private void SnoozeAlerts(int minutes)
@@ -3031,7 +4380,6 @@ set { _statusText = value; RaisePropertyChanged(); }
     {
         _snoozeUntil = null;
         UpdateBellState();
-        StatusText = "Enabled";
     }
 
     // Update bell icon state - called when snooze or autoplay settings change
@@ -3053,6 +4401,10 @@ set { _statusText = value; RaisePropertyChanged(); }
         {
             _bellToolTipText = "Alert audio: Disabled (click to enable)";
         }
+        else if (IsBellAlertState)
+        {
+            _bellToolTipText = "Alert audio: ACTIVE alert playing (click for snooze options)";
+        }
         else if (_isAlertSnoozed)
         {
             _bellToolTipText = $"Alert audio: Snoozed until {_snoozeUntil!.Value:t} (click to change)";
@@ -3064,12 +4416,15 @@ set { _statusText = value; RaisePropertyChanged(); }
 
         // Determine color
         bool alertsEnabled = _settings?.AutoplayAlerts ?? false;
+        bool isAlertPlaying = IsBellAlertState;
         bool isSnoozed = _isAlertSnoozed;
         string colorHex = !alertsEnabled
-            ? "#666666"  // Gray when disabled
-            : isSnoozed
-                ? "#ffaa00"  // Orange when snoozed
-                : "#00ff00"; // Green when enabled
+            ? "#8a8a8a"   // Gray outline when disabled
+            : isAlertPlaying
+                ? "#ff6b6b" // Red accent when active alert is playing
+                : isSnoozed
+                    ? "#c2a36a" // Muted amber when snoozed
+                    : "#9fb38a"; // Muted green when enabled
 
         _bellColor = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(colorHex));
 
@@ -3077,6 +4432,8 @@ set { _statusText = value; RaisePropertyChanged(); }
         RaisePropertyChanged(nameof(IsAlertSnoozed));
         RaisePropertyChanged(nameof(BellToolTipText));
         RaisePropertyChanged(nameof(BellColor));
+        RaisePropertyChanged(nameof(IsBellAlertState));
+        RaisePropertyChanged(nameof(IsBellMenuVisible));
     }
 
     private void ToggleSnoozeMenu()
@@ -3095,7 +4452,6 @@ set { _statusText = value; RaisePropertyChanged(); }
                     _settings.AutoplayAlerts = true;
                     _settings.SaveToFile();
                     UpdateBellState();
-                    StatusText = "Enabled";
                 })
             });
         }
@@ -3150,204 +4506,10 @@ set { _statusText = value; RaisePropertyChanged(); }
                 _settings.AutoplayAlerts = false;
                 _settings.SaveToFile();
                 UpdateBellState();
-                StatusText = "Disabled";
             })
         });
 
         menu.Open(this);
-    }
-
-    private void OnSettingsClicked(object? sender, RoutedEventArgs e)
-    {
-        TogglePane(RightPaneType.Settings);
-    }
-
-    private void OnAlertsClicked(object? sender, RoutedEventArgs e)
-    {
-        TogglePane(RightPaneType.Alerts);
-    }
-
-    private void OnClearClicked(object? sender, RoutedEventArgs e)
-    {
-        _allCalls.Clear();
-        _liveCalls.Clear();
-        _insightsWindowCallCache.Clear();
-        _insightsWindowCallIdCache.Clear();
-        _insightsWindowHashCache.Clear();
-        Calls.Clear();
-        GroupedCalls.Clear();
-        _collapsedGroups.Clear();
-        _callsReceivedCount = 0;
-        _alertsTriggeredCount = 0;
-        RaisePropertyChanged(nameof(CallsReceivedCount));
-        RaisePropertyChanged(nameof(AlertsTriggeredCount));
-        StatusText = "Calls cleared";
-        HideMenu();
-    }
-
-    private async void OnOpenOfflineCaptureClicked(object? sender, RoutedEventArgs e)
-    {
-        // Show offline mode dialog (don't stop live capture yet)
-        var offlineWindow = new OfflineModeWindow(_settings);
-        await offlineWindow.ShowDialog(this);
-
-        // Debug: log what we got from the dialog
-        System.Diagnostics.Debug.WriteLine($"[MainWindow] Dialog returned: SelectedPath={offlineWindow.SelectedPath}, LoadedCalls={(offlineWindow.LoadedCalls != null ? offlineWindow.LoadedCalls.Count.ToString() : "null")}");
-
-        // Only switch to offline mode if loading was successful
-        if (offlineWindow.SelectedPath != null && offlineWindow.LoadedCalls != null && offlineWindow.LoadedCalls.Count > 0)
-        {
-            // Stop any audio playback first
-            StopAudio();
-
-            // User selected a folder and loading succeeded - now stop live capture if running
-            if (!_isOfflineMode && _callManager != null && _callManager.IsStarted())
-            {
-                _callManager.Stop();
-                StatusText = "Live capture stopped";
-            }
-
-            // Clear live calls before loading offline captures
-            _allCalls.Clear();
-            Calls.Clear();
-
-            // Switch to offline mode (or load new offline capture if already in offline mode)
-            _isOfflineMode = true;
-
-            // Clean up previous offline manager if exists
-            if (_offlineCallManager != null)
-            {
-                _offlineCallManager.Stop();
-                _offlineCallManager.Dispose();
-            }
-
-            _offlineCallManager = new OfflineCallManager(offlineWindow.SelectedPath, OnNewCall);
-
-            // Load calls into UI with proper sorting (pinned first)
-            System.Diagnostics.Debug.WriteLine($"[MainWindow] Loading {offlineWindow.LoadedCalls.Count} calls into UI");
-            foreach (var call in offlineWindow.LoadedCalls)
-            {
-                call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
-                call.FriendlyFrequency = FormatFrequency(call.Frequency);
-                call.PlayAudioCommand = (c) => PlayAudio(c);
-
-                // Use GetInsertIndex to properly sort pinned calls to top
-                int insertIndex = GetInsertIndexInList(_allCalls, call);
-                _allCalls.Insert(insertIndex, call);
-            }
-            System.Diagnostics.Debug.WriteLine($"[MainWindow] Calls.Count after load: {Calls.Count}");
-
-            ApplyTimeRangeFilter();
-            System.Diagnostics.Debug.WriteLine($"[MainWindow] GroupedCalls.Count after load: {GroupedCalls.Count}");
-
-            // Update call and alert counts to reflect loaded offline captures
-            _callsReceivedCount = offlineWindow.LoadedCalls.Count;
-            _alertsTriggeredCount = offlineWindow.LoadedCalls.Count(c => c.IsAlertMatch);
-            RaisePropertyChanged(nameof(CallsReceivedCount));
-            RaisePropertyChanged(nameof(AlertsTriggeredCount));
-            CallCountText = $"Calls: {_callsReceivedCount}";
-
-            // Update UI
-            RaisePropertyChanged(nameof(ModeIndicatorText));
-            RaisePropertyChanged(nameof(ModeIndicatorColor));
-            RaisePropertyChanged(nameof(IsOfflineMode));
-
-            Title = $"PizzaPi - Offline: {offlineWindow.SelectedPath}";
-            StatusText = $"Loaded {offlineWindow.LoadedCalls.Count} offline calls";
-        }
-        else if (offlineWindow.SelectedPath != null)
-        {
-            // User selected a folder but loading failed or no calls found
-            System.Diagnostics.Debug.WriteLine($"[MainWindow] Offline load failed - no calls loaded");
-            StatusText = "Offline load failed - no calls loaded";
-        }
-        // else: user cancelled - do nothing, stay in current mode
-
-        HideMenu();
-    }
-
-    private void OnReturnToLiveModeClicked(object? sender, RoutedEventArgs e)
-    {
-        if (!_isOfflineMode)
-        {
-            StatusText = "Already in live mode";
-            HideMenu();
-            return;
-        }
-
-        // Stop offline call manager
-        _offlineCallManager?.Stop();
-        _offlineCallManager?.Dispose();
-        _offlineCallManager = null;
-
-        // Clear calls
-        _allCalls.Clear();
-        Calls.Clear();
-
-        // Switch back to live mode
-        _isOfflineMode = false;
-
-        // Update UI
-        RaisePropertyChanged(nameof(ModeIndicatorText));
-        RaisePropertyChanged(nameof(ModeIndicatorColor));
-        RaisePropertyChanged(nameof(IsOfflineMode));
-
-        // Restart live call manager
-        _ = InitializeAsync();
-
-        Title = "PizzaPi";
-        StatusText = "Returned to live mode";
-
-        HideMenu();
-    }
-
-    private void OnCleanupClicked(object? sender, RoutedEventArgs e)
-    {
-        TogglePane(RightPaneType.Cleanup);
-    }
-
-    private void OnViewLogClicked(object? sender, RoutedEventArgs e)
-    {
-        // Open the log file in default text editor
-        var logPath = Path.Combine(Settings.DefaultWorkingDirectory, "Logs");
-        if (Directory.Exists(logPath))
-        {
-            // Find the most recent log file (both .txt and .log)
-            var logFiles = Directory.GetFiles(logPath, "*.*")
-                .Where(f => f.EndsWith(".txt") || f.EndsWith(".log"))
-                .OrderByDescending(f => File.GetLastWriteTime(f))
-                .FirstOrDefault();
-            if (!string.IsNullOrEmpty(logFiles) && File.Exists(logFiles))
-            {
-                // Open in default text editor
-                try
-                {
-                    var proc = new System.Diagnostics.Process
-                    {
-                        StartInfo = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = logFiles,
-                            UseShellExecute = true
-                        }
-                    };
-                    proc.Start();
-                    StatusText = $"Opened log: {Path.GetFileName(logFiles)}";
-                }
-                catch (Exception ex)
-                {
-                    StatusText = $"Error opening log: {ex.Message}";
-                }
-            }
-            else
-            {
-                StatusText = "No log files found. Enable verbose logging in settings.";
-            }
-        }
-        else
-        {
-            StatusText = "Log directory not found";
-        }
-        HideMenu();
     }
 
     private void OnRefreshClicked(object? sender, RoutedEventArgs e)
@@ -3356,9 +4518,10 @@ set { _statusText = value; RaisePropertyChanged(); }
         HideMenu();
     }
 
-    private void PlayAudio(TranscribedCall newCall)
+    private void PlayAudio(TranscribedCall newCall, bool autoplayAlertPlayback = false)
     {
         StopAudio(); // always stop anything currently playing first
+        _openBellMenuOnNextClick = false;
 
         var audioFilePath = newCall.Location;
         if (string.IsNullOrEmpty(audioFilePath) || !File.Exists(audioFilePath))
@@ -3367,7 +4530,8 @@ set { _statusText = value; RaisePropertyChanged(); }
             return;
         }
 
-        StatusText = $"Playing: {newCall.FriendlyTalkgroup} @ {newCall.FriendlyFrequency}";
+        _isAutoplayAlertAudioPlaying = _settings.AutoplayAlerts && (autoplayAlertPlayback || newCall.IsAlertMatch);
+        UpdateBellState();
 
         if (_isLinux)
         {
@@ -3379,7 +4543,15 @@ set { _statusText = value; RaisePropertyChanged(); }
         try
         {
             // Reset all playing flags first
-            foreach (var c in Calls.ToList())   // .ToList() makes a snapshot so we can safely set properties
+            foreach (var c in _allCalls.ToList())
+            {
+                c.IsAudioPlaying = (c.UniqueId == newCall.UniqueId);
+            }
+            foreach (var c in _liveCalls.ToList())
+            {
+                c.IsAudioPlaying = (c.UniqueId == newCall.UniqueId);
+            }
+            foreach (var c in Calls.ToList())   // visible subset
             {
                 c.IsAudioPlaying = (c.UniqueId == newCall.UniqueId);
             }
@@ -3402,9 +4574,12 @@ set { _statusText = value; RaisePropertyChanged(); }
             _waveOut.PlaybackStopped += playbackHandler;
             _waveOut.Init((IWaveProvider)_audioReader);
             _waveOut.Play();
+            UpdateBellState();
         }
         catch (Exception ex)
         {
+            _isAutoplayAlertAudioPlaying = false;
+            UpdateBellState();
             StatusText = $"Error playing audio: {ex.Message}";
         }
     }
@@ -3449,6 +4624,17 @@ set { _statusText = value; RaisePropertyChanged(); }
             catch { }
             _audioReader = null;
         }
+
+        foreach (var c in _allCalls.ToList())
+            c.IsAudioPlaying = false;
+        foreach (var c in _liveCalls.ToList())
+            c.IsAudioPlaying = false;
+        foreach (var c in Calls.ToList())
+            c.IsAudioPlaying = false;
+
+        _isAutoplayAlertAudioPlaying = false;
+        SetActiveAlertHistoryAudio(null);
+        UpdateBellState();
     }
 
     private void PlayAudioLinux(string filePath, TranscribedCall call)
@@ -3489,10 +4675,19 @@ set { _statusText = value; RaisePropertyChanged(); }
             // Set playing flag safely (use .ToList() snapshot)
             SafeUiPost(() =>
             {
+                foreach (var c in _allCalls.ToList())
+                {
+                    c.IsAudioPlaying = (c.UniqueId == call.UniqueId);
+                }
+                foreach (var c in _liveCalls.ToList())
+                {
+                    c.IsAudioPlaying = (c.UniqueId == call.UniqueId);
+                }
                 foreach (var c in Calls.ToList())
                 {
                     c.IsAudioPlaying = (c.UniqueId == call.UniqueId);
                 }
+                UpdateBellState();
             });
         }
         catch (Exception ex)
@@ -3500,6 +4695,8 @@ set { _statusText = value; RaisePropertyChanged(); }
             StatusText = $"Error starting ffplay: {ex.Message}\n\nInstall ffmpeg with:\nsudo apt install ffmpeg";
             process?.Dispose();
             _currentAudioProcess = null;
+            _isAutoplayAlertAudioPlaying = false;
+            UpdateBellState();
         }
     }
 
@@ -3525,8 +4722,6 @@ set { _statusText = value; RaisePropertyChanged(); }
                         GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
                 }
             }
-
-            StatusText = "Playback complete";
 
             // Force UI refresh of this call
             var index = Calls.IndexOf(call);
@@ -3615,118 +4810,1635 @@ set { _statusText = value; RaisePropertyChanged(); }
     }
 
     // Time range filter button handlers
-    private void OnLiveModeClicked(object? sender, RoutedEventArgs e)
+    private void OnHighlightsClicked(object? sender, RoutedEventArgs e)
     {
-        if (IsRadioMode)
+        SelectedSection = MainSection.Highlights;
+        _isInsightsMode = true;
+        _isOfflineMode = false;
+        SetInsightsCategoryFilter("all");
+        _ = LoadInsightsSummariesAsync();
+        MenuSpecificStatusText = NextInsightStatusText;
+    }
+
+    private void OnSectionPoliceClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.Police;
+        _isInsightsMode = false;
+        SetInsightsCategoryFilter("police");
+        RefreshCategoryGroupedCalls(Calls.ToList());
+        MenuSpecificStatusText = "Police activity";
+    }
+
+    private void OnSectionFireClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.Fire;
+        _isInsightsMode = false;
+        SetInsightsCategoryFilter("fire");
+        RefreshCategoryGroupedCalls(Calls.ToList());
+        MenuSpecificStatusText = "Fire activity";
+    }
+
+    private void OnSectionEmsClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.EMS;
+        _isInsightsMode = false;
+        SetInsightsCategoryFilter("ems");
+        RefreshCategoryGroupedCalls(Calls.ToList());
+        MenuSpecificStatusText = "EMS activity";
+    }
+
+    private void OnSectionTrafficClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.Traffic;
+        _isInsightsMode = false;
+        SetInsightsCategoryFilter("traffic");
+        RefreshCategoryGroupedCalls(Calls.ToList());
+        MenuSpecificStatusText = "Traffic activity";
+    }
+
+    private void OnSectionOtherClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.Other;
+        _isInsightsMode = false;
+        SetInsightsCategoryFilter("other");
+        RefreshCategoryGroupedCalls(Calls.ToList());
+        MenuSpecificStatusText = "Other activity";
+    }
+
+    private void OnSectionAlertsClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.Alerts;
+        ReloadAlertHistory();
+        MarkAlertHistoryRead();
+        MenuSpecificStatusText = "Alert history";
+    }
+
+    private async void OnGenerateSummariesNowClicked(object? sender, RoutedEventArgs e)
+    {
+        await GenerateSummariesForCurrentRangeAsync("summaries");
+    }
+
+    private async void OnGenerateHighlightsNowClicked(object? sender, RoutedEventArgs e)
+    {
+        await GenerateSummariesForCurrentRangeAsync("highlights");
+    }
+
+    private void OnGoToAlertConfigurationClicked(object? sender, RoutedEventArgs e)
+    {
+        SelectedSection = MainSection.Settings;
+        RefreshSettingsTabsFromSettings();
+        var settingsTabs = this.FindControl<TabControl>("SettingsTabControl");
+        if (settingsTabs != null)
+            settingsTabs.SelectedIndex = 2; // Alerts tab
+        MenuSpecificStatusText = "Alert configuration";
+    }
+
+    private async Task GenerateSummariesForCurrentRangeAsync(string label)
+    {
+        if (!IsGenerateNowVisible || _isGeneratingInsightsNow)
+            return;
+
+        if (!IsInsightsEnabled)
         {
-            ShowRadioSubmenu = !ShowRadioSubmenu;
-            ShowInsightsSubmenu = false;
+            MenuSpecificStatusText = $"Cannot generate {label}: insights are disabled.";
             return;
         }
 
-        SwitchToLiveMode();
-        ShowRadioSubmenu = false;
-    }
-
-    private void OnInsightsClicked(object? sender, RoutedEventArgs e)
-    {
-        Trace(TraceLoggerType.Insights, TraceEventType.Information, "OnInsightsClicked fired");
-        if (IsInsightsMode)
+        EnsureInsightsServiceStarted();
+        if (_insightsService == null)
         {
-            ShowInsightsSubmenu = !ShowInsightsSubmenu;
-            ShowRadioSubmenu = false;
+            MenuSpecificStatusText = $"Cannot generate {label}: insights service unavailable.";
             return;
         }
 
-        SwitchToInsightsMode();
-        ShowInsightsSubmenu = false;
-    }
-
-    private void OnInsightsMorningClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("morning");
-    }
-
-    private void OnInsightsAfternoonClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("afternoon");
-    }
-
-    private void OnInsightsNightClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("night");
-    }
-
-    private void OnInsights24hClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("24h");
-    }
-
-    private void OnInsights2dClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("2d");
-    }
-
-    private void OnInsightsWeekClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("week");
-    }
-
-    private void OnInsightsTodayClicked(object? sender, RoutedEventArgs e)
-    {
-        SetInsightsFilter("today");
-    }
-
-    private void SetInsightsFilter(string filterType)
-    {
-        _insightsFilter = filterType;
-        
-        // Update button states
-        RaisePropertyChanged(nameof(IsInsightsMorningActive));
-        RaisePropertyChanged(nameof(IsInsightsAfternoonActive));
-        RaisePropertyChanged(nameof(IsInsightsNightActive));
-        RaisePropertyChanged(nameof(IsInsightsTodayActive));
-        RaisePropertyChanged(nameof(IsInsights24hActive));
-        RaisePropertyChanged(nameof(IsInsights2dActive));
-        RaisePropertyChanged(nameof(IsInsightsWeekActive));
-        RaisePropertyChanged(nameof(IsInsightsRangeActive));
-
-        // Only load if not already loading (prevent duplicate calls)
-        if (!InsightsLoading)
+        var sourceCalls = Calls.ToList();
+        if (sourceCalls.Count == 0)
         {
-            _ = LoadInsightsSummariesAsync();
+            MenuSpecificStatusText = $"No calls available to generate {label} for this time range.";
+            return;
+        }
+
+        var (start, end) = GetCurrentRangeBounds();
+        var startOffset = new DateTimeOffset(start, TimeZoneInfo.Local.GetUtcOffset(start));
+        var endOffset = new DateTimeOffset(end, TimeZoneInfo.Local.GetUtcOffset(end));
+
+        _isGeneratingInsightsNow = true;
+        RaisePropertyChanged(nameof(CanGenerateNow));
+        InsightsStatusText = $"Generating {label}...";
+        MenuSpecificStatusText = $"Generating {label} now...";
+
+        try
+        {
+            var success = await _insightsService.FinalizeWindowAsync(startOffset, endOffset, sourceCalls, _settings, "manual insights summary");
+            if (success)
+            {
+                await LoadInsightsSummariesAsync();
+                MenuSpecificStatusText = $"Generated {label} for the selected time range.";
+            }
+            else
+            {
+                var reason = string.IsNullOrWhiteSpace(_insightsService.LastFailureReason)
+                    ? "unknown error"
+                    : _insightsService.LastFailureReason!;
+                MenuSpecificStatusText = $"Unable to generate {label}: {reason}";
+            }
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Unable to generate {label}: {ex.Message}";
+        }
+        finally
+        {
+            _isGeneratingInsightsNow = false;
+            RaisePropertyChanged(nameof(CanGenerateNow));
+            RaisePropertyChanged(nameof(IsHighlightsEmpty));
+            RaisePropertyChanged(nameof(IsCategoryInsightsEmpty));
+            RefreshNextInsightStatus();
+            _ = UpdateUsageTextAsync();
         }
     }
 
-    private void OnLast24hClicked(object? sender, RoutedEventArgs e)
+    private void OnSectionSettingsClicked(object? sender, RoutedEventArgs e)
     {
-        _currentFilter = "24h";
-        _historicalRangeCalls = null;
-        _customStartDate = null;
-        _customEndDate = null;
-        ApplyTimeRangeFilter();
-        UpdateButtonStates();
+        SelectedSection = MainSection.Settings;
+        RefreshSettingsTabsFromSettings();
+        _ = UpdateUsageTextAsync();
+        MenuSpecificStatusText = "Settings";
     }
 
-    private void OnLast2dClicked(object? sender, RoutedEventArgs e)
+    private void OnSectionTroubleshootClicked(object? sender, RoutedEventArgs e)
     {
-        var end = DateTime.Now;
-        var start = end.AddHours(-48);
-        SwitchToOfflineHistory(start, end, "2d");
+        SelectedSection = MainSection.Troubleshoot;
+        LoadTroubleshootLogs();
+        MenuSpecificStatusText = "Troubleshoot";
     }
 
-    private void OnLastWeekClicked(object? sender, RoutedEventArgs e)
+    private void OnBellMenuClicked(object? sender, RoutedEventArgs e)
     {
-        var end = DateTime.Now;
-        var start = end.AddDays(-7);
-        SwitchToOfflineHistory(start, end, "week");
+        if (!_settings.AutoplayAlerts)
+        {
+            _settings.AutoplayAlerts = true;
+            _snoozeUntil = null;
+            _openBellMenuOnNextClick = false;
+            _settings.SaveToFile(_currentSettingsPath);
+            UpdateBellState();
+            StatusText = "Alert audio enabled";
+            return;
+        }
+
+        if (IsBellAlertState)
+        {
+            StopAudio();
+            _openBellMenuOnNextClick = true;
+            StatusText = "Alert audio stopped";
+            UpdateBellState();
+            return;
+        }
+
+        if (_openBellMenuOnNextClick)
+        {
+            _openBellMenuOnNextClick = false;
+            ToggleSnoozeMenu();
+            return;
+        }
+
+        ToggleSnoozeMenu();
     }
 
-    private void OnRangeLiveClicked(object? sender, RoutedEventArgs e)
+    private async void OnRestartTrunkRecorderClicked(object? sender, RoutedEventArgs e)
     {
-        OnRange24hClicked(sender, e);
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return;
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "/bin/bash",
+                ArgumentList = { "-lc", "sudo systemctl restart trunk-recorder" },
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(psi);
+            if (process != null)
+            {
+                await process.WaitForExitAsync();
+            }
+            MenuSpecificStatusText = "Trunk recorder restart requested";
+            LoadTroubleshootLogs();
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Restart failed: {ex.Message}";
+        }
     }
 
+    private async void OnCopyTroubleshootLogClicked(object? sender, RoutedEventArgs e)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        if (top?.Clipboard == null)
+            return;
+
+        var text = $"{TrunkRecorderLogText}{Environment.NewLine}{Environment.NewLine}{PizzaPiLogText}";
+        await top.Clipboard.SetTextAsync(text);
+        MenuSpecificStatusText = "Troubleshoot logs copied";
+    }
+
+    private static string NormalizeTroubleshootTraceLevel(string? value)
+    {
+        return (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "error" => "Error",
+            "warning" => "Warning",
+            "information" => "Information",
+            "debug" => "Debug",
+            _ => "Information"
+        };
+    }
+
+    private static SourceLevels ParseTroubleshootTraceLevel(string? label)
+    {
+        return NormalizeTroubleshootTraceLevel(label) switch
+        {
+            "Error" => SourceLevels.Error,
+            "Warning" => SourceLevels.Warning,
+            "Debug" => SourceLevels.Verbose,
+            _ => SourceLevels.Information
+        };
+    }
+
+    private static string ToTroubleshootTraceLevelLabel(SourceLevels level)
+    {
+        return level switch
+        {
+            SourceLevels.Error or SourceLevels.Critical => "Error",
+            SourceLevels.Warning => "Warning",
+            SourceLevels.Verbose or SourceLevels.All => "Debug",
+            _ => "Information"
+        };
+    }
+
+    private void ApplyTroubleshootTraceLevelSelection(string selectedLabel)
+    {
+        var level = ParseTroubleshootTraceLevel(selectedLabel);
+        _settings.TraceLevelApp = level;
+        TraceLogger.SetLevel(level);
+        pizzalib.TraceLogger.SetLevel(level);
+        try
+        {
+            _settings.SaveToFile(_currentSettingsPath);
+            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Information, $"Live trace level changed to {level}");
+            MenuSpecificStatusText = $"Trace level: {selectedLabel}";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Trace level changed in-memory, but save failed: {ex.Message}";
+        }
+    }
+
+    private void SyncTroubleshootTraceLevelFromSettings()
+    {
+        var label = ToTroubleshootTraceLevelLabel(_settings.TraceLevelApp);
+        _selectedTroubleshootTraceLevel = label;
+        RaisePropertyChanged(nameof(SelectedTroubleshootTraceLevel));
+    }
+
+    private void LoadTroubleshootLogs()
+    {
+        try
+        {
+            TraceLogger.Flush();
+            pizzalib.TraceLogger.Flush();
+
+            RefreshPizzaPiLogOptions();
+            LoadSelectedPizzaPiLogText();
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "/bin/bash",
+                    ArgumentList = { "-lc", "tmux capture-pane -pt trunklogs -S -250" },
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc != null)
+                {
+                    var stdout = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit(3000);
+                    TrunkRecorderLogText = string.IsNullOrWhiteSpace(stdout) ? "No trunk recorder log output." : stdout;
+                    RaisePropertyChanged(nameof(TrunkRecorderLogText));
+                }
+            }
+
+            var pizzaHasError = PizzaPiLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
+            var trunkHasError = TrunkRecorderLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
+            var retuneCount = System.Text.RegularExpressions.Regex.Matches(
+                TrunkRecorderLogText ?? string.Empty,
+                "Retuning to Control Channel",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count;
+            HasTroubleshootIssue = pizzaHasError || trunkHasError || retuneCount >= 3;
+            RaisePropertyChanged(nameof(HasTroubleshootIssue));
+            RaisePropertyChanged(nameof(TroubleshootMenuText));
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Troubleshoot log load failed: {ex.Message}";
+        }
+    }
+
+    private void RefreshPizzaPiLogOptions()
+    {
+        var previousSelection = _selectedPizzaPiLogOption;
+        var currentPath = TraceLogger.CurrentLogPath;
+        var allLogs = GetPizzaPiLogFilesOrdered()
+            .Where(path => string.IsNullOrWhiteSpace(currentPath)
+                || !string.Equals(path, currentPath, StringComparison.OrdinalIgnoreCase))
+            .Take(100)
+            .ToList();
+
+        _isRefreshingPizzaPiLogOptions = true;
+        try
+        {
+            PizzaPiLogOptions.Clear();
+            _pizzaPiLogOptionPathMap.Clear();
+
+            PizzaPiLogOptions.Add(CurrentPizzaPiLogOption);
+
+            var seenLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in allLogs)
+            {
+                var baseLabel = FormatPizzaPiLogOptionLabel(path);
+                var label = baseLabel;
+                var suffix = 2;
+                while (!seenLabels.Add(label))
+                {
+                    label = $"{baseLabel} ({suffix++})";
+                }
+
+                PizzaPiLogOptions.Add(label);
+                _pizzaPiLogOptionPathMap[label] = path;
+            }
+
+            var nextSelection = previousSelection;
+            if (string.IsNullOrWhiteSpace(nextSelection) || !PizzaPiLogOptions.Contains(nextSelection))
+                nextSelection = CurrentPizzaPiLogOption;
+
+            _selectedPizzaPiLogOption = nextSelection;
+            RaisePropertyChanged(nameof(SelectedPizzaPiLogOption));
+        }
+        finally
+        {
+            _isRefreshingPizzaPiLogOptions = false;
+        }
+    }
+
+    private List<string> GetPizzaPiLogFilesOrdered()
+    {
+        var logDir = TraceLogger.m_TraceFileDir;
+        if (!Directory.Exists(logDir))
+            return new List<string>();
+
+        return Directory.GetFiles(logDir, "pizzapi-*.txt")
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .ToList();
+    }
+
+    private List<string> GetPizzaPiLogCandidatesForSelection()
+    {
+        if (_selectedPizzaPiLogOption != null
+            && !string.Equals(_selectedPizzaPiLogOption, CurrentPizzaPiLogOption, StringComparison.Ordinal)
+            && _pizzaPiLogOptionPathMap.TryGetValue(_selectedPizzaPiLogOption, out var selectedPath))
+        {
+            return new List<string> { selectedPath };
+        }
+
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(TraceLogger.CurrentLogPath) && File.Exists(TraceLogger.CurrentLogPath))
+            candidates.Add(TraceLogger.CurrentLogPath);
+        candidates.AddRange(GetPizzaPiLogFilesOrdered());
+        return candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void LoadSelectedPizzaPiLogText()
+    {
+        var candidates = GetPizzaPiLogCandidatesForSelection();
+        foreach (var candidate in candidates)
+        {
+            if (TryReadTextFileShared(candidate, out var text))
+            {
+                PizzaPiLogText = text;
+                RaisePropertyChanged(nameof(PizzaPiLogText));
+                return;
+            }
+        }
+
+        PizzaPiLogText = "PizzaPi log unavailable.";
+        RaisePropertyChanged(nameof(PizzaPiLogText));
+    }
+
+    private static bool TryReadTextFileShared(string path, out string text)
+    {
+        text = string.Empty;
+        try
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            text = reader.ReadToEnd();
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private static string FormatPizzaPiLogOptionLabel(string path)
+    {
+        var info = new FileInfo(path);
+        var ts = info.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss");
+        var size = FormatFileSize(info.Length);
+        return $"{ts} | {size} | {info.Name}";
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        const double kb = 1024d;
+        const double mb = kb * 1024d;
+        if (bytes >= mb)
+            return $"{bytes / mb:0.00} MB";
+        if (bytes >= kb)
+            return $"{bytes / kb:0.0} KB";
+        return $"{bytes} B";
+    }
+
+    private void OnProfileSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox combo && combo.SelectedItem is ProcessingProfile profile)
+        {
+            ActiveProfile = profile;
+        }
+    }
+
+    private void OnProfileEditorSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox combo && combo.SelectedItem is ProcessingProfile profile)
+            ProfileEditorSelectedProfile = profile;
+    }
+
+    private void OnCreateProfileClicked(object? sender, RoutedEventArgs e)
+    {
+        var name = (this.FindControl<TextBox>("ProfileNameTextBox")?.Text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            MenuSpecificStatusText = "Profile name is required";
+            return;
+        }
+
+        if (Profiles.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            MenuSpecificStatusText = "Profile name already exists";
+            return;
+        }
+
+        var includePolice = this.FindControl<CheckBox>("ProfileIncludePoliceCheckBox")?.IsChecked ?? true;
+        var includeFire = this.FindControl<CheckBox>("ProfileIncludeFireCheckBox")?.IsChecked ?? true;
+        var includeEms = this.FindControl<CheckBox>("ProfileIncludeEmsCheckBox")?.IsChecked ?? true;
+        var includeTraffic = this.FindControl<CheckBox>("ProfileIncludeTrafficCheckBox")?.IsChecked ?? true;
+        var includeOther = this.FindControl<CheckBox>("ProfileIncludeOtherCheckBox")?.IsChecked ?? true;
+        var talkgroups = ParseProfileTalkgroups(
+            this.FindControl<TextBox>("ProfileTalkgroupsTextBox")?.Text ?? string.Empty);
+
+        var profile = new ProcessingProfile
+        {
+            Name = name,
+            IncludePolice = includePolice,
+            IncludeFire = includeFire,
+            IncludeEMS = includeEms,
+            IncludeTraffic = includeTraffic,
+            IncludeOther = includeOther,
+            AllowedTalkgroups = talkgroups,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+        Profiles.Add(profile);
+        ProfileEditorSelectedProfile = profile;
+        SelectedTalkgroupAddProfile = profile;
+        _profileStore.Save(Profiles.ToList(), ActiveProfile?.Id ?? profile.Id);
+        MenuSpecificStatusText = $"Created profile: {name} (active profile unchanged)";
+    }
+
+    private void OnDeleteProfileClicked(object? sender, RoutedEventArgs e)
+    {
+        if (ProfileEditorSelectedProfile == null || Profiles.Count <= 1)
+        {
+            MenuSpecificStatusText = "Cannot delete profile";
+            return;
+        }
+
+        var deletingProfile = ProfileEditorSelectedProfile;
+        var deletingActive = ActiveProfile?.Id == deletingProfile.Id;
+        Profiles.Remove(deletingProfile);
+        ProfileEditorSelectedProfile = Profiles.FirstOrDefault();
+        if (deletingActive && ActiveProfile != null)
+            ActiveProfile = Profiles.First();
+        EnsureTalkgroupAddProfileSelection();
+        _profileStore.Save(Profiles.ToList(), ActiveProfile?.Id ?? Profiles.First().Id);
+        MenuSpecificStatusText = "Profile deleted";
+    }
+
+    private void OnUpdateProfileClicked(object? sender, RoutedEventArgs e)
+    {
+        if (ProfileEditorSelectedProfile == null)
+            return;
+
+        var targetProfile = ProfileEditorSelectedProfile;
+        targetProfile.IncludePolice = this.FindControl<CheckBox>("ProfileIncludePoliceCheckBox")?.IsChecked ?? true;
+        targetProfile.IncludeFire = this.FindControl<CheckBox>("ProfileIncludeFireCheckBox")?.IsChecked ?? true;
+        targetProfile.IncludeEMS = this.FindControl<CheckBox>("ProfileIncludeEmsCheckBox")?.IsChecked ?? true;
+        targetProfile.IncludeTraffic = this.FindControl<CheckBox>("ProfileIncludeTrafficCheckBox")?.IsChecked ?? true;
+        targetProfile.IncludeOther = this.FindControl<CheckBox>("ProfileIncludeOtherCheckBox")?.IsChecked ?? true;
+
+        var talkgroupsRaw = this.FindControl<TextBox>("ProfileTalkgroupsTextBox")?.Text ?? string.Empty;
+        var talkgroups = ParseProfileTalkgroups(talkgroupsRaw);
+        targetProfile.AllowedTalkgroups = talkgroups;
+        targetProfile.UpdatedAtUtc = DateTime.UtcNow;
+
+        _profileStore.Save(Profiles.ToList(), ActiveProfile?.Id ?? targetProfile.Id);
+        if (ActiveProfile?.Id == targetProfile.Id)
+        {
+            RefreshMenuVisibility();
+            EnsureValidSelectedSection();
+            ApplyActiveProfileToManagers();
+            ClearSectionCachesForProfileSwitch();
+            ApplyTimeRangeFilter();
+            if (IsHighlightsSelected)
+                _ = LoadInsightsSummariesAsync();
+        }
+
+        MenuSpecificStatusText = "Profile updated";
+    }
+
+    private static List<long> ParseProfileTalkgroups(string talkgroupsRaw)
+    {
+        return talkgroupsRaw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(v =>
+            {
+                if (long.TryParse(v, out var id))
+                    return (long?)id;
+                return null;
+            })
+            .Where(v => v.HasValue)
+            .Select(v => v!.Value)
+            .Distinct()
+            .ToList();
+    }
+
+    private void OnAlertHistoryPlayClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.DataContext is not AlertMatchRecord record)
+            return;
+        if (string.IsNullOrWhiteSpace(record.AudioPath) || !File.Exists(record.AudioPath))
+        {
+            MenuSpecificStatusText = "Alert audio not available";
+            return;
+        }
+
+        if (record.IsAudioPlaying)
+        {
+            StopAudio();
+            MenuSpecificStatusText = "Alert audio stopped";
+            return;
+        }
+
+        var call = new TranscribedCall
+        {
+            Location = record.AudioPath,
+            StartTime = record.TimestampUnix,
+            StopTime = record.TimestampUnix + Math.Max(1, record.DurationSec),
+            Transcription = record.Transcription,
+            FriendlyTalkgroup = "Alert",
+            FriendlyFrequency = string.Empty
+        };
+        PlayAudio(call);
+        SetActiveAlertHistoryAudio(record);
+        MenuSpecificStatusText = $"Playing alert audio ({record.AlertType})";
+    }
+
+    private void SetActiveAlertHistoryAudio(AlertMatchRecord? activeRecord)
+    {
+        foreach (var item in AlertHistory)
+        {
+            item.IsAudioPlaying = activeRecord != null && item.Id == activeRecord.Id;
+        }
+    }
+
+    private async void OnSettingsLoadProxyClicked(object? sender, RoutedEventArgs e)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel?.StorageProvider == null)
+        {
+            MenuSpecificStatusText = "Load failed: file picker unavailable";
+            return;
+        }
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Load settings JSON",
+            AllowMultiple = false,
+            FileTypeFilter = new List<FilePickerFileType>
+            {
+                new("JSON files") { Patterns = new List<string> { "*.json" } }
+            }
+        });
+
+        var file = files.FirstOrDefault();
+        if (file == null)
+            return;
+
+        try
+        {
+            var path = file.Path.LocalPath;
+            _settings = Settings.LoadFromFile(path);
+            _currentSettingsPath = path;
+            TraceLogger.SetLevel(_settings.TraceLevelApp);
+            pizzalib.TraceLogger.SetLevel(_settings.TraceLevelApp);
+            SyncTroubleshootTraceLevelFromSettings();
+            RefreshSettingsUiAndPanels();
+            ApplyActiveProfileToManagers();
+            MenuSpecificStatusText = $"Loaded settings: {Path.GetFileName(path)}";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Load failed: {ex.Message}";
+        }
+    }
+
+    private async void OnSettingsSaveProxyClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ApplySettingsTabsToSettings();
+            _settings.SaveToFile(_currentSettingsPath);
+            await ApplySettingsAndRestartAsync(_settings);
+            MenuSpecificStatusText = "Settings saved";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Save failed: {ex.Message}";
+        }
+    }
+
+    private async void OnSettingsSaveAsProxyClicked(object? sender, RoutedEventArgs e)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel?.StorageProvider == null)
+        {
+            MenuSpecificStatusText = "Save As failed: file picker unavailable";
+            return;
+        }
+
+        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save settings JSON",
+            SuggestedFileName = "settings.json",
+            FileTypeChoices = new List<FilePickerFileType>
+            {
+                new("JSON files") { Patterns = new List<string> { "*.json" } }
+            }
+        });
+
+        if (file == null)
+            return;
+
+        try
+        {
+            ApplySettingsTabsToSettings();
+            _settings.SaveToFile(file.Path.LocalPath);
+            _currentSettingsPath = file.Path.LocalPath;
+            await ApplySettingsAndRestartAsync(_settings);
+            MenuSpecificStatusText = $"Saved settings: {Path.GetFileName(_currentSettingsPath)}";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Save As failed: {ex.Message}";
+        }
+    }
+
+    private async void OnSettingsImportTalkgroupsClicked(object? sender, RoutedEventArgs e)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel?.StorageProvider == null)
+        {
+            MenuSpecificStatusText = "Import failed: file picker unavailable";
+            return;
+        }
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import Talkgroups CSV",
+            AllowMultiple = false,
+            FileTypeFilter = new List<FilePickerFileType>
+            {
+                new("CSV files") { Patterns = new List<string> { "*.csv" } }
+            }
+        });
+        var file = files.FirstOrDefault();
+        if (file == null)
+            return;
+
+        try
+        {
+            var imported = TalkgroupHelper.GetTalkgroupsFromCsv(file.Path.LocalPath);
+            if (imported.Count == 0)
+            {
+                MenuSpecificStatusText = "Import failed: no talkgroups found in CSV.";
+                return;
+            }
+
+            AutoGenerateMappingsFromTalkgroups(imported, replaceExistingMappings: true);
+            RefreshTalkgroupRows();
+            HasPendingTalkgroupMappingChanges = true;
+            MenuSpecificStatusText = $"Imported {imported.Count} talkgroups";
+            TalkgroupWizardStatusText = $"Imported {imported.Count} talkgroups from CSV. Click Apply to make mappings live.";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Import failed: {ex.Message}";
+        }
+    }
+
+    private async void OnSettingsBuildTalkgroupsClicked(object? sender, RoutedEventArgs e)
+    {
+        var sid = await PromptForSidAsync();
+        if (string.IsNullOrWhiteSpace(sid))
+            return;
+
+        var url = $"https://www.radioreference.com/db/sid/{sid.Trim()}";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            TalkgroupWizardStatusText = "Invalid SID.";
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(30);
+            var html = await client.GetStringAsync(uri);
+            var parsed = ParseTalkgroupsFromHtml(html, out var parseDiag);
+            Trace(
+                TraceLoggerType.Settings,
+                TraceEventType.Information,
+                $"RR build parse diagnostics for SID={sid.Trim()} url={url}: {parseDiag}");
+            if (parsed.Count == 0)
+            {
+                Trace(
+                    TraceLoggerType.Settings,
+                    TraceEventType.Warning,
+                    $"RR build parsed zero talkgroups for SID={sid.Trim()} url={url}; diagnostics: {parseDiag}");
+                TalkgroupWizardStatusText = $"Crawl failed: no talkgroups parsed from {url}.";
+                return;
+            }
+
+            AutoGenerateMappingsFromTalkgroups(parsed, replaceExistingMappings: true);
+            RefreshTalkgroupRows();
+            HasPendingTalkgroupMappingChanges = true;
+
+            var exportedTrCsvPath = ExportTrSupportedTalkgroupsCsv(sid.Trim());
+            TalkgroupWizardStatusText = $"Built {parsed.Count} talkgroups from {url}. Exported TR CSV: {Path.GetFileName(exportedTrCsvPath)}. Click Apply to make mappings live.";
+            MenuSpecificStatusText = TalkgroupWizardStatusText;
+        }
+        catch (Exception ex)
+        {
+            TalkgroupWizardStatusText = $"Crawl failed: {ex.Message}";
+        }
+    }
+
+    private async Task<string?> PromptForSidAsync()
+    {
+        var sidBox = new TextBox
+        {
+            Width = 220,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+            Text = string.Empty,
+            PlaceholderText = "e.g. 6355"
+        };
+        var help = new TextBlock
+        {
+            Text = "Enter RadioReference SID (URL: https://www.radioreference.com/db/sid/{SID})",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Foreground = Avalonia.Media.Brushes.Gray,
+            FontSize = 11
+        };
+        var okButton = new Button { Content = "Build", Width = 90 };
+        var cancelButton = new Button { Content = "Cancel", Width = 90 };
+        var buttonRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+        buttonRow.Children.Add(okButton);
+        buttonRow.Children.Add(cancelButton);
+
+        var panel = new StackPanel { Margin = new Avalonia.Thickness(12), Spacing = 8 };
+        panel.Children.Add(help);
+        panel.Children.Add(sidBox);
+        panel.Children.Add(buttonRow);
+
+        var window = new Window
+        {
+            Title = "Build RR CSV",
+            Width = 500,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = panel
+        };
+
+        string? result = null;
+        okButton.Click += (_, _) =>
+        {
+            result = sidBox.Text?.Trim();
+            window.Close();
+        };
+        cancelButton.Click += (_, _) =>
+        {
+            result = null;
+            window.Close();
+        };
+
+        await window.ShowDialog(this);
+        return result;
+    }
+
+    private string ExportTrSupportedTalkgroupsCsv(string? sid)
+    {
+        var fileToken = string.IsNullOrWhiteSpace(sid)
+            ? "latest"
+            : new string(sid.Where(char.IsLetterOrDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(fileToken))
+            fileToken = "latest";
+
+        var outputDir = Settings.DefaultWorkingDirectory;
+        Directory.CreateDirectory(outputDir);
+        var outputPath = Path.Combine(outputDir, $"talkgroups-tr-{fileToken}.csv");
+
+        var rows = _talkgroupMappings
+            .GroupBy(m => m.TalkgroupId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+            .OrderBy(m => m.TalkgroupId)
+            .ToList();
+
+        using var writer = new StreamWriter(outputPath, append: false, Encoding.UTF8);
+        writer.WriteLine("Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category");
+        foreach (var row in rows)
+        {
+            writer.WriteLine(
+                $"{row.TalkgroupId}," +
+                $"{row.TalkgroupId:X}," +
+                $"{EscapeCsvField(row.Mode)}," +
+                $"{EscapeCsvField(row.AlphaTag)}," +
+                $"{EscapeCsvField(row.Description)}," +
+                $"{EscapeCsvField(row.Tag)}," +
+                $"{EscapeCsvField(row.Category)}");
+        }
+
+        Trace(
+            TraceLoggerType.Settings,
+            TraceEventType.Information,
+            $"Exported TR-supported talkgroups CSV: path={outputPath}, rows={rows.Count}");
+
+        return outputPath;
+    }
+
+    private static string EscapeCsvField(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+
+        var needsQuotes = value.Contains(',') || value.Contains('"') || value.Contains('\r') || value.Contains('\n');
+        if (!needsQuotes)
+            return value;
+
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private void OnTalkgroupSelectAllClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox checkBox)
+            return;
+
+        var shouldSelect = checkBox.IsChecked == true;
+        _suppressTalkgroupSelectionTracking = true;
+        try
+        {
+            foreach (var row in _visibleTalkgroupMappingRows)
+                row.IsSelectedForProfile = shouldSelect;
+        }
+        finally
+        {
+            _suppressTalkgroupSelectionTracking = false;
+        }
+
+        if (!shouldSelect)
+            _talkgroupSelectionAnchorId = null;
+        UpdateTalkgroupSelectionUiState();
+    }
+
+    private void OnTalkgroupSelectionCheckboxPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _shiftPressedDuringTalkgroupCheckboxPress = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+    }
+
+    private void OnTalkgroupSelectionCheckboxClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox checkBox || checkBox.DataContext is not TalkgroupMappingRow row)
+            return;
+
+        var shouldSelect = checkBox.IsChecked == true;
+        if (_shiftPressedDuringTalkgroupCheckboxPress)
+            ApplyTalkgroupRangeSelection(row, shouldSelect);
+        else
+            UpdateTalkgroupSelectionUiState();
+
+        _talkgroupSelectionAnchorId = row.Id;
+        _shiftPressedDuringTalkgroupCheckboxPress = false;
+    }
+
+    private void OnAddSelectedTalkgroupsClicked(object? sender, RoutedEventArgs e)
+    {
+        if (SelectedTalkgroupAddProfile == null)
+        {
+            MenuSpecificStatusText = "Select a target profile first.";
+            return;
+        }
+
+        if (IsDefaultProfile(SelectedTalkgroupAddProfile))
+        {
+            MenuSpecificStatusText = "Default profile cannot be edited.";
+            return;
+        }
+
+        var selectedTgids = _talkgroupMappingRows
+            .Where(r => r.IsSelectedForProfile)
+            .Select(r => r.Id)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+        if (selectedTgids.Count == 0)
+        {
+            MenuSpecificStatusText = "Select at least one talkgroup row.";
+            return;
+        }
+
+        var prior = new HashSet<long>(SelectedTalkgroupAddProfile.AllowedTalkgroups ?? new List<long>());
+        var added = 0;
+        foreach (var tgid in selectedTgids)
+        {
+            if (prior.Add(tgid))
+                added++;
+        }
+
+        SelectedTalkgroupAddProfile.AllowedTalkgroups = prior.OrderBy(id => id).ToList();
+        SelectedTalkgroupAddProfile.UpdatedAtUtc = DateTime.UtcNow;
+        ProfileEditorSelectedProfile = SelectedTalkgroupAddProfile;
+
+        var activeProfileId = ActiveProfile?.Id ?? SelectedTalkgroupAddProfile.Id;
+        _profileStore.Save(Profiles.ToList(), activeProfileId);
+        if (ActiveProfile?.Id == SelectedTalkgroupAddProfile.Id)
+        {
+            RefreshMenuVisibility();
+            EnsureValidSelectedSection();
+            ApplyActiveProfileToManagers();
+            ClearSectionCachesForProfileSwitch();
+            ApplyTimeRangeFilter();
+            if (IsHighlightsSelected)
+                _ = LoadInsightsSummariesAsync();
+        }
+        _settings.SaveToFile(_currentSettingsPath);
+        RefreshProfileEditorFromSelectedProfile();
+
+        MenuSpecificStatusText = added > 0
+            ? $"Added {added} talkgroup(s) to profile '{SelectedTalkgroupAddProfile.Name}'."
+            : $"No new talkgroups were added to profile '{SelectedTalkgroupAddProfile.Name}'.";
+    }
+
+    private async void OnTalkgroupApplyClicked(object? sender, RoutedEventArgs e)
+    {
+        if (IsTalkgroupEditorBusy || !HasPendingTalkgroupMappingChanges)
+            return;
+
+        var approved = await ConfirmTalkgroupApplyAsync();
+        if (!approved)
+            return;
+
+        try
+        {
+            IsTalkgroupApplyBusy = true;
+            TalkgroupAutoResolveStatusText = "Stopping live call manager...";
+
+            var wasStarted = _callManager != null && _callManager.IsStarted();
+            if (wasStarted && _callManager != null)
+            {
+                await Task.Run(() => _callManager.Stop(block: true));
+            }
+
+            TalkgroupAutoResolveStatusText = "Applying talkgroup mappings...";
+
+            await Task.Run(() =>
+            {
+                // Persist staged mappings before atomic cutover so restart state matches live state.
+                _talkgroupMappingStore.SaveAll(_talkgroupMappings);
+
+                // Persist settings after mapping updates.
+                _settings.SaveToFile(_currentSettingsPath);
+
+                // Atomic in-memory switchover: readers block briefly while snapshot pointer is replaced.
+                PublishLiveTalkgroupSnapshotFromStaged();
+            });
+
+            if (wasStarted && _callManager != null)
+            {
+                TalkgroupAutoResolveStatusText = "Restarting live call manager...";
+                var restarted = await _callManager.Start();
+                if (!restarted)
+                    throw new Exception("Live call manager did not restart successfully.");
+            }
+
+            HasPendingTalkgroupMappingChanges = false;
+            TalkgroupWizardStatusText = "Talkgroup mappings are now live.";
+            MenuSpecificStatusText = "Talkgroup mappings applied. Live call manager restarted.";
+
+            TriggerHistoricalRefreshAfterMappingApply();
+        }
+        catch (Exception ex)
+        {
+            TalkgroupWizardStatusText = $"Apply failed: {ex.Message}";
+        }
+        finally
+        {
+            IsTalkgroupApplyBusy = false;
+            TalkgroupAutoResolveStatusText = string.Empty;
+        }
+    }
+
+    private async Task<bool> ConfirmTalkgroupApplyAsync()
+    {
+        var message = new TextBlock
+        {
+            Text = "Note: Applying changes to the talkgroup mapping will restart live call manager. Some in-flight calls might be lost.",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 460
+        };
+
+        var proceedButton = new Button
+        {
+            Content = "Proceed",
+            Width = 110,
+            Classes = { "menu-btn" }
+        };
+        var cancelButton = new Button
+        {
+            Content = "Cancel",
+            Width = 110,
+            Classes = { "menu-btn" }
+        };
+
+        var buttons = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
+        };
+        buttons.Children.Add(proceedButton);
+        buttons.Children.Add(cancelButton);
+
+        var panel = new StackPanel
+        {
+            Margin = new Thickness(14),
+            Spacing = 12
+        };
+        panel.Children.Add(message);
+        panel.Children.Add(buttons);
+
+        var window = new Window
+        {
+            Title = "Apply Talkgroup Mapping",
+            Width = 540,
+            Height = 190,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = panel
+        };
+
+        var result = false;
+        proceedButton.Click += (_, _) =>
+        {
+            result = true;
+            window.Close();
+        };
+        cancelButton.Click += (_, _) =>
+        {
+            result = false;
+            window.Close();
+        };
+
+        await window.ShowDialog(this);
+        return result;
+    }
+
+    private void TriggerHistoricalRefreshAfterMappingApply()
+    {
+        if (_currentFilter == "24h")
+        {
+            RefreshDerivedFieldsForLoadedCalls();
+            ApplyTimeRangeFilter();
+            return;
+        }
+
+        var requestVersion = Interlocked.Increment(ref _talkgroupRefreshRequestVersion);
+        var (start, end) = GetCurrentRangeBounds();
+        MenuSpecificStatusText = "Talkgroup mappings are live. Refreshing historical calls...";
+        _ = Task.Run(() =>
+        {
+            var refreshed = LoadOfflineCallsFromHistory(start, end);
+            foreach (var call in refreshed)
+            {
+                call.FriendlyTalkgroup = FormatTalkgroupFromLiveSnapshot(call.Talkgroup);
+                call.FriendlyFrequency = FormatFrequency(call.Frequency);
+                call.PlayAudioCommand = c => PlayAudio(c);
+            }
+
+            SafeUiPost(() =>
+            {
+                if (requestVersion != _talkgroupRefreshRequestVersion)
+                    return;
+
+                _historicalRangeCalls = refreshed;
+                ApplyTimeRangeFilter(refreshed);
+                MenuSpecificStatusText = $"Talkgroup mappings applied. Refreshed {refreshed.Count} historical calls.";
+            });
+        });
+    }
+
+    private static List<Talkgroup> ParseTalkgroupsFromHtml(string html)
+    {
+        return ParseTalkgroupsFromHtml(html, out _);
+    }
+
+    private static List<Talkgroup> ParseTalkgroupsFromHtml(string html, out string diagnostics)
+    {
+        var rows = new List<Talkgroup>();
+        var diag = new TalkgroupParserDiagnostics();
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            diagnostics = "empty html";
+            return rows;
+        }
+
+        var clean = System.Text.RegularExpressions.Regex.Replace(
+            html,
+            "<script[\\s\\S]*?</script>|<style[\\s\\S]*?</style>",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        diag.CleanHtmlLength = clean.Length;
+
+        var talkgroupsSection = ExtractTalkgroupsSectionHtml(clean, diag);
+        if (string.IsNullOrWhiteSpace(talkgroupsSection))
+        {
+            diagnostics = diag.ToString();
+            return rows;
+        }
+
+        var seen = new HashSet<long>();
+        ParseTalkgroupTablesFromSection(talkgroupsSection, seen, rows, diag);
+        diag.RowsParsed = rows.Count;
+        diagnostics = diag.ToString();
+
+        return rows.OrderBy(r => r.Id).ToList();
+    }
+
+    private static string ExtractTalkgroupsSectionHtml(string html, TalkgroupParserDiagnostics? diag = null)
+    {
+        var headingMatches = System.Text.RegularExpressions.Regex.Matches(
+            html,
+            "<h(?<level>[1-6])[^>]*>(?<title>[\\s\\S]*?)</h\\k<level>>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (diag != null)
+            diag.HeadingCount = headingMatches.Count;
+        if (headingMatches.Count == 0)
+            return html;
+
+        System.Text.RegularExpressions.Match? talkgroupsHeading = null;
+        System.Text.RegularExpressions.Match? talkgroupsHeadingContains = null;
+        var talkgroupsLevel = 0;
+        foreach (System.Text.RegularExpressions.Match heading in headingMatches)
+        {
+            var title = NormalizeHtmlText(heading.Groups["title"].Value);
+            if (title.Equals("Talkgroups", StringComparison.OrdinalIgnoreCase))
+            {
+                talkgroupsHeading = heading;
+                if (!int.TryParse(heading.Groups["level"].Value, out talkgroupsLevel))
+                    talkgroupsLevel = 2;
+                if (diag != null)
+                    diag.TalkgroupsHeadingMatchedExactly = true;
+                break;
+            }
+            if (talkgroupsHeadingContains == null &&
+                title.IndexOf("Talkgroups", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                talkgroupsHeadingContains = heading;
+                if (diag != null)
+                    diag.TalkgroupsHeadingMatchedContains = true;
+            }
+        }
+
+        if (talkgroupsHeading == null)
+        {
+            talkgroupsHeading = talkgroupsHeadingContains;
+            if (talkgroupsHeading == null)
+                return html;
+            if (!int.TryParse(talkgroupsHeading.Groups["level"].Value, out talkgroupsLevel))
+                talkgroupsLevel = 2;
+        }
+        if (diag != null)
+        {
+            diag.TalkgroupsHeadingFound = talkgroupsHeading != null;
+            diag.TalkgroupsHeadingLevel = talkgroupsLevel;
+        }
+
+        var start = talkgroupsHeading.Index + talkgroupsHeading.Length;
+        var end = html.Length;
+        foreach (System.Text.RegularExpressions.Match heading in headingMatches)
+        {
+            if (heading.Index <= talkgroupsHeading.Index)
+                continue;
+            if (!int.TryParse(heading.Groups["level"].Value, out var level))
+                continue;
+
+            if (level <= talkgroupsLevel)
+            {
+                end = heading.Index;
+                break;
+            }
+        }
+
+        if (start < 0 || start >= html.Length)
+            return html;
+        if (end <= start || end > html.Length)
+        {
+            var fallback = html[start..];
+            if (diag != null)
+                diag.TalkgroupsSectionLength = fallback.Length;
+            return fallback;
+        }
+        var section = html[start..end];
+        if (diag != null)
+            diag.TalkgroupsSectionLength = section.Length;
+        return section;
+    }
+
+    private static void ParseTalkgroupTablesFromSection(
+        string sectionHtml,
+        HashSet<long> seen,
+        List<Talkgroup> rows,
+        TalkgroupParserDiagnostics? diag = null)
+    {
+        var nodeMatches = System.Text.RegularExpressions.Regex.Matches(
+            sectionHtml,
+            "(?<heading><h(?<level>[1-6])[^>]*>(?<title>[\\s\\S]*?)</h\\k<level>>)|(?<table><table[^>]*>[\\s\\S]*?</table>)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (diag != null)
+            diag.SectionNodeCount = nodeMatches.Count;
+        if (nodeMatches.Count == 0)
+            return;
+
+        var currentSectionTitle = "Talkgroups";
+        foreach (System.Text.RegularExpressions.Match node in nodeMatches)
+        {
+            if (node.Groups["heading"].Success)
+            {
+                var title = CleanCategoryLabel(NormalizeHtmlText(node.Groups["title"].Value));
+                if (!string.IsNullOrWhiteSpace(title) &&
+                    !title.Equals("Talkgroups", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentSectionTitle = title;
+                }
+                continue;
+            }
+
+            if (!node.Groups["table"].Success)
+                continue;
+            ParseTalkgroupTable(node.Groups["table"].Value, currentSectionTitle, seen, rows, diag);
+        }
+    }
+
+    private static void ParseTalkgroupTable(
+        string tableHtml,
+        string sectionTitle,
+        HashSet<long> seen,
+        List<Talkgroup> rows,
+        TalkgroupParserDiagnostics? diag = null)
+    {
+        if (diag != null)
+            diag.TableCount++;
+
+        var trMatches = System.Text.RegularExpressions.Regex.Matches(
+            tableHtml,
+            "<tr[^>]*>(?<row>[\\s\\S]*?)</tr>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (trMatches.Count == 0)
+            return;
+
+        var headerIndexes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var headerRowIndex = -1;
+        for (var i = 0; i < trMatches.Count; i++)
+        {
+            var thMatches = System.Text.RegularExpressions.Regex.Matches(
+                trMatches[i].Groups["row"].Value,
+                "<th\\b(?:\"[^\"]*\"|'[^']*'|[^'\">])*>(?<cell>[\\s\\S]*?)</th>",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (thMatches.Count == 0)
+                continue;
+            if (diag != null)
+                diag.TablesWithThRows++;
+
+            var headers = thMatches
+                .Select(m => NormalizeHeaderToken(NormalizeHtmlText(m.Groups["cell"].Value)))
+                .ToList();
+            if (!TryGetTalkgroupHeaderIndexes(headers, headerIndexes))
+            {
+                if (diag != null)
+                    diag.HeaderCandidateRejected++;
+                continue;
+            }
+
+            headerRowIndex = i;
+            break;
+        }
+
+        if (headerRowIndex < 0)
+            return;
+        if (diag != null)
+            diag.TablesMatchedHeaderSchema++;
+
+        for (var rowIdx = headerRowIndex + 1; rowIdx < trMatches.Count; rowIdx++)
+        {
+            var cellMatches = System.Text.RegularExpressions.Regex.Matches(
+                trMatches[rowIdx].Groups["row"].Value,
+                "<td\\b(?:\"[^\"]*\"|'[^']*'|[^'\">])*>(?<cell>[\\s\\S]*?)</td>",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (cellMatches.Count == 0)
+                continue;
+
+            var cells = cellMatches
+                .Select(m => NormalizeHtmlText(m.Groups["cell"].Value))
+                .ToList();
+            if (!headerIndexes.Values.All(i => i >= 0 && i < cells.Count))
+                continue;
+            if (!TryParseTalkgroupId(cells[headerIndexes["dec"]], out var id) || !seen.Add(id))
+            {
+                if (diag != null)
+                    diag.RowsRejectedId++;
+                continue;
+            }
+
+            rows.Add(new Talkgroup
+            {
+                Id = id,
+                Mode = NullIfEmpty(cells[headerIndexes["mode"]]),
+                AlphaTag = NullIfEmpty(cells[headerIndexes["alpha_tag"]]),
+                Description = NullIfEmpty(cells[headerIndexes["description"]]),
+                Tag = NullIfEmpty(cells[headerIndexes["tag"]]),
+                Category = NullIfEmpty(CleanCategoryLabel(sectionTitle))
+            });
+        }
+    }
+
+    private static bool TryGetTalkgroupHeaderIndexes(
+        List<string> normalizedHeaders,
+        Dictionary<string, int> indexes)
+    {
+        indexes.Clear();
+        if (normalizedHeaders == null || normalizedHeaders.Count == 0)
+            return false;
+
+        for (var i = 0; i < normalizedHeaders.Count; i++)
+        {
+            var h = normalizedHeaders[i];
+            if (h == "dec")
+                indexes["dec"] = i;
+            else if (h == "hex")
+                indexes["hex"] = i;
+            else if (h == "mode")
+                indexes["mode"] = i;
+            else if (h == "alphatag" || h == "alpha")
+                indexes["alpha_tag"] = i;
+            else if (h == "description" || h == "desc")
+                indexes["description"] = i;
+            else if (h == "tag")
+                indexes["tag"] = i;
+        }
+
+        return indexes.ContainsKey("dec")
+               && indexes.ContainsKey("hex")
+               && indexes.ContainsKey("mode")
+               && indexes.ContainsKey("alpha_tag")
+               && indexes.ContainsKey("description")
+               && indexes.ContainsKey("tag");
+    }
+
+    private static string NormalizeHeaderToken(string value)
+    {
+        var lower = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return new string(lower.Where(char.IsLetterOrDigit).ToArray());
+    }
+    private static bool TryParseTalkgroupId(string? raw, out long id)
+    {
+        id = 0;
+        var text = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        // Reject frequency-like values (e.g. 851.1125) and anything that's not a whole number.
+        if (text.Contains('.'))
+            return false;
+
+        // Accept plain integer forms, optionally with commas/spaces around digits.
+        var normalized = text.Replace(",", string.Empty).Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(normalized, @"^\d{1,8}$"))
+            return false;
+        if (!long.TryParse(normalized, out id))
+            return false;
+
+        return id > 0;
+    }
+
+    private sealed class TalkgroupParserDiagnostics
+    {
+        public int CleanHtmlLength { get; set; }
+        public int HeadingCount { get; set; }
+        public bool TalkgroupsHeadingMatchedExactly { get; set; }
+        public bool TalkgroupsHeadingMatchedContains { get; set; }
+        public bool TalkgroupsHeadingFound { get; set; }
+        public int TalkgroupsHeadingLevel { get; set; }
+        public int TalkgroupsSectionLength { get; set; }
+        public int SectionNodeCount { get; set; }
+        public int TableCount { get; set; }
+        public int TablesWithThRows { get; set; }
+        public int HeaderCandidateRejected { get; set; }
+        public int TablesMatchedHeaderSchema { get; set; }
+        public int RowsRejectedId { get; set; }
+        public int RowsParsed { get; set; }
+
+        public override string ToString()
+        {
+            return $"cleanLen={CleanHtmlLength}; headings={HeadingCount}; tgHeadingFound={TalkgroupsHeadingFound}; " +
+                   $"tgHeadingExact={TalkgroupsHeadingMatchedExactly}; tgHeadingContains={TalkgroupsHeadingMatchedContains}; " +
+                   $"tgHeadingLevel={TalkgroupsHeadingLevel}; tgSectionLen={TalkgroupsSectionLength}; nodes={SectionNodeCount}; " +
+                   $"tables={TableCount}; tablesWithTh={TablesWithThRows}; headerRejects={HeaderCandidateRejected}; " +
+                   $"tgTables={TablesMatchedHeaderSchema}; rowsRejectedId={RowsRejectedId}; rowsParsed={RowsParsed}";
+        }
+    }
+
+    private static string NormalizeHtmlText(string value)
+    {
+        var decoded = System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(value, "<[^>]+>", string.Empty));
+        return decoded.Replace("&nbsp;", " ").Trim();
+    }
+
+    private static string CleanCategoryLabel(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return string.Empty;
+
+        var text = System.Text.RegularExpressions.Regex.Replace(raw, @"\s+", " ").Trim();
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"(?i)\bView\s+Talkgroup\s+Category\s+Details\b",
+            string.Empty).Trim();
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"(?i)\b([A-Za-z][A-Za-z\s'\-]+County)\s*\(\s*\d+\s*\)",
+            "$1");
+        while (System.Text.RegularExpressions.Regex.IsMatch(text, @"\s*\([^)]*\)\s*$"))
+        {
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s*\([^)]*\)\s*$", string.Empty).Trim();
+        }
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        return text;
+    }
+
+    private static string? NullIfEmpty(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? GetCell(List<string> cells, Dictionary<string, int> headers, string key, int fallback)
+    {
+        if (headers.TryGetValue(key, out var idx) && idx >= 0 && idx < cells.Count)
+            return cells[idx];
+        if (fallback >= 0 && fallback < cells.Count)
+            return cells[fallback];
+        return null;
+    }
+
+    private void OnWizardAddTalkgroupClicked(object? sender, RoutedEventArgs e)
+    {
+        if (!long.TryParse((WizardDraftIdText ?? string.Empty).Trim(), out var id) || id <= 0)
+        {
+            TalkgroupWizardStatusText = "TGID must be a positive number.";
+            return;
+        }
+
+        var existing = _wizardTalkgroupDraftRows.FirstOrDefault(t => t.Id == id);
+        var next = new Talkgroup
+        {
+            Id = id,
+            AlphaTag = string.IsNullOrWhiteSpace(WizardDraftAlphaTag) ? null : WizardDraftAlphaTag.Trim(),
+            Description = string.IsNullOrWhiteSpace(WizardDraftDescription) ? null : WizardDraftDescription.Trim(),
+            Category = string.IsNullOrWhiteSpace(WizardDraftCategory) ? null : WizardDraftCategory.Trim(),
+            Mode = existing?.Mode,
+            Tag = existing?.Tag
+        };
+
+        if (existing != null)
+        {
+            var idx = _wizardTalkgroupDraftRows.IndexOf(existing);
+            _wizardTalkgroupDraftRows[idx] = next;
+        }
+        else
+        {
+            _wizardTalkgroupDraftRows.Add(next);
+        }
+
+        WizardDraftIdText = string.Empty;
+        WizardDraftAlphaTag = string.Empty;
+        WizardDraftDescription = string.Empty;
+        WizardDraftCategory = string.Empty;
+        TalkgroupWizardStatusText = $"Draft rows: {_wizardTalkgroupDraftRows.Count}";
+    }
+
+    private void OnWizardClearDraftClicked(object? sender, RoutedEventArgs e)
+    {
+        _wizardTalkgroupDraftRows.Clear();
+        TalkgroupWizardStatusText = "Draft cleared.";
+    }
+
+    private void OnWizardApplyDraftClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_wizardTalkgroupDraftRows.Count == 0)
+        {
+            TalkgroupWizardStatusText = "Draft is empty.";
+            return;
+        }
+
+        var staged = _wizardTalkgroupDraftRows.OrderBy(t => t.Id).ToList();
+        AutoGenerateMappingsFromTalkgroups(staged);
+        RefreshTalkgroupRows();
+        HasPendingTalkgroupMappingChanges = true;
+        TalkgroupWizardStatusText = $"Staged {staged.Count} draft talkgroups. Click Apply to make them live.";
+        MenuSpecificStatusText = TalkgroupWizardStatusText;
+    }
+
+    private void OnInitializeTalkgroupMappingsClicked(object? sender, RoutedEventArgs e)
+    {
+        TalkgroupWizardStatusText = "Mappings are already initialized from import/build. Review and click Apply.";
+    }
+
+    private void OnSaveTalkgroupMappingClicked(object? sender, RoutedEventArgs e)
+    {
+        SaveSelectedTalkgroupMapping();
+    }
+
+    private void OnSettingsTestEmailClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ApplySettingsTabsToSettings();
+            if (string.IsNullOrWhiteSpace(_settings.EmailUser))
+            {
+                MenuSpecificStatusText = "Email test failed: email user not set";
+                return;
+            }
+
+            EmailSender.SendHtml(
+                _settings,
+                "pizzawave test",
+                _settings.EmailUser!,
+                "PizzaPi test email",
+                "<b>PizzaPi test email</b><br/>Your email settings are working.");
+            MenuSpecificStatusText = "Email test sent";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Email test failed: {ex.Message}";
+        }
+    }
     private void OnRange24hClicked(object? sender, RoutedEventArgs e)
     {
         _currentFilter = "24h";
@@ -3735,41 +6447,62 @@ set { _statusText = value; RaisePropertyChanged(); }
         _customEndDate = null;
         PruneLiveMemoryWindow();
         ApplyTimeRangeFilter();
+        if (IsAlertsSelected)
+            ReloadAlertHistory();
         UpdateButtonStates();
+        if (IsHighlightsSelected)
+            _ = LoadInsightsSummariesAsync();
     }
 
     private void OnRange2dClicked(object? sender, RoutedEventArgs e)
     {
-        var end = DateTime.Now;
-        var start = end.AddHours(-48);
-        SwitchToOfflineHistory(start, end, "2d");
+        _currentFilter = "2d";
+        _historicalRangeCalls = null;
+        ApplyTimeRangeFilter();
+        if (IsAlertsSelected)
+            ReloadAlertHistory();
+        UpdateButtonStates();
+        if (IsHighlightsSelected)
+            _ = LoadInsightsSummariesAsync();
     }
 
     private void OnRangeWeekClicked(object? sender, RoutedEventArgs e)
     {
-        var end = DateTime.Now;
-        var start = end.AddDays(-7);
-        SwitchToOfflineHistory(start, end, "week");
+        _currentFilter = "week";
+        _historicalRangeCalls = null;
+        ApplyTimeRangeFilter();
+        if (IsAlertsSelected)
+            ReloadAlertHistory();
+        UpdateButtonStates();
+        if (IsHighlightsSelected)
+            _ = LoadInsightsSummariesAsync();
     }
 
-    private void OnPickRangeClicked(object? sender, RoutedEventArgs e)
+    private async void OnPickRangeClicked(object? sender, RoutedEventArgs e)
     {
-        TogglePane(RightPaneType.Range);
+        var dialog = new DatePickerDialog(
+            _customStartDate ?? DateTime.Now.AddDays(-7),
+            _customEndDate ?? DateTime.Now);
+        await dialog.ShowDialog(this);
+
+        if (dialog.SelectedStart.HasValue && dialog.SelectedEnd.HasValue)
+        {
+            _customStartDate = dialog.SelectedStart.Value;
+            _customEndDate = dialog.SelectedEnd.Value;
+            _currentFilter = "custom";
+            ApplyTimeRangeFilter();
+            if (IsAlertsSelected)
+                ReloadAlertHistory();
+            UpdateButtonStates();
+            if (IsHighlightsSelected)
+                _ = LoadInsightsSummariesAsync();
+        }
     }
 
-    private void OnInsightTranscriptClicked(object? sender, RoutedEventArgs e)
+    private async void OnInsightTranscriptClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.DataContext is not InsightNotableEvent notable)
             return;
-
-        var notableKey = GetInsightNotableKey(notable);
-        if (_activePane == RightPaneType.InsightTranscript &&
-            string.Equals(_activeInsightTranscriptKey, notableKey, StringComparison.Ordinal))
-        {
-            ClosePane(reloadSettings: false);
-            StatusText = "Transcript pane closed.";
-            return;
-        }
 
         var calls = ResolveCallsForNotable(notable);
         if (calls.Count == 0)
@@ -3778,10 +6511,8 @@ set { _statusText = value; RaisePropertyChanged(); }
             return;
         }
 
-        _activePane = RightPaneType.InsightTranscript;
-        ActivePaneContent = BuildInsightTranscriptPane(notable, calls);
-        _activeInsightTranscriptKey = notableKey;
-        RaisePaneStateChanged();
+        var dialog = BuildInsightTranscriptDialog(notable, calls);
+        await dialog.ShowDialog(this);
     }
 
     private void OnInsightAudioClicked(object? sender, RoutedEventArgs e)
@@ -3796,7 +6527,6 @@ set { _statusText = value; RaisePropertyChanged(); }
             foreach (var c in Calls.ToList())
                 c.IsAudioPlaying = false;
             _activeInsightAudioKey = null;
-            StatusText = "Audio stopped.";
             return;
         }
 
@@ -3812,7 +6542,92 @@ set { _statusText = value; RaisePropertyChanged(); }
         _activeInsightAudioKey = notableKey;
     }
 
-    private Control BuildInsightTranscriptPane(InsightNotableEvent notable, List<TranscribedCall> calls)
+    private void OnInsightNextCallClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.DataContext is not InsightNotableEvent notable)
+            return;
+
+        var matched = ResolveCallsForNotable(notable);
+        var visibleKeys = CategoryGroupedCalls
+            .Where(i => !i.IsHeader && i.Call != null)
+            .Select(i => GetCallDedupKey(i.Call!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var navigable = matched
+            .Where(c => visibleKeys.Contains(GetCallDedupKey(c)))
+            .ToList();
+        if (navigable.Count == 0)
+            navigable = matched;
+
+        if (navigable.Count == 0)
+        {
+            MenuSpecificStatusText = "No matching calls found for this insight.";
+            btn.Content = "Go to record";
+            foreach (var call in Calls)
+                call.IsCurrentMatch = false;
+            return;
+        }
+
+        var notableKey = GetInsightNotableKey(notable);
+        var currentIndex = _insightCallNavigateIndex.TryGetValue(notableKey, out var idx) ? idx : -1;
+        var nextIndex = (currentIndex + 1) % navigable.Count;
+        _insightCallNavigateIndex[notableKey] = nextIndex;
+        var target = navigable[nextIndex];
+
+        var relatedKeys = navigable
+            .Select(GetCallDedupKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var call in Calls)
+            call.IsCurrentMatch = relatedKeys.Contains(GetCallDedupKey(call));
+
+        var groupKey = target.FriendlyTalkgroup;
+        if (!string.IsNullOrWhiteSpace(groupKey) && _collapsedCategoryGroups.Contains(groupKey))
+        {
+            _collapsedCategoryGroups.Remove(groupKey);
+            RefreshCategoryGroupedCalls(Calls.ToList());
+        }
+
+        if (navigable.Count <= 1)
+            btn.Content = "Go to record";
+        else
+            btn.Content = $"Go to records ({nextIndex + 1} of {navigable.Count})";
+
+        ScrollTargetCallIntoView(target);
+        var localTime = DateTimeOffset.FromUnixTimeSeconds(target.StartTime).ToLocalTime().ToString("g");
+        MenuSpecificStatusText = $"Selected call {nextIndex + 1}/{navigable.Count}: {target.FriendlyTalkgroup} at {localTime}";
+    }
+
+    private void ScrollTargetCallIntoView(TranscribedCall target)
+    {
+        if (_categoryCallsDataGrid == null)
+            return;
+
+        var targetKey = GetCallDedupKey(target);
+        var targetIndex = CategoryGroupedCalls
+            .Select((item, index) => new { item, index })
+            .FirstOrDefault(x =>
+                !x.item.IsHeader
+                && x.item.Call != null
+                && string.Equals(GetCallDedupKey(x.item.Call), targetKey, StringComparison.OrdinalIgnoreCase))
+            ?.index ?? -1;
+        if (targetIndex < 0)
+            return;
+
+        var targetItem = CategoryGroupedCalls[targetIndex];
+        const int scrollLeadRows = 5;
+        var anchorIndex = Math.Max(0, targetIndex - scrollLeadRows);
+        var anchorItem = CategoryGroupedCalls[anchorIndex];
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_categoryCallsDataGrid == null)
+                return;
+            _categoryCallsDataGrid.SelectedItem = targetItem;
+            // Scroll with a lead buffer so the target is comfortably visible instead of edge-clipped.
+            _categoryCallsDataGrid.ScrollIntoView(anchorItem, null);
+            _categoryCallsDataGrid.ScrollIntoView(targetItem, null);
+        }, DispatcherPriority.Background);
+    }
+
+    private Window BuildInsightTranscriptDialog(InsightNotableEvent notable, List<TranscribedCall> calls)
     {
         var titleBlock = new TextBlock
         {
@@ -3854,7 +6669,8 @@ set { _statusText = value; RaisePropertyChanged(); }
             Classes = { "menu-btn" },
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
         };
-        closeButton.Click += (_, _) => ClosePane(reloadSettings: false);
+        Window? dialog = null;
+        closeButton.Click += (_, _) => dialog?.Close();
 
         var layoutGrid = new Grid
         {
@@ -3870,11 +6686,20 @@ set { _statusText = value; RaisePropertyChanged(); }
         layoutGrid.Children.Add(transcriptBox);
         layoutGrid.Children.Add(closeButton);
 
-        return new Border
+        var content = new Border
         {
             Padding = new Thickness(12),
             Child = layoutGrid
         };
+        dialog = new Window
+        {
+            Title = "Insight Transcript",
+            Width = 760,
+            Height = 520,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = content
+        };
+        return dialog;
     }
 
     private List<TranscribedCall> ResolveCallsForNotable(InsightNotableEvent notable)
@@ -3886,10 +6711,26 @@ set { _statusText = value; RaisePropertyChanged(); }
         var cacheKey = $"{summary.WindowStart:O}|{summary.WindowEnd:O}";
         if (!_insightsWindowCallCache.TryGetValue(cacheKey, out var windowCalls))
         {
-            windowCalls = LoadOfflineCallsFromHistory(summary.WindowStart.LocalDateTime, summary.WindowEnd.LocalDateTime);
+            // Prefer already-loaded calls for the active range to avoid expensive disk scans
+            // and keep category-switch interactions fast.
+            var fromVisibleCalls = Calls
+                .Where(c =>
+                {
+                    var ts = DateTimeOffset.FromUnixTimeSeconds(c.StartTime);
+                    return ts >= summary.WindowStart && ts <= summary.WindowEnd;
+                })
+                .ToList();
+
+            if (fromVisibleCalls.Count == 0)
+            {
+                // Fallback for older windows not currently materialized in visible calls.
+                fromVisibleCalls = LoadOfflineCallsFromHistory(summary.WindowStart.LocalDateTime, summary.WindowEnd.LocalDateTime);
+            }
+
+            windowCalls = fromVisibleCalls;
             foreach (var call in windowCalls)
             {
-                call.FriendlyTalkgroup = TalkgroupHelper.FormatTalkgroup(_settings, call.Talkgroup);
+                call.FriendlyTalkgroup = FormatTalkgroupFromLiveSnapshot(call.Talkgroup);
                 call.FriendlyFrequency = FormatFrequency(call.Frequency);
                 call.PlayAudioCommand = c => PlayAudio(c);
             }
@@ -4105,202 +6946,39 @@ set { _statusText = value; RaisePropertyChanged(); }
         return true;
     }
 
-    private void OnViewClicked(object? sender, RoutedEventArgs e)
-    {
-        // Toggle View submenu (same as existing behavior)
-        OnViewButtonClicked(sender, e);
-    }
-
-    private void OnAlertsClicked2(object? sender, RoutedEventArgs e)
-    {
-        OnAlertsClicked(sender, e);
-    }
-
-    private void OnSettingsClicked2(object? sender, RoutedEventArgs e)
-    {
-        OnSettingsClicked(sender, e);
-    }
-
-    private void OnCleanupClicked2(object? sender, RoutedEventArgs e)
-    {
-        OnCleanupClicked(sender, e);
-    }
-
-    private void OnExitClicked2(object? sender, RoutedEventArgs e)
-    {
-        Close();
-    }
-
-    private void OnExitClicked(object? sender, RoutedEventArgs e)
-    {
-        Close();
-    }
-
     private void OnCallRowClicked(object? sender, PointerReleasedEventArgs e)
     {
         e.Handled = true;
 
-        if (sender is Border border && border.DataContext is CallGroupItem groupItem && groupItem.Call != null)
+        if (sender is not Control control || control.DataContext is not CallGroupItem groupItem || groupItem.Call == null)
+            return;
+
+        var call = groupItem.Call;
+        if (call.IsAudioPlaying)
         {
-            var call = groupItem.Call;
-
-            if (call.IsAudioPlaying)
-            {
-                // === MANUAL STOP (click row while playing) ===
-                StopAudio();
-                call.IsAudioPlaying = false;
-                StatusText = "Playback stopped";
-
-                if (!call.IsAlertMatch)
-                {
-                    call.IsPinned = false;
-                    RepositionCall(call);
-
-                    if (_useGrouping)
-                        ApplyGrouping();
-                    else
-                    {
-                        GroupedCalls.Clear();
-                        foreach (var c in Calls)
-                            GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
-                    }
-                }
-
-                // Force UI refresh of this call (updates pin icon + play/stop icon)
-                var index = Calls.IndexOf(call);
-                if (index >= 0)
-                    Calls[index] = call;
-            }
-            else
-            {
-                // === START PLAYING ===
-                // Pin it to the top
-                call.IsPinned = true;
-                RepositionCall(call);
-
-                if (_useGrouping)
-                    ApplyGrouping();
-                else
-                {
-                    GroupedCalls.Clear();
-                    foreach (var c in Calls)
-                        GroupedCalls.Add(new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true });
-                }
-
-                PlayAudio(call);
-            }
+            StopAudio();
+            call.IsAudioPlaying = false;
+            return;
         }
+
+        PlayAudio(call);
     }
 
-    private void OnPinClicked(object? sender, PointerReleasedEventArgs e)
+    private void OnCallPlayClicked(object? sender, RoutedEventArgs e)
     {
         e.Handled = true;
+        if (sender is not Control control || control.DataContext is not CallGroupItem groupItem || groupItem.Call == null)
+            return;
 
-        if (sender is Control control && control.DataContext is CallGroupItem groupItem && groupItem.Call != null)
+        var call = groupItem.Call;
+        if (call.IsAudioPlaying)
         {
-            groupItem.Call.IsPinned = !groupItem.Call.IsPinned;
-            ApplyGrouping();   // rebuilds list with pinned items at top
+            StopAudio();
+            call.IsAudioPlaying = false;
+            return;
         }
-    }
 
-    private async void OnSaveClicked(object? sender, PointerReleasedEventArgs e)
-    {
-        e.Handled = true;
-
-        e.Handled = true;
-
-        if (sender is Control control && control.DataContext is CallGroupItem groupItem && groupItem.Call != null)
-        {
-            var call = groupItem.Call;
-            if (string.IsNullOrEmpty(call.Location))
-            {
-                StatusText = "Error: Audio file not available";
-                return;
-            }
-
-            // Show folder picker dialog
-            var topLevel = TopLevel.GetTopLevel(this);
-            var storageProvider = topLevel?.StorageProvider;
-            if (storageProvider == null)
-            {
-                StatusText = "Error: Could not access file picker";
-                return;
-            }
-
-            var options = new FolderPickerOpenOptions
-            {
-                Title = "Select folder to save audio and transcription"
-            };
-
-            var folders = await storageProvider.OpenFolderPickerAsync(options);
-            var folder = folders?.FirstOrDefault();
-
-            if (folder == null)
-            {
-                StatusText = "Save cancelled";
-                return;
-            }
-
-            try
-            {
-                // Create filename base from talkgroup and time
-                var safeName = $"{call.FriendlyTalkgroup}_{call.StartTime}";
-                safeName = new string(safeName.Where(c => !Path.GetInvalidFileNameChars().Contains(c)).ToArray());
-
-                // Copy audio file
-                var sourceAudio = call.Location;
-                var destAudio = Path.Combine(folder.Path.LocalPath, $"{safeName}.mp3");
-                File.Copy(sourceAudio, destAudio, overwrite: true);
-
-                // Save transcription
-                var destTxt = Path.Combine(folder.Path.LocalPath, $"{safeName}.txt");
-                var transcriptionContent = $"Talkgroup: {call.FriendlyTalkgroup}\n" +
-                                          $"Frequency: {call.FriendlyFrequency}\n" +
-                                          $"Time: {call.CallTime}\n" +
-                                          $"Duration: {call.Duration}s\n\n" +
-                                          $"Transcription:\n{call.Transcription}";
-                File.WriteAllText(destTxt, transcriptionContent);
-
-                StatusText = $"Saved to {folder.Path.LocalPath}";
-            }
-            catch (Exception ex)
-            {
-                StatusText = $"Error saving: {ex.Message}";
-            }
-        }
-    }
-
-    private async void OnCopyClicked(object? sender, PointerReleasedEventArgs e)
-    {
-        e.Handled = true;
-
-        if (sender is Control control && control.DataContext is CallGroupItem groupItem && groupItem.Call != null)
-        {
-            var call = groupItem.Call;
-
-            if (string.IsNullOrEmpty(call.Transcription))
-            {
-                StatusText = "Error: No transcription to copy";
-                return;
-            }
-
-            // Copy transcription to clipboard using Avalonia's clipboard
-            try
-            {
-                var clipboard = this.Clipboard;
-                if (clipboard == null)
-                {
-                    StatusText = "Error: Clipboard not available";
-                    return;
-                }
-                await clipboard.SetTextAsync(call.Transcription);
-                StatusText = "Transcription copied to clipboard";
-            }
-            catch (Exception ex)
-            {
-                StatusText = $"Error copying to clipboard: {ex.Message}";
-            }
-        }
+        PlayAudio(call);
     }
 
     private void OnIncreaseFontSizeClicked(object? sender, RoutedEventArgs e)
@@ -4329,14 +7007,6 @@ set { _statusText = value; RaisePropertyChanged(); }
     {
         // Apply grouping which will also apply sorting
         ApplyGrouping();
-
-        StatusText = _currentSortMode switch
-        {
-            0 => "Sorted by time (newest first)",
-            1 => "Sorted by time (oldest first)",
-            2 => "Sorted by talkgroup",
-            _ => "Sorted"
-        };
     }
 
     private void InitializeComponent()
@@ -4372,6 +7042,8 @@ set { _statusText = value; RaisePropertyChanged(); }
         RaisePropertyChanged(nameof(IsRangeWeekActive));
         RaisePropertyChanged(nameof(IsRangeCustomActive));
         RaisePropertyChanged(nameof(IsRangeActive));
+        RaisePropertyChanged(nameof(IsGenerateNowVisible));
+        RaisePropertyChanged(nameof(CanGenerateNow));
     }
 }
 
@@ -4406,4 +7078,86 @@ public class ConfidenceColorConverter : IValueConverter
         throw new NotImplementedException();
     }
 }
+
+public sealed class TalkgroupLiveSnapshot
+{
+    public static readonly TalkgroupLiveSnapshot Empty = new(0, new Dictionary<long, TalkgroupMapping>());
+
+    public TalkgroupLiveSnapshot(
+        int version,
+        IReadOnlyDictionary<long, TalkgroupMapping> mappingsById)
+    {
+        Version = version;
+        MappingsById = mappingsById;
+    }
+
+    public int Version { get; }
+    public IReadOnlyDictionary<long, TalkgroupMapping> MappingsById { get; }
+}
+
+public sealed class TalkgroupMappingRow : INotifyPropertyChanged
+{
+    public long Id { get; set; }
+    public string Mode { get; set; } = string.Empty;
+    public string AlphaTag { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    private string _opsCategory = "other";
+    private bool _isSelectedForProfile;
+    public Action<TalkgroupMappingRow>? OnOpsCategoryChanged { get; set; }
+    public Action<TalkgroupMappingRow>? OnSelectionChanged { get; set; }
+
+    public string OpsCategory
+    {
+        get => _opsCategory;
+        set
+        {
+            var normalized = InsightCategoryPalette.Normalize(value) switch
+            {
+                "police" => "police",
+                "fire" => "fire",
+                "ems" => "ems",
+                "traffic" => "traffic",
+                _ => "other"
+            };
+            if (string.Equals(_opsCategory, normalized, StringComparison.Ordinal))
+                return;
+            _opsCategory = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OpsCategory)));
+            OnOpsCategoryChanged?.Invoke(this);
+        }
+    }
+
+    public bool IsSelectedForProfile
+    {
+        get => _isSelectedForProfile;
+        set
+        {
+            if (_isSelectedForProfile == value)
+                return;
+            _isSelectedForProfile = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelectedForProfile)));
+            OnSelectionChanged?.Invoke(this);
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+public class InsightNavigateButtonTextConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is not int count || count <= 1)
+            return "Go to record";
+        return $"Go to records (1 of {count})";
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+
 

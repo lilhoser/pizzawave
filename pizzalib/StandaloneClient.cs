@@ -190,8 +190,6 @@ namespace pizzalib
                         Trace(TraceLoggerType.StandaloneClient,
                               TraceEventType.Information,
                               $"Loaded {tgs.Count} talkgroups");
-                        m_Settings.Talkgroups = tgs;
-                        m_Settings.SaveToFile(SettingsPath); // persist
                     }
                 }
                 catch (Exception ex)

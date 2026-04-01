@@ -32,6 +32,8 @@ namespace pizzalib
         private bool m_Disposed;
         private StreamWriter? m_JournalFile;
         private string m_CaptureRoot;
+        private Func<RawCallData, bool>? m_RawCallFilter;
+        protected Func<TranscribedCall, bool>? m_TranscribedCallFilter;
         public static readonly string s_CallJournalFile = "calljournal.json";
         protected Action<TranscribedCall> m_NewTranscribedCallCallback;
         private bool _ffmpegReady = false;
@@ -232,6 +234,16 @@ namespace pizzalib
             m_JournalFile = null;
         }
 
+        public void SetRawCallFilter(Func<RawCallData, bool>? rawCallFilter)
+        {
+            m_RawCallFilter = rawCallFilter;
+        }
+
+        public void SetTranscribedCallFilter(Func<TranscribedCall, bool>? transcribedCallFilter)
+        {
+            m_TranscribedCallFilter = transcribedCallFilter;
+        }
+
         protected virtual async Task<bool> Reinitialize(Settings Settings)
         {
             if (!m_Initialized)
@@ -258,10 +270,19 @@ namespace pizzalib
         {
             try
             {
+                if (m_RawCallFilter != null && !m_RawCallFilter(CallData))
+                {
+                    return;
+                }
+
                 //
                 // Get the transcribed call info
                 //
                 var call = await GetTranscribedCall(CallData);
+                if (m_TranscribedCallFilter != null && !m_TranscribedCallFilter(call))
+                {
+                    return;
+                }
 
                 //
                 // Write the call mp3 to disk first (so it's available for alert emails)

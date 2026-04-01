@@ -12,6 +12,8 @@ public partial class CleanupPanel : UserControl
 {
     private string _capturePath;
     private long _estimatedFreeSpace;
+    private readonly AlertHistoryStore _alertHistoryStore = new();
+    private readonly InsightsStorage _insightsStorage = new();
 
     public event EventHandler? RequestClose;
     public event EventHandler? CleanupCompleted;
@@ -186,6 +188,12 @@ public partial class CleanupPanel : UserControl
                 await PerformArchive(cutoffDate);
             }
 
+            var cleanupRelatedData = this.FindControl<CheckBox>("CleanupRelatedDataCheckBox")?.IsChecked == true;
+            if (cleanupRelatedData)
+            {
+                await PerformRelatedDataCleanup(cutoffDate);
+            }
+
             LoadCurrentUsage();
             UpdateEstimate();
             CleanupCompleted?.Invoke(this, EventArgs.Empty);
@@ -323,6 +331,15 @@ public partial class CleanupPanel : UserControl
 
                 CleanupEmptyDirectories(_capturePath);
             }
+        });
+    }
+
+    private System.Threading.Tasks.Task PerformRelatedDataCleanup(DateTime cutoffDate)
+    {
+        return System.Threading.Tasks.Task.Run(() =>
+        {
+            _alertHistoryStore.PruneOlderThan(cutoffDate);
+            _insightsStorage.DeleteBefore(cutoffDate);
         });
     }
 

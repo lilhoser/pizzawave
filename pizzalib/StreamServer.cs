@@ -112,7 +112,7 @@ namespace pizzalib
                         }
                     });
                     activeTasks[task.Id] = task;
-                    task.ContinueWith(_ =>
+                    _ = task.ContinueWith(_ =>
                     {
                         activeTasks.TryRemove(task.Id, out _);
                     }, TaskScheduler.Default);

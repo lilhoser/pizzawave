@@ -16,6 +16,7 @@ namespace pizzapi;
 
 public partial class SettingsPanel : UserControl
 {
+    private readonly TalkgroupMappingStore _talkgroupMappingStore = new();
     private Settings? _settings;
     private TextBox? _listenPortTextBox;
     private ComboBox? _transcriptionModelComboBox;
@@ -290,7 +291,7 @@ public partial class SettingsPanel : UserControl
                     currentSettings.TraceLevelApp = settingsCopy.TraceLevelApp;
                     currentSettings.SnoozeDurationMinutes = settingsCopy.SnoozeDurationMinutes;
 
-                    currentSettings.SaveToFile(_currentSettingsPath);
+            currentSettings.SaveToFile(_currentSettingsPath);
                     if (ApplySettingsRequested != null)
                     {
                         _ = ApplySettingsRequested.Invoke(currentSettings);
@@ -739,13 +740,35 @@ public partial class SettingsPanel : UserControl
             var path = file.Path.LocalPath;
             try
             {
-                _settings!.Talkgroups = TalkgroupHelper.GetTalkgroupsFromCsv(path);
-                var count = _settings.Talkgroups.Count;
+                var imported = TalkgroupHelper.GetTalkgroupsFromCsv(path);
+                var existing = _talkgroupMappingStore.LoadAll()
+                    .GroupBy(m => m.TalkgroupId)
+                    .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+                    .ToDictionary(m => m.TalkgroupId);
+                foreach (var tg in imported)
+                {
+                    if (!existing.TryGetValue(tg.Id, out var row))
+                    {
+                        row = new TalkgroupMapping
+                        {
+                            TalkgroupId = tg.Id,
+                            EnabledInTr = true,
+                            EnabledInPp = true
+                        };
+                        existing[tg.Id] = row;
+                    }
 
-                _settings.SaveToFile(_currentSettingsPath);
+                    row.Mode = tg.Mode ?? string.Empty;
+                    row.AlphaTag = tg.AlphaTag ?? string.Empty;
+                    row.Description = tg.Description ?? string.Empty;
+                    row.Tag = tg.Tag ?? string.Empty;
+                    row.Category = tg.Category ?? string.Empty;
+                    row.UpdatedUtc = DateTime.UtcNow;
+                }
+                var merged = existing.Values.OrderBy(v => v.TalkgroupId).ToList();
+                _talkgroupMappingStore.SaveAll(merged);
                 UpdateTalkgroupCount();
-
-                ShowMessage("Import Complete", $"Imported {count} talkgroups from {System.IO.Path.GetFileName(path)}");
+                ShowMessage("Import Complete", $"Imported {imported.Count} talkgroups from {System.IO.Path.GetFileName(path)}");
             }
             catch (Exception ex)
             {
@@ -758,7 +781,10 @@ public partial class SettingsPanel : UserControl
     {
         if (_talkgroupCountText != null)
         {
-            var count = _settings?.Talkgroups?.Count ?? 0;
+            var count = _talkgroupMappingStore.LoadAll()
+                .Select(m => m.TalkgroupId)
+                .Distinct()
+                .Count();
             _talkgroupCountText.Text = $"({count})";
         }
     }
@@ -774,7 +800,20 @@ public partial class SettingsPanel : UserControl
 
     private void ShowTalkgroupsTable()
     {
-        var talkgroups = _settings?.Talkgroups ?? new List<Talkgroup>();
+        var talkgroups = _talkgroupMappingStore.LoadAll()
+            .GroupBy(m => m.TalkgroupId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+            .OrderBy(m => m.TalkgroupId)
+            .Select(m => new Talkgroup
+            {
+                Id = m.TalkgroupId,
+                Mode = m.Mode,
+                AlphaTag = m.AlphaTag,
+                Description = m.Description,
+                Tag = m.Tag,
+                Category = m.Category
+            })
+            .ToList();
 
         var headerGrid = new Grid
         {

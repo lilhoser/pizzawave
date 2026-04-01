@@ -116,6 +116,15 @@
                                            Foreground="Gray"
                                            Text="{}{date} will be replaced with current date" />
                             </StackPanel>
+
+                            <CheckBox x:Name="CleanupRelatedDataCheckBox"
+                                      IsChecked="True"
+                                      Foreground="White"
+                                      Content="Also clear related alerts and insights history" />
+                            <TextBlock FontSize="11"
+                                       Foreground="Gray"
+                                       Margin="20,0,0,0"
+                                       Text="Keeps all-time LM token usage ledger intact." />
                         </StackPanel>
                     </Border>
 

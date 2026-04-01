@@ -40,6 +40,10 @@ namespace pizzalib
             {
                 call.IsAlertMatch = false;
                 call.ShouldAutoplay = false;
+                call.MatchedAlertRuleId = null;
+                call.MatchedAlertRuleName = string.Empty;
+                call.MatchedAlertType = string.Empty;
+                call.MatchedAlertDetail = string.Empty;
 
                 foreach (var alert in m_Settings.Alerts)
                 {
@@ -53,20 +57,18 @@ namespace pizzalib
                         continue;
                     }
 
-                    var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var keyword in keywords)
+                    if (TryMatchAlert(alert, call, out var matchedType, out var matchedDetail))
                     {
-                        if (!string.IsNullOrEmpty(call.Transcription) &&
-                            call.Transcription.ToLower().Contains(keyword.ToLower()))
-                        {
-                            Trace(TraceLoggerType.Alerts, TraceEventType.Information,
-                                  $"Alert {alert.Name} keyword {keyword} matches call ID {call.CallId} transcription.");
-                            call.IsAlertMatch = true;
-                            call.IsPinned = true;
-                            call.ShouldAutoplay = alert.Autoplay;
-                            TriggerAlertEvent(alert, call);
-                            break;
-                        }
+                        Trace(TraceLoggerType.Alerts, TraceEventType.Information,
+                              $"Alert {alert.Name} ({matchedType}:{matchedDetail}) matches call ID {call.CallId} transcription.");
+                        call.IsAlertMatch = true;
+                        call.IsPinned = true;
+                        call.ShouldAutoplay = alert.Autoplay;
+                        call.MatchedAlertRuleId = alert.Id;
+                        call.MatchedAlertRuleName = alert.Name;
+                        call.MatchedAlertType = matchedType;
+                        call.MatchedAlertDetail = matchedDetail;
+                        TriggerAlertEvent(alert, call);
                     }
 
                     if (call.IsAlertMatch) break;
@@ -77,6 +79,10 @@ namespace pizzalib
         public static void ProcessAlertsOffline(TranscribedCall call, List<Alert> alerts)
         {
             call.IsAlertMatch = false;
+            call.MatchedAlertRuleId = null;
+            call.MatchedAlertRuleName = string.Empty;
+            call.MatchedAlertType = string.Empty;
+            call.MatchedAlertDetail = string.Empty;
 
             foreach (var alert in alerts)
             {
@@ -90,22 +96,62 @@ namespace pizzalib
                     continue;
                 }
 
-                var keywords = alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var keyword in keywords)
+                if (TryMatchAlert(alert, call, out var matchedType, out var matchedDetail))
                 {
-                    if (!string.IsNullOrEmpty(call.Transcription) &&
-                        call.Transcription.ToLower().Contains(keyword.ToLower()))
-                    {
-                        Trace(TraceLoggerType.Alerts, TraceEventType.Information,
-                              $"Offline alert {alert.Name} keyword {keyword} matches call ID {call.CallId} transcription.");
-                        call.IsAlertMatch = true;
-                        call.IsPinned = true;
-                        break;
-                    }
+                    Trace(TraceLoggerType.Alerts, TraceEventType.Information,
+                          $"Offline alert {alert.Name} ({matchedType}:{matchedDetail}) matches call ID {call.CallId} transcription.");
+                    call.IsAlertMatch = true;
+                    call.IsPinned = true;
+                    call.MatchedAlertRuleId = alert.Id;
+                    call.MatchedAlertRuleName = alert.Name;
+                    call.MatchedAlertType = matchedType;
+                    call.MatchedAlertDetail = matchedDetail;
                 }
 
                 if (call.IsAlertMatch) break;
             }
+        }
+
+        private static bool TryMatchAlert(Alert alert, TranscribedCall call, out string matchedType, out string matchedDetail)
+        {
+            matchedType = string.Empty;
+            matchedDetail = string.Empty;
+
+            var transcription = call.Transcription ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(transcription))
+                return false;
+
+            var matchType = alert.MatchType == AlertMatchType.PoliceCode
+                ? AlertMatchType.PoliceCode
+                : AlertMatchType.Keyword;
+
+            if (matchType == AlertMatchType.Keyword)
+            {
+                foreach (var keyword in alert.Keywords.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (string.IsNullOrWhiteSpace(keyword))
+                        continue;
+                    if (transcription.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedType = "keyword";
+                        matchedDetail = keyword;
+                        return true;
+                    }
+                }
+            }
+
+            if (matchType == AlertMatchType.PoliceCode)
+            {
+                var codes = alert.PoliceCodes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (PoliceCodeLookup.TryMatchInText(transcription, codes, out var code))
+                {
+                    matchedType = "police_code";
+                    matchedDetail = code;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void TriggerAlertEvent(Alert alert, TranscribedCall call)
@@ -203,7 +249,9 @@ namespace pizzalib
 
         private void SendEmailNotification(Alert Alert, AlertEvent AlertEvent, TranscribedCall Call)
         {
-            var formattedTalkgroup = TalkgroupHelper.FormatTalkgroup(m_Settings, Call.Talkgroup);
+            var formattedTalkgroup = !string.IsNullOrWhiteSpace(Call.FriendlyTalkgroup)
+                ? Call.FriendlyTalkgroup
+                : $"{Call.Talkgroup}";
             var recipients = Alert.GetEmailRecipients();
 
             foreach (var recipient in recipients)

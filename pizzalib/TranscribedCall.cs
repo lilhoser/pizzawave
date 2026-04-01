@@ -46,12 +46,15 @@ namespace pizzalib
             set { _isAudioPlaying = value; RaisePropertyChanged(); }
         }
         public Guid UniqueId { get; set; }
-        [Newtonsoft.Json.JsonIgnore]
         public bool IsAlertMatch
         {
             get => _isAlertMatch;
             set { _isAlertMatch = value; RaisePropertyChanged(); }
         }
+        public Guid? MatchedAlertRuleId { get; set; }
+        public string MatchedAlertRuleName { get; set; } = string.Empty;
+        public string MatchedAlertType { get; set; } = string.Empty;
+        public string MatchedAlertDetail { get; set; } = string.Empty;
         [Newtonsoft.Json.JsonIgnore]
         public bool IsPinned
         {
@@ -96,7 +99,7 @@ namespace pizzalib
 
         public string ToString(Settings Settings)
         {
-            var talkgroup = TalkgroupHelper.FormatTalkgroup(Settings, Talkgroup);
+            var talkgroup = !string.IsNullOrWhiteSpace(FriendlyTalkgroup) ? FriendlyTalkgroup : $"{Talkgroup}";
             DateTime date = DateTimeOffset.FromUnixTimeSeconds(StartTime).ToLocalTime().DateTime;
             var dateStr = $"{date:M/d/yyyy h:mm tt}";
             return $"[{talkgroup}]:{dateStr}: {Transcription}";

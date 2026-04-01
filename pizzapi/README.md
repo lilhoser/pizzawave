@@ -40,6 +40,21 @@ PizzaPi receives callstream traffic from trunk-recorder, transcribes calls, show
 - `Settings`: App/runtime/LM/email configuration
 - `View`: display options (including font size)
 
+## Talkgroups (Current)
+
+- `Settings -> Talkgroups` is the primary talkgroup workflow.
+- `Import CSV` loads RR/TR-style CSV data into staged mappings.
+- `Build CSV` crawls a RadioReference SID page (`https://www.radioreference.com/db/sid/<SID>`), parses Talkgroups tables, stages mappings, and auto-exports a Trunk Recorder CSV.
+- `Apply` performs the live switchover (stop live manager, publish new snapshot, restart manager).
+
+Authoritative store:
+- `talkgroup-mappings.json` (working directory).
+- `settings.json` `Talkgroups` is not used as the source of truth for resolving calls in `pizzapi`.
+
+Trunk Recorder export:
+- Output file: `talkgroups-tr-<sid>.csv`
+- Header: `Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category`
+
 ## Notes
 
 - Opening `Insights` auto-selects `Today`.

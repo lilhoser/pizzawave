@@ -27,10 +27,11 @@ namespace pizzapi
             pizzalib.Settings.DefaultWorkingDirectory, "Logs"});
         private static string m_Location = Path.Combine(new string[] { m_TraceFileDir,
                             $"pizzapi-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
-        private static TextWriterTraceListener m_TextWriterTraceListener =
-            new TextWriterTraceListener(m_Location, "pizzapiTextWriterListener");
+        public static string CurrentLogPath => m_Location;
+        private static TextWriterTraceListener? m_TextWriterTraceListener;
         private static SourceSwitch m_Switch =
             new SourceSwitch("pizzapiSwitch", "Verbose");
+        private static bool m_IsInitialized;
         private static TraceSource[] Sources = {
             new TraceSource("MainWindow", SourceLevels.Verbose),
             new TraceSource("Settings", SourceLevels.Verbose),
@@ -57,14 +58,11 @@ namespace pizzapi
 
         public static void Initialize(bool RedirectToStdout = false)
         {
+            if (m_IsInitialized) return;
+
             // Disable AutoFlush to prevent excessive disk I/O on Linux/RPI
             // Traces will be flushed when Shutdown() is called or manually
             System.Diagnostics.Trace.AutoFlush = false;
-            foreach (var source in Sources)
-            {
-                source.Listeners.Add(m_TextWriterTraceListener);
-                source.Switch = m_Switch;
-            }
 
             if (Directory.Exists(pizzalib.Settings.DefaultWorkingDirectory))
             {
@@ -78,7 +76,38 @@ namespace pizzapi
                     {
                     }
                 }
+
+                try
+                {
+                    var stream = new FileStream(
+                        m_Location,
+                        FileMode.Append,
+                        FileAccess.Write,
+                        FileShare.ReadWrite);
+                    var writer = new StreamWriter(stream) { AutoFlush = false };
+                    m_TextWriterTraceListener =
+                        new TextWriterTraceListener(writer, "pizzapiTextWriterListener");
+                }
+                catch (IOException)
+                {
+                    m_TextWriterTraceListener = null;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    m_TextWriterTraceListener = null;
+                }
             }
+
+            foreach (var source in Sources)
+            {
+                if (m_TextWriterTraceListener != null)
+                {
+                    source.Listeners.Add(m_TextWriterTraceListener);
+                }
+                source.Switch = m_Switch;
+            }
+
+            m_IsInitialized = true;
         }
 
         public static void Shutdown()
@@ -98,13 +127,38 @@ namespace pizzapi
             m_Switch.Level = Level;
         }
 
+        public static void Flush()
+        {
+            try
+            {
+                foreach (var source in Sources)
+                    source.Flush();
+                m_TextWriterTraceListener?.Flush();
+                System.Diagnostics.Trace.Flush();
+            }
+            catch
+            {
+                // Ignore flush errors for troubleshooting UX.
+            }
+        }
+
         public static void Trace(TraceLoggerType Type, TraceEventType EventType, string Message)
         {
             if (Type >= TraceLoggerType.Max)
             {
                 throw new Exception("Invalid logger type");
             }
-            Sources[(int)Type].TraceEvent(EventType, 1, $"{DateTime.Now:M/d/yyyy h:mm tt}: {Message}");
+
+            try
+            {
+                Sources[(int)Type].TraceEvent(EventType, 1, $"{DateTime.Now:M/d/yyyy h:mm tt}: {Message}");
+            }
+            catch (IOException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
 
         public static void OpenTraceLog()

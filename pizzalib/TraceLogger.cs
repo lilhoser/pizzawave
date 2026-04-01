@@ -27,10 +27,10 @@ namespace pizzalib
             Settings.DefaultWorkingDirectory, "Logs"});
         private static string m_Location = Path.Combine(new string[] { m_TraceFileDir,
                             $"pizzalib-{DateTime.Now.ToString("yyyy-MM-dd-HHmmss")}.txt"});
-        private static TextWriterTraceListener m_TextWriterTraceListener =
-            new TextWriterTraceListener(m_Location, "pizzalibTextWriterListener");
+        private static TextWriterTraceListener? m_TextWriterTraceListener;
         private static SourceSwitch m_Switch =
             new SourceSwitch("pizzalibSwitch", "Verbose");
+        private static bool m_IsInitialized;
         private static TraceSource[] Sources = {
             new TraceSource("StreamServer", SourceLevels.Verbose),
             new TraceSource("RawCallData", SourceLevels.Verbose),
@@ -63,14 +63,11 @@ namespace pizzalib
 
         public static void Initialize(bool RedirectToStdout = false)
         {
+            if (m_IsInitialized) return;
+
             // Disable AutoFlush to prevent excessive disk I/O on Linux/RPI
             // Traces will be flushed when Shutdown() is called or manually
             System.Diagnostics.Trace.AutoFlush = false;
-            foreach (var source in Sources)
-            {
-                source.Listeners.Add(m_TextWriterTraceListener);
-                source.Switch = m_Switch;
-            }
 
             if (Directory.Exists(Settings.DefaultWorkingDirectory))
             {
@@ -84,7 +81,38 @@ namespace pizzalib
                     {
                     }
                 }
+
+                try
+                {
+                    var stream = new FileStream(
+                        m_Location,
+                        FileMode.Append,
+                        FileAccess.Write,
+                        FileShare.ReadWrite);
+                    var writer = new StreamWriter(stream) { AutoFlush = false };
+                    m_TextWriterTraceListener =
+                        new TextWriterTraceListener(writer, "pizzalibTextWriterListener");
+                }
+                catch (IOException)
+                {
+                    m_TextWriterTraceListener = null;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    m_TextWriterTraceListener = null;
+                }
             }
+
+            foreach (var source in Sources)
+            {
+                if (m_TextWriterTraceListener != null)
+                {
+                    source.Listeners.Add(m_TextWriterTraceListener);
+                }
+                source.Switch = m_Switch;
+            }
+
+            m_IsInitialized = true;
         }
 
         public static void Shutdown()
@@ -104,6 +132,21 @@ namespace pizzalib
             m_Switch.Level = Level;
         }
 
+        public static void Flush()
+        {
+            try
+            {
+                foreach (var source in Sources)
+                    source.Flush();
+                m_TextWriterTraceListener?.Flush();
+                System.Diagnostics.Trace.Flush();
+            }
+            catch
+            {
+                // Ignore flush errors to avoid impacting runtime.
+            }
+        }
+
         public static void Trace(TraceLoggerType Type, TraceEventType EventType, string Message)
         {
             if (Type >= TraceLoggerType.Max)
@@ -114,7 +157,16 @@ namespace pizzalib
             // Structured logging format: timestamp|level|type|message
             // Note: AutoFlush is disabled to prevent excessive disk I/O on Linux/RPI
             var structuredMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}|{(int)EventType}|{Type}|{Message}";
-            Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
+            try
+            {
+                Sources[(int)Type].TraceEvent(EventType, 1, structuredMessage);
+            }
+            catch (IOException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
 
         public static void OpenTraceLog()

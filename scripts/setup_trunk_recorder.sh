@@ -335,9 +335,9 @@ if [[ $DO_SERVICE -eq 1 ]]; then
     echo "=== Preparing directories ==="
     mkdir -p "$ETC_TR_DIR" "$VAR_LIB"/{recordings,tmp} "$VAR_LOG"
     chown -R "$USER_NAME:$USER_NAME" "$VAR_LIB" "$VAR_LOG" "$ETC_TR_DIR"
-    chmod -R 755 "$VAR_LIB" "$VAR_LOG"
-    chmod 755 "$VAR_LIB/recordings" "$VAR_LOG"
-    chmod -R 644 "$VAR_LIB" "$VAR_LOG"
+    # Directories need execute bit for traversal/creation; files should stay non-executable.
+    find "$VAR_LIB" "$VAR_LOG" -type d -exec chmod 755 {} \;
+    find "$VAR_LIB" "$VAR_LOG" -type f -exec chmod 644 {} \;
 
     echo "=== Copying config ==="
     rm -f "$CONFIG_PATH"

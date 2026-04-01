@@ -25,16 +25,16 @@
         </StackPanel>
         
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-            <Button Content="Cancel" 
-                    Width="80" 
-                    Click="OnCancelClicked"
-                    Background="#444"
-                    Foreground="White"/>
             <Button Content="OK" 
                     Width="80" 
                     Click="OnOkClicked"
                     Background="#ffaa00"
                     Foreground="Black"/>
+            <Button Content="Cancel" 
+                    Width="80" 
+                    Click="OnCancelClicked"
+                    Background="#444"
+                    Foreground="White"/>
         </StackPanel>
     </StackPanel>
 </Window>

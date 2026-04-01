@@ -62,11 +62,13 @@ This website will output the center frequencies and control channels for your sy
 
 A talkgroup is simply a virtual channel within the trunked system that groups related users together. For example, all police dispatch communications might be on one talkgroup, while fire dispatch is on another. By creating a talkgroups file and linking it in your config, you can have the PizzaPi UI display the talkgroup names and descriptions instead of just showing "Unknown Talkgroup 12345" for every call.
 
-Talkgroups are listed on the RadioReference page for your system. To generate the CSV:
-1. Visit the RadioReference talkgroups section for the system you are monitoring (example: https://www.radioreference.com/db/sid/4879).
-1. Copy the HTML table for the talkgroups you want.
-1. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
-1. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
+Talkgroups are listed on the RadioReference page for your system. You can still build this CSV manually, but current PizzaPi builds can do this for you in the UI:
+1. Open `Settings -> Talkgroups`.
+1. Click `Build CSV`.
+1. Enter the SID (example: `6355` for `https://www.radioreference.com/db/sid/6355`).
+1. PizzaPi parses the RR Talkgroups tables, stages the mapping rows, and auto-exports a Trunk Recorder CSV.
+
+If you prefer manual CSV management, use this TR-compatible header format:
 
 Example:
 ```
@@ -77,6 +79,10 @@ Decimal,Mode,Alpha Tag,Description,Tag,Category
 ```
 
 The talkgroup file will be used in both TR setup and PizzaPi setup, so save it somewhere persistent on your RPI (e.g. `/home/<USER>/tr5/talkgroups.csv`).
+
+Current behavior note:
+- PizzaPi resolves talkgroups from `talkgroup-mappings.json` (mapping store), not from `settings.json` `Talkgroups`.
+- The `Build CSV` operation also exports `talkgroups-tr-<sid>.csv` (TR-compatible) so the same dataset can be used by trunk-recorder.
 
 
 ## 1. System Preparation
@@ -340,7 +346,8 @@ You can start the application and manually update the settings file or use the o
 
 If you don't plan on using LM Studio, you can remove those options.
 
-You can manually populate Talkgroups array in the settings file, or use the settings pane in PizzaPi to import them from the same CSV file you used for trunk-recorder.
+Do not manually populate the `Talkgroups` array in `settings.json` for PizzaPi talkgroup resolution.
+Use `Settings -> Talkgroups` (`Import CSV` or `Build CSV`) and then click `Apply` to make mappings live. `Apply` restarts the live call manager to atomically switch mapping snapshots.
 
 Note: the model you choose for LM Link must be OpenAI-compatible and support structured output.
 

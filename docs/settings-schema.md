@@ -15,7 +15,7 @@ Primary path:
 | `AutostartListener` | bool | `true` | starts listener on app start |
 | `transcriptionEngine` | string | `"whisper"` | `whisper` or `vosk` |
 | `transcriptionModelPreset` | string | `""` | preset model alias |
-| `talkgroups` / `Talkgroups` | array | `[]` | talkgroup definitions |
+| `talkgroups` / `Talkgroups` | array | `[]` | legacy/interop field; PizzaPi resolves via `talkgroup-mappings.json` |
 | `Alerts` | array | `[]` | alert rules |
 | `analogChannels` | number | `1` | PCM metadata |
 | `analogBitDepth` | number | `16` | PCM metadata |

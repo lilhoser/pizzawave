@@ -75,6 +75,12 @@ public class InsightNotableEvent
         }
     }
 
+    [JsonIgnore]
+    public bool ShowDateDivider { get; set; }
+
+    [JsonIgnore]
+    public string DateDividerText { get; set; } = string.Empty;
+
     private static string NormalizeDisplayTitle(string? rawTitle, string categoryKey)
     {
         var title = (rawTitle ?? string.Empty).Trim();
@@ -197,11 +203,11 @@ public class InsightCategorySection
     public string CategoryKey { get; set; } = "other";
     public string DisplayName { get; set; } = "Other";
     public string Icon { get; set; } = "*";
-    public string AccentColor { get; set; } = "#5a5a5a";
+    public string AccentColor { get; set; } = "#8a63d2";
     public List<InsightNotableEvent> Events { get; set; } = new();
     public bool IsCollapsed { get; set; }
     public bool ShowAll { get; set; }
-    public int PreviewCount { get; set; } = 3;
+    public int PreviewCount { get; set; } = 100;
 
     public int TotalCount => Events.Count;
     public int HiddenCount => Math.Max(0, TotalCount - PreviewCount);
@@ -295,7 +301,7 @@ internal static class InsightCategoryPalette
             "traffic" => "#d79a28",
             "public_works" => "#6b7f95",
             "utilities" => "#8a63d2",
-            _ => "#5a5a5a"
+            _ => "#8a63d2"
         };
     }
 
@@ -309,7 +315,7 @@ internal static class InsightCategoryPalette
             "traffic" => "#312916",
             "public_works" => "#222a31",
             "utilities" => "#272133",
-            _ => "#2a2a2a"
+            _ => "#271f33"
         };
     }
 }

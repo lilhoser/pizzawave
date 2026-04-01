@@ -164,6 +164,28 @@ Canonical references:
 * [Operational Limits](operational-limits.md)
 * [Email SMTP Troubleshooting](email-smtp-troubleshooting.md)
 
+## Talkgroup Mapping Lifecycle (Current)
+
+`pizzapi` now uses a mapping-first talkgroup workflow:
+
+1. In `Settings -> Talkgroups`, use `Import CSV` (existing RR/TR CSV) or `Build CSV` (crawl RadioReference SID URL and parse Talkgroups tables).
+2. Imported/built rows are staged in the mapping editor table.
+3. Click `Apply` to make mappings live.
+
+Authoritative mapping storage:
+- `talkgroup-mappings.json` in the pizzawave working directory.
+- `settings.json` `Talkgroups` is no longer the source of truth for UI talkgroup resolution.
+
+On `Build CSV` success:
+- `pizzapi` exports a Trunk Recorder-compatible CSV automatically:
+  - `talkgroups-tr-<sid>.csv`
+  - columns: `Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category`
+
+On `Apply`:
+- Live call manager is stopped, mapping snapshot is atomically replaced from staged rows, then live call manager is restarted.
+- Historical range views are refreshed in the background so range/insights lookup uses the same mapping snapshot.
+- There is no separate mapping draft file; only staged in-memory edits and persisted `talkgroup-mappings.json`.
+
 _Important_: Make sure your `trunk-recorder` system is configured to connect to the right IP address. In an exotic scenario where you're running `pizzacmd` from both a Windows host system and a WSL2 Ubuntu system, the host system and the virtual Ubuntu system will have different IP addresses! In this scenario, you might forget to set the correct IP address on the `trunk-recorder` system, and only one of these machines will receive audio data, while the other might be stuck on this:
 
 ```
@@ -180,6 +202,9 @@ See [Deployment Guide](deployment.md) for detailed instructions on deploying to:
 If you want automation, start with the `scripts` folder:
 * `pizzapi-upgrade.sh` - Automates installing/deploying the latest `pizzapi` UI `.deb` package
 * `setup_trunk_recorder.sh` - Automates building, installing, and configuring trunk-recorder
+* `tr_tune.sh` - Unified Trunk Recorder tuning workflow (control-channel sweep, error sweep, SDR bakeoff)
+
+See [scripts/README.md](../scripts/README.md) for complete usage and tuning workflow examples.
 
 ## Quick Deploy Reference
 

@@ -17,24 +17,17 @@ specific language governing permissions and limitations
 under the License.
 */
 using CsvHelper;
-using CsvHelper.Configuration.Attributes;
 using System.Globalization;
 
 namespace pizzalib
 {
     public record Talkgroup
     {
-        [Index(0)]
         public long Id { get; init; }
-        [Index(1)]
         public string? Mode { get; init; }
-        [Index(2)]
         public string? AlphaTag { get; init; }
-        [Index(3)]
         public string? Description { get; init; }
-        [Index(4)]
         public string? Tag { get; init; }
-        [Index(5)]
         public string? Category { get; init; }
     }
 
@@ -44,17 +37,72 @@ namespace pizzalib
         {
             using var reader = new StreamReader(fileName);
             using var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
-            return csv.GetRecords<Talkgroup>().ToList();
+            if (!csv.Read() || !csv.ReadHeader())
+                return new List<Talkgroup>();
+
+            var headers = (csv.HeaderRecord ?? Array.Empty<string>())
+                .Select((name, index) => new { Key = NormalizeHeader(name), index })
+                .GroupBy(x => x.Key)
+                .ToDictionary(g => g.Key, g => g.First().index);
+
+            var rows = new List<Talkgroup>();
+            while (csv.Read())
+            {
+                var idRaw = GetField(csv, headers, "decimal", "dec", "id", "tgid");
+                if (string.IsNullOrWhiteSpace(idRaw))
+                    continue;
+
+                var normalizedId = idRaw.Replace(",", string.Empty).Trim();
+                if (!long.TryParse(normalizedId, out var id) || id <= 0)
+                    continue;
+
+                rows.Add(new Talkgroup
+                {
+                    Id = id,
+                    Mode = NullIfWhiteSpace(GetField(csv, headers, "mode")),
+                    AlphaTag = NullIfWhiteSpace(GetField(csv, headers, "alphatag", "alpha", "alpha tag")),
+                    Description = NullIfWhiteSpace(GetField(csv, headers, "description", "desc")),
+                    Tag = NullIfWhiteSpace(GetField(csv, headers, "tag")),
+                    Category = NullIfWhiteSpace(GetField(csv, headers, "category"))
+                });
+            }
+
+            return rows;
         }
 
-        public static Talkgroup? LookupTalkgroup(Settings settings, long talkgroupId)
+        private static string NormalizeHeader(string? header)
         {
-            return settings.Talkgroups?.FirstOrDefault(t => t.Id == talkgroupId);
+            return new string((header ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant()
+                .Where(char.IsLetterOrDigit)
+                .ToArray());
         }
 
-        public static string FormatTalkgroup(Settings settings, long talkgroupId, bool shortFormat = true)
+        private static string? GetField(CsvReader csv, Dictionary<string, int> headers, params string[] keys)
         {
-            var talkgroup = LookupTalkgroup(settings, talkgroupId);
+            foreach (var key in keys)
+            {
+                if (!headers.TryGetValue(NormalizeHeader(key), out var index))
+                    continue;
+                return csv.GetField(index);
+            }
+            return null;
+        }
+
+        private static string? NullIfWhiteSpace(string? value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        public static Talkgroup? LookupTalkgroup(IEnumerable<Talkgroup>? talkgroups, long talkgroupId)
+        {
+            return talkgroups?.FirstOrDefault(t => t.Id == talkgroupId);
+        }
+
+        public static string FormatTalkgroup(IEnumerable<Talkgroup>? talkgroups, long talkgroupId, bool shortFormat = true)
+        {
+            var talkgroup = LookupTalkgroup(talkgroups, talkgroupId);
             if (talkgroup == null)
             {
                 return $"{talkgroupId}";

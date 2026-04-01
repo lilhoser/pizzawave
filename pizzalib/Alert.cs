@@ -20,6 +20,12 @@ using System.Net.Mail;
 
 namespace pizzalib
 {
+    public enum AlertMatchType
+    {
+        Keyword = 0,
+        PoliceCode = 2
+    }
+
     public enum AlertFrequency
     {
         RealTime,
@@ -33,6 +39,8 @@ namespace pizzalib
         public string Name { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string Keywords { get; set; } = string.Empty;
+        public string PoliceCodes { get; set; } = string.Empty;
+        public AlertMatchType MatchType { get; set; } = AlertMatchType.Keyword;
         public AlertFrequency Frequency { get; set; }
         public List<long> Talkgroups { get; set; } = [];
         public bool Enabled { get; set; }
@@ -47,9 +55,17 @@ namespace pizzalib
                 throw new Exception("Name is required");
             }
 
-            if (string.IsNullOrEmpty(Keywords))
+            MatchType = NormalizeMatchType(MatchType);
+
+            bool hasAnyCriteria = false;
+            if (MatchType == AlertMatchType.Keyword && !string.IsNullOrWhiteSpace(Keywords))
+                hasAnyCriteria = true;
+            if (MatchType == AlertMatchType.PoliceCode && !string.IsNullOrWhiteSpace(PoliceCodes))
+                hasAnyCriteria = true;
+
+            if (!hasAnyCriteria)
             {
-                throw new Exception("Keywords are required");
+                throw new Exception("At least one enabled alert criteria is required (keyword/police code).");
             }
 
             // Email is optional - if provided, validate format
@@ -82,6 +98,13 @@ namespace pizzalib
                 return new List<string>();
             }
             return emails.ToList();
+        }
+
+        private static AlertMatchType NormalizeMatchType(AlertMatchType type)
+        {
+            return type == AlertMatchType.PoliceCode
+                ? AlertMatchType.PoliceCode
+                : AlertMatchType.Keyword;
         }
     }
 }

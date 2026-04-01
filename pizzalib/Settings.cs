@@ -125,18 +125,6 @@ namespace pizzalib
         public int analogBitDepth;
         public int analogSamplingRate;
 
-        // Backing field for Talkgroups property (for JSON serialization)
-        private List<Talkgroup>? talkgroups;
-
-        /// <summary>
-        /// Public property for Talkgroups list (for JSON serialization)
-        /// </summary>
-        public List<Talkgroup>? Talkgroups
-        {
-            get => talkgroups;
-            set => talkgroups = value;
-        }
-
         // whisper.net settings
         [JsonIgnore]
         public string? whisperModelFile;
@@ -230,7 +218,6 @@ namespace pizzalib
                 analogChannels == other.analogChannels &&
                 analogBitDepth == other.analogBitDepth &&
                 analogSamplingRate == other.analogSamplingRate &&
-                talkgroups?.SequenceEqual(other.talkgroups) == true &&
                 whisperModelFile == other.whisperModelFile &&
                 transcriptionEngine == other.transcriptionEngine &&
                 transcriptionModelPreset == other.transcriptionModelPreset &&
@@ -399,7 +386,6 @@ namespace pizzalib
             if (ConfigVersion < 2)
             {
                 // Migrate from version 1 to 2
-                // No migration needed currently
                 ConfigVersion = 2;
             }
         }

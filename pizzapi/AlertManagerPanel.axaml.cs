@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using Avalonia.Controls;
+using Avalonia.Data.Converters;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using pizzalib;
@@ -10,11 +12,13 @@ public partial class AlertManagerPanel : UserControl
 {
     private Settings _settings;
     private string _settingsPath = Settings.DefaultSettingsFileLocation;
+    private readonly TalkgroupMappingStore _talkgroupMappingStore = new();
     private Alert? _editingAlert;
     private ObservableCollection<Talkgroup> _talkgroups;
     private ObservableCollection<Alert> _alertsCollection;
     private HashSet<long> _selectedTalkgroupIds;
     private Dictionary<long, CheckBox> _talkgroupCheckboxes;
+    private Dictionary<string, CheckBox> _policeCodeCheckboxes;
 
     public event EventHandler? RequestClose;
 
@@ -26,15 +30,17 @@ public partial class AlertManagerPanel : UserControl
     {
         _settings = settings;
         _settingsPath = Settings.DefaultSettingsFileLocation;
-        _talkgroups = new ObservableCollection<Talkgroup>(_settings.Talkgroups ?? new List<Talkgroup>());
+        _talkgroups = new ObservableCollection<Talkgroup>(LoadTalkgroupsFromMappings());
         _alertsCollection = new ObservableCollection<Alert>(_settings.Alerts ?? new List<Alert>());
         _selectedTalkgroupIds = new HashSet<long>();
         _talkgroupCheckboxes = new Dictionary<long, CheckBox>();
+        _policeCodeCheckboxes = new Dictionary<string, CheckBox>(StringComparer.OrdinalIgnoreCase);
 
         InitializeComponent();
         LoadAlertsList();
         SetupEventHandlers();
         LoadTalkgroupCheckboxes();
+        LoadPoliceCodeCheckboxes();
     }
 
     private void InitializeComponent()
@@ -64,6 +70,83 @@ public partial class AlertManagerPanel : UserControl
         }
     }
 
+    private void LoadPoliceCodeCheckboxes()
+    {
+        var panel = this.FindControl<StackPanel>("PoliceCodeCheckboxesPanel");
+        if (panel == null) return;
+
+        panel.Children.Clear();
+        _policeCodeCheckboxes.Clear();
+
+        foreach (var kv in PoliceCodeLookup.GetSupportedCodes().OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var checkBox = new CheckBox
+            {
+                Content = $"{kv.Key} - {kv.Value}",
+                Tag = kv.Key
+            };
+            panel.Children.Add(checkBox);
+            _policeCodeCheckboxes[kv.Key] = checkBox;
+        }
+    }
+
+    private void UpdateMatchTypeInputVisibility()
+    {
+        var keywordPanel = this.FindControl<StackPanel>("KeywordInputPanel");
+        var policePanel = this.FindControl<StackPanel>("PoliceCodeInputPanel");
+
+        if (keywordPanel == null || policePanel == null)
+            return;
+
+        var matchType = GetSelectedMatchType();
+        keywordPanel.IsVisible = matchType == AlertMatchType.Keyword;
+        policePanel.IsVisible = matchType == AlertMatchType.PoliceCode;
+    }
+
+    private AlertMatchType GetSelectedMatchType()
+    {
+        if (this.FindControl<RadioButton>("MatchPoliceCodeRadio")?.IsChecked == true)
+            return AlertMatchType.PoliceCode;
+        return AlertMatchType.Keyword;
+    }
+
+    private void SetSelectedMatchType(AlertMatchType type)
+    {
+        var keyword = this.FindControl<RadioButton>("MatchKeywordRadio");
+        var police = this.FindControl<RadioButton>("MatchPoliceCodeRadio");
+
+        if (keyword == null || police == null)
+            return;
+
+        var normalized = type == AlertMatchType.PoliceCode
+            ? AlertMatchType.PoliceCode
+            : AlertMatchType.Keyword;
+        keyword.IsChecked = normalized == AlertMatchType.Keyword;
+        police.IsChecked = normalized == AlertMatchType.PoliceCode;
+        UpdateMatchTypeInputVisibility();
+    }
+
+    private string GetSelectedPoliceCodesCsv()
+    {
+        var selected = _policeCodeCheckboxes
+            .Where(kvp => kvp.Value.IsChecked == true)
+            .Select(kvp => kvp.Key)
+            .OrderBy(code => code, StringComparer.OrdinalIgnoreCase);
+        return string.Join(", ", selected);
+    }
+
+    private void SetSelectedPoliceCodes(string? csv)
+    {
+        var selected = new HashSet<string>(
+            (csv ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in _policeCodeCheckboxes)
+        {
+            kvp.Value.IsChecked = selected.Contains(kvp.Key);
+        }
+    }
+
     private void OnTalkgroupCheckedChanged(object? sender, RoutedEventArgs e)
     {
         if (sender is CheckBox checkBox && checkBox.Tag is long tgId)
@@ -83,6 +166,8 @@ public partial class AlertManagerPanel : UserControl
         var deleteBtn = this.FindControl<Button>("DeleteButton");
         var allRadio = this.FindControl<RadioButton>("AllTalkgroupsRadio");
         var selectedRadio = this.FindControl<RadioButton>("SelectedTalkgroupsRadio");
+        var matchKeywordRadio = this.FindControl<RadioButton>("MatchKeywordRadio");
+        var matchPoliceCodeRadio = this.FindControl<RadioButton>("MatchPoliceCodeRadio");
         var talkgroupBorder = this.FindControl<Border>("TalkgroupListBorder");
         var alertsListBox = this.FindControl<ListBox>("AlertsListBox");
 
@@ -122,9 +207,16 @@ public partial class AlertManagerPanel : UserControl
         if (talkgroupBorder != null)
             talkgroupBorder.IsVisible = false;
 
+        if (matchKeywordRadio != null)
+            matchKeywordRadio.IsCheckedChanged += (s, e) => UpdateMatchTypeInputVisibility();
+        if (matchPoliceCodeRadio != null)
+            matchPoliceCodeRadio.IsCheckedChanged += (s, e) => UpdateMatchTypeInputVisibility();
+
         var freqCombo = this.FindControl<ComboBox>("AlertFrequencyComboBox");
         if (freqCombo != null)
             freqCombo.SelectedIndex = 0;
+
+        UpdateMatchTypeInputVisibility();
     }
 
     private void OnAlertsListSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -155,13 +247,14 @@ public partial class AlertManagerPanel : UserControl
         if (!string.IsNullOrWhiteSpace(settingsPath))
             _settingsPath = settingsPath;
 
-        _talkgroups = new ObservableCollection<Talkgroup>(_settings.Talkgroups ?? new List<Talkgroup>());
+        _talkgroups = new ObservableCollection<Talkgroup>(LoadTalkgroupsFromMappings());
         _alertsCollection = new ObservableCollection<Alert>(_settings.Alerts ?? new List<Alert>());
         _selectedTalkgroupIds.Clear();
         _editingAlert = null;
 
         LoadAlertsList();
         LoadTalkgroupCheckboxes();
+        LoadPoliceCodeCheckboxes();
         ResetForm();
     }
 
@@ -180,6 +273,8 @@ public partial class AlertManagerPanel : UserControl
                     existingAlert.Name = alert.Name;
                     existingAlert.Email = alert.Email;
                     existingAlert.Keywords = alert.Keywords;
+                    existingAlert.PoliceCodes = alert.PoliceCodes;
+                    existingAlert.MatchType = alert.MatchType;
                     existingAlert.Frequency = alert.Frequency;
                     existingAlert.Enabled = alert.Enabled;
                     existingAlert.Autoplay = alert.Autoplay;
@@ -225,21 +320,44 @@ public partial class AlertManagerPanel : UserControl
         }
     }
 
+    private List<Talkgroup> LoadTalkgroupsFromMappings()
+    {
+        var rows = _talkgroupMappingStore.LoadAll()
+            .GroupBy(m => m.TalkgroupId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
+            .OrderBy(m => m.TalkgroupId)
+            .Select(m => new Talkgroup
+            {
+                Id = m.TalkgroupId,
+                Mode = m.Mode,
+                AlphaTag = m.AlphaTag,
+                Description = m.Description,
+                Tag = m.Tag,
+                Category = m.Category
+            })
+            .ToList();
+        return rows;
+    }
+
     private Alert GetAlertFromForm()
     {
         var alertName = this.FindControl<TextBox>("AlertNameTextBox")?.Text ?? string.Empty;
         var alertEmail = this.FindControl<TextBox>("AlertEmailTextBox")?.Text ?? string.Empty;
         var alertKeywords = this.FindControl<TextBox>("AlertKeywordsTextBox")?.Text ?? string.Empty;
+        var alertPoliceCodes = GetSelectedPoliceCodesCsv();
         var alertFrequency = this.FindControl<ComboBox>("AlertFrequencyComboBox")?.SelectedIndex ?? 0;
         var enabled = this.FindControl<CheckBox>("EnabledCheckBox")?.IsChecked ?? true;
         var autoplay = this.FindControl<CheckBox>("AutoplayCheckBox")?.IsChecked ?? true;
         var allRadio = this.FindControl<RadioButton>("AllTalkgroupsRadio");
+        var selectedMatchType = GetSelectedMatchType();
 
         var alert = new Alert
         {
             Name = alertName,
             Email = alertEmail,
             Keywords = alertKeywords,
+            PoliceCodes = alertPoliceCodes,
+            MatchType = selectedMatchType,
             Frequency = (AlertFrequency)alertFrequency,
             Enabled = enabled,
             Autoplay = autoplay
@@ -270,9 +388,13 @@ public partial class AlertManagerPanel : UserControl
         if (alertName != null) alertName.Text = alert.Name;
         if (alertEmail != null) alertEmail.Text = alert.Email;
         if (alertKeywords != null) alertKeywords.Text = alert.Keywords;
+        SetSelectedPoliceCodes(alert.PoliceCodes);
         if (alertFrequency != null) alertFrequency.SelectedIndex = (int)alert.Frequency;
         if (enabled != null) enabled.IsChecked = alert.Enabled;
         if (autoplay != null) autoplay.IsChecked = alert.Autoplay;
+
+        var selectedType = alert.MatchType;
+        SetSelectedMatchType(selectedType);
 
         if (alert.Talkgroups.Count > 0)
         {
@@ -316,9 +438,11 @@ public partial class AlertManagerPanel : UserControl
         if (alertName != null) alertName.Text = string.Empty;
         if (alertEmail != null) alertEmail.Text = string.Empty;
         if (alertKeywords != null) alertKeywords.Text = string.Empty;
+        SetSelectedPoliceCodes(string.Empty);
         if (alertFrequency != null) alertFrequency.SelectedIndex = 0;
         if (enabled != null) enabled.IsChecked = true;
         if (autoplay != null) autoplay.IsChecked = true;
+        SetSelectedMatchType(AlertMatchType.Keyword);
 
         allRadio!.IsChecked = true;
         selectedRadio!.IsChecked = false;
@@ -377,5 +501,18 @@ public partial class AlertManagerPanel : UserControl
         {
             errorWindow.Show();
         }
+    }
+}
+
+public class EnabledStatusConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return value is bool enabled && enabled ? "enabled" : "disabled";
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
     }
 }

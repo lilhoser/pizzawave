@@ -47,13 +47,38 @@
                             </StackPanel>
 
                             <StackPanel Spacing="5">
+                                <TextBlock Text="Match Type" FontSize="14" FontWeight="Bold" />
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <RadioButton x:Name="MatchKeywordRadio"
+                                                 Content="Keyword"
+                                                 GroupName="MatchType"
+                                                 IsChecked="True"/>
+                                    <RadioButton x:Name="MatchPoliceCodeRadio"
+                                                 Content="Police Code"
+                                                 GroupName="MatchType"/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel x:Name="KeywordInputPanel" Spacing="5">
                                 <TextBlock Text="Keywords" FontSize="14" FontWeight="Bold" />
                                 <TextBox x:Name="AlertKeywordsTextBox"
                                          PlaceholderText="comma, separated, keywords"
                                          FontSize="14" />
                                 <TextBlock FontSize="11"
                                            Foreground="Gray"
-                                           Text="Alert triggers when transcription contains any of these keywords" />
+                                           Text="Alert triggers when transcription contains any listed keyword." />
+                            </StackPanel>
+
+                            <StackPanel x:Name="PoliceCodeInputPanel" Spacing="5" IsVisible="False">
+                                <TextBlock Text="Police Codes" FontSize="14" FontWeight="Bold" />
+                                <Border Background="#1a1a1a" CornerRadius="4" Padding="10" MaxHeight="140">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <StackPanel x:Name="PoliceCodeCheckboxesPanel" Spacing="4" />
+                                    </ScrollViewer>
+                                </Border>
+                                <TextBlock FontSize="11"
+                                           Foreground="Gray"
+                                           Text="Select one or more police codes to match in transcription text." />
                             </StackPanel>
 
                             <StackPanel Spacing="5">
