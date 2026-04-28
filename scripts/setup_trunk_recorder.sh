@@ -31,6 +31,7 @@ PLUGIN_SO="/usr/local/lib/trunk-recorder/lib${PLUGIN_DIR_NAME}.so"
 BINARY="/usr/local/bin/trunk-recorder"
 TRUNK_REPO="https://github.com/TrunkRecorder/trunk-recorder.git"
 PLUGIN_REPO="https://github.com/lilhoser/callstream.git"
+SCRIPT_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Detect real user's home (works with sudo)
 if [ -n "${SUDO_USER:-}" ]; then
@@ -48,6 +49,10 @@ BUILD_DIR="${REAL_HOME}/tr5/trunk-build"
 TMUX_SCRIPT="/usr/local/bin/trunklogs.sh"
 TMUX_SESSION_NAME="trunklogs"
 PROFILE_FILE="${REAL_HOME}/.profile"
+TR_HEALTH_SCRIPT="/usr/local/bin/tr_health_collect.sh"
+TR_HEALTH_SERVICE="/etc/systemd/system/tr-health-collector.service"
+TR_HEALTH_TIMER="/etc/systemd/system/tr-health-collector.timer"
+TR_HEALTH_DIR="/var/lib/pizzapi/tr-health"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Functions
@@ -117,6 +122,23 @@ run_status_audit() {
         systemctl is-active trunk-recorder.service &>/dev/null && echo " ACTIVE" || echo " INACTIVE/FAILED"
     else
         echo " MISSING - $SERVICE_PATH"
+    fi
+    echo -e "\n→ TR health collector:"
+    if [[ -f "$TR_HEALTH_SCRIPT" ]]; then
+        ls -l "$TR_HEALTH_SCRIPT" | awk '{printf " OK - Script exists (%s bytes)\n", $5}'
+    else
+        echo " MISSING - $TR_HEALTH_SCRIPT"
+    fi
+    if [[ -f "$TR_HEALTH_TIMER" ]]; then
+        systemctl is-enabled tr-health-collector.timer &>/dev/null && echo " Timer enabled" || echo " Timer NOT enabled"
+        systemctl is-active tr-health-collector.timer &>/dev/null && echo " Timer active" || echo " Timer inactive"
+    else
+        echo " MISSING - $TR_HEALTH_TIMER"
+    fi
+    if [[ -f "$TR_HEALTH_DIR/summary_5m.csv" ]]; then
+        ls -l "$TR_HEALTH_DIR/summary_5m.csv" | awk '{printf " OK - Summary file exists (%s bytes)\n", $5}'
+    else
+        echo " INFO - No summary file yet ($TR_HEALTH_DIR/summary_5m.csv)"
     fi
 	echo -e "\n→ SDR device access for user:"
 	if id "$USER_NAME" &>/dev/null; then
@@ -240,9 +262,11 @@ if [[ $DO_CLEAN -eq 1 ]]; then
     echo "!!! WARNING: --clean selected !!!"
     echo "This will DELETE:"
     echo " - systemd service"
+    echo " - TR health collector timer/service"
     echo " - $VAR_LIB (recordings, tmp)"
     echo " - $VAR_LOG"
     echo " - $ETC_TR_DIR (config + files)"
+    echo " - $TR_HEALTH_DIR (flat-file health metrics)"
     echo
     read -p "Type YES (uppercase) to continue: " confirm
     if [[ "$confirm" != "YES" ]]; then
@@ -252,8 +276,13 @@ if [[ $DO_CLEAN -eq 1 ]]; then
 
     systemctl stop trunk-recorder.service 2>/dev/null || true
     systemctl disable trunk-recorder.service 2>/dev/null || true
+    systemctl stop tr-health-collector.timer 2>/dev/null || true
+    systemctl disable tr-health-collector.timer 2>/dev/null || true
     rm -f "$SERVICE_PATH"
+    rm -f "$TR_HEALTH_SERVICE" "$TR_HEALTH_TIMER" "$TR_HEALTH_SCRIPT"
     rm -rf "$VAR_LIB" "$VAR_LOG" "$ETC_TR_DIR"
+    rm -rf "$TR_HEALTH_DIR"
+    systemctl daemon-reload
 
     echo "Cleaning tmux live log viewer..."
     tmux kill-session -t "$TMUX_SESSION_NAME" 2>/dev/null || true
@@ -334,10 +363,65 @@ if [[ $DO_SERVICE -eq 1 ]]; then
 
     echo "=== Preparing directories ==="
     mkdir -p "$ETC_TR_DIR" "$VAR_LIB"/{recordings,tmp} "$VAR_LOG"
+    mkdir -p "$TR_HEALTH_DIR"
     chown -R "$USER_NAME:$USER_NAME" "$VAR_LIB" "$VAR_LOG" "$ETC_TR_DIR"
+    chown -R "$USER_NAME:$USER_NAME" "$TR_HEALTH_DIR"
     # Directories need execute bit for traversal/creation; files should stay non-executable.
     find "$VAR_LIB" "$VAR_LOG" -type d -exec chmod 755 {} \;
     find "$VAR_LIB" "$VAR_LOG" -type f -exec chmod 644 {} \;
+    chmod 755 "$TR_HEALTH_DIR"
+
+    echo "=== Installing TR health collector ==="
+    if [[ -f "$SCRIPT_SELF_DIR/tr_health_collect.sh" ]]; then
+        cp -f "$SCRIPT_SELF_DIR/tr_health_collect.sh" "$TR_HEALTH_SCRIPT"
+    else
+        echo "WARNING: tr_health_collect.sh not found in $SCRIPT_SELF_DIR; installing inline fallback"
+        cat > "$TR_HEALTH_SCRIPT" << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+WINDOW_MINUTES="${1:-5}"
+SERVICE_NAME="${TR_SERVICE_NAME:-trunk-recorder}"
+OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzapi/tr-health}"
+SUMMARY_CSV="${OUT_DIR}/summary_5m.csv"
+mkdir -p "$OUT_DIR"
+end_iso="$(date '+%Y-%m-%d %H:%M:%S')"
+start_iso="$(date -d "${WINDOW_MINUTES} minutes ago" '+%Y-%m-%d %H:%M:%S')"
+tmp_log="$(mktemp)"
+trap 'rm -f "$tmp_log"' EXIT
+journalctl -u "$SERVICE_NAME" --since "$start_iso" --until "$end_iso" --no-pager > "$tmp_log" || true
+if [[ ! -f "$SUMMARY_CSV" ]]; then
+  echo "ts_start,ts_end,scope,decode_lines,decode0,decode0_pct,avg_decode_rate,max_decode_rate,retunes,calls_started,calls_concluded,update_not_grant,no_tx_recorded,sample_stops,unable_source,tuningerr_samples,tuningerr_avg_abs_hz,tuningerr_max_abs_hz" > "$SUMMARY_CSV"
+fi
+echo "$start_iso,$end_iso,global,0,0,0.00,0.00,0,0,0,0,0,0,0,0,0,0.00,0" >> "$SUMMARY_CSV"
+chmod 644 "$SUMMARY_CSV" || true
+EOF
+    fi
+    chmod 755 "$TR_HEALTH_SCRIPT"
+
+    cat > "$TR_HEALTH_SERVICE" << EOF
+[Unit]
+Description=Collect Trunk Recorder health metrics into flat files
+After=trunk-recorder.service
+
+[Service]
+Type=oneshot
+ExecStart=$TR_HEALTH_SCRIPT 5
+EOF
+
+    cat > "$TR_HEALTH_TIMER" << EOF
+[Unit]
+Description=Run Trunk Recorder health collector every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=tr-health-collector.service
+
+[Install]
+WantedBy=timers.target
+EOF
 
     echo "=== Copying config ==="
     rm -f "$CONFIG_PATH"
@@ -380,9 +464,12 @@ EOF
         echo "Service file created — not started/enabled."
         echo "Test: sudo -u $USER_NAME $BINARY --config=$CONFIG_PATH"
         echo "Enable: sudo systemctl enable --now trunk-recorder.service"
+        echo "Enable health collector: sudo systemctl enable --now tr-health-collector.timer"
     else
         systemctl enable trunk-recorder.service
         systemctl start trunk-recorder.service
+        systemctl enable tr-health-collector.timer
+        systemctl start tr-health-collector.timer
         echo "Service enabled and started."
         sleep 8
     fi
