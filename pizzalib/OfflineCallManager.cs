@@ -29,6 +29,7 @@ namespace pizzalib
         private Settings? m_Settings;
         private CancellationTokenSource? CancelSource;
         private Func<string, bool>? m_FileFilter;
+        private readonly string m_ArchiveAudioRoot = Path.Combine(Settings.DefaultOfflineCaptureDirectory, "archive-audio");
 
         public OfflineCallManager(
             string OfflineFilesPath,
@@ -389,6 +390,28 @@ namespace pizzalib
             {
                 // Transcribe the call
                 var call = await GetTranscribedCall(CallData);
+
+                // Persist an MP3 for offline .bin loads so archive sessions can play audio.
+                if (!RuntimeFlags.DisableAudioEncoding)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(m_ArchiveAudioRoot);
+                        var fileName = $"audio-{DateTime.Now:yyyy-MM-dd-HHmmss.ff}.mp3";
+                        await CallData.DumpStreamToFile(m_ArchiveAudioRoot, fileName, OutputFileFormat.Mp3);
+                        call.Location = Path.Combine(m_ArchiveAudioRoot, fileName);
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace(TraceLoggerType.OfflineCallManager, TraceEventType.Warning,
+                            $"Failed to persist offline archive audio: {ex.Message}");
+                        call.Location = string.Empty;
+                    }
+                }
+                else
+                {
+                    call.Location = string.Empty;
+                }
 
                 // Process alerts (visual only, no emails)
                 ProcessAlerts(call);

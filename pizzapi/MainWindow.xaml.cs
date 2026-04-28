@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
+using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -320,11 +321,47 @@ public sealed class LmUsageLedgerRow
     public string CostStandardDisplay => CostStandard.ToString("F2");
 }
 
+public sealed class TrHealthRow
+{
+    public DateTime StartUtc { get; set; }
+    public DateTime EndUtc { get; set; }
+    public string Scope { get; set; } = string.Empty;
+    public int DecodeLines { get; set; }
+    public int DecodeZero { get; set; }
+    public double AvgDecodeRate { get; set; }
+    public int Retunes { get; set; }
+    public int CallsConcluded { get; set; }
+    public int UpdateNotGrant { get; set; }
+    public int NoTxRecorded { get; set; }
+    public int SampleStops { get; set; }
+    public int UnableSource { get; set; }
+    public int TuningErrSamples { get; set; }
+    public double TuningErrAvgAbsHz { get; set; }
+    public double TuningErrMaxAbsHz { get; set; }
+}
+
+public sealed class TrHealthAggregate
+{
+    public int Windows { get; set; }
+    public double DecodeZeroPercent { get; set; }
+    public double AvgDecodeRate { get; set; }
+    public int Retunes { get; set; }
+    public int CallsConcluded { get; set; }
+    public int NoTxRecorded { get; set; }
+    public int SampleStops { get; set; }
+    public int UnableSource { get; set; }
+}
+
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private LiveCallManager? _callManager;
     private OfflineCallManager? _offlineCallManager;
     private bool _isOfflineMode;
+    private List<TranscribedCall>? _archiveSessionCalls;
+    private string _activeArchiveText = string.Empty;
+    private bool _isArchiveBrowserBusy;
+    private bool _isArchiveLoadInProgress;
+    private readonly OsSecretStore _secretStore = new(Settings.DefaultWorkingDirectory);
     private int _callsReceivedCount;
     private int _alertsTriggeredCount;
     private string _serverStatusText = "Server: Not started";
@@ -414,6 +451,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public bool IsRange2dActive => _currentFilter == "2d";
     public bool IsRangeWeekActive => _currentFilter == "week";
     public bool IsRangeCustomActive => _currentFilter == "custom";
+    public bool IsArchiveSessionActive => _isOfflineMode && _archiveSessionCalls != null;
+    public bool IsArchiveBrowseEnabled => !_isArchiveBrowserBusy && !_isArchiveLoadInProgress;
+    public string ActiveArchiveText => IsArchiveSessionActive
+        ? $"{_activeArchiveText} ({_archiveSessionCalls?.Count ?? 0})"
+        : _activeArchiveText;
+    public string ArchiveCacheStatusText
+    {
+        get
+        {
+            var path = string.IsNullOrWhiteSpace(_settings.ArchiveLocalCachePath)
+                ? Path.Combine(Settings.DefaultOfflineCaptureDirectory, "sftp-cache")
+                : Environment.ExpandEnvironmentVariables(_settings.ArchiveLocalCachePath);
+            return $"Cache: {path}";
+        }
+    }
 
     public bool IsRadioMode => !_isInsightsMode;
     public bool ShowRadioSubmenu
@@ -443,6 +495,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string RadioDataSourceText =>
         _isInsightsMode
             ? string.Empty
+            : IsArchiveSessionActive
+                ? "Radio source: SFTP archive cache"
             : _currentFilter == "24h"
                 ? "Radio source: memory + 24h capture folders"
                 : "Radio source: historical disk";
@@ -662,7 +716,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public bool IsOfflineMode => _isOfflineMode;
 
-    public string ModeIndicatorText => _isOfflineMode ? "OFFLINE" : "LIVE";
+    public string ModeIndicatorText => IsArchiveSessionActive ? "ARCHIVE" : _isOfflineMode ? "OFFLINE" : "LIVE";
 
     public string ModeIndicatorColor => _isOfflineMode ? "#ffaa00" : "#00ff00";
 
@@ -770,11 +824,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _insightCallNavigateIndex.Clear();
         var (start, end) = GetCurrentRangeBounds();
-        var folderCalls = preloadedFolderCalls ?? LoadOfflineCallsFromHistory(start, end);
-        foreach (var call in folderCalls)
+        var sourceCalls = IsArchiveSessionActive
+            ? _archiveSessionCalls!
+            : BuildLiveLocalCallSet(start, end, preloadedFolderCalls);
+
+        foreach (var call in sourceCalls)
         {
             PopulateDerivedCallFields(call);
         }
+
+        var filteredCalls = sourceCalls
+            .Where(ShouldIncludeCallForProfile)
+            .ToList();
+
+        UpdateVisibleCallCollections(filteredCalls);
+
+        RadioStatusText = IsArchiveSessionActive
+            ? $"Archive: {_activeArchiveText} ({Calls.Count})"
+            : _currentFilter switch
+            {
+                "24h" => $"Last 24 hours ({Calls.Count})",
+                "2d" => $"Last 2 days ({Calls.Count})",
+                "week" => $"Last week ({Calls.Count})",
+                "custom" => _customStartDate.HasValue && _customEndDate.HasValue
+                    ? $"Custom range: {_customStartDate.Value:d} - {_customEndDate.Value:d} ({Calls.Count})"
+                    : $"Custom range ({Calls.Count})",
+                _ => $"Showing {Calls.Count} calls"
+            };
+        RaisePropertyChanged(nameof(RadioDataSourceText));
+
+        UpdateButtonStates();
+        RaisePropertyChanged(nameof(CompositeStatusText));
+    }
+
+    private List<TranscribedCall> BuildLiveLocalCallSet(
+        DateTime start,
+        DateTime end,
+        List<TranscribedCall>? preloadedFolderCalls = null)
+    {
+        var folderCalls = preloadedFolderCalls ?? LoadOfflineCallsFromHistory(start, end);
         var merged = new List<TranscribedCall>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -796,10 +884,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 merged.Add(call);
         }
 
-        var filteredCalls = merged
-            .Where(ShouldIncludeCallForProfile)
-            .ToList();
-        
+        return merged;
+    }
+
+    private void UpdateVisibleCallCollections(List<TranscribedCall> filteredCalls)
+    {
         // Update the Calls collection
         Calls.Clear();
         foreach (var call in filteredCalls)
@@ -820,32 +909,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         RefreshCategoryGroupedCalls(filteredCalls);
-        
-        RadioStatusText = _currentFilter switch
-        {
-            "24h" => $"Last 24 hours ({Calls.Count})",
-            "2d" => $"Last 2 days ({Calls.Count})",
-            "week" => $"Last week ({Calls.Count})",
-            "custom" => _customStartDate.HasValue && _customEndDate.HasValue
-                ? $"Custom range: {_customStartDate.Value:d} - {_customEndDate.Value:d} ({Calls.Count})"
-                : $"Custom range ({Calls.Count})",
-            _ => $"Showing {Calls.Count} calls"
-        };
-        RaisePropertyChanged(nameof(RadioDataSourceText));
-        
-        // Update button states
-        RaisePropertyChanged(nameof(IsLiveActive));
-        RaisePropertyChanged(nameof(IsRadioMode));
-        RaisePropertyChanged(nameof(Is24hActive));
-        RaisePropertyChanged(nameof(IsRangeLiveActive));
-        RaisePropertyChanged(nameof(IsRange24hActive));
-        RaisePropertyChanged(nameof(IsRange2dActive));
-        RaisePropertyChanged(nameof(Is2dActive));
-        RaisePropertyChanged(nameof(IsWeekActive));
-        RaisePropertyChanged(nameof(IsRangeActive));
-        RaisePropertyChanged(nameof(IsGenerateNowVisible));
-        RaisePropertyChanged(nameof(CanGenerateNow));
-        RaisePropertyChanged(nameof(CompositeStatusText));
     }
     
     public void SetTimeRangeFilter(string filterType)
@@ -1716,6 +1779,8 @@ RaisePropertyChanged(nameof(IsWeekActive));
     private static readonly string[] _troubleshootTraceLevelOptions = { "Error", "Warning", "Information", "Debug" };
     private string _selectedTroubleshootTraceLevel = "Information";
     private const string CurrentPizzaPiLogOption = "Current";
+    private const string TrHealthSummaryCsvPath = "/var/lib/pizzapi/tr-health/summary_5m.csv";
+    private const string TrHealthWindowLabel = "24h";
     private bool _isRefreshingPizzaPiLogOptions;
     private string _selectedPizzaPiLogOption = CurrentPizzaPiLogOption;
     private readonly Dictionary<string, string> _pizzaPiLogOptionPathMap = new(StringComparer.OrdinalIgnoreCase);
@@ -1983,6 +2048,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
     public Control? CleanupPanelControl => _cleanupPanel;
     public bool IsTrunkTroubleshootVisible => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
     public string TrunkRecorderLogText { get; private set; } = "Trunk recorder log unavailable.";
+    public string TrunkRecorderHealthText { get; private set; } = "TR health summary unavailable.";
     public string PizzaPiLogText { get; private set; } = "PizzaPi log unavailable.";
     public IReadOnlyList<string> TroubleshootTraceLevelOptions => _troubleshootTraceLevelOptions;
     public string SelectedPizzaPiLogOption
@@ -2207,6 +2273,20 @@ RaisePropertyChanged(nameof(IsWeekActive));
         RequireControl<TextBox>("SettingsLmLinkApiKeyTextBox").Text = _settings.LmLinkApiKey ?? string.Empty;
         RequireControl<TextBox>("SettingsLmLinkTimeoutTextBox").Text = _settings.LmLinkTimeoutMs.ToString();
         RequireControl<TextBox>("SettingsLmLinkRetriesTextBox").Text = _settings.LmLinkMaxRetries.ToString();
+        RequireControl<CheckBox>("SettingsArchiveEnabledCheckBox").IsChecked = _settings.ArchiveSftpEnabled;
+        RequireControl<TextBox>("SettingsArchiveHostTextBox").Text = _settings.ArchiveSftpHost ?? string.Empty;
+        RequireControl<TextBox>("SettingsArchivePortTextBox").Text = (_settings.ArchiveSftpPort <= 0 ? 22 : _settings.ArchiveSftpPort).ToString();
+        RequireControl<TextBox>("SettingsArchiveUsernameTextBox").Text = _settings.ArchiveSftpUsername ?? string.Empty;
+        RequireControl<ComboBox>("SettingsArchiveAuthModeComboBox").SelectedIndex =
+            string.Equals(_settings.ArchiveSftpAuthMode, "privatekey", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        RequireControl<TextBox>("SettingsArchivePasswordTextBox").Text = string.Empty;
+        RequireControl<TextBox>("SettingsArchivePrivateKeyPathTextBox").Text = _settings.ArchiveSftpPrivateKeyPath ?? string.Empty;
+        RequireControl<TextBox>("SettingsArchivePrivateKeyPassphraseTextBox").Text = string.Empty;
+        RequireControl<TextBox>("SettingsArchiveRemoteRootTextBox").Text = _settings.ArchiveSftpRemoteRoot ?? string.Empty;
+        RequireControl<TextBox>("SettingsArchiveCachePathTextBox").Text = string.IsNullOrWhiteSpace(_settings.ArchiveLocalCachePath)
+            ? Path.Combine(Settings.DefaultOfflineCaptureDirectory, "sftp-cache")
+            : _settings.ArchiveLocalCachePath;
+        RaisePropertyChanged(nameof(ArchiveCacheStatusText));
         LoadTalkgroupMappings();
         RefreshTalkgroupRows();
     }
@@ -2267,6 +2347,22 @@ RaisePropertyChanged(nameof(IsWeekActive));
         var lmRetriesTextBox = RequireControl<TextBox>("SettingsLmLinkRetriesTextBox");
         if (int.TryParse(lmRetriesTextBox.Text, out var retries))
             _settings.LmLinkMaxRetries = retries;
+
+        _settings.ArchiveSftpEnabled = RequireControl<CheckBox>("SettingsArchiveEnabledCheckBox").IsChecked == true;
+        _settings.ArchiveSftpHost = RequireControl<TextBox>("SettingsArchiveHostTextBox").Text ?? string.Empty;
+        if (int.TryParse(RequireControl<TextBox>("SettingsArchivePortTextBox").Text, out var archivePort))
+            _settings.ArchiveSftpPort = archivePort;
+        _settings.ArchiveSftpUsername = RequireControl<TextBox>("SettingsArchiveUsernameTextBox").Text ?? string.Empty;
+        _settings.ArchiveSftpAuthMode = RequireControl<ComboBox>("SettingsArchiveAuthModeComboBox").SelectedIndex == 1
+            ? "privatekey"
+            : "password";
+        _settings.ArchiveSftpPassword = null;
+        _settings.ArchiveSftpPrivateKeyPath = RequireControl<TextBox>("SettingsArchivePrivateKeyPathTextBox").Text ?? string.Empty;
+        _settings.ArchiveSftpPrivateKeyPassphrase = null;
+        _settings.ArchiveSftpRemoteRoot = RequireControl<TextBox>("SettingsArchiveRemoteRootTextBox").Text ?? string.Empty;
+        _settings.ArchiveLocalCachePath = RequireControl<TextBox>("SettingsArchiveCachePathTextBox").Text ?? string.Empty;
+        PersistArchiveSecretsFromUi();
+        RaisePropertyChanged(nameof(ArchiveCacheStatusText));
     }
 
     private T RequireControl<T>(string name) where T : Control
@@ -2278,6 +2374,615 @@ RaisePropertyChanged(nameof(IsWeekActive));
         var message = $"Required settings control '{name}' ({typeof(T).Name}) was not found in the visual tree.";
         TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Error, message);
         throw new InvalidOperationException(message);
+    }
+
+    private void ApplyArchiveSettingsFromTabsIfAvailable()
+    {
+        var enabled = this.FindControl<CheckBox>("SettingsArchiveEnabledCheckBox");
+        if (enabled == null)
+            return;
+
+        _settings.ArchiveSftpEnabled = enabled.IsChecked == true;
+        _settings.ArchiveSftpHost = this.FindControl<TextBox>("SettingsArchiveHostTextBox")?.Text ?? _settings.ArchiveSftpHost;
+        if (int.TryParse(this.FindControl<TextBox>("SettingsArchivePortTextBox")?.Text, out var port))
+            _settings.ArchiveSftpPort = port;
+        _settings.ArchiveSftpUsername = this.FindControl<TextBox>("SettingsArchiveUsernameTextBox")?.Text ?? _settings.ArchiveSftpUsername;
+        _settings.ArchiveSftpAuthMode = this.FindControl<ComboBox>("SettingsArchiveAuthModeComboBox")?.SelectedIndex == 1
+            ? "privatekey"
+            : "password";
+        _settings.ArchiveSftpPassword = null;
+        _settings.ArchiveSftpPrivateKeyPath = this.FindControl<TextBox>("SettingsArchivePrivateKeyPathTextBox")?.Text ?? _settings.ArchiveSftpPrivateKeyPath;
+        _settings.ArchiveSftpPrivateKeyPassphrase = null;
+        _settings.ArchiveSftpRemoteRoot = this.FindControl<TextBox>("SettingsArchiveRemoteRootTextBox")?.Text ?? _settings.ArchiveSftpRemoteRoot;
+        _settings.ArchiveLocalCachePath = this.FindControl<TextBox>("SettingsArchiveCachePathTextBox")?.Text ?? _settings.ArchiveLocalCachePath;
+        PersistArchiveSecretsFromUi();
+        RaisePropertyChanged(nameof(ArchiveCacheStatusText));
+    }
+
+    private async void OnArchiveTestConnectionClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ApplyArchiveSettingsFromTabsIfAvailable();
+            ValidateArchiveSettingsForUse();
+            MenuSpecificStatusText = "Testing archive SFTP connection...";
+            var secrets = ResolveArchiveSecretsForCurrentSettings();
+            await new ArchiveSftpService(_settings, secrets.Password, secrets.PrivateKeyPassphrase)
+                .TestConnectionAsync(CancellationToken.None);
+            MenuSpecificStatusText = "Archive SFTP connection OK";
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Archive test failed: {ex.Message}";
+        }
+    }
+
+    private async void OnArchiveBrowseClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_isArchiveBrowserBusy)
+            return;
+
+        try
+        {
+            ApplyArchiveSettingsFromTabsIfAvailable();
+            if (!_settings.ArchiveSftpEnabled)
+            {
+                MenuSpecificStatusText = "Enable SFTP archive source in Settings > Archives first";
+                return;
+            }
+            ValidateArchiveSettingsForUse();
+            await ShowArchiveBrowserAsync();
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Archive browse failed: {ex.Message}";
+        }
+    }
+
+    private async Task ShowArchiveBrowserAsync()
+    {
+        var secrets = ResolveArchiveSecretsForCurrentSettings();
+        var service = new ArchiveSftpService(_settings, secrets.Password, secrets.PrivateKeyPassphrase);
+        var viewModel = new ArchiveBrowserViewModel();
+        var configuredRoot = service.GetConfiguredRootPath();
+        var currentRemotePath = configuredRoot;
+
+        var status = new TextBlock
+        {
+            Text = "Select a folder to open it, or load a selected archive.",
+            Foreground = Brushes.LightGray,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var startTextBox = new TextBox
+        {
+            Width = 120,
+            PlaceholderText = "yyyy-MM-dd"
+        };
+        var endTextBox = new TextBox
+        {
+            Width = 120,
+            PlaceholderText = "yyyy-MM-dd"
+        };
+        var pathText = new TextBlock
+        {
+            Text = currentRemotePath,
+            Foreground = Brushes.LightGray,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var grid = new DataGrid
+        {
+            ItemsSource = viewModel.Archives,
+            AutoGenerateColumns = false,
+            IsReadOnly = true,
+            SelectionMode = DataGridSelectionMode.Extended,
+            Height = 420
+        };
+        grid.Columns.Add(new DataGridTextColumn { Header = "Name", Binding = new Binding(nameof(ArchiveFolderItem.Name)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        grid.Columns.Add(new DataGridTextColumn { Header = "Modified", Binding = new Binding(nameof(ArchiveFolderItem.DisplayModified)), Width = new DataGridLength(150) });
+        grid.Columns.Add(new DataGridTextColumn { Header = "Type", Binding = new Binding(nameof(ArchiveFolderItem.DisplayType)), Width = new DataGridLength(90) });
+        grid.Columns.Add(new DataGridTextColumn { Header = ".bin", Binding = new Binding(nameof(ArchiveFolderItem.DisplayBinCount)), Width = new DataGridLength(70) });
+
+        var upButton = new Button { Content = "Up", Classes = { "menu-btn" }, Width = 80 };
+        var openButton = new Button { Content = "Open", Classes = { "menu-btn" }, Width = 90 };
+        var refreshButton = new Button { Content = "Refresh", Classes = { "menu-btn" }, Width = 110 };
+        var loadButton = new Button { Content = "Load selected", Classes = { "menu-btn" }, Width = 130 };
+        var closeButton = new Button { Content = "Close", Classes = { "menu-btn" }, Width = 90 };
+
+        var pathRow = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 8,
+            Children =
+            {
+                new TextBlock { Text = "Path:", VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center },
+                upButton,
+                pathText
+            }
+        };
+        var filterRow = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 8,
+            Children =
+            {
+                new TextBlock { Text = "Start:", VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center },
+                startTextBox,
+                new TextBlock { Text = "End:", VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center },
+                endTextBox,
+                refreshButton
+            }
+        };
+        var buttonRow = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Children = { openButton, loadButton, closeButton }
+        };
+        var content = new StackPanel
+        {
+            Margin = new Thickness(14),
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock { Text = "SFTP Archive Browser", FontSize = 18, FontWeight = Avalonia.Media.FontWeight.SemiBold },
+                new TextBlock { Text = $"{_settings.ArchiveSftpHost}:{_settings.ArchiveSftpPort} {_settings.ArchiveSftpRemoteRoot}", Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap },
+                pathRow,
+                filterRow,
+                grid,
+                status,
+                buttonRow
+            }
+        };
+        var dialog = new Window
+        {
+            Title = "Browse SFTP Archives",
+            Width = 860,
+            Height = 700,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = content
+        };
+
+        void UpdatePathUi()
+        {
+            pathText.Text = currentRemotePath;
+            upButton.IsEnabled = !string.Equals(currentRemotePath, configuredRoot, StringComparison.Ordinal);
+            openButton.IsEnabled = grid.SelectedItem is ArchiveFolderItem;
+        }
+
+        async Task RefreshArchivesAsync()
+        {
+            SetArchiveBrowserBusy(true);
+            upButton.IsEnabled = false;
+            openButton.IsEnabled = false;
+            refreshButton.IsEnabled = false;
+            loadButton.IsEnabled = false;
+            status.Text = "Listing archives...";
+            try
+            {
+                var start = ParseArchiveDate(startTextBox.Text, isEnd: false);
+                var end = ParseArchiveDate(endTextBox.Text, isEnd: true);
+                var items = await service.ListArchivesAsync(currentRemotePath, start, end, CancellationToken.None);
+                viewModel.Archives.Clear();
+                foreach (var item in items)
+                    viewModel.Archives.Add(item);
+                status.Text = $"Found {items.Count} item(s) under {currentRemotePath}.";
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"Refresh failed: {ex.Message}";
+            }
+            finally
+            {
+                refreshButton.IsEnabled = true;
+                loadButton.IsEnabled = true;
+                SetArchiveBrowserBusy(false);
+                UpdatePathUi();
+            }
+        }
+
+        async Task OpenSelectedAsync()
+        {
+            var selectedItems = GetSelectedArchiveItems();
+            if (selectedItems.Count == 0)
+            {
+                status.Text = "Select a folder or file first.";
+                return;
+            }
+
+            if (selectedItems.Count > 1)
+            {
+                status.Text = "Open supports a single folder selection. Multi-select is for Load selected.";
+                return;
+            }
+
+            var selected = selectedItems[0];
+
+            if (!selected.IsDirectory)
+            {
+                status.Text = "Files do not open. Use Load selected to download and load the archive.";
+                return;
+            }
+
+            currentRemotePath = selected.RemotePath;
+            UpdatePathUi();
+            await RefreshArchivesAsync();
+        }
+
+        string GetParentRemotePath()
+        {
+            if (string.Equals(currentRemotePath, configuredRoot, StringComparison.Ordinal))
+                return configuredRoot;
+
+            var trimmed = currentRemotePath.TrimEnd('/');
+            var slashIndex = trimmed.LastIndexOf('/');
+            if (slashIndex <= 0)
+                return configuredRoot;
+
+            var parent = trimmed[..slashIndex];
+            if (parent.Length < configuredRoot.Length)
+                return configuredRoot;
+
+            return parent;
+        }
+
+        grid.SelectionChanged += (_, _) => UpdatePathUi();
+        grid.DoubleTapped += async (_, _) => await OpenSelectedAsync();
+        upButton.Click += async (_, _) =>
+        {
+            currentRemotePath = GetParentRemotePath();
+            UpdatePathUi();
+            await RefreshArchivesAsync();
+        };
+        openButton.Click += async (_, _) => await OpenSelectedAsync();
+        refreshButton.Click += async (_, _) => await RefreshArchivesAsync();
+        loadButton.Click += (_, _) =>
+        {
+            var selectedItems = GetSelectedArchiveItems();
+            if (selectedItems.Count == 0)
+            {
+                status.Text = "Select one or more archive items first.";
+                return;
+            }
+            var selectedSnapshot = selectedItems.ToList();
+            var archiveLabel = BuildArchiveSelectionLabel(selectedSnapshot);
+            dialog.Close();
+            _ = RunArchiveSelectionLoadAsync(service, selectedSnapshot, archiveLabel);
+        };
+        closeButton.Click += (_, _) => dialog.Close();
+
+        UpdatePathUi();
+        await RefreshArchivesAsync();
+        await dialog.ShowDialog(this);
+
+        List<ArchiveFolderItem> GetSelectedArchiveItems()
+        {
+            var selected = (grid.SelectedItems ?? new List<object>())
+                .OfType<ArchiveFolderItem>()
+                .ToList();
+
+            if (selected.Count == 0 && grid.SelectedItem is ArchiveFolderItem single)
+                selected.Add(single);
+
+            return selected;
+        }
+    }
+
+    private static DateTime? ParseArchiveDate(string? text, bool isEnd)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        if (!DateTime.TryParse(text.Trim(), CultureInfo.CurrentCulture, DateTimeStyles.AssumeLocal, out var value))
+            throw new FormatException($"Invalid archive date: {text}");
+        return isEnd && value.TimeOfDay == TimeSpan.Zero
+            ? value.Date.AddDays(1).AddTicks(-1)
+            : value;
+    }
+
+    private void SetArchiveBrowserBusy(bool value)
+    {
+        _isArchiveBrowserBusy = value;
+        RaisePropertyChanged(nameof(IsArchiveBrowseEnabled));
+    }
+
+    private void SetArchiveLoadInProgress(bool value)
+    {
+        _isArchiveLoadInProgress = value;
+        IsEnabled = !value;
+        RaisePropertyChanged(nameof(IsArchiveBrowseEnabled));
+    }
+
+    private async Task RunArchiveSelectionLoadAsync(
+        ArchiveSftpService service,
+        List<ArchiveFolderItem> selectedItems,
+        string archiveLabel)
+    {
+        SetArchiveLoadInProgress(true);
+        try
+        {
+            MenuSpecificStatusText = $"Loading archive selection ({selectedItems.Count})...";
+            var localRoots = new List<string>(selectedItems.Count);
+            var progress = new Progress<string>(message =>
+            {
+                SafeUiPost(() => MenuSpecificStatusText = message);
+            });
+
+            foreach (var item in selectedItems)
+            {
+                MenuSpecificStatusText = $"Downloading {item.Name}...";
+                var localRoot = await service.DownloadArchiveAsync(item, progress, CancellationToken.None);
+                localRoots.Add(localRoot);
+            }
+
+            MenuSpecificStatusText = $"Processing archive call data ({selectedItems.Count} selection(s))...";
+            await LoadArchiveSessionAsync(localRoots, archiveLabel);
+        }
+        catch (Exception ex)
+        {
+            MenuSpecificStatusText = $"Archive load failed: {ex.Message}";
+        }
+        finally
+        {
+            SetArchiveLoadInProgress(false);
+        }
+    }
+
+    private void ValidateArchiveSettingsForUse()
+    {
+        if (!_settings.ArchiveSftpEnabled)
+            throw new InvalidOperationException("Archive SFTP source is not enabled.");
+        if (string.IsNullOrWhiteSpace(_settings.ArchiveSftpHost))
+            throw new InvalidOperationException("Archive SFTP host is required.");
+        if (_settings.ArchiveSftpPort <= 0 || _settings.ArchiveSftpPort > 65535)
+            throw new InvalidOperationException("Archive SFTP port must be between 1 and 65535.");
+        if (string.IsNullOrWhiteSpace(_settings.ArchiveSftpUsername))
+            throw new InvalidOperationException("Archive SFTP username is required.");
+        if (string.IsNullOrWhiteSpace(_settings.ArchiveSftpRemoteRoot))
+            throw new InvalidOperationException("Archive SFTP remote root is required.");
+
+        var authMode = (_settings.ArchiveSftpAuthMode ?? "password").Trim().ToLowerInvariant();
+        if (authMode == "privatekey")
+        {
+            if (string.IsNullOrWhiteSpace(_settings.ArchiveSftpPrivateKeyPath))
+                throw new InvalidOperationException("Archive SFTP private key path is required.");
+            var (_, privateKeyPassphrase) = ResolveArchiveSecretsForCurrentSettings();
+            if (privateKeyPassphrase == null)
+                throw new InvalidOperationException("Archive private key passphrase is missing in OS key store.");
+            return;
+        }
+
+        if (authMode != "password")
+            throw new InvalidOperationException("Archive SFTP auth mode must be Password or Private key.");
+        var (password, _) = ResolveArchiveSecretsForCurrentSettings();
+        if (string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException("Archive SFTP password is missing in OS key store.");
+    }
+
+    private string BuildArchiveSecretKeyId()
+    {
+        var host = (_settings.ArchiveSftpHost ?? string.Empty).Trim().ToLowerInvariant();
+        var user = (_settings.ArchiveSftpUsername ?? string.Empty).Trim().ToLowerInvariant();
+        var root = (_settings.ArchiveSftpRemoteRoot ?? string.Empty).Trim().ToLowerInvariant();
+        return $"{host}:{_settings.ArchiveSftpPort}:{user}:{root}";
+    }
+
+    private (string? Password, string? PrivateKeyPassphrase) ResolveArchiveSecretsForCurrentSettings()
+    {
+        var keyId = BuildArchiveSecretKeyId();
+        var password = _secretStore.LookupArchivePassword(keyId);
+        var passphrase = _secretStore.LookupArchivePrivateKeyPassphrase(keyId);
+        return (password, passphrase);
+    }
+
+    private void PersistArchiveSecretsFromUi()
+    {
+        var keyId = BuildArchiveSecretKeyId();
+        var passwordInput = this.FindControl<TextBox>("SettingsArchivePasswordTextBox")?.Text;
+        if (!string.IsNullOrWhiteSpace(passwordInput))
+            _secretStore.StoreArchivePassword(keyId, passwordInput);
+
+        var passphraseInput = this.FindControl<TextBox>("SettingsArchivePrivateKeyPassphraseTextBox")?.Text;
+        if (!string.IsNullOrWhiteSpace(passphraseInput))
+            _secretStore.StoreArchivePrivateKeyPassphrase(keyId, passphraseInput);
+    }
+
+    private async Task LoadArchiveSessionAsync(List<string> localRoots, string archiveName)
+    {
+        StopAudio();
+        var calls = new List<TranscribedCall>();
+        var priorUpdateProgressLabel = _settings.UpdateProgressLabelCallback;
+        var priorSetProgressBar = _settings.SetProgressBarCallback;
+        var priorProgressStep = _settings.ProgressBarStepCallback;
+        var priorHideProgressBar = _settings.HideProgressBarCallback;
+
+        _settings.UpdateProgressLabelCallback = message =>
+        {
+            SafeUiPost(() => MenuSpecificStatusText = message);
+        };
+        _settings.SetProgressBarCallback = (_, _) => { };
+        _settings.ProgressBarStepCallback = () => { };
+        _settings.HideProgressBarCallback = () => { };
+
+        try
+        {
+            using (var manager = new OfflineCallManager(call =>
+            {
+                PopulateDerivedCallFields(call);
+                if (string.IsNullOrWhiteSpace(call.Location) || !File.Exists(call.Location))
+                    call.Location = string.Empty;
+                call.PlayAudioCommand = c => PlayAudio(c);
+                calls.Add(call);
+            }))
+            {
+                _offlineCallManager = manager;
+                manager.SetOfflineRoots(localRoots);
+                ApplyActiveProfileToManagers();
+                await manager.Initialize(_settings);
+                await manager.Start();
+            }
+            _offlineCallManager = null;
+        }
+        finally
+        {
+            _settings.UpdateProgressLabelCallback = priorUpdateProgressLabel;
+            _settings.SetProgressBarCallback = priorSetProgressBar;
+            _settings.ProgressBarStepCallback = priorProgressStep;
+            _settings.HideProgressBarCallback = priorHideProgressBar;
+        }
+
+        _archiveSessionCalls = calls
+            .OrderByDescending(c => c.StartTime)
+            .ToList();
+        _activeArchiveText = archiveName;
+        _isOfflineMode = true;
+        _isInsightsMode = false;
+        ShowInsightsSubmenu = false;
+        ShowRadioSubmenu = true;
+        SelectedSection = FirstVisibleCallSection();
+        ClearSectionCachesForProfileSwitch();
+        ApplyTimeRangeFilter();
+        UpdateButtonStates();
+        Title = $"PizzaPi - Archive {archiveName}";
+        MenuSpecificStatusText = $"Loaded archive {archiveName}: {_archiveSessionCalls.Count} calls";
+    }
+
+    private static string BuildArchiveSelectionLabel(List<ArchiveFolderItem> selectedItems)
+    {
+        var points = selectedItems
+            .SelectMany(ExtractArchiveDatePoints)
+            .OrderBy(d => d)
+            .ToList();
+
+        if (points.Count == 0)
+        {
+            if (selectedItems.Count == 1)
+                return selectedItems[0].Name;
+            return $"{selectedItems.Count} selections";
+        }
+
+        var dayBuckets = points
+            .GroupBy(d => d.Date)
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        if (dayBuckets.Count == 1)
+        {
+            var day = dayBuckets[0].Key;
+            var min = dayBuckets[0].Min(d => d);
+            var max = dayBuckets[0].Max(d => d);
+            var timePart = min == max ? $"{FormatHour(min)}" : $"{FormatHour(min)}-{FormatHour(max)}";
+            var datePart = day.Year == DateTime.Now.Year
+                ? day.ToString("MMMM d", CultureInfo.CurrentCulture)
+                : day.ToString("MMMM d yyyy", CultureInfo.CurrentCulture);
+            return $"{datePart} {timePart}";
+        }
+
+        var days = dayBuckets.Select(g => g.Key).ToList();
+        var isConsecutive = true;
+        for (var i = 1; i < days.Count; i++)
+        {
+            if (days[i] != days[i - 1].AddDays(1))
+            {
+                isConsecutive = false;
+                break;
+            }
+        }
+
+        if (isConsecutive)
+        {
+            var start = days.First();
+            var end = days.Last();
+            if (start.Year == end.Year && start.Year == DateTime.Now.Year)
+                return $"{start:MMMM d} - {end:MMMM d}";
+            if (start.Year == end.Year)
+                return $"{start:MMMM d} - {end:MMMM d yyyy}";
+            return $"{start:MMMM d yyyy} - {end:MMMM d yyyy}";
+        }
+
+        return string.Join(", ", days.Select(day =>
+            day.Year == DateTime.Now.Year
+                ? day.ToString("MMMM d", CultureInfo.CurrentCulture)
+                : day.ToString("MMMM d yyyy", CultureInfo.CurrentCulture)));
+    }
+
+    private static string FormatHour(DateTime dateTime)
+    {
+        return dateTime.ToString("%h", CultureInfo.CurrentCulture) + dateTime.ToString("tt", CultureInfo.InvariantCulture).ToUpperInvariant();
+    }
+
+    private static List<DateTime> ExtractArchiveDatePoints(ArchiveFolderItem item)
+    {
+        var points = new List<DateTime>();
+        var path = (item.RemotePath ?? string.Empty).Replace('\\', '/').Trim('/');
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            if (!int.TryParse(segments[i], out var year) || year < 2000 || year > 2100)
+                continue;
+
+            var month = TryParseSegment(segments, i + 1, 1, 12, defaultValue: 1);
+            var day = TryParseSegment(segments, i + 2, 1, 31, defaultValue: 1);
+            var hour = TryParseSegment(segments, i + 3, 0, 23, defaultValue: 0);
+
+            try
+            {
+                points.Add(new DateTime(year, month, day, hour, 0, 0, DateTimeKind.Local));
+            }
+            catch
+            {
+                // Ignore invalid partial date path.
+            }
+        }
+
+        if (points.Count == 0 && item.ModifiedLocal != DateTime.MinValue)
+            points.Add(item.ModifiedLocal);
+
+        return points;
+    }
+
+    private static int TryParseSegment(string[] segments, int index, int min, int max, int defaultValue)
+    {
+        if (index < 0 || index >= segments.Length)
+            return defaultValue;
+        if (!int.TryParse(segments[index], out var parsed))
+            return defaultValue;
+        if (parsed < min || parsed > max)
+            return defaultValue;
+        return parsed;
+    }
+
+    private MainSection FirstVisibleCallSection()
+    {
+        if (_activeProfile?.IncludePolice ?? true) return MainSection.Police;
+        if (_activeProfile?.IncludeFire ?? true) return MainSection.Fire;
+        if (_activeProfile?.IncludeEMS ?? true) return MainSection.EMS;
+        if (_activeProfile?.IncludeTraffic ?? true) return MainSection.Traffic;
+        return MainSection.Other;
+    }
+
+    private void OnReturnToLiveLocalClicked(object? sender, RoutedEventArgs e)
+    {
+        ReturnToLiveLocalMode();
+    }
+
+    private void ReturnToLiveLocalMode()
+    {
+        StopAudio();
+        _archiveSessionCalls = null;
+        _activeArchiveText = string.Empty;
+        _isOfflineMode = false;
+        _currentFilter = "24h";
+        _historicalRangeCalls = null;
+        _customStartDate = null;
+        _customEndDate = null;
+        Title = "PizzaPi";
+        ClearSectionCachesForProfileSwitch();
+        ApplyTimeRangeFilter();
+        if (IsAlertsSelected)
+            ReloadAlertHistory();
+        UpdateButtonStates();
+        MenuSpecificStatusText = "Returned to Live + Local";
     }
 
     private void RefreshTalkgroupRows()
@@ -3820,13 +4525,13 @@ RaisePropertyChanged(nameof(IsWeekActive));
             int insertIndexLive = GetInsertIndexInList(_liveCalls, call);
             _liveCalls.Insert(insertIndexLive, call);
             PruneLiveMemoryWindow();
-            if (_currentFilter == "24h")
+            if (!IsArchiveSessionActive && _currentFilter == "24h")
             {
                 ScheduleAdaptiveLiveUiRefresh();
             }
 
             // Autoplay audio for alert matches (if enabled globally, not snoozed, and alert has autoplay enabled)
-            if (call.IsAlertMatch && call.ShouldAutoplay && _settings.AutoplayAlerts && !IsAlertSnoozed)
+            if (!IsArchiveSessionActive && call.IsAlertMatch && call.ShouldAutoplay && _settings.AutoplayAlerts && !IsAlertSnoozed)
             {
                 TraceLogger.Trace(TraceLoggerType.Alerts, TraceEventType.Information, 
                     $"Alert triggered: {call.FriendlyTalkgroup} - autoplaying audio");
@@ -3859,9 +4564,12 @@ RaisePropertyChanged(nameof(IsWeekActive));
             }
 
             // Ingest call into insights service for real-time processing (if insights mode is active)
-            _insightsService?.IngestCall(call);
-            RefreshNextInsightStatus();
-            if (call.IsAlertMatch)
+            if (!IsArchiveSessionActive)
+            {
+                _insightsService?.IngestCall(call);
+                RefreshNextInsightStatus();
+            }
+            if (!IsArchiveSessionActive && call.IsAlertMatch)
                 MenuSpecificStatusText = $"Alert match: {call.MatchedAlertType} {call.MatchedAlertDetail}".Trim();
         });
     }
@@ -4526,7 +5234,15 @@ private string _statusText = "Initializing...";
         var audioFilePath = newCall.Location;
         if (string.IsNullOrEmpty(audioFilePath) || !File.Exists(audioFilePath))
         {
-            StatusText = "Error: Audio file not found";
+            if (IsArchiveSessionActive)
+            {
+                StatusText = "Audio unavailable for this archive call";
+                MenuSpecificStatusText = "Audio unavailable: selected SFTP archive call has no local audio file.";
+            }
+            else
+            {
+                StatusText = "Error: Audio file not found";
+            }
             return;
         }
 
@@ -5041,9 +5757,15 @@ private string _statusText = "Initializing...";
         if (top?.Clipboard == null)
             return;
 
-        var text = $"{TrunkRecorderLogText}{Environment.NewLine}{Environment.NewLine}{PizzaPiLogText}";
+        var text = $"{TrunkRecorderHealthText}{Environment.NewLine}{Environment.NewLine}{TrunkRecorderLogText}{Environment.NewLine}{Environment.NewLine}{PizzaPiLogText}";
         await top.Clipboard.SetTextAsync(text);
         MenuSpecificStatusText = "Troubleshoot logs copied";
+    }
+
+    private void OnRefreshTrHealthClicked(object? sender, RoutedEventArgs e)
+    {
+        LoadTroubleshootLogs();
+        MenuSpecificStatusText = "TR health refreshed";
     }
 
     private static string NormalizeTroubleshootTraceLevel(string? value)
@@ -5136,13 +5858,17 @@ private string _statusText = "Initializing...";
                 }
             }
 
+            LoadTrHealthSummaryText();
+
             var pizzaHasError = PizzaPiLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
             var trunkHasError = TrunkRecorderLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
+            var trHealthHasIssue = TrunkRecorderHealthText.Contains("CRITICAL", StringComparison.OrdinalIgnoreCase)
+                || TrunkRecorderHealthText.Contains("sample-stops>0", StringComparison.OrdinalIgnoreCase);
             var retuneCount = System.Text.RegularExpressions.Regex.Matches(
                 TrunkRecorderLogText ?? string.Empty,
                 "Retuning to Control Channel",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count;
-            HasTroubleshootIssue = pizzaHasError || trunkHasError || retuneCount >= 3;
+            HasTroubleshootIssue = pizzaHasError || trunkHasError || trHealthHasIssue || retuneCount >= 3;
             RaisePropertyChanged(nameof(HasTroubleshootIssue));
             RaisePropertyChanged(nameof(TroubleshootMenuText));
         }
@@ -5260,6 +5986,175 @@ private string _statusText = "Initializing...";
         {
             return false;
         }
+    }
+
+    private void LoadTrHealthSummaryText()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            TrunkRecorderHealthText = "TR health summary available only on Linux hosts.";
+            RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+            return;
+        }
+
+        if (!TryReadTextFileShared(TrHealthSummaryCsvPath, out var csvText) || string.IsNullOrWhiteSpace(csvText))
+        {
+            TrunkRecorderHealthText = $"TR health summary unavailable. Expected file: {TrHealthSummaryCsvPath}";
+            RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+            return;
+        }
+
+        var rows = ParseTrHealthRows(csvText);
+        if (rows.Count == 0)
+        {
+            TrunkRecorderHealthText = $"TR health summary has no usable rows: {TrHealthSummaryCsvPath}";
+            RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+            return;
+        }
+
+        var windowStart = DateTime.UtcNow.AddHours(-24);
+        var recentRows = rows.Where(r => r.EndUtc >= windowStart).ToList();
+        if (recentRows.Count == 0)
+        {
+            TrunkRecorderHealthText = $"TR health summary has no rows in the last {TrHealthWindowLabel}.";
+            RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"TR health summary ({TrHealthWindowLabel})");
+        sb.AppendLine($"source: {TrHealthSummaryCsvPath}");
+
+        var globalRows = recentRows
+            .Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.EndUtc)
+            .ToList();
+        if (globalRows.Count > 0)
+        {
+            var globalAgg = AggregateTrHealthRows(globalRows);
+            var severity = globalAgg.DecodeZeroPercent >= 40.0 || globalAgg.SampleStops > 0 ? "CRITICAL"
+                : globalAgg.DecodeZeroPercent >= 25.0 ? "WARNING"
+                : "OK";
+            sb.AppendLine(
+                $"GLOBAL [{severity}] windows={globalAgg.Windows} decode0%={globalAgg.DecodeZeroPercent:F2} avgDecode={globalAgg.AvgDecodeRate:F2}/sec retunes={globalAgg.Retunes} calls={globalAgg.CallsConcluded} noTx={globalAgg.NoTxRecorded} sample-stops={globalAgg.SampleStops} unable-source={globalAgg.UnableSource}");
+        }
+
+        var perSystem = recentRows
+            .Where(r => !string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)
+                && !r.Scope.StartsWith("source:", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.Scope)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+        foreach (var group in perSystem)
+        {
+            var agg = AggregateTrHealthRows(group.ToList());
+            sb.AppendLine(
+                $"{group.Key}: windows={agg.Windows} decode0%={agg.DecodeZeroPercent:F2} avgDecode={agg.AvgDecodeRate:F2}/sec retunes={agg.Retunes} calls={agg.CallsConcluded} noTx={agg.NoTxRecorded}");
+        }
+
+        var perSource = recentRows
+            .Where(r => r.Scope.StartsWith("source:", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.Scope)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+        if (perSource.Any())
+        {
+            sb.AppendLine("sources:");
+            foreach (var group in perSource)
+            {
+                var agg = AggregateTrHealthRows(group.ToList());
+                var serial = group.Key.Replace("source:", string.Empty, StringComparison.OrdinalIgnoreCase);
+                sb.AppendLine(
+                    $"  rtl={serial}: windows={agg.Windows} sample-stops={agg.SampleStops} tune-samples={group.Sum(x => x.TuningErrSamples)} tune-avg|hz|={WeightedAverage(group.Select(x => (x.TuningErrAvgAbsHz, x.TuningErrSamples))):F2} tune-max|hz|={group.Max(x => x.TuningErrMaxAbsHz):F0}");
+            }
+        }
+
+        var last = recentRows.OrderByDescending(r => r.EndUtc).First();
+        sb.AppendLine($"last window end: {last.EndUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
+        TrunkRecorderHealthText = sb.ToString();
+        RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+    }
+
+    private static List<TrHealthRow> ParseTrHealthRows(string csvText)
+    {
+        var rows = new List<TrHealthRow>();
+        var lines = csvText
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => !line.StartsWith("ts_start,", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var line in lines)
+        {
+            var parts = line.Split(',');
+            if (parts.Length < 18)
+                continue;
+
+            if (!DateTime.TryParse(parts[0], out var start))
+                continue;
+            if (!DateTime.TryParse(parts[1], out var end))
+                continue;
+
+            rows.Add(new TrHealthRow
+            {
+                StartUtc = DateTime.SpecifyKind(start, DateTimeKind.Local).ToUniversalTime(),
+                EndUtc = DateTime.SpecifyKind(end, DateTimeKind.Local).ToUniversalTime(),
+                Scope = parts[2],
+                DecodeLines = ParseInt(parts[3]),
+                DecodeZero = ParseInt(parts[4]),
+                AvgDecodeRate = ParseDouble(parts[6]),
+                Retunes = ParseInt(parts[8]),
+                CallsConcluded = ParseInt(parts[10]),
+                UpdateNotGrant = ParseInt(parts[11]),
+                NoTxRecorded = ParseInt(parts[12]),
+                SampleStops = ParseInt(parts[13]),
+                UnableSource = ParseInt(parts[14]),
+                TuningErrSamples = ParseInt(parts[15]),
+                TuningErrAvgAbsHz = ParseDouble(parts[16]),
+                TuningErrMaxAbsHz = ParseDouble(parts[17])
+            });
+        }
+
+        return rows;
+    }
+
+    private static TrHealthAggregate AggregateTrHealthRows(List<TrHealthRow> rows)
+    {
+        var decodeLines = rows.Sum(r => r.DecodeLines);
+        var decodeZero = rows.Sum(r => r.DecodeZero);
+        var weightedDecodeRate = rows.Sum(r => r.AvgDecodeRate * Math.Max(r.DecodeLines, 1));
+        var weightedDenominator = rows.Sum(r => Math.Max(r.DecodeLines, 1));
+        return new TrHealthAggregate
+        {
+            Windows = rows.Count,
+            DecodeZeroPercent = decodeLines > 0 ? (decodeZero * 100.0) / decodeLines : 0,
+            AvgDecodeRate = weightedDenominator > 0 ? weightedDecodeRate / weightedDenominator : 0,
+            Retunes = rows.Sum(r => r.Retunes),
+            CallsConcluded = rows.Sum(r => r.CallsConcluded),
+            NoTxRecorded = rows.Sum(r => r.NoTxRecorded),
+            SampleStops = rows.Sum(r => r.SampleStops),
+            UnableSource = rows.Sum(r => r.UnableSource)
+        };
+    }
+
+    private static double WeightedAverage(IEnumerable<(double Value, int Weight)> points)
+    {
+        double numerator = 0;
+        double denominator = 0;
+        foreach (var p in points)
+        {
+            var w = Math.Max(p.Weight, 0);
+            numerator += p.Value * w;
+            denominator += w;
+        }
+
+        return denominator > 0 ? numerator / denominator : 0;
+    }
+
+    private static int ParseInt(string value)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+    }
+
+    private static double ParseDouble(string value)
+    {
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0.0;
     }
 
     private static string FormatPizzaPiLogOptionLabel(string path)
@@ -6441,6 +7336,8 @@ private string _statusText = "Initializing...";
     }
     private void OnRange24hClicked(object? sender, RoutedEventArgs e)
     {
+        if (IsArchiveSessionActive)
+            ReturnToLiveLocalMode();
         _currentFilter = "24h";
         _historicalRangeCalls = null;
         _customStartDate = null;
@@ -6456,6 +7353,8 @@ private string _statusText = "Initializing...";
 
     private void OnRange2dClicked(object? sender, RoutedEventArgs e)
     {
+        if (IsArchiveSessionActive)
+            ReturnToLiveLocalMode();
         _currentFilter = "2d";
         _historicalRangeCalls = null;
         ApplyTimeRangeFilter();
@@ -6468,6 +7367,8 @@ private string _statusText = "Initializing...";
 
     private void OnRangeWeekClicked(object? sender, RoutedEventArgs e)
     {
+        if (IsArchiveSessionActive)
+            ReturnToLiveLocalMode();
         _currentFilter = "week";
         _historicalRangeCalls = null;
         ApplyTimeRangeFilter();
@@ -6480,6 +7381,8 @@ private string _statusText = "Initializing...";
 
     private async void OnPickRangeClicked(object? sender, RoutedEventArgs e)
     {
+        if (IsArchiveSessionActive)
+            ReturnToLiveLocalMode();
         var dialog = new DatePickerDialog(
             _customStartDate ?? DateTime.Now.AddDays(-7),
             _customEndDate ?? DateTime.Now);
@@ -7042,6 +7945,13 @@ private string _statusText = "Initializing...";
         RaisePropertyChanged(nameof(IsRangeWeekActive));
         RaisePropertyChanged(nameof(IsRangeCustomActive));
         RaisePropertyChanged(nameof(IsRangeActive));
+        RaisePropertyChanged(nameof(IsArchiveSessionActive));
+        RaisePropertyChanged(nameof(IsArchiveBrowseEnabled));
+        RaisePropertyChanged(nameof(ActiveArchiveText));
+        RaisePropertyChanged(nameof(ArchiveCacheStatusText));
+        RaisePropertyChanged(nameof(ModeIndicatorText));
+        RaisePropertyChanged(nameof(ModeIndicatorColor));
+        RaisePropertyChanged(nameof(RadioDataSourceText));
         RaisePropertyChanged(nameof(IsGenerateNowVisible));
         RaisePropertyChanged(nameof(CanGenerateNow));
     }

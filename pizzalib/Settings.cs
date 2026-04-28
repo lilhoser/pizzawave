@@ -107,6 +107,28 @@ namespace pizzalib
         [JsonProperty("emailProvider")]
         public string EmailProvider { get; set; } = "gmail";
 
+        // Remote archive settings (SFTP)
+        [JsonProperty("archiveSftpEnabled")]
+        public bool ArchiveSftpEnabled { get; set; }
+        [JsonProperty("archiveSftpHost")]
+        public string? ArchiveSftpHost { get; set; }
+        [JsonProperty("archiveSftpPort")]
+        public int ArchiveSftpPort { get; set; } = 22;
+        [JsonProperty("archiveSftpUsername")]
+        public string? ArchiveSftpUsername { get; set; }
+        [JsonProperty("archiveSftpAuthMode")]
+        public string ArchiveSftpAuthMode { get; set; } = "password";
+        [JsonIgnore]
+        public string? ArchiveSftpPassword { get; set; }
+        [JsonProperty("archiveSftpPrivateKeyPath")]
+        public string? ArchiveSftpPrivateKeyPath { get; set; }
+        [JsonIgnore]
+        public string? ArchiveSftpPrivateKeyPassphrase { get; set; }
+        [JsonProperty("archiveSftpRemoteRoot")]
+        public string? ArchiveSftpRemoteRoot { get; set; }
+        [JsonProperty("archiveLocalCachePath")]
+        public string? ArchiveLocalCachePath { get; set; }
+
         // Alert audio settings
         public bool AutoplayAlerts;
         public int SnoozeDurationMinutes;
@@ -197,6 +219,16 @@ namespace pizzalib
             LmLinkMaxRetries = 2;
             DailyInsightsDigestEnabled = false;
             EmailProvider = "gmail";
+            ArchiveSftpEnabled = false;
+            ArchiveSftpHost = string.Empty;
+            ArchiveSftpPort = 22;
+            ArchiveSftpUsername = string.Empty;
+            ArchiveSftpAuthMode = "password";
+            ArchiveSftpPassword = string.Empty;
+            ArchiveSftpPrivateKeyPath = string.Empty;
+            ArchiveSftpPrivateKeyPassphrase = string.Empty;
+            ArchiveSftpRemoteRoot = string.Empty;
+            ArchiveLocalCachePath = Path.Combine(DefaultOfflineCaptureDirectory, "sftp-cache");
         }
 
         public bool Equals(Settings? other)
@@ -229,7 +261,15 @@ namespace pizzalib
                 LmLinkTimeoutMs == other.LmLinkTimeoutMs &&
                 LmLinkMaxRetries == other.LmLinkMaxRetries &&
                 DailyInsightsDigestEnabled == other.DailyInsightsDigestEnabled &&
-                EmailProvider == other.EmailProvider;
+                EmailProvider == other.EmailProvider &&
+                ArchiveSftpEnabled == other.ArchiveSftpEnabled &&
+                ArchiveSftpHost == other.ArchiveSftpHost &&
+                ArchiveSftpPort == other.ArchiveSftpPort &&
+                ArchiveSftpUsername == other.ArchiveSftpUsername &&
+                ArchiveSftpAuthMode == other.ArchiveSftpAuthMode &&
+                ArchiveSftpPrivateKeyPath == other.ArchiveSftpPrivateKeyPath &&
+                ArchiveSftpRemoteRoot == other.ArchiveSftpRemoteRoot &&
+                ArchiveLocalCachePath == other.ArchiveLocalCachePath;
         }
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
@@ -361,6 +401,24 @@ namespace pizzalib
                 if (!hasAppPassword)
                     throw new Exception("Daily insights digest requires email user and app password");
             }
+
+            if (ArchiveSftpEnabled)
+            {
+                if (string.IsNullOrWhiteSpace(ArchiveSftpHost))
+                    throw new Exception("Archive SFTP host is required when archive SFTP is enabled");
+                if (ArchiveSftpPort <= 0 || ArchiveSftpPort > 65535)
+                    throw new Exception("Archive SFTP port must be between 1 and 65535");
+                if (string.IsNullOrWhiteSpace(ArchiveSftpUsername))
+                    throw new Exception("Archive SFTP username is required when archive SFTP is enabled");
+                if (string.IsNullOrWhiteSpace(ArchiveSftpRemoteRoot))
+                    throw new Exception("Archive SFTP remote root is required when archive SFTP is enabled");
+
+                var authMode = (ArchiveSftpAuthMode ?? "password").Trim().ToLowerInvariant();
+                if (authMode != "password" && authMode != "privatekey")
+                    throw new Exception("Archive SFTP auth mode must be 'password' or 'privatekey'");
+                if (authMode == "privatekey" && string.IsNullOrWhiteSpace(ArchiveSftpPrivateKeyPath))
+                    throw new Exception("Archive SFTP private key path is required when private key auth is selected");
+            }
         }
 
         public void SaveToFile(string? target = null)
@@ -428,6 +486,18 @@ namespace pizzalib
                     settings.EmailProvider = "gmail";
                 }
                 settings.EmailProvider = NormalizeEmailProvider(settings.EmailProvider);
+                if (settings.ArchiveSftpPort <= 0)
+                {
+                    settings.ArchiveSftpPort = 22;
+                }
+                if (string.IsNullOrWhiteSpace(settings.ArchiveSftpAuthMode))
+                {
+                    settings.ArchiveSftpAuthMode = "password";
+                }
+                if (string.IsNullOrWhiteSpace(settings.ArchiveLocalCachePath))
+                {
+                    settings.ArchiveLocalCachePath = Path.Combine(DefaultOfflineCaptureDirectory, "sftp-cache");
+                }
                 // Ensure Alerts is initialized
                 if (settings.Alerts == null)
                 {

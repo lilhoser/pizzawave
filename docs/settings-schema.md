@@ -43,6 +43,23 @@ Primary path:
 | `lmLinkMaxRetries` | number | `2` | retry count |
 | `dailyInsightsDigestEnabled` | bool | `false` | requires LM Link + email creds |
 
+## SFTP Archives
+
+These keys configure the optional `pizzapi` SFTP archive browser for Trunk Recorder `.bin` call archives. Downloaded archive data is cached separately from normal live/local captures and is loaded only while the UI is in archive mode.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `archiveSftpEnabled` | bool | `false` | enables the SFTP archive source |
+| `archiveSftpHost` | string | `""` | SFTP host name or IP address |
+| `archiveSftpPort` | number | `22` | SFTP port |
+| `archiveSftpUsername` | string | `""` | SFTP username |
+| `archiveSftpAuthMode` | string | `"password"` | `password` or `privatekey` |
+| `archiveSftpPassword` | string | `""` | password for password auth |
+| `archiveSftpPrivateKeyPath` | string | `""` | local private key path for private key auth |
+| `archiveSftpPrivateKeyPassphrase` | string | `""` | optional private key passphrase |
+| `archiveSftpRemoteRoot` | string | `""` | remote folder containing archive folders or `.bin` files |
+| `archiveLocalCachePath` | string | `%APPDATA%/pizzawave/offline/sftp-cache` | local cache root for downloaded archive data |
+
 ## UI / Performance
 
 | Key | Type | Default | Notes |

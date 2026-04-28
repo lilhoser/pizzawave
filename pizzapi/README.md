@@ -27,6 +27,7 @@ PizzaPi receives callstream traffic from trunk-recorder, transcribes calls, show
    - transcription model/engine
    - optional email/app password
    - optional LM Link settings for Insights
+   - optional SFTP archive settings for remote `.bin` archives
 4. Point trunk-recorder callstream to this host/port.
 
 ## UI Basics
@@ -35,10 +36,23 @@ PizzaPi receives callstream traffic from trunk-recorder, transcribes calls, show
   - defaults to `24h`
   - `24h` is a rolling memory window primed from disk at startup
   - `2d/week/range` are historical disk lookups
+  - `Archive...` loads selected SFTP archives into a separate offline archive session
 - `Insights`: Summary tiles by category/time range
 - `Alerts`: Alert rule management
 - `Settings`: App/runtime/LM/email configuration
+  - `Archives` configures an optional SFTP source for archived Trunk Recorder `.bin` data
 - `View`: display options (including font size)
+
+## SFTP Archives
+
+`Settings -> Archives` configures an optional SFTP server containing archived Trunk Recorder call data in `.bin` format. Use `Test Connection` to validate the server/root path, then use `Archive...` from the Radio side menu to browse, filter, download, and load an archive.
+
+Downloaded SFTP archive data is cached separately from live/local captures:
+
+- Live/local captures remain under the normal `captures` folder.
+- SFTP archives default to `%APPDATA%\pizzawave\offline\sftp-cache`.
+- Loading an archive switches the UI to `ARCHIVE` mode and reads only the selected cached archive folder.
+- `Return to Live + Local` exits archive mode and restores the normal live/local Radio view.
 
 ## Talkgroups (Current)
 

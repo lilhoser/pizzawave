@@ -203,6 +203,7 @@ If you want automation, start with the `scripts` folder:
 * `pizzapi-upgrade.sh` - Automates installing/deploying the latest `pizzapi` UI `.deb` package
 * `setup_trunk_recorder.sh` - Automates building, installing, and configuring trunk-recorder
 * `tr_tune.sh` - Unified Trunk Recorder tuning workflow (control-channel sweep, error sweep, SDR bakeoff)
+* `tr_health_collect.sh` - Flat-file Trunk Recorder health collector used by Troubleshooting UI on Pi deployments
 
 See [scripts/README.md](../scripts/README.md) for complete usage and tuning workflow examples.
 
@@ -254,7 +255,15 @@ The [callstream plugin](https://github.com/lilhoser/callstream) allows you to re
            * HOUR
                * YEAR-MONTH-DAY.HOURMINUTESECOND.bin.bin
 
-Offline captures can be loaded at any directory level by `pizzaui` or by the following code (`pizzalib` required):
+In `pizzapi`, configure `Settings -> Archives` to browse these SFTP archives directly from the Radio UI. `Archive...` lists remote archive folders/files, can filter by date range, downloads the selected item to the separate archive cache, and then loads it as an `ARCHIVE` session.
+
+`pizzapi` keeps SFTP archive data separate from live/local history:
+* Normal live/local Radio views read from the `captures` folder.
+* SFTP archive downloads default to `offline/sftp-cache` under the pizzawave working directory.
+* Loading an archive does not copy data into `captures`.
+* Use `Return to Live + Local` to leave archive mode and restore the normal live/local pane of glass.
+
+Offline captures can also be loaded at any directory level by `pizzaui` or by the following code (`pizzalib` required):
 
 ```
 var targets = Directory.GetFiles(offlineDir, "*.*", SearchOption.AllDirectories).ToList();
@@ -305,7 +314,7 @@ foreach (var file in targets)
 }
 ```
 
-Offline captures are slow to load, because many audio recordings are being transcribed at one time (whereas in live mode, calls are transcribed as they are received over the air). As a result, after an offline capture is loaded, the contained call records are also exported to a live capture for easier retrieval later.
+Offline captures are slow to load, because many audio recordings are being transcribed at one time (whereas in live mode, calls are transcribed as they are received over the air). Legacy tooling may export loaded offline records into a live capture for easier retrieval later; current `pizzapi` SFTP archive sessions intentionally do not co-mingle downloaded archive data with live/local captures.
 
 ## Alerts when loading captures
 

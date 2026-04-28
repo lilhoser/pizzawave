@@ -456,6 +456,25 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                        <Button Classes="menu-btn"
+                                Content="Archive..."
+                                Height="34"
+                                HorizontalAlignment="Stretch"
+                                Click="OnArchiveBrowseClicked"
+                                IsEnabled="{Binding IsArchiveBrowseEnabled}"/>
+                        <Button Classes="menu-btn"
+                                Content="Return to Live + Local"
+                                Height="34"
+                                HorizontalAlignment="Stretch"
+                                Background="#ffaa00"
+                                Foreground="#000000"
+                                IsVisible="{Binding IsArchiveSessionActive}"
+                                Click="OnReturnToLiveLocalClicked"/>
+                        <TextBlock Text="{Binding ActiveArchiveText}"
+                                   FontSize="11"
+                                   Foreground="#ffd28a"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding IsArchiveSessionActive}"/>
                     </StackPanel>
                 </Border>
 
@@ -1258,6 +1277,88 @@
                                 </Grid>
                             </Border>
                         </TabItem>
+                        <TabItem Header="Archives">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <Grid Margin="12"
+                                      ColumnDefinitions="600,16,420"
+                                      HorizontalAlignment="Left"
+                                      VerticalAlignment="Top">
+                                    <Border Grid.Column="0"
+                                            Padding="14"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Top"
+                                            Background="#232323"
+                                            CornerRadius="8"
+                                            BorderBrush="#3b3b3b"
+                                            BorderThickness="1">
+                                        <StackPanel Spacing="10">
+                                            <CheckBox x:Name="SettingsArchiveEnabledCheckBox" Content="Enable SFTP archive source"/>
+                                            <TextBlock Text="Remote Trunk Recorder archives are downloaded to a separate cache and loaded as an offline archive session."
+                                                       FontSize="11"
+                                                       Foreground="#b0b0b0"
+                                                       TextWrapping="Wrap"/>
+                                            <TextBlock Text="Host" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchiveHostTextBox" Width="320" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Port" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchivePortTextBox" Width="100" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Username" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchiveUsernameTextBox" Width="260" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Authentication" FontWeight="Bold"/>
+                                            <ComboBox x:Name="SettingsArchiveAuthModeComboBox" Width="180" HorizontalAlignment="Left">
+                                                <ComboBoxItem Content="Password" />
+                                                <ComboBoxItem Content="Private key" />
+                                            </ComboBox>
+                                            <TextBlock Text="Password" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchivePasswordTextBox" Width="260" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Private Key Path" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchivePrivateKeyPathTextBox" Width="420" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Private Key Passphrase" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchivePrivateKeyPassphraseTextBox" Width="260" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Remote Root" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchiveRemoteRootTextBox" Width="420" HorizontalAlignment="Left"/>
+                                            <TextBlock Text="Local Archive Cache" FontWeight="Bold"/>
+                                            <TextBox x:Name="SettingsArchiveCachePathTextBox" Width="420" HorizontalAlignment="Left"/>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button Content="Test Connection"
+                                                        Classes="menu-btn"
+                                                        Width="150"
+                                                        Click="OnArchiveTestConnectionClicked"/>
+                                                <Button Content="Browse Archives"
+                                                        Classes="menu-btn"
+                                                        Width="150"
+                                                        Click="OnArchiveBrowseClicked"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2"
+                                            Padding="14"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Top"
+                                            Background="#1b2732"
+                                            CornerRadius="8"
+                                            BorderBrush="#355069"
+                                            BorderThickness="1">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Archive behavior"
+                                                       FontWeight="Bold"
+                                                       Foreground="#d8ecff"/>
+                                            <TextBlock Text="Downloaded archive data is kept separate from live/local captures."
+                                                       FontSize="12"
+                                                       Foreground="#d4e8f8"
+                                                       TextWrapping="Wrap"/>
+                                            <TextBlock Text="Live + Local reads the captures folder. Archive mode reads only the selected cache folder until you return to Live + Local."
+                                                       FontSize="12"
+                                                       Foreground="#9fc1dd"
+                                                       TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding ArchiveCacheStatusText}"
+                                                       FontSize="11"
+                                                       Foreground="#9fc1dd"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </ScrollViewer>
+                        </TabItem>
                         <TabItem Header="Insights">
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <Grid Margin="12"
@@ -1566,12 +1667,20 @@
                         </Grid>
                     </TabItem>
                     <TabItem Header="Trunk Recorder" IsEnabled="{Binding IsTrunkTroubleshootVisible}">
-                        <Grid RowDefinitions="Auto,*" Margin="8">
+                        <Grid RowDefinitions="Auto,Auto,*" Margin="8">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Content="Restart" Classes="menu-btn" Click="OnRestartTrunkRecorderClicked"/>
                                 <Button Content="Copy" Classes="menu-btn" Click="OnCopyTroubleshootLogClicked"/>
+                                <Button Content="Refresh Health" Classes="menu-btn" Click="OnRefreshTrHealthClicked"/>
                             </StackPanel>
                             <TextBox Grid.Row="1"
+                                     Margin="0,8,0,0"
+                                     Text="{Binding TrunkRecorderHealthText}"
+                                     IsReadOnly="True"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     MinHeight="160"/>
+                            <TextBox Grid.Row="2"
                                      Margin="0,8,0,0"
                                      Text="{Binding TrunkRecorderLogText}"
                                      IsReadOnly="True"
