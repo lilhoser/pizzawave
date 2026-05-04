@@ -30,6 +30,16 @@ Manual run:
 sudo /usr/local/bin/tr_health_collect.sh 5
 ```
 
+## Troubleshooting UI Integration
+
+Current `pizzapi` troubleshooting prefers this collector output directly:
+
+- Source file: `/var/lib/pizzapi/tr-health/summary_5m.csv`
+- Settings mode: `Collector CSV (preferred)`
+- Remote retrieval: same SSH connector used by diagnostics
+
+If collector output is unavailable, `pizzapi` can optionally warn and fall back to raw-log mode.
+
 ## `tr_tune.sh`
 
 Unified tuning workflow helper for:

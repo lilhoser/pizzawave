@@ -163,6 +163,7 @@ Canonical references:
 * [Insights Behavior Matrix](insights-behavior-matrix.md)
 * [Operational Limits](operational-limits.md)
 * [Email SMTP Troubleshooting](email-smtp-troubleshooting.md)
+* [pizzapi Guide](pizzapi.md) - includes Trunk Recorder troubleshooting modes and baseline behavior
 
 ## Talkgroup Mapping Lifecycle (Current)
 

@@ -19,6 +19,21 @@ Common commands, paths, ports, and other frequently-needed information for pizza
 
 ## Common Commands
 
+### Trunk Recorder Health Collector
+
+```bash
+# Timer/service status
+sudo systemctl status tr-health-collector.timer
+sudo systemctl status tr-health-collector.service
+
+# Last collector runs
+journalctl -u tr-health-collector.service -n 50 --no-pager
+
+# Collector output file
+ls -lh /var/lib/pizzapi/tr-health/summary_5m.csv
+tail -n 5 /var/lib/pizzapi/tr-health/summary_5m.csv
+```
+
 ### Service Management (Linux)
 
 ```bash
@@ -118,6 +133,15 @@ sudo dpkg -r pizzapi
 `pizzacmd` currently applies only the first recognized option in a command invocation.
 
 Avoid combining `--settings` and `--talkgroups` in one run; invoke separately.
+
+## Troubleshooting Data Paths
+
+| Item | Path |
+|---|---|
+| TR collector output (preferred source) | `/var/lib/pizzapi/tr-health/summary_5m.csv` |
+| TR diagnostics local cache (default) | `%APPDATA%\pizzawave\tr-diagnostics` (Windows) / `~/.config/pizzawave/tr-diagnostics` (Linux/macOS) |
+| TR persisted baseline history | `<trDiagnosticsLocalCachePath>/baseline_history_5m.csv` |
+| TR parse cache manifest (raw-log mode) | `<trDiagnosticsLocalCachePath>/parse_manifest.json` |
 
 ## Talkgroups CSV Format
 

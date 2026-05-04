@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -14,6 +15,7 @@ using Avalonia.Media;
 using Avalonia.VisualTree;
 using NAudio.Wave;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using pizzalib;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -24,6 +26,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using static pizzapi.TraceLogger;
 
 namespace pizzapi;
@@ -39,6 +43,7 @@ public class CallGroupItem
     public bool IsExpanded { get; set; } = true; // For collapsible groups
     public bool IsSearchMatch { get; set; }  // For search highlighting
     public int MatchIndex { get; set; }      // Position among matches for navigation
+    public bool IsPulseTarget { get; set; }
 }
 
 public class CallGroupItemTemplateSelector : IDataTemplate
@@ -321,6 +326,19 @@ public sealed class LmUsageLedgerRow
     public string CostStandardDisplay => CostStandard.ToString("F2");
 }
 
+public class StringHasTextConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return !string.IsNullOrWhiteSpace(value as string);
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return BindingOperations.DoNothing;
+    }
+}
+
 public sealed class TrHealthRow
 {
     public DateTime StartUtc { get; set; }
@@ -343,6 +361,7 @@ public sealed class TrHealthRow
 public sealed class TrHealthAggregate
 {
     public int Windows { get; set; }
+    public int DecodeSampleLines { get; set; }
     public double DecodeZeroPercent { get; set; }
     public double AvgDecodeRate { get; set; }
     public int Retunes { get; set; }
@@ -350,6 +369,61 @@ public sealed class TrHealthAggregate
     public int NoTxRecorded { get; set; }
     public int SampleStops { get; set; }
     public int UnableSource { get; set; }
+}
+
+public sealed class TrHealthMetricRow
+{
+    public string Metric { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public bool IsIssue { get; set; }
+}
+
+public sealed class TrHealthHourlyRow
+{
+    public string Hour { get; set; } = string.Empty;
+    public string DecodeZeroText { get; set; } = string.Empty;
+    public double DecodeZeroPercent { get; set; }
+    public string AvgDecodeText { get; set; } = string.Empty;
+    public double AvgDecodePercent { get; set; }
+    public string RetunesText { get; set; } = string.Empty;
+    public double RetunesPercent { get; set; }
+    public string NoTxText { get; set; } = string.Empty;
+    public double NoTxPercent { get; set; }
+    public string StopsText { get; set; } = string.Empty;
+    public double StopsPercent { get; set; }
+}
+
+public sealed class TrHealthChartRow
+{
+    public string Title { get; set; } = string.Empty;
+    public string YAxisLabel { get; set; } = string.Empty;
+    public string MinLabel { get; set; } = "0";
+    public string MaxLabel { get; set; } = string.Empty;
+    public string StartLabel { get; set; } = string.Empty;
+    public string EndLabel { get; set; } = string.Empty;
+    public string XTick0Label { get; set; } = string.Empty;
+    public string XTick1Label { get; set; } = string.Empty;
+    public string XTick2Label { get; set; } = string.Empty;
+    public string XTick3Label { get; set; } = string.Empty;
+    public string XTick4Label { get; set; } = string.Empty;
+    public string XTick5Label { get; set; } = string.Empty;
+    public string YTick1Label { get; set; } = string.Empty;
+    public string YTick2Label { get; set; } = string.Empty;
+    public string YTick3Label { get; set; } = string.Empty;
+    public string Series1Label { get; set; } = string.Empty;
+    public string Series2Label { get; set; } = string.Empty;
+    public string Series3Label { get; set; } = string.Empty;
+    public string Series4Label { get; set; } = string.Empty;
+    public string Series5Label { get; set; } = string.Empty;
+    public string Series6Label { get; set; } = string.Empty;
+    public bool HasLegend { get; set; }
+    public AvaloniaList<Point> Series1Points { get; } = new();
+    public AvaloniaList<Point> Series2Points { get; } = new();
+    public AvaloniaList<Point> Series3Points { get; } = new();
+    public AvaloniaList<Point> Series4Points { get; } = new();
+    public AvaloniaList<Point> Series5Points { get; } = new();
+    public AvaloniaList<Point> Series6Points { get; } = new();
 }
 
 public partial class MainWindow : Window, INotifyPropertyChanged
@@ -366,6 +440,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private int _alertsTriggeredCount;
     private string _serverStatusText = "Server: Not started";
     private string _connectionStatus = "Connection: Disconnected";
+    private bool _isTrServerListening;
+    private bool _isTrServerReceiving;
+    private DateTimeOffset? _lastTrCallReceivedAt;
+    private DispatcherTimer? _trServerReceivingTimer;
     private string _infoText = "Waiting for calls...";
     private Settings _settings = new Settings();
     private string _versionString;
@@ -519,6 +597,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly HashSet<string> _collapsedLegacyGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _collapsedCategoryGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenCategoryGroupHeaders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pulsingCategoryKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _categoryPulseVersions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pulsingVisibleHeaderKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _visibleHeaderPulseVersions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly CancellationTokenSource _pulseShutdownCts = new();
+    private int _pulseSequence;
     // Flag to prevent re-entrancy in collapse/expand
     private bool _isCollapsingExpanding = false;
 
@@ -838,6 +922,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             .ToList();
 
         UpdateVisibleCallCollections(filteredCalls);
+        CallsReceivedCount = Calls.Count;
 
         RadioStatusText = IsArchiveSessionActive
             ? $"Archive: {_activeArchiveText} ({Calls.Count})"
@@ -987,6 +1072,12 @@ RaisePropertyChanged(nameof(IsWeekActive));
 
     private string GetInsightsRangeFilterKey() => _currentFilter == "custom" ? "range" : _currentFilter;
 
+    private (DateTimeOffset start, DateTimeOffset end) GetCurrentRangeOffsetBounds()
+    {
+        var (start, end) = GetCurrentRangeBounds();
+        return (new DateTimeOffset(start), new DateTimeOffset(end));
+    }
+
     private void RefreshCategoryGroupedCalls(List<TranscribedCall> visibleCalls)
     {
         IEnumerable<TranscribedCall> calls = visibleCalls;
@@ -1013,7 +1104,8 @@ RaisePropertyChanged(nameof(IsWeekActive));
                 IsHeader = true,
                 GroupKey = title,
                 HeaderText = $"{title} ({group.Count()})",
-                IsExpanded = isExpanded
+                IsExpanded = isExpanded,
+                IsPulseTarget = _pulsingVisibleHeaderKeys.Contains(title)
             });
             if (!isExpanded)
                 continue;
@@ -1023,6 +1115,128 @@ RaisePropertyChanged(nameof(IsWeekActive));
             }
         }
         RaisePropertyChanged(nameof(IsCategoryRawCallsEmpty));
+    }
+
+    private void PulseCallDestination(TranscribedCall call)
+    {
+        var categoryKey = ResolveCategoryKeyFromTalkgroup(call.Talkgroup);
+        TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Verbose,
+            $"Pulse target resolved: category={categoryKey}, talkgroup={call.Talkgroup}, header={call.FriendlyTalkgroup}");
+        if (categoryKey is "police" or "fire" or "ems")
+            StartCategoryMenuPulse(categoryKey);
+
+        var selectedCategoryKey = GetSelectedCategoryKey();
+        if (!string.Equals(selectedCategoryKey, categoryKey, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var visibleHeaderKey = call.FriendlyTalkgroup;
+        if (string.IsNullOrWhiteSpace(visibleHeaderKey))
+            return;
+
+        StartVisibleHeaderPulse(visibleHeaderKey);
+        ApplyTimeRangeFilter();
+    }
+
+    private void StartCategoryMenuPulse(string categoryKey)
+    {
+        var pulseVersion = ++_pulseSequence;
+        var wasAlreadyPulsing = _pulsingCategoryKeys.Contains(categoryKey);
+        _pulsingCategoryKeys.Add(categoryKey);
+        _categoryPulseVersions[categoryKey] = pulseVersion;
+        if (wasAlreadyPulsing)
+        {
+            _pulsingCategoryKeys.Remove(categoryKey);
+            RaiseCategoryPulseChanged(categoryKey);
+            SafeUiPost(() =>
+            {
+                if (!_categoryPulseVersions.TryGetValue(categoryKey, out var currentVersion) || currentVersion != pulseVersion)
+                    return;
+
+                _pulsingCategoryKeys.Add(categoryKey);
+                RaiseCategoryPulseChanged(categoryKey);
+            }, DispatcherPriority.Background);
+        }
+        RaiseCategoryPulseChanged(categoryKey);
+        _ = ClearCategoryMenuPulseAfterDelayAsync(categoryKey, pulseVersion, _pulseShutdownCts.Token);
+    }
+
+    private async Task ClearCategoryMenuPulseAfterDelayAsync(string categoryKey, int pulseVersion, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            SafeUiPost(() =>
+            {
+                if (!_categoryPulseVersions.TryGetValue(categoryKey, out var currentVersion) || currentVersion != pulseVersion)
+                    return;
+
+                _categoryPulseVersions.Remove(categoryKey);
+                _pulsingCategoryKeys.Remove(categoryKey);
+                RaiseCategoryPulseChanged(categoryKey);
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StartVisibleHeaderPulse(string headerKey)
+    {
+        var pulseVersion = ++_pulseSequence;
+        var wasAlreadyPulsing = _pulsingVisibleHeaderKeys.Contains(headerKey);
+        _pulsingVisibleHeaderKeys.Add(headerKey);
+        _visibleHeaderPulseVersions[headerKey] = pulseVersion;
+        if (wasAlreadyPulsing && IsAnyCategorySelected)
+        {
+            _pulsingVisibleHeaderKeys.Remove(headerKey);
+            ApplyTimeRangeFilter();
+            SafeUiPost(() =>
+            {
+                if (!_visibleHeaderPulseVersions.TryGetValue(headerKey, out var currentVersion) || currentVersion != pulseVersion)
+                    return;
+
+                _pulsingVisibleHeaderKeys.Add(headerKey);
+                ApplyTimeRangeFilter();
+            }, DispatcherPriority.Background);
+        }
+        _ = ClearVisibleHeaderPulseAfterDelayAsync(headerKey, pulseVersion, _pulseShutdownCts.Token);
+    }
+
+    private async Task ClearVisibleHeaderPulseAfterDelayAsync(string headerKey, int pulseVersion, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            SafeUiPost(() =>
+            {
+                if (!_visibleHeaderPulseVersions.TryGetValue(headerKey, out var currentVersion) || currentVersion != pulseVersion)
+                    return;
+
+                _visibleHeaderPulseVersions.Remove(headerKey);
+                _pulsingVisibleHeaderKeys.Remove(headerKey);
+                if (IsAnyCategorySelected)
+                    RefreshCategoryGroupedCalls(Calls.ToList());
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void RaiseCategoryPulseChanged(string categoryKey)
+    {
+        switch (categoryKey)
+        {
+            case "police":
+                RaisePropertyChanged(nameof(IsPolicePulseActive));
+                break;
+            case "fire":
+                RaisePropertyChanged(nameof(IsFirePulseActive));
+                break;
+            case "ems":
+                RaisePropertyChanged(nameof(IsEmsPulseActive));
+                break;
+        }
     }
 
     private void ClearVisibleCalls()
@@ -1038,18 +1252,28 @@ RaisePropertyChanged(nameof(IsWeekActive));
     {
         SafeUiPost(() =>
         {
+            var (rangeStart, rangeEnd) = GetCurrentRangeOffsetBounds();
+            var filteredWindow = FilterTopEvents(
+                window,
+                maxEvents: MaxInsightsEventsPerSummary,
+                rangeStart,
+                rangeEnd);
+
+            if (filteredWindow.NotableEvents.Count == 0 && string.IsNullOrWhiteSpace(filteredWindow.Error))
+                return;
+
             // Match by actual window identity (start/end), not date only.
             var existing = InsightsSummaries.FirstOrDefault(s => 
-                s.WindowStart == window.WindowStart && s.WindowEnd == window.WindowEnd);
+                s.WindowStart == filteredWindow.WindowStart && s.WindowEnd == filteredWindow.WindowEnd);
             if (existing != null)
             {
                 // Update existing entry
                 int index = InsightsSummaries.IndexOf(existing);
-                InsightsSummaries[index] = FilterTopEvents(window, maxEvents: MaxInsightsEventsPerSummary);
+                InsightsSummaries[index] = filteredWindow;
             }
             else
             {
-                InsightsSummaries.Add(FilterTopEvents(window, maxEvents: MaxInsightsEventsPerSummary));
+                InsightsSummaries.Add(filteredWindow);
             }
             RefreshInsightsCategorySections();
             RefreshNextInsightStatus();
@@ -1132,20 +1356,30 @@ RaisePropertyChanged(nameof(IsWeekActive));
             if (requestVersion != Volatile.Read(ref _insightsLoadRequestVersion))
                 return;
 
-            InsightsSummaries.Clear();
-            foreach (var s in summaries)
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                var filteredSummary = FilterTopEvents(s, maxEvents: MaxInsightsEventsPerSummary);
-                InsightsSummaries.Add(filteredSummary);
-                _insightsProgressStatus = $"Loaded {InsightsSummaries.Count}/{summaries.Count} summary(ies)";
-                InsightsStatusText = _insightsProgressStatus;
-            }
-            RefreshInsightsCategorySections();
+                InsightsSummaries.Clear();
+                foreach (var s in summaries)
+                {
+                    var filteredSummary = FilterTopEvents(s, maxEvents: MaxInsightsEventsPerSummary, start, end);
+                    if (filteredSummary.NotableEvents.Count == 0 && string.IsNullOrWhiteSpace(filteredSummary.Error))
+                        continue;
+                    InsightsSummaries.Add(filteredSummary);
+                    _insightsProgressStatus = $"Loaded {InsightsSummaries.Count}/{summaries.Count} summary(ies)";
+                    InsightsStatusText = _insightsProgressStatus;
+                }
 
-            if (summaries.Count == 0 && !InsightsStatusText.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-            {
-                InsightsStatusText = "No daily summaries available for this time range";
-            }
+                RefreshInsightsCategorySections();
+                RaisePropertyChanged(nameof(InsightsSummaries));
+                RaisePropertyChanged(nameof(InsightsCategorySections));
+                RaisePropertyChanged(nameof(InsightsNarrativeSections));
+                RaisePropertyChanged(nameof(InsightsNarrativeBullets));
+
+                if (summaries.Count == 0 && !InsightsStatusText.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                {
+                    InsightsStatusText = "No daily summaries available for this time range";
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -1185,36 +1419,82 @@ RaisePropertyChanged(nameof(IsWeekActive));
         }
     }
 
-    private InsightSummaryWindow FilterTopEvents(InsightSummaryWindow summary, int maxEvents)
+    private InsightSummaryWindow FilterTopEvents(
+        InsightSummaryWindow summary,
+        int maxEvents,
+        DateTimeOffset? rangeStart = null,
+        DateTimeOffset? rangeEnd = null)
     {
-        if (summary.NotableEvents == null || summary.NotableEvents.Count <= maxEvents)
+        AttachNotableEventParents(summary);
+
+        var events = summary.NotableEvents ?? new List<InsightNotableEvent>();
+        if (rangeStart.HasValue && rangeEnd.HasValue)
         {
-            AttachNotableEventParents(summary);
+            events = events
+                .Where(e => IsInsightNotableInRange(e, rangeStart.Value, rangeEnd.Value))
+                .ToList();
+        }
+
+        if (events.Count <= maxEvents && ReferenceEquals(events, summary.NotableEvents))
+        {
             PopulateNotableEventMetadata(summary);
             return summary;
         }
 
-        var filtered = new InsightSummaryWindow
+        var filtered = CloneInsightSummaryWithEvents(summary, events
+            .OrderByDescending(e => e.HasAlertMatch)
+            .ThenByDescending(GetNotableSortKey)
+            .ThenByDescending(e => e.Confidence)
+            .Take(maxEvents)
+            .ToList());
+        AttachNotableEventParents(filtered);
+        PopulateNotableEventMetadata(filtered);
+
+        return filtered;
+    }
+
+    private InsightSummaryWindow CloneInsightSummaryWithEvents(
+        InsightSummaryWindow summary,
+        List<InsightNotableEvent> events)
+    {
+        return new InsightSummaryWindow
         {
             WindowStart = summary.WindowStart,
             WindowEnd = summary.WindowEnd,
             SummaryText = summary.SummaryText,
             Model = summary.Model,
+            PromptVersion = summary.PromptVersion,
             SourceCounts = summary.SourceCounts,
             SourceHashes = summary.SourceHashes,
-            Error = summary.Error
+            SourceCallIds = summary.SourceCallIds,
+            Error = summary.Error,
+            NotableEvents = events
         };
+    }
 
-        filtered.NotableEvents = summary.NotableEvents
-            .OrderByDescending(e => e.HasAlertMatch)
-            .ThenByDescending(GetNotableSortKey)
-            .ThenByDescending(e => e.Confidence)
-            .Take(maxEvents)
-            .ToList();
-        AttachNotableEventParents(filtered);
-        PopulateNotableEventMetadata(filtered);
+    private bool IsInsightNotableInRange(InsightNotableEvent notable, DateTimeOffset rangeStart, DateTimeOffset rangeEnd)
+    {
+        if (notable.IsErrorEvent)
+            return true;
 
-        return filtered;
+        var matchedCalls = ResolveCallsForNotable(notable);
+        if (matchedCalls.Count > 0)
+        {
+            return matchedCalls.Any(c =>
+            {
+                var ts = DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime();
+                return ts >= rangeStart && ts <= rangeEnd;
+            });
+        }
+
+        if (TryGetNotableTargetUnix(notable, out var targetUnix))
+        {
+            var target = DateTimeOffset.FromUnixTimeSeconds(targetUnix).ToLocalTime();
+            return target >= rangeStart && target <= rangeEnd;
+        }
+
+        var summary = notable.ParentSummary;
+        return summary != null && summary.WindowStart >= rangeStart && summary.WindowEnd <= rangeEnd;
     }
 
     private void RefreshInsightsCategorySections()
@@ -1593,7 +1873,10 @@ RaisePropertyChanged(nameof(IsWeekActive));
     private List<InsightSummaryWindow> LoadInsightsForRange(DateTimeOffset start, DateTimeOffset end)
     {
         var summaries = _insightsStorage.LoadDaily(start, end);
-        return summaries.Select(s => FilterTopEvents(s, maxEvents: MaxInsightsEventsPerSummary)).ToList();
+        return summaries
+            .Select(s => FilterTopEvents(s, maxEvents: MaxInsightsEventsPerSummary, start, end))
+            .Where(s => s.NotableEvents.Count > 0 || !string.IsNullOrWhiteSpace(s.Error))
+            .ToList();
     }
 
     private void SwitchToOfflineHistory(DateTime start, DateTime end, string filterLabel)
@@ -1758,7 +2041,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
         {
             _currentFilter = "custom";
             ApplyTimeRangeFilter();
-            if (IsHighlightsSelected)
+            if (IsInsightsDrivenViewActive)
                 _ = LoadInsightsSummariesAsync();
         }
         else
@@ -1783,11 +2066,50 @@ RaisePropertyChanged(nameof(IsWeekActive));
     private const string TrHealthWindowLabel = "24h";
     private bool _isRefreshingPizzaPiLogOptions;
     private string _selectedPizzaPiLogOption = CurrentPizzaPiLogOption;
+    private string _pendingTrunkRecorderLogText = string.Empty;
+    private string _trunkRecorderRemediesText = string.Empty;
+    private bool _isTrunkLogOutputSelected;
+    private bool _hasTrHealthIssue;
+    private bool _hasLoadedTrTroubleshootOnce;
+    private bool _isTrTroubleshootLoading;
+    private bool _trHealthShowBySystem;
+    private string _selectedTrHealthBaseline = "7d";
+    private bool _forceRawLogDiagnostics;
+    private List<TrHealthRow> _trHealthRows = new();
+    private List<TrHealthRow> _trHealthHistoryRows = new();
+    private string _trHealthHistoryPath = string.Empty;
+    private bool _usePersistedBaselineHistory = true;
+    private bool _isTrHealthInsightsBusy;
+    private string _trHealthInsightsText = "Click \"Generate Recommendation\" to summarize TR health findings.";
     private readonly Dictionary<string, string> _pizzaPiLogOptionPathMap = new(StringComparer.OrdinalIgnoreCase);
     public ObservableCollection<ProcessingProfile> Profiles { get; } = new();
     public ObservableCollection<ProcessingProfile> TalkgroupEditableProfiles { get; } = new();
     public ObservableCollection<AlertMatchRecord> AlertHistory { get; } = new();
     public ObservableCollection<string> PizzaPiLogOptions { get; } = new();
+    public ObservableCollection<TrHealthMetricRow> TrHealthMetrics { get; } = new();
+    public ObservableCollection<TrHealthMetricRow> TrHealthSystemRows { get; } = new();
+    public ObservableCollection<TrHealthMetricRow> TrHealthRemedyRows { get; } = new();
+    public ObservableCollection<TrHealthHourlyRow> TrHealthHourlyRows { get; } = new();
+    public ObservableCollection<TrHealthChartRow> TrHealthCharts { get; } = new();
+    public ObservableCollection<string> TrHealthBaselineOptions { get; } = new() { "7d", "14d", "30d" };
+    public bool IsTrHealthInsightsEnabled => IsInsightsEnabled;
+    public bool IsTrHealthInsightsBusy
+    {
+        get => _isTrHealthInsightsBusy;
+        set
+        {
+            if (_isTrHealthInsightsBusy == value) return;
+            _isTrHealthInsightsBusy = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(CanGenerateTrHealthInsights));
+        }
+    }
+    public bool CanGenerateTrHealthInsights => IsTrHealthInsightsEnabled && !IsTrHealthInsightsBusy;
+    public string TrHealthInsightsText
+    {
+        get => _trHealthInsightsText;
+        set { _trHealthInsightsText = value; RaisePropertyChanged(); }
+    }
     public ObservableCollection<CallGroupItem> CategoryGroupedCalls { get; } = new();
     public ObservableCollection<Talkgroup> TalkgroupRows { get; } = new();
     public ObservableCollection<TalkgroupMappingRow> TalkgroupMappingRows => _talkgroupMappingRows;
@@ -1844,6 +2166,67 @@ RaisePropertyChanged(nameof(IsWeekActive));
     {
         get => _wizardDraftAlphaTag;
         set { _wizardDraftAlphaTag = value; RaisePropertyChanged(); }
+    }
+
+    public bool IsTrTroubleshootLoading
+    {
+        get => _isTrTroubleshootLoading;
+        set
+        {
+            if (_isTrTroubleshootLoading == value)
+                return;
+            _isTrTroubleshootLoading = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsTrTroubleshootControlsEnabled));
+        }
+    }
+
+    public bool IsTrTroubleshootControlsEnabled => !IsTrTroubleshootLoading;
+
+    public bool TrHealthShowBySystem
+    {
+        get => _trHealthShowBySystem;
+        set
+        {
+            if (_trHealthShowBySystem == value)
+                return;
+            _trHealthShowBySystem = value;
+            RaisePropertyChanged();
+            RebuildTrHealthCharts();
+        }
+    }
+
+    public string SelectedTrHealthBaseline
+    {
+        get => _selectedTrHealthBaseline;
+        set
+        {
+            var normalized = TrHealthBaselineOptions.Contains(value) ? value : "7d";
+            if (string.Equals(_selectedTrHealthBaseline, normalized, StringComparison.Ordinal))
+                return;
+            _selectedTrHealthBaseline = normalized;
+            RaisePropertyChanged();
+            RebuildTrHealthCharts();
+        }
+    }
+
+    public bool UsePersistedBaselineHistory
+    {
+        get => _usePersistedBaselineHistory;
+        set
+        {
+            if (_usePersistedBaselineHistory == value)
+                return;
+            _usePersistedBaselineHistory = value;
+            RaisePropertyChanged();
+            RebuildTrHealthCharts();
+        }
+    }
+
+    public bool ForceRawLogDiagnostics
+    {
+        get => _forceRawLogDiagnostics;
+        set { _forceRawLogDiagnostics = value; RaisePropertyChanged(); }
     }
 
     public string WizardDraftDescription
@@ -2031,6 +2414,9 @@ RaisePropertyChanged(nameof(IsWeekActive));
     public bool IsEmsSelected => SelectedSection == MainSection.EMS;
     public bool IsTrafficSelected => SelectedSection == MainSection.Traffic;
     public bool IsOtherSelected => SelectedSection == MainSection.Other;
+    public bool IsPolicePulseActive => _pulsingCategoryKeys.Contains("police");
+    public bool IsFirePulseActive => _pulsingCategoryKeys.Contains("fire");
+    public bool IsEmsPulseActive => _pulsingCategoryKeys.Contains("ems");
     public bool IsSettingsSelected => SelectedSection == MainSection.Settings;
     public bool IsTroubleshootSelected => SelectedSection == MainSection.Troubleshoot;
     public bool IsAnyCategorySelected => IsPoliceSelected || IsFireSelected || IsEmsSelected || IsTrafficSelected || IsOtherSelected;
@@ -2042,13 +2428,20 @@ RaisePropertyChanged(nameof(IsWeekActive));
     public bool IsCategoryInsightsEmpty => IsAnyCategorySelected && InsightsCategorySections.Count == 0;
     public bool IsCategoryRawCallsEmpty => IsAnyCategorySelected && CategoryGroupedCalls.Count == 0;
     public bool IsAlertsEmpty => IsAlertsSelected && AlertHistory.Count == 0;
+    private bool IsInsightsDrivenViewActive => IsHighlightsSelected || IsAnyCategorySelected;
 
     public string CurrentProfileName => _activeProfile?.Name ?? "Default";
         public Control? AlertsPanelControl => _alertsPanel;
     public Control? CleanupPanelControl => _cleanupPanel;
-    public bool IsTrunkTroubleshootVisible => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+    public bool IsTrunkTroubleshootVisible => RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+        || string.Equals(_settings.TrDiagnosticsMode, "ssh", StringComparison.OrdinalIgnoreCase);
     public string TrunkRecorderLogText { get; private set; } = "Trunk recorder log unavailable.";
     public string TrunkRecorderHealthText { get; private set; } = "TR health summary unavailable.";
+    public string TrunkRecorderDiagnosticsText { get; private set; } = "TR diagnostics unavailable.";
+    public string TrunkRecorderHealthTitle { get; private set; } = "TR health summary";
+    public string TrunkRecorderHealthSource { get; private set; } = string.Empty;
+    public string TrunkRecorderHealthWindow { get; private set; } = string.Empty;
+    public string TrunkRecorderHealthLastWindow { get; private set; } = string.Empty;
     public string PizzaPiLogText { get; private set; } = "PizzaPi log unavailable.";
     public IReadOnlyList<string> TroubleshootTraceLevelOptions => _troubleshootTraceLevelOptions;
     public string SelectedPizzaPiLogOption
@@ -2141,6 +2534,54 @@ RaisePropertyChanged(nameof(IsWeekActive));
     public string FooterAlertsText => $"Alerts: {AlertsTriggeredCount}";
     public string FooterTokensText => $"Tokens: {SessionTokenUsageText}";
     public string FooterStatusText => MenuSpecificStatusText;
+    public string TrServerPillText
+    {
+        get
+        {
+            if (!_isTrServerListening)
+                return "TR off";
+            return _isTrServerReceiving ? "Receiving" : "Listening";
+        }
+    }
+
+    public IBrush TrServerPillBackground
+    {
+        get
+        {
+            if (!_isTrServerListening)
+                return Brushes.Transparent;
+            return _isTrServerReceiving ? Brush.Parse("#8a6d1f") : Brush.Parse("#15803d");
+        }
+    }
+
+    public IBrush TrServerPillBorderBrush
+    {
+        get
+        {
+            if (!_isTrServerListening)
+                return Brush.Parse("#666666");
+            return _isTrServerReceiving ? Brush.Parse("#facc15") : Brush.Parse("#22c55e");
+        }
+    }
+
+    public IBrush TrServerPillForeground => Brushes.White;
+
+    public string TrServerToolTipText
+    {
+        get
+        {
+            if (!_isTrServerListening)
+                return $"TR server is not listening. {ServerStatusText}";
+
+            var portText = _settings.ListenPort > 0 ? $" on port {_settings.ListenPort}" : string.Empty;
+            if (!_lastTrCallReceivedAt.HasValue)
+                return $"TR server is listening{portText}. No live calls received this session.";
+
+            var lastLocal = _lastTrCallReceivedAt.Value.ToLocalTime();
+            return $"TR server is listening{portText}. Last call received {lastLocal:g} ({FormatElapsed(lastLocal)} ago).";
+        }
+    }
+
     private void ApplyMenuStatusText(string value)
     {
         _menuSpecificStatusText = value;
@@ -2150,6 +2591,64 @@ RaisePropertyChanged(nameof(IsWeekActive));
     }
 
     private void SetMenuStatus(string value) => ApplyMenuStatusText(value);
+
+    private void SetTrServerListening(bool isListening)
+    {
+        _isTrServerListening = isListening;
+        if (!isListening)
+        {
+            _isTrServerReceiving = false;
+            _lastTrCallReceivedAt = null;
+            _trServerReceivingTimer?.Stop();
+        }
+        RaiseTrServerStatusChanged();
+    }
+
+    private void MarkTrCallReceived()
+    {
+        _lastTrCallReceivedAt = DateTimeOffset.Now;
+        _isTrServerReceiving = true;
+        _trServerReceivingTimer ??= CreateTrServerReceivingTimer();
+        _trServerReceivingTimer.Stop();
+        _trServerReceivingTimer.Start();
+        RaiseTrServerStatusChanged();
+    }
+
+    private DispatcherTimer CreateTrServerReceivingTimer()
+    {
+        var timer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(5)
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _isTrServerReceiving = false;
+            RaiseTrServerStatusChanged();
+        };
+        return timer;
+    }
+
+    private void RaiseTrServerStatusChanged()
+    {
+        RaisePropertyChanged(nameof(TrServerPillText));
+        RaisePropertyChanged(nameof(TrServerPillBackground));
+        RaisePropertyChanged(nameof(TrServerPillBorderBrush));
+        RaisePropertyChanged(nameof(TrServerPillForeground));
+        RaisePropertyChanged(nameof(TrServerToolTipText));
+    }
+
+    private static string FormatElapsed(DateTimeOffset since)
+    {
+        var elapsed = DateTimeOffset.Now - since;
+        if (elapsed.TotalSeconds < 60)
+            return $"{Math.Max(0, (int)elapsed.TotalSeconds)}s";
+        if (elapsed.TotalMinutes < 60)
+            return $"{(int)elapsed.TotalMinutes}m";
+        if (elapsed.TotalHours < 24)
+            return $"{(int)elapsed.TotalHours}h";
+        return $"{(int)elapsed.TotalDays}d";
+    }
 
     public string MenuSpecificStatusText
     {
@@ -2286,7 +2785,26 @@ RaisePropertyChanged(nameof(IsWeekActive));
         RequireControl<TextBox>("SettingsArchiveCachePathTextBox").Text = string.IsNullOrWhiteSpace(_settings.ArchiveLocalCachePath)
             ? Path.Combine(Settings.DefaultOfflineCaptureDirectory, "sftp-cache")
             : _settings.ArchiveLocalCachePath;
+        RequireControl<ComboBox>("SettingsTrDiagnosticsModeComboBox").SelectedIndex =
+            string.Equals(_settings.TrDiagnosticsMode, "ssh", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        RequireControl<TextBox>("SettingsTrDiagnosticsHostTextBox").Text = _settings.TrDiagnosticsHost ?? string.Empty;
+        RequireControl<TextBox>("SettingsTrDiagnosticsPortTextBox").Text = (_settings.TrDiagnosticsPort <= 0 ? 22 : _settings.TrDiagnosticsPort).ToString();
+        RequireControl<TextBox>("SettingsTrDiagnosticsUsernameTextBox").Text = _settings.TrDiagnosticsUsername ?? string.Empty;
+        RequireControl<ComboBox>("SettingsTrDiagnosticsAuthModeComboBox").SelectedIndex =
+            string.Equals(_settings.TrDiagnosticsAuthMode, "privatekey", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        RequireControl<TextBox>("SettingsTrDiagnosticsPasswordTextBox").Text = string.Empty;
+        RequireControl<TextBox>("SettingsTrDiagnosticsPrivateKeyPathTextBox").Text = _settings.TrDiagnosticsPrivateKeyPath ?? string.Empty;
+        RequireControl<TextBox>("SettingsTrDiagnosticsPrivateKeyPassphraseTextBox").Text = string.Empty;
+        RequireControl<TextBox>("SettingsTrDiagnosticsLogDirTextBox").Text = string.IsNullOrWhiteSpace(_settings.TrDiagnosticsRemoteLogDir)
+            ? "/var/log/trunk-recorder"
+            : _settings.TrDiagnosticsRemoteLogDir;
+        RequireControl<TextBox>("SettingsTrDiagnosticsCachePathTextBox").Text = string.IsNullOrWhiteSpace(_settings.TrDiagnosticsLocalCachePath)
+            ? Path.Combine(Settings.DefaultWorkingDirectory, "tr-diagnostics")
+            : _settings.TrDiagnosticsLocalCachePath;
         RaisePropertyChanged(nameof(ArchiveCacheStatusText));
+            RaisePropertyChanged(nameof(IsTrunkTroubleshootVisible));
+            RaisePropertyChanged(nameof(IsTrHealthInsightsEnabled));
+            RaisePropertyChanged(nameof(CanGenerateTrHealthInsights));
         LoadTalkgroupMappings();
         RefreshTalkgroupRows();
     }
@@ -2361,8 +2879,25 @@ RaisePropertyChanged(nameof(IsWeekActive));
         _settings.ArchiveSftpPrivateKeyPassphrase = null;
         _settings.ArchiveSftpRemoteRoot = RequireControl<TextBox>("SettingsArchiveRemoteRootTextBox").Text ?? string.Empty;
         _settings.ArchiveLocalCachePath = RequireControl<TextBox>("SettingsArchiveCachePathTextBox").Text ?? string.Empty;
+        _settings.TrDiagnosticsMode = RequireControl<ComboBox>("SettingsTrDiagnosticsModeComboBox").SelectedIndex == 1 ? "ssh" : "local";
+        _settings.TrDiagnosticsHost = RequireControl<TextBox>("SettingsTrDiagnosticsHostTextBox").Text ?? string.Empty;
+        if (int.TryParse(RequireControl<TextBox>("SettingsTrDiagnosticsPortTextBox").Text, out var trPort))
+            _settings.TrDiagnosticsPort = trPort;
+        _settings.TrDiagnosticsUsername = RequireControl<TextBox>("SettingsTrDiagnosticsUsernameTextBox").Text ?? string.Empty;
+        _settings.TrDiagnosticsAuthMode = RequireControl<ComboBox>("SettingsTrDiagnosticsAuthModeComboBox").SelectedIndex == 1
+            ? "privatekey"
+            : "password";
+        _settings.TrDiagnosticsPassword = null;
+        _settings.TrDiagnosticsPrivateKeyPath = RequireControl<TextBox>("SettingsTrDiagnosticsPrivateKeyPathTextBox").Text ?? string.Empty;
+        _settings.TrDiagnosticsPrivateKeyPassphrase = null;
+        _settings.TrDiagnosticsRemoteLogDir = RequireControl<TextBox>("SettingsTrDiagnosticsLogDirTextBox").Text ?? string.Empty;
+        _settings.TrDiagnosticsLocalCachePath = RequireControl<TextBox>("SettingsTrDiagnosticsCachePathTextBox").Text ?? string.Empty;
         PersistArchiveSecretsFromUi();
+        PersistTrDiagnosticsSecretsFromUi();
         RaisePropertyChanged(nameof(ArchiveCacheStatusText));
+        RaisePropertyChanged(nameof(IsTrunkTroubleshootVisible));
+        RaisePropertyChanged(nameof(IsTrHealthInsightsEnabled));
+        RaisePropertyChanged(nameof(CanGenerateTrHealthInsights));
     }
 
     private T RequireControl<T>(string name) where T : Control
@@ -2395,8 +2930,25 @@ RaisePropertyChanged(nameof(IsWeekActive));
         _settings.ArchiveSftpPrivateKeyPassphrase = null;
         _settings.ArchiveSftpRemoteRoot = this.FindControl<TextBox>("SettingsArchiveRemoteRootTextBox")?.Text ?? _settings.ArchiveSftpRemoteRoot;
         _settings.ArchiveLocalCachePath = this.FindControl<TextBox>("SettingsArchiveCachePathTextBox")?.Text ?? _settings.ArchiveLocalCachePath;
+        _settings.TrDiagnosticsMode = this.FindControl<ComboBox>("SettingsTrDiagnosticsModeComboBox")?.SelectedIndex == 1 ? "ssh" : "local";
+        _settings.TrDiagnosticsHost = this.FindControl<TextBox>("SettingsTrDiagnosticsHostTextBox")?.Text ?? _settings.TrDiagnosticsHost;
+        if (int.TryParse(this.FindControl<TextBox>("SettingsTrDiagnosticsPortTextBox")?.Text, out var trPort))
+            _settings.TrDiagnosticsPort = trPort;
+        _settings.TrDiagnosticsUsername = this.FindControl<TextBox>("SettingsTrDiagnosticsUsernameTextBox")?.Text ?? _settings.TrDiagnosticsUsername;
+        _settings.TrDiagnosticsAuthMode = this.FindControl<ComboBox>("SettingsTrDiagnosticsAuthModeComboBox")?.SelectedIndex == 1
+            ? "privatekey"
+            : "password";
+        _settings.TrDiagnosticsPassword = null;
+        _settings.TrDiagnosticsPrivateKeyPath = this.FindControl<TextBox>("SettingsTrDiagnosticsPrivateKeyPathTextBox")?.Text ?? _settings.TrDiagnosticsPrivateKeyPath;
+        _settings.TrDiagnosticsPrivateKeyPassphrase = null;
+        _settings.TrDiagnosticsRemoteLogDir = this.FindControl<TextBox>("SettingsTrDiagnosticsLogDirTextBox")?.Text ?? _settings.TrDiagnosticsRemoteLogDir;
+        _settings.TrDiagnosticsLocalCachePath = this.FindControl<TextBox>("SettingsTrDiagnosticsCachePathTextBox")?.Text ?? _settings.TrDiagnosticsLocalCachePath;
         PersistArchiveSecretsFromUi();
+        PersistTrDiagnosticsSecretsFromUi();
         RaisePropertyChanged(nameof(ArchiveCacheStatusText));
+        RaisePropertyChanged(nameof(IsTrunkTroubleshootVisible));
+        RaisePropertyChanged(nameof(IsTrHealthInsightsEnabled));
+        RaisePropertyChanged(nameof(CanGenerateTrHealthInsights));
     }
 
     private async void OnArchiveTestConnectionClicked(object? sender, RoutedEventArgs e)
@@ -2784,6 +3336,34 @@ RaisePropertyChanged(nameof(IsWeekActive));
         var passphraseInput = this.FindControl<TextBox>("SettingsArchivePrivateKeyPassphraseTextBox")?.Text;
         if (!string.IsNullOrWhiteSpace(passphraseInput))
             _secretStore.StoreArchivePrivateKeyPassphrase(keyId, passphraseInput);
+    }
+
+    private string BuildTrDiagnosticsSecretKeyId()
+    {
+        var host = (_settings.TrDiagnosticsHost ?? string.Empty).Trim().ToLowerInvariant();
+        var user = (_settings.TrDiagnosticsUsername ?? string.Empty).Trim().ToLowerInvariant();
+        var logDir = (_settings.TrDiagnosticsRemoteLogDir ?? string.Empty).Trim().ToLowerInvariant();
+        return $"{host}:{_settings.TrDiagnosticsPort}:{user}:{logDir}";
+    }
+
+    private (string? Password, string? PrivateKeyPassphrase) ResolveTrDiagnosticsSecretsForCurrentSettings()
+    {
+        var keyId = BuildTrDiagnosticsSecretKeyId();
+        var password = _secretStore.LookupTrDiagnosticsPassword(keyId);
+        var passphrase = _secretStore.LookupTrDiagnosticsPrivateKeyPassphrase(keyId);
+        return (password, passphrase);
+    }
+
+    private void PersistTrDiagnosticsSecretsFromUi()
+    {
+        var keyId = BuildTrDiagnosticsSecretKeyId();
+        var passwordInput = this.FindControl<TextBox>("SettingsTrDiagnosticsPasswordTextBox")?.Text;
+        if (!string.IsNullOrWhiteSpace(passwordInput))
+            _secretStore.StoreTrDiagnosticsPassword(keyId, passwordInput);
+
+        var passphraseInput = this.FindControl<TextBox>("SettingsTrDiagnosticsPrivateKeyPassphraseTextBox")?.Text;
+        if (!string.IsNullOrWhiteSpace(passphraseInput))
+            _secretStore.StoreTrDiagnosticsPrivateKeyPassphrase(keyId, passphraseInput);
     }
 
     private async Task LoadArchiveSessionAsync(List<string> localRoots, string archiveName)
@@ -3799,7 +4379,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
         }
     }
 
-    private void SafeUiPost(Action action)
+    private void SafeUiPost(Action action, DispatcherPriority? priority = null)
     {
         if (_isClosing)
             return;
@@ -3817,7 +4397,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
             {
                 // Swallow UI-update races during teardown.
             }
-        });
+        }, priority ?? DispatcherPriority.Normal);
     }
 
     private async Task ApplySettingsAndRestartAsync(Settings newSettings)
@@ -3856,6 +4436,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
 
             if (_callManager != null && _callManager.IsStarted())
             {
+                SafeUiPost(() => SetTrServerListening(false));
                 await Task.Run(() =>
                 {
                     _callManager.Stop(block: true);
@@ -3872,12 +4453,14 @@ RaisePropertyChanged(nameof(IsWeekActive));
             StatusText = "Settings applied";
             _serverStatusText = "Server: Running on port " + _settings.ListenPort;
             ServerInfo = $"Port {_settings.ListenPort}";
+            SetTrServerListening(true);
             RaisePropertyChanged(nameof(ServerStatusText));
             RaisePropertyChanged(nameof(ServerInfo));
         }
         catch (Exception ex)
         {
             StatusText = $"Error applying settings: {ex.Message}";
+            SetTrServerListening(false);
         }
         finally
         {
@@ -4439,6 +5022,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
                     _serverStatusText = "Server: Running on port " + _settings.ListenPort;
                     ServerInfo = $"Port {_settings.ListenPort}";
                     _connectionStatus = "Connection: Ready";
+                    SetTrServerListening(true);
                     TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, $"Server initialized on port {_settings.ListenPort}");
 
                     // Prime radio 24h view from persisted capture history at startup.
@@ -4494,6 +5078,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
                     StatusText = errorMsg;
                     _serverStatusText = errorServerStatus;
                     ServerInfo = errorInfo;
+                    SetTrServerListening(false);
                     RaisePropertyChanged(nameof(ServerStatusText));
                     RaisePropertyChanged(nameof(ServerInfo));
                 });
@@ -4516,6 +5101,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
 
             RadioStatusText = $"New call: {call.FriendlyTalkgroup} @ {call.FriendlyFrequency}";
             CallCountText = $"Calls: {_callsReceivedCount + 1}";
+            MarkTrCallReceived();
             TraceLogger.Trace(TraceLoggerType.MainWindow, TraceEventType.Information, 
                 $"Call received: {call.FriendlyTalkgroup} @ {call.FriendlyFrequency} ({call.Duration}s)");
 
@@ -4525,6 +5111,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
             int insertIndexLive = GetInsertIndexInList(_liveCalls, call);
             _liveCalls.Insert(insertIndexLive, call);
             PruneLiveMemoryWindow();
+            PulseCallDestination(call);
             if (!IsArchiveSessionActive && _currentFilter == "24h")
             {
                 ScheduleAdaptiveLiveUiRefresh();
@@ -4835,7 +5422,6 @@ RaisePropertyChanged(nameof(IsWeekActive));
                 break;
 
             await UpdateUsageTextAsync();
-            LoadTroubleshootLogs();
         }
     }
 
@@ -5054,7 +5640,12 @@ private string _statusText = "Initializing...";
     public string ServerStatusText
     {
         get { return _serverStatusText; }
-        set { _serverStatusText = value; RaisePropertyChanged(); }
+        set
+        {
+            _serverStatusText = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(TrServerToolTipText));
+        }
     }
 
     public string ConnectionStatus
@@ -5473,6 +6064,8 @@ private string _statusText = "Initializing...";
     {
         try
         {
+            _pulseShutdownCts.Cancel();
+
             // Stop audio playback first
             StopAudio();
 
@@ -5685,7 +6278,11 @@ private string _statusText = "Initializing...";
     private void OnSectionTroubleshootClicked(object? sender, RoutedEventArgs e)
     {
         SelectedSection = MainSection.Troubleshoot;
-        LoadTroubleshootLogs();
+        if (!_hasLoadedTrTroubleshootOnce)
+        {
+            _hasLoadedTrTroubleshootOnce = true;
+            LoadTroubleshootLogs();
+        }
         MenuSpecificStatusText = "Troubleshoot";
     }
 
@@ -5721,51 +6318,170 @@ private string _statusText = "Initializing...";
         ToggleSnoozeMenu();
     }
 
-    private async void OnRestartTrunkRecorderClicked(object? sender, RoutedEventArgs e)
+    private void OnTrunkTroubleshootTabSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        if (sender is not TabControl tabControl || tabControl.SelectedItem is not TabItem tabItem)
             return;
 
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "/bin/bash",
-                ArgumentList = { "-lc", "sudo systemctl restart trunk-recorder" },
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var process = Process.Start(psi);
-            if (process != null)
-            {
-                await process.WaitForExitAsync();
-            }
-            MenuSpecificStatusText = "Trunk recorder restart requested";
-            LoadTroubleshootLogs();
-        }
-        catch (Exception ex)
-        {
-            MenuSpecificStatusText = $"Restart failed: {ex.Message}";
-        }
-    }
-
-    private async void OnCopyTroubleshootLogClicked(object? sender, RoutedEventArgs e)
-    {
-        var top = TopLevel.GetTopLevel(this);
-        if (top?.Clipboard == null)
+        _isTrunkLogOutputSelected = string.Equals(tabItem.Header?.ToString(), "Log Output", StringComparison.OrdinalIgnoreCase);
+        if (!_isTrunkLogOutputSelected)
             return;
 
-        var text = $"{TrunkRecorderHealthText}{Environment.NewLine}{Environment.NewLine}{TrunkRecorderLogText}{Environment.NewLine}{Environment.NewLine}{PizzaPiLogText}";
-        await top.Clipboard.SetTextAsync(text);
-        MenuSpecificStatusText = "Troubleshoot logs copied";
+        TrunkRecorderLogText = string.IsNullOrWhiteSpace(_pendingTrunkRecorderLogText)
+            ? "Log output has not been loaded yet. Refresh health first."
+            : _pendingTrunkRecorderLogText;
+        RaisePropertyChanged(nameof(TrunkRecorderLogText));
     }
 
     private void OnRefreshTrHealthClicked(object? sender, RoutedEventArgs e)
     {
         LoadTroubleshootLogs();
         MenuSpecificStatusText = "TR health refreshed";
+    }
+
+    private async void OnGenerateTrHealthInsightsClicked(object? sender, RoutedEventArgs e)
+    {
+        await GenerateTrHealthInsightsAsync();
+    }
+
+    private async Task GenerateTrHealthInsightsAsync()
+    {
+        if (!IsTrHealthInsightsEnabled)
+        {
+            TrHealthInsightsText = "LM Link is not configured. Enable LM Link in Settings > Insights to use this tab.";
+            return;
+        }
+
+        if (_trHealthRows.Count == 0)
+        {
+            TrHealthInsightsText = "No TR health data loaded yet. Click Refresh Health first.";
+            return;
+        }
+
+        IsTrHealthInsightsBusy = true;
+        TrHealthInsightsText = "Generating TR health recommendation...";
+        MenuSpecificStatusText = "Generating TR health recommendation...";
+        try
+        {
+            using var http = new HttpClient
+            {
+                Timeout = Timeout.InfiniteTimeSpan
+            };
+            var endpoint = LmLinkClient.BuildEndpoint(_settings);
+            var model = _settings.LmLinkModel ?? string.Empty;
+            var prompt = BuildTrHealthInsightsPrompt();
+            var payload = new
+            {
+                model,
+                temperature = 0.2,
+                messages = new object[]
+                {
+                    new { role = "system", content = "You are a radio systems reliability analyst. Be concise and practical." },
+                    new { role = "user", content = prompt }
+                }
+            };
+            var json = JsonConvert.SerializeObject(payload);
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            if (!string.IsNullOrWhiteSpace(_settings.LmLinkApiKey))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _settings.LmLinkApiKey);
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(10000, _settings.LmLinkTimeoutMs)));
+            using var response = await http.SendAsync(request, cts.Token);
+            var responseText = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"LM Link HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+            var parsed = JObject.Parse(responseText);
+            var content = parsed["choices"]?.FirstOrDefault()?["message"]?["content"]?.ToString();
+            TrHealthInsightsText = string.IsNullOrWhiteSpace(content)
+                ? "LM Link returned no insight text."
+                : content.Trim();
+            MenuSpecificStatusText = "TR health recommendation generated";
+        }
+        catch (Exception ex)
+        {
+            TrHealthInsightsText = $"TR insights generation failed: {ex.Message}";
+            MenuSpecificStatusText = $"TR insights generation failed: {ex.Message}";
+        }
+        finally
+        {
+            IsTrHealthInsightsBusy = false;
+        }
+    }
+
+    private string BuildTrHealthInsightsPrompt()
+    {
+        var windowStart = DateTime.UtcNow.AddHours(-24);
+        var recentRows = _trHealthRows.Where(r => r.EndUtc >= windowStart).ToList();
+        var global24 = recentRows.Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)).ToList();
+        var systems24 = recentRows
+            .Where(r => IsDisplaySystemScope(r.Scope))
+            .GroupBy(r => r.Scope)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { Name = g.Key, Agg = AggregateTrHealthRows(g.ToList()) })
+            .ToList();
+        var globalAll = _trHealthRows.Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)).ToList();
+        var baselineKey = (SelectedTrHealthBaseline ?? "7d").Trim().ToLowerInvariant();
+        var baselineDays = baselineKey == "14d" ? 14 : baselineKey == "30d" ? 30 : 7;
+        var baselineStart = DateTime.UtcNow.AddDays(-baselineDays);
+        var baselineEnd = DateTime.UtcNow.AddHours(-24);
+        var baselineRows = globalAll.Where(r => r.EndUtc >= baselineStart && r.EndUtc < baselineEnd).ToList();
+        var globalRecent = recentRows.Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        static string PartOfDay(DateTime localTime)
+        {
+            var h = localTime.Hour;
+            if (h >= 5 && h < 12) return "morning";
+            if (h >= 12 && h < 18) return "afternoon";
+            return "night";
+        }
+
+        var todAgg = globalRecent
+            .GroupBy(r => PartOfDay(r.EndUtc.ToLocalTime()))
+            .ToDictionary(g => g.Key, g => AggregateTrHealthRows(g.ToList()), StringComparer.OrdinalIgnoreCase);
+
+        var dailyAgg = globalAll
+            .Where(r => r.EndUtc >= DateTime.UtcNow.AddDays(-8))
+            .GroupBy(r => r.EndUtc.ToLocalTime().Date)
+            .OrderBy(g => g.Key)
+            .Select(g => (Date: g.Key, Agg: AggregateTrHealthRows(g.ToList())))
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Summarize trunk-recorder health issues and recommendations in <= 10 bullets.");
+        sb.AppendLine("Include top 3 issues, likely root causes, and 3 concrete next actions.");
+        sb.AppendLine("Include a short time-of-day breakdown (morning/afternoon/night) and day-over-day trend notes.");
+        sb.AppendLine("Health summary window is LAST 24H ONLY.");
+        if (global24.Count > 0)
+        {
+            var agg = AggregateTrHealthRows(global24);
+            sb.AppendLine($"Global24h: decodeSamples={agg.DecodeSampleLines} decode0={agg.DecodeZeroPercent:F2}% avgDecode={FormatDecodeRateWithConfidence(agg)} retunes={agg.Retunes} calls={agg.CallsConcluded} noTx={agg.NoTxRecorded} stops={agg.SampleStops} unableSource={agg.UnableSource}");
+        }
+        if (baselineRows.Count > 0)
+        {
+            var agg = AggregateTrHealthRows(baselineRows);
+            sb.AppendLine($"GlobalBaseline{baselineDays}d(prior to current 24h): decodeSamples={agg.DecodeSampleLines} decode0={agg.DecodeZeroPercent:F2}% avgDecode={FormatDecodeRateWithConfidence(agg)} retunes={agg.Retunes} noTx={agg.NoTxRecorded} stops={agg.SampleStops}");
+        }
+        foreach (var key in new[] { "morning", "afternoon", "night" })
+        {
+            if (!todAgg.TryGetValue(key, out var agg))
+                continue;
+            sb.AppendLine($"TimeOfDay24h[{key}]: decode0={agg.DecodeZeroPercent:F2}% avgDecode={FormatDecodeRateWithConfidence(agg)} retunes={agg.Retunes} noTx={agg.NoTxRecorded} stops={agg.SampleStops}");
+        }
+        if (dailyAgg.Count >= 2)
+        {
+            sb.AppendLine("DayOverDay(last 7d):");
+            foreach (var day in dailyAgg)
+            {
+                sb.AppendLine($"- {day.Date:yyyy-MM-dd}: decode0={day.Agg.DecodeZeroPercent:F2}% avgDecode={FormatDecodeRateWithConfidence(day.Agg)} retunes={day.Agg.Retunes} noTx={day.Agg.NoTxRecorded} stops={day.Agg.SampleStops}");
+            }
+        }
+        sb.AppendLine("Decode-rate confidence: treat avgDecode as low-confidence when decodeSamples < 20.");
+        sb.AppendLine("Systems24h:");
+        foreach (var s in systems24.Take(8))
+            sb.AppendLine($"- {s.Name}: decodeSamples={s.Agg.DecodeSampleLines} decode0={s.Agg.DecodeZeroPercent:F2}% avgDecode={FormatDecodeRateWithConfidence(s.Agg)} calls={s.Agg.CallsConcluded} retunes={s.Agg.Retunes} noTx={s.Agg.NoTxRecorded} stops={s.Agg.SampleStops}");
+        return sb.ToString();
     }
 
     private static string NormalizeTroubleshootTraceLevel(string? value)
@@ -5827,8 +6543,10 @@ private string _statusText = "Initializing...";
         RaisePropertyChanged(nameof(SelectedTroubleshootTraceLevel));
     }
 
-    private void LoadTroubleshootLogs()
+    private async void LoadTroubleshootLogs()
     {
+        var latestDiagnostics = string.Empty;
+        IsTrTroubleshootLoading = true;
         try
         {
             TraceLogger.Flush();
@@ -5837,45 +6555,151 @@ private string _statusText = "Initializing...";
             RefreshPizzaPiLogOptions();
             LoadSelectedPizzaPiLogText();
 
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            ApplyArchiveSettingsFromTabsIfAvailable();
+            var secrets = ResolveTrDiagnosticsSecretsForCurrentSettings();
+            latestDiagnostics = BuildTrDiagnosticsStartupText();
+            TrunkRecorderHealthText = "Loading TR health summary...";
+            SetTrHealthSummaryHeader("Loading TR health summary", string.Empty, string.Empty, string.Empty);
+            TrHealthMetrics.Clear();
+            TrHealthSystemRows.Clear();
+            TrHealthRemedyRows.Clear();
+            TrHealthHourlyRows.Clear();
+            TrHealthCharts.Clear();
+            TrunkRecorderDiagnosticsText = latestDiagnostics;
+            TrunkRecorderLogText = "Log output will load when the Log Output tab is selected.";
+            _pendingTrunkRecorderLogText = string.Empty;
+            RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+            RaisePropertyChanged(nameof(TrunkRecorderDiagnosticsText));
+            RaisePropertyChanged(nameof(TrunkRecorderLogText));
+            MenuSpecificStatusText = "Loading TR diagnostics and metrics...";
+            var progressBuffer = new StringBuilder();
+            var lastUiProgressUpdate = DateTime.UtcNow;
+            var progress = new Progress<string>(message =>
             {
-                var psi = new ProcessStartInfo
+                if (!string.IsNullOrWhiteSpace(message))
+                    progressBuffer.AppendLine(message);
+                var now = DateTime.UtcNow;
+                var shouldFlush = (now - lastUiProgressUpdate).TotalMilliseconds >= 250
+                    || message.Contains("WARNING", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("Wrote summary", StringComparison.OrdinalIgnoreCase);
+                if (shouldFlush)
                 {
-                    FileName = "/bin/bash",
-                    ArgumentList = { "-lc", "tmux capture-pane -pt trunklogs -S -250" },
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    var stdout = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(3000);
-                    TrunkRecorderLogText = string.IsNullOrWhiteSpace(stdout) ? "No trunk recorder log output." : stdout;
-                    RaisePropertyChanged(nameof(TrunkRecorderLogText));
+                    latestDiagnostics = BuildTrDiagnosticsStartupText() + Environment.NewLine + Environment.NewLine + progressBuffer.ToString().TrimEnd();
+                    TrunkRecorderDiagnosticsText = latestDiagnostics;
+                    RaisePropertyChanged(nameof(TrunkRecorderDiagnosticsText));
+                    lastUiProgressUpdate = now;
                 }
-            }
-
-            LoadTrHealthSummaryText();
+                var latestLine = message;
+                if (!string.IsNullOrWhiteSpace(latestLine))
+                    MenuSpecificStatusText = $"Loading TR diagnostics... {latestLine}";
+            });
+            var diagnostics = await new TrDiagnosticsService(_settings, secrets.Password, secrets.PrivateKeyPassphrase)
+                .LoadAsync(progress, ForceRawLogDiagnostics, CancellationToken.None);
+            _pendingTrunkRecorderLogText = diagnostics.RecentLogText;
+            TrunkRecorderLogText = _isTrunkLogOutputSelected
+                ? _pendingTrunkRecorderLogText
+                : "Log output loaded in cache. Select the Log Output tab to display it.";
+            RaisePropertyChanged(nameof(TrunkRecorderLogText));
+            LoadTrHealthSummaryText(diagnostics.SummaryCsvText, diagnostics.SummarySource);
+            TrunkRecorderDiagnosticsText = BuildTrDiagnosticsReportText(diagnostics.DiagnosticsText);
+            RaisePropertyChanged(nameof(TrunkRecorderDiagnosticsText));
 
             var pizzaHasError = PizzaPiLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
-            var trunkHasError = TrunkRecorderLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
-            var trHealthHasIssue = TrunkRecorderHealthText.Contains("CRITICAL", StringComparison.OrdinalIgnoreCase)
-                || TrunkRecorderHealthText.Contains("sample-stops>0", StringComparison.OrdinalIgnoreCase);
+            var trunkHasError = _pendingTrunkRecorderLogText.Contains("error", StringComparison.OrdinalIgnoreCase);
             var retuneCount = System.Text.RegularExpressions.Regex.Matches(
-                TrunkRecorderLogText ?? string.Empty,
+                _pendingTrunkRecorderLogText ?? string.Empty,
                 "Retuning to Control Channel",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count;
-            HasTroubleshootIssue = pizzaHasError || trunkHasError || trHealthHasIssue || retuneCount >= 3;
+            HasTroubleshootIssue = pizzaHasError || trunkHasError || _hasTrHealthIssue || retuneCount >= 3;
             RaisePropertyChanged(nameof(HasTroubleshootIssue));
             RaisePropertyChanged(nameof(TroubleshootMenuText));
+            MenuSpecificStatusText = "TR diagnostics loaded";
         }
         catch (Exception ex)
         {
             MenuSpecificStatusText = $"Troubleshoot log load failed: {ex.Message}";
+            TrunkRecorderHealthText = "TR health summary unavailable.";
+            SetTrHealthSummaryHeader("TR health summary unavailable", string.Empty, string.Empty, string.Empty);
+            TrHealthMetrics.Clear();
+            TrHealthSystemRows.Clear();
+            TrHealthRemedyRows.Clear();
+            TrHealthHourlyRows.Clear();
+            TrHealthCharts.Clear();
+            TrunkRecorderDiagnosticsText = BuildTrDiagnosticsFailureText(ex, latestDiagnostics);
+            TrunkRecorderLogText = $"TR diagnostics load failed: {ex.Message}";
+            RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+            RaisePropertyChanged(nameof(TrunkRecorderDiagnosticsText));
+            RaisePropertyChanged(nameof(TrunkRecorderLogText));
         }
+        finally
+        {
+            IsTrTroubleshootLoading = false;
+        }
+    }
+
+    private string BuildTrDiagnosticsReportText(string diagnosticsText)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(_trunkRecorderRemediesText))
+        {
+            sb.AppendLine("Suggested remedies");
+            sb.AppendLine(_trunkRecorderRemediesText.TrimEnd());
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("Diagnostics transcript");
+        sb.AppendLine(string.IsNullOrWhiteSpace(diagnosticsText) ? "No diagnostics transcript available." : diagnosticsText);
+        return sb.ToString();
+    }
+
+    private string BuildTrDiagnosticsStartupText()
+    {
+        var mode = string.Equals(_settings.TrDiagnosticsMode, "ssh", StringComparison.OrdinalIgnoreCase)
+            ? "SSH"
+            : "Local";
+        var sb = new StringBuilder();
+        sb.AppendLine("TR diagnostics loading...");
+        sb.AppendLine($"mode: {mode}");
+        sb.AppendLine($"diagnostics source: {(ForceRawLogDiagnostics ? "raw logs (forced by UI)" : "collector CSV (auto-fallback to raw logs)")}");
+        sb.AppendLine($"log directory: {(_settings.TrDiagnosticsRemoteLogDir ?? string.Empty)}");
+        sb.AppendLine($"cache: {(_settings.TrDiagnosticsLocalCachePath ?? string.Empty)}");
+        if (mode == "SSH")
+        {
+            sb.AppendLine($"host: {_settings.TrDiagnosticsHost}:{(_settings.TrDiagnosticsPort <= 0 ? 22 : _settings.TrDiagnosticsPort)}");
+            sb.AppendLine($"username: {_settings.TrDiagnosticsUsername}");
+            sb.AppendLine($"auth: {_settings.TrDiagnosticsAuthMode}");
+            sb.AppendLine($"password stored: {(!string.IsNullOrWhiteSpace(ResolveTrDiagnosticsSecretsForCurrentSettings().Password) ? "yes" : "no")}");
+            sb.AppendLine($"private-key passphrase stored: {(ResolveTrDiagnosticsSecretsForCurrentSettings().PrivateKeyPassphrase != null ? "yes" : "no")}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private string BuildTrDiagnosticsFailureText(Exception ex, string latestDiagnostics)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("TR diagnostics failed.");
+        sb.AppendLine($"error: {ex.Message}");
+        if (ex.InnerException != null)
+            sb.AppendLine($"inner: {ex.InnerException.Message}");
+        sb.AppendLine();
+        sb.AppendLine(string.IsNullOrWhiteSpace(latestDiagnostics)
+            ? BuildTrDiagnosticsStartupText()
+            : latestDiagnostics);
+        return sb.ToString();
+    }
+
+    private void SetTrHealthSummaryHeader(string title, string window, string lastWindow, string source)
+    {
+        TrunkRecorderHealthTitle = title;
+        TrunkRecorderHealthWindow = window;
+        TrunkRecorderHealthLastWindow = lastWindow;
+        TrunkRecorderHealthSource = source;
+        RaisePropertyChanged(nameof(TrunkRecorderHealthTitle));
+        RaisePropertyChanged(nameof(TrunkRecorderHealthWindow));
+        RaisePropertyChanged(nameof(TrunkRecorderHealthLastWindow));
+        RaisePropertyChanged(nameof(TrunkRecorderHealthSource));
     }
 
     private void RefreshPizzaPiLogOptions()
@@ -5988,18 +6812,31 @@ private string _statusText = "Initializing...";
         }
     }
 
-    private void LoadTrHealthSummaryText()
+    private void LoadTrHealthSummaryText(string? csvText = null, string? sourcePath = null)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        _hasTrHealthIssue = false;
+        TrHealthMetrics.Clear();
+        TrHealthSystemRows.Clear();
+        TrHealthRemedyRows.Clear();
+        TrHealthHourlyRows.Clear();
+        TrHealthCharts.Clear();
+
+        if (csvText == null && !RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             TrunkRecorderHealthText = "TR health summary available only on Linux hosts.";
+            SetTrHealthSummaryHeader("TR health summary unavailable", string.Empty, string.Empty, "Available only on Linux hosts unless SSH diagnostics is configured.");
             RaisePropertyChanged(nameof(TrunkRecorderHealthText));
             return;
         }
 
-        if (!TryReadTextFileShared(TrHealthSummaryCsvPath, out var csvText) || string.IsNullOrWhiteSpace(csvText))
+        var source = string.IsNullOrWhiteSpace(sourcePath) ? TrHealthSummaryCsvPath : sourcePath;
+        if (csvText == null && !TryReadTextFileShared(TrHealthSummaryCsvPath, out csvText))
+            csvText = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(csvText))
         {
-            TrunkRecorderHealthText = $"TR health summary unavailable. Expected file: {TrHealthSummaryCsvPath}";
+            TrunkRecorderHealthText = $"TR health summary unavailable. Expected file: {source}";
+            SetTrHealthSummaryHeader("TR health summary unavailable", string.Empty, string.Empty, $"Expected file: {source}");
             RaisePropertyChanged(nameof(TrunkRecorderHealthText));
             return;
         }
@@ -6007,7 +6844,8 @@ private string _statusText = "Initializing...";
         var rows = ParseTrHealthRows(csvText);
         if (rows.Count == 0)
         {
-            TrunkRecorderHealthText = $"TR health summary has no usable rows: {TrHealthSummaryCsvPath}";
+            TrunkRecorderHealthText = $"TR health summary has no usable rows: {source}";
+            SetTrHealthSummaryHeader("TR health summary unavailable", string.Empty, string.Empty, $"No usable rows: {source}");
             RaisePropertyChanged(nameof(TrunkRecorderHealthText));
             return;
         }
@@ -6017,38 +6855,80 @@ private string _statusText = "Initializing...";
         if (recentRows.Count == 0)
         {
             TrunkRecorderHealthText = $"TR health summary has no rows in the last {TrHealthWindowLabel}.";
+            SetTrHealthSummaryHeader("TR health summary unavailable", TrHealthWindowLabel, string.Empty, $"No rows in selected window. Source: {source}");
             RaisePropertyChanged(nameof(TrunkRecorderHealthText));
             return;
         }
 
         var sb = new StringBuilder();
+        _trunkRecorderRemediesText = string.Empty;
         sb.AppendLine($"TR health summary ({TrHealthWindowLabel})");
-        sb.AppendLine($"source: {TrHealthSummaryCsvPath}");
+        sb.AppendLine($"source: {source}");
+        sb.AppendLine();
 
         var globalRows = recentRows
             .Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase))
             .OrderBy(r => r.EndUtc)
             .ToList();
+        TrHealthAggregate? globalAggForRemedies = null;
         if (globalRows.Count > 0)
         {
             var globalAgg = AggregateTrHealthRows(globalRows);
-            var severity = globalAgg.DecodeZeroPercent >= 40.0 || globalAgg.SampleStops > 0 ? "CRITICAL"
-                : globalAgg.DecodeZeroPercent >= 25.0 ? "WARNING"
-                : "OK";
-            sb.AppendLine(
-                $"GLOBAL [{severity}] windows={globalAgg.Windows} decode0%={globalAgg.DecodeZeroPercent:F2} avgDecode={globalAgg.AvgDecodeRate:F2}/sec retunes={globalAgg.Retunes} calls={globalAgg.CallsConcluded} noTx={globalAgg.NoTxRecorded} sample-stops={globalAgg.SampleStops} unable-source={globalAgg.UnableSource}");
+            globalAggForRemedies = globalAgg;
+            _hasTrHealthIssue = globalAgg.DecodeZeroPercent >= 25.0
+                || globalAgg.SampleStops > 0
+                || globalAgg.UnableSource > 0
+                || globalAgg.NoTxRecorded > 0;
+            var summaryLabel = _hasTrHealthIssue ? "Issues detected" : "No obvious issues";
+            sb.AppendLine($"Summary: {summaryLabel}");
+            sb.AppendLine();
+            sb.AppendLine("Metric                         Value");
+            sb.AppendLine("-----------------------------------------------");
+            sb.AppendLine($"5-minute windows               {globalAgg.Windows}");
+            sb.AppendLine($"Decode sample lines            {globalAgg.DecodeSampleLines}");
+            sb.AppendLine($"Decode samples at 0/sec        {globalAgg.DecodeZeroPercent:F2}%");
+            sb.AppendLine($"Average decode rate            {FormatDecodeRateWithConfidence(globalAgg)}");
+            sb.AppendLine($"Control-channel retunes        {globalAgg.Retunes}");
+            sb.AppendLine($"Recorded calls concluded       {globalAgg.CallsConcluded}");
+            sb.AppendLine($"No transmissions recorded      {globalAgg.NoTxRecorded}");
+            sb.AppendLine($"Sample-source stops            {globalAgg.SampleStops}");
+            sb.AppendLine($"No source covering frequency   {globalAgg.UnableSource}");
+            sb.AppendLine();
+
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "Decode samples at 0/sec", Value = $"{globalAgg.DecodeZeroPercent:F2}%", Notes = globalAgg.DecodeZeroPercent >= 25 ? "Frequent zero decode samples suggest unstable control-channel decode." : "Lower is better.", IsIssue = globalAgg.DecodeZeroPercent >= 25.0 });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "Average decode rate", Value = FormatDecodeRateWithConfidence(globalAgg), Notes = "Computed from Control Channel Message Decode Rate lines.", IsIssue = HasSufficientDecodeSamples(globalAgg) && globalAgg.AvgDecodeRate <= 0.10 });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "Decode sample lines", Value = globalAgg.DecodeSampleLines.ToString("N0"), Notes = "Decode-rate confidence is low when this is small (shown as N/A).", IsIssue = globalAgg.DecodeSampleLines < 20 });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "Control-channel retunes", Value = globalAgg.Retunes.ToString("N0"), Notes = "High counts can indicate weak/unstable control-channel reception or incorrect channel list.", IsIssue = globalAgg.Retunes >= Math.Max(20, globalAgg.Windows * 4) });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "Recorded calls concluded", Value = globalAgg.CallsConcluded.ToString("N0"), Notes = "Count of Concluding Recorded Call lines." });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "No transmissions recorded", Value = globalAgg.NoTxRecorded.ToString("N0"), Notes = "Includes no transmissions and recorder capacity failures.", IsIssue = globalAgg.NoTxRecorded > 0 });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "Sample-source stops", Value = globalAgg.SampleStops.ToString("N0"), Notes = "Nonzero means trunk-recorder reported a source stopped receiving samples.", IsIssue = globalAgg.SampleStops > 0 });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "No source covering frequency", Value = globalAgg.UnableSource.ToString("N0"), Notes = "Usually points to source min/max coverage or SDR count/configuration.", IsIssue = globalAgg.UnableSource > 0 });
+            TrHealthMetrics.Add(new TrHealthMetricRow { Metric = "5-minute windows parsed", Value = globalAgg.Windows.ToString("N0"), Notes = "Number of summary buckets generated from logs." });
         }
 
         var perSystem = recentRows
             .Where(r => !string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)
-                && !r.Scope.StartsWith("source:", StringComparison.OrdinalIgnoreCase))
+                && IsDisplaySystemScope(r.Scope))
             .GroupBy(r => r.Scope)
             .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
         foreach (var group in perSystem)
         {
             var agg = AggregateTrHealthRows(group.ToList());
             sb.AppendLine(
-                $"{group.Key}: windows={agg.Windows} decode0%={agg.DecodeZeroPercent:F2} avgDecode={agg.AvgDecodeRate:F2}/sec retunes={agg.Retunes} calls={agg.CallsConcluded} noTx={agg.NoTxRecorded}");
+                $"{group.Key}: windows={agg.Windows} decodeSamples={agg.DecodeSampleLines} decode0%={agg.DecodeZeroPercent:F2} avgDecode={FormatDecodeRateWithConfidence(agg)} retunes={agg.Retunes} calls={agg.CallsConcluded} noTx={agg.NoTxRecorded}");
+            var systemIssue = agg.DecodeZeroPercent >= 25.0
+                || agg.SampleStops > 0
+                || agg.UnableSource > 0
+                || agg.NoTxRecorded > 0
+                || (agg.CallsConcluded >= 100 && HasSufficientDecodeSamples(agg) && agg.AvgDecodeRate <= 0.10)
+                || (agg.CallsConcluded >= 100 && agg.DecodeSampleLines < 20);
+            TrHealthSystemRows.Add(new TrHealthMetricRow
+            {
+                Metric = group.Key,
+                Value = systemIssue ? "Issues detected" : "No obvious issues",
+                Notes = $"decodeSamples={agg.DecodeSampleLines:N0}, decode0={agg.DecodeZeroPercent:F2}%, avg={FormatDecodeRateWithConfidence(agg)}, retunes={agg.Retunes:N0}, calls={agg.CallsConcluded:N0}, noTx={agg.NoTxRecorded:N0}",
+                IsIssue = systemIssue
+            });
         }
 
         var perSource = recentRows
@@ -6068,9 +6948,594 @@ private string _statusText = "Initializing...";
         }
 
         var last = recentRows.OrderByDescending(r => r.EndUtc).First();
+        _trHealthRows = rows;
+        UpdateTrHealthBaselineHistory(rows, source);
+        RebuildTrHealthCharts();
         sb.AppendLine($"last window end: {last.EndUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
+        if (globalAggForRemedies != null)
+            _trunkRecorderRemediesText = BuildTrHealthRemedies(globalAggForRemedies);
+        foreach (var remedy in ParseRemedies(_trunkRecorderRemediesText))
+        {
+            TrHealthRemedyRows.Add(remedy);
+        }
+        if (TrHealthSystemRows.Count == 0)
+        {
+            TrHealthSystemRows.Add(new TrHealthMetricRow { Metric = "No system rows", Value = "-", Notes = "No system-scoped log lines were parsed for this window." });
+        }
+        SetTrHealthSummaryHeader(
+            _hasTrHealthIssue ? "TR health summary: issues detected" : "TR health summary: no obvious issues",
+            $"Window: {TrHealthWindowLabel} (health summary uses last 24h only)",
+            $"Last parsed bucket: {last.EndUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}",
+            $"Source: {source}");
         TrunkRecorderHealthText = sb.ToString();
         RaisePropertyChanged(nameof(TrunkRecorderHealthText));
+    }
+
+    private static bool IsDisplaySystemScope(string? scope)
+    {
+        if (string.IsNullOrWhiteSpace(scope))
+            return false;
+        var value = scope.Trim();
+        if (string.Equals(value, "global", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (value.StartsWith("source", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (value.All(char.IsDigit))
+            return false;
+        return value.Any(char.IsLetter);
+    }
+
+    private void RebuildTrHealthCharts()
+    {
+        TrHealthHourlyRows.Clear();
+        TrHealthCharts.Clear();
+        if (_trHealthRows.Count == 0)
+            return;
+
+        var windowStart = DateTime.UtcNow.AddHours(-24);
+        var recentRows = _trHealthRows.Where(r => r.EndUtc >= windowStart).ToList();
+        var globalRows = recentRows
+            .Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.EndUtc)
+            .ToList();
+        var baselineRows = UsePersistedBaselineHistory && _trHealthHistoryRows.Count > 0
+            ? _trHealthHistoryRows
+            : _trHealthRows;
+        BuildHourlyTrendRows(baselineRows, globalRows, recentRows, TrHealthShowBySystem, SelectedTrHealthBaseline);
+    }
+
+    private void UpdateTrHealthBaselineHistory(List<TrHealthRow> rows, string sourcePath)
+    {
+        try
+        {
+            var baseDir = Path.GetDirectoryName(sourcePath);
+            if (string.IsNullOrWhiteSpace(baseDir))
+                return;
+            _trHealthHistoryPath = Path.Combine(baseDir, "baseline_history_5m.csv");
+            var existing = File.Exists(_trHealthHistoryPath)
+                ? ParseTrHealthRows(File.ReadAllText(_trHealthHistoryPath))
+                : new List<TrHealthRow>();
+            var map = new Dictionary<string, TrHealthRow>(StringComparer.Ordinal);
+            foreach (var row in existing)
+                map[$"{row.StartUtc:O}|{row.EndUtc:O}|{row.Scope}"] = row;
+            foreach (var row in rows)
+                map[$"{row.StartUtc:O}|{row.EndUtc:O}|{row.Scope}"] = row;
+            var merged = map.Values
+                .OrderBy(r => r.StartUtc)
+                .ThenBy(r => r.Scope, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _trHealthHistoryRows = merged;
+            File.WriteAllText(_trHealthHistoryPath, SerializeTrHealthRowsToCsv(merged));
+        }
+        catch
+        {
+            _trHealthHistoryRows = rows;
+        }
+    }
+
+    private static string SerializeTrHealthRowsToCsv(List<TrHealthRow> rows)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("ts_start,ts_end,scope,decode_lines,decode_zero,decode_nonzero,avg_decode_rate,grant_updates,retunes,calls_started,calls_concluded,update_not_grant,no_tx_recorded,sample_stops,unable_source,tuning_err_samples,tuning_err_avg_abs_hz,tuning_err_max_abs_hz");
+        foreach (var row in rows)
+        {
+            var decodeNonZero = Math.Max(0, row.DecodeLines - row.DecodeZero);
+            sb.AppendLine(string.Join(",", new[]
+            {
+                row.StartUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                row.EndUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                EscapeCsv(row.Scope),
+                row.DecodeLines.ToString(CultureInfo.InvariantCulture),
+                row.DecodeZero.ToString(CultureInfo.InvariantCulture),
+                decodeNonZero.ToString(CultureInfo.InvariantCulture),
+                row.AvgDecodeRate.ToString("F3", CultureInfo.InvariantCulture),
+                "0",
+                row.Retunes.ToString(CultureInfo.InvariantCulture),
+                "0",
+                row.CallsConcluded.ToString(CultureInfo.InvariantCulture),
+                row.UpdateNotGrant.ToString(CultureInfo.InvariantCulture),
+                row.NoTxRecorded.ToString(CultureInfo.InvariantCulture),
+                row.SampleStops.ToString(CultureInfo.InvariantCulture),
+                row.UnableSource.ToString(CultureInfo.InvariantCulture),
+                row.TuningErrSamples.ToString(CultureInfo.InvariantCulture),
+                row.TuningErrAvgAbsHz.ToString("F3", CultureInfo.InvariantCulture),
+                row.TuningErrMaxAbsHz.ToString("F3", CultureInfo.InvariantCulture)
+            }));
+        }
+        return sb.ToString();
+    }
+
+    private void BuildHourlyTrendRows(List<TrHealthRow> allRows, List<TrHealthRow> globalRows, List<TrHealthRow> recentRows, bool bySystem, string baselineSelection)
+    {
+        var hourly = globalRows
+            .GroupBy(r =>
+            {
+                var local = r.EndUtc.ToLocalTime();
+                return new DateTime(local.Year, local.Month, local.Day, local.Hour, 0, 0);
+            })
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var rows = g.ToList();
+                var agg = AggregateTrHealthRows(rows);
+                var decodeLines = rows.Sum(r => r.DecodeLines);
+                var decodeZero = rows.Sum(r => r.DecodeZero);
+                return (Hour: g.Key, Agg: agg, DecodeZero: decodeZero, DecodeLines: decodeLines);
+            })
+            .ToList();
+
+        if (hourly.Count == 0)
+            return;
+
+        var startLabel = hourly.First().Hour.ToString("MM-dd HH:00");
+        var endLabel = hourly.Last().Hour.ToString("MM-dd HH:00");
+        var allGlobalRows = allRows
+            .Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.EndUtc)
+            .ToList();
+
+        if (!bySystem)
+        {
+            TrHealthCharts.Add(BuildBaselineChart(
+            "Decode Zero Samples",
+            "Y axis: count of Control Channel Message Decode Rate samples at 0/sec",
+            hourly.Select(x => (x.Hour, (double)x.DecodeZero)).ToList(),
+            allGlobalRows,
+            rows => rows.Sum(r => (double)r.DecodeZero),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+            TrHealthCharts.Add(BuildBaselineChart(
+            "Average Decode Rate",
+            "Y axis: average Control Channel Message Decode Rate per second",
+            hourly.Select(x => (x.Hour, x.Agg.AvgDecodeRate)).ToList(),
+            allGlobalRows,
+            rows => AggregateTrHealthRows(rows).AvgDecodeRate,
+            baselineSelection,
+            "F1",
+            startLabel,
+            endLabel));
+            TrHealthCharts.Add(BuildBaselineChart(
+            "Control-Channel Retunes",
+            "Y axis: retune events per hour",
+            hourly.Select(x => (x.Hour, (double)x.Agg.Retunes)).ToList(),
+            allGlobalRows,
+            rows => rows.Sum(r => (double)r.Retunes),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+            TrHealthCharts.Add(BuildBaselineChart(
+            "No Transmissions Recorded",
+            "Y axis: calls with no recorded transmissions per hour",
+            hourly.Select(x => (x.Hour, (double)x.Agg.NoTxRecorded)).ToList(),
+            allGlobalRows,
+            rows => rows.Sum(r => (double)r.NoTxRecorded),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+            TrHealthCharts.Add(BuildBaselineChart(
+            "Sample Source Stops",
+            "Y axis: source stopped receiving samples events per hour",
+            hourly.Select(x => (x.Hour, (double)x.Agg.SampleStops)).ToList(),
+            allGlobalRows,
+            rows => rows.Sum(r => (double)r.SampleStops),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+            return;
+        }
+
+        var systemScopes = recentRows
+            .Where(r => IsDisplaySystemScope(r.Scope))
+            .GroupBy(r => r.Scope)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .Select(g => g.Key)
+            .ToList();
+        if (systemScopes.Count == 0)
+            return;
+
+        TrHealthCharts.Add(BuildSystemChart(
+            "Decode Zero Samples by System",
+            "Y axis: count of 0/sec decode samples per hour",
+            recentRows,
+            systemScopes,
+            rows => rows.Sum(r => r.DecodeZero),
+            allRows,
+            rows => rows.Sum(r => (double)r.DecodeZero),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+        TrHealthCharts.Add(BuildSystemChart(
+            "Average Decode Rate by System",
+            "Y axis: average Control Channel Message Decode Rate per second",
+            recentRows,
+            systemScopes,
+            rows => AggregateTrHealthRows(rows).AvgDecodeRate,
+            allRows,
+            rows => AggregateTrHealthRows(rows).AvgDecodeRate,
+            baselineSelection,
+            "F1",
+            startLabel,
+            endLabel));
+        TrHealthCharts.Add(BuildSystemChart(
+            "Retunes by System",
+            "Y axis: retune events per hour",
+            recentRows,
+            systemScopes,
+            rows => rows.Sum(r => r.Retunes),
+            allRows,
+            rows => rows.Sum(r => (double)r.Retunes),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+        TrHealthCharts.Add(BuildSystemChart(
+            "No Transmissions by System",
+            "Y axis: calls with no recorded transmissions per hour",
+            recentRows,
+            systemScopes,
+            rows => rows.Sum(r => r.NoTxRecorded),
+            allRows,
+            rows => rows.Sum(r => (double)r.NoTxRecorded),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+        TrHealthCharts.Add(BuildSystemChart(
+            "Sample Source Stops by System",
+            "Y axis: source stopped receiving samples events per hour",
+            recentRows,
+            systemScopes,
+            rows => rows.Sum(r => r.SampleStops),
+            allRows,
+            rows => rows.Sum(r => (double)r.SampleStops),
+            baselineSelection,
+            "N0",
+            startLabel,
+            endLabel));
+    }
+
+    private static TrHealthChartRow BuildBaselineChart(
+        string title,
+        string yAxisLabel,
+        List<(DateTime Hour, double Value)> current24hPoints,
+        List<TrHealthRow> allGlobalRows,
+        Func<List<TrHealthRow>, double> selector,
+        string baselineSelection,
+        string valueFormat,
+        string startLabel,
+        string endLabel)
+    {
+        var series = new List<(string Label, List<(DateTime Hour, double Value)> Points)> { (string.Empty, current24hPoints) };
+        var baseline = BuildSelectedBaselineSeries(
+            allGlobalRows,
+            selector,
+            baselineSelection,
+            current24hPoints.Select(p => p.Hour).ToList());
+        if (baseline.Points.Count > 0)
+            series.Add((string.Empty, baseline.Points));
+        return BuildMultiSeriesChart(title, yAxisLabel, series, valueFormat, startLabel, endLabel, forceLegend: false);
+    }
+
+    private static List<(DateTime Hour, double Value)> BuildHourlyBaselineSeries(
+        List<TrHealthRow> allGlobalRows,
+        DateTime startUtc,
+        DateTime endUtc,
+        Func<List<TrHealthRow>, double> selector,
+        List<DateTime> anchorHours)
+    {
+        var selected = allGlobalRows
+            .Where(r => r.EndUtc >= startUtc && r.EndUtc < endUtc)
+            .ToList();
+        if (selected.Count == 0)
+            return new List<(DateTime Hour, double Value)>();
+
+        var byHour = selected
+            .GroupBy(r =>
+            {
+                var local = r.EndUtc.ToLocalTime();
+                return local.Hour;
+            })
+            .ToDictionary(g => g.Key, g => selector(g.ToList()));
+
+        var series = new List<(DateTime Hour, double Value)>();
+        foreach (var anchorHour in anchorHours.OrderBy(h => h))
+        {
+            var localHour = anchorHour.ToLocalTime().Hour;
+            var value = byHour.TryGetValue(localHour, out var v) ? v : 0d;
+            series.Add((anchorHour, value));
+        }
+        return series;
+    }
+
+    private static TrHealthChartRow BuildChart(
+        string title,
+        string yAxisLabel,
+        List<(DateTime Hour, double Value)> points,
+        string valueFormat,
+        string startLabel,
+        string endLabel,
+        string seriesLabel)
+    {
+        return BuildMultiSeriesChart(
+            title,
+            yAxisLabel,
+            new List<(string Label, List<(DateTime Hour, double Value)> Points)> { (seriesLabel, points) },
+            valueFormat,
+            startLabel,
+            endLabel);
+    }
+
+    private static TrHealthChartRow BuildSystemChart(
+        string title,
+        string yAxisLabel,
+        List<TrHealthRow> recentRows,
+        List<string> systemScopes,
+        Func<List<TrHealthRow>, double> selector,
+        List<TrHealthRow> allRows,
+        Func<List<TrHealthRow>, double> baselineSelector,
+        string baselineSelection,
+        string valueFormat,
+        string startLabel,
+        string endLabel)
+    {
+        var series = new List<(string Label, List<(DateTime Hour, double Value)> Points)>();
+        foreach (var scope in systemScopes)
+        {
+            var systemRowsRecent = recentRows
+                .Where(r => string.Equals(r.Scope, scope, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var points = systemRowsRecent
+                .GroupBy(r =>
+                {
+                    var local = r.EndUtc.ToLocalTime();
+                    return new DateTime(local.Year, local.Month, local.Day, local.Hour, 0, 0);
+                })
+                .OrderBy(g => g.Key)
+                .Select(g => (g.Key, selector(g.ToList())))
+                .ToList();
+            if (points.Count > 0)
+                series.Add((scope, points));
+
+            var systemRowsAll = allRows
+                .Where(r => string.Equals(r.Scope, scope, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var baseline = BuildSelectedBaselineSeries(
+                systemRowsAll,
+                baselineSelector,
+                baselineSelection,
+                points.Select(p => p.Key).ToList());
+            if (baseline.Points.Count > 0)
+                series.Add((string.Empty, baseline.Points));
+        }
+
+        return BuildMultiSeriesChart(title, yAxisLabel, series, valueFormat, startLabel, endLabel, forceLegend: true);
+    }
+
+    private static (string Label, List<(DateTime Hour, double Value)> Points) BuildSelectedBaselineSeries(
+        List<TrHealthRow> allGlobalRows,
+        Func<List<TrHealthRow>, double> selector,
+        string baselineSelection,
+        List<DateTime> anchorHours)
+    {
+        if (anchorHours.Count == 0)
+            return (string.Empty, new List<(DateTime Hour, double Value)>());
+
+        var nowUtc = DateTime.UtcNow;
+        var selection = (baselineSelection ?? "7d").Trim().ToLowerInvariant();
+        if (selection == "7d")
+            return ("7d baseline", BuildHourlyBaselineSeries(allGlobalRows, nowUtc.AddDays(-7), nowUtc.AddHours(-24), selector, anchorHours));
+        if (selection == "14d")
+            return ("14d baseline", BuildHourlyBaselineSeries(allGlobalRows, nowUtc.AddDays(-14), nowUtc.AddHours(-24), selector, anchorHours));
+        return ("30d baseline", BuildHourlyBaselineSeries(allGlobalRows, nowUtc.AddDays(-30), nowUtc.AddHours(-24), selector, anchorHours));
+    }
+
+    private static TrHealthChartRow BuildMultiSeriesChart(
+        string title,
+        string yAxisLabel,
+        List<(string Label, List<(DateTime Hour, double Value)> Points)> series,
+        string valueFormat,
+        string startLabel,
+        string endLabel,
+        bool forceLegend = false)
+    {
+        const double left = 42;
+        const double right = 620;
+        const double top = 12;
+        const double bottom = 118;
+
+        var allPoints = series.SelectMany(s => s.Points).ToList();
+        var max = allPoints.Count == 0 ? 1.0 : Math.Max(1.0, allPoints.Max(p => p.Value));
+        var minHour = allPoints.Count == 0 ? DateTime.Now : allPoints.Min(p => p.Hour);
+        var maxHour = allPoints.Count == 0 ? minHour.AddHours(1) : allPoints.Max(p => p.Hour);
+        var hourRange = Math.Max(1.0, (maxHour - minHour).TotalHours);
+
+        var xTicks = BuildTimeTickLabels(minHour);
+        var chart = new TrHealthChartRow
+        {
+            Title = title,
+            YAxisLabel = yAxisLabel,
+            MinLabel = "0",
+            MaxLabel = valueFormat == "F1"
+                ? max.ToString("F1", CultureInfo.InvariantCulture)
+                : max.ToString("N0", CultureInfo.InvariantCulture),
+            StartLabel = startLabel,
+            EndLabel = endLabel,
+            XTick0Label = xTicks[0],
+            XTick1Label = xTicks[1],
+            XTick2Label = xTicks[2],
+            XTick3Label = xTicks[3],
+            XTick4Label = xTicks[4],
+            XTick5Label = xTicks[5],
+            YTick1Label = FormatAxisTick(max * 0.25, valueFormat),
+            YTick2Label = FormatAxisTick(max * 0.50, valueFormat),
+            YTick3Label = FormatAxisTick(max * 0.75, valueFormat),
+            HasLegend = forceLegend || series.Count > 1
+        };
+
+        if (series.Count > 0)
+        {
+            chart.Series1Label = series[0].Label;
+            AddChartPoints(chart.Series1Points, series[0].Points, minHour, hourRange, max, left, right, top, bottom);
+        }
+        if (series.Count > 1)
+        {
+            chart.Series2Label = series[1].Label;
+            AddChartPoints(chart.Series2Points, series[1].Points, minHour, hourRange, max, left, right, top, bottom);
+        }
+        if (series.Count > 2)
+        {
+            chart.Series3Label = series[2].Label;
+            AddChartPoints(chart.Series3Points, series[2].Points, minHour, hourRange, max, left, right, top, bottom);
+        }
+        if (series.Count > 3)
+        {
+            chart.Series4Label = series[3].Label;
+            AddChartPoints(chart.Series4Points, series[3].Points, minHour, hourRange, max, left, right, top, bottom);
+        }
+        if (series.Count > 4)
+        {
+            chart.Series5Label = series[4].Label;
+            AddChartPoints(chart.Series5Points, series[4].Points, minHour, hourRange, max, left, right, top, bottom);
+        }
+        if (series.Count > 5)
+        {
+            chart.Series6Label = series[5].Label;
+            AddChartPoints(chart.Series6Points, series[5].Points, minHour, hourRange, max, left, right, top, bottom);
+        }
+
+        return chart;
+    }
+
+    private static string[] BuildTimeTickLabels(DateTime minHour)
+    {
+        var labels = new string[6];
+        for (var i = 0; i < labels.Length; i++)
+            labels[i] = minHour.AddHours(i * 4).ToLocalTime().ToString("htt", CultureInfo.InvariantCulture).ToLowerInvariant();
+        return labels;
+    }
+
+    private static string FormatAxisTick(double value, string valueFormat)
+    {
+        return valueFormat == "F1"
+            ? value.ToString("F1", CultureInfo.InvariantCulture)
+            : value.ToString("N0", CultureInfo.InvariantCulture);
+    }
+
+    private static void AddChartPoints(
+        AvaloniaList<Point> target,
+        List<(DateTime Hour, double Value)> points,
+        DateTime minHour,
+        double hourRange,
+        double max,
+        double left,
+        double right,
+        double top,
+        double bottom)
+    {
+        foreach (var point in points)
+        {
+            var x = left + ((point.Hour - minHour).TotalHours / hourRange) * (right - left);
+            var y = bottom - (Math.Clamp(point.Value, 0, max) / max) * (bottom - top);
+            target.Add(new Point(x, y));
+        }
+
+        if (target.Count == 1)
+        {
+            var only = target[0];
+            target.Add(new Point(only.X + 1, only.Y));
+        }
+    }
+
+    private static List<TrHealthMetricRow> ParseRemedies(string remediesText)
+    {
+        var rows = new List<TrHealthMetricRow>();
+        foreach (var line in remediesText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var cleaned = line.Trim().TrimStart('-', ' ');
+            if (string.IsNullOrWhiteSpace(cleaned))
+                continue;
+            var title = cleaned.Split('.', 2)[0].Trim();
+            rows.Add(new TrHealthMetricRow
+            {
+                Metric = string.IsNullOrWhiteSpace(title) ? "Recommendation" : title,
+                Notes = cleaned
+            });
+        }
+
+        if (rows.Count == 0)
+        {
+            rows.Add(new TrHealthMetricRow
+            {
+                Metric = "No obvious remedies",
+                Notes = "The current summary did not cross the built-in thresholds."
+            });
+        }
+
+        return rows;
+    }
+
+    private static string BuildTrHealthRemedies(TrHealthAggregate agg)
+    {
+        var sb = new StringBuilder();
+        if (agg.SampleStops > 0)
+        {
+            sb.AppendLine("- Sample-source stops were detected. Check SDR USB stability, power, hub/cable quality, and whether the SDR process is being starved.");
+        }
+
+        if (agg.DecodeZeroPercent >= 40.0)
+        {
+            sb.AppendLine("- Decode rate is frequently zero. Verify antenna/feedline, control-channel frequency list, gain/PPM calibration, and local RF noise.");
+        }
+        else if (agg.DecodeZeroPercent >= 25.0)
+        {
+            sb.AppendLine("- Decode rate is intermittently zero. Watch signal quality and consider gain/PPM adjustment.");
+        }
+
+        if (agg.Retunes >= Math.Max(20, agg.Windows * 4))
+        {
+            sb.AppendLine("- Retunes are high for the window count. Confirm the configured control channels and site coverage; frequent retunes often mean weak/unstable control-channel decode.");
+        }
+
+        if (agg.UnableSource > 0)
+        {
+            sb.AppendLine("- Some calls had no source covering the requested frequency. Check source min/max ranges and whether enough SDRs cover all voice channels.");
+        }
+
+        if (agg.NoTxRecorded > 0)
+        {
+            sb.AppendLine("- Calls with no recorded transmissions were found. This can follow UPDATE-not-GRANT events, poor decode, or recorder contention.");
+        }
+
+        return sb.Length == 0
+            ? "No obvious remedies from the current health summary."
+            : sb.ToString();
     }
 
     private static List<TrHealthRow> ParseTrHealthRows(string csvText)
@@ -6123,6 +7588,7 @@ private string _statusText = "Initializing...";
         return new TrHealthAggregate
         {
             Windows = rows.Count,
+            DecodeSampleLines = decodeLines,
             DecodeZeroPercent = decodeLines > 0 ? (decodeZero * 100.0) / decodeLines : 0,
             AvgDecodeRate = weightedDenominator > 0 ? weightedDecodeRate / weightedDenominator : 0,
             Retunes = rows.Sum(r => r.Retunes),
@@ -6131,6 +7597,18 @@ private string _statusText = "Initializing...";
             SampleStops = rows.Sum(r => r.SampleStops),
             UnableSource = rows.Sum(r => r.UnableSource)
         };
+    }
+
+    private static bool HasSufficientDecodeSamples(TrHealthAggregate agg)
+    {
+        return agg.DecodeSampleLines >= 20;
+    }
+
+    private static string FormatDecodeRateWithConfidence(TrHealthAggregate agg)
+    {
+        return HasSufficientDecodeSamples(agg)
+            ? $"{agg.AvgDecodeRate:F2}/sec"
+            : "N/A (low decode samples)";
     }
 
     private static double WeightedAverage(IEnumerable<(double Value, int Weight)> points)
@@ -6155,6 +7633,13 @@ private string _statusText = "Initializing...";
     private static double ParseDouble(string value)
     {
         return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0.0;
+    }
+
+    private static string EscapeCsv(string value)
+    {
+        if (!value.Contains(',') && !value.Contains('"') && !value.Contains('\n') && !value.Contains('\r'))
+            return value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 
     private static string FormatPizzaPiLogOptionLabel(string path)
@@ -6275,7 +7760,7 @@ private string _statusText = "Initializing...";
             ApplyActiveProfileToManagers();
             ClearSectionCachesForProfileSwitch();
             ApplyTimeRangeFilter();
-            if (IsHighlightsSelected)
+            if (IsInsightsDrivenViewActive)
                 _ = LoadInsightsSummariesAsync();
         }
 
@@ -6712,7 +8197,7 @@ private string _statusText = "Initializing...";
             ApplyActiveProfileToManagers();
             ClearSectionCachesForProfileSwitch();
             ApplyTimeRangeFilter();
-            if (IsHighlightsSelected)
+            if (IsInsightsDrivenViewActive)
                 _ = LoadInsightsSummariesAsync();
         }
         _settings.SaveToFile(_currentSettingsPath);
@@ -7347,7 +8832,7 @@ private string _statusText = "Initializing...";
         if (IsAlertsSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
-        if (IsHighlightsSelected)
+        if (IsInsightsDrivenViewActive)
             _ = LoadInsightsSummariesAsync();
     }
 
@@ -7361,7 +8846,7 @@ private string _statusText = "Initializing...";
         if (IsAlertsSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
-        if (IsHighlightsSelected)
+        if (IsInsightsDrivenViewActive)
             _ = LoadInsightsSummariesAsync();
     }
 
@@ -7375,7 +8860,7 @@ private string _statusText = "Initializing...";
         if (IsAlertsSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
-        if (IsHighlightsSelected)
+        if (IsInsightsDrivenViewActive)
             _ = LoadInsightsSummariesAsync();
     }
 
@@ -7397,7 +8882,7 @@ private string _statusText = "Initializing...";
             if (IsAlertsSelected)
                 ReloadAlertHistory();
             UpdateButtonStates();
-            if (IsHighlightsSelected)
+            if (IsInsightsDrivenViewActive)
                 _ = LoadInsightsSummariesAsync();
         }
     }

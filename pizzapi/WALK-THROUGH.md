@@ -396,6 +396,23 @@ You can attach to the session at anytime via `tmux attach -t trunklogs`.  Detach
 
 Check server status with `sudo systemctl status trunk-recorder`
 
+#### PizzaPi Troubleshoot tab (recommended)
+
+Use `Troubleshoot -> Trunk Recorder` in pizzapi:
+
+- `Health Summary` evaluates the **last 24h only**
+- `Metrics` supports global/by-system views and 7d/14d/30d baselines
+- `Diagnostics` shows connection/fetch/parser transcript
+- `Insights` can generate LM Link-based recommendations
+
+In `Settings -> Trunk recorder -> Diagnostics`:
+
+- Set `Data Source` to `Collector CSV (preferred)` to read:
+  - `/var/lib/pizzapi/tr-health/summary_5m.csv`
+- Optionally enable fallback to `Raw logs` when collector output is unavailable.
+
+If fallback is used, pizzapi warns in diagnostics transcript.
+
 ### PizzaPi
 
 #### Logs

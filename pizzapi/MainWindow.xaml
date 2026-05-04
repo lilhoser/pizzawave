@@ -18,6 +18,7 @@
         <local:BoolToStringConverter x:Key="BoolToStringConverter" />
         <local:BoolToColorConverter x:Key="BoolToColorConverter" />
         <local:InvertedBoolConverter x:Key="InvertedBoolConverter" />
+        <local:StringHasTextConverter x:Key="StringHasTextConverter" />
         <local:InsightNavigateButtonTextConverter x:Key="InsightNavigateButtonTextConverter" />
         
         <!-- Dynamic button style with active state support -->
@@ -70,7 +71,8 @@
                     HorizontalAlignment="Stretch"
                     HorizontalContentAlignment="Left"
                     VerticalContentAlignment="Center"
-                    Classes="header-button">
+                    Classes="header-button call-pulse-target"
+                    Classes.pulse="{Binding IsPulseTarget}">
                 <Button.Styles>
                     <Style Selector="Button.header-button">
                         <Setter Property="BorderThickness" Value="0"/>
@@ -401,6 +403,38 @@
             <Setter Property="Padding" Value="16,13,12,11"/>
             <Setter Property="BorderBrush" Value="#0a0a0a"/>
         </Style>
+        <Style Selector="Button.menu-main-btn.pulse, Button.header-button.pulse">
+            <Style.Animations>
+                <Animation Duration="0:0:0.8"
+                           IterationCount="Infinite"
+                           PlaybackDirection="Alternate">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="BorderBrush" Value="#fff4a3"/>
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="BorderBrush" Value="#facc15"/>
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+            <Setter Property="BorderBrush" Value="#facc15"/>
+            <Setter Property="BorderThickness" Value="2"/>
+        </Style>
+        <Style Selector="Button.menu-main-btn.pulse /template/ ContentPresenter#PART_ContentPresenter, Button.header-button.pulse /template/ ContentPresenter#PART_ContentPresenter">
+            <Style.Animations>
+                <Animation Duration="0:0:0.8"
+                           IterationCount="Infinite"
+                           PlaybackDirection="Alternate">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="BorderBrush" Value="#fff7c2"/>
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="BorderBrush" Value="#facc15"/>
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+            <Setter Property="BorderBrush" Value="#facc15"/>
+            <Setter Property="BorderThickness" Value="2"/>
+        </Style>
     </Window.Styles>
     
     <DockPanel>
@@ -457,7 +491,7 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                         <Button Classes="menu-btn"
-                                Content="Archive..."
+                                Content="Load archive..."
                                 Height="34"
                                 HorizontalAlignment="Stretch"
                                 Click="OnArchiveBrowseClicked"
@@ -523,6 +557,7 @@
                 <Separator Margin="0,2,0,2"/>
 
                 <Button Classes="menu-btn menu-main-btn"
+                        Classes.pulse="{Binding IsPolicePulseActive}"
                         Cursor="Hand"
                         HorizontalAlignment="Stretch"
                         IsVisible="{Binding IsPoliceMenuVisible}"
@@ -538,6 +573,7 @@
                 </Button>
 
                 <Button Classes="menu-btn menu-main-btn"
+                        Classes.pulse="{Binding IsFirePulseActive}"
                         Cursor="Hand"
                         HorizontalAlignment="Stretch"
                         IsVisible="{Binding IsFireMenuVisible}"
@@ -553,6 +589,7 @@
                 </Button>
 
                 <Button Classes="menu-btn menu-main-btn"
+                        Classes.pulse="{Binding IsEmsPulseActive}"
                         Cursor="Hand"
                         HorizontalAlignment="Stretch"
                         IsVisible="{Binding IsEmsMenuVisible}"
@@ -960,6 +997,58 @@
                                                  Width="180"
                                                  HorizontalAlignment="Left"
                                                  HorizontalContentAlignment="Left"/>
+                                        <Separator Margin="0,10,0,4"/>
+                                        <TextBlock Text="Diagnostics" FontWeight="Bold"/>
+                                        <TextBlock Text="SSH mode fetches trunk-recorder log files, caches them locally, and computes health summaries on this machine."
+                                                   FontSize="11"
+                                                   Foreground="#b0b0b0"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="Mode" FontWeight="Bold"/>
+                                        <TextBlock Text="Where diagnostics are read from: local host files or SSH to Trunk Recorder."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <ComboBox x:Name="SettingsTrDiagnosticsModeComboBox" Width="180" HorizontalAlignment="Left">
+                                            <ComboBoxItem Content="Local" />
+                                            <ComboBoxItem Content="SSH" />
+                                        </ComboBox>
+                                        <TextBlock Text="Host" FontWeight="Bold"/>
+                                        <TextBlock Text="SSH host name or IP when diagnostics mode is SSH."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsHostTextBox" Width="320" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Port" FontWeight="Bold"/>
+                                        <TextBlock Text="SSH port on the Trunk Recorder host (normally 22)."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsPortTextBox" Width="100" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Username" FontWeight="Bold"/>
+                                        <TextBlock Text="SSH user account used to read diagnostics data remotely."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsUsernameTextBox" Width="260" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Authentication" FontWeight="Bold"/>
+                                        <TextBlock Text="Choose password or private key authentication for SSH."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <ComboBox x:Name="SettingsTrDiagnosticsAuthModeComboBox" Width="180" HorizontalAlignment="Left">
+                                            <ComboBoxItem Content="Password" />
+                                            <ComboBoxItem Content="Private key" />
+                                        </ComboBox>
+                                        <TextBlock Text="Password" FontWeight="Bold"/>
+                                        <TextBlock Text="SSH password (stored securely; leave blank to keep existing)."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsPasswordTextBox" Width="260" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Private Key Path" FontWeight="Bold"/>
+                                        <TextBlock Text="Path to SSH private key file for private-key authentication."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsPrivateKeyPathTextBox" Width="420" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Private Key Passphrase" FontWeight="Bold"/>
+                                        <TextBlock Text="Optional passphrase for the private key (stored securely)."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsPrivateKeyPassphraseTextBox" Width="260" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Remote/Local Log Directory" FontWeight="Bold"/>
+                                        <TextBlock Text="Raw trunk-recorder log directory used only when raw-log mode is selected."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsLogDirTextBox" Width="420" HorizontalAlignment="Left"/>
+                                        <TextBlock Text="Local Diagnostics Cache" FontWeight="Bold"/>
+                                        <TextBlock Text="Local cache directory for downloaded diagnostics artifacts."
+                                                   FontSize="11" Foreground="#b0b0b0" TextWrapping="Wrap"/>
+                                        <TextBox x:Name="SettingsTrDiagnosticsCachePathTextBox" Width="420" HorizontalAlignment="Left"/>
                                     </StackPanel>
                                 </Border>
                             </ScrollViewer>
@@ -1648,7 +1737,6 @@
                     <TabItem Header="Pizzapi">
                         <Grid RowDefinitions="Auto,*" Margin="8">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Copy" Classes="menu-btn" Click="OnCopyTroubleshootLogClicked"/>
                                 <TextBlock Text="Trace level:" VerticalAlignment="Center" Foreground="#d0d0d0"/>
                                 <ComboBox Width="180"
                                           ItemsSource="{Binding TroubleshootTraceLevelOptions}"
@@ -1667,25 +1755,283 @@
                         </Grid>
                     </TabItem>
                     <TabItem Header="Trunk Recorder" IsEnabled="{Binding IsTrunkTroubleshootVisible}">
-                        <Grid RowDefinitions="Auto,Auto,*" Margin="8">
+                        <Grid RowDefinitions="Auto,*" Margin="8">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Restart" Classes="menu-btn" Click="OnRestartTrunkRecorderClicked"/>
-                                <Button Content="Copy" Classes="menu-btn" Click="OnCopyTroubleshootLogClicked"/>
-                                <Button Content="Refresh Health" Classes="menu-btn" Click="OnRefreshTrHealthClicked"/>
+                                <Button Content="Refresh Health" Classes="menu-btn" Click="OnRefreshTrHealthClicked"
+                                        IsEnabled="{Binding IsTrTroubleshootControlsEnabled}"/>
+                                <CheckBox Content="Use raw logs (slower; may take time to download/parse)"
+                                          IsChecked="{Binding ForceRawLogDiagnostics, Mode=TwoWay}"
+                                          VerticalAlignment="Center"
+                                          IsEnabled="{Binding IsTrTroubleshootControlsEnabled}"/>
+                                <TextBlock Text="Loading diagnostics and metrics..."
+                                           VerticalAlignment="Center"
+                                           Foreground="#f0c674"
+                                           IsVisible="{Binding IsTrTroubleshootLoading}"/>
                             </StackPanel>
-                            <TextBox Grid.Row="1"
-                                     Margin="0,8,0,0"
-                                     Text="{Binding TrunkRecorderHealthText}"
-                                     IsReadOnly="True"
-                                     TextWrapping="Wrap"
-                                     AcceptsReturn="True"
-                                     MinHeight="160"/>
-                            <TextBox Grid.Row="2"
-                                     Margin="0,8,0,0"
-                                     Text="{Binding TrunkRecorderLogText}"
-                                     IsReadOnly="True"
-                                     TextWrapping="Wrap"
-                                     AcceptsReturn="True"/>
+                            <TabControl Grid.Row="1"
+                                        Margin="0,8,0,0"
+                                        IsEnabled="{Binding IsTrTroubleshootControlsEnabled}"
+                                        SelectionChanged="OnTrunkTroubleshootTabSelectionChanged">
+                                <TabItem Header="Health Summary">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Margin="8" Spacing="12">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Text="{Binding TrunkRecorderHealthTitle}" FontSize="18" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding TrunkRecorderHealthWindow}" Foreground="#b0b0b0"/>
+                                                <TextBlock Text="Health summary is computed from the last 24 hours only." Foreground="#ffcf9f"/>
+                                                <TextBlock Text="{Binding TrunkRecorderHealthLastWindow}" Foreground="#b0b0b0"/>
+                                                <TextBlock Text="{Binding TrunkRecorderHealthSource}" Foreground="#8f8f8f" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <DataGrid ItemsSource="{Binding TrHealthMetrics}"
+                                                      AutoGenerateColumns="False"
+                                                      IsReadOnly="True"
+                                                      CanUserSortColumns="False"
+                                                      HeadersVisibility="Column"
+                                                      GridLinesVisibility="Horizontal"
+                                                      MinHeight="220">
+                                                <DataGrid.Columns>
+                                                    <DataGridTemplateColumn Header="Metric" Width="220">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate x:DataType="local:TrHealthMetricRow">
+                                                                <Border Background="{Binding IsIssue, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|Transparent'}" Padding="4,2">
+                                                                    <TextBlock Text="{Binding Metric}"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                    <DataGridTemplateColumn Header="Value" Width="140">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate x:DataType="local:TrHealthMetricRow">
+                                                                <Border Background="{Binding IsIssue, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|Transparent'}" Padding="4,2">
+                                                                    <TextBlock Text="{Binding Value}"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                    <DataGridTemplateColumn Header="Notes" Width="*">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate x:DataType="local:TrHealthMetricRow">
+                                                                <Border Background="{Binding IsIssue, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|Transparent'}" Padding="4,2">
+                                                                    <TextBlock Text="{Binding Notes}" TextWrapping="Wrap"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                            <TextBlock Text="Systems" FontSize="15" FontWeight="SemiBold"/>
+                                            <DataGrid ItemsSource="{Binding TrHealthSystemRows}"
+                                                      AutoGenerateColumns="False"
+                                                      IsReadOnly="True"
+                                                      CanUserSortColumns="False"
+                                                      HeadersVisibility="Column"
+                                                      GridLinesVisibility="Horizontal"
+                                                      MinHeight="120">
+                                                <DataGrid.Columns>
+                                                    <DataGridTemplateColumn Header="System" Width="220">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate x:DataType="local:TrHealthMetricRow">
+                                                                <Border Background="{Binding IsIssue, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|Transparent'}" Padding="4,2">
+                                                                    <TextBlock Text="{Binding Metric}"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                    <DataGridTemplateColumn Header="Health" Width="160">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate x:DataType="local:TrHealthMetricRow">
+                                                                <Border Background="{Binding IsIssue, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|Transparent'}" Padding="4,2">
+                                                                    <TextBlock Text="{Binding Value}"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                    <DataGridTemplateColumn Header="Details" Width="*">
+                                                        <DataGridTemplateColumn.CellTemplate>
+                                                            <DataTemplate x:DataType="local:TrHealthMetricRow">
+                                                                <Border Background="{Binding IsIssue, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4a2a2a|Transparent'}" Padding="4,2">
+                                                                    <TextBlock Text="{Binding Notes}" TextWrapping="Wrap"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </DataGridTemplateColumn.CellTemplate>
+                                                    </DataGridTemplateColumn>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                            <TextBlock Text="Suggested Remedies" FontSize="15" FontWeight="SemiBold"/>
+                                            <ItemsControl ItemsSource="{Binding TrHealthRemedyRows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="#242424" BorderBrush="#3b3b3b" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,6">
+                                                            <StackPanel Spacing="3">
+                                                                <TextBlock Text="{Binding Metric}" FontWeight="SemiBold"/>
+                                                                <TextBlock Text="{Binding Notes}" TextWrapping="Wrap" Foreground="#d0d0d0"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
+                                <TabItem Header="Metrics">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Margin="8" Spacing="12">
+                                            <TextBlock Text="Hourly Trends and Baselines" FontSize="15" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Baselines appear as dotted lines." Foreground="#b0b0b0"/>
+                                            <StackPanel Orientation="Horizontal" Spacing="16">
+                                                <CheckBox Content="By system" IsChecked="{Binding TrHealthShowBySystem, Mode=TwoWay}"/>
+                                                <CheckBox Content="Use persisted baseline history" IsChecked="{Binding UsePersistedBaselineHistory, Mode=TwoWay}"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <TextBlock Text="Compare against baseline" VerticalAlignment="Center" Foreground="#d0d0d0"/>
+                                                    <ComboBox Width="120"
+                                                              ItemsSource="{Binding TrHealthBaselineOptions}"
+                                                              SelectedItem="{Binding SelectedTrHealthBaseline, Mode=TwoWay}"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <ItemsControl ItemsSource="{Binding TrHealthCharts}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel Orientation="Horizontal"/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="#202020"
+                                                                BorderBrush="#3b3b3b"
+                                                                BorderThickness="1"
+                                                                CornerRadius="6"
+                                                                Padding="10"
+                                                                Width="760"
+                                                                HorizontalAlignment="Left"
+                                                                Margin="0,0,12,12">
+                                                            <Grid RowDefinitions="Auto,150,Auto,Auto" ColumnDefinitions="56,*">
+                                                                <StackPanel Grid.ColumnSpan="2" Spacing="2">
+                                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Text="{Binding YAxisLabel}" Foreground="#a8a8a8" FontSize="11"/>
+                                                                </StackPanel>
+                                                                <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="Auto,*,Auto" Margin="0,14,6,18">
+                                                                    <TextBlock Text="{Binding MaxLabel}" FontSize="11" HorizontalAlignment="Right"/>
+                                                                    <TextBlock Grid.Row="1" Text="{Binding YTick3Label}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,24,0,0" Foreground="#a8a8a8"/>
+                                                                    <TextBlock Grid.Row="1" Text="{Binding YTick2Label}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#a8a8a8"/>
+                                                                    <TextBlock Grid.Row="1" Text="{Binding YTick1Label}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,24" Foreground="#a8a8a8"/>
+                                                                    <TextBlock Grid.Row="2" Text="{Binding MinLabel}" FontSize="11" HorizontalAlignment="Right"/>
+                                                                </Grid>
+                                                                <Canvas Grid.Row="1" Grid.Column="1" Width="640" Height="140" ClipToBounds="True">
+                                                                    <Line StartPoint="42,12" EndPoint="42,118" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="42,118" EndPoint="620,118" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="42,91.5" EndPoint="620,91.5" Stroke="#2f2f2f" StrokeThickness="1"/>
+                                                                    <Line StartPoint="42,65" EndPoint="620,65" Stroke="#333" StrokeThickness="1"/>
+                                                                    <Line StartPoint="42,38.5" EndPoint="620,38.5" Stroke="#2f2f2f" StrokeThickness="1"/>
+                                                                    <Line StartPoint="42,118" EndPoint="42,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="138.3,118" EndPoint="138.3,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="234.7,118" EndPoint="234.7,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="331.0,118" EndPoint="331.0,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="427.3,118" EndPoint="427.3,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="523.7,118" EndPoint="523.7,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Line StartPoint="620,118" EndPoint="620,123" Stroke="#666" StrokeThickness="1"/>
+                                                                    <Polyline Points="{Binding Series1Points}" Stroke="#62c6ff" StrokeThickness="2"/>
+                                                                    <Polyline Points="{Binding Series2Points}" Stroke="#62c6ff" StrokeThickness="2" StrokeDashArray="4,4"/>
+                                                                    <Polyline Points="{Binding Series3Points}" Stroke="#ffcf5a" StrokeThickness="2"/>
+                                                                    <Polyline Points="{Binding Series4Points}" Stroke="#ffcf5a" StrokeThickness="2" StrokeDashArray="4,4"/>
+                                                                    <Polyline Points="{Binding Series5Points}" Stroke="#7ee081" StrokeThickness="2"/>
+                                                                    <Polyline Points="{Binding Series6Points}" Stroke="#7ee081" StrokeThickness="2" StrokeDashArray="4,4"/>
+                                                                </Canvas>
+                                                                <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,*,*,*,*,*,*" Margin="42,0,20,0">
+                                                                    <TextBlock Grid.Column="0" Text="{Binding XTick0Label}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Left"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding XTick1Label}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="2" Text="{Binding XTick2Label}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="3" Text="{Binding XTick3Label}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="4" Text="{Binding XTick4Label}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="5" Text="{Binding XTick5Label}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="6" Text="{Binding EndLabel}" FontSize="11" Foreground="#a8a8a8" HorizontalAlignment="Right"/>
+                                                                </Grid>
+                                                                <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
+                                                                    <StackPanel.IsVisible>
+                                                                        <Binding Path="HasLegend"/>
+                                                                    </StackPanel.IsVisible>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                        <StackPanel.IsVisible>
+                                                                            <Binding Path="Series1Label" Converter="{StaticResource StringHasTextConverter}"/>
+                                                                        </StackPanel.IsVisible>
+                                                                        <Border Width="16" Height="3" Background="#62c6ff" VerticalAlignment="Center"/>
+                                                                        <TextBlock Text="{Binding Series1Label}" FontSize="11" Foreground="#d0d0d0"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                        <StackPanel.IsVisible>
+                                                                            <Binding Path="Series2Label" Converter="{StaticResource StringHasTextConverter}"/>
+                                                                        </StackPanel.IsVisible>
+                                                                        <Border Width="16" Height="3" Background="#62c6ff" VerticalAlignment="Center"/>
+                                                                        <TextBlock Text="{Binding Series2Label}" FontSize="11" Foreground="#d0d0d0"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                        <StackPanel.IsVisible>
+                                                                            <Binding Path="Series3Label" Converter="{StaticResource StringHasTextConverter}"/>
+                                                                        </StackPanel.IsVisible>
+                                                                        <Border Width="16" Height="3" Background="#ffcf5a" VerticalAlignment="Center"/>
+                                                                        <TextBlock Text="{Binding Series3Label}" FontSize="11" Foreground="#d0d0d0"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                        <StackPanel.IsVisible>
+                                                                            <Binding Path="Series4Label" Converter="{StaticResource StringHasTextConverter}"/>
+                                                                        </StackPanel.IsVisible>
+                                                                        <Border Width="16" Height="3" Background="#ffcf5a" VerticalAlignment="Center"/>
+                                                                        <TextBlock Text="{Binding Series4Label}" FontSize="11" Foreground="#d0d0d0"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                        <StackPanel.IsVisible>
+                                                                            <Binding Path="Series5Label" Converter="{StaticResource StringHasTextConverter}"/>
+                                                                        </StackPanel.IsVisible>
+                                                                        <Border Width="16" Height="3" Background="#7ee081" VerticalAlignment="Center"/>
+                                                                        <TextBlock Text="{Binding Series5Label}" FontSize="11" Foreground="#d0d0d0"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                        <StackPanel.IsVisible>
+                                                                            <Binding Path="Series6Label" Converter="{StaticResource StringHasTextConverter}"/>
+                                                                        </StackPanel.IsVisible>
+                                                                        <Border Width="16" Height="3" Background="#7ee081" VerticalAlignment="Center"/>
+                                                                        <TextBlock Text="{Binding Series6Label}" FontSize="11" Foreground="#d0d0d0"/>
+                                                                    </StackPanel>
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
+                                <TabItem Header="Log Output">
+                                    <TextBox Text="{Binding TrunkRecorderLogText}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"/>
+                                </TabItem>
+                                <TabItem Header="Diagnostics">
+                                    <TextBox Text="{Binding TrunkRecorderDiagnosticsText}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"/>
+                                </TabItem>
+                                <TabItem Header="Insights" IsEnabled="{Binding IsTrHealthInsightsEnabled}">
+                                    <Grid RowDefinitions="Auto,*" Margin="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Generate Recommendation"
+                                                    Classes="menu-btn"
+                                                    Click="OnGenerateTrHealthInsightsClicked"
+                                                    IsEnabled="{Binding CanGenerateTrHealthInsights}"/>
+                                            <TextBlock Text="Uses LM Link to summarize issues and baselines."
+                                                       Foreground="#b0b0b0"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBox Grid.Row="1"
+                                                 Margin="0,8,0,0"
+                                                 Text="{Binding TrHealthInsightsText}"
+                                                 IsReadOnly="True"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"/>
+                                    </Grid>
+                                </TabItem>
+                            </TabControl>
                         </Grid>
                     </TabItem>
                 </TabControl>
@@ -1722,12 +2068,29 @@
                                TextTrimming="CharacterEllipsis"
                                Width="420"/>
                 </StackPanel>
-                <TextBlock Grid.Column="1"
-                           Text="{Binding VersionString}"
-                           Foreground="#888"
-                           FontSize="11"
-                           VerticalAlignment="Center"
-                           Margin="5,0,0,0" />
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Right"
+                            Margin="5,0,0,0">
+                    <Border Background="{Binding TrServerPillBackground}"
+                            BorderBrush="{Binding TrServerPillBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="8,2"
+                            VerticalAlignment="Center"
+                            ToolTip.Tip="{Binding TrServerToolTipText}">
+                        <TextBlock Text="{Binding TrServerPillText}"
+                                   Foreground="{Binding TrServerPillForeground}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"/>
+                    </Border>
+                    <TextBlock Text="{Binding VersionString}"
+                               Foreground="#888"
+                               FontSize="11"
+                               VerticalAlignment="Center" />
+                </StackPanel>
             </Grid>
         </Border>
         

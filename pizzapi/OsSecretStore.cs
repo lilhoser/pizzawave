@@ -36,6 +36,26 @@ public sealed class OsSecretStore
         return LookupSecret($"archive-privatekey-passphrase:{keyId}");
     }
 
+    public void StoreTrDiagnosticsPassword(string keyId, string secret)
+    {
+        StoreSecret($"tr-diagnostics-password:{keyId}", secret);
+    }
+
+    public string? LookupTrDiagnosticsPassword(string keyId)
+    {
+        return LookupSecret($"tr-diagnostics-password:{keyId}");
+    }
+
+    public void StoreTrDiagnosticsPrivateKeyPassphrase(string keyId, string secret)
+    {
+        StoreSecret($"tr-diagnostics-privatekey-passphrase:{keyId}", secret);
+    }
+
+    public string? LookupTrDiagnosticsPrivateKeyPassphrase(string keyId)
+    {
+        return LookupSecret($"tr-diagnostics-privatekey-passphrase:{keyId}");
+    }
+
     private void StoreSecret(string account, string secret)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -93,7 +113,10 @@ public sealed class OsSecretStore
 
     private string GetDpapiPath(string account)
     {
-        var safeName = account.Replace(':', '_');
+        var safeName = account;
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+            safeName = safeName.Replace(invalid, '_');
+        safeName = safeName.Replace('/', '_').Replace('\\', '_').Replace(':', '_');
         return Path.Combine(_dpapiRoot, $"{safeName}.bin");
     }
 

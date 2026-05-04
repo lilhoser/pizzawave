@@ -129,6 +129,28 @@ namespace pizzalib
         [JsonProperty("archiveLocalCachePath")]
         public string? ArchiveLocalCachePath { get; set; }
 
+        // Trunk Recorder diagnostics settings
+        [JsonProperty("trDiagnosticsMode")]
+        public string TrDiagnosticsMode { get; set; } = "local";
+        [JsonProperty("trDiagnosticsHost")]
+        public string? TrDiagnosticsHost { get; set; }
+        [JsonProperty("trDiagnosticsPort")]
+        public int TrDiagnosticsPort { get; set; } = 22;
+        [JsonProperty("trDiagnosticsUsername")]
+        public string? TrDiagnosticsUsername { get; set; }
+        [JsonProperty("trDiagnosticsAuthMode")]
+        public string TrDiagnosticsAuthMode { get; set; } = "password";
+        [JsonIgnore]
+        public string? TrDiagnosticsPassword { get; set; }
+        [JsonProperty("trDiagnosticsPrivateKeyPath")]
+        public string? TrDiagnosticsPrivateKeyPath { get; set; }
+        [JsonIgnore]
+        public string? TrDiagnosticsPrivateKeyPassphrase { get; set; }
+        [JsonProperty("trDiagnosticsRemoteLogDir")]
+        public string? TrDiagnosticsRemoteLogDir { get; set; }
+        [JsonProperty("trDiagnosticsLocalCachePath")]
+        public string? TrDiagnosticsLocalCachePath { get; set; }
+
         // Alert audio settings
         public bool AutoplayAlerts;
         public int SnoozeDurationMinutes;
@@ -229,6 +251,16 @@ namespace pizzalib
             ArchiveSftpPrivateKeyPassphrase = string.Empty;
             ArchiveSftpRemoteRoot = string.Empty;
             ArchiveLocalCachePath = Path.Combine(DefaultOfflineCaptureDirectory, "sftp-cache");
+            TrDiagnosticsMode = "local";
+            TrDiagnosticsHost = string.Empty;
+            TrDiagnosticsPort = 22;
+            TrDiagnosticsUsername = string.Empty;
+            TrDiagnosticsAuthMode = "password";
+            TrDiagnosticsPassword = string.Empty;
+            TrDiagnosticsPrivateKeyPath = string.Empty;
+            TrDiagnosticsPrivateKeyPassphrase = string.Empty;
+            TrDiagnosticsRemoteLogDir = "/var/log/trunk-recorder";
+            TrDiagnosticsLocalCachePath = Path.Combine(DefaultWorkingDirectory, "tr-diagnostics");
         }
 
         public bool Equals(Settings? other)
@@ -269,7 +301,15 @@ namespace pizzalib
                 ArchiveSftpAuthMode == other.ArchiveSftpAuthMode &&
                 ArchiveSftpPrivateKeyPath == other.ArchiveSftpPrivateKeyPath &&
                 ArchiveSftpRemoteRoot == other.ArchiveSftpRemoteRoot &&
-                ArchiveLocalCachePath == other.ArchiveLocalCachePath;
+                ArchiveLocalCachePath == other.ArchiveLocalCachePath &&
+                TrDiagnosticsMode == other.TrDiagnosticsMode &&
+                TrDiagnosticsHost == other.TrDiagnosticsHost &&
+                TrDiagnosticsPort == other.TrDiagnosticsPort &&
+                TrDiagnosticsUsername == other.TrDiagnosticsUsername &&
+                TrDiagnosticsAuthMode == other.TrDiagnosticsAuthMode &&
+                TrDiagnosticsPrivateKeyPath == other.TrDiagnosticsPrivateKeyPath &&
+                TrDiagnosticsRemoteLogDir == other.TrDiagnosticsRemoteLogDir &&
+                TrDiagnosticsLocalCachePath == other.TrDiagnosticsLocalCachePath;
         }
 
         public static bool HasFieldChanged(Settings Object1, Settings Object2, string Name)
@@ -419,6 +459,27 @@ namespace pizzalib
                 if (authMode == "privatekey" && string.IsNullOrWhiteSpace(ArchiveSftpPrivateKeyPath))
                     throw new Exception("Archive SFTP private key path is required when private key auth is selected");
             }
+
+            var trMode = (TrDiagnosticsMode ?? "local").Trim().ToLowerInvariant();
+            if (trMode != "local" && trMode != "ssh")
+                throw new Exception("TR diagnostics mode must be 'local' or 'ssh'");
+            if (TrDiagnosticsPort <= 0 || TrDiagnosticsPort > 65535)
+                throw new Exception("TR diagnostics port must be between 1 and 65535");
+            if (trMode == "ssh")
+            {
+                if (string.IsNullOrWhiteSpace(TrDiagnosticsHost))
+                    throw new Exception("TR diagnostics host is required when SSH mode is enabled");
+                if (string.IsNullOrWhiteSpace(TrDiagnosticsUsername))
+                    throw new Exception("TR diagnostics username is required when SSH mode is enabled");
+                if (string.IsNullOrWhiteSpace(TrDiagnosticsRemoteLogDir))
+                    throw new Exception("TR diagnostics remote log directory is required when SSH mode is enabled");
+
+                var authMode = (TrDiagnosticsAuthMode ?? "password").Trim().ToLowerInvariant();
+                if (authMode != "password" && authMode != "privatekey")
+                    throw new Exception("TR diagnostics auth mode must be 'password' or 'privatekey'");
+                if (authMode == "privatekey" && string.IsNullOrWhiteSpace(TrDiagnosticsPrivateKeyPath))
+                    throw new Exception("TR diagnostics private key path is required when private key auth is selected");
+            }
         }
 
         public void SaveToFile(string? target = null)
@@ -497,6 +558,27 @@ namespace pizzalib
                 if (string.IsNullOrWhiteSpace(settings.ArchiveLocalCachePath))
                 {
                     settings.ArchiveLocalCachePath = Path.Combine(DefaultOfflineCaptureDirectory, "sftp-cache");
+                }
+                if (string.IsNullOrWhiteSpace(settings.TrDiagnosticsMode))
+                {
+                    settings.TrDiagnosticsMode = "local";
+                }
+                settings.TrDiagnosticsMode = settings.TrDiagnosticsMode.Trim().ToLowerInvariant() == "ssh" ? "ssh" : "local";
+                if (settings.TrDiagnosticsPort <= 0)
+                {
+                    settings.TrDiagnosticsPort = 22;
+                }
+                if (string.IsNullOrWhiteSpace(settings.TrDiagnosticsAuthMode))
+                {
+                    settings.TrDiagnosticsAuthMode = "password";
+                }
+                if (string.IsNullOrWhiteSpace(settings.TrDiagnosticsRemoteLogDir))
+                {
+                    settings.TrDiagnosticsRemoteLogDir = "/var/log/trunk-recorder";
+                }
+                if (string.IsNullOrWhiteSpace(settings.TrDiagnosticsLocalCachePath))
+                {
+                    settings.TrDiagnosticsLocalCachePath = Path.Combine(DefaultWorkingDirectory, "tr-diagnostics");
                 }
                 // Ensure Alerts is initialized
                 if (settings.Alerts == null)

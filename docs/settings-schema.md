@@ -70,6 +70,33 @@ These keys configure the optional `pizzapi` SFTP archive browser for Trunk Recor
 | `AutoCleanupCalls` | bool | `true` | in-memory call cleanup |
 | `MaxCallsToKeep` | number | `100` | max calls retained in UI list |
 
+## Trunk Recorder Diagnostics / Troubleshooting
+
+These keys control `pizzapi` `Troubleshoot -> Trunk Recorder`.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `trDiagnosticsMode` | string | `"local"` | `local` or `ssh` |
+| `trDiagnosticsHost` | string | `""` | TR host for SSH diagnostics |
+| `trDiagnosticsPort` | number | `22` | SSH port |
+| `trDiagnosticsUsername` | string | `""` | SSH username |
+| `trDiagnosticsAuthMode` | string | `"password"` | `password` or `privatekey` |
+| `trDiagnosticsPassword` | string | `""` | password auth secret |
+| `trDiagnosticsPrivateKeyPath` | string | `""` | private key path for SSH auth |
+| `trDiagnosticsPrivateKeyPassphrase` | string | `""` | optional private key passphrase |
+| `trDiagnosticsRemoteLogDir` | string | `"/var/log/trunk-recorder"` | raw-log directory fallback source |
+| `trDiagnosticsLocalCachePath` | string | `%APPDATA%/pizzawave/tr-diagnostics` | local diagnostics cache root |
+| `trDiagnosticsLookbackHours` | number | `24` | health summary window is still last 24h; this controls diagnostics fetch scope input |
+| `trDiagnosticsTmuxSession` | string | `"trunklogs"` | optional live fallback session name |
+| `trDiagnosticsSourceMode` | string | `"collector"` | `collector` (preferred) or `rawlogs` |
+| `trDiagnosticsFallbackToRawLogs` | bool | `true` | when source mode is `collector`, fallback to raw-log mode if collector CSV is unavailable |
+
+Behavior notes:
+- In `collector` mode, pizzapi reads `/var/lib/pizzapi/tr-health/summary_5m.csv` (local or over SSH).
+- If collector CSV is unavailable and fallback is enabled, diagnostics warns and uses raw-log parsing.
+- Raw-log parsing is incremental (changed/new cached logs only).
+- Baseline overlays can use persisted merged history (`baseline_history_5m.csv`) for longer-term comparisons.
+
 ## Notes
 
 - Use the exact key casing above for new configs.

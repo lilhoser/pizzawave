@@ -107,6 +107,37 @@ Archive data is intentionally kept separate from normal live/local history:
 - Archive mode reads only the selected cached archive folder.
 - New live calls may continue to arrive in the background, but they do not appear in the archive view until you return to `Live + Local`.
 
+## Troubleshooting (Trunk Recorder)
+
+`Troubleshoot -> Trunk Recorder` includes:
+
+- `Health Summary` (last 24h only)
+- `Metrics` (global/by-system charts + baseline overlays)
+- `Log Output`
+- `Diagnostics`
+- `Insights` (LM Link recommendation tab; disabled if LM Link is not configured)
+
+Health Summary explicitly evaluates the last 24 hours only. Issue rows are highlighted.
+
+### Diagnostics Source Modes
+
+Settings (`Settings -> Trunk recorder -> Diagnostics`) now support:
+
+- `Collector CSV (preferred)`:
+  - Reads `/var/lib/pizzapi/tr-health/summary_5m.csv` locally or via SSH.
+- `Raw logs only`:
+  - Pulls raw log files from `/var/log/trunk-recorder` and parses locally.
+- Optional fallback:
+  - In collector mode, if collector output is unavailable, diagnostics can warn and fall back to raw logs.
+
+### Baseline History and Charting
+
+- Baseline selections: `7d`, `14d`, `30d`.
+- Baselines are shown as dotted lines on the same current-24h x-axis (hour-of-day projection).
+- Metrics tab includes `Use persisted baseline history`:
+  - Uses `<trDiagnosticsLocalCachePath>/baseline_history_5m.csv` when enabled.
+- Raw-log parse mode is incremental (reuses unchanged cached parse results).
+
 ## Email
 
 - Gmail and Yahoo are supported using SMTP + app passwords.

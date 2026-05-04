@@ -41,6 +41,7 @@ PizzaPi receives callstream traffic from trunk-recorder, transcribes calls, show
 - `Alerts`: Alert rule management
 - `Settings`: App/runtime/LM/email configuration
   - `Archives` configures an optional SFTP source for archived Trunk Recorder `.bin` data
+  - `Trunk recorder` includes diagnostics source mode (collector CSV vs raw logs)
 - `View`: display options (including font size)
 
 ## SFTP Archives
@@ -74,3 +75,20 @@ Trunk Recorder export:
 - Opening `Insights` auto-selects `Today`.
 - `Today` may trigger summarization for current live backlog.
 - `24h`, `2d`, `Week`, `Range` in Insights load persisted summaries.
+
+## Trunk Recorder Troubleshooting
+
+`Troubleshoot -> Trunk Recorder` now supports:
+
+- `Health Summary` (evaluates last 24h only)
+- `Metrics` with `7d/14d/30d` baselines (dotted lines)
+- `Log Output` and `Diagnostics`
+- `Insights` recommendation tab (LM Link required)
+
+Diagnostics data source can be selected in `Settings -> Trunk recorder -> Diagnostics`:
+
+- `Collector CSV (preferred)` reads `/var/lib/pizzapi/tr-health/summary_5m.csv` (local/SSH)
+- `Raw logs only` parses `/var/log/trunk-recorder` data
+- Optional fallback from collector to raw logs with warning in diagnostics transcript
+
+Raw-log parsing is incremental, and persisted baseline history is stored under the diagnostics cache (`baseline_history_5m.csv`) for faster/longer baseline overlays.
