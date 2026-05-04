@@ -162,7 +162,7 @@ jobs:
         dotnet publish pizzapi/pizzapi.csproj \
           -c Release \
           -r linux-${{ matrix.arch }} \
-          --self-contained false \
+          --self-contained true \
           -p:BuildProfile=${{ matrix.buildProfile }} \
           -p:PublishSingleFile=false \
           -p:Version=${{ needs.get-version.outputs.version }} \
