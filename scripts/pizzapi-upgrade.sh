@@ -56,12 +56,27 @@ install_native_ui_dependencies() {
     echo "Installing native UI/font dependencies..."
     $SUDO apt-get update
     $SUDO apt-get install -y \
-        libfontconfig1 libfreetype6 libuuid1 \
-        libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 \
-        libice6 libsm6 \
-        libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 \
-        libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 \
+        libc6 zlib1g libfontconfig1 libfreetype6 libuuid1 libx11-6 libice6 libsm6
+
+    OPTIONAL_PACKAGES="
+        libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6
+        libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0
+        libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1
         libxxf86vm1 libdrm2 libgbm1 libgl1-mesa-dri libegl1 libinput10 libasound2
+    "
+
+    AVAILABLE_OPTIONAL_PACKAGES=""
+    for package in $OPTIONAL_PACKAGES; do
+        if apt-cache show "$package" >/dev/null 2>&1; then
+            AVAILABLE_OPTIONAL_PACKAGES="$AVAILABLE_OPTIONAL_PACKAGES $package"
+        else
+            echo "Skipping unavailable optional package: $package"
+        fi
+    done
+
+    if [ -n "$AVAILABLE_OPTIONAL_PACKAGES" ]; then
+        $SUDO apt-get install -y $AVAILABLE_OPTIONAL_PACKAGES || true
+    fi
 }
 
 install_launch_wrapper() {

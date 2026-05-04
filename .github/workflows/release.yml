@@ -220,7 +220,7 @@ jobs:
         Section: utils
         Priority: optional
         Architecture: ${{ matrix.deb-arch }}
-        Depends: libicu-dev, libssl3, zlib1g, libfontconfig1, libfreetype6, libuuid1, libx11-6, libx11-xcb1, libxcb1, libxext6, libxfixes3, libxi6, libxrender1, libxtst6, libice6, libsm6, libxcb-glx0, libxcb-dri2-0, libxcb-dri3-0, libxcb-present0, libxcb-randr0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libxshmfence1, libxxf86vm1, libdrm2, libgbm1, libgl1-mesa-dri, libegl1, libinput10, libasound2
+        Depends: libc6, zlib1g, libfontconfig1, libfreetype6, libuuid1, libx11-6, libice6, libsm6
         Maintainer: PizzaWave Team
         Description: PizzaWave API for Linux (${{ matrix.arch }})
           A .NET-based API for radio scanning and call streaming.
@@ -250,7 +250,7 @@ jobs:
         set -e
         echo "Installing PizzaPi UI dependencies..."
         apt-get update
-        apt-get install -y libfontconfig1 libfreetype6 libuuid1 libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 libice6 libsm6 libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 libxxf86vm1 libdrm2 libgbm1 libgl1-mesa-dri libegl1 libinput10 libasound2 || true
+        apt-get install -y libc6 zlib1g libfontconfig1 libfreetype6 libuuid1 libx11-6 libice6 libsm6 || true
         mkdir -p /etc/pizzapi
         if [ ! -f /etc/pizzapi/appsettings.json ]; then
           cp /opt/pizzapi/appsettings.json.example /etc/pizzapi/appsettings.json 2>/dev/null || true
