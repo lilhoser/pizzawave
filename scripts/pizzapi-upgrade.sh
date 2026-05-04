@@ -61,7 +61,7 @@ install_native_ui_dependencies() {
         libice6 libsm6 \
         libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 \
         libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 \
-        libxxf86vm1 libdrm2 libgbm1 libgl1-mesa-dri libegl1-mesa libinput10 libasound2
+        libxxf86vm1 libdrm2 libgbm1 libgl1-mesa-dri libegl1 libinput10 libasound2
 }
 
 install_launch_wrapper() {
