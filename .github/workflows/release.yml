@@ -189,7 +189,29 @@ jobs:
       run: |
         cp -r ./publish/${{ matrix.arch }}/* package/opt/pizzapi/
         cp ./pizzapi/images/logo.png package/opt/pizzapi/images/logo.png
-        chmod +x package/opt/pizzapi/pizzapi
+        mv package/opt/pizzapi/pizzapi package/opt/pizzapi/pizzapi.bin
+        cat > package/opt/pizzapi/pizzapi << 'EOF'
+        #!/bin/sh
+        set -e
+
+        for lib in \
+          /usr/lib/aarch64-linux-gnu/libfreetype.so.6 \
+          /usr/lib/arm-linux-gnueabihf/libfreetype.so.6 \
+          /usr/lib/x86_64-linux-gnu/libfreetype.so.6 \
+          /usr/lib/libfreetype.so.6 \
+          /usr/lib/aarch64-linux-gnu/libuuid.so.1 \
+          /usr/lib/arm-linux-gnueabihf/libuuid.so.1 \
+          /usr/lib/x86_64-linux-gnu/libuuid.so.1 \
+          /usr/lib/libuuid.so.1; do
+          if [ -r "$lib" ]; then
+            LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD }$lib"
+          fi
+        done
+
+        export LD_PRELOAD
+        exec /opt/pizzapi/pizzapi.bin "$@"
+        EOF
+        chmod +x package/opt/pizzapi/pizzapi package/opt/pizzapi/pizzapi.bin
     - name: Create DEBIAN control file
       run: |
         cat > package/DEBIAN/control << 'EOF'
@@ -198,7 +220,7 @@ jobs:
         Section: utils
         Priority: optional
         Architecture: ${{ matrix.deb-arch }}
-        Depends: libicu-dev, libssl3, zlib1g, libfontconfig1, libx11-6, libx11-xcb1, libxcb1, libxext6, libxfixes3, libxi6, libxrender1, libxtst6, libxcb-glx0, libxcb-dri2-0, libxcb-dri3-0, libxcb-present0, libxcb-randr0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libxshmfence1, libxxf86vm1, libdrm2, libgbm1, libasound2
+        Depends: libicu-dev, libssl3, zlib1g, libfontconfig1, libfreetype6, libuuid1, libx11-6, libx11-xcb1, libxcb1, libxext6, libxfixes3, libxi6, libxrender1, libxtst6, libice6, libsm6, libxcb-glx0, libxcb-dri2-0, libxcb-dri3-0, libxcb-present0, libxcb-randr0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libxshmfence1, libxxf86vm1, libdrm2, libgbm1, libgl1-mesa-dri, libegl1-mesa, libinput10, libasound2
         Maintainer: PizzaWave Team
         Description: PizzaWave API for Linux (${{ matrix.arch }})
           A .NET-based API for radio scanning and call streaming.
@@ -228,7 +250,7 @@ jobs:
         set -e
         echo "Installing PizzaPi UI dependencies..."
         apt-get update
-        apt-get install -y libfontconfig1 libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 libxxf86vm1 libdrm2 libgbm1 libasound2 || true
+        apt-get install -y libfontconfig1 libfreetype6 libuuid1 libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 libice6 libsm6 libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 libxxf86vm1 libdrm2 libgbm1 libgl1-mesa-dri libegl1-mesa libinput10 libasound2 || true
         mkdir -p /etc/pizzapi
         if [ ! -f /etc/pizzapi/appsettings.json ]; then
           cp /opt/pizzapi/appsettings.json.example /etc/pizzapi/appsettings.json 2>/dev/null || true

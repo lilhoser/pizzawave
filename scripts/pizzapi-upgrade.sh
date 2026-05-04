@@ -52,6 +52,52 @@ install_dotnet_runtime() {
     $SUDO apt-get install -y "dotnet-runtime-${REQUIRED_DOTNET_MAJOR}.0"
 }
 
+install_native_ui_dependencies() {
+    echo "Installing native UI/font dependencies..."
+    $SUDO apt-get update
+    $SUDO apt-get install -y \
+        libfontconfig1 libfreetype6 libuuid1 \
+        libx11-6 libx11-xcb1 libxcb1 libxext6 libxfixes3 libxi6 libxrender1 libxtst6 \
+        libice6 libsm6 \
+        libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 libxcb-present0 libxcb-randr0 \
+        libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxshmfence1 \
+        libxxf86vm1 libdrm2 libgbm1 libgl1-mesa-dri libegl1-mesa libinput10 libasound2
+}
+
+install_launch_wrapper() {
+    if [ ! -f /opt/pizzapi/pizzapi ]; then
+        return
+    fi
+
+    if [ ! -f /opt/pizzapi/pizzapi.bin ]; then
+        $SUDO mv /opt/pizzapi/pizzapi /opt/pizzapi/pizzapi.bin
+    fi
+
+    $SUDO tee /opt/pizzapi/pizzapi >/dev/null << 'EOF'
+#!/bin/sh
+set -e
+
+for lib in \
+  /usr/lib/aarch64-linux-gnu/libfreetype.so.6 \
+  /usr/lib/arm-linux-gnueabihf/libfreetype.so.6 \
+  /usr/lib/x86_64-linux-gnu/libfreetype.so.6 \
+  /usr/lib/libfreetype.so.6 \
+  /usr/lib/aarch64-linux-gnu/libuuid.so.1 \
+  /usr/lib/arm-linux-gnueabihf/libuuid.so.1 \
+  /usr/lib/x86_64-linux-gnu/libuuid.so.1 \
+  /usr/lib/libuuid.so.1; do
+  if [ -r "$lib" ]; then
+    LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD }$lib"
+  fi
+done
+
+export LD_PRELOAD
+exec /opt/pizzapi/pizzapi.bin "$@"
+EOF
+
+    $SUDO chmod +x /opt/pizzapi/pizzapi /opt/pizzapi/pizzapi.bin
+}
+
 echo "=========================================="
 echo "  PizzaPi UI Upgrade"
 echo "=========================================="
@@ -78,6 +124,8 @@ fi
 echo ""
 echo "Installing..."
 $SUDO dpkg -i "$DEB_FILE" || $SUDO apt-get install -f -y
+install_native_ui_dependencies
+install_launch_wrapper
 
 # Setup autostart
 AUTOSTART_DIR="$HOME/.config/autostart"
