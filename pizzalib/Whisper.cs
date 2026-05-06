@@ -37,6 +37,7 @@ namespace pizzalib
         private WhisperFactory? m_Factory;
         private WhisperProcessor? m_Processor;
         private readonly SemaphoreSlim m_ProcessorLock = new SemaphoreSlim(1, 1);
+        private bool m_RetriedModelLoad;
 
         public Whisper(Settings Settings)
         {
@@ -179,38 +180,74 @@ namespace pizzalib
             try
             {
                 m_Factory = WhisperFactory.FromPath(m_ModelFile);
+
+                //
+                // Create a persistent processor. This keeps the Whisper thread pool
+                // alive but stable, avoiding the overhead of creating/destroying
+                // processors for each call (which was causing high CPU on Linux).
+                // The processor will be reused for all transcriptions.
+                //
+                m_Processor = m_Factory.CreateBuilder()
+                    // Auto language detection adds extra inference cost; default to English
+                    // for scanner traffic to reduce sustained CPU on low-power ARM devices.
+                    .WithLanguage("en")
+                    .WithNoContext()
+                    .WithSingleSegment()
+                    .Build();
+
+                // Reset semaphore to allow concurrent access (it was created with 1, 1)
+                // This is fine since we only allow one wait at a time
+                await m_ProcessorLock.WaitAsync();
+                m_ProcessorLock.Release();
             }
             catch (Exception ex)
             {
-                var err = $"Failed to build processor/factory: {ex.Message}";
+                if (!m_RetriedModelLoad && IsAutoManagedModelFile(m_ModelFile))
+                {
+                    m_RetriedModelLoad = true;
+                    Trace(TraceLoggerType.Whisper, TraceEventType.Warning,
+                        $"Whisper failed to initialize auto-managed model '{m_ModelFile}': {ex}. Deleting and downloading a fresh copy.");
+                    TraceLogger.Flush();
+                    try
+                    {
+                        m_Processor?.Dispose();
+                        m_Processor = null;
+                        m_Factory?.Dispose();
+                        m_Factory = null;
+                        File.Delete(m_ModelFile);
+                    }
+                    catch (Exception deleteEx)
+                    {
+                        Trace(TraceLoggerType.Whisper, TraceEventType.Warning,
+                            $"Failed to delete invalid Whisper model '{m_ModelFile}': {deleteEx}");
+                        TraceLogger.Flush();
+                    }
+
+                    m_ModelFile = string.Empty;
+                    return await Initialize().ConfigureAwait(false);
+                }
+
+                var err = $"Failed to load the whisper model from '{m_ModelFile}': {ex}";
                 Trace(TraceLoggerType.Whisper, TraceEventType.Error, err);
+                TraceLogger.Flush();
                 throw new Exception(err);
             }
-
-            //
-            // Create a persistent processor. This keeps the Whisper thread pool
-            // alive but stable, avoiding the overhead of creating/destroying
-            // processors for each call (which was causing high CPU on Linux).
-            // The processor will be reused for all transcriptions.
-            //
-            m_Processor = m_Factory.CreateBuilder()
-                // Auto language detection adds extra inference cost; default to English
-                // for scanner traffic to reduce sustained CPU on low-power ARM devices.
-                .WithLanguage("en")
-                .WithNoContext()
-                .WithSingleSegment()
-                .Build();
-
-            // Reset semaphore to allow concurrent access (it was created with 1, 1)
-            // This is fine since we only allow one wait at a time
-            await m_ProcessorLock.WaitAsync();
-            m_ProcessorLock.Release();
 
             m_Initialized = true;
             m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
             Trace(TraceLoggerType.Whisper, TraceEventType.Information,
                 $"Whisper initialized. ModelPath='{m_ModelFile}', Language='en'");
             return true;
+        }
+
+        private bool IsAutoManagedModelFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            var fullModelPath = Path.GetFullPath(path);
+            var fullModelFolder = Path.GetFullPath(s_ModelFolder);
+            return fullModelPath.StartsWith(fullModelFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string GetWhisperPresetAlias(string? preset)

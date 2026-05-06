@@ -460,7 +460,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private DateTime? _snoozeUntil = null;  // Explicitly initialize to null
     private bool _alwaysPinAlertMatches = true;
     private int _currentSortMode = 0; // 0=newest first, 1=oldest first, 2=talkgroup
-    private int _currentGroupMode = 0; // 0=none, 1=talkgroup, 2=time of day, 3=source
+    private int _currentGroupMode = 0; // 0=none, 1=talkgroup, 2=time of day, 3=system
     private bool _isAlertSnoozed = false;
     private bool _isAutoplayAlertAudioPlaying = false;
     private bool _openBellMenuOnNextClick;
@@ -504,6 +504,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _talkgroupMappingEnabledInPp = true;
     private string _talkgroupMappingOpsCategory = string.Empty;
     private string _talkgroupMappingNotes = string.Empty;
+    private string _archiveSecretStatusText = string.Empty;
+    private string _transcriptionTestStatusText = string.Empty;
     
     // Time range filter state for persistent button bar
     private string _currentFilter = "24h"; // 24h, 2d, week, custom
@@ -542,6 +544,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ? Path.Combine(Settings.DefaultOfflineCaptureDirectory, "sftp-cache")
                 : Environment.ExpandEnvironmentVariables(_settings.ArchiveLocalCachePath);
             return $"Cache: {path}";
+        }
+    }
+    public string ArchiveSecretStatusText
+    {
+        get => _archiveSecretStatusText;
+        private set
+        {
+            if (string.Equals(_archiveSecretStatusText, value, StringComparison.Ordinal))
+                return;
+            _archiveSecretStatusText = value;
+            RaisePropertyChanged();
+        }
+    }
+    public string TranscriptionTestStatusText
+    {
+        get => _transcriptionTestStatusText;
+        private set
+        {
+            if (string.Equals(_transcriptionTestStatusText, value, StringComparison.Ordinal))
+                return;
+            _transcriptionTestStatusText = value;
+            RaisePropertyChanged();
         }
     }
 
@@ -683,8 +707,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     public bool IsGenerateNowVisible => _currentFilter == "24h" || _currentFilter == "2d";
     public bool CanGenerateNow => IsGenerateNowVisible && !_isGeneratingInsightsNow;
-    public bool IsHighlightsEmpty => IsHighlightsSelected && !InsightsLoading && InsightsSummaries.Count == 0;
+    public bool IsHighlightsEmpty => IsDashboardSelected
+        && !InsightsLoading
+        && DashboardIncidentBuckets.Count == 0;
     public ObservableCollection<InsightSummaryWindow> InsightsSummaries { get; } = new();
+    public ObservableCollection<DashboardIncidentBucket> DashboardIncidentBuckets { get; } = new();
+    public ObservableCollection<TrHealthChartRow> DashboardCategoryVolumeCharts { get; } = new();
+    public ObservableCollection<DashboardTalkgroupTrendRow> DashboardTalkgroupTrendRows { get; } = new();
+    public ObservableCollection<DashboardQualityHourStackRow> DashboardQualityHourRows { get; } = new();
+    public ObservableCollection<DashboardBarStatRow> DashboardQualitySystemRows { get; } = new();
+    public ObservableCollection<DashboardBarStatRow> DashboardQualityTalkgroupRows { get; } = new();
+    public string DashboardQualityProblemTotalText => $"{Calls.Count(IsProblemTranscript):N0} quality-problem calls";
+    public ObservableCollection<DashboardSimpleStat> DashboardSimpleStats { get; } = new();
+    public ObservableCollection<DashboardBarStatRow> DashboardCategoryShareRows { get; } = new();
+    public ObservableCollection<DashboardBarStatRow> DashboardAlertKeywordRows { get; } = new();
+    public ObservableCollection<DashboardScatterPoint> DashboardVolumeScatterPoints { get; } = new();
+    public ObservableCollection<DashboardScatterPoint> DashboardKeywordScatterPoints { get; } = new();
+    public bool IsDashboardIncidentBucketsEmpty => DashboardIncidentBuckets.Count == 0;
+    public bool HasDashboardIncidentDetails => DashboardIncidentBuckets.Any(b => b.HasEventDetails);
+    public string DashboardIncidentExpandAllText => DashboardIncidentBuckets.Any(b => b.HasEventDetails && !b.IsExpanded)
+        ? "Expand all"
+        : "Collapse all";
     public ObservableCollection<InsightCategorySection> InsightsCategorySections { get; } = new();
     public ObservableCollection<InsightsNarrativeSection> InsightsNarrativeSections { get; } = new();
     public ObservableCollection<string> InsightsNarrativeBullets { get; } = new();
@@ -1275,6 +1318,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
             {
                 InsightsSummaries.Add(filteredWindow);
             }
+            RefreshDashboardIncidents();
             RefreshInsightsCategorySections();
             RefreshNextInsightStatus();
         });
@@ -1295,13 +1339,13 @@ RaisePropertyChanged(nameof(IsWeekActive));
         if (!IsInsightsEnabled || _insightsService == null)
         {
             NextInsightStatusText = "Insights disabled";
-            if (IsHighlightsSelected)
+            if (IsDashboardSelected)
                 MenuSpecificStatusText = NextInsightStatusText;
             return;
         }
 
         NextInsightStatusText = _insightsService.GetNextSummaryStatusText();
-        if (IsHighlightsSelected)
+        if (IsDashboardSelected)
             MenuSpecificStatusText = NextInsightStatusText;
     }
 
@@ -1369,6 +1413,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
                     InsightsStatusText = _insightsProgressStatus;
                 }
 
+                RefreshDashboardIncidents();
                 RefreshInsightsCategorySections();
                 RaisePropertyChanged(nameof(InsightsSummaries));
                 RaisePropertyChanged(nameof(InsightsCategorySections));
@@ -1391,6 +1436,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
             {
                 InsightsSummaries.Clear();
                 InsightsSummaries.Add(errorSummary);
+                RefreshDashboardIncidents();
                 InsightsStatusText = $"Error: {ex.Message}";
                 RaisePropertyChanged(nameof(InsightsStatusText));
                 RefreshInsightsCategorySections();
@@ -2104,6 +2150,1014 @@ RaisePropertyChanged(nameof(IsWeekActive));
             RaisePropertyChanged(nameof(CanGenerateTrHealthInsights));
         }
     }
+
+    private void RefreshDashboardIncidents()
+    {
+        var events = InsightsSummaries
+            .Where(s => s?.NotableEvents != null)
+            .SelectMany(s => s.NotableEvents.Where(e => e != null && !e.IsErrorEvent))
+            .ToList();
+
+        var visibleCalls = Calls.ToList();
+        var allCalls = _allCalls.ToList();
+        var dashboardCallIdMap = BuildDashboardCallIdMap(visibleCalls.Count > 0 ? visibleCalls : allCalls);
+
+        DashboardIncidentBuckets.Clear();
+        foreach (var bucket in BuildDashboardIncidentBuckets(InsightsSummaries.ToList(), events, dashboardCallIdMap))
+            DashboardIncidentBuckets.Add(bucket);
+
+        DashboardCategoryVolumeCharts.Clear();
+        foreach (var row in BuildDashboardCategoryVolumeCharts(allCalls.Count > 0 ? allCalls : visibleCalls))
+            DashboardCategoryVolumeCharts.Add(row);
+        DashboardTalkgroupTrendRows.Clear();
+        foreach (var row in BuildDashboardTalkgroupTrendRows(visibleCalls))
+            DashboardTalkgroupTrendRows.Add(row);
+        DashboardQualityHourRows.Clear();
+        foreach (var row in BuildDashboardQualityHourRows(visibleCalls))
+            DashboardQualityHourRows.Add(row);
+        DashboardQualitySystemRows.Clear();
+        foreach (var row in BuildDashboardQualitySystemRows(visibleCalls))
+            DashboardQualitySystemRows.Add(row);
+        DashboardQualityTalkgroupRows.Clear();
+        foreach (var row in BuildDashboardQualityTalkgroupRows(visibleCalls))
+            DashboardQualityTalkgroupRows.Add(row);
+        DashboardSimpleStats.Clear();
+        foreach (var row in BuildDashboardSimpleStats(visibleCalls, events, DashboardIncidentBuckets.ToList()))
+            DashboardSimpleStats.Add(row);
+        DashboardCategoryShareRows.Clear();
+        foreach (var row in BuildDashboardCategoryShareRows(visibleCalls))
+            DashboardCategoryShareRows.Add(row);
+        DashboardAlertKeywordRows.Clear();
+        foreach (var row in BuildDashboardAlertKeywordRows(visibleCalls))
+            DashboardAlertKeywordRows.Add(row);
+        DashboardVolumeScatterPoints.Clear();
+        foreach (var p in BuildDashboardVolumeScatterPoints(visibleCalls))
+            DashboardVolumeScatterPoints.Add(p);
+        DashboardKeywordScatterPoints.Clear();
+        foreach (var p in BuildDashboardKeywordScatterPoints(visibleCalls))
+            DashboardKeywordScatterPoints.Add(p);
+
+        RaisePropertyChanged(nameof(DashboardIncidentBuckets));
+        RaisePropertyChanged(nameof(DashboardCategoryVolumeCharts));
+        RaisePropertyChanged(nameof(DashboardTalkgroupTrendRows));
+        RaisePropertyChanged(nameof(DashboardQualityHourRows));
+        RaisePropertyChanged(nameof(DashboardQualitySystemRows));
+        RaisePropertyChanged(nameof(DashboardQualityTalkgroupRows));
+        RaisePropertyChanged(nameof(DashboardQualityProblemTotalText));
+        RaisePropertyChanged(nameof(DashboardSimpleStats));
+        RaisePropertyChanged(nameof(DashboardCategoryShareRows));
+        RaisePropertyChanged(nameof(DashboardAlertKeywordRows));
+        RaisePropertyChanged(nameof(DashboardVolumeScatterPoints));
+        RaisePropertyChanged(nameof(DashboardKeywordScatterPoints));
+        RaisePropertyChanged(nameof(IsDashboardIncidentBucketsEmpty));
+        RaisePropertyChanged(nameof(HasDashboardIncidentDetails));
+        RaisePropertyChanged(nameof(DashboardIncidentExpandAllText));
+        RaisePropertyChanged(nameof(IsHighlightsEmpty));
+    }
+
+    private List<DashboardIncidentBucket> BuildDashboardIncidentBuckets(
+        List<InsightSummaryWindow> summaries,
+        List<InsightNotableEvent> events,
+        Dictionary<string, TranscribedCall> callIdMap)
+    {
+        if (events.Count == 0)
+            return new List<DashboardIncidentBucket>();
+
+        var sourceIncidentBuckets = BuildStructuredIncidentBuckets(summaries, callIdMap);
+        if (sourceIncidentBuckets.Count > 0)
+            return sourceIncidentBuckets;
+
+        return BuildIncidentEventGroups(events, callIdMap)
+            .Where(g => g.Events.Count > 1)
+            .Select(g =>
+            {
+                var latest = g.Events.OrderByDescending(e => GetIncidentEventSortTime(e, callIdMap)).First();
+                return new DashboardIncidentBucket
+                {
+                    BucketName = g.DisplayTitle,
+                    MatchCount = g.Events.Count,
+                    LatestSeen = latest.ParentSummary?.WindowEnd ?? DateTimeOffset.Now,
+                    PreviewText = string.IsNullOrWhiteSpace(latest.Detail) ? latest.CategoryDisplay : latest.Detail,
+                    SourceText = "Related calls",
+                    EventDetails = g.Events
+                        .OrderByDescending(e => GetIncidentEventSortTime(e, callIdMap))
+                        .ThenByDescending(e => e.Confidence)
+                        .Select(e => CreateDashboardIncidentDetail(e, callIdMap))
+                        .ToList()
+                };
+            })
+            .OrderByDescending(b => b.MatchCount)
+            .ThenByDescending(b => b.LatestSeen)
+            .ToList();
+    }
+
+    private sealed class DashboardIncidentEventGroup
+    {
+        public string DisplayTitle { get; set; } = string.Empty;
+        public List<InsightNotableEvent> Events { get; } = new();
+        public HashSet<string> Tokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public DateTimeOffset FirstSeen { get; set; }
+        public DateTimeOffset LastSeen { get; set; }
+    }
+
+    private static List<DashboardIncidentEventGroup> BuildIncidentEventGroups(
+        List<InsightNotableEvent> events,
+        Dictionary<string, TranscribedCall> callIdMap)
+    {
+        var groups = new List<DashboardIncidentEventGroup>();
+        foreach (var ev in events
+            .OrderBy(e => GetIncidentEventSortTime(e, callIdMap))
+            .ThenByDescending(e => e.Confidence))
+        {
+            var eventTime = GetIncidentEventSortTime(ev, callIdMap);
+            var tokens = ExtractIncidentTokens(ev);
+            if (tokens.Count == 0)
+                tokens.Add(InsightCategoryPalette.Normalize(ev.Category));
+
+            var target = groups
+                .Where(g => IsWithinIncidentWindow(g, eventTime))
+                .Select(g => new { Group = g, Score = ComputeIncidentSimilarity(g.Tokens, tokens) })
+                .Where(x => x.Score >= 0.34)
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => Math.Abs((x.Group.LastSeen - eventTime).TotalMinutes))
+                .Select(x => x.Group)
+                .FirstOrDefault();
+
+            if (target == null)
+            {
+                target = new DashboardIncidentEventGroup
+                {
+                    DisplayTitle = string.IsNullOrWhiteSpace(ev.DisplayTitle) ? ev.CategoryDisplay : ev.DisplayTitle,
+                    Tokens = new HashSet<string>(tokens, StringComparer.OrdinalIgnoreCase),
+                    FirstSeen = eventTime,
+                    LastSeen = eventTime
+                };
+                groups.Add(target);
+            }
+
+            target.Events.Add(ev);
+            target.FirstSeen = eventTime < target.FirstSeen ? eventTime : target.FirstSeen;
+            target.LastSeen = eventTime > target.LastSeen ? eventTime : target.LastSeen;
+            target.Tokens.UnionWith(tokens);
+            var bestTitle = target.Events
+                .OrderByDescending(e => e.Confidence)
+                .Select(e => string.IsNullOrWhiteSpace(e.DisplayTitle) ? e.CategoryDisplay : e.DisplayTitle)
+                .FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+            if (!string.IsNullOrWhiteSpace(bestTitle))
+                target.DisplayTitle = bestTitle;
+        }
+
+        return groups;
+    }
+
+    private static bool IsWithinIncidentWindow(DashboardIncidentEventGroup group, DateTimeOffset eventTime)
+    {
+        var first = eventTime < group.FirstSeen ? eventTime : group.FirstSeen;
+        var last = eventTime > group.LastSeen ? eventTime : group.LastSeen;
+        return (last - first).TotalMinutes <= 60;
+    }
+
+    private static double ComputeIncidentSimilarity(HashSet<string> a, HashSet<string> b)
+    {
+        if (a.Count == 0 || b.Count == 0)
+            return 0;
+        var intersection = a.Count(b.Contains);
+        var union = a.Count + b.Count - intersection;
+        var jaccard = union <= 0 ? 0 : intersection / (double)union;
+        var containment = intersection / (double)Math.Min(a.Count, b.Count);
+        return Math.Max(jaccard, containment * 0.72);
+    }
+
+    private static HashSet<string> ExtractIncidentTokens(InsightNotableEvent ev)
+    {
+        var stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "call","calls","unit","units","officer","officers","dispatch","reported","advised","responding",
+            "response","scene","area","update","updates","subject","caller","vehicle","police","fire","ems",
+            "medical","traffic","north","south","east","west","street","road","drive","avenue","near"
+        };
+        var text = $"{ev.DisplayTitle} {ev.Detail}".ToLowerInvariant();
+        var cleaned = System.Text.RegularExpressions.Regex.Replace(text, @"[^a-z0-9\s]", " ");
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token.Length < 4 || stop.Contains(token))
+                continue;
+            tokens.Add(token);
+        }
+        return tokens;
+    }
+
+    private static DateTimeOffset GetIncidentEventSortTime(InsightNotableEvent ev, Dictionary<string, TranscribedCall> callIdMap)
+    {
+        var rawCallTimes = ResolveRawCallTimes(ev.CallIds, callIdMap);
+        if (rawCallTimes.Count > 0)
+            return rawCallTimes.Min();
+        return ResolveNotableDisplayTimestamp(ev) ?? ev.ParentSummary?.WindowStart ?? DateTimeOffset.MinValue;
+    }
+
+    private static List<DashboardIncidentBucket> BuildStructuredIncidentBuckets(
+        List<InsightSummaryWindow> summaries,
+        Dictionary<string, TranscribedCall> callIdMap)
+    {
+        var incidentProps = typeof(InsightSummaryWindow).GetProperties()
+            .Where(p => typeof(System.Collections.IEnumerable).IsAssignableFrom(p.PropertyType) && p.PropertyType != typeof(string))
+            .Where(p => p.PropertyType != typeof(List<InsightNotableEvent>))
+            .ToList();
+        var incidents = new List<InsightIncident>();
+        foreach (var summary in summaries)
+        {
+            foreach (var prop in incidentProps)
+            {
+                if (prop.GetValue(summary) is not System.Collections.IEnumerable enumerable)
+                    continue;
+                foreach (var item in enumerable)
+                {
+                    if (item is InsightIncident incident)
+                        incidents.Add(incident);
+                }
+            }
+        }
+
+        return incidents
+            .GroupBy(i => string.IsNullOrWhiteSpace(i.IncidentId) ? i.Title : i.IncidentId, StringComparer.OrdinalIgnoreCase)
+            .Where(g => Math.Max(g.Sum(i => Math.Max(1, i.EventCount)), g.Count()) > 1)
+            .Select(g =>
+            {
+                var latest = g.OrderByDescending(i => i.LastSeen).First();
+                return new DashboardIncidentBucket
+                {
+                    BucketName = string.IsNullOrWhiteSpace(latest.Title) ? latest.CategoryDisplay : latest.Title,
+                    MatchCount = Math.Max(g.Sum(i => Math.Max(1, i.EventCount)), g.Count()),
+                    LatestSeen = latest.LastSeen == default ? DateTimeOffset.Now : latest.LastSeen,
+                    PreviewText = string.IsNullOrWhiteSpace(latest.NarrativeSummary) ? latest.AgenciesDisplay : latest.NarrativeSummary,
+                    SourceText = $"{latest.SeverityDisplay} {latest.Status}".Trim(),
+                    EventDetails = g
+                        .OrderByDescending(i => i.LastSeen)
+                        .SelectMany(i => CreateDashboardIncidentDetails(i, callIdMap))
+                        .ToList()
+                };
+            })
+            .OrderByDescending(b => b.MatchCount)
+            .ThenByDescending(b => b.LatestSeen)
+            .ToList();
+    }
+
+    private static DashboardIncidentDetail CreateDashboardIncidentDetail(
+        InsightNotableEvent e,
+        Dictionary<string, TranscribedCall> callIdMap)
+    {
+        var sourceCall = ResolvePrimarySourceCall(e.CallIds, callIdMap);
+        var occurredAt = sourceCall != null
+            ? DateTimeOffset.FromUnixTimeSeconds(sourceCall.StartTime).ToLocalTime()
+            : ResolveNotableDisplayTimestamp(e);
+        var timeText = FormatIncidentDetailTime(occurredAt, e);
+        var callText = FormatSourceCallIds(e.CallIds);
+        return new DashboardIncidentDetail
+        {
+            Title = string.IsNullOrWhiteSpace(e.DisplayTitle) ? e.CategoryDisplay : e.DisplayTitle,
+            Detail = string.IsNullOrWhiteSpace(e.Detail) ? e.CategoryDisplay : e.Detail,
+            MetaText = $"{timeText} | {e.CategoryDisplay} | {e.ConfidencePercent}{callText}",
+            OccurredAt = occurredAt,
+            SourceCallId = e.CallIds.FirstOrDefault(id => !string.IsNullOrWhiteSpace(id))?.Trim() ?? string.Empty,
+            SourceCall = sourceCall
+        };
+    }
+
+    private static Dictionary<string, TranscribedCall> BuildDashboardCallIdMap(IEnumerable<TranscribedCall> calls)
+    {
+        var map = new Dictionary<string, TranscribedCall>(StringComparer.OrdinalIgnoreCase);
+        foreach (var call in calls)
+        {
+            var callId = CallHash.ComputeCallId(call);
+            if (!map.ContainsKey(callId))
+                map[callId] = call;
+        }
+        return map;
+    }
+
+    private static List<DateTimeOffset> ResolveRawCallTimes(IEnumerable<string>? callIds, Dictionary<string, TranscribedCall> callIdMap)
+    {
+        var times = new List<DateTimeOffset>();
+        foreach (var id in callIds ?? Enumerable.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(id) || !callIdMap.TryGetValue(id.Trim(), out var call))
+                continue;
+            times.Add(DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime());
+        }
+        return times;
+    }
+
+    private static TranscribedCall? ResolvePrimarySourceCall(IEnumerable<string>? callIds, Dictionary<string, TranscribedCall> callIdMap)
+    {
+        foreach (var id in callIds ?? Enumerable.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            if (callIdMap.TryGetValue(id.Trim(), out var call))
+                return call;
+        }
+        return null;
+    }
+
+    private static DateTimeOffset? ResolveNotableDisplayTimestamp(InsightNotableEvent notable)
+    {
+        var parent = notable.ParentSummary;
+        if (parent == null || string.IsNullOrWhiteSpace(notable.Timestamp))
+            return parent?.WindowStart;
+
+        var raw = notable.Timestamp.Trim();
+        var formats = new[] { "HH:mm", "H:mm", "h:mm tt", "hh:mm tt", "h:mmtt", "hh:mmtt" };
+        if (!DateTime.TryParseExact(raw, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            return parent.WindowStart;
+
+        var localDate = parent.WindowStart.ToLocalTime().Date;
+        var local = localDate.Add(parsed.TimeOfDay);
+        return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+    }
+
+    private static string FormatIncidentDetailTime(DateTimeOffset? occurredAt, InsightNotableEvent fallback)
+    {
+        if (occurredAt.HasValue)
+            return occurredAt.Value.ToLocalTime().ToString("MMM d h:mm tt");
+        if (!string.IsNullOrWhiteSpace(fallback.TimestampDisplay))
+            return fallback.TimestampDisplay;
+        return fallback.ParentSummary == null
+            ? string.Empty
+            : $"{fallback.ParentSummary.WindowStart.ToLocalTime():MMM d h:mm tt}-{fallback.ParentSummary.WindowEnd.ToLocalTime():h:mm tt}";
+    }
+
+    private static string FormatSourceCallIds(IEnumerable<string>? callIds)
+    {
+        var ids = (callIds ?? Enumerable.Empty<string>())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (ids.Count == 0)
+            return string.Empty;
+
+        return ids.Count == 1
+            ? $" | 1 source call ({ids[0]})"
+            : $" | {ids.Count} source calls ({string.Join(", ", ids)})";
+    }
+
+    private static IEnumerable<DashboardIncidentDetail> CreateDashboardIncidentDetails(
+        InsightIncident incident,
+        Dictionary<string, TranscribedCall> callIdMap)
+    {
+        if (incident.LinkedEvents.Count > 0)
+        {
+            foreach (var e in incident.LinkedEvents
+                .OrderByDescending(e => e.ParentSummary?.WindowEnd ?? DateTimeOffset.MinValue)
+                .ThenByDescending(e => e.Confidence))
+            {
+                yield return CreateDashboardIncidentDetail(e, callIdMap);
+            }
+
+            yield break;
+        }
+
+        yield return new DashboardIncidentDetail
+        {
+            Title = string.IsNullOrWhiteSpace(incident.Title) ? incident.CategoryDisplay : incident.Title,
+            Detail = string.IsNullOrWhiteSpace(incident.NarrativeSummary) ? incident.AgenciesDisplay : incident.NarrativeSummary,
+            MetaText = $"{incident.FirstSeen.ToLocalTime():MMM d h:mm tt}-{incident.LastSeen.ToLocalTime():h:mm tt} | {incident.AgenciesDisplay} | {incident.ConfidencePercent} | {Math.Max(incident.EventCount, 1)} update{(incident.EventCount == 1 ? string.Empty : "s")}",
+            OccurredAt = incident.LastSeen == default ? null : incident.LastSeen
+        };
+    }
+
+    private void OnDashboardIncidentToggleClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control control || control.DataContext is not DashboardIncidentBucket bucket)
+            return;
+
+        bucket.IsExpanded = !bucket.IsExpanded;
+        RaisePropertyChanged(nameof(DashboardIncidentExpandAllText));
+    }
+
+    private void OnDashboardIncidentExpandAllClicked(object? sender, RoutedEventArgs e)
+    {
+        var shouldExpand = DashboardIncidentBuckets.Any(b => b.HasEventDetails && !b.IsExpanded);
+        foreach (var bucket in DashboardIncidentBuckets.Where(b => b.HasEventDetails))
+            bucket.IsExpanded = shouldExpand;
+
+        RaisePropertyChanged(nameof(DashboardIncidentExpandAllText));
+    }
+
+    private void OnDashboardIncidentUpdateAudioClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control control || control.DataContext is not DashboardIncidentDetail detail)
+            return;
+        if (detail.SourceCall == null)
+        {
+            StatusText = "No matching source call found for this update.";
+            return;
+        }
+
+        PlayAudio(detail.SourceCall);
+    }
+
+    private async void OnDashboardIncidentUpdateTranscriptClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control control || control.DataContext is not DashboardIncidentDetail detail)
+            return;
+        if (detail.SourceCall == null)
+        {
+            StatusText = "No matching source call found for this update.";
+            return;
+        }
+
+        var dialog = BuildCallTranscriptDialog(detail);
+        await dialog.ShowDialog(this);
+    }
+
+    private Window BuildCallTranscriptDialog(DashboardIncidentDetail detail)
+    {
+        var call = detail.SourceCall!;
+        var localTime = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime().ToString("g");
+        var titleBlock = new TextBlock
+        {
+            Text = detail.Title,
+            FontSize = 18,
+            FontWeight = FontWeight.Bold,
+            Foreground = Brushes.White,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var subtitleBlock = new TextBlock
+        {
+            Text = $"{localTime} | TG {call.Talkgroup} | {detail.SourceCallId}",
+            Foreground = Brushes.LightGray,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var transcriptBox = new TextBox
+        {
+            Text = call.Transcription ?? string.Empty,
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true
+        };
+        var transcriptScroller = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = transcriptBox
+        };
+        var closeButton = new Button
+        {
+            Content = "Close",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            MinWidth = 90
+        };
+        var window = new Window
+        {
+            Title = "Source Call Transcript",
+            Width = 680,
+            Height = 430,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        closeButton.Click += (_, _) => window.Close();
+
+        var layout = new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"),
+            RowSpacing = 10
+        };
+        Grid.SetRow(titleBlock, 0);
+        Grid.SetRow(subtitleBlock, 1);
+        Grid.SetRow(transcriptScroller, 2);
+        Grid.SetRow(closeButton, 3);
+        layout.Children.Add(titleBlock);
+        layout.Children.Add(subtitleBlock);
+        layout.Children.Add(transcriptScroller);
+        layout.Children.Add(closeButton);
+
+        window.Content = new Border
+        {
+            Background = new SolidColorBrush(Color.Parse("#1f2f3d")),
+            Padding = new Thickness(14),
+            Child = layout
+        };
+        return window;
+    }
+
+    private List<TrHealthChartRow> BuildDashboardCategoryVolumeCharts(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0)
+            return new List<TrHealthChartRow>();
+
+        var now = DateTimeOffset.Now;
+        var start = now.AddHours(-24);
+        var recentCalls = calls
+            .Where(c =>
+            {
+                var ts = DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime();
+                return ts >= start && ts <= now;
+            })
+            .ToList();
+        if (recentCalls.Count == 0)
+            return new List<TrHealthChartRow>();
+
+        var startHour = start.LocalDateTime;
+        startHour = new DateTime(startHour.Year, startHour.Month, startHour.Day, startHour.Hour, 0, 0);
+        var hours = Enumerable.Range(0, 24)
+            .Select(i => startHour.AddHours(i))
+            .ToList();
+
+        var series = recentCalls
+            .GroupBy(c => ResolveCategoryKeyFromTalkgroup(c.Talkgroup))
+            .Select(g =>
+            {
+                var byHour = g
+                    .GroupBy(c =>
+                    {
+                        var local = DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().DateTime;
+                        return new DateTime(local.Year, local.Month, local.Day, local.Hour, 0, 0);
+                    })
+                    .ToDictionary(hg => hg.Key, hg => (double)hg.Count());
+                return (
+                    Label: $"{InsightCategoryPalette.DisplayName(g.Key)} ({g.Count():N0})",
+                    Points: hours.Select(h => (Hour: h, Value: byHour.TryGetValue(h, out var count) ? count : 0)).ToList(),
+                    Total: g.Count());
+            })
+            .OrderByDescending(x => x.Total)
+            .Take(6)
+            .ToList();
+
+        if (series.Count == 0)
+            return new List<TrHealthChartRow>();
+
+        var chart = BuildMultiSeriesChart(
+            "Calls by Hour and Category (Last 24h)",
+            "Y axis: call count per hour",
+            series.Select(s => (s.Label, s.Points)).ToList(),
+            "F0",
+            startHour.ToString("HH:00", CultureInfo.InvariantCulture),
+            startHour.AddHours(23).ToString("HH:00", CultureInfo.InvariantCulture),
+            forceLegend: true);
+        return new List<TrHealthChartRow> { chart };
+    }
+
+    private List<DashboardTalkgroupTrendRow> BuildDashboardTalkgroupTrendRows(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0)
+            return new List<DashboardTalkgroupTrendRow>();
+
+        var topGroups = calls
+            .GroupBy(GetDashboardTalkgroupLabel)
+            .OrderByDescending(g => g.Count())
+            .Take(8)
+            .ToList();
+
+        var totalCalls = Math.Max(1, calls.Count);
+        var maxGroupCalls = Math.Max(1, topGroups.Select(g => g.Count()).DefaultIfEmpty(0).Max());
+        var rangeStart = calls.Min(c => c.StartTime);
+        var rangeEnd = calls.Max(c => c.StartTime);
+
+        return topGroups
+            .Select(g =>
+            {
+                var lastHeard = g.Max(c => c.StartTime);
+                var bucketSpan = FormatSparkBucketSpan(rangeStart, rangeEnd, 12);
+                return new DashboardTalkgroupTrendRow
+                {
+                    Talkgroup = g.Key,
+                    TotalCalls = g.Count(),
+                    ShareText = $"{(g.Count() * 100.0 / totalCalls):0.#}%",
+                    LastHeardText = DateTimeOffset.FromUnixTimeSeconds(lastHeard)
+                        .ToLocalTime()
+                        .ToString("M/d HH:mm", CultureInfo.InvariantCulture),
+                    TrendStartLabel = FormatSparkRangeEndpoint(rangeStart),
+                    TrendEndLabel = FormatSparkRangeEndpoint(rangeEnd),
+                    TrendBucketLabel = bucketSpan,
+                    CountRatio = Math.Clamp(g.Count() / (double)maxGroupCalls, 0, 1),
+                    Bars = BuildMiniBars(BuildTalkgroupSparkBins(g.ToList(), rangeStart, rangeEnd, 12))
+                };
+            })
+            .ToList();
+    }
+
+    private static string GetDashboardTalkgroupLabel(TranscribedCall call)
+    {
+        var friendly = (call.FriendlyTalkgroup ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(friendly)
+            ? $"TG {call.Talkgroup}"
+            : friendly;
+    }
+
+    private static List<double> BuildTalkgroupSparkBins(List<TranscribedCall> calls, long rangeStart, long rangeEnd, int binCount)
+    {
+        if (calls.Count == 0)
+            return new List<double>();
+
+        var span = Math.Max(1, rangeEnd - rangeStart + 1);
+        var bins = new double[binCount];
+        foreach (var call in calls)
+        {
+            var index = (int)Math.Floor((call.StartTime - rangeStart) / (double)span * binCount);
+            bins[Math.Clamp(index, 0, binCount - 1)]++;
+        }
+
+        return bins.ToList();
+    }
+
+    private static string FormatSparkRangeEndpoint(long unixSeconds)
+    {
+        return DateTimeOffset.FromUnixTimeSeconds(unixSeconds)
+            .ToLocalTime()
+            .ToString("M/d HH:mm", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatSparkBucketSpan(long rangeStart, long rangeEnd, int binCount)
+    {
+        var totalMinutes = Math.Max(1, (rangeEnd - rangeStart + 1) / 60.0);
+        var bucketMinutes = totalMinutes / Math.Max(1, binCount);
+        if (bucketMinutes < 60)
+            return $"{Math.Max(1, (int)Math.Round(bucketMinutes))}m each";
+        var bucketHours = bucketMinutes / 60.0;
+        if (bucketHours < 24)
+            return $"{bucketHours:0.#}h each";
+        return $"{bucketHours / 24.0:0.#}d each";
+    }
+
+    private static List<DashboardMiniBar> BuildMiniBars(List<double> points)
+    {
+        if (points.Count == 0)
+            return new List<DashboardMiniBar>();
+        var max = Math.Max(1.0, points.Max());
+        return points
+            .Select(p => new DashboardMiniBar { Ratio = Math.Clamp(p / max, 0, 1) })
+            .ToList();
+    }
+
+    private List<DashboardQualityHourStackRow> BuildDashboardQualityHourRows(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0)
+            return new();
+
+        var buckets = Enumerable.Range(0, 24)
+            .Select(hour =>
+            {
+                var hourCalls = calls
+                    .Where(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour == hour)
+                    .ToList();
+                return new
+                {
+                    Hour = hour,
+                    Total = hourCalls.Count,
+                    Empty = hourCalls.Count(c => string.IsNullOrWhiteSpace(c.Transcription)),
+                    Failure = hourCalls.Count(c => !string.IsNullOrWhiteSpace(c.Transcription) && IsTranscriptFailureHint(c)),
+                    Inaudible = hourCalls.Count(c =>
+                    {
+                        var text = (c.Transcription ?? string.Empty).Trim();
+                        return !string.IsNullOrWhiteSpace(text)
+                            && !IsTranscriptFailureHint(c)
+                            && IsTranscriptInaudibleHint(c);
+                    }),
+                    Short = hourCalls.Count(c =>
+                    {
+                        var text = (c.Transcription ?? string.Empty).Trim();
+                        return !string.IsNullOrWhiteSpace(text)
+                            && text.Length < 20
+                            && !IsTranscriptFailureHint(c)
+                            && !IsTranscriptInaudibleHint(c);
+                    })
+                };
+            })
+            .ToList();
+
+        var maxProblems = Math.Max(1, buckets.Max(b => b.Empty + b.Failure + b.Inaudible + b.Short));
+        const double chartHeight = 110;
+        return buckets
+            .Select(b =>
+            {
+                var problemTotal = b.Empty + b.Failure + b.Inaudible + b.Short;
+                double Height(int count) => problemTotal == 0 ? 0 : count / (double)maxProblems * chartHeight;
+                return new DashboardQualityHourStackRow
+                {
+                    HourLabel = $"{b.Hour:00}",
+                    HourTickLabel = b.Hour % 3 == 0 ? $"{b.Hour:00}" : string.Empty,
+                    EmptyHeight = Height(b.Empty),
+                    FailureHeight = Height(b.Failure),
+                    InaudibleHeight = Height(b.Inaudible),
+                    ShortHeight = Height(b.Short),
+                    TotalText = problemTotal == 0 ? string.Empty : problemTotal.ToString("N0", CultureInfo.InvariantCulture),
+                    RateText = b.Total == 0 ? string.Empty : $"{(problemTotal * 100.0 / b.Total):0.#}%"
+                };
+            })
+            .ToList();
+    }
+
+    private List<DashboardBarStatRow> BuildDashboardQualityTalkgroupRows(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0)
+            return new();
+
+        var allRows = calls
+            .GroupBy(GetDashboardTalkgroupLabel)
+            .Select(g =>
+            {
+                var total = g.Count();
+                var problem = g.Count(IsProblemTranscript);
+                var rate = total == 0 ? 0 : problem * 100.0 / total;
+                return new
+                {
+                    Name = g.Key,
+                    Total = total,
+                    Problem = problem,
+                    Label = $"{g.Key}  {problem}/{total} ({rate:0.#}%)"
+                };
+            })
+            .Where(x => x.Problem > 0)
+            .OrderByDescending(x => x.Problem)
+            .ThenBy(x => x.Label)
+            .ToList();
+
+        if (allRows.Count == 0)
+            return new();
+
+        var visibleRows = allRows.Take(8).ToList();
+        var otherRows = allRows.Skip(8).ToList();
+        if (otherRows.Count > 0)
+        {
+            var otherProblem = otherRows.Sum(x => x.Problem);
+            var otherTotal = otherRows.Sum(x => x.Total);
+            var otherRate = otherTotal == 0 ? 0 : otherProblem * 100.0 / otherTotal;
+            visibleRows.Add(new
+            {
+                Name = "Other talkgroups",
+                Total = otherTotal,
+                Problem = otherProblem,
+                Label = $"Other talkgroups  {otherProblem}/{otherTotal} ({otherRate:0.#}%)"
+            });
+        }
+
+        var maxProblems = Math.Max(1, visibleRows.Max(x => x.Problem));
+        return visibleRows
+            .Select(x => new DashboardBarStatRow
+            {
+                Label = x.Label,
+                Ratio = Math.Clamp(x.Problem / (double)maxProblems, 0, 1),
+                ValueText = x.Problem.ToString("N0", CultureInfo.InvariantCulture)
+            })
+            .ToList();
+    }
+
+    private List<DashboardBarStatRow> BuildDashboardQualitySystemRows(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0)
+            return new();
+
+        var rows = calls
+            .GroupBy(call =>
+            {
+                var system = (call.SystemShortName ?? string.Empty).Trim();
+                return string.IsNullOrWhiteSpace(system) ? "Unknown system" : system;
+            })
+            .Select(g =>
+            {
+                var total = g.Count();
+                var inaudible = g.Count(IsTranscriptInaudibleHint);
+                var rate = total == 0 ? 0 : inaudible * 100.0 / total;
+                return new
+                {
+                    Name = g.Key,
+                    Total = total,
+                    Inaudible = inaudible,
+                    Label = $"{g.Key}  {inaudible}/{total} ({rate:0.#}%)"
+                };
+            })
+            .Where(x => x.Inaudible > 0)
+            .OrderByDescending(x => x.Inaudible)
+            .ThenBy(x => x.Label)
+            .ToList();
+
+        if (rows.Count == 0)
+            return new();
+
+        var maxProblems = Math.Max(1, rows.Max(x => x.Inaudible));
+        return rows
+            .Select(x => new DashboardBarStatRow
+            {
+                Label = x.Label,
+                Ratio = Math.Clamp(x.Inaudible / (double)maxProblems, 0, 1),
+                ValueText = x.Inaudible.ToString("N0", CultureInfo.InvariantCulture)
+            })
+            .ToList();
+    }
+
+    private static bool IsProblemTranscript(TranscribedCall call)
+    {
+        var text = (call.Transcription ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(text)
+            || text.Length < 20
+            || IsTranscriptFailureHint(call)
+            || IsTranscriptInaudibleHint(call);
+    }
+
+    private static bool IsTranscriptFailureHint(TranscribedCall call)
+    {
+        var text = call.Transcription ?? string.Empty;
+        return text.Contains("failed", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTranscriptInaudibleHint(TranscribedCall call)
+    {
+        var text = call.Transcription ?? string.Empty;
+        return TranscriptContainsText(text, "inaudible")
+            || TranscriptContainsText(text, "unintelligible")
+            || TranscriptContainsText(text, "indistinct")
+            || TranscriptContainsText(text, "garbled")
+            || TranscriptContainsText(text, "static")
+            || TranscriptContainsText(text, "blank_audio")
+            || TranscriptContainsText(text, "blank audio")
+            || TranscriptContainsText(text, "no audio")
+            || TranscriptContainsText(text, "silence")
+            || TranscriptContainsText(text, "beeping")
+            || TranscriptContainsText(text, "music")
+            || TranscriptContainsText(text, "phone ringing")
+            || TranscriptContainsText(text, "crickets chirping")
+            || TranscriptContainsText(text, "pause")
+            || TranscriptContainsText(text, "background")
+            || TranscriptContainsText(text, "unclear")
+            || TranscriptContainsText(text, "distorted")
+            || TranscriptContainsText(text, "muffled");
+    }
+
+    private static bool TranscriptContainsText(string text, string keyword)
+    {
+        return text.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private List<DashboardSimpleStat> BuildDashboardSimpleStats(
+        List<TranscribedCall> calls,
+        List<InsightNotableEvent> events,
+        List<DashboardIncidentBucket> incidentGroups)
+    {
+        var stats = new List<DashboardSimpleStat>();
+        if (calls.Count == 0)
+            return stats;
+
+        var uniqueTalkgroups = calls.Select(c => c.Talkgroup).Distinct().Count();
+        var alerts = calls.Count(c => c.IsAlertMatch);
+        var qualityProblems = calls.Count(IsProblemTranscript);
+        var busiestHour = calls
+            .GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour)
+            .Select(g => new { Hour = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Hour)
+            .FirstOrDefault();
+        var avgInsightConfidence = events.Count == 0 ? 0 : events.Average(e => e.Confidence);
+        var incidentCount = incidentGroups.Count;
+
+        stats.Add(new DashboardSimpleStat { Label = "Total Calls", Value = calls.Count.ToString("N0"), SubValue = "Filtered range" });
+        stats.Add(new DashboardSimpleStat { Label = "Alert Rate", Value = $"{(alerts * 100.0 / calls.Count):0.#}%", SubValue = $"{alerts:N0} matched calls" });
+        stats.Add(new DashboardSimpleStat { Label = "Incidents", Value = incidentCount.ToString("N0"), SubValue = "An Incident consists of multiple, related calls" });
+        stats.Add(new DashboardSimpleStat { Label = "Quality Problems", Value = qualityProblems.ToString("N0"), SubValue = $"{(qualityProblems * 100.0 / calls.Count):0.#}% of calls" });
+        stats.Add(new DashboardSimpleStat { Label = "Busiest Hour", Value = busiestHour == null ? "--" : $"{busiestHour.Hour:00}:00", SubValue = busiestHour == null ? "No calls" : $"{busiestHour.Count:N0} calls" });
+        stats.Add(new DashboardSimpleStat { Label = "Unique Talkgroups", Value = uniqueTalkgroups.ToString("N0"), SubValue = "Traffic spread" });
+        stats.Add(new DashboardSimpleStat { Label = "Avg Insight Confidence", Value = $"{avgInsightConfidence * 100.0:0.#}%", SubValue = "Notable events only" });
+        return stats;
+    }
+
+    private List<DashboardBarStatRow> BuildDashboardCategoryShareRows(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0) return new();
+        return BuildRatioRows(
+            calls.GroupBy(c => InsightCategoryPalette.DisplayName(ResolveCategoryKeyFromTalkgroup(c.Talkgroup)))
+                 .Select(g => (Label: g.Key, Value: (double)g.Count()))
+                 .OrderByDescending(x => x.Value)
+                 .ToList(),
+            valueSuffix: "%", normalizeToPercentOfTotal: true);
+    }
+
+    private List<DashboardBarStatRow> BuildDashboardAlertKeywordRows(List<TranscribedCall> calls)
+    {
+        var alertCalls = calls.Where(c => c.IsAlertMatch).ToList();
+        var keywords = ExtractKeywords(alertCalls.Select(c =>
+            string.IsNullOrWhiteSpace(c.MatchedAlertDetail)
+                ? c.Transcription ?? string.Empty
+                : c.MatchedAlertDetail));
+        return BuildRatioRows(
+            keywords.OrderByDescending(k => k.Value).Take(10).Select(k => (k.Key, Value: (double)k.Value)).ToList(),
+            valueSuffix: "");
+    }
+
+    private List<DashboardScatterPoint> BuildDashboardVolumeScatterPoints(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0) return new();
+        var byHour = calls.GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour)
+            .Select(g => new { Hour = g.Key, Count = g.Count() })
+            .OrderBy(x => x.Hour)
+            .ToList();
+        var max = Math.Max(1, byHour.Max(x => x.Count));
+        return byHour.Select(x => new DashboardScatterPoint
+        {
+            X = (x.Hour / 23.0) * 220.0,
+            Y = 100.0 - ((x.Count / (double)max) * 100.0),
+            Color = "#6fb7ff",
+            Tooltip = $"{x.Hour:00}:00  {x.Count} calls"
+        }).ToList();
+    }
+
+    private List<DashboardScatterPoint> BuildDashboardKeywordScatterPoints(List<TranscribedCall> calls)
+    {
+        if (calls.Count == 0) return new();
+        var suspicious = new[] { "pursuit", "shots", "homicide", "burglary", "robbery", "weapon", "stabbing", "crash", "dui", "overdose", "fire" };
+        var points = new List<DashboardScatterPoint>();
+        foreach (var call in calls)
+        {
+            var text = (call.Transcription ?? string.Empty).ToLowerInvariant();
+            var matches = suspicious.Count(k => text.Contains(k, StringComparison.OrdinalIgnoreCase));
+            if (matches == 0) continue;
+            var ts = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
+            var hourNorm = ts.Hour / 23.0;
+            var dur = GetCallDurationSeconds(call);
+            var durNorm = Math.Clamp(dur / 120.0, 0, 1);
+            points.Add(new DashboardScatterPoint
+            {
+                X = hourNorm * 220.0,
+                Y = 100.0 - (durNorm * 100.0),
+                Color = matches >= 2 ? "#ff8c69" : "#ffd27a",
+                Tooltip = $"{ts:HH:mm}  dur {dur:0}s  kw {matches}"
+            });
+        }
+        return points.Take(250).ToList();
+    }
+
+    private static List<DashboardBarStatRow> BuildRatioRows(
+        List<(string Label, double Value)> rows,
+        string valueSuffix,
+        bool normalizeToPercentOfTotal = false)
+    {
+        if (rows.Count == 0) return new();
+        var max = Math.Max(1.0, rows.Max(r => r.Value));
+        var total = Math.Max(1.0, rows.Sum(r => r.Value));
+        return rows.Select(r =>
+        {
+            var displayValue = normalizeToPercentOfTotal ? (r.Value / total) * 100.0 : r.Value;
+            return new DashboardBarStatRow
+            {
+                Label = r.Label,
+                Ratio = Math.Clamp(r.Value / max, 0, 1),
+                ValueText = valueSuffix == "%"
+                    ? $"{displayValue:0.#}%"
+                    : $"{displayValue:0.#}{valueSuffix}"
+            };
+        }).ToList();
+    }
+
+    private static Dictionary<string, int> ExtractKeywords(IEnumerable<string> texts)
+    {
+        var stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "the","and","for","that","with","from","this","there","were","have","has","had","into","onto","over","under",
+            "unit","units","officer","officers","dispatch","radio","traffic","reported","advised","update","call","caller",
+            "respond","responding","copy","affirmative","negative","vehicle"
+        };
+        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var text in texts)
+        {
+            var cleaned = System.Text.RegularExpressions.Regex.Replace((text ?? string.Empty).ToLowerInvariant(), @"[^a-z0-9\s]", " ");
+            foreach (var token in cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (token.Length < 4 || stop.Contains(token)) continue;
+                map[token] = map.TryGetValue(token, out var count) ? count + 1 : 1;
+            }
+        }
+        return map;
+    }
+
+    private static double GetCallDurationSeconds(TranscribedCall call)
+    {
+        if (call == null) return 0;
+        try { return Math.Max(0, call.Duration); } catch { }
+        var durProp = call.GetType().GetProperty("Duration");
+        if (durProp?.GetValue(call) is IConvertible val)
+            return Math.Max(0, Convert.ToDouble(val, CultureInfo.InvariantCulture));
+        var stopProp = call.GetType().GetProperty("StopTime")?.GetValue(call);
+        var startProp = call.GetType().GetProperty("StartTime")?.GetValue(call);
+        if (stopProp is IConvertible stop && startProp is IConvertible start)
+            return Math.Max(0, Convert.ToDouble(stop) - Convert.ToDouble(start));
+        return 0;
+    }
+
+    private static double GetCallFrequency(TranscribedCall call)
+    {
+        if (call == null) return 0;
+        try { return call.Frequency; } catch { }
+        var prop = call.GetType().GetProperty("Frequency");
+        if (prop?.GetValue(call) is IConvertible val)
+            return Convert.ToDouble(val, CultureInfo.InvariantCulture);
+        return 0;
+    }
+
+    private static string FormatFrequencyLabel(double frequency)
+    {
+        if (frequency <= 0) return string.Empty;
+        return frequency >= 1_000_000 ? $"{frequency / 1_000_000.0:0.000} MHz" : $"{frequency:0}";
+    }
+
     public bool CanGenerateTrHealthInsights => IsTrHealthInsightsEnabled && !IsTrHealthInsightsBusy;
     public string TrHealthInsightsText
     {
@@ -2379,6 +3433,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
                 return;
             _selectedSection = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsDashboardSelected));
             RaisePropertyChanged(nameof(IsHighlightsSelected));
             RaisePropertyChanged(nameof(IsAlertsSelected));
             RaisePropertyChanged(nameof(IsPoliceSelected));
@@ -2400,13 +3455,14 @@ RaisePropertyChanged(nameof(IsWeekActive));
             RaisePropertyChanged(nameof(IsAlertsEmpty));
             RaisePropertyChanged(nameof(CompositeStatusText));
 
-            if (value == MainSection.Alerts)
+            if (value == MainSection.Highlights || value == MainSection.Alerts)
             {
                 MarkAlertHistoryRead();
             }
         }
     }
 
+    public bool IsDashboardSelected => SelectedSection == MainSection.Highlights || SelectedSection == MainSection.Alerts;
     public bool IsHighlightsSelected => SelectedSection == MainSection.Highlights;
     public bool IsAlertsSelected => SelectedSection == MainSection.Alerts;
     public bool IsPoliceSelected => SelectedSection == MainSection.Police;
@@ -2421,14 +3477,14 @@ RaisePropertyChanged(nameof(IsWeekActive));
     public bool IsTroubleshootSelected => SelectedSection == MainSection.Troubleshoot;
     public bool IsAnyCategorySelected => IsPoliceSelected || IsFireSelected || IsEmsSelected || IsTrafficSelected || IsOtherSelected;
     public bool IsCallsSectionVisible => IsAnyCategorySelected;
-    public bool IsInsightsSectionVisible => IsHighlightsSelected;
-    public bool IsAlertsSectionVisible => IsAlertsSelected;
+    public bool IsInsightsSectionVisible => IsDashboardSelected;
+    public bool IsAlertsSectionVisible => false;
     public bool IsSettingsSectionVisible => IsSettingsSelected;
     public bool IsTroubleshootSectionVisible => IsTroubleshootSelected;
     public bool IsCategoryInsightsEmpty => IsAnyCategorySelected && InsightsCategorySections.Count == 0;
     public bool IsCategoryRawCallsEmpty => IsAnyCategorySelected && CategoryGroupedCalls.Count == 0;
-    public bool IsAlertsEmpty => IsAlertsSelected && AlertHistory.Count == 0;
-    private bool IsInsightsDrivenViewActive => IsHighlightsSelected || IsAnyCategorySelected;
+    public bool IsAlertsEmpty => IsDashboardSelected && AlertHistory.Count == 0;
+    private bool IsInsightsDrivenViewActive => IsDashboardSelected || IsAnyCategorySelected;
 
     public string CurrentProfileName => _activeProfile?.Name ?? "Default";
         public Control? AlertsPanelControl => _alertsPanel;
@@ -2785,6 +3841,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
         RequireControl<TextBox>("SettingsArchiveCachePathTextBox").Text = string.IsNullOrWhiteSpace(_settings.ArchiveLocalCachePath)
             ? Path.Combine(Settings.DefaultOfflineCaptureDirectory, "sftp-cache")
             : _settings.ArchiveLocalCachePath;
+        UpdateArchiveSecretStatus();
         RequireControl<ComboBox>("SettingsTrDiagnosticsModeComboBox").SelectedIndex =
             string.Equals(_settings.TrDiagnosticsMode, "ssh", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         RequireControl<TextBox>("SettingsTrDiagnosticsHostTextBox").Text = _settings.TrDiagnosticsHost ?? string.Empty;
@@ -2895,6 +3952,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
         PersistArchiveSecretsFromUi();
         PersistTrDiagnosticsSecretsFromUi();
         RaisePropertyChanged(nameof(ArchiveCacheStatusText));
+        UpdateArchiveSecretStatus();
         RaisePropertyChanged(nameof(IsTrunkTroubleshootVisible));
         RaisePropertyChanged(nameof(IsTrHealthInsightsEnabled));
         RaisePropertyChanged(nameof(CanGenerateTrHealthInsights));
@@ -2966,6 +4024,48 @@ RaisePropertyChanged(nameof(IsWeekActive));
         catch (Exception ex)
         {
             MenuSpecificStatusText = $"Archive test failed: {ex.Message}";
+        }
+    }
+
+    private void OnArchiveSecretFieldChanged(object? sender, TextChangedEventArgs e)
+    {
+        UpdateArchiveSecretStatus();
+    }
+
+    private void OnArchiveSecretSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        UpdateArchiveSecretStatus();
+    }
+
+    private async void OnTranscriptionTestClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var modelCombo = RequireControl<ComboBox>("SettingsModelComboBox");
+            _settings.TranscriptionModelPreset = IndexToModelPreset(modelCombo.SelectedIndex);
+            var engineCombo = RequireControl<ComboBox>("SettingsEngineComboBox");
+            _settings.TranscriptionEngine = engineCombo.SelectedIndex == 1 ? "vosk" : "whisper";
+            TranscriptionTestStatusText = "Testing transcription model...";
+            MenuSpecificStatusText = "Testing transcription model...";
+            var success = await TranscriberPreloader.PreloadAsync(_settings, status =>
+            {
+                SafeUiPost(() =>
+                {
+                    TranscriptionTestStatusText = status;
+                    MenuSpecificStatusText = status;
+                });
+            });
+            TranscriptionTestStatusText = success
+                ? "Transcription model test passed."
+                : TranscriptionTestStatusText;
+            MenuSpecificStatusText = TranscriptionTestStatusText;
+        }
+        catch (Exception ex)
+        {
+            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Error, $"Transcription test failed: {ex}");
+            TraceLogger.Flush();
+            TranscriptionTestStatusText = $"Test failed: {ex.Message}";
+            MenuSpecificStatusText = TranscriptionTestStatusText;
         }
     }
 
@@ -3315,7 +4415,12 @@ RaisePropertyChanged(nameof(IsWeekActive));
         var host = (_settings.ArchiveSftpHost ?? string.Empty).Trim().ToLowerInvariant();
         var user = (_settings.ArchiveSftpUsername ?? string.Empty).Trim().ToLowerInvariant();
         var root = (_settings.ArchiveSftpRemoteRoot ?? string.Empty).Trim().ToLowerInvariant();
-        return $"{host}:{_settings.ArchiveSftpPort}:{user}:{root}";
+        return BuildArchiveSecretKeyId(host, _settings.ArchiveSftpPort, user, root);
+    }
+
+    private static string BuildArchiveSecretKeyId(string host, int port, string user, string root)
+    {
+        return $"{host.Trim().ToLowerInvariant()}:{(port <= 0 ? 22 : port)}:{user.Trim().ToLowerInvariant()}:{root.Trim().ToLowerInvariant()}";
     }
 
     private (string? Password, string? PrivateKeyPassphrase) ResolveArchiveSecretsForCurrentSettings()
@@ -3324,6 +4429,54 @@ RaisePropertyChanged(nameof(IsWeekActive));
         var password = _secretStore.LookupArchivePassword(keyId);
         var passphrase = _secretStore.LookupArchivePrivateKeyPassphrase(keyId);
         return (password, passphrase);
+    }
+
+    private void UpdateArchiveSecretStatus()
+    {
+        var authMode = this.FindControl<ComboBox>("SettingsArchiveAuthModeComboBox")?.SelectedIndex == 1
+            ? "privatekey"
+            : (_settings.ArchiveSftpAuthMode ?? "password").Trim().ToLowerInvariant();
+        var host = (this.FindControl<TextBox>("SettingsArchiveHostTextBox")?.Text ?? _settings.ArchiveSftpHost ?? string.Empty).Trim();
+        var user = (this.FindControl<TextBox>("SettingsArchiveUsernameTextBox")?.Text ?? _settings.ArchiveSftpUsername ?? string.Empty).Trim();
+        var root = (this.FindControl<TextBox>("SettingsArchiveRemoteRootTextBox")?.Text ?? _settings.ArchiveSftpRemoteRoot ?? string.Empty).Trim();
+        var port = _settings.ArchiveSftpPort <= 0 ? 22 : _settings.ArchiveSftpPort;
+        if (int.TryParse(this.FindControl<TextBox>("SettingsArchivePortTextBox")?.Text, out var parsedPort))
+            port = parsedPort;
+
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(root))
+        {
+            ArchiveSecretStatusText = "Password cache status: enter host, username, and remote root to identify the key-store entry.";
+            return;
+        }
+
+        var passwordInput = this.FindControl<TextBox>("SettingsArchivePasswordTextBox")?.Text;
+        var passphraseInput = this.FindControl<TextBox>("SettingsArchivePrivateKeyPassphraseTextBox")?.Text;
+        if (authMode == "privatekey")
+        {
+            if (!string.IsNullOrWhiteSpace(passphraseInput))
+            {
+                ArchiveSecretStatusText = "Private key passphrase entered. Click Save to update the key store.";
+                return;
+            }
+
+            var keyId = BuildArchiveSecretKeyId(host, port, user, root);
+            var passphrase = _secretStore.LookupArchivePrivateKeyPassphrase(keyId);
+            ArchiveSecretStatusText = passphrase != null
+                ? "Private key passphrase is cached for this settings file."
+                : "No private key passphrase is cached for this settings file.";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(passwordInput))
+        {
+            ArchiveSecretStatusText = "Password entered. Click Save to update the key store.";
+            return;
+        }
+
+        var password = _secretStore.LookupArchivePassword(BuildArchiveSecretKeyId(host, port, user, root));
+        ArchiveSecretStatusText = !string.IsNullOrWhiteSpace(password)
+            ? "Password is cached for this settings file."
+            : "No SFTP password is cached for this settings file.";
     }
 
     private void PersistArchiveSecretsFromUi()
@@ -3336,6 +4489,8 @@ RaisePropertyChanged(nameof(IsWeekActive));
         var passphraseInput = this.FindControl<TextBox>("SettingsArchivePrivateKeyPassphraseTextBox")?.Text;
         if (!string.IsNullOrWhiteSpace(passphraseInput))
             _secretStore.StoreArchivePrivateKeyPassphrase(keyId, passphraseInput);
+
+        UpdateArchiveSecretStatus();
     }
 
     private string BuildTrDiagnosticsSecretKeyId()
@@ -3559,7 +4714,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
         Title = "PizzaPi";
         ClearSectionCachesForProfileSwitch();
         ApplyTimeRangeFilter();
-        if (IsAlertsSelected)
+        if (IsDashboardSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
         MenuSpecificStatusText = "Returned to Live + Local";
@@ -3822,7 +4977,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
 
     private void PublishLiveTalkgroupSnapshotFromStore()
     {
-        var live = _talkgroupMappingStore.LoadAll();
+        var live = LoadTalkgroupMappingsFromStoreForUi();
         var mappingsById = live
             .GroupBy(m => m.TalkgroupId)
             .Select(g => g.OrderByDescending(x => x.UpdatedUtc).First())
@@ -3835,10 +4990,32 @@ RaisePropertyChanged(nameof(IsWeekActive));
 
     private void LoadTalkgroupMappings()
     {
-        _talkgroupMappings = _talkgroupMappingStore.LoadAll();
+        _talkgroupMappings = LoadTalkgroupMappingsFromStoreForUi();
         HasPendingTalkgroupMappingChanges = false;
         RebuildTalkgroupMappingIndex();
         RefreshTalkgroupRows();
+    }
+
+    private List<TalkgroupMapping> LoadTalkgroupMappingsFromStoreForUi()
+    {
+        try
+        {
+            var rows = _talkgroupMappingStore.LoadAll();
+            Trace(
+                TraceLoggerType.Settings,
+                TraceEventType.Information,
+                $"Loaded {rows.Count} talkgroup mapping row(s) from {_talkgroupMappingStore.FilePath}");
+            return rows;
+        }
+        catch (Exception ex)
+        {
+            var message = $"Talkgroup mappings load failed: {ex.Message}";
+            Trace(TraceLoggerType.Settings, TraceEventType.Error, $"{message}; path={_talkgroupMappingStore.FilePath}; exception={ex}");
+            TraceLogger.Flush();
+            TalkgroupWizardStatusText = message;
+            MenuSpecificStatusText = message;
+            return new List<TalkgroupMapping>();
+        }
     }
 
     private void LoadSelectedTalkgroupMappingIntoEditor()
@@ -4063,8 +5240,8 @@ RaisePropertyChanged(nameof(IsWeekActive));
             DurationSec = call.Duration,
             TimestampUnix = call.StartTime,
             AudioPath = call.Location ?? string.Empty,
-            IsRead = SelectedSection == MainSection.Alerts,
-            ReadAtUtc = SelectedSection == MainSection.Alerts ? DateTime.UtcNow : null
+            IsRead = IsDashboardSelected,
+            ReadAtUtc = IsDashboardSelected ? DateTime.UtcNow : null
         };
 
         _alertHistoryStore.Append(record);
@@ -4825,7 +6002,7 @@ RaisePropertyChanged(nameof(IsWeekActive));
             {
                 1 => GroupByTalkgroup(sortedCalls),
                 2 => GroupByTimeOfDay(sortedCalls),
-                3 => GroupBySource(sortedCalls),
+                3 => GroupBySystem(sortedCalls),
                 _ => sortedCalls.Select(c => new CallGroupItem { IsHeader = false, Call = c, ShowTalkgroup = true }).ToList()
             };
 
@@ -4916,10 +6093,10 @@ RaisePropertyChanged(nameof(IsWeekActive));
         return result;
     }
 
-    private List<CallGroupItem> GroupBySource(List<TranscribedCall> calls)
+    private List<CallGroupItem> GroupBySystem(List<TranscribedCall> calls)
     {
         var result = new List<CallGroupItem>();
-        var grouped = calls.GroupBy(c => c.SystemShortName ?? "Unknown")
+        var grouped = calls.GroupBy(c => ResolveCallSystemName(c))
                           .OrderBy(g => g.Key);
 
         foreach (var group in grouped)
@@ -4936,6 +6113,12 @@ RaisePropertyChanged(nameof(IsWeekActive));
             }
         }
         return result;
+    }
+
+    private static string ResolveCallSystemName(TranscribedCall call)
+    {
+        var system = (call.SystemShortName ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(system) ? "Unknown system" : system;
     }
 
     private string GetAssemblyVersion()
@@ -6119,12 +7302,14 @@ private string _statusText = "Initializing...";
     }
 
     // Time range filter button handlers
-    private void OnHighlightsClicked(object? sender, RoutedEventArgs e)
+    private void OnDashboardClicked(object? sender, RoutedEventArgs e)
     {
         SelectedSection = MainSection.Highlights;
         _isInsightsMode = true;
         _isOfflineMode = false;
         SetInsightsCategoryFilter("all");
+        ReloadAlertHistory();
+        MarkAlertHistoryRead();
         _ = LoadInsightsSummariesAsync();
         MenuSpecificStatusText = NextInsightStatusText;
     }
@@ -6176,10 +7361,14 @@ private string _statusText = "Initializing...";
 
     private void OnSectionAlertsClicked(object? sender, RoutedEventArgs e)
     {
-        SelectedSection = MainSection.Alerts;
+        SelectedSection = MainSection.Highlights;
+        _isInsightsMode = true;
+        _isOfflineMode = false;
+        SetInsightsCategoryFilter("all");
         ReloadAlertHistory();
         MarkAlertHistoryRead();
-        MenuSpecificStatusText = "Alert history";
+        _ = LoadInsightsSummariesAsync();
+        MenuSpecificStatusText = NextInsightStatusText;
     }
 
     private async void OnGenerateSummariesNowClicked(object? sender, RoutedEventArgs e)
@@ -6278,6 +7467,10 @@ private string _statusText = "Initializing...";
     private void OnSectionTroubleshootClicked(object? sender, RoutedEventArgs e)
     {
         SelectedSection = MainSection.Troubleshoot;
+        TraceLogger.Flush();
+        pizzalib.TraceLogger.Flush();
+        RefreshPizzaPiLogOptions(forceCurrentSelection: true);
+        LoadSelectedPizzaPiLogText();
         if (!_hasLoadedTrTroubleshootOnce)
         {
             _hasLoadedTrTroubleshootOnce = true;
@@ -6331,6 +7524,22 @@ private string _statusText = "Initializing...";
             ? "Log output has not been loaded yet. Refresh health first."
             : _pendingTrunkRecorderLogText;
         RaisePropertyChanged(nameof(TrunkRecorderLogText));
+    }
+
+    private void OnTroubleshootTabSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not TabControl tabControl || tabControl.SelectedItem is not TabItem tabItem)
+            return;
+        if (!ReferenceEquals(e.Source, tabControl))
+            return;
+
+        if (!string.Equals(tabItem.Header?.ToString(), "Pizzapi", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        TraceLogger.Flush();
+        pizzalib.TraceLogger.Flush();
+        RefreshPizzaPiLogOptions(forceCurrentSelection: true);
+        LoadSelectedPizzaPiLogText();
     }
 
     private void OnRefreshTrHealthClicked(object? sender, RoutedEventArgs e)
@@ -6552,7 +7761,7 @@ private string _statusText = "Initializing...";
             TraceLogger.Flush();
             pizzalib.TraceLogger.Flush();
 
-            RefreshPizzaPiLogOptions();
+            RefreshPizzaPiLogOptions(forceCurrentSelection: true);
             LoadSelectedPizzaPiLogText();
 
             ApplyArchiveSettingsFromTabsIfAvailable();
@@ -6702,7 +7911,7 @@ private string _statusText = "Initializing...";
         RaisePropertyChanged(nameof(TrunkRecorderHealthSource));
     }
 
-    private void RefreshPizzaPiLogOptions()
+    private void RefreshPizzaPiLogOptions(bool forceCurrentSelection = false)
     {
         var previousSelection = _selectedPizzaPiLogOption;
         var currentPath = TraceLogger.CurrentLogPath;
@@ -6715,10 +7924,8 @@ private string _statusText = "Initializing...";
         _isRefreshingPizzaPiLogOptions = true;
         try
         {
-            PizzaPiLogOptions.Clear();
-            _pizzaPiLogOptionPathMap.Clear();
-
-            PizzaPiLogOptions.Add(CurrentPizzaPiLogOption);
+            var nextOptions = new List<string> { CurrentPizzaPiLogOption };
+            var nextPathMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             var seenLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in allLogs)
@@ -6731,21 +7938,44 @@ private string _statusText = "Initializing...";
                     label = $"{baseLabel} ({suffix++})";
                 }
 
-                PizzaPiLogOptions.Add(label);
-                _pizzaPiLogOptionPathMap[label] = path;
+                nextOptions.Add(label);
+                nextPathMap[label] = path;
             }
 
-            var nextSelection = previousSelection;
-            if (string.IsNullOrWhiteSpace(nextSelection) || !PizzaPiLogOptions.Contains(nextSelection))
+            var nextSelection = forceCurrentSelection ? CurrentPizzaPiLogOption : previousSelection;
+            if (string.IsNullOrWhiteSpace(nextSelection) || !nextOptions.Contains(nextSelection))
                 nextSelection = CurrentPizzaPiLogOption;
 
             _selectedPizzaPiLogOption = nextSelection;
             RaisePropertyChanged(nameof(SelectedPizzaPiLogOption));
+
+            UpdatePizzaPiLogOptionsInPlace(nextOptions);
+            _pizzaPiLogOptionPathMap.Clear();
+            foreach (var pair in nextPathMap)
+                _pizzaPiLogOptionPathMap[pair.Key] = pair.Value;
         }
         finally
         {
             _isRefreshingPizzaPiLogOptions = false;
         }
+    }
+
+    private void UpdatePizzaPiLogOptionsInPlace(IReadOnlyList<string> nextOptions)
+    {
+        for (var i = 0; i < nextOptions.Count; i++)
+        {
+            if (i >= PizzaPiLogOptions.Count)
+            {
+                PizzaPiLogOptions.Add(nextOptions[i]);
+                continue;
+            }
+
+            if (!string.Equals(PizzaPiLogOptions[i], nextOptions[i], StringComparison.Ordinal))
+                PizzaPiLogOptions[i] = nextOptions[i];
+        }
+
+        while (PizzaPiLogOptions.Count > nextOptions.Count)
+            PizzaPiLogOptions.RemoveAt(PizzaPiLogOptions.Count - 1);
     }
 
     private List<string> GetPizzaPiLogFilesOrdered()
@@ -6777,24 +8007,33 @@ private string _statusText = "Initializing...";
 
     private void LoadSelectedPizzaPiLogText()
     {
-        var candidates = GetPizzaPiLogCandidatesForSelection();
-        foreach (var candidate in candidates)
+        try
         {
-            if (TryReadTextFileShared(candidate, out var text))
+            var candidates = GetPizzaPiLogCandidatesForSelection();
+            foreach (var candidate in candidates)
             {
-                PizzaPiLogText = text;
-                RaisePropertyChanged(nameof(PizzaPiLogText));
-                return;
+                if (TryReadTextFileShared(candidate, out var text))
+                {
+                    PizzaPiLogText = text;
+                    RaisePropertyChanged(nameof(PizzaPiLogText));
+                    return;
+                }
             }
+
+            PizzaPiLogText = "PizzaPi log unavailable.";
+        }
+        catch (Exception ex)
+        {
+            PizzaPiLogText = $"PizzaPi log unavailable: {ex.Message}";
         }
 
-        PizzaPiLogText = "PizzaPi log unavailable.";
         RaisePropertyChanged(nameof(PizzaPiLogText));
     }
 
     private static bool TryReadTextFileShared(string path, out string text)
     {
         text = string.Empty;
+        const long maxLogViewerBytes = 512 * 1024;
         try
         {
             using var stream = new FileStream(
@@ -6802,11 +8041,16 @@ private string _statusText = "Initializing...";
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length > maxLogViewerBytes)
+                stream.Seek(-maxLogViewerBytes, SeekOrigin.End);
             using var reader = new StreamReader(stream);
-            text = reader.ReadToEnd();
+            var body = reader.ReadToEnd();
+            text = stream.Length > maxLogViewerBytes
+                ? $"Showing last {FormatFileSize(maxLogViewerBytes)} of {Path.GetFileName(path)}.{Environment.NewLine}{Environment.NewLine}{body}"
+                : body;
             return true;
         }
-        catch (IOException)
+        catch
         {
             return false;
         }
@@ -6842,6 +8086,7 @@ private string _statusText = "Initializing...";
         }
 
         var rows = ParseTrHealthRows(csvText);
+        rows = NormalizeTrHealthRowsToSystems(rows);
         if (rows.Count == 0)
         {
             TrunkRecorderHealthText = $"TR health summary has no usable rows: {source}";
@@ -6983,6 +8228,91 @@ private string _statusText = "Initializing...";
         if (value.All(char.IsDigit))
             return false;
         return value.Any(char.IsLetter);
+    }
+
+    private List<TrHealthRow> NormalizeTrHealthRowsToSystems(List<TrHealthRow> rows)
+    {
+        var sourceSystemMap = BuildSourceSystemMap();
+        if (sourceSystemMap.Count == 0)
+            return rows;
+
+        var canonicalRows = rows
+            .Where(row => !int.TryParse((row.Scope ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            .ToList();
+        var canonicalKeys = canonicalRows
+            .Select(row => $"{row.StartUtc:O}|{row.EndUtc:O}|{(row.Scope ?? string.Empty).Trim().ToLowerInvariant()}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var row in rows.Where(row => int.TryParse((row.Scope ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _)))
+        {
+            var scope = (row.Scope ?? string.Empty).Trim();
+            var sourceIndex = int.Parse(scope, CultureInfo.InvariantCulture);
+            if (!sourceSystemMap.TryGetValue(sourceIndex, out var systemName))
+                continue;
+
+            var canonicalKey = $"{row.StartUtc:O}|{row.EndUtc:O}|{systemName.Trim().ToLowerInvariant()}";
+            if (canonicalKeys.Contains(canonicalKey))
+                continue;
+
+            row.Scope = systemName;
+            canonicalRows.Add(row);
+            canonicalKeys.Add(canonicalKey);
+        }
+
+        return CollapseDuplicateTrHealthRows(canonicalRows);
+    }
+
+    private Dictionary<int, string> BuildSourceSystemMap()
+    {
+        return _allCalls
+            .Concat(Calls)
+            .Where(call => !string.IsNullOrWhiteSpace(call.SystemShortName))
+            .GroupBy(call => call.Source)
+            .Select(g =>
+            {
+                var system = g
+                    .GroupBy(call => ResolveCallSystemName(call))
+                    .OrderByDescending(systemGroup => systemGroup.Count())
+                    .ThenBy(systemGroup => systemGroup.Key, StringComparer.OrdinalIgnoreCase)
+                    .First().Key;
+                return new { Source = g.Key, System = system };
+            })
+            .ToDictionary(x => x.Source, x => x.System);
+    }
+
+    private static List<TrHealthRow> CollapseDuplicateTrHealthRows(List<TrHealthRow> rows)
+    {
+        return rows
+            .GroupBy(row => new { row.StartUtc, row.EndUtc, Scope = (row.Scope ?? string.Empty).Trim().ToLowerInvariant() })
+            .Select(g =>
+            {
+                var groupRows = g.ToList();
+                var first = groupRows[0];
+                if (groupRows.Count == 1)
+                    return first;
+                var agg = AggregateTrHealthRows(groupRows);
+                return new TrHealthRow
+                {
+                    StartUtc = first.StartUtc,
+                    EndUtc = first.EndUtc,
+                    Scope = first.Scope,
+                    DecodeLines = agg.DecodeSampleLines,
+                    DecodeZero = groupRows.Sum(r => r.DecodeZero),
+                    AvgDecodeRate = agg.AvgDecodeRate,
+                    Retunes = agg.Retunes,
+                    CallsConcluded = agg.CallsConcluded,
+                    UpdateNotGrant = groupRows.Sum(r => r.UpdateNotGrant),
+                    NoTxRecorded = agg.NoTxRecorded,
+                    SampleStops = agg.SampleStops,
+                    UnableSource = agg.UnableSource,
+                    TuningErrSamples = groupRows.Sum(r => r.TuningErrSamples),
+                    TuningErrAvgAbsHz = WeightedAverage(groupRows.Select(r => (r.TuningErrAvgAbsHz, r.TuningErrSamples))),
+                    TuningErrMaxAbsHz = groupRows.Max(r => r.TuningErrMaxAbsHz)
+                };
+            })
+            .OrderBy(row => row.StartUtc)
+            .ThenBy(row => row.Scope, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private void RebuildTrHealthCharts()
@@ -7376,7 +8706,7 @@ private string _statusText = "Initializing...";
         var maxHour = allPoints.Count == 0 ? minHour.AddHours(1) : allPoints.Max(p => p.Hour);
         var hourRange = Math.Max(1.0, (maxHour - minHour).TotalHours);
 
-        var xTicks = BuildTimeTickLabels(minHour);
+        var xTicks = BuildTimeTickLabels(minHour, maxHour);
         var chart = new TrHealthChartRow
         {
             Title = title,
@@ -7433,11 +8763,17 @@ private string _statusText = "Initializing...";
         return chart;
     }
 
-    private static string[] BuildTimeTickLabels(DateTime minHour)
+    private static string[] BuildTimeTickLabels(DateTime minHour, DateTime maxHour)
     {
         var labels = new string[6];
+        var rangeHours = Math.Max(1.0, (maxHour - minHour).TotalHours);
         for (var i = 0; i < labels.Length; i++)
-            labels[i] = minHour.AddHours(i * 4).ToLocalTime().ToString("htt", CultureInfo.InvariantCulture).ToLowerInvariant();
+        {
+            var tick = minHour.AddHours(rangeHours * i / labels.Length).ToLocalTime();
+            labels[i] = rangeHours <= 36
+                ? tick.ToString("htt", CultureInfo.InvariantCulture).ToLowerInvariant()
+                : tick.ToString("M/d", CultureInfo.InvariantCulture);
+        }
         return labels;
     }
 
@@ -7868,12 +9204,15 @@ private string _statusText = "Initializing...";
         try
         {
             ApplySettingsTabsToSettings();
+            PersistPendingTalkgroupMappingsFromSettingsSave();
             _settings.SaveToFile(_currentSettingsPath);
             await ApplySettingsAndRestartAsync(_settings);
             MenuSpecificStatusText = "Settings saved";
         }
         catch (Exception ex)
         {
+            TraceLogger.Trace(TraceLoggerType.Settings, TraceEventType.Error, $"Settings save failed: {ex}");
+            TraceLogger.Flush();
             MenuSpecificStatusText = $"Save failed: {ex.Message}";
         }
     }
@@ -7903,6 +9242,7 @@ private string _statusText = "Initializing...";
         try
         {
             ApplySettingsTabsToSettings();
+            PersistPendingTalkgroupMappingsFromSettingsSave();
             _settings.SaveToFile(file.Path.LocalPath);
             _currentSettingsPath = file.Path.LocalPath;
             await ApplySettingsAndRestartAsync(_settings);
@@ -7912,6 +9252,20 @@ private string _statusText = "Initializing...";
         {
             MenuSpecificStatusText = $"Save As failed: {ex.Message}";
         }
+    }
+
+    private void PersistPendingTalkgroupMappingsFromSettingsSave()
+    {
+        if (!HasPendingTalkgroupMappingChanges)
+            return;
+
+        _talkgroupMappingStore.SaveAll(_talkgroupMappings);
+        PublishLiveTalkgroupSnapshotFromStaged();
+        HasPendingTalkgroupMappingChanges = false;
+        Trace(
+            TraceLoggerType.Settings,
+            TraceEventType.Information,
+            $"Saved {_talkgroupMappings.Count} pending talkgroup mapping row(s) from settings save to {_talkgroupMappingStore.FilePath}");
     }
 
     private async void OnSettingsImportTalkgroupsClicked(object? sender, RoutedEventArgs e)
@@ -8234,6 +9588,10 @@ private string _statusText = "Initializing...";
             {
                 // Persist staged mappings before atomic cutover so restart state matches live state.
                 _talkgroupMappingStore.SaveAll(_talkgroupMappings);
+                Trace(
+                    TraceLoggerType.Settings,
+                    TraceEventType.Information,
+                    $"Saved {_talkgroupMappings.Count} talkgroup mapping row(s) to {_talkgroupMappingStore.FilePath}");
 
                 // Persist settings after mapping updates.
                 _settings.SaveToFile(_currentSettingsPath);
@@ -8251,6 +9609,7 @@ private string _statusText = "Initializing...";
             }
 
             HasPendingTalkgroupMappingChanges = false;
+            RefreshTalkgroupRows();
             TalkgroupWizardStatusText = "Talkgroup mappings are now live.";
             MenuSpecificStatusText = "Talkgroup mappings applied. Live call manager restarted.";
 
@@ -8259,6 +9618,9 @@ private string _statusText = "Initializing...";
         catch (Exception ex)
         {
             TalkgroupWizardStatusText = $"Apply failed: {ex.Message}";
+            MenuSpecificStatusText = TalkgroupWizardStatusText;
+            Trace(TraceLoggerType.Settings, TraceEventType.Error, $"Talkgroup apply failed: {ex}");
+            TraceLogger.Flush();
         }
         finally
         {
@@ -8829,7 +10191,7 @@ private string _statusText = "Initializing...";
         _customEndDate = null;
         PruneLiveMemoryWindow();
         ApplyTimeRangeFilter();
-        if (IsAlertsSelected)
+        if (IsDashboardSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
         if (IsInsightsDrivenViewActive)
@@ -8843,7 +10205,7 @@ private string _statusText = "Initializing...";
         _currentFilter = "2d";
         _historicalRangeCalls = null;
         ApplyTimeRangeFilter();
-        if (IsAlertsSelected)
+        if (IsDashboardSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
         if (IsInsightsDrivenViewActive)
@@ -8857,7 +10219,7 @@ private string _statusText = "Initializing...";
         _currentFilter = "week";
         _historicalRangeCalls = null;
         ApplyTimeRangeFilter();
-        if (IsAlertsSelected)
+        if (IsDashboardSelected)
             ReloadAlertHistory();
         UpdateButtonStates();
         if (IsInsightsDrivenViewActive)
@@ -8879,7 +10241,7 @@ private string _statusText = "Initializing...";
             _customEndDate = dialog.SelectedEnd.Value;
             _currentFilter = "custom";
             ApplyTimeRangeFilter();
-            if (IsAlertsSelected)
+            if (IsDashboardSelected)
                 ReloadAlertHistory();
             UpdateButtonStates();
             if (IsInsightsDrivenViewActive)
@@ -8907,7 +10269,11 @@ private string _statusText = "Initializing...";
     {
         if (sender is not Button btn || btn.DataContext is not InsightNotableEvent notable)
             return;
+        PlayInsightAudio(notable);
+    }
 
+    private void PlayInsightAudio(InsightNotableEvent notable)
+    {
         var notableKey = GetInsightNotableKey(notable);
         if (string.Equals(_activeInsightAudioKey, notableKey, StringComparison.Ordinal) && IsInsightAudioPlaying())
         {
@@ -8934,7 +10300,11 @@ private string _statusText = "Initializing...";
     {
         if (sender is not Button btn || btn.DataContext is not InsightNotableEvent notable)
             return;
+        NavigateInsightCall(notable, btn);
+    }
 
+    private void NavigateInsightCall(InsightNotableEvent notable, Button btn)
+    {
         var matched = ResolveCallsForNotable(notable);
         var visibleKeys = CategoryGroupedCalls
             .Where(i => !i.IsHeader && i.Call != null)

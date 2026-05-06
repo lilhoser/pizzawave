@@ -20,6 +20,7 @@ public sealed class TalkgroupMapping
 public sealed class TalkgroupMappingStore
 {
     private readonly string _path;
+    public string FilePath => _path;
 
     public TalkgroupMappingStore(string? path = null)
     {
@@ -45,19 +46,12 @@ public sealed class TalkgroupMappingStore
 
     public List<TalkgroupMapping> LoadAll()
     {
-        try
-        {
-            if (!File.Exists(_path))
-                return new List<TalkgroupMapping>();
-
-            var json = File.ReadAllText(_path);
-            var rows = JsonConvert.DeserializeObject<List<TalkgroupMapping>>(json);
-            return rows ?? new List<TalkgroupMapping>();
-        }
-        catch
-        {
+        if (!File.Exists(_path))
             return new List<TalkgroupMapping>();
-        }
+
+        var json = File.ReadAllText(_path);
+        var rows = JsonConvert.DeserializeObject<List<TalkgroupMapping>>(json);
+        return rows ?? new List<TalkgroupMapping>();
     }
 
     public void SaveAll(List<TalkgroupMapping> rows)

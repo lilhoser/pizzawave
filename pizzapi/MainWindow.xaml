@@ -338,13 +338,14 @@
                     BorderBrush="#36566f"
                     BorderThickness="1"
                     CornerRadius="6"
-                    Margin="0,0,0,10"
+                    Margin="0,0,8,10"
                     Padding="10">
                 <StackPanel Spacing="6">
                     <TextBlock Text="{Binding FriendlyWindowLabel}"
                                Foreground="#d7ecff"
                                FontWeight="SemiBold"
-                               FontSize="{DynamicResource CurrentFontSize}"/>
+                               FontSize="{DynamicResource CurrentFontSize}"
+                               TextWrapping="Wrap"/>
                     <TextBlock Text="{Binding WindowStart, StringFormat='{}{0:MMM d, h:mm tt}'}"
                                Foreground="#9ac7e8"
                                FontSize="{DynamicResource CurrentFontSize}"/>
@@ -385,9 +386,9 @@
             <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}"/>
         </Style>
         <Style Selector="Button.menu-main-btn">
-            <Setter Property="MinHeight" Value="68"/>
+            <Setter Property="MinHeight" Value="51"/>
             <Setter Property="MinWidth" Value="180"/>
-            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Padding" Value="14,9"/>
             <Setter Property="FontSize" Value="18"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="BorderBrush" Value="#111"/>
@@ -400,7 +401,7 @@
             <Setter Property="BorderBrush" Value="#e6e6e6"/>
         </Style>
         <Style Selector="Button.menu-main-btn:pressed">
-            <Setter Property="Padding" Value="16,13,12,11"/>
+            <Setter Property="Padding" Value="16,10,12,8"/>
             <Setter Property="BorderBrush" Value="#0a0a0a"/>
         </Style>
         <Style Selector="Button.menu-main-btn.pulse, Button.header-button.pulse">
@@ -479,23 +480,37 @@
                                     Foreground="{Binding IsRangeCustomActive, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                                     Click="OnPickRangeClicked"/>
                         </StackPanel>
-                        <ComboBox Width="190"
-                                  HorizontalAlignment="Left"
-                                  ItemsSource="{Binding Profiles}"
-                                  SelectedItem="{Binding ActiveProfile, Mode=TwoWay}"
-                                  SelectionChanged="OnProfileSelectionChanged">
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate x:DataType="local:ProcessingProfile">
-                                    <TextBlock Text="{Binding Name}"/>
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-                        <Button Classes="menu-btn"
-                                Content="Load archive..."
-                                Height="34"
-                                HorizontalAlignment="Stretch"
-                                Click="OnArchiveBrowseClicked"
-                                IsEnabled="{Binding IsArchiveBrowseEnabled}"/>
+                        <Grid ColumnDefinitions="95,6,*">
+                            <ComboBox Grid.Column="0"
+                                      Width="95"
+                                      HorizontalAlignment="Left"
+                                      ItemsSource="{Binding Profiles}"
+                                      SelectedItem="{Binding ActiveProfile, Mode=TwoWay}"
+                                      SelectionChanged="OnProfileSelectionChanged">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="local:ProcessingProfile">
+                                        <TextBlock Text="{Binding Name}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Grid.Column="2"
+                                    Classes="menu-btn"
+                                    Height="34"
+                                    HorizontalAlignment="Stretch"
+                                    Padding="8,4"
+                                    Click="OnArchiveBrowseClicked"
+                                    IsEnabled="{Binding IsArchiveBrowseEnabled}">
+                                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                    <Path Width="18"
+                                          Height="18"
+                                          Stretch="Uniform"
+                                          VerticalAlignment="Center"
+                                          Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          Data="M2,4 L6,4 L7.2,5.4 L14,5.4 C14.7,5.4 15.2,5.9 15.2,6.6 L15.2,12.8 C15.2,13.5 14.7,14 14,14 L2.8,14 C2.1,14 1.6,13.5 1.6,12.8 L1.6,5.2 C1.6,4.5 2.1,4 2.8,4 Z M2.8,6.2 L2.8,12.8 L14,12.8 L14,6.6 L6.6,6.6 L5.4,5.2 L2.8,5.2 Z"/>
+                                    <TextBlock Text="Archive" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
                         <Button Classes="menu-btn"
                                 Content="Return to Live + Local"
                                 Height="34"
@@ -515,29 +530,16 @@
                 <Button Classes="menu-btn menu-main-btn"
                         Cursor="Hand"
                         HorizontalAlignment="Stretch"
-                        Background="{Binding IsHighlightsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
-                        Foreground="{Binding IsHighlightsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
-                        IsEnabled="{Binding IsInsightsEnabled}"
-                        Click="OnHighlightsClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                        Background="{Binding IsDashboardSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#33aaff,#4a4a4a'}"
+                        Foreground="{Binding IsDashboardSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
+                        Click="OnDashboardClicked">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M7,1.5 C4.7,1.5 2.9,3.3 2.9,5.6 C2.9,7.3 3.8,8.6 5.2,9.6 L5.2,11 L8.8,11 L8.8,9.6 C10.2,8.6 11.1,7.3 11.1,5.6 C11.1,3.3 9.3,1.5 7,1.5 Z M5.4,12.2 L8.6,12.2 L8.6,13.4 L5.4,13.4 Z M5.9,14.4 L8.1,14.4 L8.1,15.2 L5.9,15.2 Z"/>
-                        <TextBlock Text="Highlights" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-
-                <Button Classes="menu-btn menu-main-btn"
-                        Cursor="Hand"
-                        HorizontalAlignment="Stretch"
-                        Background="{Binding IsAlertsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff9900,#4a4a4a'}"
-                        Foreground="{Binding IsAlertsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
-                        Click="OnSectionAlertsClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
-                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M7,1 C4.8,1 3,2.8 3,5 L3,8.5 L1.8,10.2 L1.8,11 L12.2,11 L12.2,10.2 L11,8.5 L11,5 C11,2.8 9.2,1 7,1 Z M5.8,12 C5.8,12.7 6.3,13.2 7,13.2 C7.7,13.2 8.2,12.7 8.2,12 Z"/>
-                        <TextBlock Text="Alerts" VerticalAlignment="Center"/>
+                              Data="M7,2 C10.3,2 13,4.7 13,8 C13,9.5 12.5,10.9 11.5,12 L9.9,10.9 C10.6,10.1 11,9.1 11,8 C11,5.8 9.2,4 7,4 C4.8,4 3,5.8 3,8 C3,9.1 3.4,10.1 4.1,10.9 L2.5,12 C1.5,10.9 1,9.5 1,8 C1,4.7 3.7,2 7,2 Z M6.6,7.8 L9.6,5.8 L7.8,8.9 C7.5,9.5 6.6,9.4 6.3,8.8 C6.1,8.5 6.2,8.1 6.6,7.8 Z M2.8,7.4 L4.2,7.4 L4.2,8.6 L2.8,8.6 Z M6.4,3.7 L7.6,3.7 L7.6,5.1 L6.4,5.1 Z M9.8,7.4 L11.2,7.4 L11.2,8.6 L9.8,8.6 Z"/>
+                        <TextBlock Text="Dashboard" VerticalAlignment="Center"/>
                         <Border Background="#d62222"
                                 CornerRadius="10"
                                 MinWidth="20"
@@ -564,10 +566,12 @@
                         Background="{Binding IsPoliceSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#2b74e4,#4a4a4a'}"
                         Foreground="{Binding IsPoliceSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionPoliceClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M7,1.4 L8.6,3.2 L11,3.6 L10.1,5.8 L11.1,8 L8.8,8.4 L7.2,10.2 L5.6,8.4 L3.3,8 L4.3,5.8 L3.4,3.6 L5.8,3.2 Z M7,4.8 L7.5,6.1 L8.9,6.2 L7.8,7 L8.1,8.4 L7,7.6 L5.9,8.4 L6.2,7 L5.1,6.2 L6.5,6.1 Z"/>
+                              Data="M7,1.4 L8.6,3.2 L11,3.6 L10.1,5.8 L11.1,8 L8.8,8.4 L7.2,10.2 L5.6,8.4 L3.3,8 L4.3,5.8 L3.4,3.6 L5.8,3.2 Z M7,4.3 L7.5,5.6 L8.9,5.7 L7.8,6.5 L8.1,7.9 L7,7.1 L5.9,7.9 L6.2,6.5 L5.1,5.7 L6.5,5.6 Z"/>
                         <TextBlock Text="Police" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -580,8 +584,10 @@
                         Background="{Binding IsFireSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#cf4b3c,#4a4a4a'}"
                         Foreground="{Binding IsFireSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionFireClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                               Data="M7,1 C9.8,3.5 10.4,6.7 8.8,8.8 C10,8.9 11.2,9.8 11.2,11.2 C11.2,13.2 9.5,15 7.2,15 C4.8,15 3,13.2 3,11 C3,9.4 3.9,8.1 5.3,7.1 C6.7,6 7.3,4.5 7,1 Z"/>
                         <TextBlock Text="Fire" VerticalAlignment="Center"/>
@@ -596,8 +602,10 @@
                         Background="{Binding IsEmsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#2ea44f,#4a4a4a'}"
                         Foreground="{Binding IsEmsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionEmsClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                               Data="M6,2 L8,2 L8,5 L11,5 L11,7 L8,7 L8,10 L6,10 L6,7 L3,7 L3,5 L6,5 Z"/>
                         <TextBlock Text="EMS" VerticalAlignment="Center"/>
@@ -611,10 +619,12 @@
                         Background="{Binding IsTrafficSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#d79a28,#4a4a4a'}"
                         Foreground="{Binding IsTrafficSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionTrafficClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M5.5,2 L8.5,2 L8.5,5 L5.5,5 Z M5.5,5.8 L8.5,5.8 L8.5,8.8 L5.5,8.8 Z M5.5,9.6 L8.5,9.6 L8.5,12.6 L5.5,12.6 Z M6.2,2.7 L7.8,2.7 L7.8,4.3 L6.2,4.3 Z M6.2,6.5 L7.8,6.5 L7.8,8.1 L6.2,8.1 Z M6.2,10.3 L7.8,10.3 L7.8,11.9 L6.2,11.9 Z"/>
+                              Data="M4.5,1.8 L9.5,1.8 L9.5,5.2 L4.5,5.2 Z M4.5,5.8 L9.5,5.8 L9.5,9.2 L4.5,9.2 Z M4.5,9.8 L9.5,9.8 L9.5,13.2 L4.5,13.2 Z M5.7,2.6 L8.3,2.6 L8.3,4.4 L5.7,4.4 Z M5.7,6.6 L8.3,6.6 L8.3,8.4 L5.7,8.4 Z M5.7,10.6 L8.3,10.6 L8.3,12.4 L5.7,12.4 Z"/>
                         <TextBlock Text="Traffic" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -626,8 +636,10 @@
                         Background="{Binding IsOtherSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#8a63d2,#4a4a4a'}"
                         Foreground="{Binding IsOtherSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionOtherClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                               Data="M7,2 C9.5,2 11.4,3.8 11.4,6.1 C11.4,7.7 10.4,8.8 9.2,9.5 C8.6,9.9 8.4,10.2 8.4,10.8 L6.8,10.8 C6.8,9.9 7.1,9.2 7.8,8.7 C8.8,8 9.6,7.4 9.6,6.2 C9.6,5 8.5,4.2 7.1,4.2 C5.8,4.2 4.9,5 4.6,6.1 L3,5.6 C3.5,3.5 5.1,2 7,2 Z M6.8,11.8 L8.4,11.8 L8.4,13.3 L6.8,13.3 Z"/>
                         <TextBlock Text="Other" VerticalAlignment="Center"/>
@@ -642,8 +654,10 @@
                         Background="{Binding IsSettingsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff9900,#4a4a4a'}"
                         Foreground="{Binding IsSettingsSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionSettingsClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                               Data="M6.9,2 L7.7,2 L8,3.1 C8.4,3.2 8.8,3.3 9.1,3.5 L10.1,2.9 L10.7,3.5 L10.1,4.5 C10.3,4.8 10.4,5.2 10.5,5.6 L11.6,5.9 L11.6,6.7 L10.5,7 C10.4,7.4 10.3,7.8 10.1,8.1 L10.7,9.1 L10.1,9.7 L9.1,9.1 C8.8,9.3 8.4,9.4 8,9.5 L7.7,10.6 L6.9,10.6 L6.6,9.5 C6.2,9.4 5.8,9.3 5.5,9.1 L4.5,9.7 L3.9,9.1 L4.5,8.1 C4.3,7.8 4.2,7.4 4.1,7 L3,6.7 L3,5.9 L4.1,5.6 C4.2,5.2 4.3,4.8 4.5,4.5 L3.9,3.5 L4.5,2.9 L5.5,3.5 C5.8,3.3 6.2,3.2 6.6,3.1 Z M7.3,4.7 C6.4,4.7 5.7,5.4 5.7,6.3 C5.7,7.2 6.4,7.9 7.3,7.9 C8.2,7.9 8.9,7.2 8.9,6.3 C8.9,5.4 8.2,4.7 7.3,4.7 Z"/>
                         <TextBlock Text="Settings" VerticalAlignment="Center"/>
@@ -656,10 +670,12 @@
                         Background="{Binding IsTroubleshootSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#ff5555,#4a4a4a'}"
                         Foreground="{Binding IsTroubleshootSelected, Converter={StaticResource BoolToBrushConverter}, ConverterParameter='#000000,#FFFFFF'}"
                         Click="OnSectionTroubleshootClicked">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Path Width="24" Height="24"
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Path Width="28" Height="28"
+                              Stretch="Uniform"
+                              VerticalAlignment="Center"
                               Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M7,2 L12,11 L2,11 Z M7,5 L7.8,5 L7.8,8 L7,8 Z M7,8.8 L7.8,8.8 L7.8,9.6 L7,9.6 Z"/>
+                              Data="M7,2 L12,11 L2,11 Z M6.6,5 L7.4,5 L7.4,8 L6.6,8 Z M6.6,8.8 L7.4,8.8 L7.4,9.6 L6.6,9.6 Z"/>
                         <TextBlock Text="{Binding TroubleshootMenuText}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -799,8 +815,8 @@
                             </DataGrid.Styles>
                         </DataGrid>
                         <Border IsVisible="{Binding IsCategoryRawCallsEmpty}"
-                                Background="#252525"
-                                BorderBrush="#3c3c3c"
+                                Background="#1f2f3d"
+                                BorderBrush="#36566f"
                                 BorderThickness="1"
                                 CornerRadius="6"
                                 Padding="14"
@@ -816,144 +832,623 @@
                 </Border>
             </Grid>
 
-            <!-- Insights list -->
+            <!-- Dashboard -->
             <Grid Grid.Row="1"
                   Grid.Column="0"
                   IsVisible="{Binding IsInsightsSectionVisible}">
-                <Grid Margin="10">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding InsightsSummaries}"
-                                      ItemTemplate="{StaticResource InsightWindowSummaryTemplate}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <VirtualizingStackPanel Orientation="Vertical"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                    </ScrollViewer>
-                    <Border IsVisible="{Binding IsHighlightsEmpty}"
-                            Background="#253645"
-                            BorderBrush="#36566f"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="14"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Top">
-                        <StackPanel Spacing="12">
-                            <TextBlock Text="No highlights available for the given time range"
-                                       FontSize="18"
+                <Grid>
+                    <Grid Margin="10"
+                          ColumnDefinitions="*,10,*">
+                        <Border Grid.Column="0"
+                                Background="#1f2f3d"
+                                BorderBrush="#36566f"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="8">
+                            <Grid>
+                                <Grid>
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Spacing="10">
+                                            <Border Background="#223748" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <ItemsControl ItemsSource="{Binding DashboardSimpleStats}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <WrapPanel Orientation="Horizontal" ItemWidth="190"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardSimpleStat">
+                                                                <Border Background="#1e2f3d" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,8,8">
+                                                                    <StackPanel>
+                                                                        <TextBlock Text="{Binding Label}" Foreground="#9fc1dd"/>
+                                                                        <TextBlock Text="{Binding Value}" Foreground="#d7ecff" FontSize="22" FontWeight="Bold"/>
+                                                                        <TextBlock Text="{Binding SubValue}" Foreground="#9fc1dd" FontSize="11" TextWrapping="Wrap"/>
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="Volume Patterns"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#9fc1dd"/>
+                                            <Border Background="#223748"
+                                                    BorderBrush="#36566f"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <ItemsControl ItemsSource="{Binding DashboardCategoryVolumeCharts}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid RowDefinitions="Auto,150,Auto,Auto" ColumnDefinitions="56,*">
+                                                                    <StackPanel Grid.ColumnSpan="2" Spacing="2">
+                                                                        <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" Foreground="#cfe7ff"/>
+                                                                        <TextBlock Text="{Binding YAxisLabel}" Foreground="#9fc1dd" FontSize="11"/>
+                                                                    </StackPanel>
+                                                                    <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="Auto,*,Auto" Margin="0,14,6,18">
+                                                                        <TextBlock Text="{Binding MaxLabel}" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right"/>
+                                                                        <TextBlock Grid.Row="1" Text="{Binding YTick3Label}" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,24,0,0"/>
+                                                                        <TextBlock Grid.Row="1" Text="{Binding YTick2Label}" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                                                        <TextBlock Grid.Row="1" Text="{Binding YTick1Label}" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,24"/>
+                                                                        <TextBlock Grid.Row="2" Text="{Binding MinLabel}" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right"/>
+                                                                    </Grid>
+                                                                    <Canvas Grid.Row="1" Grid.Column="1" Width="640" Height="140" ClipToBounds="True" Background="#1e2f3d">
+                                                                        <Line StartPoint="42,12" EndPoint="42,118" Stroke="#666" StrokeThickness="1"/>
+                                                                        <Line StartPoint="42,118" EndPoint="620,118" Stroke="#666" StrokeThickness="1"/>
+                                                                        <Line StartPoint="42,91.5" EndPoint="620,91.5" Stroke="#2f2f2f" StrokeThickness="1"/>
+                                                                        <Line StartPoint="42,65" EndPoint="620,65" Stroke="#333" StrokeThickness="1"/>
+                                                                        <Line StartPoint="42,38.5" EndPoint="620,38.5" Stroke="#2f2f2f" StrokeThickness="1"/>
+                                                                        <Polyline Points="{Binding Series1Points}" Stroke="#62c6ff" StrokeThickness="2"/>
+                                                                        <Polyline Points="{Binding Series2Points}" Stroke="#ffcf5a" StrokeThickness="2"/>
+                                                                        <Polyline Points="{Binding Series3Points}" Stroke="#7ee081" StrokeThickness="2"/>
+                                                                        <Polyline Points="{Binding Series4Points}" Stroke="#ff8c69" StrokeThickness="2"/>
+                                                                        <Polyline Points="{Binding Series5Points}" Stroke="#c792ea" StrokeThickness="2"/>
+                                                                        <Polyline Points="{Binding Series6Points}" Stroke="#b8cde1" StrokeThickness="2"/>
+                                                                    </Canvas>
+                                                                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,*,*,*,*,*,*" Margin="42,0,20,0">
+                                                                        <TextBlock Grid.Column="0" Text="{Binding XTick0Label}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Left"/>
+                                                                        <TextBlock Grid.Column="1" Text="{Binding XTick1Label}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Center"/>
+                                                                        <TextBlock Grid.Column="2" Text="{Binding XTick2Label}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Center"/>
+                                                                        <TextBlock Grid.Column="3" Text="{Binding XTick3Label}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Center"/>
+                                                                        <TextBlock Grid.Column="4" Text="{Binding XTick4Label}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Center"/>
+                                                                        <TextBlock Grid.Column="5" Text="{Binding XTick5Label}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Center"/>
+                                                                        <TextBlock Grid.Column="6" Text="{Binding EndLabel}" FontSize="11" Foreground="#9fc1dd" HorizontalAlignment="Right"/>
+                                                                    </Grid>
+                                                                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0" IsVisible="{Binding HasLegend}">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding Series1Label, Converter={StaticResource StringHasTextConverter}}">
+                                                                            <Border Width="16" Height="3" Background="#62c6ff" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding Series1Label}" FontSize="11" Foreground="#d7ecff"/>
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding Series2Label, Converter={StaticResource StringHasTextConverter}}">
+                                                                            <Border Width="16" Height="3" Background="#ffcf5a" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding Series2Label}" FontSize="11" Foreground="#d7ecff"/>
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding Series3Label, Converter={StaticResource StringHasTextConverter}}">
+                                                                            <Border Width="16" Height="3" Background="#7ee081" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding Series3Label}" FontSize="11" Foreground="#d7ecff"/>
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding Series4Label, Converter={StaticResource StringHasTextConverter}}">
+                                                                            <Border Width="16" Height="3" Background="#ff8c69" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding Series4Label}" FontSize="11" Foreground="#d7ecff"/>
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding Series5Label, Converter={StaticResource StringHasTextConverter}}">
+                                                                            <Border Width="16" Height="3" Background="#c792ea" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding Series5Label}" FontSize="11" Foreground="#d7ecff"/>
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding Series6Label, Converter={StaticResource StringHasTextConverter}}">
+                                                                            <Border Width="16" Height="3" Background="#b8cde1" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding Series6Label}" FontSize="11" Foreground="#d7ecff"/>
+                                                                        </StackPanel>
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Background="#223748"
+                                                    BorderBrush="#36566f"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="Top Talkgroups by Call Volume"
+                                                               FontSize="16"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#cfe7ff"/>
+                                                    <Grid ColumnDefinitions="2.2*,70,70,92,150"
+                                                          ColumnSpacing="10"
+                                                          Margin="0,0,0,2">
+                                                        <TextBlock Text="Talkgroup" Foreground="#9fc1dd" FontSize="11"/>
+                                                        <TextBlock Grid.Column="1" Text="Calls" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right"/>
+                                                        <TextBlock Grid.Column="2" Text="Share" Foreground="#9fc1dd" FontSize="11" HorizontalAlignment="Right"/>
+                                                        <TextBlock Grid.Column="3" Text="Last heard" Foreground="#9fc1dd" FontSize="11"/>
+                                                        <TextBlock Grid.Column="4" Text="Trend" Foreground="#9fc1dd" FontSize="11"/>
+                                                    </Grid>
+                                                    <ItemsControl ItemsSource="{Binding DashboardTalkgroupTrendRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardTalkgroupTrendRow">
+                                                                <Grid ColumnDefinitions="2.2*,70,70,92,150"
+                                                                      ColumnSpacing="10"
+                                                                      Margin="0,2,0,2">
+                                                                    <Grid RowDefinitions="Auto,Auto">
+                                                                        <TextBlock Text="{Binding Talkgroup}"
+                                                                                   Foreground="#d7ecff"
+                                                                                   TextTrimming="CharacterEllipsis"/>
+                                                                        <ProgressBar Grid.Row="1"
+                                                                                     Minimum="0"
+                                                                                     Maximum="1"
+                                                                                     Value="{Binding CountRatio}"
+                                                                                     Height="3"
+                                                                                     Margin="0,3,0,0"/>
+                                                                    </Grid>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Text="{Binding TotalCalls}"
+                                                                               Foreground="#d7ecff"
+                                                                               HorizontalAlignment="Right"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding ShareText}"
+                                                                               Foreground="#9fc1dd"
+                                                                               HorizontalAlignment="Right"/>
+                                                                    <TextBlock Grid.Column="3"
+                                                                               Text="{Binding LastHeardText}"
+                                                                               Foreground="#9fc1dd"
+                                                                               FontSize="12"/>
+                                                                    <Grid Grid.Column="4" RowDefinitions="Auto,Auto">
+                                                                        <ItemsControl ItemsSource="{Binding Bars}">
+                                                                            <ItemsControl.ItemsPanel>
+                                                                                <ItemsPanelTemplate>
+                                                                                    <StackPanel Orientation="Horizontal" Spacing="2"/>
+                                                                                </ItemsPanelTemplate>
+                                                                            </ItemsControl.ItemsPanel>
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate x:DataType="local:DashboardMiniBar">
+                                                                                    <Border Width="10" Height="16" Background="#62c6ff" Opacity="{Binding DisplayOpacity}"/>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
+                                                                        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*" Margin="0,2,0,0">
+                                                                            <TextBlock Text="{Binding TrendStartLabel}"
+                                                                                       Foreground="#7898ad"
+                                                                                       FontSize="9"/>
+                                                                            <TextBlock Grid.Column="1"
+                                                                                       Text="{Binding TrendBucketLabel}"
+                                                                                       Foreground="#7898ad"
+                                                                                       FontSize="9"
+                                                                                       HorizontalAlignment="Center"/>
+                                                                            <TextBlock Grid.Column="2"
+                                                                                       Text="{Binding TrendEndLabel}"
+                                                                                       Foreground="#7898ad"
+                                                                                       FontSize="9"
+                                                                                       HorizontalAlignment="Right"/>
+                                                                        </Grid>
+                                                                    </Grid>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="Transcription Quality"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#9fc1dd"/>
+                                            <Border Background="#223748"
+                                                    BorderBrush="#36566f"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="Quality Problems by Hour"
+                                                                   FontSize="16"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#cfe7ff"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding DashboardQualityProblemTotalText}"
+                                                                   Foreground="#9fc1dd"
+                                                                   FontSize="12"
+                                                                   VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                    <ItemsControl ItemsSource="{Binding DashboardQualityHourRows}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardQualityHourStackRow">
+                                                                <Grid RowDefinitions="110,Auto,Auto" Width="24">
+                                                                    <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center" Spacing="0">
+                                                                        <Border Width="18" Height="{Binding EmptyHeight}" Background="#ff5a70"/>
+                                                                        <Border Width="18" Height="{Binding FailureHeight}" Background="#ff9f43"/>
+                                                                        <Border Width="18" Height="{Binding InaudibleHeight}" Background="#62c6ff"/>
+                                                                        <Border Width="18" Height="{Binding ShortHeight}" Background="#ffcf5a"/>
+                                                                    </StackPanel>
+                                                                    <TextBlock Grid.Row="1" Text="{Binding TotalText}" Foreground="#d7ecff" FontSize="10" HorizontalAlignment="Center"/>
+                                                                    <TextBlock Grid.Row="2" Text="{Binding HourTickLabel}" Foreground="#9fc1dd" FontSize="10" HorizontalAlignment="Center"/>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                                            <Border Width="14" Height="3" Background="#ff5a70" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="Empty" Foreground="#d7ecff" FontSize="11"/>
+                                                        </StackPanel>
+                                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                                            <Border Width="14" Height="3" Background="#ff9f43" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="Failure" Foreground="#d7ecff" FontSize="11"/>
+                                                        </StackPanel>
+                                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                                            <Border Width="14" Height="3" Background="#62c6ff" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="Inaudible" Foreground="#d7ecff" FontSize="11"/>
+                                                        </StackPanel>
+                                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                                            <Border Width="14" Height="3" Background="#ffcf5a" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="Short" Foreground="#d7ecff" FontSize="11"/>
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Background="#223748" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="Inaudible by System" FontSize="16" FontWeight="SemiBold" Foreground="#cfe7ff"/>
+                                                    <ItemsControl ItemsSource="{Binding DashboardQualitySystemRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardBarStatRow">
+                                                                <Grid ColumnDefinitions="220,*,64" ColumnSpacing="8" Margin="0,1,0,1">
+                                                                    <TextBlock Text="{Binding Label}" Foreground="#d7ecff" TextTrimming="CharacterEllipsis"/>
+                                                                    <ProgressBar Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding Ratio}" Height="12"/>
+                                                                    <TextBlock Grid.Column="2" Text="{Binding ValueText}" Foreground="#9fc1dd" HorizontalAlignment="Right"/>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Background="#223748" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="Problem Talkgroups" FontSize="16" FontWeight="SemiBold" Foreground="#cfe7ff"/>
+                                                    <ItemsControl ItemsSource="{Binding DashboardQualityTalkgroupRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardBarStatRow">
+                                                                <Grid ColumnDefinitions="220,*,64" ColumnSpacing="8" Margin="0,1,0,1">
+                                                                    <TextBlock Text="{Binding Label}" Foreground="#d7ecff" TextTrimming="CharacterEllipsis"/>
+                                                                    <ProgressBar Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding Ratio}" Height="12"/>
+                                                                    <TextBlock Grid.Column="2" Text="{Binding ValueText}" Foreground="#9fc1dd" HorizontalAlignment="Right"/>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="Distribution"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#9fc1dd"/>
+                                            <Border Background="#223748" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="Category Share" FontSize="16" FontWeight="SemiBold" Foreground="#cfe7ff"/>
+                                                    <ItemsControl ItemsSource="{Binding DashboardCategoryShareRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardBarStatRow">
+                                                                <Grid ColumnDefinitions="130,*,68" ColumnSpacing="8" Margin="0,1,0,1">
+                                                                    <TextBlock Text="{Binding Label}" Foreground="#d7ecff"/>
+                                                                    <ProgressBar Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding Ratio}" Height="12"/>
+                                                                    <TextBlock Grid.Column="2" Text="{Binding ValueText}" Foreground="#9fc1dd" HorizontalAlignment="Right"/>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="Exploration"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#9fc1dd"/>
+                                            <Border Background="#223748" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="Alert-Only Keywords" FontSize="16" FontWeight="SemiBold" Foreground="#cfe7ff"/>
+                                                    <ItemsControl ItemsSource="{Binding DashboardAlertKeywordRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="local:DashboardBarStatRow">
+                                                                <Grid ColumnDefinitions="160,*,56" ColumnSpacing="8" Margin="0,1,0,1">
+                                                                    <TextBlock Text="{Binding Label}" Foreground="#d7ecff"/>
+                                                                    <ProgressBar Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding Ratio}" Height="12"/>
+                                                                    <TextBlock Grid.Column="2" Text="{Binding ValueText}" Foreground="#9fc1dd" HorizontalAlignment="Right"/>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                    <Border IsVisible="{Binding IsHighlightsEmpty}"
+                                            Background="#253645"
+                                            BorderBrush="#36566f"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="14"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Top">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="No highlights available for the given time range"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#cfe7ff"
+                                                       TextWrapping="Wrap"/>
+                                            <Button Classes="menu-btn"
+                                                    Content="Generate highlights now"
+                                                    HorizontalAlignment="Left"
+                                                    IsVisible="{Binding IsGenerateNowVisible}"
+                                                    IsEnabled="{Binding CanGenerateNow}"
+                                                    Click="OnGenerateHighlightsNowClicked"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <GridSplitter Grid.Column="1"
+                                      Width="10"
+                                      Background="#36566f"
+                                      ResizeDirection="Columns"
+                                      ShowsPreview="True"/>
+
+                        <Grid Grid.Column="2"
+                              RowDefinitions="*,10,*">
+                        <Border Grid.Row="0"
+                                Background="#252525"
+                                BorderBrush="#3c3c3c"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="8">
+                            <Grid RowDefinitions="Auto,*">
+                                <TextBlock Text="Alerts"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Foreground="#cfe7ff"
+                                           Margin="0,0,0,8"/>
+                                <Grid Grid.Row="1">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsControl ItemsSource="{Binding AlertHistory}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal"
+                                                               ItemWidth="245"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="local:AlertMatchRecord">
+                                                    <Border Background="#1e2f3d"
+                                                            BorderBrush="#36566f"
+                                                            BorderThickness="1"
+                                                            CornerRadius="6"
+                                                            Margin="0,0,8,8"
+                                                            Padding="8">
+                                                        <Grid ColumnDefinitions="Auto,*"
+                                                              RowDefinitions="Auto,Auto"
+                                                              ColumnSpacing="8"
+                                                              RowSpacing="6">
+                                                            <Button Grid.Column="0"
+                                                                    Grid.RowSpan="2"
+                                                                    Classes="menu-btn"
+                                                                    Height="40"
+                                                                    MinWidth="74"
+                                                                    Padding="8,4"
+                                                                    Click="OnAlertHistoryPlayClicked">
+                                                                <Grid Width="22" Height="22">
+                                                                    <Path Data="M8 5.14V19.14L19 12.14L8 5.14Z"
+                                                                          Fill="#4CAF50"
+                                                                          IsVisible="{Binding IsAudioPlaying, Converter={StaticResource InvertedBoolConverter}}"/>
+                                                                    <Path Data="M6 6H18V18H6V6Z"
+                                                                          Fill="#f44336"
+                                                                          IsVisible="{Binding IsAudioPlaying}"/>
+                                                                </Grid>
+                                                            </Button>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Grid.Row="0"
+                                                                       TextWrapping="Wrap"
+                                                                       VerticalAlignment="Top">
+                                                                <Run Text="{Binding HighlightPrefix}"/>
+                                                                <Run Text="{Binding HighlightMatch}"
+                                                                     Foreground="#101010"
+                                                                     Background="#ffd24d"
+                                                                     FontWeight="Bold"/>
+                                                                <Run Text="{Binding HighlightSuffix}"/>
+                                                            </TextBlock>
+                                                            <WrapPanel Grid.Column="1"
+                                                                       Grid.Row="1"
+                                                                       Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding AlertType}"
+                                                                           Foreground="#ffd27a"
+                                                                           Margin="0,0,10,0"/>
+                                                                <TextBlock Text="{Binding DurationSec, StringFormat='{}{0}s'}"
+                                                                           Foreground="#8ec7ff"
+                                                                           Margin="0,0,10,0"/>
+                                                                <TextBlock Text="{Binding DisplayTimestamp}"
+                                                                           Foreground="#9fc1dd"/>
+                                                            </WrapPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <Border IsVisible="{Binding IsAlertsEmpty}"
+                                            Background="#223748"
+                                            BorderBrush="#36566f"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="14"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Top">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="No alerts available for the given time range"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#cfe7ff"
+                                                       TextWrapping="Wrap"/>
+                                            <Button Classes="menu-btn"
+                                                    Content="Go to alert configuration"
+                                                    HorizontalAlignment="Left"
+                                                    Click="OnGoToAlertConfigurationClicked"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <GridSplitter Grid.Row="1"
+                                      Height="10"
+                                      Background="#36566f"
+                                      ResizeDirection="Rows"
+                                      ShowsPreview="True"/>
+
+                        <Border Grid.Row="2"
+                                Background="#1f2f3d"
+                                BorderBrush="#36566f"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="8">
+                            <Grid RowDefinitions="Auto,*">
+                                <TextBlock Text="Incident Explorer"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Foreground="#cfe7ff"
+                                           Margin="0,0,0,8"/>
+                                <ScrollViewer Grid.Row="1"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel Spacing="8">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="Active Incidents"
+                                                       FontSize="16"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#cfe7ff"/>
+                                            <Button Grid.Column="1"
+                                                    Classes="menu-btn"
+                                                    Content="{Binding DashboardIncidentExpandAllText}"
+                                                    Padding="8,3"
+                                                    MinHeight="28"
+                                                    IsVisible="{Binding HasDashboardIncidentDetails}"
+                                                    Click="OnDashboardIncidentExpandAllClicked"/>
+                                        </Grid>
+                                        <ItemsControl ItemsSource="{Binding DashboardIncidentBuckets}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="local:DashboardIncidentBucket">
+                                                    <Border Background="#1e2f3d" BorderBrush="#36566f" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                                        <StackPanel Spacing="4">
+                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                <TextBlock Text="{Binding BucketName}" Foreground="#d7ecff" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                                <TextBlock Grid.Column="1" Text="{Binding UpdateCountText}" Foreground="#9fc1dd"/>
+                                                            </Grid>
+                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                <TextBlock Text="{Binding TimeRangeText}" Foreground="#9fc1dd" FontSize="11"/>
+                                                                <TextBlock Grid.Column="1" Text="{Binding SourceText}" Foreground="#ffd27a" FontSize="11"/>
+                                                            </Grid>
+                                                            <TextBlock Text="{Binding PreviewText}" Foreground="#d7ecff" TextWrapping="Wrap"/>
+                                                            <Button Classes="menu-btn"
+                                                                    Content="{Binding ExpandLabel}"
+                                                                    Padding="8,3"
+                                                                    MinHeight="28"
+                                                                    HorizontalAlignment="Left"
+                                                                    IsVisible="{Binding HasEventDetails}"
+                                                                    Click="OnDashboardIncidentToggleClicked"/>
+                                                            <Border Background="#192936"
+                                                                    BorderBrush="#36566f"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="4"
+                                                                    Padding="6"
+                                                                    Margin="0,4,0,0"
+                                                                    IsVisible="{Binding IsDetailVisible}">
+                                                                <StackPanel Spacing="5">
+                                                                    <TextBlock Text="Related calls"
+                                                                               Foreground="#9fc1dd"
+                                                                               FontSize="11"
+                                                                               FontWeight="SemiBold"/>
+                                                                    <ItemsControl ItemsSource="{Binding EventDetails}">
+                                                                        <ItemsControl.ItemTemplate>
+                                                                            <DataTemplate x:DataType="local:DashboardIncidentDetail">
+                                                                                <Border BorderBrush="#2b465a"
+                                                                                        BorderThickness="0,1,0,0"
+                                                                                        Padding="0,5,0,0"
+                                                                                        Margin="0,0,0,2">
+                                                                                    <StackPanel Spacing="2">
+                                                                                        <TextBlock Text="{Binding Title}"
+                                                                                                   Foreground="#d7ecff"
+                                                                                                   FontWeight="SemiBold"
+                                                                                                   TextWrapping="Wrap"/>
+                                                                                        <TextBlock Text="{Binding MetaText}"
+                                                                                                   Foreground="#9fc1dd"
+                                                                                                   FontSize="11"
+                                                                                                   TextWrapping="Wrap"/>
+                                                                                        <TextBlock Text="{Binding Detail}"
+                                                                                                   Foreground="#c5def3"
+                                                                                                   TextWrapping="Wrap"/>
+                                                                                        <StackPanel Orientation="Horizontal"
+                                                                                                    Spacing="6"
+                                                                                                    IsVisible="{Binding HasSourceCall}">
+                                                                                            <Button Content="Transcript"
+                                                                                                    Classes="menu-btn"
+                                                                                                    Padding="8,3"
+                                                                                                    MinHeight="28"
+                                                                                                    Foreground="#7dd3fc"
+                                                                                                    Click="OnDashboardIncidentUpdateTranscriptClicked"/>
+                                                                                            <Button Content="Audio"
+                                                                                                    Classes="menu-btn"
+                                                                                                    Padding="8,3"
+                                                                                                    MinHeight="28"
+                                                                                                    Foreground="#7dd3fc"
+                                                                                                    Click="OnDashboardIncidentUpdateAudioClicked"/>
+                                                                                        </StackPanel>
+                                                                                    </StackPanel>
+                                                                                </Border>
+                                                                            </DataTemplate>
+                                                                        </ItemsControl.ItemTemplate>
+                                                                    </ItemsControl>
+                                                                </StackPanel>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Text="No incidents detected."
+                                                   IsVisible="{Binding IsDashboardIncidentBucketsEmpty}"
+                                                   Foreground="#9fc1dd"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
+                        </Grid>
+                    </Grid>
+
+                    <!-- Loading overlay -->
+                    <Border Background="#000000aa"
+                            IsVisible="{Binding InsightsLoading}"
+                            VerticalAlignment="Stretch"
+                            HorizontalAlignment="Stretch">
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Spacing="15">
+                            <ProgressBar Width="200" Height="4" Value="0" IsIndeterminate="True"/>
+                            <TextBlock Text="{Binding InsightsStatusText}"
+                                       Foreground="White"
+                                       FontSize="14"
                                        FontWeight="SemiBold"
-                                       Foreground="#cfe7ff"
-                                       TextWrapping="Wrap"/>
-                            <Button Classes="menu-btn"
-                                    Content="Generate highlights now"
-                                    HorizontalAlignment="Left"
-                                    IsVisible="{Binding IsGenerateNowVisible}"
-                                    IsEnabled="{Binding CanGenerateNow}"
-                                    Click="OnGenerateHighlightsNowClicked"/>
-                        </StackPanel>
+                                       HorizontalAlignment="Center"/>
+                    </StackPanel>
                     </Border>
                 </Grid>
-                
-                <!-- Loading overlay -->
-                <Border Background="#000000aa"
-                        IsVisible="{Binding InsightsLoading}"
-                        VerticalAlignment="Stretch"
-                        HorizontalAlignment="Stretch">
-                    <StackPanel HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Spacing="15">
-                        <ProgressBar Width="200" Height="4" Value="0" IsIndeterminate="True"/>
-                        <TextBlock Text="{Binding InsightsStatusText}"
-                                   Foreground="White"
-                                   FontSize="14"
-                                   FontWeight="SemiBold"
-                                   HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </Border>
-            </Grid>
-
-            <!-- Alerts history -->
-            <Grid Grid.Row="1"
-                  Grid.Column="0"
-                  IsVisible="{Binding IsAlertsSectionVisible}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled">
-                    <Border Padding="10">
-                        <ItemsControl ItemsSource="{Binding AlertHistory}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="local:AlertMatchRecord">
-                                    <Border Background="#232323"
-                                            BorderBrush="#3c3c3c"
-                                            BorderThickness="0,0,0,1"
-                                            Padding="6,4">
-                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
-                                            <Button Grid.Column="0"
-                                                    Classes="menu-btn"
-                                                    Height="40"
-                                                    MinWidth="74"
-                                                    Padding="8,4"
-                                                    Click="OnAlertHistoryPlayClicked">
-                                                <Grid Width="22" Height="22">
-                                                    <Path Data="M8 5.14V19.14L19 12.14L8 5.14Z"
-                                                          Fill="#4CAF50"
-                                                          IsVisible="{Binding IsAudioPlaying, Converter={StaticResource InvertedBoolConverter}}"/>
-                                                    <Path Data="M6 6H18V18H6V6Z"
-                                                          Fill="#f44336"
-                                                          IsVisible="{Binding IsAudioPlaying}"/>
-                                                </Grid>
-                                            </Button>
-                                            <TextBlock Grid.Column="1"
-                                                       TextWrapping="Wrap"
-                                                       VerticalAlignment="Center">
-                                                <Run Text="{Binding HighlightPrefix}"/>
-                                                <Run Text="{Binding HighlightMatch}"
-                                                     Foreground="#101010"
-                                                     Background="#ffd24d"
-                                                     FontWeight="Bold"/>
-                                                <Run Text="{Binding HighlightSuffix}"/>
-                                            </TextBlock>
-                                            <TextBlock Grid.Column="2"
-                                                       Text="{Binding AlertType}"
-                                                       Foreground="#ffaa00"
-                                                       VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="3"
-                                                       Text="{Binding DurationSec, StringFormat='{}{0}s'}"
-                                                       Foreground="#8ec7ff"
-                                                       VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="4"
-                                                       Text="{Binding DisplayTimestamp}"
-                                                       Foreground="#bbbbbb"
-                                                       VerticalAlignment="Center"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </Border>
-                </ScrollViewer>
-                <Border IsVisible="{Binding IsAlertsEmpty}"
-                        Margin="10"
-                        Background="#3b2f23"
-                        BorderBrush="#7a5a3a"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        Padding="14"
-                        HorizontalAlignment="Stretch"
-                        VerticalAlignment="Top">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="No alerts available for the given time range"
-                                   FontSize="18"
-                                   FontWeight="SemiBold"
-                                   Foreground="#ffd9b0"
-                                   TextWrapping="Wrap"/>
-                        <Button Classes="menu-btn"
-                                Content="Go to alert configuration"
-                                HorizontalAlignment="Left"
-                                Click="OnGoToAlertConfigurationClicked"/>
-                    </StackPanel>
-                </Border>
             </Grid>
 
             <!-- Settings -->
@@ -1090,6 +1585,17 @@
                                             <ComboBoxItem Content="Whisper" />
                                             <ComboBoxItem Content="Vosk" />
                                         </ComboBox>
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Test"
+                                                    Classes="menu-btn"
+                                                    Width="120"
+                                                    HorizontalAlignment="Left"
+                                                    Click="OnTranscriptionTestClicked"/>
+                                            <TextBlock Text="{Binding TranscriptionTestStatusText}"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="#d0d0d0"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
                                     </StackPanel>
                                 </Border>
                             </ScrollViewer>
@@ -1211,35 +1717,37 @@
                                 <Grid RowDefinitions="Auto,*"
                                       RowSpacing="10"
                                       IsEnabled="{Binding IsTalkgroupEditorBusy, Converter={StaticResource InvertedBoolConverter}}">
-                                        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
+                                        <WrapPanel Grid.Row="0"
+                                                   Orientation="Horizontal">
                                             <TextBlock Text="CSV:"
+                                                       Margin="0,0,8,8"
                                                        VerticalAlignment="Center"
                                                        FontWeight="SemiBold"/>
-                                            <Button Grid.Column="1"
-                                                    Content="Import"
+                                            <Button Content="Import"
                                                     Classes="menu-btn"
+                                                    Margin="0,0,8,8"
                                                     Click="OnSettingsImportTalkgroupsClicked"/>
-                                            <Button Grid.Column="2"
-                                                    Content="Build"
+                                            <Button Content="Build"
                                                     Classes="menu-btn"
+                                                    Margin="0,0,8,8"
                                                     Click="OnSettingsBuildTalkgroupsClicked"/>
-                                            <Button Grid.Column="3"
-                                                    Content="Apply"
+                                            <Button Content="Apply"
                                                     Classes="menu-btn"
+                                                    Margin="0,0,8,8"
                                                     Click="OnTalkgroupApplyClicked"
                                                     IsEnabled="{Binding IsTalkgroupApplyEnabled}"/>
-                                            <TextBlock Grid.Column="4"
-                                                       Text="|"
+                                            <TextBlock Text="|"
+                                                       Margin="0,0,8,8"
                                                        VerticalAlignment="Center"
                                                        Foreground="#8a8a8a"/>
-                                            <TextBlock Grid.Column="5"
-                                                       Text="Profile:"
+                                            <TextBlock Text="Profile:"
+                                                       Margin="0,0,8,8"
                                                        VerticalAlignment="Center"
                                                        FontWeight="SemiBold"/>
-                                            <ComboBox Grid.Column="6"
-                                                      ItemsSource="{Binding TalkgroupEditableProfiles}"
+                                            <ComboBox ItemsSource="{Binding TalkgroupEditableProfiles}"
                                                       SelectedItem="{Binding SelectedTalkgroupAddProfile, Mode=TwoWay}"
                                                       MinWidth="180"
+                                                      Margin="0,0,8,8"
                                                       VerticalAlignment="Center"
                                                       IsEnabled="{Binding IsTalkgroupAddProfileEnabled}">
                                                 <ComboBox.ItemTemplate>
@@ -1248,39 +1756,42 @@
                                                     </DataTemplate>
                                                 </ComboBox.ItemTemplate>
                                             </ComboBox>
-                                            <Button Grid.Column="7"
-                                                    Content="Add Selected"
+                                            <Button Content="Add Selected"
                                                     Classes="menu-btn"
+                                                    Margin="0,0,8,8"
                                                     Click="OnAddSelectedTalkgroupsClicked"
                                                     IsEnabled="{Binding CanAddSelectedTalkgroups}"/>
-                                            <TextBlock Grid.Column="8"
-                                                       Text="|"
+                                            <TextBlock Text="|"
+                                                       Margin="0,0,8,8"
                                                        VerticalAlignment="Center"
                                                        Foreground="#8a8a8a"/>
-                                            <TextBlock Grid.Column="9"
-                                                       Text="View:"
+                                            <TextBlock Text="View:"
+                                                       Margin="0,0,8,8"
                                                        VerticalAlignment="Center"
                                                        FontWeight="SemiBold"/>
-                                            <ComboBox Grid.Column="10"
-                                                      ItemsSource="{Binding TalkgroupOpsCategoryFilterOptions}"
+                                            <ComboBox ItemsSource="{Binding TalkgroupOpsCategoryFilterOptions}"
                                                       SelectedItem="{Binding SelectedTalkgroupOpsCategoryFilter, Mode=TwoWay}"
                                                       MinWidth="120"
+                                                      Margin="0,0,8,8"
                                                       VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="11"
-                                                       Text="Keyword:"
+                                            <TextBlock Text="Keyword:"
+                                                       Margin="0,0,8,8"
                                                        VerticalAlignment="Center"
                                                        FontWeight="SemiBold"/>
-                                            <TextBox Grid.Column="12"
-                                                     Width="180"
-                                                     VerticalAlignment="Center"
-                                                     PlaceholderText="Filter talkgroups"
-                                                     Text="{Binding TalkgroupKeywordFilter, Mode=TwoWay}"/>
-                                            <StackPanel Grid.Column="13" Spacing="2" VerticalAlignment="Center">
+                                            <TextBox Width="160"
+                                                     Margin="0,0,8,8"
+                                                      VerticalAlignment="Center"
+                                                      PlaceholderText="Filter talkgroups"
+                                                      Text="{Binding TalkgroupKeywordFilter, Mode=TwoWay}"/>
+                                            <StackPanel Spacing="2"
+                                                        Width="280"
+                                                        Margin="0,0,8,8"
+                                                        VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding TalkgroupCoverageText}"
                                                            Foreground="#aaddff"
                                                            TextWrapping="Wrap"/>
                                             </StackPanel>
-                                        </Grid>
+                                        </WrapPanel>
                                     <Border Grid.Row="1"
                                             Background="#1a1a1a"
                                             CornerRadius="6"
@@ -1387,24 +1898,28 @@
                                                        Foreground="#b0b0b0"
                                                        TextWrapping="Wrap"/>
                                             <TextBlock Text="Host" FontWeight="Bold"/>
-                                            <TextBox x:Name="SettingsArchiveHostTextBox" Width="320" HorizontalAlignment="Left"/>
+                                             <TextBox x:Name="SettingsArchiveHostTextBox" Width="320" HorizontalAlignment="Left" TextChanged="OnArchiveSecretFieldChanged"/>
                                             <TextBlock Text="Port" FontWeight="Bold"/>
-                                            <TextBox x:Name="SettingsArchivePortTextBox" Width="100" HorizontalAlignment="Left"/>
+                                             <TextBox x:Name="SettingsArchivePortTextBox" Width="100" HorizontalAlignment="Left" TextChanged="OnArchiveSecretFieldChanged"/>
                                             <TextBlock Text="Username" FontWeight="Bold"/>
-                                            <TextBox x:Name="SettingsArchiveUsernameTextBox" Width="260" HorizontalAlignment="Left"/>
+                                             <TextBox x:Name="SettingsArchiveUsernameTextBox" Width="260" HorizontalAlignment="Left" TextChanged="OnArchiveSecretFieldChanged"/>
                                             <TextBlock Text="Authentication" FontWeight="Bold"/>
-                                            <ComboBox x:Name="SettingsArchiveAuthModeComboBox" Width="180" HorizontalAlignment="Left">
+                                             <ComboBox x:Name="SettingsArchiveAuthModeComboBox" Width="180" HorizontalAlignment="Left" SelectionChanged="OnArchiveSecretSelectionChanged">
                                                 <ComboBoxItem Content="Password" />
                                                 <ComboBoxItem Content="Private key" />
                                             </ComboBox>
-                                            <TextBlock Text="Password" FontWeight="Bold"/>
-                                            <TextBox x:Name="SettingsArchivePasswordTextBox" Width="260" HorizontalAlignment="Left"/>
+                                             <TextBlock Text="Password" FontWeight="Bold"/>
+                                             <TextBox x:Name="SettingsArchivePasswordTextBox" Width="260" HorizontalAlignment="Left" TextChanged="OnArchiveSecretFieldChanged"/>
+                                             <TextBlock Text="{Binding ArchiveSecretStatusText}"
+                                                        FontSize="11"
+                                                        Foreground="#9fc1dd"
+                                                        TextWrapping="Wrap"/>
                                             <TextBlock Text="Private Key Path" FontWeight="Bold"/>
                                             <TextBox x:Name="SettingsArchivePrivateKeyPathTextBox" Width="420" HorizontalAlignment="Left"/>
                                             <TextBlock Text="Private Key Passphrase" FontWeight="Bold"/>
-                                            <TextBox x:Name="SettingsArchivePrivateKeyPassphraseTextBox" Width="260" HorizontalAlignment="Left"/>
+                                             <TextBox x:Name="SettingsArchivePrivateKeyPassphraseTextBox" Width="260" HorizontalAlignment="Left" TextChanged="OnArchiveSecretFieldChanged"/>
                                             <TextBlock Text="Remote Root" FontWeight="Bold"/>
-                                            <TextBox x:Name="SettingsArchiveRemoteRootTextBox" Width="420" HorizontalAlignment="Left"/>
+                                             <TextBox x:Name="SettingsArchiveRemoteRootTextBox" Width="420" HorizontalAlignment="Left" TextChanged="OnArchiveSecretFieldChanged"/>
                                             <TextBlock Text="Local Archive Cache" FontWeight="Bold"/>
                                             <TextBox x:Name="SettingsArchiveCachePathTextBox" Width="420" HorizontalAlignment="Left"/>
                                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -1733,7 +2248,8 @@
             <Grid Grid.Row="1"
                   Grid.Column="0"
                   IsVisible="{Binding IsTroubleshootSectionVisible}">
-                <TabControl Margin="8">
+                <TabControl Margin="8"
+                            SelectionChanged="OnTroubleshootTabSelectionChanged">
                     <TabItem Header="Pizzapi">
                         <Grid RowDefinitions="Auto,*" Margin="8">
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -2065,6 +2581,7 @@
                     <TextBlock Text="{Binding FooterStatusText}"
                                Foreground="#d7d7d7"
                                FontSize="12"
+                               ToolTip.Tip="{Binding FooterStatusText}"
                                TextTrimming="CharacterEllipsis"
                                Width="420"/>
                 </StackPanel>

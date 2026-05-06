@@ -1,5 +1,8 @@
 using Newtonsoft.Json;
+using pizzalib;
+using System.ComponentModel;
 using System.Linq;
+using System.Runtime.CompilerServices;
 namespace pizzapi;
 
 public class InsightNotableEvent
@@ -330,4 +333,201 @@ public class InsightIndexEntry
     public List<string> Tags { get; set; } = new();
     [JsonProperty("path")]
     public string Path { get; set; } = string.Empty;
+}
+
+public class InsightIncident
+{
+    [JsonProperty("incident_id")]
+    public string IncidentId { get; set; } = string.Empty;
+    [JsonProperty("title")]
+    public string Title { get; set; } = string.Empty;
+    [JsonProperty("narrative_summary")]
+    public string NarrativeSummary { get; set; } = string.Empty;
+    [JsonProperty("interestingness_score")]
+    public double InterestingnessScore { get; set; }
+    [JsonProperty("severity")]
+    public string Severity { get; set; } = "medium";
+    [JsonProperty("status")]
+    public string Status { get; set; } = "active";
+    [JsonProperty("first_seen")]
+    public DateTimeOffset FirstSeen { get; set; }
+    [JsonProperty("last_seen")]
+    public DateTimeOffset LastSeen { get; set; }
+    [JsonProperty("category")]
+    public string Category { get; set; } = "other";
+    [JsonProperty("call_ids")]
+    public List<string> CallIds { get; set; } = new();
+    [JsonProperty("call_hashes")]
+    public List<string> CallHashes { get; set; } = new();
+    [JsonProperty("event_count")]
+    public int EventCount { get; set; }
+    [JsonProperty("source_window_count")]
+    public int SourceWindowCount { get; set; }
+    [JsonProperty("participating_categories")]
+    public List<string> ParticipatingCategories { get; set; } = new();
+    [JsonProperty("novelty_score")]
+    public double NoveltyScore { get; set; }
+    [JsonProperty("recency_score")]
+    public double RecencyScore { get; set; }
+    [JsonProperty("rank_score")]
+    public double RankScore { get; set; }
+    [JsonProperty("correlation_confidence")]
+    public double CorrelationConfidence { get; set; }
+
+    [JsonIgnore]
+    public List<InsightNotableEvent> LinkedEvents { get; set; } = new();
+    [JsonIgnore]
+    public InsightNotableEvent? PrimaryEvent { get; set; }
+    [JsonIgnore]
+    public string CategoryKey => InsightCategoryPalette.Normalize(Category);
+    [JsonIgnore]
+    public string CategoryDisplay => InsightCategoryPalette.DisplayName(CategoryKey);
+    [JsonIgnore]
+    public string CategoryAccentColor => InsightCategoryPalette.AccentColor(CategoryKey);
+    [JsonIgnore]
+    public string CategoryTileBackground => InsightCategoryPalette.TileBackground(CategoryKey);
+    [JsonIgnore]
+    public string SeverityDisplay => (Severity ?? string.Empty).Trim().ToUpperInvariant();
+    [JsonIgnore]
+    public string ConfidencePercent => $"{Math.Clamp((int)Math.Round(InterestingnessScore * 100.0), 0, 100)}%";
+    [JsonIgnore]
+    public string LastSeenDisplay => LastSeen.ToLocalTime().ToString("MMM d, h:mm tt");
+    [JsonIgnore]
+    public int DistinctCallCount => CallIds.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+    [JsonIgnore]
+    public string AgenciesDisplay => ParticipatingCategories.Count == 0
+        ? CategoryDisplay
+        : string.Join(" + ", ParticipatingCategories
+            .Select(InsightCategoryPalette.DisplayName)
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+    [JsonIgnore]
+    public string EventsDefinitionText => $"Events: {EventCount}";
+    [JsonIgnore]
+    public string CallsDefinitionText => $"Calls: {DistinctCallCount}";
+    [JsonIgnore]
+    public string NoveltyDefinitionText => $"Novelty: {Math.Clamp((int)Math.Round(NoveltyScore * 100.0), 0, 100)}%";
+    [JsonIgnore]
+    public string CorrelationDefinitionText => $"Correlation: {Math.Clamp((int)Math.Round(CorrelationConfidence * 100.0), 0, 100)}%";
+}
+
+public class DashboardIncidentBucket : INotifyPropertyChanged
+{
+    private bool _isExpanded;
+
+    public string BucketName { get; set; } = string.Empty;
+    public int MatchCount { get; set; }
+    public DateTimeOffset LatestSeen { get; set; }
+    public string PreviewText { get; set; } = string.Empty;
+    public string SourceText { get; set; } = string.Empty;
+    public List<DashboardIncidentDetail> EventDetails { get; set; } = new();
+    public string LatestSeenText => LatestSeen.ToLocalTime().ToString("MMM d, h:mm tt");
+    public string TimeRangeText
+    {
+        get
+        {
+            var times = EventDetails
+                .Where(d => d.OccurredAt.HasValue)
+                .Select(d => d.OccurredAt!.Value.ToLocalTime())
+                .OrderBy(t => t)
+                .ToList();
+            if (times.Count == 0)
+                return LatestSeenText;
+
+            var first = times.First();
+            var last = times.Last();
+            return first.Date == last.Date
+                ? $"{first:MMM d h:mm tt}-{last:h:mm tt}"
+                : $"{first:MMM d h:mm tt}-{last:MMM d h:mm tt}";
+        }
+    }
+    public bool HasEventDetails => EventDetails.Count > 0;
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set
+        {
+            if (_isExpanded == value)
+                return;
+            _isExpanded = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsDetailVisible));
+            OnPropertyChanged(nameof(ExpandLabel));
+        }
+    }
+    public bool IsDetailVisible => HasEventDetails && IsExpanded;
+    public string ExpandLabel => IsExpanded ? "Collapse" : "Expand";
+    public string UpdateCountText => $"{MatchCount} update{(MatchCount == 1 ? string.Empty : "s")}";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+}
+
+public class DashboardIncidentDetail
+{
+    public string Title { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
+    public string MetaText { get; set; } = string.Empty;
+    public DateTimeOffset? OccurredAt { get; set; }
+    public string SourceCallId { get; set; } = string.Empty;
+    [JsonIgnore]
+    public TranscribedCall? SourceCall { get; set; }
+    [JsonIgnore]
+    public bool HasSourceCall => SourceCall != null;
+}
+
+public class DashboardTalkgroupTrendRow
+{
+    public string Talkgroup { get; set; } = string.Empty;
+    public int TotalCalls { get; set; }
+    public string ShareText { get; set; } = string.Empty;
+    public string LastHeardText { get; set; } = string.Empty;
+    public string TrendStartLabel { get; set; } = string.Empty;
+    public string TrendEndLabel { get; set; } = string.Empty;
+    public string TrendBucketLabel { get; set; } = string.Empty;
+    public double CountRatio { get; set; }
+    public List<DashboardMiniBar> Bars { get; set; } = new();
+}
+
+public class DashboardMiniBar
+{
+    public double Ratio { get; set; }
+    public double DisplayOpacity => Ratio <= 0 ? 0.16 : Math.Clamp(0.30 + (Ratio * 0.70), 0.30, 1.0);
+}
+
+public class DashboardQualityHourStackRow
+{
+    public string HourLabel { get; set; } = string.Empty;
+    public string HourTickLabel { get; set; } = string.Empty;
+    public double EmptyHeight { get; set; }
+    public double FailureHeight { get; set; }
+    public double InaudibleHeight { get; set; }
+    public double ShortHeight { get; set; }
+    public string TotalText { get; set; } = string.Empty;
+    public string RateText { get; set; } = string.Empty;
+}
+
+public class DashboardSimpleStat
+{
+    public string Label { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+    public string SubValue { get; set; } = string.Empty;
+}
+
+public class DashboardBarStatRow
+{
+    public string Label { get; set; } = string.Empty;
+    public double Ratio { get; set; }
+    public string ValueText { get; set; } = string.Empty;
+}
+
+public class DashboardScatterPoint
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+    public string Color { get; set; } = "#6fb7ff";
+    public string Tooltip { get; set; } = string.Empty;
 }

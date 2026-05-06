@@ -5,11 +5,11 @@ namespace pizzalib
 {
     public static class TranscriberPreloader
     {
-        public static async Task PreloadAsync(Settings settings, Action<string>? statusCallback = null)
+        public static async Task<bool> PreloadAsync(Settings settings, Action<string>? statusCallback = null)
         {
             if (settings == null)
             {
-                return;
+                return false;
             }
 
             var engine = (settings.TranscriptionEngine ?? "whisper").Trim().ToLowerInvariant();
@@ -24,12 +24,14 @@ namespace pizzalib
 
                 await transcriber.Initialize().ConfigureAwait(false);
                 statusCallback?.Invoke($"{engine} model ready");
+                return true;
             }
             catch (Exception ex)
             {
                 Trace(TraceLoggerType.CallManager, TraceEventType.Error,
                     $"Model preload failed for {engine}: {ex.Message}");
                 statusCallback?.Invoke($"{engine} model load failed: {ex.Message}");
+                return false;
             }
             finally
             {

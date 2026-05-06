@@ -72,7 +72,18 @@ public sealed class OsSecretStore
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            StoreWithSecretTool(account, secret);
+            try
+            {
+                StoreWithSecretTool(account, secret);
+            }
+            catch (Exception ex)
+            {
+                TraceLogger.Trace(
+                    TraceLogger.TraceLoggerType.Settings,
+                    TraceEventType.Warning,
+                    $"secret-tool unavailable for storing '{account}'. Falling back to file secret store: {ex}");
+                StoreWithFileFallback(account, secret);
+            }
             return;
         }
 
@@ -86,7 +97,23 @@ public sealed class OsSecretStore
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             return LookupWithMacKeychain(account);
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            return LookupWithSecretTool(account);
+        {
+            try
+            {
+                var value = LookupWithSecretTool(account);
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+            catch (Exception ex)
+            {
+                TraceLogger.Trace(
+                    TraceLogger.TraceLoggerType.Settings,
+                    TraceEventType.Warning,
+                    $"secret-tool unavailable for lookup '{account}'. Trying file secret store: {ex}");
+            }
+
+            return LookupWithFileFallback(account);
+        }
 
         throw new PlatformNotSupportedException("Unsupported OS for secure secret storage.");
     }
@@ -157,6 +184,66 @@ public sealed class OsSecretStore
             return null;
         var value = result.StdOut.Trim();
         return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private void StoreWithFileFallback(string account, string secret)
+    {
+        Directory.CreateDirectory(_dpapiRoot);
+        TryRestrictDirectory(_dpapiRoot);
+
+        var path = GetDpapiPath(account);
+        File.WriteAllText(path, Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)));
+        TryRestrictFile(path);
+    }
+
+    private string? LookupWithFileFallback(string account)
+    {
+        var path = GetDpapiPath(account);
+        if (!File.Exists(path))
+            return null;
+
+        var encoded = File.ReadAllText(path).Trim();
+        if (string.IsNullOrWhiteSpace(encoded))
+            return null;
+
+        try
+        {
+            return Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+        }
+        catch (FormatException)
+        {
+            return encoded;
+        }
+    }
+
+    private static void TryRestrictDirectory(string path)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return;
+
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        catch
+        {
+            // Best effort only; failed chmod should not block settings saves.
+        }
+    }
+
+    private static void TryRestrictFile(string path)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return;
+
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch
+        {
+            // Best effort only; failed chmod should not block settings saves.
+        }
     }
 
     private static void RunProcessOrThrow(string fileName, string args)
