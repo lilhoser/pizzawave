@@ -93,7 +93,7 @@ fi
 chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
 chown root:"$SERVICE_USER" "$CONFIG_DIR/pizzad.json" "$CONFIG_DIR/pizzad.token"
 chmod 0640 "$CONFIG_DIR/pizzad.json"
-chmod 0600 "$CONFIG_DIR/pizzad.token"
+chmod 0640 "$CONFIG_DIR/pizzad.token"
 
 cat > "$SERVICE_PATH" <<EOF
 [Unit]

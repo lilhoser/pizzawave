@@ -94,6 +94,8 @@ install -d "$PKG_ROOT/usr/bin"
 install -d "$PKG_ROOT/usr/lib/pizzawave/scripts"
 install -d "$PKG_ROOT/lib/systemd/system"
 install -d "$PKG_ROOT/etc/pizzawave"
+install -d "$PKG_ROOT/var/lib/pizzawave/audio"
+install -d "$PKG_ROOT/var/lib/pizzawave/import-cache"
 
 cp -a "$PUBLISH_DIR"/. "$PKG_ROOT/opt/pizzawave/pizzad"/
 install -m 0755 "$ROOT_DIR/scripts/pizzawave" "$PKG_ROOT/usr/bin/pizzawave"
@@ -189,7 +191,7 @@ chown -R "\$SERVICE_USER:\$SERVICE_USER" "\$DATA_DIR"
 chown -R root:"\$SERVICE_USER" "\$CONFIG_DIR"
 chmod 0750 "\$CONFIG_DIR"
 chmod 0640 "\$CONFIG_DIR/pizzad.json" || true
-chmod 0600 "\$CONFIG_DIR/pizzad.token" || true
+chmod 0640 "\$CONFIG_DIR/pizzad.token" || true
 
 if getent group systemd-journal >/dev/null 2>&1; then
   usermod -aG systemd-journal "\$SERVICE_USER" || true
