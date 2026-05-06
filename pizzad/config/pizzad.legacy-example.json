@@ -1,0 +1,67 @@
+{
+  "server": {
+    "httpBind": "0.0.0.0",
+    "httpPort": 8080
+  },
+  "auth": {
+    "mode": "token",
+    "readRequiresAuth": false,
+    "writeRequiresAuth": true,
+    "tokenFile": "/etc/pizzawave/pizzad.token"
+  },
+  "storage": {
+    "databasePath": "/var/lib/pizzawave/pizzad.db",
+    "audioRoot": "/var/lib/pizzawave/audio",
+    "importCacheRoot": "/var/lib/pizzawave/import-cache"
+  },
+  "ingest": {
+    "callstreamBind": "127.0.0.1",
+    "callstreamPort": 9123,
+    "maxConcurrentClients": 4
+  },
+  "transcription": {
+    "provider": "whisper",
+    "analogSampleRate": 8000,
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "openAiModel": "qwen3.6-35b-a3b@q8_0"
+  },
+  "sftpImport": {
+    "enabled": true,
+    "host": "192.168.1.183",
+    "port": 22,
+    "username": "pizzawave",
+    "authMode": "password",
+    "password": "",
+    "privateKeyPath": "",
+    "privateKeyPassphrase": "",
+    "remoteRoot": "pizzawave",
+    "quickImportMaxHours": 48,
+    "defaultBatchCallCap": 5000,
+    "defaultBatchByteCap": 21474836480
+  },
+  "trunkRecorder": {
+    "configPath": "/etc/trunk-recorder/config.json",
+    "logServiceName": "trunk-recorder",
+    "healthWindowMinutes": 5
+  },
+  "alerts": {
+    "emailEnabled": true,
+    "emailProvider": "gmail",
+    "emailUser": "you@example.com",
+    "emailPassword": "",
+    "rules": [
+      {
+        "id": "95e90081-38bd-4fa9-b17e-9445ef725eac",
+        "name": "mahan",
+        "enabled": true,
+        "matchType": "keyword",
+        "keywords": "mahan, mahan gap, may ham, harrison pike",
+        "policeCodes": "",
+        "email": "you@example.com",
+        "frequency": "realtime",
+        "autoplay": false,
+        "talkgroups": []
+      }
+    ]
+  }
+}
