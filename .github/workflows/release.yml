@@ -313,10 +313,43 @@ jobs:
         path: pizzapi_${{ needs.get-version.outputs.version }}_${{ matrix.deb-arch }}.deb
         retention-days: 30
 
+  # Build pizzawave/pizzad engine service package
+  build-pizzawave:
+    runs-on: ubuntu-latest
+    needs: get-version
+    strategy:
+      matrix:
+        include:
+          - runtime: linux-x64
+            artifact: pizzawave-deb-amd64
+          - runtime: linux-arm64
+            artifact: pizzawave-deb-arm64
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: pizzad/web/package-lock.json
+    - name: Build PizzaWave Engine .deb (${{ matrix.runtime }})
+      run: |
+        bash ./scripts/pizzawave build-deb \
+          --version "${{ needs.get-version.outputs.version }}" \
+          --rid "${{ matrix.runtime }}"
+    - name: Upload .deb artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact }}
+        path: artifacts/packages/*.deb
+        retention-days: 30
+
   # Create GitHub Release with all artifacts
   create-release:
     runs-on: ubuntu-latest
-    needs: [get-version, build-pizzalib, build-pizzacmd, build-pizzapi]
+    needs: [get-version, build-pizzalib, build-pizzacmd, build-pizzapi, build-pizzawave]
     steps:
     - uses: actions/checkout@v4
     - uses: actions/download-artifact@v4
