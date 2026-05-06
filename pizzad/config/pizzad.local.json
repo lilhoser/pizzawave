@@ -12,7 +12,8 @@
   "storage": {
     "databasePath": "../artifacts/pizzad-local.db",
     "audioRoot": "../artifacts/pizzad-local-audio",
-    "importCacheRoot": "../artifacts/pizzad-local-import-cache"
+    "importCacheRoot": "../artifacts/pizzad-local-import-cache",
+    "appDataRoot": "../artifacts/pizzad-local-appdata"
   },
   "ingest": {
     "callstreamBind": "127.0.0.1",

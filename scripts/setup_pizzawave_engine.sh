@@ -52,7 +52,7 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   adduser --system --group --home "$DATA_DIR" "$SERVICE_USER"
 fi
 
-mkdir -p "$INSTALL_ROOT" "$CONFIG_DIR" "$DATA_DIR/audio" "$DATA_DIR/import-cache"
+mkdir -p "$INSTALL_ROOT" "$CONFIG_DIR" "$DATA_DIR/audio" "$DATA_DIR/import-cache" "$DATA_DIR/appdata"
 find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp -a "$PUBLISH_DIR"/. "$INSTALL_ROOT"/
 
@@ -69,7 +69,8 @@ if [[ ! -f "$CONFIG_DIR/pizzad.json" ]]; then
   "storage": {
     "databasePath": "/var/lib/pizzawave/pizzad.db",
     "audioRoot": "/var/lib/pizzawave/audio",
-    "importCacheRoot": "/var/lib/pizzawave/import-cache"
+    "importCacheRoot": "/var/lib/pizzawave/import-cache",
+    "appDataRoot": "/var/lib/pizzawave/appdata"
   },
   "ingest": { "callstreamBind": "127.0.0.1", "callstreamPort": 9123 },
   "transcription": { "provider": "none", "analogSampleRate": 8000 },
@@ -105,11 +106,14 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-WorkingDirectory=$INSTALL_ROOT
+WorkingDirectory=$DATA_DIR
 ExecStart=$INSTALL_ROOT/pizzad --config $CONFIG_DIR/pizzad.json
 Restart=on-failure
 RestartSec=5
 Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+Environment=HOME=$DATA_DIR
+Environment=XDG_CONFIG_HOME=$DATA_DIR/appdata
+Environment=XDG_DATA_HOME=$DATA_DIR/appdata
 
 [Install]
 WantedBy=multi-user.target

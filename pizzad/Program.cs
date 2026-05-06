@@ -10,6 +10,13 @@ var configPath = args
     ?? "/etc/pizzawave/pizzad.json";
 
 var config = EngineConfig.Load(configPath);
+Directory.CreateDirectory(config.Storage.AudioRoot);
+Directory.CreateDirectory(config.Storage.ImportCacheRoot);
+Directory.CreateDirectory(Path.GetDirectoryName(config.Storage.DatabasePath) ?? ".");
+
+Environment.SetEnvironmentVariable("HOME", config.Storage.AppDataRoot);
+Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", config.Storage.AppDataRoot);
+Environment.SetEnvironmentVariable("XDG_DATA_HOME", config.Storage.AppDataRoot);
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls($"http://{config.Server.HttpBind}:{config.Server.HttpPort}");

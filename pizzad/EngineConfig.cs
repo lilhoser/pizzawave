@@ -96,6 +96,7 @@ public sealed class StorageConfig
     public string DatabasePath { get; set; } = "/var/lib/pizzawave/pizzad.db";
     public string AudioRoot { get; set; } = "/var/lib/pizzawave/audio";
     public string ImportCacheRoot { get; set; } = "/var/lib/pizzawave/import-cache";
+    public string AppDataRoot { get; set; } = "/var/lib/pizzawave/appdata";
 }
 
 public sealed class IngestConfig

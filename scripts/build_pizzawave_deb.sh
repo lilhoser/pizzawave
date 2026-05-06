@@ -96,6 +96,7 @@ install -d "$PKG_ROOT/lib/systemd/system"
 install -d "$PKG_ROOT/etc/pizzawave"
 install -d "$PKG_ROOT/var/lib/pizzawave/audio"
 install -d "$PKG_ROOT/var/lib/pizzawave/import-cache"
+install -d "$PKG_ROOT/var/lib/pizzawave/appdata"
 
 cp -a "$PUBLISH_DIR"/. "$PKG_ROOT/opt/pizzawave/pizzad"/
 install -m 0755 "$ROOT_DIR/scripts/pizzawave" "$PKG_ROOT/usr/bin/pizzawave"
@@ -114,11 +115,14 @@ Wants=network-online.target
 Type=simple
 User=pizzawave
 Group=pizzawave
-WorkingDirectory=/opt/pizzawave/pizzad
+WorkingDirectory=/var/lib/pizzawave
 ExecStart=/opt/pizzawave/pizzad/pizzad --config /etc/pizzawave/pizzad.json
 Restart=on-failure
 RestartSec=5
 Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+Environment=HOME=/var/lib/pizzawave
+Environment=XDG_CONFIG_HOME=/var/lib/pizzawave/appdata
+Environment=XDG_DATA_HOME=/var/lib/pizzawave/appdata
 
 [Install]
 WantedBy=multi-user.target
@@ -136,7 +140,8 @@ cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
   "storage": {
     "databasePath": "/var/lib/pizzawave/pizzad.db",
     "audioRoot": "/var/lib/pizzawave/audio",
-    "importCacheRoot": "/var/lib/pizzawave/import-cache"
+    "importCacheRoot": "/var/lib/pizzawave/import-cache",
+    "appDataRoot": "/var/lib/pizzawave/appdata"
   },
   "ingest": { "callstreamBind": "127.0.0.1", "callstreamPort": 9123 },
   "transcription": { "provider": "none", "analogSampleRate": 8000 },
@@ -177,7 +182,7 @@ if ! id "\$SERVICE_USER" >/dev/null 2>&1; then
   adduser --system --group --home "\$DATA_DIR" "\$SERVICE_USER"
 fi
 
-mkdir -p "\$CONFIG_DIR" "\$DATA_DIR/audio" "\$DATA_DIR/import-cache"
+mkdir -p "\$CONFIG_DIR" "\$DATA_DIR/audio" "\$DATA_DIR/import-cache" "\$DATA_DIR/appdata"
 
 if [[ ! -f "\$CONFIG_DIR/pizzad.token" ]]; then
   umask 077

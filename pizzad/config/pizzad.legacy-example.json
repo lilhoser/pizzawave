@@ -12,7 +12,8 @@
   "storage": {
     "databasePath": "/var/lib/pizzawave/pizzad.db",
     "audioRoot": "/var/lib/pizzawave/audio",
-    "importCacheRoot": "/var/lib/pizzawave/import-cache"
+    "importCacheRoot": "/var/lib/pizzawave/import-cache",
+    "appDataRoot": "/var/lib/pizzawave/appdata"
   },
   "ingest": {
     "callstreamBind": "127.0.0.1",
