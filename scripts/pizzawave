@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALLED_SCRIPT_DIR="/usr/lib/pizzawave/scripts"
+
+script_path() {
+  local name="$1"
+  if [[ -f "$SOURCE_ROOT/scripts/$name" ]]; then
+    printf '%s\n' "$SOURCE_ROOT/scripts/$name"
+    return
+  fi
+  printf '%s\n' "$INSTALLED_SCRIPT_DIR/$name"
+}
 
 usage() {
   cat <<'USAGE'
 PizzaWave stack helper
 
 Commands:
+  build-deb [args...]                 Build self-contained pizzawave .deb
   install-engine --publish-dir PATH
   configure-callstream [--config /etc/trunk-recorder/config.json]
   setup-trunk-recorder [args...]      Pass-through to setup_trunk_recorder.sh
@@ -22,23 +33,26 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
+  build-deb)
+    exec "$(script_path build_pizzawave_deb.sh)" "$@"
+    ;;
   install-engine)
-    exec "$ROOT_DIR/scripts/setup_pizzawave_engine.sh" "$@"
+    exec "$(script_path setup_pizzawave_engine.sh)" "$@"
     ;;
   configure-callstream)
-    exec python3 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$@"
+    exec python3 "$(script_path pizzawave_configure_callstream.py)" "$@"
     ;;
   setup-trunk-recorder)
-    exec "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$@"
+    exec "$(script_path setup_trunk_recorder.sh)" "$@"
     ;;
   install-stack)
-    "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$@"
-    python3 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" --config /etc/trunk-recorder/config.json
+    "$(script_path setup_trunk_recorder.sh)" "$@"
+    python3 "$(script_path pizzawave_configure_callstream.py)" --config /etc/trunk-recorder/config.json
     systemctl restart trunk-recorder.service || true
     systemctl restart pizzad.service || true
     ;;
   audit)
-    exec "$ROOT_DIR/scripts/setup_trunk_recorder.sh" --audit
+    exec "$(script_path setup_trunk_recorder.sh)" --audit
     ;;
   -h|--help|"")
     usage

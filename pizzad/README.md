@@ -33,6 +33,24 @@ Useful local URLs:
 
 ## Install
 
+Preferred deployment is the `.deb` package:
+
+```bash
+./scripts/pizzawave build-deb --rid linux-x64
+sudo apt install ./artifacts/packages/pizzawave_0.1.0_amd64.deb
+```
+
+For Raspberry Pi OS/Debian ARM64:
+
+```bash
+./scripts/pizzawave build-deb --rid linux-arm64
+sudo apt install ./artifacts/packages/pizzawave_0.1.0_arm64.deb
+```
+
+The package is self-contained: the TR server does not need a separate .NET runtime. During install it creates the `pizzawave` service user, writes `/etc/pizzawave/pizzad.json` if it does not already exist, generates `/etc/pizzawave/pizzad.token`, enables/restarts `pizzad.service`, and patches `/etc/trunk-recorder/config.json` when present. The callstream patch creates a timestamped backup.
+
+The script installer remains available for development:
+
 ```bash
 sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad
 ```
