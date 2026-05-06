@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "pizzad local": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "",
+      "commandLineArgs": "--config config/pizzad.local.json",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "PIZZAD_BUILD_WEB_UI": "true"
+      },
+      "applicationUrl": "http://127.0.0.1:18080"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "server": {
+    "httpBind": "127.0.0.1",
+    "httpPort": 18080
+  },
+  "auth": {
+    "mode": "open",
+    "readRequiresAuth": false,
+    "writeRequiresAuth": false,
+    "tokenFile": "../artifacts/pizzad-local.token"
+  },
+  "storage": {
+    "databasePath": "../artifacts/pizzad-local.db",
+    "audioRoot": "../artifacts/pizzad-local-audio",
+    "importCacheRoot": "../artifacts/pizzad-local-import-cache"
+  },
+  "ingest": {
+    "callstreamBind": "127.0.0.1",
+    "callstreamPort": 19123,
+    "maxConcurrentClients": 4
+  },
+  "transcription": {
+    "provider": "none",
+    "analogSampleRate": 8000,
+    "openAiBaseUrl": "http://localhost:1234/v1"
+  },
+  "sftpImport": {
+    "enabled": false,
+    "quickImportMaxHours": 48,
+    "defaultBatchCallCap": 5000,
+    "defaultBatchByteCap": 21474836480
+  },
+  "trunkRecorder": {
+    "configPath": "/etc/trunk-recorder/config.json",
+    "logServiceName": "trunk-recorder",
+    "healthWindowMinutes": 5
+  },
+  "alerts": {
+    "emailEnabled": false,
+    "emailProvider": "gmail",
+    "rules": []
+  }
+}

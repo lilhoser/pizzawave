@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'USAGE'
+PizzaWave stack helper
+
+Commands:
+  install-engine --publish-dir PATH
+  configure-callstream [--config /etc/trunk-recorder/config.json]
+  setup-trunk-recorder [args...]      Pass-through to setup_trunk_recorder.sh
+  install-stack [args...]             Source-build TR/callstream, then configure callstream
+  audit                               Run trunk-recorder setup audit
+
+This helper is the script form of the future pizzawave package CLI.
+USAGE
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  install-engine)
+    exec "$ROOT_DIR/scripts/setup_pizzawave_engine.sh" "$@"
+    ;;
+  configure-callstream)
+    exec python3 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$@"
+    ;;
+  setup-trunk-recorder)
+    exec "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$@"
+    ;;
+  install-stack)
+    "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$@"
+    python3 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" --config /etc/trunk-recorder/config.json
+    systemctl restart trunk-recorder.service || true
+    systemctl restart pizzad.service || true
+    ;;
+  audit)
+    exec "$ROOT_DIR/scripts/setup_trunk_recorder.sh" --audit
+    ;;
+  -h|--help|"")
+    usage
+    ;;
+  *)
+    echo "Unknown command: $cmd" >&2
+    usage
+    exit 1
+    ;;
+esac

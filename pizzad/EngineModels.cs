@@ -1,0 +1,166 @@
+using System.Text.Json.Serialization;
+using System.Text.Json;
+
+namespace pizzad;
+
+public sealed record EngineCall
+{
+    public long Id { get; init; }
+    public string UniqueKey { get; init; } = string.Empty;
+    public long StartTime { get; init; }
+    public long StopTime { get; init; }
+    public int Source { get; init; }
+    public string SystemShortName { get; init; } = string.Empty;
+    public long CallstreamCallId { get; init; }
+    public long Talkgroup { get; init; }
+    public string TalkgroupName { get; init; } = string.Empty;
+    public double Frequency { get; init; }
+    public string Category { get; init; } = "other";
+    public string AudioPath { get; init; } = string.Empty;
+    public string Transcription { get; init; } = string.Empty;
+    public string TranscriptionStatus { get; init; } = "pending";
+    public bool IsImported { get; init; }
+    public bool IsAlertMatch { get; init; }
+    public string RawMetadataJson { get; init; } = "{}";
+}
+
+public sealed record AlertMatchDto
+{
+    public long Id { get; init; }
+    public long CallId { get; init; }
+    public string RuleName { get; init; } = string.Empty;
+    public string Detail { get; init; } = string.Empty;
+    public long MatchedAt { get; init; }
+    public bool IsImported { get; init; }
+    public bool NotificationSuppressed { get; init; }
+}
+
+public sealed record DashboardDto
+{
+    public IReadOnlyList<KpiDto> Kpis { get; init; } = [];
+    public IReadOnlyList<HourCategoryDto> VolumeByHourCategory { get; init; } = [];
+    public IReadOnlyList<QualityHourDto> QualityByHour { get; init; } = [];
+    public IReadOnlyList<BarStatDto> ProblemTalkgroups { get; init; } = [];
+    public IReadOnlyList<BarStatDto> InaudibleBySystem { get; init; } = [];
+    public IReadOnlyList<BarStatDto> CategoryShare { get; init; } = [];
+    public IReadOnlyList<TopTalkgroupDto> TopTalkgroups { get; init; } = [];
+    public IReadOnlyList<AlertMatchDto> Alerts { get; init; } = [];
+    public IReadOnlyList<IncidentDto> Incidents { get; init; } = [];
+}
+
+public sealed record KpiDto(string Label, string Value, string Subtext);
+
+public sealed record HourCategoryDto(int Hour, string Category, int Count);
+
+public sealed record QualityHourDto(int Hour, int Empty, int Failure, int Inaudible, int Short);
+
+public sealed record BarStatDto(string Label, int Value, double Ratio, string ValueText);
+
+public sealed record TopTalkgroupDto(
+    string Label,
+    long Talkgroup,
+    int Count,
+    double Share,
+    long LastHeard,
+    IReadOnlyList<double> Trend,
+    string TrendStartLabel,
+    string TrendBucketLabel,
+    string TrendEndLabel);
+
+public sealed record CategoryGroupDto(string Label, IReadOnlyList<EngineCall> Calls);
+
+public sealed record CategoryPageDto(string Category, string GroupBy, IReadOnlyList<CategoryGroupDto> Groups);
+
+public sealed record IncidentDto
+{
+    public long Id { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string Detail { get; init; } = string.Empty;
+    public long FirstSeen { get; init; }
+    public long LastSeen { get; init; }
+    public IReadOnlyList<IncidentCallDto> Calls { get; init; } = [];
+}
+
+public sealed record IncidentCallDto(long CallId, long RawTimestamp, string Transcript, string AudioUrl);
+
+public sealed record JobDto
+{
+    public long Id { get; init; }
+    public string Type { get; init; } = string.Empty;
+    public string Status { get; init; } = "queued";
+    public int Total { get; init; }
+    public int Completed { get; init; }
+    public int Failed { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public DateTime CreatedAtUtc { get; init; }
+    public DateTime? StartedAtUtc { get; init; }
+    public DateTime? FinishedAtUtc { get; init; }
+}
+
+public sealed record HealthDto(
+    string Status,
+    string Version,
+    string DatabasePath,
+    string AudioRoot,
+    int QueueDepth,
+    DateTime ServerTimeUtc);
+
+public sealed record AuthInitDto(string Mode, bool ReadRequiresAuth, bool WriteRequiresAuth);
+
+public sealed record TrHealthSampleDto
+{
+    public long Id { get; init; }
+    public DateTime WindowStartUtc { get; init; }
+    public DateTime WindowEndUtc { get; init; }
+    public string Scope { get; init; } = "global";
+    public int DecodeLines { get; init; }
+    public int DecodeZero { get; init; }
+    public double DecodeZeroPct { get; init; }
+    public int Retunes { get; init; }
+    public int CallsStarted { get; init; }
+    public int CallsConcluded { get; init; }
+    public int SampleStops { get; init; }
+    public int UnableSource { get; init; }
+}
+
+public sealed record TimeRangeQuery(long? Start, long? End)
+{
+    public (long Start, long End) Resolve()
+    {
+        var end = End ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var start = Start ?? DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeSeconds();
+        return (start, end);
+    }
+}
+
+public sealed record SftpEstimateRequest(DateTime StartLocal, DateTime EndLocal);
+
+public sealed record SftpEstimateResponse(int CandidateCount, long CandidateBytes, bool ExceedsQuickImportWindow, string Message);
+
+public sealed record SftpImportRequest(DateTime StartLocal, DateTime EndLocal, bool ConfirmLargeImport, int? CallCap, long? ByteCap);
+
+public sealed record SettingsSectionDto(string Section, object Values);
+
+public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);
+
+public sealed record JobControlRequest(string Action);
+
+public sealed record GenerateSummaryRequest(long Start, long End, bool ConfirmLargeRange);
+
+public sealed record SaveSettingsRequest(JsonElement Values);
+
+public sealed class EngineSectionUpdate
+{
+    public ServerConfig? Server { get; set; }
+    public StorageConfig? Storage { get; set; }
+    public IngestConfig? Ingest { get; set; }
+}
+
+public sealed record EngineAlertMatchResult(
+    bool IsMatch,
+    Guid? RuleId,
+    string RuleName,
+    string Type,
+    string Detail,
+    bool EmailSent,
+    string Error);

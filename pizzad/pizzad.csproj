@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Configurations>Debug;Release;DEBUG_X64_CUDA;RELEASE_X64_CUDA</Configurations>
+    <AssemblyName>pizzad</AssemblyName>
+    <RootNamespace>pizzad</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\pizzalib\pizzalib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
+    <PackageReference Include="SSH.NET" Version="2024.2.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="wwwroot\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Update="web\**\*">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="BuildWebUi" BeforeTargets="ComputeFilesToPublish">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm install" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm run build" />
+  </Target>
+
+  <Target Name="BuildWebUiForVisualStudio" BeforeTargets="Build" Condition="'$(BuildingInsideVisualStudio)' == 'true' Or '$(PIZZAD_BUILD_WEB_UI)' == 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm install" Condition="!Exists('$(MSBuildProjectDirectory)\web\node_modules')" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm run build" />
+  </Target>
+
+</Project>
