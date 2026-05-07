@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using System.Globalization;
 using System.Text.Json;
 
 namespace pizzad;
@@ -573,41 +572,6 @@ public sealed class EngineDatabase
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
-        await PruneSingleCallIncidentsAsync(connection, ct);
-    }
-
-    private async Task PruneSingleCallIncidentsAsync(SqliteConnection connection, CancellationToken ct)
-    {
-        await using var count = connection.CreateCommand();
-        count.CommandText = """
-            SELECT COUNT(*)
-            FROM incidents i
-            WHERE (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = i.id) < 2;
-            """;
-        var raw = await count.ExecuteScalarAsync(ct);
-        var total = raw is long value ? value : Convert.ToInt64(raw, CultureInfo.InvariantCulture);
-        if (total == 0)
-            return;
-
-        await using var deleteLinks = connection.CreateCommand();
-        deleteLinks.CommandText = """
-            DELETE FROM incident_calls
-            WHERE incident_id IN (
-                SELECT i.id
-                FROM incidents i
-                WHERE (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = i.id) < 2
-            );
-            """;
-        await deleteLinks.ExecuteNonQueryAsync(ct);
-
-        await using var deleteIncidents = connection.CreateCommand();
-        deleteIncidents.CommandText = """
-            DELETE FROM incidents
-            WHERE (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = incidents.id) < 2;
-            """;
-        await deleteIncidents.ExecuteNonQueryAsync(ct);
-
-        _logger.LogInformation("Pruned {Count:N0} single-call incident row(s); incidents require at least 2 related calls.", total);
     }
 
     private static async Task AddColumnIfMissingAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken ct)

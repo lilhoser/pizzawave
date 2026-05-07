@@ -221,7 +221,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 new
                 {
                     role = "system",
-                    content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). An incident is multiple related calls about the same situation. For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 2-4 matching call_ids copied exactly from the provided call lines. Omit single-call observations, routine acknowledgements, and 'no incident' findings."
+                    content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). An incident is multiple related calls about the same situation. For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 2 or more matching call_ids copied exactly from the provided call lines. Omit single-call observations, routine acknowledgements, and 'no incident' findings."
                 },
                 new { role = "user", content = BuildPrompt(calls, start, end) }
             }
@@ -282,7 +282,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
         sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
         sb.AppendLine("Incident definition: an incident is multiple related calls about the same situation. Do not create notable_events for single-call observations.");
-        sb.AppendLine("Linkage guidance: each notable event must include 2-4 call_ids copied exactly from input lines.");
+        sb.AppendLine("Linkage guidance: each notable event must include 2 or more call_ids copied exactly from input lines. Include every clearly related source call in this window.");
         sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Return an empty notable_events array when there are no multi-call incidents. Keep each detail concise (1 sentence).");
 
         var prioritizedCalls = calls
@@ -508,8 +508,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                                 {
                                     type = "array",
                                     items = new { type = "string" },
-                                    minItems = 2,
-                                    maxItems = 4
+                                    minItems = 2
                                 }
                             },
                             required = new[] { "title", "detail", "category", "timestamp", "confidence", "call_ids" }
