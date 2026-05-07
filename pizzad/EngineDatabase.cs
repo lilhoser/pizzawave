@@ -436,7 +436,6 @@ public sealed class EngineDatabase
             SELECT * FROM tr_health_samples
             WHERE unixepoch(window_start_utc) >= $start AND unixepoch(window_end_utc) <= $end
             ORDER BY window_start_utc DESC
-            LIMIT 2000;
             """;
         Add(command, "$start", start);
         Add(command, "$end", end);
