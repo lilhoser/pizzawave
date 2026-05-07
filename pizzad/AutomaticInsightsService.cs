@@ -135,6 +135,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                     Detail = string.IsNullOrWhiteSpace(ev.Detail) ? result.SummaryText : ev.Detail.Trim(),
                     FirstSeen = calls.Min(c => c.StartTime),
                     LastSeen = calls.Max(c => c.StartTime),
+                    Confidence = Math.Clamp(ev.Confidence, 0, 1),
                     Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
                 }, ct);
                 incidents++;

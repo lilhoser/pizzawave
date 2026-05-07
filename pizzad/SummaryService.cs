@@ -65,6 +65,7 @@ public sealed class SummaryService
                     Detail = detail,
                     FirstSeen = ordered.Min(c => c.StartTime),
                     LastSeen = ordered.Max(c => c.StartTime),
+                    Confidence = Math.Clamp(ordered.Count / 4.0, 0.35, 0.85),
                     Calls = ordered.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
                 };
                 await _database.AddIncidentAsync(incident, ct);

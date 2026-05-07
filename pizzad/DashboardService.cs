@@ -55,17 +55,19 @@ public sealed class DashboardService
         var calls = Enrich(await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.Category, category, StringComparison.OrdinalIgnoreCase))
             .ToList();
+        var insights = BuildCategoryInsights(await _database.ListIncidentsAsync(start, end, ct), calls);
         if (string.Equals(groupBy, "none", StringComparison.OrdinalIgnoreCase))
         {
-            return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)]);
+            return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)], insights);
         }
 
         var groups = calls
-            .GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().ToString("dddd, MMM d h tt", CultureInfo.CurrentCulture))
+            .GroupBy(c => string.IsNullOrWhiteSpace(c.TalkgroupName) ? $"TG {c.Talkgroup}" : c.TalkgroupName)
+            .OrderByDescending(g => g.Max(c => c.StartTime))
             .Select(g => new CategoryGroupDto(g.Key, g.ToList()))
             .ToList();
 
-        return new CategoryPageDto(category, "time", groups);
+        return new CategoryPageDto(category, "talkgroup", groups, insights);
     }
 
     public Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
@@ -75,6 +77,31 @@ public sealed class DashboardService
 
     private List<EngineCall> Enrich(List<EngineCall> calls) =>
         calls.Select(_talkgroups.Enrich).ToList();
+
+    private static IReadOnlyList<CategoryInsightDto> BuildCategoryInsights(List<IncidentDto> incidents, List<EngineCall> categoryCalls)
+    {
+        var categoryCallIds = categoryCalls.Select(c => c.Id).ToHashSet();
+        return incidents
+            .Select(i => new
+            {
+                Incident = i,
+                Calls = i.Calls.Where(c => categoryCallIds.Contains(c.CallId)).ToList()
+            })
+            .Where(x => x.Calls.Count > 0)
+            .OrderByDescending(x => x.Incident.Confidence)
+            .ThenByDescending(x => x.Incident.LastSeen)
+            .Select(x => new CategoryInsightDto(
+                x.Incident.Id,
+                x.Incident.Title,
+                x.Incident.Detail,
+                x.Incident.FirstSeen,
+                x.Incident.LastSeen,
+                x.Incident.Confidence,
+                x.Calls.Count,
+                x.Calls))
+            .Take(100)
+            .ToList();
+    }
 
     private static IReadOnlyList<HourCategoryDto> BuildVolume(List<EngineCall> calls) =>
         calls.GroupBy(c => new { DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour, c.Category })

@@ -31,6 +31,7 @@ public sealed class EngineDatabase
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode=WAL;", ct);
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=ON;", ct);
         await ExecuteNonQueryAsync(connection, SchemaSql, ct);
+        await EnsureSchemaMigrationsAsync(connection, ct);
         _logger.LogInformation("SQLite engine store ready at {Path}", _config.Storage.DatabasePath);
     }
 
@@ -409,14 +410,15 @@ public sealed class EngineDatabase
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)tx;
         command.CommandText = """
-            INSERT INTO incidents (title, detail, first_seen, last_seen, source_summary_ids, created_at_utc)
-            VALUES ($title, $detail, $first_seen, $last_seen, '[]', $created_at_utc);
+            INSERT INTO incidents (title, detail, first_seen, last_seen, incident_score, source_summary_ids, created_at_utc)
+            VALUES ($title, $detail, $first_seen, $last_seen, $incident_score, '[]', $created_at_utc);
             SELECT last_insert_rowid();
             """;
         Add(command, "$title", incident.Title);
         Add(command, "$detail", incident.Detail);
         Add(command, "$first_seen", incident.FirstSeen);
         Add(command, "$last_seen", incident.LastSeen);
+        Add(command, "$incident_score", incident.Confidence);
         Add(command, "$created_at_utc", DateTime.UtcNow.ToString("O"));
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
 
@@ -465,7 +467,7 @@ public sealed class EngineDatabase
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, title, detail, first_seen, last_seen
+            SELECT id, title, detail, first_seen, last_seen, incident_score
             FROM incidents
             WHERE last_seen >= $start AND first_seen <= $end
             ORDER BY last_seen DESC
@@ -485,6 +487,7 @@ public sealed class EngineDatabase
                 Detail = reader.GetString(2),
                 FirstSeen = reader.GetInt64(3),
                 LastSeen = reader.GetInt64(4),
+                Confidence = reader.GetDouble(5),
                 Calls = await ListIncidentCallsAsync(connection, incidentId, ct)
             });
         }
@@ -558,6 +561,19 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    private static async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "ALTER TABLE incidents ADD COLUMN incident_score REAL NOT NULL DEFAULT 0;";
+        try
+        {
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+        }
+    }
+
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS calls (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -605,6 +621,7 @@ public sealed class EngineDatabase
             detail TEXT NOT NULL,
             first_seen INTEGER NOT NULL,
             last_seen INTEGER NOT NULL,
+            incident_score REAL NOT NULL DEFAULT 0,
             source_summary_ids TEXT NOT NULL DEFAULT '[]',
             created_at_utc TEXT NOT NULL
         );

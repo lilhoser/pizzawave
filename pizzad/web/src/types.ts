@@ -15,6 +15,17 @@ export type Incident = {
   detail: string;
   firstSeen: number;
   lastSeen: number;
+  confidence: number;
+  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string }[];
+};
+export type CategoryInsight = {
+  id: number;
+  title: string;
+  detail: string;
+  firstSeen: number;
+  lastSeen: number;
+  score: number;
+  callCount: number;
   calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string }[];
 };
 export type TopTalkgroup = {
@@ -59,6 +70,7 @@ export type CategoryPage = {
   category: string;
   groupBy: string;
   groups: { label: string; calls: EngineCall[] }[];
+  insights: CategoryInsight[];
 };
 export type Job = {
   id: number;

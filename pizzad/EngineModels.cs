@@ -69,7 +69,21 @@ public sealed record TopTalkgroupDto(
 
 public sealed record CategoryGroupDto(string Label, IReadOnlyList<EngineCall> Calls);
 
-public sealed record CategoryPageDto(string Category, string GroupBy, IReadOnlyList<CategoryGroupDto> Groups);
+public sealed record CategoryInsightDto(
+    long Id,
+    string Title,
+    string Detail,
+    long FirstSeen,
+    long LastSeen,
+    double Score,
+    int CallCount,
+    IReadOnlyList<IncidentCallDto> Calls);
+
+public sealed record CategoryPageDto(
+    string Category,
+    string GroupBy,
+    IReadOnlyList<CategoryGroupDto> Groups,
+    IReadOnlyList<CategoryInsightDto> Insights);
 
 public sealed record IncidentDto
 {
@@ -78,6 +92,7 @@ public sealed record IncidentDto
     public string Detail { get; init; } = string.Empty;
     public long FirstSeen { get; init; }
     public long LastSeen { get; init; }
+    public double Confidence { get; init; }
     public IReadOnlyList<IncidentCallDto> Calls { get; init; } = [];
 }
 

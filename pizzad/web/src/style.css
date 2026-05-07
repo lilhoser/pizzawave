@@ -65,6 +65,25 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   background: #252b31;
   white-space: nowrap;
 }
+.segmented {
+  display: inline-flex;
+  border: 1px solid #3f474f;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segmented button {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #252b31;
+  color: #cbd5de;
+  padding: 5px 9px;
+}
+.segmented button.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
 .nav {
   grid-row: 2 / 4;
   padding: 8px;
@@ -163,6 +182,74 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .table th, .table td { border-bottom: 1px solid #30363d; padding: 6px 4px; text-align: left; }
 .trend { display: inline-block; width: 6px; background: var(--accent); margin-right: 2px; vertical-align: bottom; }
 .category-page, .settings-page, .trouble-page { height: 100%; overflow: auto; padding: 10px; }
+.category-split-page {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.4fr);
+  gap: 10px;
+  padding: 10px;
+  overflow: hidden;
+}
+.insights-pane, .calls-pane { min-height: 0; }
+.raw-category .call-group { max-width: 1180px; }
+.call-group {
+  background: #20252a;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.call-group > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: #25313a;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-weight: 700;
+}
+.call-group .call {
+  margin: 0;
+  border-width: 1px 0 0;
+  border-radius: 0;
+}
+.insight-tile {
+  background: #1f2f3d;
+  border: 1px solid #36566f;
+  border-radius: 6px;
+  padding: 9px;
+  margin-bottom: 9px;
+}
+.insight-tile summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+.insight-tile summary strong {
+  color: #111;
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 12px;
+}
+.insight-time {
+  color: #9ac7e8;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.call-actions {
+  display: grid;
+  gap: 6px;
+}
+.call-actions audio {
+  width: 100%;
+  height: 30px;
+}
 .call {
   margin-bottom: 8px;
   background: #20252a;
@@ -176,6 +263,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 @media (max-width: 900px) {
   .app { grid-template-columns: 138px 1fr; }
   .dashboard { grid-template-columns: 1fr; grid-template-rows: auto auto auto; overflow: auto; }
+  .category-split-page { grid-template-columns: 1fr; overflow: auto; }
   .left-pane { grid-row: auto; }
   .bar-row { grid-template-columns: 110px 1fr 70px; }
 }

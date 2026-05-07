@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityHour, TopTalkgroup, TrHealth } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityHour, TopTalkgroup, TrHealth } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -25,6 +25,7 @@ function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [rangeHours, setRangeHours] = useState(24);
   const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
+  const [categoryViewMode, setCategoryViewMode] = useState(() => localStorage.getItem("pizzawave-category-view") || "split");
   const [status, setStatus] = useState("Starting");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [category, setCategory] = useState<CategoryPage | null>(null);
@@ -88,6 +89,10 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    localStorage.setItem("pizzawave-category-view", categoryViewMode);
+  }, [categoryViewMode]);
+
+  useEffect(() => {
     const events = new EventSource("/api/v1/events/stream");
     for (const type of ["call_ingested", "call_transcribed", "alert_matched", "job_updated", "summary_updated", "health_updated"]) {
       events.addEventListener(type, () => void load());
@@ -112,6 +117,10 @@ function App() {
           <option value="blue">Blue</option>
           <option value="orange">Orange</option>
         </select>
+        {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
+          <button className={categoryViewMode === "split" ? "active" : ""} onClick={() => setCategoryViewMode("split")}>Insights + Calls</button>
+          <button className={categoryViewMode === "raw" ? "active" : ""} onClick={() => setCategoryViewMode("raw")}>Raw Calls</button>
+        </div>}
         <span className="pill">{status}</span>
         <span className="pill">REST + SSE</span>
       </header>
@@ -124,7 +133,7 @@ function App() {
       </aside>
       <main className="main">
         {page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
-        {categories.includes(page as any) && <CategoryView data={category} />}
+        {categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
         {page === "troubleshoot" && <TroubleshootView health={health} trConfig={trConfig} />}
         {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} rangeHours={rangeHours} reload={load} />}
       </main>
@@ -213,9 +222,26 @@ function Incidents({ rows }: { rows: Incident[] }) {
   return <>{rows.map(i => <details className="call" key={i.id}><summary>{i.title}</summary><p>{i.detail}</p>{i.calls.map(c => <div className="muted" key={c.callId}>{new Date(c.rawTimestamp * 1000).toLocaleString()} - Call {c.callId}</div>)}</details>)}</>;
 }
 
-function CategoryView({ data }: { data: CategoryPage | null }) {
+function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: string; rangeHours: number; reload: () => Promise<void> }) {
   if (!data) return <div className="category-page">Loading...</div>;
-  return <div className="category-page">{data.groups.map(group => <section key={group.label}><h3>{group.label}</h3>{group.calls.map(c => <CallRow call={c} key={c.id} />)}</section>)}</div>;
+  if (mode === "raw") {
+    return <div className="category-page raw-category"><CategoryCallGroups groups={data.groups} /></div>;
+  }
+  async function generate() {
+    await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
+    await reload();
+  }
+  return <div className="category-split-page"><section className="pane insights-pane"><h2>{label(data.category)} Insights</h2><CategoryInsights rows={data.insights} onGenerate={generate} /></section><section className="pane calls-pane"><h2>Calls by Talkgroup</h2><CategoryCallGroups groups={data.groups} /></section></div>;
+}
+
+function CategoryInsights({ rows, onGenerate }: { rows: CategoryInsight[]; onGenerate: () => Promise<void> }) {
+  if (!rows.length) return <div className="card"><p className="muted">No insight summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
+  return <>{rows.map(item => <details className="insight-tile" key={item.id} open><summary><span>{item.title}</span><strong>{Math.round(item.score * 100)}%</strong></summary><div className="insight-time">{new Date(item.firstSeen * 1000).toLocaleString()} - {new Date(item.lastSeen * 1000).toLocaleTimeString()}</div><p>{item.detail}</p><div className="call-actions"><span className="pill">{item.callCount} source calls</span>{item.calls.slice(0, 3).map(c => <audio key={c.callId} controls src={`/api/v1/calls/${c.callId}/audio`} />)}</div></details>)}</>;
+}
+
+function CategoryCallGroups({ groups }: { groups: CategoryPage["groups"] }) {
+  if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
+  return <>{groups.map(group => <details className="call-group" key={group.label} open><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>)}</>;
 }
 
 function CallRow({ call }: { call: EngineCall }) {
