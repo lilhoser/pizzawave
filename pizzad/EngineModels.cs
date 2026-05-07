@@ -88,6 +88,18 @@ public sealed record CategoryInsightDto(
     int CallCount,
     IReadOnlyList<IncidentCallDto> Calls);
 
+public sealed record InsightEventRecordDto
+{
+    public long Id { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string Detail { get; init; } = string.Empty;
+    public string Category { get; init; } = "other";
+    public long FirstSeen { get; init; }
+    public long LastSeen { get; init; }
+    public double Confidence { get; init; }
+    public IReadOnlyList<IncidentCallDto> Calls { get; init; } = [];
+}
+
 public sealed record CategoryPageDto(
     string Category,
     string GroupBy,

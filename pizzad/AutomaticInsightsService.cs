@@ -66,6 +66,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         var end = calls.Max(c => Math.Max(c.StartTime, c.StopTime));
         var result = await SummarizeWindowAsync(calls, start, end, ct);
         var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
+        await PersistInsightEventsAsync(windowId, result, calls, ct);
         var incidents = await PersistIncidentsAsync(result, calls, ct);
         _priorSummary = result.SummaryText;
         await _events.PublishAsync("summary_updated", new { windowId, start, end, incidents }, ct);
@@ -151,6 +152,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             var result = await SummarizeWindowAsync(batch, start, end, ct);
             var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
+            await PersistInsightEventsAsync(windowId, result, batch, ct);
             var incidents = await PersistIncidentsAsync(result, batch, ct);
 
             _priorSummary = result.SummaryText;
@@ -215,6 +217,36 @@ public sealed class AutomaticInsightsService : BackgroundService
         return incidents;
     }
 
+    private async Task PersistInsightEventsAsync(long windowId, InsightResult result, List<EngineCall> batch, CancellationToken ct)
+    {
+        var events = result.Events
+            .Where(IsNotableInsightEvent)
+            .Select(ev =>
+            {
+                var calls = ResolveEventCalls(ev, batch);
+                if (calls.Count == 0)
+                    return null;
+
+                return new InsightEventRecordDto
+                {
+                    Title = string.IsNullOrWhiteSpace(ev.Title) ? "Radio insight" : ev.Title.Trim(),
+                    Detail = string.IsNullOrWhiteSpace(ev.Detail) ? result.SummaryText : ev.Detail.Trim(),
+                    Category = string.IsNullOrWhiteSpace(ev.Category) ? "other" : ev.Category.Trim().ToLowerInvariant(),
+                    FirstSeen = calls.Min(c => c.StartTime),
+                    LastSeen = calls.Max(c => c.StartTime),
+                    Confidence = Math.Clamp(ev.Confidence, 0, 1),
+                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
+                };
+            })
+            .Where(e => e != null)
+            .Cast<InsightEventRecordDto>()
+            .ToList();
+
+        await _database.ReplaceInsightEventsAsync(windowId, events, ct);
+        if (events.Count > 0)
+            _logger.LogInformation("Persisted {Count} insight event(s) for window {WindowId}", events.Count, windowId);
+    }
+
     private async Task<InsightResult> SummarizeWindowAsync(List<EngineCall> calls, long start, long end, CancellationToken ct)
     {
         var baseUrl = InsightBaseUrl().TrimEnd('/');
@@ -235,7 +267,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 new
                 {
                     role = "system",
-                    content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). An incident is multiple related calls about the same situation. For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 2 or more matching call_ids copied exactly from the provided call lines. Omit single-call observations, routine acknowledgements, and 'no incident' findings."
+                    content = "You summarize radio call transcripts into concise, actionable category insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include one or more matching call_ids copied exactly from the provided call lines. Omit routine acknowledgements and 'no incident' findings."
                 },
                 new { role = "user", content = BuildPrompt(calls, start, end) }
             }
@@ -295,9 +327,9 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("Category guidance: each notable event must use one of these categories exactly:");
         sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
         sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
-        sb.AppendLine("Incident definition: an incident is multiple related calls about the same situation. Do not create notable_events for single-call observations.");
-        sb.AppendLine("Linkage guidance: each notable event must include 2 or more call_ids copied exactly from input lines. Include every clearly related source call in this window.");
-        sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Return an empty notable_events array when there are no multi-call incidents. Keep each detail concise (1 sentence).");
+        sb.AppendLine("Insight guidance: notable_events may describe a single important call or multiple related calls. Incidents will be derived later from multi-call notable events.");
+        sb.AppendLine("Linkage guidance: each notable event must include one or more call_ids copied exactly from input lines. Include every clearly related source call in this window.");
+        sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Return an empty notable_events array when there is nothing notable. Keep each detail concise (1 sentence).");
 
         var prioritizedCalls = calls
             .OrderByDescending(c => c.IsAlertMatch)
@@ -416,6 +448,19 @@ public sealed class AutomaticInsightsService : BackgroundService
             return false;
 
         if (ev.CallIds.Count < 2)
+            return false;
+
+        return !Regex.IsMatch(combined,
+            @"\b(no|none|not|without|unclear)\b.{0,40}\b(incident|event|actionable|emergency|issue|activity)\b|\b(no event detected|no clear incident|no actionable incident|no notable event|nothing notable|routine traffic only|routine chatter|non.?incident)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsNotableInsightEvent(InsightEvent ev)
+    {
+        var title = NormalizeEventText(ev.Title);
+        var detail = NormalizeEventText(ev.Detail);
+        var combined = $"{title} {detail}".Trim();
+        if (string.IsNullOrWhiteSpace(combined) || ev.CallIds.Count == 0)
             return false;
 
         return !Regex.IsMatch(combined,
@@ -629,7 +674,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                                 {
                                     type = "array",
                                     items = new { type = "string" },
-                                    minItems = 2
+                                    minItems = 1
                                 }
                             },
                             required = new[] { "title", "detail", "category", "timestamp", "confidence", "call_ids" }

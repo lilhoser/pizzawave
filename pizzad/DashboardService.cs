@@ -53,7 +53,7 @@ public sealed class DashboardService
         var calls = Enrich(await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.Category, category, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var insights = BuildCategoryInsights(await _database.ListIncidentsAsync(start, end, ct), calls);
+        var insights = BuildCategoryInsights(await _database.ListInsightEventsAsync(start, end, ct), calls);
         if (string.Equals(groupBy, "none", StringComparison.OrdinalIgnoreCase))
         {
             return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)], insights);
@@ -76,25 +76,25 @@ public sealed class DashboardService
     private List<EngineCall> Enrich(List<EngineCall> calls) =>
         calls.Select(_talkgroups.Enrich).ToList();
 
-    private static IReadOnlyList<CategoryInsightDto> BuildCategoryInsights(List<IncidentDto> incidents, List<EngineCall> categoryCalls)
+    private static IReadOnlyList<CategoryInsightDto> BuildCategoryInsights(List<InsightEventRecordDto> insightEvents, List<EngineCall> categoryCalls)
     {
         var categoryCallIds = categoryCalls.Select(c => c.Id).ToHashSet();
-        return incidents
+        return insightEvents
             .Select(i => new
             {
-                Incident = i,
+                Insight = i,
                 Calls = i.Calls.Where(c => categoryCallIds.Contains(c.CallId)).ToList()
             })
-            .Where(x => x.Calls.Count >= 2)
-            .OrderByDescending(x => x.Incident.Confidence)
-            .ThenByDescending(x => x.Incident.LastSeen)
+            .Where(x => x.Calls.Count > 0)
+            .OrderByDescending(x => x.Insight.LastSeen)
+            .ThenByDescending(x => x.Insight.Confidence)
             .Select(x => new CategoryInsightDto(
-                x.Incident.Id,
-                x.Incident.Title,
-                x.Incident.Detail,
-                x.Incident.FirstSeen,
-                x.Incident.LastSeen,
-                x.Incident.Confidence,
+                x.Insight.Id,
+                x.Insight.Title,
+                x.Insight.Detail,
+                x.Insight.FirstSeen,
+                x.Insight.LastSeen,
+                x.Insight.Confidence,
                 x.Calls.Count,
                 x.Calls))
             .Take(100)

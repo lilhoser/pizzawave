@@ -473,6 +473,90 @@ public sealed class EngineDatabase
         return Convert.ToInt64(result);
     }
 
+    public async Task ReplaceInsightEventsAsync(long windowId, IReadOnlyList<InsightEventRecordDto> events, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var tx = await connection.BeginTransactionAsync(ct);
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = (SqliteTransaction)tx;
+            delete.CommandText = "DELETE FROM insight_events WHERE window_id=$window_id;";
+            Add(delete, "$window_id", windowId);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var ev in events)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = (SqliteTransaction)tx;
+            insert.CommandText = """
+                INSERT INTO insight_events (window_id, title, detail, category, first_seen, last_seen, confidence, call_ids_json)
+                VALUES ($window_id, $title, $detail, $category, $first_seen, $last_seen, $confidence, $call_ids_json);
+                """;
+            Add(insert, "$window_id", windowId);
+            Add(insert, "$title", ev.Title);
+            Add(insert, "$detail", ev.Detail);
+            Add(insert, "$category", ev.Category);
+            Add(insert, "$first_seen", ev.FirstSeen);
+            Add(insert, "$last_seen", ev.LastSeen);
+            Add(insert, "$confidence", ev.Confidence);
+            Add(insert, "$call_ids_json", JsonSerializer.Serialize(ev.Calls.Select(c => c.CallId)));
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
+    public async Task<List<InsightEventRecordDto>> ListInsightEventsAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, title, detail, category, first_seen, last_seen, confidence, call_ids_json
+            FROM insight_events
+            WHERE last_seen >= $start AND first_seen <= $end
+            ORDER BY last_seen DESC, confidence DESC
+            LIMIT 1000;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        var rawRows = new List<(long Id, string Title, string Detail, string Category, long FirstSeen, long LastSeen, double Confidence, IReadOnlyList<long> CallIds)>();
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                rawRows.Add((
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.GetInt64(4),
+                    reader.GetInt64(5),
+                    reader.GetDouble(6),
+                    ParseCallIds(reader.GetString(7))));
+            }
+        }
+
+        var rows = new List<InsightEventRecordDto>();
+        foreach (var row in rawRows)
+        {
+            rows.Add(new InsightEventRecordDto
+            {
+                Id = row.Id,
+                Title = row.Title,
+                Detail = row.Detail,
+                Category = row.Category,
+                FirstSeen = row.FirstSeen,
+                LastSeen = row.LastSeen,
+                Confidence = row.Confidence,
+                Calls = await ListSpecificIncidentCallsAsync(connection, row.CallIds, ct)
+            });
+        }
+
+        return rows;
+    }
+
     public async Task<long> GetLatestInsightWindowEndAsync(CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -540,6 +624,48 @@ public sealed class EngineDatabase
         return calls;
     }
 
+    private static async Task<List<IncidentCallDto>> ListSpecificIncidentCallsAsync(SqliteConnection connection, IReadOnlyList<long> callIds, CancellationToken ct)
+    {
+        if (callIds.Count == 0)
+            return [];
+
+        var parameters = callIds.Select((_, i) => $"$id{i}").ToArray();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT id, start_time, transcription
+            FROM calls
+            WHERE id IN ({string.Join(",", parameters)})
+            ORDER BY start_time ASC;
+            """;
+        for (var i = 0; i < callIds.Count; i++)
+            Add(command, parameters[i], callIds[i]);
+
+        var calls = new List<IncidentCallDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var callId = reader.GetInt64(0);
+            calls.Add(new IncidentCallDto(
+                callId,
+                reader.GetInt64(1),
+                reader.GetString(2),
+                $"/api/v1/calls/{callId}/audio"));
+        }
+        return calls;
+    }
+
+    private static IReadOnlyList<long> ParseCallIds(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<long>>(json) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private static EngineCall ReadCall(SqliteDataReader reader) => new()
     {
         Id = reader.GetInt64(reader.GetOrdinal("id")),
@@ -587,6 +713,22 @@ public sealed class EngineDatabase
     {
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
+        await ExecuteNonQueryAsync(connection, """
+            CREATE TABLE IF NOT EXISTS insight_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                window_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'other',
+                first_seen INTEGER NOT NULL,
+                last_seen INTEGER NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                call_ids_json TEXT NOT NULL DEFAULT '[]',
+                FOREIGN KEY(window_id) REFERENCES insight_windows(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_insight_events_time ON insight_events(last_seen DESC, confidence DESC);
+            """, ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
     }
 
@@ -718,6 +860,21 @@ public sealed class EngineDatabase
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_insight_windows_range ON insight_windows(window_start, window_end);
+
+        CREATE TABLE IF NOT EXISTS insight_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            window_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            first_seen INTEGER NOT NULL,
+            last_seen INTEGER NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0,
+            call_ids_json TEXT NOT NULL DEFAULT '[]',
+            FOREIGN KEY(window_id) REFERENCES insight_windows(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_insight_events_time ON insight_events(last_seen DESC, confidence DESC);
 
         CREATE TABLE IF NOT EXISTS incident_calls (
             incident_id INTEGER NOT NULL,
