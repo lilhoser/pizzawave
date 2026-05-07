@@ -2,11 +2,24 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryPage, Dashboard, EngineCall, Incident, Job, TopTalkgroup, TrHealth } from "./types";
+import type { AlertMatch, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityHour, TopTalkgroup, TrHealth } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 type Page = "dashboard" | "troubleshoot" | "settings" | typeof categories[number];
+const categoryColors: Record<string, string> = {
+  police: "#5aa7ff",
+  fire: "#ff6b5a",
+  ems: "#54d68a",
+  traffic: "#f7c948",
+  other: "#b58cff"
+};
+const qualityColors: Record<keyof Omit<QualityHour, "hour">, string> = {
+  inaudible: "#5aa7ff",
+  short: "#f7c948",
+  empty: "#9faab5",
+  failure: "#ff6b5a"
+};
 
 function App() {
   const [page, setPage] = useState<Page>("dashboard");
@@ -16,12 +29,19 @@ function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [category, setCategory] = useState<CategoryPage | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
   const [health, setHealth] = useState<TrHealth[]>([]);
   const [trConfig, setTrConfig] = useState<any>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
 
   const load = useCallback(async () => {
     try {
+      const [healthStatus, jobRows] = await Promise.all([
+        api.request<EngineHealth>("/api/v1/health"),
+        api.request<Job[]>("/api/v1/jobs")
+      ]);
+      setEngineHealth(healthStatus);
+      setJobs(jobRows);
       if (page === "dashboard") {
         setDashboard(await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`));
       } else if (categories.includes(page as any)) {
@@ -34,8 +54,7 @@ function App() {
         setHealth(healthRows);
         setTrConfig(cfg);
       } else if (page === "settings") {
-        const [jobRows, engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
-          api.request<Job[]>("/api/v1/jobs"),
+        const [engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
           api.request<any>("/api/v1/settings/engine"),
           api.request<any>("/api/v1/settings/transcription"),
           api.request<any>("/api/v1/settings/ai-insights"),
@@ -110,8 +129,9 @@ function App() {
         {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} rangeHours={rangeHours} reload={load} />}
       </main>
       <footer className="statusbar">
-        <span className="pill">Coverage, jobs, and summary state</span>
-        <span className="muted">Incidents are generated automatically from live transcribed call batches.</span>
+        <span className="pill">Queue {engineHealth?.queueDepth ?? "--"}</span>
+        <span className="pill">Jobs {jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length}</span>
+        <span className="muted">{dashboard ? `${dashboard.incidents.length} incidents in selected range` : "Incidents are generated automatically from live transcribed call batches."}</span>
       </footer>
     </div>
   );
@@ -123,8 +143,8 @@ function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; r
     <div className="dashboard">
       <section className="pane left-pane">
         <div className="section kpis">{data.kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
-        <div className="section"><h3>Volume Patterns</h3><TopTalkgroups rows={data.topTalkgroups} /></div>
-        <div className="section"><h3>Quality</h3><Bars title="Inaudible by System" rows={data.inaudibleBySystem} /><Bars title="Problem Talkgroups" rows={data.problemTalkgroups} /></div>
+        <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /><TopTalkgroups rows={data.topTalkgroups} /></div>
+        <div className="section"><h3>Quality</h3><QualityByHourChart rows={data.qualityByHour} /><Bars title="Inaudible by System" rows={data.inaudibleBySystem} /><Bars title="Problem Talkgroups" rows={data.problemTalkgroups} /></div>
         <div className="section"><h3>Distribution</h3><Bars title="Category Share" rows={data.categoryShare} /></div>
         <div className="section"><h3>Exploration</h3><p className="muted">Server-computed dashboard data keeps browser behavior consistent with native clients.</p></div>
       </section>
@@ -140,6 +160,43 @@ function Kpi({ label, value, subtext }: { label: string; value: string; subtext:
 
 function Bars({ title, rows }: { title: string; rows: BarStat[] }) {
   return <div className="card"><h4>{title}</h4>{rows.length ? rows.map(r => <div className="bar-row" key={r.label}><span>{r.label}</span><div className="bar"><span style={{ width: `${Math.round(r.ratio * 100)}%` }} /></div><span>{r.valueText}</span></div>) : <span className="muted">No data</span>}</div>;
+}
+
+function VolumeByHourChart({ rows }: { rows: HourCategory[] }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const byCategory = categories.map(category => ({
+    category,
+    values: hours.map(hour => rows.find(r => r.hour === hour && r.category === category)?.count ?? 0)
+  }));
+  const max = Math.max(1, ...byCategory.flatMap(c => c.values));
+  const points = (values: number[]) => values
+    .map((value, hour) => `${36 + hour * 19},${158 - value / max * 118}`)
+    .join(" ");
+  return <div className="card chart-card"><h4>Calls by Hour and Category</h4><svg className="chart" viewBox="0 0 500 190" role="img" aria-label="Calls by hour and category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div>;
+}
+
+function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const keys: (keyof Omit<QualityHour, "hour">)[] = ["inaudible", "short", "empty", "failure"];
+  const totals = hours.map(hour => {
+    const row = rows.find(r => r.hour === hour);
+    return row ? keys.reduce((sum, key) => sum + row[key], 0) : 0;
+  });
+  const max = Math.max(1, ...totals);
+  return <div className="card chart-card"><h4>Quality Problems by Hour</h4><svg className="chart" viewBox="0 0 500 190" role="img" aria-label="Quality problems by hour"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" /><text className="chart-label" x="4" y="34">{max}</text>{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}{hours.map(hour => {
+    const row = rows.find(r => r.hour === hour);
+    let y = 158;
+    return keys.map(key => {
+      const value = row?.[key] ?? 0;
+      const height = value / max * 118;
+      y -= height;
+      return <rect key={`${hour}-${key}`} x={31 + hour * 19} y={y} width="11" height={height} fill={qualityColors[key]} />;
+    });
+  })}</svg><Legend items={keys.map(k => [label(k), qualityColors[k]])} /></div>;
+}
+
+function Legend({ items }: { items: string[][] }) {
+  return <div className="legend">{items.map(([name, color]) => <span key={name}><i style={{ background: color }} />{name}</span>)}</div>;
 }
 
 function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {

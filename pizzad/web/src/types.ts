@@ -28,8 +28,12 @@ export type TopTalkgroup = {
   trendBucketLabel: string;
   trendEndLabel: string;
 };
+export type HourCategory = { hour: number; category: string; count: number };
+export type QualityHour = { hour: number; empty: number; failure: number; inaudible: number; short: number };
 export type Dashboard = {
   kpis: Kpi[];
+  volumeByHourCategory: HourCategory[];
+  qualityByHour: QualityHour[];
   inaudibleBySystem: BarStat[];
   problemTalkgroups: BarStat[];
   categoryShare: BarStat[];
@@ -64,6 +68,14 @@ export type Job = {
   completed: number;
   failed: number;
   message: string;
+};
+export type EngineHealth = {
+  status: string;
+  version: string;
+  databasePath: string;
+  audioRoot: string;
+  queueDepth: number;
+  serverTimeUtc: string;
 };
 export type TrHealth = {
   id: number;

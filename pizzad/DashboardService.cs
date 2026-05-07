@@ -36,8 +36,7 @@ public sealed class DashboardService
                 new("Incidents", incidents.Count.ToString("N0", CultureInfo.CurrentCulture), "An Incident consists of multiple, related calls"),
                 new("Quality Problems", qualityProblems.ToString("N0", CultureInfo.CurrentCulture), "Empty, failed, inaudible, or short transcripts"),
                 new("Busiest Hour", busiest == null ? "--" : $"{busiest.Key:00}:00", busiest == null ? "No calls" : $"{busiest.Count():N0} calls"),
-                new("Unique Talkgroups", calls.Select(c => c.Talkgroup).Distinct().Count().ToString("N0", CultureInfo.CurrentCulture), "Heard in selected range"),
-                new("Avg Insight Confidence", "--", "Generated summaries only")
+                new("Unique Talkgroups", calls.Select(c => c.Talkgroup).Distinct().Count().ToString("N0", CultureInfo.CurrentCulture), "Heard in selected range")
             ],
             VolumeByHourCategory = BuildVolume(calls),
             QualityByHour = BuildQuality(calls),
