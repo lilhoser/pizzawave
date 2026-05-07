@@ -47,7 +47,7 @@ For Raspberry Pi OS/Debian ARM64:
 sudo apt install ./artifacts/packages/pizzawave_0.1.0_arm64.deb
 ```
 
-The package is self-contained: the TR server does not need a separate .NET runtime. During install it creates the `pizzawave` service user, writes `/etc/pizzawave/pizzad.json` if it does not already exist, generates `/etc/pizzawave/pizzad.token`, enables/restarts `pizzad.service`, and patches `/etc/trunk-recorder/config.json` when present. The callstream patch creates a timestamped backup.
+The package is self-contained: the TR server does not need a separate .NET runtime. During install it creates the `pizzawave` service user, writes `/etc/pizzawave/pizzad.json` if it does not already exist, generates `/etc/pizzawave/pizzad.token`, enables/restarts `pizzad.service`, and patches `/etc/trunk-recorder/config.json` when present. The callstream patch creates a timestamped backup. Read and write API access is open by default for private LAN/Tailscale deployments; set `auth.writeRequiresAuth` or `auth.readRequiresAuth` to `true` if you expose the service more broadly.
 
 The script installer remains available for development:
 

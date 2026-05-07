@@ -93,7 +93,7 @@ if [[ ! -f "$CONFIG_DIR/pizzad.json" ]]; then
   "auth": {
     "mode": "token",
     "readRequiresAuth": false,
-    "writeRequiresAuth": true,
+    "writeRequiresAuth": false,
     "tokenFile": "/etc/pizzawave/pizzad.token"
   },
   "storage": {

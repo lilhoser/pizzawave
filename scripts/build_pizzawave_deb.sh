@@ -135,7 +135,7 @@ cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
   "auth": {
     "mode": "token",
     "readRequiresAuth": false,
-    "writeRequiresAuth": true,
+    "writeRequiresAuth": false,
     "tokenFile": "/etc/pizzawave/pizzad.token"
   },
   "storage": {

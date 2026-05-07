@@ -88,7 +88,7 @@ public sealed class AuthConfig
 {
     public string Mode { get; set; } = "token";
     public bool ReadRequiresAuth { get; set; }
-    public bool WriteRequiresAuth { get; set; } = true;
+    public bool WriteRequiresAuth { get; set; }
     public string TokenFile { get; set; } = "/etc/pizzawave/pizzad.token";
 }
 
