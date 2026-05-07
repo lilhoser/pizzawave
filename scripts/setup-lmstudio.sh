@@ -7,6 +7,7 @@ set -euo pipefail
 
 DEFAULT_MODEL="qwen3.6-35b-a3b@q8_0"
 SERVICE_PATH="/etc/systemd/system/lmstudio.service"
+LMS_WRAPPER_PATH="/usr/local/bin/lms"
 
 print_usage() {
   cat <<'USAGE'
@@ -110,6 +111,13 @@ fi
 
 echo "==> Verifying lms installation"
 sudo -u "$TARGET_USER" -H "$LMS_BIN" --help >/dev/null
+
+echo "==> Installing lms command wrapper: $LMS_WRAPPER_PATH"
+cat > "$LMS_WRAPPER_PATH" <<EOF
+#!/usr/bin/env bash
+exec "$LMS_BIN" "\$@"
+EOF
+chmod 0755 "$LMS_WRAPPER_PATH"
 
 if [[ "$PRELOAD_MODEL" == "true" ]]; then
   echo "==> Downloading model: $MODEL_ID"
