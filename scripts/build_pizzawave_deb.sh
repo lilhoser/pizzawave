@@ -105,6 +105,7 @@ install -m 0755 "$ROOT_DIR/scripts/setup_pizzawave_engine.sh" "$PKG_ROOT/usr/lib
 install -m 0755 "$ROOT_DIR/scripts/setup-lmstudio.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup-lmstudio.sh"
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_configure_callstream.py"
 install -m 0755 "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_trunk_recorder.sh"
+install -m 0755 "$ROOT_DIR/scripts/prime_tr_health.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/prime_tr_health.py"
 
 cat > "$PKG_ROOT/lib/systemd/system/pizzad.service" <<'EOF'
 [Unit]

@@ -326,7 +326,39 @@ public sealed class EngineDatabase
     public async Task InsertHealthSampleAsync(TrHealthSampleDto sample, CancellationToken ct)
     {
         await using var connection = OpenConnection();
+        await InsertHealthSampleAsync(connection, sample, ct);
+    }
+
+    public async Task UpsertHealthSamplesAsync(IEnumerable<TrHealthSampleDto> samples, CancellationToken ct)
+    {
+        var rows = samples.ToList();
+        if (rows.Count == 0)
+            return;
+
+        await using var connection = OpenConnection();
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        foreach (var sample in rows)
+            await InsertHealthSampleAsync(connection, sample, ct, (SqliteTransaction)tx);
+        await tx.CommitAsync(ct);
+    }
+
+    private static async Task InsertHealthSampleAsync(SqliteConnection connection, TrHealthSampleDto sample, CancellationToken ct, SqliteTransaction? tx = null)
+    {
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = """
+                DELETE FROM tr_health_samples
+                WHERE window_start_utc=$window_start_utc AND window_end_utc=$window_end_utc AND scope=$scope;
+                """;
+            Add(delete, "$window_start_utc", sample.WindowStartUtc.ToString("O"));
+            Add(delete, "$window_end_utc", sample.WindowEndUtc.ToString("O"));
+            Add(delete, "$scope", sample.Scope);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
+
         await using var command = connection.CreateCommand();
+        command.Transaction = tx;
         command.CommandText = """
             INSERT INTO tr_health_samples (
                 window_start_utc, window_end_utc, scope, decode_lines, decode_zero, decode_zero_pct,

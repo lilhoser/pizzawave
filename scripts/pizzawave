@@ -23,6 +23,7 @@ Commands:
   configure-callstream [--config /etc/trunk-recorder/config.json]
   setup-lmstudio [args...]            Install/configure LM Studio for insights
   setup-trunk-recorder [args...]      Pass-through to setup_trunk_recorder.sh
+  prime-tr-health [args...]           Import historical trunk-recorder health into pizzad SQLite
   install-stack [args...]             Source-build TR/callstream, then configure callstream
   audit                               Run trunk-recorder setup audit
 
@@ -48,6 +49,9 @@ case "$cmd" in
     ;;
   setup-trunk-recorder)
     exec "$(script_path setup_trunk_recorder.sh)" "$@"
+    ;;
+  prime-tr-health)
+    exec python3 "$(script_path prime_tr_health.py)" "$@"
     ;;
   install-stack)
     "$(script_path setup_trunk_recorder.sh)" "$@"
