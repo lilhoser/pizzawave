@@ -11,6 +11,7 @@ type Page = "dashboard" | "troubleshoot" | "settings" | typeof categories[number
 function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [rangeHours, setRangeHours] = useState(24);
+  const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
   const [status, setStatus] = useState("Starting");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [category, setCategory] = useState<CategoryPage | null>(null);
@@ -61,6 +62,11 @@ function App() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("pizzawave-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
     const events = new EventSource("/api/v1/events/stream");
     for (const type of ["call_ingested", "call_transcribed", "alert_matched", "job_updated", "summary_updated", "health_updated"]) {
       events.addEventListener(type, () => void load());
@@ -80,6 +86,10 @@ function App() {
           <option value={24}>24h</option>
           <option value={48}>2d</option>
           <option value={168}>Week</option>
+        </select>
+        <select aria-label="Color scheme" value={theme} onChange={e => setTheme(e.target.value)}>
+          <option value="blue">Blue</option>
+          <option value="orange">Orange</option>
         </select>
         <span className="pill">{status}</span>
         <span className="pill">REST + SSE</span>
@@ -131,7 +141,7 @@ function Bars({ title, rows }: { title: string; rows: BarStat[] }) {
 }
 
 function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {
-  return <table className="table"><thead><tr><th>Talkgroup</th><th>Calls</th><th>Share</th><th>Trend</th></tr></thead><tbody>{rows.map(r => <tr key={r.talkgroup}><td>{r.label}</td><td>{r.count}</td><td>{(r.share * 100).toFixed(1)}%</td><td><div>{r.trend.map((v, i) => <span className="trend" style={{ height: 4 + v * 18 }} key={i} />)}</div><div className="muted">{r.trendStartLabel} · {r.trendBucketLabel} · {r.trendEndLabel}</div></td></tr>)}</tbody></table>;
+  return <table className="table"><thead><tr><th>Talkgroup</th><th>Calls</th><th>Share</th><th>Trend</th></tr></thead><tbody>{rows.map(r => <tr key={r.talkgroup}><td>{r.label}</td><td>{r.count}</td><td>{(r.share * 100).toFixed(1)}%</td><td><div>{r.trend.map((v, i) => <span className="trend" style={{ height: 4 + v * 18 }} key={i} />)}</div><div className="muted">{r.trendStartLabel} - {r.trendBucketLabel} - {r.trendEndLabel}</div></td></tr>)}</tbody></table>;
 }
 
 function Alerts({ rows }: { rows: AlertMatch[] }) {
@@ -145,7 +155,7 @@ function Incidents({ rows, rangeHours, reload }: { rows: Incident[]; rangeHours:
     await reload();
   }
   if (!rows.length) return <div className="card"><p className="muted">No generated incidents for this range.</p><button onClick={generate}>Generate incidents for this range</button></div>;
-  return <>{rows.map(i => <details className="call" key={i.id}><summary>{i.title}</summary><p>{i.detail}</p>{i.calls.map(c => <div className="muted" key={c.callId}>{new Date(c.rawTimestamp * 1000).toLocaleString()} · Call {c.callId}</div>)}</details>)}</>;
+  return <>{rows.map(i => <details className="call" key={i.id}><summary>{i.title}</summary><p>{i.detail}</p>{i.calls.map(c => <div className="muted" key={c.callId}>{new Date(c.rawTimestamp * 1000).toLocaleString()} - Call {c.callId}</div>)}</details>)}</>;
 }
 
 function CategoryView({ data }: { data: CategoryPage | null }) {
@@ -165,7 +175,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
   async function regenToken() { await api.request("/api/v1/settings/auth/regenerate-token", { method: "POST" }); alert("Token regenerated on server. Update this browser token from the token file."); }
   async function generate() { await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) }); await reload(); }
-  return <div className="settings-page"><h2>Settings</h2><div className="card"><h3>Jobs / Imports</h3>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> · {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed · {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}</div><div className="card"><h3>SFTP Import</h3><SftpImport reload={reload} /></div><div className="card"><h3>Summaries / Incidents</h3><button onClick={generate}>Generate incidents for selected range</button></div>{["engine", "transcription", "sftp", "tr", "alerts", "auth"].map(section => <SettingsJsonEditor section={section} value={settingsSections[section]} reload={reload} key={section} />)}<div className="card"><h3>Auth Token</h3><button onClick={regenToken}>Regenerate token</button></div></div>;
+  return <div className="settings-page"><h2>Settings</h2><div className="card"><h3>Jobs / Imports</h3>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> - {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}</div><div className="card"><h3>SFTP Import</h3><SftpImport reload={reload} /></div><div className="card"><h3>Summaries / Incidents</h3><button onClick={generate}>Generate incidents for selected range</button></div>{["engine", "transcription", "sftp", "tr", "alerts", "auth"].map(section => <SettingsJsonEditor section={section} value={settingsSections[section]} reload={reload} key={section} />)}<div className="card"><h3>Auth Token</h3><button onClick={regenToken}>Regenerate token</button></div></div>;
 }
 
 function SettingsJsonEditor({ section, value, reload }: { section: string; value: any; reload: () => Promise<void> }) {

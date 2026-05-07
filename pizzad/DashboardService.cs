@@ -6,15 +6,17 @@ namespace pizzad;
 public sealed class DashboardService
 {
     private readonly EngineDatabase _database;
+    private readonly TalkgroupResolver _talkgroups;
 
-    public DashboardService(EngineDatabase database)
+    public DashboardService(EngineDatabase database, TalkgroupResolver talkgroups)
     {
         _database = database;
+        _talkgroups = talkgroups;
     }
 
     public async Task<DashboardDto> BuildDashboardAsync(long start, long end, CancellationToken ct)
     {
-        var calls = await _database.ListCallsAsync(start, end, null, ct);
+        var calls = Enrich(await _database.ListCallsAsync(start, end, null, ct));
         var alerts = await _database.ListAlertMatchesAsync(start, end, ct);
         var incidents = await ListIncidentsAsync(start, end, ct);
         var total = calls.Count;
@@ -51,7 +53,9 @@ public sealed class DashboardService
     public async Task<CategoryPageDto> BuildCategoryPageAsync(string category, string groupBy, long start, long end, CancellationToken ct)
     {
         category = NormalizeCategory(category);
-        var calls = await _database.ListCallsAsync(start, end, category, ct);
+        var calls = Enrich(await _database.ListCallsAsync(start, end, null, ct))
+            .Where(c => string.Equals(c.Category, category, StringComparison.OrdinalIgnoreCase))
+            .ToList();
         if (string.Equals(groupBy, "none", StringComparison.OrdinalIgnoreCase))
         {
             return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)]);
@@ -69,6 +73,9 @@ public sealed class DashboardService
     {
         return _database.ListIncidentsAsync(start, end, ct);
     }
+
+    private List<EngineCall> Enrich(List<EngineCall> calls) =>
+        calls.Select(_talkgroups.Enrich).ToList();
 
     private static IReadOnlyList<HourCategoryDto> BuildVolume(List<EngineCall> calls) =>
         calls.GroupBy(c => new { DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour, c.Category })

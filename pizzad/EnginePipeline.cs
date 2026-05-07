@@ -12,6 +12,7 @@ public sealed class EnginePipeline
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
     private readonly EngineAlertService _alerts;
+    private readonly TalkgroupResolver _talkgroups;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<(long CallId, RawCallData Raw, bool Imported)> _transcriptionQueue = new();
     private readonly SemaphoreSlim _queueSignal = new(0);
@@ -26,12 +27,14 @@ public sealed class EnginePipeline
         EngineDatabase database,
         EventStream events,
         EngineAlertService alerts,
+        TalkgroupResolver talkgroups,
         ILogger<EnginePipeline> logger)
     {
         _config = config;
         _database = database;
         _events = events;
         _alerts = alerts;
+        _talkgroups = talkgroups;
         _logger = logger;
         _pizzalibSettings = BuildPizzalibSettings(config);
     }
@@ -195,6 +198,7 @@ public sealed class EnginePipeline
         var callstreamCallId = json.Value<long?>("CallId") ?? 0;
         var source = json.Value<int?>("Source") ?? -1;
         var frequency = json.Value<double?>("Frequency") ?? 0;
+        var resolved = _talkgroups.Resolve(talkgroup);
         var unique = $"{system}|{talkgroup}|{start}|{stop}|{callstreamCallId}|{frequency}";
         return new EngineCall
         {
@@ -205,22 +209,13 @@ public sealed class EnginePipeline
             SystemShortName = system,
             CallstreamCallId = callstreamCallId,
             Talkgroup = talkgroup,
+            TalkgroupName = resolved.Label,
             Frequency = frequency,
-            Category = ClassifyCategory(talkgroup, rawJson),
+            Category = resolved.Category,
             TranscriptionStatus = "pending",
             IsImported = imported,
             RawMetadataJson = rawJson
         };
-    }
-
-    private static string ClassifyCategory(long talkgroup, string rawJson)
-    {
-        var text = rawJson.ToLowerInvariant();
-        if (text.Contains("police") || text.Contains("sheriff")) return "police";
-        if (text.Contains("fire")) return "fire";
-        if (text.Contains("ems") || text.Contains("medical")) return "ems";
-        if (text.Contains("traffic")) return "traffic";
-        return "other";
     }
 
     private static string SanitizeFileName(string fileName)

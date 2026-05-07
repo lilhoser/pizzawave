@@ -55,6 +55,8 @@ public sealed class EngineDatabase
                 $talkgroup, $talkgroup_name, $frequency, $category, $audio_path, $transcription,
                 $transcription_status, $is_imported, $is_alert_match, $raw_metadata_json, $now, $now)
             ON CONFLICT(unique_key) DO UPDATE SET
+                talkgroup_name=excluded.talkgroup_name,
+                category=excluded.category,
                 audio_path=excluded.audio_path,
                 transcription=excluded.transcription,
                 transcription_status=excluded.transcription_status,

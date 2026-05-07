@@ -25,6 +25,7 @@ builder.Services.AddSingleton<EngineDatabase>();
 builder.Services.AddSingleton<EventStream>();
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<EngineAlertService>();
+builder.Services.AddSingleton<TalkgroupResolver>();
 builder.Services.AddSingleton<EnginePipeline>();
 builder.Services.AddSingleton<DashboardService>();
 builder.Services.AddSingleton<SftpImportService>();

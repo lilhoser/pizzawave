@@ -42,6 +42,7 @@
   },
   "trunkRecorder": {
     "configPath": "/etc/trunk-recorder/config.json",
+    "talkgroupsPath": "/etc/trunk-recorder/talkgroups.csv",
     "logServiceName": "trunk-recorder",
     "healthWindowMinutes": 5
   },

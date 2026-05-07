@@ -136,6 +136,7 @@ public sealed class SftpImportConfig
 public sealed class TrunkRecorderConfig
 {
     public string ConfigPath { get; set; } = "/etc/trunk-recorder/config.json";
+    public string TalkgroupsPath { get; set; } = "/etc/trunk-recorder/talkgroups.csv";
     public string LogServiceName { get; set; } = "trunk-recorder";
     public int HealthWindowMinutes { get; set; } = 5;
 }

@@ -76,6 +76,7 @@ if [[ ! -f "$CONFIG_DIR/pizzad.json" ]]; then
   "transcription": { "provider": "none", "analogSampleRate": 8000 },
   "trunkRecorder": {
     "configPath": "/etc/trunk-recorder/config.json",
+    "talkgroupsPath": "/etc/trunk-recorder/talkgroups.csv",
     "logServiceName": "trunk-recorder",
     "healthWindowMinutes": 5
   }
@@ -95,6 +96,9 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
 chown root:"$SERVICE_USER" "$CONFIG_DIR/pizzad.json" "$CONFIG_DIR/pizzad.token"
 chmod 0640 "$CONFIG_DIR/pizzad.json"
 chmod 0640 "$CONFIG_DIR/pizzad.token"
+if getent group trunk-recorder >/dev/null 2>&1; then
+  usermod -aG trunk-recorder "$SERVICE_USER" || true
+fi
 
 cat > "$SERVICE_PATH" <<EOF
 [Unit]
