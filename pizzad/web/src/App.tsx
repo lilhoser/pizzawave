@@ -236,16 +236,16 @@ function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage |
 
 function CategoryInsights({ rows, onGenerate }: { rows: CategoryInsight[]; onGenerate: () => Promise<void> }) {
   if (!rows.length) return <div className="card"><p className="muted">No insight summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
-  return <>{rows.map(item => <details className="insight-tile" key={item.id} open><summary><span>{item.title}</span><strong>{Math.round(item.score * 100)}%</strong></summary><div className="insight-time">{new Date(item.firstSeen * 1000).toLocaleString()} - {new Date(item.lastSeen * 1000).toLocaleTimeString()}</div><p>{item.detail}</p><div className="call-actions"><span className="pill">{item.callCount} source calls</span>{item.calls.slice(0, 3).map(c => <audio key={c.callId} controls src={`/api/v1/calls/${c.callId}/audio`} />)}</div></details>)}</>;
+  return <>{rows.map(item => <details className="insight-tile" key={item.id} open><summary><span>{item.title}</span><strong>{Math.round(item.score * 100)}%</strong></summary><div className="insight-time">{new Date(item.firstSeen * 1000).toLocaleString()} - {new Date(item.lastSeen * 1000).toLocaleTimeString()}</div><p>{item.detail}</p><div className="call-actions"><span className="pill">{item.callCount} source calls</span>{item.calls.slice(0, 3).map(c => <audio key={c.callId} controls preload="none" src={`/api/v1/calls/${c.callId}/audio`} />)}</div></details>)}</>;
 }
 
 function CategoryCallGroups({ groups }: { groups: CategoryPage["groups"] }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
-  return <>{groups.map(group => <details className="call-group" key={group.label} open><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>)}</>;
+  return <>{groups.map(group => <details className="call-group" key={group.label}><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>)}</>;
 }
 
 function CallRow({ call }: { call: EngineCall }) {
-  return <div className="call"><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{call.transcriptionStatus}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+  return <div className="call"><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{call.transcriptionStatus}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="none" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
 }
 
 function TroubleshootView({ health, trConfig }: { health: TrHealth[]; trConfig: any }) {
