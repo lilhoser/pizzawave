@@ -431,11 +431,11 @@ function TrHealthChartView({ chart }: { chart: TrHealthChart }) {
       <line className="axis" x1={left} y1={top + plotH} x2={left + plotW} y2={top + plotH} />
       <text className="chart-label" x={left - 6} y={top + 4} textAnchor="end">{formatChartValue(max, chart.valueFormat)}</text>
       <text className="chart-label" x={left - 6} y={top + plotH} textAnchor="end">0</text>
-      {chart.series.map((s, si) => <polyline key={s.label || si} points={s.values.map((v, i) => `${x(i, s.values.length)},${y(v)}`).join(" ")} fill="none" stroke={colors[si % colors.length]} strokeWidth="2" strokeDasharray={s.isBaseline ? "5 5" : undefined} />)}
+      {chart.series.map((s, si) => <polyline key={s.label || si} points={s.values.map((v, i) => `${x(i, s.values.length)},${y(v)}`).join(" ")} fill="none" stroke={s.isBaseline ? "#d7ecff" : colors[si % colors.length]} strokeWidth={s.isBaseline ? "2.5" : "2"} strokeDasharray={s.isBaseline ? "6 5" : undefined} />)}
       <text className="chart-label" x={left} y={h - 10}>{chart.labels[0] ?? ""}</text>
       <text className="chart-label" x={left + plotW} y={h - 10} textAnchor="end">{chart.labels[chart.labels.length - 1] ?? ""}</text>
     </svg>
-    <div className="legend">{chart.series.map((s, i) => <span key={s.label || i}><i style={{ background: colors[i % colors.length] }} />{s.label || "current"}</span>)}</div>
+    <div className="legend">{chart.series.map((s, i) => <span className={s.isBaseline ? "baseline-legend" : ""} key={s.label || i}><i style={{ background: s.isBaseline ? "#d7ecff" : colors[i % colors.length] }} />{s.label || "current"}</span>)}</div>
   </div>;
 }
 

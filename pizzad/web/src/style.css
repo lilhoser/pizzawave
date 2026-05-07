@@ -175,6 +175,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   height: 9px;
   border-radius: 999px;
 }
+.legend .baseline-legend {
+  color: #d7ecff;
+}
+.legend .baseline-legend i {
+  border-radius: 0;
+  height: 3px;
+}
 .bar-row { display: grid; grid-template-columns: 150px 1fr 92px; gap: 8px; align-items: center; font-size: 12px; margin: 5px 0; }
 .bar { height: 8px; background: #30363d; border-radius: 999px; overflow: hidden; }
 .bar span { display: block; height: 100%; background: var(--accent); }

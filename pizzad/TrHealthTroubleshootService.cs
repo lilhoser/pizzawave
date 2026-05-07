@@ -200,11 +200,12 @@ public sealed class TrHealthTroubleshootService
     private static TrHealthChartDto BuildChart(string title, string yAxis, string format, List<DateTime> hours, List<(string Label, IReadOnlyList<double> Values)> series, List<TrHealthSampleDto> baselineRows, string baseline, Func<TrHealthAggregate, double> selector, IReadOnlyList<string>? scopes = null)
     {
         var chartSeries = series.Select(s => new TrHealthSeriesDto(s.Label, s.Values)).ToList();
-        var baselineValues = scopes == null
-            ? BaselineSeries(baselineRows.Where(IsGlobal).ToList(), hours, selector, baseline)
-            : BaselineSeries(baselineRows.Where(r => scopes.Contains(r.Scope, StringComparer.OrdinalIgnoreCase)).ToList(), hours, selector, baseline);
-        if (baselineValues.Any(v => v > 0))
-            chartSeries.Add(new TrHealthSeriesDto($"{baseline} baseline", baselineValues, true));
+        var comparisonRows = scopes == null
+            ? baselineRows.Where(IsGlobal).ToList()
+            : baselineRows.Where(r => scopes.Contains(r.Scope, StringComparer.OrdinalIgnoreCase)).ToList();
+        var hasBaselineHistory = HasBaselineHistory(comparisonRows, baseline);
+        var baselineValues = BaselineSeries(comparisonRows, hours, selector, baseline);
+        chartSeries.Add(new TrHealthSeriesDto(hasBaselineHistory ? $"{baseline} baseline" : $"{baseline} baseline (no history yet)", baselineValues, true));
 
         return new TrHealthChartDto(title, yAxis, format, hours.Select(h => h.ToString("MM-dd HH:00", CultureInfo.InvariantCulture)).ToList(), chartSeries);
     }
@@ -245,6 +246,12 @@ public sealed class TrHealthTroubleshootService
             var dayCount = Math.Max(1, matching.Select(r => r.WindowEndUtc.ToLocalTime().Date).Distinct().Count());
             return selector(Aggregate(matching)) / dayCount;
         }).ToList();
+    }
+
+    private static bool HasBaselineHistory(List<TrHealthSampleDto> rows, string baseline)
+    {
+        var cutoff = DateTime.UtcNow.AddDays(-BaselineDays(baseline));
+        return rows.Any(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < DateTime.UtcNow.AddHours(-24));
     }
 
     private static string BuildSummaryText(TrHealthAggregate agg, IReadOnlyList<TrHealthMetricDto> systems, DateTime last)
