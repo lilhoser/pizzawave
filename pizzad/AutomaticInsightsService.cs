@@ -11,6 +11,9 @@ public sealed class AutomaticInsightsService : BackgroundService
 {
     private const int DefaultBatchSize = 50;
     private const int MaxPromptChars = 120_000;
+    private const double IncidentCallEventThreshold = 0.20;
+    private const double IncidentPairThreshold = 0.28;
+    private static readonly TimeSpan MaxIncidentSpan = TimeSpan.FromMinutes(60);
     private readonly ConcurrentQueue<EngineCall> _queue = new();
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
@@ -183,6 +186,17 @@ public sealed class AutomaticInsightsService : BackgroundService
                     "Skipped AI event '{Title}' because it linked {CallCount} call(s); incidents require at least 2 related calls.",
                     ev.Title,
                     calls.Count);
+                continue;
+            }
+
+            if (!IsValidIncidentCandidate(ev, calls, out var rejectReason))
+            {
+                _logger.LogInformation(
+                    "Rejected AI incident candidate '{Title}' with {CallCount} call(s): {Reason}. Calls={CallIds}",
+                    ev.Title,
+                    calls.Count,
+                    rejectReason,
+                    string.Join(",", calls.Select(c => c.Id)));
                 continue;
             }
 
@@ -407,6 +421,113 @@ public sealed class AutomaticInsightsService : BackgroundService
         return !Regex.IsMatch(combined,
             @"\b(no|none|not|without|unclear)\b.{0,40}\b(incident|event|actionable|emergency|issue|activity)\b|\b(no event detected|no clear incident|no actionable incident|no notable event|nothing notable|routine traffic only|routine chatter|non.?incident)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsValidIncidentCandidate(InsightEvent ev, List<EngineCall> calls, out string reason)
+    {
+        if (calls.Count < 2)
+        {
+            reason = "fewer than 2 resolved calls";
+            return false;
+        }
+
+        var first = calls.Min(c => c.StartTime);
+        var last = calls.Max(c => c.StartTime);
+        var span = TimeSpan.FromSeconds(Math.Max(0, last - first));
+        if (span > MaxIncidentSpan)
+        {
+            reason = $"call span {span.TotalMinutes:0.#}m exceeds {MaxIncidentSpan.TotalMinutes:0.#}m";
+            return false;
+        }
+
+        var eventTokens = ExtractIncidentTokens($"{ev.Title} {ev.Detail}");
+        if (eventTokens.Count == 0)
+        {
+            reason = "event title/detail did not contain specific incident tokens";
+            return false;
+        }
+
+        var callTokens = calls
+            .Select(c => new
+            {
+                Call = c,
+                EventTokens = ExtractIncidentTokens($"{c.TalkgroupName} {c.Transcription}"),
+                PairTokens = ExtractIncidentTokens(c.Transcription)
+            })
+            .ToList();
+
+        var eventMatchedCalls = callTokens
+            .Where(c => ComputeIncidentSimilarity(eventTokens, c.EventTokens) >= IncidentCallEventThreshold)
+            .Select(c => c.Call)
+            .ToList();
+
+        var maxPairwise = 0.0;
+        for (var i = 0; i < callTokens.Count; i++)
+        {
+            for (var j = i + 1; j < callTokens.Count; j++)
+                maxPairwise = Math.Max(maxPairwise, ComputeIncidentSimilarity(callTokens[i].PairTokens, callTokens[j].PairTokens));
+        }
+
+        if (eventMatchedCalls.Count >= 2)
+        {
+            reason = "accepted by event token overlap";
+            return true;
+        }
+
+        if (eventMatchedCalls.Count >= 1 && HasRepeatedTalkgroup(calls, eventMatchedCalls))
+        {
+            reason = "accepted by event token overlap and repeated talkgroup";
+            return true;
+        }
+
+        if (maxPairwise >= IncidentPairThreshold)
+        {
+            reason = "accepted by call transcript overlap";
+            return true;
+        }
+
+        reason = $"insufficient shared signal; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}, span={span.TotalMinutes:0.#}m";
+        return false;
+    }
+
+    private static bool HasRepeatedTalkgroup(List<EngineCall> calls, List<EngineCall> eventMatchedCalls)
+    {
+        var matchedTalkgroups = eventMatchedCalls.Select(c => c.Talkgroup).ToHashSet();
+        return calls
+            .Where(c => matchedTalkgroups.Contains(c.Talkgroup))
+            .GroupBy(c => c.Talkgroup)
+            .Any(g => g.Count() >= 2);
+    }
+
+    private static HashSet<string> ExtractIncidentTokens(string text)
+    {
+        var stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "call","calls","unit","units","officer","officers","dispatch","reported","advised","responding",
+            "response","scene","area","update","updates","subject","caller","vehicle","police","fire","ems",
+            "medical","traffic","north","south","east","west","street","road","drive","avenue","near","copy",
+            "copies","clear","clearance","radio","county","city","sheriff","department","channel","station"
+        };
+        var cleaned = Regex.Replace((text ?? string.Empty).ToLowerInvariant(), @"[^a-z0-9\s]", " ");
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token.Length < 4 || stop.Contains(token))
+                continue;
+            tokens.Add(token);
+        }
+        return tokens;
+    }
+
+    private static double ComputeIncidentSimilarity(HashSet<string> a, HashSet<string> b)
+    {
+        if (a.Count == 0 || b.Count == 0)
+            return 0;
+        var intersection = a.Count(b.Contains);
+        var union = a.Count + b.Count - intersection;
+        var jaccard = union <= 0 ? 0 : intersection / (double)union;
+        var containment = intersection / (double)Math.Min(a.Count, b.Count);
+        return Math.Max(jaccard, containment * 0.72);
     }
 
     private static string NormalizeEventText(string value) =>
