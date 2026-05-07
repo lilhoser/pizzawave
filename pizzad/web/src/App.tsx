@@ -34,10 +34,11 @@ function App() {
         setHealth(healthRows);
         setTrConfig(cfg);
       } else if (page === "settings") {
-        const [jobRows, engine, transcription, sftp, tr, auth, alerts] = await Promise.all([
+        const [jobRows, engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
           api.request<Job[]>("/api/v1/jobs"),
           api.request<any>("/api/v1/settings/engine"),
           api.request<any>("/api/v1/settings/transcription"),
+          api.request<any>("/api/v1/settings/ai-insights"),
           api.request<any>("/api/v1/settings/sftp"),
           api.request<any>("/api/v1/settings/tr"),
           api.request<any>("/api/v1/settings/auth"),
@@ -47,6 +48,7 @@ function App() {
         setSettingsSections({
           engine: engine.values,
           transcription: transcription.values,
+          "ai-insights": aiInsights.values,
           sftp: sftp.values,
           tr: tr.values,
           auth: auth.values,
@@ -109,7 +111,7 @@ function App() {
       </main>
       <footer className="statusbar">
         <span className="pill">Coverage, jobs, and summary state</span>
-        <span className="muted">Imports and generated incidents are managed from Settings and the dashboard Incident Explorer.</span>
+        <span className="muted">Incidents are generated automatically from live transcribed call batches.</span>
       </footer>
     </div>
   );
@@ -127,7 +129,7 @@ function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; r
         <div className="section"><h3>Exploration</h3><p className="muted">Server-computed dashboard data keeps browser behavior consistent with native clients.</p></div>
       </section>
       <section className="pane"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></section>
-      <section className="pane"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} rangeHours={rangeHours} reload={reload} /></section>
+      <section className="pane"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} /></section>
     </div>
   );
 }
@@ -149,12 +151,8 @@ function Alerts({ rows }: { rows: AlertMatch[] }) {
   return <>{rows.map(a => <div className="call" key={a.id}><div className="call-head"><strong>{a.ruleName}</strong><span>{new Date(a.matchedAt * 1000).toLocaleString()}</span>{a.isImported && <span className="pill">Imported</span>}</div><div>{a.detail}</div></div>)}</>;
 }
 
-function Incidents({ rows, rangeHours, reload }: { rows: Incident[]; rangeHours: number; reload: () => Promise<void> }) {
-  async function generate() {
-    await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
-    await reload();
-  }
-  if (!rows.length) return <div className="card"><p className="muted">No generated incidents for this range.</p><button onClick={generate}>Generate incidents for this range</button></div>;
+function Incidents({ rows }: { rows: Incident[] }) {
+  if (!rows.length) return <div className="card"><p className="muted">No incidents in this range yet. Incidents are generated automatically after enough live calls are transcribed.</p></div>;
   return <>{rows.map(i => <details className="call" key={i.id}><summary>{i.title}</summary><p>{i.detail}</p>{i.calls.map(c => <div className="muted" key={c.callId}>{new Date(c.rawTimestamp * 1000).toLocaleString()} - Call {c.callId}</div>)}</details>)}</>;
 }
 
@@ -175,7 +173,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
   async function regenToken() { await api.request("/api/v1/settings/auth/regenerate-token", { method: "POST" }); alert("Token regenerated on server. Update this browser token from the token file."); }
   async function generate() { await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) }); await reload(); }
-  return <div className="settings-page"><h2>Settings</h2><div className="card"><h3>Jobs / Imports</h3>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> - {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}</div><div className="card"><h3>SFTP Import</h3><SftpImport reload={reload} /></div><div className="card"><h3>Summaries / Incidents</h3><button onClick={generate}>Generate incidents for selected range</button></div>{["engine", "transcription", "sftp", "tr", "alerts", "auth"].map(section => <SettingsJsonEditor section={section} value={settingsSections[section]} reload={reload} key={section} />)}<div className="card"><h3>Auth Token</h3><button onClick={regenToken}>Regenerate token</button></div></div>;
+  return <div className="settings-page"><h2>Settings</h2><div className="card"><h3>Jobs / Imports</h3>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> - {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}</div><div className="card"><h3>SFTP Import</h3><SftpImport reload={reload} /></div><div className="card"><h3>Summaries / Incidents</h3><button onClick={generate}>Generate incidents for selected range</button></div>{["engine", "transcription", "ai-insights", "sftp", "tr", "alerts", "auth"].map(section => <SettingsJsonEditor section={section} value={settingsSections[section]} reload={reload} key={section} />)}<div className="card"><h3>Auth Token</h3><button onClick={regenToken}>Regenerate token</button></div></div>;
 }
 
 function SettingsJsonEditor({ section, value, reload }: { section: string; value: any; reload: () => Promise<void> }) {

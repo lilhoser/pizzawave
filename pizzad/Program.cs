@@ -26,12 +26,14 @@ builder.Services.AddSingleton<EventStream>();
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<EngineAlertService>();
 builder.Services.AddSingleton<TalkgroupResolver>();
+builder.Services.AddSingleton<AutomaticInsightsService>();
 builder.Services.AddSingleton<EnginePipeline>();
 builder.Services.AddSingleton<DashboardService>();
 builder.Services.AddSingleton<SftpImportService>();
 builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddSingleton<TrConfigService>();
 builder.Services.AddHostedService<CallstreamListener>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
 builder.Services.AddHostedService<TrHealthCollector>();
 builder.Services.AddHostedService<RecentReconciliationService>();
 builder.Services.AddEndpointsApiExplorer();
@@ -205,6 +207,7 @@ app.MapGet("/api/v1/settings/{section}", (HttpContext context, string section, A
     {
         "engine" => new { cfg.Server, cfg.Storage, cfg.Ingest },
         "transcription" => cfg.Transcription,
+        "ai-insights" => cfg.AiInsights,
         "sftp" => cfg.SftpImport,
         "tr" => cfg.TrunkRecorder,
         "auth" => new { cfg.Auth.Mode, cfg.Auth.ReadRequiresAuth, cfg.Auth.WriteRequiresAuth, cfg.Auth.TokenFile },
@@ -231,6 +234,9 @@ app.MapPost("/api/v1/settings/{section}", (HttpContext context, string section, 
             break;
         case "transcription":
             cfg.Transcription = System.Text.Json.JsonSerializer.Deserialize<TranscriptionConfig>(json, EngineConfig.JsonOptions()) ?? cfg.Transcription;
+            break;
+        case "ai-insights":
+            cfg.AiInsights = System.Text.Json.JsonSerializer.Deserialize<AiInsightsConfig>(json, EngineConfig.JsonOptions()) ?? cfg.AiInsights;
             break;
         case "sftp":
             cfg.SftpImport = System.Text.Json.JsonSerializer.Deserialize<SftpImportConfig>(json, EngineConfig.JsonOptions()) ?? cfg.SftpImport;

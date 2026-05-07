@@ -13,6 +13,7 @@ public sealed class EnginePipeline
     private readonly EventStream _events;
     private readonly EngineAlertService _alerts;
     private readonly TalkgroupResolver _talkgroups;
+    private readonly AutomaticInsightsService _insights;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<(long CallId, RawCallData Raw, bool Imported)> _transcriptionQueue = new();
     private readonly SemaphoreSlim _queueSignal = new(0);
@@ -28,6 +29,7 @@ public sealed class EnginePipeline
         EventStream events,
         EngineAlertService alerts,
         TalkgroupResolver talkgroups,
+        AutomaticInsightsService insights,
         ILogger<EnginePipeline> logger)
     {
         _config = config;
@@ -35,6 +37,7 @@ public sealed class EnginePipeline
         _events = events;
         _alerts = alerts;
         _talkgroups = talkgroups;
+        _insights = insights;
         _logger = logger;
         _pizzalibSettings = BuildPizzalibSettings(config);
     }
@@ -105,6 +108,16 @@ public sealed class EnginePipeline
                 }
 
                 await _events.PublishAsync("call_transcribed", new { callId = item.CallId, imported = item.Imported }, ct);
+                if (!item.Imported && !string.IsNullOrWhiteSpace(transcription))
+                {
+                    var updatedCall = call with
+                    {
+                        Transcription = transcription,
+                        TranscriptionStatus = "complete",
+                        IsAlertMatch = alert.IsMatch
+                    };
+                    _insights.Enqueue(updatedCall);
+                }
             }
             catch (Exception ex)
             {

@@ -25,6 +25,15 @@
     "analogSampleRate": 8000,
     "openAiBaseUrl": "http://localhost:1234/v1"
   },
+  "aiInsights": {
+    "enabled": false,
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "openAiModel": "",
+    "batchSize": 50,
+    "maxPendingCalls": 1000,
+    "timeoutMs": 600000,
+    "maxRetries": 2
+  },
   "sftpImport": {
     "enabled": false,
     "quickImportMaxHours": 48,

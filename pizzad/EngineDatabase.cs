@@ -151,6 +151,28 @@ public sealed class EngineDatabase
         return calls;
     }
 
+    public async Task<List<EngineCall>> ListCompletedCallsAfterAsync(long startExclusive, int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM calls
+            WHERE start_time > $start
+              AND transcription_status='complete'
+              AND length(trim(transcription)) > 0
+              AND is_imported=0
+            ORDER BY start_time ASC, id ASC
+            LIMIT $limit;
+            """;
+        Add(command, "$start", startExclusive);
+        Add(command, "$limit", limit);
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            calls.Add(ReadCall(reader));
+        return calls;
+    }
+
     public async Task<List<AlertMatchDto>> ListAlertMatchesAsync(long start, long end, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -412,6 +434,32 @@ public sealed class EngineDatabase
         return id;
     }
 
+    public async Task<long> AddInsightWindowAsync(long start, long end, string summaryText, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO insight_windows (window_start, window_end, summary_text, generated_at_utc)
+            VALUES ($window_start, $window_end, $summary_text, $generated_at_utc);
+            SELECT id FROM insight_windows WHERE window_start=$window_start AND window_end=$window_end;
+            """;
+        Add(command, "$window_start", start);
+        Add(command, "$window_end", end);
+        Add(command, "$summary_text", summaryText);
+        Add(command, "$generated_at_utc", DateTime.UtcNow.ToString("O"));
+        var result = await command.ExecuteScalarAsync(ct);
+        return Convert.ToInt64(result);
+    }
+
+    public async Task<long> GetLatestInsightWindowEndAsync(CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(window_end), 0) FROM insight_windows;";
+        var result = await command.ExecuteScalarAsync(ct);
+        return Convert.ToInt64(result);
+    }
+
     public async Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -568,6 +616,8 @@ public sealed class EngineDatabase
             summary_text TEXT NOT NULL,
             generated_at_utc TEXT NOT NULL
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_insight_windows_range ON insight_windows(window_start, window_end);
 
         CREATE TABLE IF NOT EXISTS incident_calls (
             incident_id INTEGER NOT NULL,

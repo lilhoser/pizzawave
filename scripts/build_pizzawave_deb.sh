@@ -145,6 +145,16 @@ cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
   },
   "ingest": { "callstreamBind": "127.0.0.1", "callstreamPort": 9123 },
   "transcription": { "provider": "none", "analogSampleRate": 8000 },
+  "aiInsights": {
+    "enabled": false,
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "openAiApiKey": "",
+    "openAiModel": "",
+    "batchSize": 50,
+    "maxPendingCalls": 1000,
+    "timeoutMs": 600000,
+    "maxRetries": 2
+  },
   "trunkRecorder": {
     "configPath": "/etc/trunk-recorder/config.json",
     "talkgroupsPath": "/etc/trunk-recorder/talkgroups.csv",

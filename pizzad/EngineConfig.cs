@@ -10,6 +10,7 @@ public sealed class EngineConfig
     public StorageConfig Storage { get; set; } = new();
     public IngestConfig Ingest { get; set; } = new();
     public TranscriptionConfig Transcription { get; set; } = new();
+    public AiInsightsConfig AiInsights { get; set; } = new();
     public SftpImportConfig SftpImport { get; set; } = new();
     public TrunkRecorderConfig TrunkRecorder { get; set; } = new();
     public AlertConfig Alerts { get; set; } = new();
@@ -115,6 +116,18 @@ public sealed class TranscriptionConfig
     public string OpenAiApiKey { get; set; } = string.Empty;
     public string OpenAiModel { get; set; } = string.Empty;
     public int AnalogSampleRate { get; set; } = 8000;
+}
+
+public sealed class AiInsightsConfig
+{
+    public bool Enabled { get; set; } = true;
+    public string OpenAiBaseUrl { get; set; } = string.Empty;
+    public string OpenAiApiKey { get; set; } = string.Empty;
+    public string OpenAiModel { get; set; } = string.Empty;
+    public int BatchSize { get; set; } = 50;
+    public int MaxPendingCalls { get; set; } = 1000;
+    public int TimeoutMs { get; set; } = 600000;
+    public int MaxRetries { get; set; } = 2;
 }
 
 public sealed class SftpImportConfig
