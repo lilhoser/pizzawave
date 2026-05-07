@@ -3,12 +3,18 @@ namespace pizzad;
 public sealed class SummaryService
 {
     private readonly EngineDatabase _database;
+    private readonly AutomaticInsightsService _insights;
     private readonly EventStream _events;
     private readonly ILogger<SummaryService> _logger;
 
-    public SummaryService(EngineDatabase database, EventStream events, ILogger<SummaryService> logger)
+    public SummaryService(
+        EngineDatabase database,
+        AutomaticInsightsService insights,
+        EventStream events,
+        ILogger<SummaryService> logger)
     {
         _database = database;
+        _insights = insights;
         _events = events;
         _logger = logger;
     }
@@ -23,7 +29,7 @@ public sealed class SummaryService
         {
             Type = "summary_generation",
             Status = "running",
-            Message = "Generating summaries and incidents for selected range.",
+            Message = "Generating AI summaries and incidents for selected range.",
             CreatedAtUtc = DateTime.UtcNow,
             StartedAtUtc = DateTime.UtcNow
         };
@@ -37,45 +43,32 @@ public sealed class SummaryService
     {
         try
         {
-            var calls = await _database.ListCallsAsync(request.Start, request.End, null, ct);
-            var candidateGroups = calls
+            var calls = (await _database.ListCallsAsync(request.Start, request.End, null, ct))
                 .Where(c => !string.IsNullOrWhiteSpace(c.Transcription))
-                .GroupBy(c => new
-                {
-                    c.SystemShortName,
-                    c.Talkgroup,
-                    Bucket = c.StartTime / 3600
-                })
-                .Where(g => g.Count() > 1)
-                .OrderBy(g => g.Min(c => c.StartTime))
+                .OrderBy(c => c.StartTime)
+                .ToList();
+            var batchSize = Math.Max(1, _insights.ConfiguredBatchSize);
+            var batches = calls
+                .Select((call, index) => new { call, index })
+                .GroupBy(x => x.index / batchSize)
+                .Select(g => g.Select(x => x.call).ToList())
                 .ToList();
 
-            var total = candidateGroups.Count;
+            var total = batches.Count;
             var completed = 0;
-            await _database.UpdateJobAsync(jobId, "running", total, 0, 0, $"Generating {total:N0} incident candidates.", true, false, ct);
+            var incidentCount = 0;
+            await _database.UpdateJobAsync(jobId, "running", total, 0, 0, $"Generating {total:N0} AI summary windows.", true, false, ct);
 
-            foreach (var group in candidateGroups)
+            foreach (var batch in batches)
             {
-                var ordered = group.OrderBy(c => c.StartTime).ToList();
-                var title = $"{Label(ordered[0])} activity";
-                var detail = BuildDetail(ordered);
-                var incident = new IncidentDto
-                {
-                    Title = title,
-                    Detail = detail,
-                    FirstSeen = ordered.Min(c => c.StartTime),
-                    LastSeen = ordered.Max(c => c.StartTime),
-                    Confidence = Math.Clamp(ordered.Count / 4.0, 0.35, 0.85),
-                    Calls = ordered.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
-                };
-                await _database.AddIncidentAsync(incident, ct);
+                incidentCount += await _insights.GenerateWindowForCallsAsync(batch, ct);
                 completed++;
-                await _database.UpdateJobAsync(jobId, "running", total, completed, 0, $"Generated {completed:N0}/{total:N0} incidents.", false, false, ct);
-                await _events.PublishAsync("job_updated", new { jobId, completed, total }, ct);
+                await _database.UpdateJobAsync(jobId, "running", total, completed, 0, $"Generated {completed:N0}/{total:N0} AI summary windows and {incidentCount:N0} incidents.", false, false, ct);
+                await _events.PublishAsync("job_updated", new { jobId, completed, total, incidents = incidentCount }, ct);
             }
 
-            await _database.UpdateJobAsync(jobId, "completed", total, completed, 0, $"Generated {completed:N0} incidents.", false, true, ct);
-            await _events.PublishAsync("summary_updated", new { request.Start, request.End, incidents = completed }, ct);
+            await _database.UpdateJobAsync(jobId, "completed", total, completed, 0, $"Generated {completed:N0} AI summary windows and {incidentCount:N0} incidents.", false, true, ct);
+            await _events.PublishAsync("summary_updated", new { request.Start, request.End, incidents = incidentCount }, ct);
         }
         catch (Exception ex)
         {
@@ -83,15 +76,5 @@ public sealed class SummaryService
             await _database.UpdateJobAsync(jobId, "failed", null, null, null, ex.Message, false, true, CancellationToken.None);
             await _events.PublishAsync("job_updated", new { jobId, status = "failed" }, CancellationToken.None);
         }
-    }
-
-    private static string Label(EngineCall call) =>
-        string.IsNullOrWhiteSpace(call.TalkgroupName) ? $"{call.SystemShortName} TG {call.Talkgroup}" : call.TalkgroupName;
-
-    private static string BuildDetail(IReadOnlyList<EngineCall> calls)
-    {
-        var first = DateTimeOffset.FromUnixTimeSeconds(calls.Min(c => c.StartTime)).ToLocalTime();
-        var last = DateTimeOffset.FromUnixTimeSeconds(calls.Max(c => c.StartTime)).ToLocalTime();
-        return $"{calls.Count} related calls from {first:g} to {last:g}. {calls[0].Transcription}";
     }
 }

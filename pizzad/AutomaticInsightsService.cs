@@ -45,6 +45,29 @@ public sealed class AutomaticInsightsService : BackgroundService
         _queue.Enqueue(_talkgroups.Enrich(call));
     }
 
+    public int ConfiguredBatchSize => BatchSize();
+
+    public async Task<int> GenerateWindowForCallsAsync(List<EngineCall> calls, CancellationToken ct)
+    {
+        calls = calls
+            .Where(c => !string.IsNullOrWhiteSpace(c.Transcription))
+            .OrderBy(c => c.StartTime)
+            .Select(_talkgroups.Enrich)
+            .ToList();
+        if (calls.Count == 0)
+            return 0;
+
+        var start = calls.Min(c => c.StartTime);
+        var end = calls.Max(c => Math.Max(c.StartTime, c.StopTime));
+        var result = await SummarizeWindowAsync(calls, start, end, ct);
+        var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
+        var incidents = await PersistIncidentsAsync(result, calls, ct);
+        _priorSummary = result.SummaryText;
+        await _events.PublishAsync("summary_updated", new { windowId, start, end, incidents }, ct);
+        _logger.LogInformation("Manual insights generated window {WindowId} with {Incidents} incidents from {Calls} calls", windowId, incidents, calls.Count);
+        return incidents;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -123,24 +146,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             var result = await SummarizeWindowAsync(batch, start, end, ct);
             var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
-            var incidents = 0;
-            foreach (var ev in result.Events.Where(IsActionableEvent))
-            {
-                var calls = ResolveEventCalls(ev, batch);
-                if (calls.Count == 0)
-                    continue;
-
-                await _database.AddIncidentAsync(new IncidentDto
-                {
-                    Title = string.IsNullOrWhiteSpace(ev.Title) ? "Radio incident" : ev.Title.Trim(),
-                    Detail = string.IsNullOrWhiteSpace(ev.Detail) ? result.SummaryText : ev.Detail.Trim(),
-                    FirstSeen = calls.Min(c => c.StartTime),
-                    LastSeen = calls.Max(c => c.StartTime),
-                    Confidence = Math.Clamp(ev.Confidence, 0, 1),
-                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
-                }, ct);
-                incidents++;
-            }
+            var incidents = await PersistIncidentsAsync(result, batch, ct);
 
             _priorSummary = result.SummaryText;
             lock (_gate)
@@ -161,6 +167,30 @@ public sealed class AutomaticInsightsService : BackgroundService
             RotateFailedBatch(batch);
             _logger.LogWarning(ex, "Automatic insights failed for {Count} calls; backing off {Seconds}s", batch.Count, cooldownSeconds);
         }
+    }
+
+    private async Task<int> PersistIncidentsAsync(InsightResult result, List<EngineCall> batch, CancellationToken ct)
+    {
+        var incidents = 0;
+        foreach (var ev in result.Events.Where(IsActionableEvent))
+        {
+            var calls = ResolveEventCalls(ev, batch);
+            if (calls.Count == 0)
+                continue;
+
+            await _database.AddIncidentAsync(new IncidentDto
+            {
+                Title = string.IsNullOrWhiteSpace(ev.Title) ? "Radio incident" : ev.Title.Trim(),
+                Detail = string.IsNullOrWhiteSpace(ev.Detail) ? result.SummaryText : ev.Detail.Trim(),
+                FirstSeen = calls.Min(c => c.StartTime),
+                LastSeen = calls.Max(c => c.StartTime),
+                Confidence = Math.Clamp(ev.Confidence, 0, 1),
+                Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
+            }, ct);
+            incidents++;
+        }
+
+        return incidents;
     }
 
     private async Task<InsightResult> SummarizeWindowAsync(List<EngineCall> calls, long start, long end, CancellationToken ct)
@@ -190,6 +220,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         };
 
         var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
+        _logger.LogInformation("Calling LM Studio insights endpoint {Endpoint} with model {Model} for {Calls} calls ({PayloadChars} chars)", endpoint, InsightModel(), calls.Count, payload.Length);
         Exception? last = null;
         for (var attempt = 0; attempt <= Math.Max(0, _config.AiInsights.MaxRetries); attempt++)
         {
@@ -200,6 +231,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 var text = await response.Content.ReadAsStringAsync(ct);
                 if (!response.IsSuccessStatusCode)
                     throw new InvalidOperationException($"Automatic insights request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
+                _logger.LogInformation("LM Studio insights response received for {Calls} calls ({ResponseChars} chars)", calls.Count, text.Length);
                 return ParseResponse(text);
             }
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
@@ -229,6 +261,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             _ => 8
         };
 
+        sb.AppendLine("/no_think");
+        sb.AppendLine("Return only the final JSON object in message.content. Do not place the answer in reasoning_content.");
         sb.AppendLine($"Window: {DateTimeOffset.FromUnixTimeSeconds(start).ToLocalTime()} to {DateTimeOffset.FromUnixTimeSeconds(end).ToLocalTime()}");
         if (!string.IsNullOrWhiteSpace(_priorSummary))
         {
@@ -281,9 +315,17 @@ public sealed class AutomaticInsightsService : BackgroundService
             content = contentElement.ValueKind == JsonValueKind.String
                 ? contentElement.GetString() ?? string.Empty
                 : contentElement.GetRawText();
+
+            if (string.IsNullOrWhiteSpace(content) &&
+                message.TryGetProperty("reasoning_content", out var reasoningElement) &&
+                reasoningElement.ValueKind == JsonValueKind.String)
+            {
+                content = reasoningElement.GetString() ?? string.Empty;
+            }
         }
 
         content = StripCodeFence(content);
+        content = ExtractJsonObject(content);
         using var doc = JsonDocument.Parse(content);
         var summary = doc.RootElement.TryGetProperty("summary_text", out var summaryElement)
             ? summaryElement.GetString() ?? string.Empty
@@ -411,6 +453,19 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private static string StripCodeFence(string content) =>
         Regex.Replace(content.Trim(), "^```(?:json)?\\s*|\\s*```$", string.Empty, RegexOptions.IgnoreCase);
+
+    private static string ExtractJsonObject(string content)
+    {
+        content = content.Trim();
+        if (content.StartsWith('{') && content.EndsWith('}'))
+            return content;
+
+        var start = content.IndexOf('{');
+        var end = content.LastIndexOf('}');
+        return start >= 0 && end > start
+            ? content[start..(end + 1)]
+            : content;
+    }
 
     private static object InsightResponseFormat() => new
     {
