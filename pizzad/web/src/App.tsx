@@ -241,11 +241,16 @@ function CategoryInsights({ rows, onGenerate }: { rows: CategoryInsight[]; onGen
 
 function CategoryCallGroups({ groups }: { groups: CategoryPage["groups"] }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
-  return <>{groups.map(group => <details className="call-group" key={group.label}><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>)}</>;
+  return <>{groups.map(group => <CollapsibleCallGroup group={group} key={group.label} />)}</>;
+}
+
+function CollapsibleCallGroup({ group }: { group: CategoryPage["groups"][number] }) {
+  const [open, setOpen] = useState(false);
+  return <details className="call-group" open={open} onToggle={e => setOpen(e.currentTarget.open)}><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{open && group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>;
 }
 
 function CallRow({ call }: { call: EngineCall }) {
-  return <div className="call"><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{call.transcriptionStatus}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="none" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+  return <div className="call"><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{call.transcriptionStatus}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
 }
 
 function TroubleshootView({ health, trConfig }: { health: TrHealth[]; trConfig: any }) {
