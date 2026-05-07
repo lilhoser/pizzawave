@@ -84,16 +84,63 @@ public sealed class TalkgroupResolver
 
     private static string NormalizeCategory(params string?[] values)
     {
+        var category = (values.ElementAtOrDefault(0) ?? string.Empty).Trim().ToLowerInvariant();
+        var tag = (values.ElementAtOrDefault(1) ?? string.Empty).Trim().ToLowerInvariant();
         var text = string.Join(" ", values.Where(v => !string.IsNullOrWhiteSpace(v))).ToLowerInvariant();
-        if (ContainsAny(text, "police", "sheriff", "law", "pd", "so", "dispatch")) return "police";
-        if (ContainsAny(text, "fire", "fd")) return "fire";
-        if (ContainsAny(text, "ems", "medical", "medic", "ambulance", "rescue")) return "ems";
-        if (ContainsAny(text, "traffic", "dot", "road", "streets", "highway")) return "traffic";
+
+        if (IsFire(text, tag)) return "fire";
+        if (IsEms(text, tag)) return "ems";
+        if (IsPolice(text, tag)) return "police";
+        if (IsTraffic(text, category, tag)) return "traffic";
         return "other";
+    }
+
+    private static bool IsPolice(string text, string tag) =>
+        ContainsAny(text, "police", "sheriff", "law enforcement", "corrections", "jail") ||
+        tag.Contains("law", StringComparison.OrdinalIgnoreCase) ||
+        HasWord(text, "pd") ||
+        HasWord(text, "so");
+
+    private static bool IsFire(string text, string tag) =>
+        ContainsAny(text, "fire") ||
+        tag.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
+        HasWord(text, "fd");
+
+    private static bool IsEms(string text, string tag) =>
+        ContainsAny(text, "ems", "medical", "medic", "ambulance", "rescue", "hospital") ||
+        tag.Contains("ems", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTraffic(string text, string category, string tag)
+    {
+        if (ContainsAny(category, "department of transportation", "transportation help", "transportation") ||
+            tag.Contains("transportation", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return ContainsAny(text,
+                "traffic",
+                "road department",
+                "roads",
+                "street department",
+                "streets",
+                "service patrol",
+                "transit",
+                "shuttle",
+                "trolley") ||
+            HasWord(text, "dot") ||
+            HasWord(text, "tdot") ||
+            HasWord(text, "hwy");
     }
 
     private static bool ContainsAny(string text, params string[] needles) =>
         needles.Any(n => text.Contains(n, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasWord(string text, string token) =>
+        System.Text.RegularExpressions.Regex.IsMatch(
+            text,
+            $@"\b{System.Text.RegularExpressions.Regex.Escape(token)}\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim() ?? string.Empty;
