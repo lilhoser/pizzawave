@@ -85,7 +85,7 @@ public sealed class DashboardService
                 Incident = i,
                 Calls = i.Calls.Where(c => categoryCallIds.Contains(c.CallId)).ToList()
             })
-            .Where(x => x.Calls.Count > 0)
+            .Where(x => x.Calls.Count >= 2)
             .OrderByDescending(x => x.Incident.Confidence)
             .ThenByDescending(x => x.Incident.LastSeen)
             .Select(x => new CategoryInsightDto(
