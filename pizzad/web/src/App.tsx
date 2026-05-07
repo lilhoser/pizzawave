@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityHour, TopTalkgroup, TrHealth } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -31,8 +31,7 @@ function App() {
   const [category, setCategory] = useState<CategoryPage | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
-  const [health, setHealth] = useState<TrHealth[]>([]);
-  const [trConfig, setTrConfig] = useState<any>(null);
+  const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
 
   const load = useCallback(async () => {
@@ -48,12 +47,7 @@ function App() {
       } else if (categories.includes(page as any)) {
         setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}`));
       } else if (page === "troubleshoot") {
-        const [healthRows, cfg] = await Promise.all([
-          api.request<TrHealth[]>(`/api/v1/troubleshoot/tr-health?${rangeQuery(rangeHours)}`),
-          api.request<any>("/api/v1/troubleshoot/tr-config")
-        ]);
-        setHealth(healthRows);
-        setTrConfig(cfg);
+        setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
       } else if (page === "settings") {
         const [engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
           api.request<any>("/api/v1/settings/engine"),
@@ -134,7 +128,7 @@ function App() {
       <main className="main">
         {page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
         {categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
-        {page === "troubleshoot" && <TroubleshootView health={health} trConfig={trConfig} />}
+        {page === "troubleshoot" && <TroubleshootView data={troubleshoot} rangeHours={rangeHours} reload={load} />}
         {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} rangeHours={rangeHours} reload={load} />}
       </main>
       <footer className="statusbar">
@@ -345,8 +339,108 @@ function confidenceClass(score: number) {
   return "confidence-low";
 }
 
-function TroubleshootView({ health, trConfig }: { health: TrHealth[]; trConfig: any }) {
-  return <div className="trouble-page"><h2>Trunk Recorder</h2><div className="card"><h3>Configuration</h3>{trConfig ? <><div>{trConfig.ok ? "OK" : "Problem"}: {trConfig.path}</div><div className="muted">Callstream target {trConfig.callstreamTarget}; configured {trConfig.callstreamConfigured ? "yes" : "no"}</div></> : "Loading..."}</div><h2>Trunk Recorder Health</h2><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>Decode 0%</th><th>Calls</th><th>Source Stops</th></tr></thead><tbody>{health.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.decodeZeroPct.toFixed(1)}%</td><td>{r.callsStarted}/{r.callsConcluded}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></div>;
+function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot | null; rangeHours: number; reload: () => Promise<void> }) {
+  const [topTab, setTopTab] = useState<"pizzad" | "tr">("tr");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "logs" | "diagnostics" | "insights">("summary");
+  const [bySystem, setBySystem] = useState(false);
+  const [baseline, setBaseline] = useState("7d");
+  const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
+
+  useEffect(() => {
+    if (topTab !== "tr" || trTab !== "metrics") return;
+    void api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=${bySystem}&baseline=${baseline}`)
+      .then(setMetricsData)
+      .catch(() => setMetricsData(null));
+  }, [topTab, trTab, bySystem, baseline, rangeHours]);
+
+  if (!data) return <div className="trouble-page">Loading troubleshoot data...</div>;
+  const active = metricsData ?? data;
+  return (
+    <div className="trouble-page">
+      <div className="trouble-tabs">
+        <button className={topTab === "pizzad" ? "active" : ""} onClick={() => setTopTab("pizzad")}>Pizzad</button>
+        <button className={topTab === "tr" ? "active" : ""} onClick={() => setTopTab("tr")}>Trunk Recorder</button>
+        <button onClick={() => void reload()}>Refresh Health</button>
+      </div>
+      {topTab === "pizzad" && <div className="trouble-panel">
+        <h2>Pizzad Diagnostics</h2>
+        <pre className="log-box">{data.diagnostics}</pre>
+      </div>}
+      {topTab === "tr" && <div className="trouble-panel">
+        <div className="trouble-tabs nested">
+          <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
+          <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
+          <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
+          <button className={trTab === "diagnostics" ? "active" : ""} onClick={() => setTrTab("diagnostics")}>Diagnostics</button>
+          <button className={trTab === "insights" ? "active" : ""} onClick={() => setTrTab("insights")}>Insights</button>
+        </div>
+        {trTab === "summary" && <TrHealthSummaryView data={data} />}
+        {trTab === "metrics" && <div>
+          <div className="metric-controls">
+            <label><input type="checkbox" checked={bySystem} onChange={e => setBySystem(e.target.checked)} /> By system</label>
+            <label>Compare against baseline <select value={baseline} onChange={e => setBaseline(e.target.value)}><option>7d</option><option>14d</option><option>30d</option></select></label>
+          </div>
+          <div className="tr-chart-grid">{active.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
+        </div>}
+        {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
+        {trTab === "diagnostics" && <pre className="log-box">{data.diagnostics}</pre>}
+        {trTab === "insights" && <div className="card"><button disabled>Generate Recommendation</button><p className="muted">Uses LM Link to summarize issues and baselines.</p><pre className="log-box">{data.insightsText}</pre></div>}
+      </div>}
+    </div>
+  );
+}
+
+function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
+  const cfg = data.config;
+  return <div className="tr-summary">
+    <div className="card">
+      <h2>{data.health.title}</h2>
+      <p className="muted">{data.health.window}</p>
+      <p className="muted">{data.health.lastWindow}</p>
+      <p className="muted">{data.health.source}</p>
+      <p className="muted">Health summary is computed from the last 24 hours only.</p>
+    </div>
+    <div className="card">
+      <h3>Configuration</h3>
+      <div>{cfg?.ok ? "OK" : "Problem"}: {cfg?.path}</div>
+      <div className="muted">Callstream target {cfg?.callstreamTarget}; configured {cfg?.callstreamConfigured ? "yes" : "no"}</div>
+    </div>
+    <MetricTable title="Health Metrics" rows={data.health.metrics} />
+    <MetricTable title="Systems" rows={data.health.systems} />
+    <div className="remedy-list"><h3>Suggested Remedies</h3>{data.health.remedies.map(r => <div className={`remedy ${r.isIssue ? "issue" : ""}`} key={r.metric}><strong>{r.metric}</strong><p>{r.notes}</p></div>)}</div>
+    <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>Decode 0%</th><th>Avg decode</th><th>Retunes</th><th>No TX</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.decodeZeroPct.toFixed(1)}%</td><td>{r.decodeLines ? (r.decodeRateTotal / r.decodeLines).toFixed(2) : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
+  </div>;
+}
+
+function MetricTable({ title, rows }: { title: string; rows: TrHealthMetric[] }) {
+  return <div className="card"><h3>{title}</h3><table className="table metric-table"><thead><tr><th>Metric</th><th>Value</th><th>Notes</th></tr></thead><tbody>{rows.map(r => <tr className={r.isIssue ? "issue-row" : ""} key={r.metric}><td>{r.metric}</td><td>{r.value}</td><td>{r.notes}</td></tr>)}</tbody></table></div>;
+}
+
+function TrHealthChartView({ chart }: { chart: TrHealthChart }) {
+  const colors = ["#62c6ff", "#ffcf5a", "#7ee081", "#ff6b5a"];
+  const max = Math.max(1, ...chart.series.flatMap(s => s.values));
+  const w = 680, h = 190, left = 44, top = 18, bottom = 38, right = 16;
+  const plotW = w - left - right, plotH = h - top - bottom;
+  const x = (i: number, len: number) => left + (len <= 1 ? 0 : (i / (len - 1)) * plotW);
+  const y = (v: number) => top + plotH - (v / max) * plotH;
+  return <div className="card tr-chart-card">
+    <h3>{chart.title}</h3>
+    <p className="muted">{chart.yAxisLabel}</p>
+    <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <line className="axis" x1={left} y1={top} x2={left} y2={top + plotH} />
+      <line className="axis" x1={left} y1={top + plotH} x2={left + plotW} y2={top + plotH} />
+      <text className="chart-label" x={left - 6} y={top + 4} textAnchor="end">{formatChartValue(max, chart.valueFormat)}</text>
+      <text className="chart-label" x={left - 6} y={top + plotH} textAnchor="end">0</text>
+      {chart.series.map((s, si) => <polyline key={s.label || si} points={s.values.map((v, i) => `${x(i, s.values.length)},${y(v)}`).join(" ")} fill="none" stroke={colors[si % colors.length]} strokeWidth="2" strokeDasharray={s.isBaseline ? "5 5" : undefined} />)}
+      <text className="chart-label" x={left} y={h - 10}>{chart.labels[0] ?? ""}</text>
+      <text className="chart-label" x={left + plotW} y={h - 10} textAnchor="end">{chart.labels[chart.labels.length - 1] ?? ""}</text>
+    </svg>
+    <div className="legend">{chart.series.map((s, i) => <span key={s.label || i}><i style={{ background: colors[i % colors.length] }} />{s.label || "current"}</span>)}</div>
+  </div>;
+}
+
+function formatChartValue(value: number, format: string) {
+  return format === "F1" ? value.toFixed(1) : Math.round(value).toLocaleString();
 }
 
 function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Job[]; settingsSections: Record<string, any>; rangeHours: number; reload: () => Promise<void> }) {

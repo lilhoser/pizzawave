@@ -330,10 +330,12 @@ public sealed class EngineDatabase
         command.CommandText = """
             INSERT INTO tr_health_samples (
                 window_start_utc, window_end_utc, scope, decode_lines, decode_zero, decode_zero_pct,
-                retunes, calls_started, calls_concluded, sample_stops, unable_source)
+                decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded,
+                sample_stops, unable_source, tuning_err_samples, tuning_err_total_abs_hz, tuning_err_max_abs_hz)
             VALUES (
                 $window_start_utc, $window_end_utc, $scope, $decode_lines, $decode_zero, $decode_zero_pct,
-                $retunes, $calls_started, $calls_concluded, $sample_stops, $unable_source);
+                $decode_rate_total, $retunes, $calls_started, $calls_concluded, $update_not_grant, $no_tx_recorded,
+                $sample_stops, $unable_source, $tuning_err_samples, $tuning_err_total_abs_hz, $tuning_err_max_abs_hz);
             """;
         Add(command, "$window_start_utc", sample.WindowStartUtc.ToString("O"));
         Add(command, "$window_end_utc", sample.WindowEndUtc.ToString("O"));
@@ -341,11 +343,17 @@ public sealed class EngineDatabase
         Add(command, "$decode_lines", sample.DecodeLines);
         Add(command, "$decode_zero", sample.DecodeZero);
         Add(command, "$decode_zero_pct", sample.DecodeZeroPct);
+        Add(command, "$decode_rate_total", sample.DecodeRateTotal);
         Add(command, "$retunes", sample.Retunes);
         Add(command, "$calls_started", sample.CallsStarted);
         Add(command, "$calls_concluded", sample.CallsConcluded);
+        Add(command, "$update_not_grant", sample.UpdateNotGrant);
+        Add(command, "$no_tx_recorded", sample.NoTxRecorded);
         Add(command, "$sample_stops", sample.SampleStops);
         Add(command, "$unable_source", sample.UnableSource);
+        Add(command, "$tuning_err_samples", sample.TuningErrSamples);
+        Add(command, "$tuning_err_total_abs_hz", sample.TuningErrTotalAbsHz);
+        Add(command, "$tuning_err_max_abs_hz", sample.TuningErrMaxAbsHz);
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -413,11 +421,17 @@ public sealed class EngineDatabase
                 DecodeLines = reader.GetInt32(reader.GetOrdinal("decode_lines")),
                 DecodeZero = reader.GetInt32(reader.GetOrdinal("decode_zero")),
                 DecodeZeroPct = reader.GetDouble(reader.GetOrdinal("decode_zero_pct")),
+                DecodeRateTotal = reader.GetDouble(reader.GetOrdinal("decode_rate_total")),
                 Retunes = reader.GetInt32(reader.GetOrdinal("retunes")),
                 CallsStarted = reader.GetInt32(reader.GetOrdinal("calls_started")),
                 CallsConcluded = reader.GetInt32(reader.GetOrdinal("calls_concluded")),
+                UpdateNotGrant = reader.GetInt32(reader.GetOrdinal("update_not_grant")),
+                NoTxRecorded = reader.GetInt32(reader.GetOrdinal("no_tx_recorded")),
                 SampleStops = reader.GetInt32(reader.GetOrdinal("sample_stops")),
-                UnableSource = reader.GetInt32(reader.GetOrdinal("unable_source"))
+                UnableSource = reader.GetInt32(reader.GetOrdinal("unable_source")),
+                TuningErrSamples = reader.GetInt32(reader.GetOrdinal("tuning_err_samples")),
+                TuningErrTotalAbsHz = reader.GetDouble(reader.GetOrdinal("tuning_err_total_abs_hz")),
+                TuningErrMaxAbsHz = reader.GetDouble(reader.GetOrdinal("tuning_err_max_abs_hz"))
             });
         }
         return rows;
@@ -713,6 +727,12 @@ public sealed class EngineDatabase
     {
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "update_not_grant", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "no_tx_recorded", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_samples", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_total_abs_hz", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_max_abs_hz", "REAL NOT NULL DEFAULT 0", ct);
         await ExecuteNonQueryAsync(connection, """
             CREATE TABLE IF NOT EXISTS insight_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -892,11 +912,17 @@ public sealed class EngineDatabase
             decode_lines INTEGER NOT NULL DEFAULT 0,
             decode_zero INTEGER NOT NULL DEFAULT 0,
             decode_zero_pct REAL NOT NULL DEFAULT 0,
+            decode_rate_total REAL NOT NULL DEFAULT 0,
             retunes INTEGER NOT NULL DEFAULT 0,
             calls_started INTEGER NOT NULL DEFAULT 0,
             calls_concluded INTEGER NOT NULL DEFAULT 0,
+            update_not_grant INTEGER NOT NULL DEFAULT 0,
+            no_tx_recorded INTEGER NOT NULL DEFAULT 0,
             sample_stops INTEGER NOT NULL DEFAULT 0,
-            unable_source INTEGER NOT NULL DEFAULT 0
+            unable_source INTEGER NOT NULL DEFAULT 0,
+            tuning_err_samples INTEGER NOT NULL DEFAULT 0,
+            tuning_err_total_abs_hz REAL NOT NULL DEFAULT 0,
+            tuning_err_max_abs_hz REAL NOT NULL DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_tr_health_window ON tr_health_samples(window_start_utc DESC, scope);

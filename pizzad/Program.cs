@@ -32,6 +32,7 @@ builder.Services.AddSingleton<DashboardService>();
 builder.Services.AddSingleton<SftpImportService>();
 builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddSingleton<TrConfigService>();
+builder.Services.AddSingleton<TrHealthTroubleshootService>();
 builder.Services.AddHostedService<CallstreamListener>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
 builder.Services.AddHostedService<TrHealthCollector>();
@@ -157,6 +158,15 @@ app.MapGet("/api/v1/troubleshoot/tr-health", async (HttpContext context, long? s
     return Results.Ok(await database.ListHealthSamplesAsync(range.Start, range.End, context.RequestAborted));
 })
 .WithName("TrHealth")
+.WithOpenApi();
+
+app.MapGet("/api/v1/troubleshoot", async (HttpContext context, long? start, long? end, bool? bySystem, string? baseline, AuthService authService, TrHealthTroubleshootService troubleshoot) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = new TimeRangeQuery(start, end).Resolve();
+    return Results.Ok(await troubleshoot.BuildAsync(range.Start, range.End, bySystem ?? false, string.IsNullOrWhiteSpace(baseline) ? "7d" : baseline, context.RequestAborted));
+})
+.WithName("Troubleshoot")
 .WithOpenApi();
 
 app.MapGet("/api/v1/troubleshoot/tr-config", (HttpContext context, AuthService authService, TrConfigService trConfig) =>

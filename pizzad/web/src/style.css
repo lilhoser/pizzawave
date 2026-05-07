@@ -182,6 +182,88 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .table th, .table td { border-bottom: 1px solid #30363d; padding: 6px 4px; text-align: left; }
 .trend { display: inline-block; width: 6px; background: var(--accent); margin-right: 2px; vertical-align: bottom; }
 .category-page, .settings-page, .trouble-page { height: 100%; overflow: auto; padding: 10px; }
+.trouble-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.trouble-tabs button.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+.trouble-tabs.nested {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #171a1d;
+  padding: 4px 0;
+}
+.trouble-panel {
+  min-height: 0;
+}
+.tr-summary {
+  display: grid;
+  gap: 10px;
+}
+.metric-table .issue-row td {
+  background: #4a2a2a;
+}
+.remedy-list {
+  display: grid;
+  gap: 8px;
+}
+.remedy {
+  background: #20252a;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 9px;
+}
+.remedy.issue {
+  border-color: #8f4242;
+  background: #2d2020;
+}
+.remedy p {
+  margin: 4px 0 0;
+  color: #d0d0d0;
+}
+.metric-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 10px;
+  color: #d0d0d0;
+}
+.metric-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tr-chart-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.tr-chart-card {
+  width: min(760px, 100%);
+}
+.log-box {
+  width: 100%;
+  min-height: 320px;
+  max-height: 70vh;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  background: #111417;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px;
+  color: #d6e2ec;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+}
 .category-split-page {
   height: 100%;
   display: grid;

@@ -1,10 +1,20 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace pizzad;
 
 public sealed class TrHealthCollector : BackgroundService
 {
+    private static readonly Regex DecodeRateRegex = new(
+        @"(?:decode|decoded)[^0-9-]*(?<rate>-?\d+(?:\.\d+)?)\s*(?:/sec|per sec|hz)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex TuningErrorRegex = new(
+        @"(?:tuning|tune)[^0-9-]*(?:error|err)[^0-9-]*(?<hz>-?\d+(?:\.\d+)?)\s*hz",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SystemScopeRegex = new(
+        @"\]\s+\((?:info|error|warning|debug)\)\s+\[(?<scope>[^\]]+)\]",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
@@ -79,10 +89,34 @@ public sealed class TrHealthCollector : BackgroundService
         return output;
     }
 
-    private static TrHealthSampleDto BuildSample(string scope, DateTime startUtc, DateTime endUtc, string log)
+    public static TrHealthSampleDto BuildSample(string scope, DateTime startUtc, DateTime endUtc, string log)
     {
-        var decodeLines = Count(log, "Control Channel Message Decode Rate");
-        var decodeZero = Count(log, "Control Channel Message Decode Rate: 0/sec");
+        var decodeLines = 0;
+        var decodeZero = 0;
+        var decodeRateTotal = 0.0;
+        var tuningErrSamples = 0;
+        var tuningErrTotalAbsHz = 0.0;
+        var tuningErrMaxAbsHz = 0.0;
+        foreach (var line in log.Split('\n'))
+        {
+            if (TryParseDecodeRate(line, out var rate))
+            {
+                decodeLines++;
+                decodeRateTotal += rate;
+                if (Math.Abs(rate) < 0.0001)
+                    decodeZero++;
+            }
+
+            var tuningMatch = TuningErrorRegex.Match(line);
+            if (tuningMatch.Success && double.TryParse(tuningMatch.Groups["hz"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var hz))
+            {
+                var absHz = Math.Abs(hz);
+                tuningErrSamples++;
+                tuningErrTotalAbsHz += absHz;
+                tuningErrMaxAbsHz = Math.Max(tuningErrMaxAbsHz, absHz);
+            }
+        }
+
         return new TrHealthSampleDto
         {
             WindowStartUtc = startUtc,
@@ -91,21 +125,47 @@ public sealed class TrHealthCollector : BackgroundService
             DecodeLines = decodeLines,
             DecodeZero = decodeZero,
             DecodeZeroPct = decodeLines == 0 ? 0 : decodeZero * 100.0 / decodeLines,
+            DecodeRateTotal = decodeRateTotal,
             Retunes = Count(log, "Retuning to Control Channel"),
             CallsStarted = Count(log, "Starting P25 Recorder"),
             CallsConcluded = Count(log, "Concluding Recorded Call"),
-            SampleStops = Count(log, "stopped receiving samples"),
-            UnableSource = Count(log, "Unable to find a source")
+            UpdateNotGrant = Count(log, "update not grant") + Count(log, "This was an UPDATE"),
+            NoTxRecorded = Count(log, "No Transmissions were recorded")
+                + Count(log, "no transmission")
+                + Count(log, "no tx")
+                + Count(log, "not recording transmission")
+                + Count(log, "only 0 recorders are available"),
+            SampleStops = Count(log, "has stopped receiving samples")
+                + Count(log, "sample stop")
+                + Count(log, "stopped samples"),
+            UnableSource = Count(log, "no source covering") + Count(log, "Unable to find a source"),
+            TuningErrSamples = tuningErrSamples,
+            TuningErrTotalAbsHz = tuningErrTotalAbsHz,
+            TuningErrMaxAbsHz = tuningErrMaxAbsHz
         };
     }
 
     private static IReadOnlyList<string> ExtractSystemScopes(string log) =>
-        Regex.Matches(log, @"\([a-z]+\)\s+\[([^]]+)\]")
-            .Select(m => m.Groups[1].Value)
+        SystemScopeRegex.Matches(log)
+            .Select(m => m.Groups["scope"].Value)
             .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Where(s => !s.All(char.IsDigit) && !s.StartsWith("source", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
     private static int Count(string haystack, string needle) =>
         Regex.Matches(haystack, Regex.Escape(needle), RegexOptions.IgnoreCase).Count;
+
+    private static bool TryParseDecodeRate(string line, out double rate)
+    {
+        rate = 0;
+        if (!line.Contains("decode", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var match = DecodeRateRegex.Match(line);
+        if (!match.Success)
+            return false;
+
+        return double.TryParse(match.Groups["rate"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate);
+    }
 }

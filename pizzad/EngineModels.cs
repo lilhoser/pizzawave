@@ -152,12 +152,51 @@ public sealed record TrHealthSampleDto
     public int DecodeLines { get; init; }
     public int DecodeZero { get; init; }
     public double DecodeZeroPct { get; init; }
+    public double DecodeRateTotal { get; init; }
+    public double AvgDecodeRate => DecodeLines == 0 ? 0 : DecodeRateTotal / DecodeLines;
     public int Retunes { get; init; }
     public int CallsStarted { get; init; }
     public int CallsConcluded { get; init; }
+    public int UpdateNotGrant { get; init; }
+    public int NoTxRecorded { get; init; }
     public int SampleStops { get; init; }
     public int UnableSource { get; init; }
+    public int TuningErrSamples { get; init; }
+    public double TuningErrTotalAbsHz { get; init; }
+    public double TuningErrMaxAbsHz { get; init; }
 }
+
+public sealed record TrHealthMetricDto(string Metric, string Value, string Notes, bool IsIssue);
+
+public sealed record TrHealthSeriesDto(string Label, IReadOnlyList<double> Values, bool IsBaseline = false);
+
+public sealed record TrHealthChartDto(
+    string Title,
+    string YAxisLabel,
+    string ValueFormat,
+    IReadOnlyList<string> Labels,
+    IReadOnlyList<TrHealthSeriesDto> Series);
+
+public sealed record TrHealthSummaryDto
+{
+    public string Title { get; init; } = "TR health summary";
+    public string Window { get; init; } = string.Empty;
+    public string LastWindow { get; init; } = string.Empty;
+    public string Source { get; init; } = string.Empty;
+    public string SummaryText { get; init; } = string.Empty;
+    public IReadOnlyList<TrHealthMetricDto> Metrics { get; init; } = [];
+    public IReadOnlyList<TrHealthMetricDto> Systems { get; init; } = [];
+    public IReadOnlyList<TrHealthMetricDto> Remedies { get; init; } = [];
+    public IReadOnlyList<TrHealthChartDto> Charts { get; init; } = [];
+    public IReadOnlyList<TrHealthSampleDto> Samples { get; init; } = [];
+}
+
+public sealed record TrTroubleshootDto(
+    TrHealthSummaryDto Health,
+    object Config,
+    string LogOutput,
+    string Diagnostics,
+    string InsightsText);
 
 public sealed record TimeRangeQuery(long? Start, long? End)
 {
