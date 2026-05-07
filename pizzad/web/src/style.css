@@ -323,16 +323,21 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border: 1px solid var(--category-border, #36566f);
   border-left: 4px solid var(--category-color, var(--accent));
   border-radius: 6px;
-  padding: 9px;
-  margin-bottom: 9px;
+  padding: 8px 9px;
+  margin-bottom: 7px;
 }
-.insight-tile summary {
+.insight-head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  cursor: pointer;
   color: var(--category-color, var(--accent-strong));
   font-weight: 700;
+  font-size: 13px;
+}
+.insight-tile p {
+  margin: 5px 0 0;
+  line-height: 1.3;
+  font-size: 13px;
 }
 .confidence {
   color: #111;
@@ -354,7 +359,18 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .insight-time {
   color: #9ac7e8;
   font-size: 12px;
-  margin-top: 4px;
+  margin-top: 3px;
+}
+.source-shelf {
+  margin-top: 7px;
+  border-top: 1px solid #2b465a;
+  padding-top: 5px;
+}
+.source-shelf > summary {
+  cursor: pointer;
+  color: #9fc1dd;
+  font-size: 12px;
+  font-weight: 600;
 }
 .call-actions {
   display: grid;
