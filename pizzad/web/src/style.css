@@ -285,6 +285,65 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .call-head { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: #cbd5de; margin-bottom: 4px; }
 .call audio { width: 100%; height: 32px; margin-top: 6px; }
+.incident-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.incident-card {
+  background: #20252a;
+  border: 1px solid #36566f;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.incident-card > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #d7ecff;
+  cursor: pointer;
+  font-weight: 700;
+}
+.incident-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  color: #9fc1dd;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.incident-details {
+  background: #192936;
+  border: 1px solid #36566f;
+  border-radius: 4px;
+  padding: 7px;
+  margin-top: 8px;
+}
+.incident-call {
+  border-top: 1px solid #2b465a;
+  padding: 6px 0 0;
+  margin-top: 6px;
+}
+.incident-call summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #cfe7ff;
+  cursor: pointer;
+  font-size: 12px;
+}
+.incident-call p {
+  color: #c5def3;
+  margin: 6px 0;
+}
+.incident-call audio {
+  width: 100%;
+  height: 30px;
+}
 .job { border-bottom: 1px solid #30363d; padding: 7px 0; }
 @media (max-width: 900px) {
   .app { grid-template-columns: 138px 1fr; }

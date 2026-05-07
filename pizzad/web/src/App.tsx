@@ -218,8 +218,36 @@ function Alerts({ rows }: { rows: AlertMatch[] }) {
 }
 
 function Incidents({ rows }: { rows: Incident[] }) {
-  if (!rows.length) return <div className="card"><p className="muted">No incidents in this range yet. Incidents are generated automatically after enough live calls are transcribed.</p></div>;
-  return <>{rows.map(i => <details className="call" key={i.id}><summary>{i.title}</summary><p>{i.detail}</p>{i.calls.map(c => <div className="muted" key={c.callId}>{new Date(c.rawTimestamp * 1000).toLocaleString()} - Call {c.callId}</div>)}</details>)}</>;
+  const [expanded, setExpanded] = useState(false);
+  if (!rows.length) return <div className="card"><p className="muted">No incidents detected.</p></div>;
+  return <div className="incident-explorer">
+    <div className="incident-toolbar">
+      <strong>Active Incidents</strong>
+      <button onClick={() => setExpanded(v => !v)}>{expanded ? "Collapse All" : "Expand All"}</button>
+    </div>
+    {rows.map(i => <details className="incident-card" key={i.id} open={expanded}>
+      <summary>
+        <span>{i.title}</span>
+        <span className="muted">{i.calls.length} calls</span>
+      </summary>
+      <div className="incident-meta">
+        <span>{incidentTimeRange(i)}</span>
+        <strong className={`confidence ${confidenceClass(i.confidence)}`}>{Math.round(i.confidence * 100)}%</strong>
+      </div>
+      <p>{i.detail}</p>
+      <div className="incident-details">
+        <div className="muted">Related calls</div>
+        {i.calls.map(c => <details className="incident-call" key={c.callId}>
+          <summary>
+            <span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span>
+            <span>Call {c.callId}</span>
+          </summary>
+          <p>{c.transcript}</p>
+          <audio controls preload="metadata" src={c.audioUrl} />
+        </details>)}
+      </div>
+    </details>)}
+  </div>;
 }
 
 function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: string; rangeHours: number; reload: () => Promise<void> }) {
@@ -253,6 +281,15 @@ function CollapsibleCallGroup({ group, category }: { group: CategoryPage["groups
 function CallRow({ call }: { call: EngineCall }) {
   const status = call.qualityReason && call.qualityReason !== "ok" ? `${call.transcriptionStatus}: ${call.qualityReason}` : call.transcriptionStatus;
   return <div className={`call category-${call.category}`}><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+}
+
+function incidentTimeRange(incident: Incident) {
+  const first = new Date(incident.firstSeen * 1000);
+  const last = new Date(incident.lastSeen * 1000);
+  if (first.toDateString() === last.toDateString()) {
+    return `${first.toLocaleString()} - ${last.toLocaleTimeString()}`;
+  }
+  return `${first.toLocaleString()} - ${last.toLocaleString()}`;
 }
 
 function confidenceClass(score: number) {

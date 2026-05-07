@@ -177,8 +177,14 @@ public sealed class AutomaticInsightsService : BackgroundService
         foreach (var ev in result.Events.Where(IsActionableEvent))
         {
             var calls = ResolveEventCalls(ev, batch);
-            if (calls.Count == 0)
+            if (calls.Count < 2)
+            {
+                _logger.LogInformation(
+                    "Skipped AI event '{Title}' because it linked {CallCount} call(s); incidents require at least 2 related calls.",
+                    ev.Title,
+                    calls.Count);
                 continue;
+            }
 
             await _database.AddIncidentAsync(new IncidentDto
             {
@@ -215,7 +221,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 new
                 {
                     role = "system",
-                    content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 1-3 matching call_ids copied exactly from the provided call lines. Do not collapse many distinct incidents into only a few bullets; include broad coverage across distinct incidents with strong evidence."
+                    content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). An incident is multiple related calls about the same situation. For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 2-4 matching call_ids copied exactly from the provided call lines. Omit single-call observations, routine acknowledgements, and 'no incident' findings."
                 },
                 new { role = "user", content = BuildPrompt(calls, start, end) }
             }
@@ -275,8 +281,9 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("Category guidance: each notable event must use one of these categories exactly:");
         sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
         sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
-        sb.AppendLine("Linkage guidance: each notable event must include 1-3 call_ids copied exactly from input lines.");
-        sb.AppendLine($"Coverage guidance: target about {targetEventCount} notable_events for this window when evidence supports it (never fewer than 6 unless there are truly fewer distinct incidents). Keep each detail concise (1 sentence).");
+        sb.AppendLine("Incident definition: an incident is multiple related calls about the same situation. Do not create notable_events for single-call observations.");
+        sb.AppendLine("Linkage guidance: each notable event must include 2-4 call_ids copied exactly from input lines.");
+        sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Return an empty notable_events array when there are no multi-call incidents. Keep each detail concise (1 sentence).");
 
         var prioritizedCalls = calls
             .OrderByDescending(c => c.IsAlertMatch)
@@ -394,7 +401,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (string.IsNullOrWhiteSpace(combined))
             return false;
 
-        if (ev.CallIds.Count == 0)
+        if (ev.CallIds.Count < 2)
             return false;
 
         return !Regex.IsMatch(combined,
@@ -500,7 +507,9 @@ public sealed class AutomaticInsightsService : BackgroundService
                                 call_ids = new
                                 {
                                     type = "array",
-                                    items = new { type = "string" }
+                                    items = new { type = "string" },
+                                    minItems = 2,
+                                    maxItems = 4
                                 }
                             },
                             required = new[] { "title", "detail", "category", "timestamp", "confidence", "call_ids" }

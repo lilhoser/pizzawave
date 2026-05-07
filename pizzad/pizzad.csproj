@@ -30,7 +30,7 @@
     </Content>
   </ItemGroup>
 
-  <Target Name="BuildWebUi" BeforeTargets="ComputeFilesToPublish">
+  <Target Name="BuildWebUi" BeforeTargets="ComputeFilesToPublish" Condition="'$(PIZZAD_SKIP_WEB_BUILD)' != 'true'">
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm install" />
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm run build" />
   </Target>
