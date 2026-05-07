@@ -11,8 +11,9 @@ public sealed class AutomaticInsightsService : BackgroundService
 {
     private const int DefaultBatchSize = 50;
     private const int MaxPromptChars = 120_000;
-    private const double IncidentCallEventThreshold = 0.20;
-    private const double IncidentPairThreshold = 0.28;
+    private const double IncidentCallEventThreshold = 0.24;
+    private const double IncidentCorroborationPairThreshold = 0.12;
+    private const double IncidentPairThreshold = 0.34;
     private static readonly TimeSpan MaxIncidentSpan = TimeSpan.FromMinutes(60);
     private readonly ConcurrentQueue<EngineCall> _queue = new();
     private readonly EngineConfig _config;
@@ -513,35 +514,20 @@ public sealed class AutomaticInsightsService : BackgroundService
                 maxPairwise = Math.Max(maxPairwise, ComputeIncidentSimilarity(callTokens[i].PairTokens, callTokens[j].PairTokens));
         }
 
-        if (eventMatchedCalls.Count >= 2)
+        if (eventMatchedCalls.Count >= 2 && maxPairwise >= IncidentCorroborationPairThreshold)
         {
-            reason = "accepted by event token overlap";
-            return true;
-        }
-
-        if (eventMatchedCalls.Count >= 1 && HasRepeatedTalkgroup(calls, eventMatchedCalls))
-        {
-            reason = "accepted by event token overlap and repeated talkgroup";
+            reason = $"accepted by event token overlap and transcript corroboration; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}";
             return true;
         }
 
         if (maxPairwise >= IncidentPairThreshold)
         {
-            reason = "accepted by call transcript overlap";
+            reason = $"accepted by strong call transcript overlap; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}";
             return true;
         }
 
-        reason = $"insufficient shared signal; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}, span={span.TotalMinutes:0.#}m";
+        reason = $"insufficient shared signal; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}, requiredEventPairwise={IncidentCorroborationPairThreshold:0.00}, requiredStrongPairwise={IncidentPairThreshold:0.00}, span={span.TotalMinutes:0.#}m";
         return false;
-    }
-
-    private static bool HasRepeatedTalkgroup(List<EngineCall> calls, List<EngineCall> eventMatchedCalls)
-    {
-        var matchedTalkgroups = eventMatchedCalls.Select(c => c.Talkgroup).ToHashSet();
-        return calls
-            .Where(c => matchedTalkgroups.Contains(c.Talkgroup))
-            .GroupBy(c => c.Talkgroup)
-            .Any(g => g.Count() >= 2);
     }
 
     private static HashSet<string> ExtractIncidentTokens(string text)
