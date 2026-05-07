@@ -123,7 +123,7 @@ public sealed class AutomaticInsightsService : BackgroundService
             var result = await SummarizeWindowAsync(batch, start, end, ct);
             var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
             var incidents = 0;
-            foreach (var ev in result.Events)
+            foreach (var ev in result.Events.Where(IsActionableEvent))
             {
                 var calls = ResolveEventCalls(ev, batch);
                 if (calls.Count == 0)
@@ -226,8 +226,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             sb.AppendLine();
         }
 
-        var target = Math.Clamp(calls.Count / 4, 6, 20);
-        sb.AppendLine($"Target about {target} notable_events when evidence supports it. Ignore greetings, empty/inaudible/static-only calls, routine plate/status checks without incident content, and duplicated adjacent radio fragments.");
+        var target = Math.Clamp(calls.Count / 4, 1, 8);
+        sb.AppendLine($"Return zero notable_events when there is no clear incident. Otherwise, target up to {target} notable_events when evidence supports it. Ignore greetings, empty/inaudible/static-only calls, routine plate/status checks without incident content, and duplicated adjacent radio fragments.");
         sb.AppendLine("Calls:");
         foreach (var call in calls.OrderBy(c => c.StartTime))
         {
@@ -313,6 +313,25 @@ public sealed class AutomaticInsightsService : BackgroundService
 
         return resolved;
     }
+
+    private static bool IsActionableEvent(InsightEvent ev)
+    {
+        var title = NormalizeEventText(ev.Title);
+        var detail = NormalizeEventText(ev.Detail);
+        var combined = $"{title} {detail}".Trim();
+        if (string.IsNullOrWhiteSpace(combined))
+            return false;
+
+        if (ev.CallIds.Count == 0)
+            return false;
+
+        return !Regex.IsMatch(combined,
+            @"\b(no|none|not|without|unclear)\b.{0,40}\b(incident|event|actionable|emergency|issue|activity)\b|\b(no event detected|no clear incident|no actionable incident|no notable event|nothing notable|routine traffic only|routine chatter|non.?incident)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static string NormalizeEventText(string value) =>
+        Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
 
     private bool IsEnabled() =>
         _config.AiInsights.Enabled &&
