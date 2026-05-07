@@ -9,7 +9,8 @@ namespace pizzad;
 
 public sealed class AutomaticInsightsService : BackgroundService
 {
-    private const int DefaultBatchSize = 20;
+    private const int DefaultBatchSize = 50;
+    private const int MaxPromptChars = 120_000;
     private readonly ConcurrentQueue<EngineCall> _queue = new();
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
@@ -175,14 +176,14 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             model = InsightModel(),
             temperature = 0.1,
-            max_tokens = 1200,
+            max_tokens = 8000,
             response_format = InsightResponseFormat(),
             messages = new[]
             {
                 new
                 {
                     role = "system",
-                    content = "You summarize radio call transcripts into concise actionable incidents. Output JSON only with fields summary_text and notable_events. notable_events is an array of objects with title, detail, category, timestamp, confidence, and call_ids. Choose category from police, fire, ems, traffic, public_works, utilities, other. Each event must include 1-3 call_ids copied exactly from input lines, such as C000001234ABC. Do not create an event if you cannot cite at least one exact call_id from the input."
+                    content = "You summarize radio call transcripts into concise, actionable insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include 1-3 matching call_ids copied exactly from the provided call lines. Do not collapse many distinct incidents into only a few bullets; include broad coverage across distinct incidents with strong evidence."
                 },
                 new { role = "user", content = BuildPrompt(calls, start, end) }
             }
@@ -219,25 +220,51 @@ public sealed class AutomaticInsightsService : BackgroundService
     private string BuildPrompt(List<EngineCall> calls, long start, long end)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Window: {DateTimeOffset.FromUnixTimeSeconds(start).ToLocalTime():yyyy-MM-dd HH:mm} to {DateTimeOffset.FromUnixTimeSeconds(end).ToLocalTime():yyyy-MM-dd HH:mm}");
+        var targetEventCount = calls.Count switch
+        {
+            >= 300 => 18,
+            >= 200 => 16,
+            >= 100 => 14,
+            >= 50 => 12,
+            _ => 8
+        };
+
+        sb.AppendLine($"Window: {DateTimeOffset.FromUnixTimeSeconds(start).ToLocalTime()} to {DateTimeOffset.FromUnixTimeSeconds(end).ToLocalTime()}");
         if (!string.IsNullOrWhiteSpace(_priorSummary))
         {
-            sb.AppendLine("Prior summary context:");
+            sb.AppendLine("Prior summary:");
             sb.AppendLine(_priorSummary);
-            sb.AppendLine();
         }
 
-        var target = Math.Clamp(calls.Count / 4, 1, 8);
-        sb.AppendLine($"Return zero notable_events when there is no clear incident. Otherwise, target up to {target} notable_events when evidence supports it. Ignore greetings, empty/inaudible/static-only calls, routine plate/status checks without incident content, and duplicated adjacent radio fragments.");
-        sb.AppendLine("Calls:");
-        foreach (var call in calls.OrderBy(c => c.StartTime))
+        sb.AppendLine("Category guidance: each notable event must use one of these categories exactly:");
+        sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
+        sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
+        sb.AppendLine("Linkage guidance: each notable event must include 1-3 call_ids copied exactly from input lines.");
+        sb.AppendLine($"Coverage guidance: target about {targetEventCount} notable_events for this window when evidence supports it (never fewer than 6 unless there are truly fewer distinct incidents). Keep each detail concise (1 sentence).");
+
+        var prioritizedCalls = calls
+            .OrderByDescending(c => c.IsAlertMatch)
+            .ThenByDescending(c => c.StopTime - c.StartTime);
+
+        var lines = new List<string>();
+        var usedChars = sb.Length;
+        foreach (var call in prioritizedCalls)
         {
             var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
-            var line = $"{CallToken(call.Id)} | {local:HH:mm:ss} | {call.SystemShortName} | {Label(call)} | {Trim(call.Transcription, 220)}";
-            if (sb.Length + line.Length > 12_000)
+            var prefix = call.IsAlertMatch ? "[ALERT] " : string.Empty;
+            var line = $"- [id:{CallToken(call.Id)}] [{local:h:mm tt}] {call.SystemShortName} | {Label(call)}: {prefix}{call.Transcription}";
+            if (usedChars + line.Length + Environment.NewLine.Length > MaxPromptChars)
                 break;
-            sb.AppendLine(line);
+
+            lines.Add(line);
+            usedChars += line.Length + Environment.NewLine.Length;
         }
+
+        var omitted = Math.Max(0, calls.Count - lines.Count);
+        sb.AppendLine($"Analyzing {lines.Count} calls (alerts prioritized, prompt budget {MaxPromptChars:N0} chars, omitted {omitted}):");
+        foreach (var line in lines)
+            sb.AppendLine(line);
+
         return sb.ToString();
     }
 

@@ -22,9 +22,7 @@
   },
   "transcription": {
     "provider": "whisper",
-    "analogSampleRate": 8000,
-    "openAiBaseUrl": "http://localhost:1234/v1",
-    "openAiModel": "qwen3.6-35b-a3b@q8_0"
+    "analogSampleRate": 8000
   },
   "aiInsights": {
     "enabled": true,

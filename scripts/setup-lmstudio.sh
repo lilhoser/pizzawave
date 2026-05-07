@@ -5,24 +5,28 @@ set -euo pipefail
 # Configure LM Studio headless daemon (llmster) as a systemd service.
 # Based on: https://lmstudio.ai/docs/developer/core/headless_llmster
 
-DEFAULT_MODEL="openai/gpt-oss-20b"
+DEFAULT_MODEL="qwen3.6-35b-a3b@q8_0"
 SERVICE_PATH="/etc/systemd/system/lmstudio.service"
 
 print_usage() {
   cat <<'USAGE'
 Usage:
-  setup-lmstudio.sh [--user <linux_user>] [--model <model_id>] [--skip-model-load]
+  setup-lmstudio.sh [--user <linux_user>] [--model <model_id>] [--preload-model] [--skip-model-load]
 
 Options:
   --user <linux_user>   Linux user that should run LM Studio service.
                         Defaults to SUDO_USER when run with sudo, otherwise current user.
-  --model <model_id>    Model identifier to download/load (default: openai/gpt-oss-20b).
-  --skip-model-load     Do not include a model preload in systemd service.
+  --model <model_id>    Model identifier to download/load when --preload-model is used
+                        (default: qwen3.6-35b-a3b@q8_0).
+  --preload-model       Download and load a local model before starting the server.
+                        Omit this for LM Link relay mode.
+  --skip-model-load     Compatibility alias for the default LM Link relay mode.
   -h, --help            Show this help.
 
 Examples:
   sudo ./scripts/setup-lmstudio.sh
-  sudo ./scripts/setup-lmstudio.sh --user alice --model openai/gpt-oss-20b
+  sudo ./scripts/setup-lmstudio.sh --user alice
+  sudo ./scripts/setup-lmstudio.sh --user alice --preload-model --model qwen3.6-35b-a3b@q8_0
   sudo ./scripts/setup-lmstudio.sh --skip-model-load
 USAGE
 }
@@ -36,7 +40,7 @@ require_cmd() {
 
 TARGET_USER="${SUDO_USER:-${USER:-}}"
 MODEL_ID="$DEFAULT_MODEL"
-SKIP_MODEL_LOAD="false"
+PRELOAD_MODEL="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,8 +54,12 @@ while [[ $# -gt 0 ]]; do
       MODEL_ID="$2"
       shift 2
       ;;
+    --preload-model)
+      PRELOAD_MODEL="true"
+      shift
+      ;;
     --skip-model-load)
-      SKIP_MODEL_LOAD="true"
+      PRELOAD_MODEL="false"
       shift
       ;;
     -h|--help)
@@ -103,9 +111,9 @@ fi
 echo "==> Verifying lms installation"
 sudo -u "$TARGET_USER" -H "$LMS_BIN" --help >/dev/null
 
-if [[ "$SKIP_MODEL_LOAD" == "false" ]]; then
+if [[ "$PRELOAD_MODEL" == "true" ]]; then
   echo "==> Downloading model: $MODEL_ID"
-  sudo -u "$TARGET_USER" -H "$LMS_BIN" get "$MODEL_ID"
+  sudo -u "$TARGET_USER" -H "$LMS_BIN" get "$MODEL_ID" --yes
 fi
 
 echo "==> Writing systemd unit: $SERVICE_PATH"
@@ -121,7 +129,7 @@ echo "==> Writing systemd unit: $SERVICE_PATH"
   echo "User=$TARGET_USER"
   echo "Environment=\"HOME=$TARGET_HOME\""
   echo "ExecStartPre=$LMS_BIN daemon up"
-  if [[ "$SKIP_MODEL_LOAD" == "false" ]]; then
+  if [[ "$PRELOAD_MODEL" == "true" ]]; then
     echo "ExecStartPre=$LMS_BIN load $MODEL_ID --yes"
   fi
   echo "ExecStart=$LMS_BIN server start --bind 127.0.0.1 --port 1234"

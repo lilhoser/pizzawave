@@ -10,13 +10,13 @@ PUBLISH_DIR=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LMSTUDIO="false"
 LMSTUDIO_USER="${SUDO_USER:-${USER:-}}"
-LMSTUDIO_MODEL="openai/gpt-oss-20b"
-LMSTUDIO_SKIP_MODEL_LOAD="false"
+LMSTUDIO_MODEL="qwen3.6-35b-a3b@q8_0"
+LMSTUDIO_SKIP_MODEL_LOAD="true"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  setup_pizzawave_engine.sh --publish-dir <path> [--with-lmstudio] [--lmstudio-user <user>] [--lmstudio-model <model>] [--skip-lmstudio-model-load]
+  setup_pizzawave_engine.sh --publish-dir <path> [--with-lmstudio] [--lmstudio-user <user>] [--lmstudio-model <model>] [--preload-lmstudio-model]
 
 Installs PizzaWave Engine (pizzad) as a systemd service.
 Build/publish first, for example:
@@ -25,6 +25,8 @@ Build/publish first, for example:
 
 LM Studio is optional and is used by aiInsights/summarization only. Local Linux
 transcription remains controlled by /etc/pizzawave/pizzad.json.
+By default LM Studio is installed in LM Link relay mode and no local LLM is
+downloaded or preloaded.
 USAGE
 }
 
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
     --lmstudio-model)
       LMSTUDIO_MODEL="$2"
       shift 2
+      ;;
+    --preload-lmstudio-model)
+      LMSTUDIO_SKIP_MODEL_LOAD="false"
+      shift
       ;;
     --skip-lmstudio-model-load)
       LMSTUDIO_SKIP_MODEL_LOAD="true"
@@ -171,6 +177,8 @@ if [[ "$INSTALL_LMSTUDIO" == "true" ]]; then
   LMSTUDIO_ARGS=(--user "$LMSTUDIO_USER" --model "$LMSTUDIO_MODEL")
   if [[ "$LMSTUDIO_SKIP_MODEL_LOAD" == "true" ]]; then
     LMSTUDIO_ARGS+=(--skip-model-load)
+  else
+    LMSTUDIO_ARGS+=(--preload-model)
   fi
   "$LMSTUDIO_SCRIPT" "${LMSTUDIO_ARGS[@]}"
 fi

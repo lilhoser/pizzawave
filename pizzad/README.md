@@ -55,11 +55,11 @@ The script installer remains available for development:
 sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad
 ```
 
-To install the optional LM Studio service used by `aiInsights` and incident
+To install the optional LM Studio relay used by `aiInsights` and incident
 summarization:
 
 ```bash
-sudo ./scripts/pizzawave setup-lmstudio --user lilhoser --model openai/gpt-oss-20b
+sudo ./scripts/pizzawave setup-lmstudio --user lilhoser
 ```
 
 Or include it during the script installer flow:
@@ -71,7 +71,9 @@ sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad --with
 LM Studio is not the transcription engine in this flow. Local Linux
 transcription is still selected separately in `/etc/pizzawave/pizzad.json` with
 `transcription.provider` (`whisper` or `vosk`). LM Studio provides the local
-OpenAI-compatible API at `http://localhost:1234/v1` for `aiInsights`.
+OpenAI-compatible API at `http://localhost:1234/v1` for `aiInsights`. The
+installer does not download or preload an LLM by default because the expected
+Pi/TR-server flow is LM Link relay mode with the model hosted remotely.
 
 The same flow is exposed through the package-style helper:
 
