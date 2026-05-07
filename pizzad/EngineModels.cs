@@ -34,6 +34,14 @@ public sealed record AlertMatchDto
     public long MatchedAt { get; init; }
     public bool IsImported { get; init; }
     public bool NotificationSuppressed { get; init; }
+    public string SystemShortName { get; init; } = string.Empty;
+    public long Talkgroup { get; init; }
+    public string TalkgroupName { get; init; } = string.Empty;
+    public string Category { get; init; } = "other";
+    public string Transcription { get; init; } = string.Empty;
+    public string TranscriptionStatus { get; init; } = string.Empty;
+    public string QualityReason { get; init; } = string.Empty;
+    public string AudioUrl { get; init; } = string.Empty;
 }
 
 public sealed record DashboardDto

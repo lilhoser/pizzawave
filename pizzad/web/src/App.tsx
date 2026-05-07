@@ -214,7 +214,28 @@ function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {
 
 function Alerts({ rows }: { rows: AlertMatch[] }) {
   if (!rows.length) return <p className="muted">No alert matches in selected range.</p>;
-  return <>{rows.map(a => <div className="call" key={a.id}><div className="call-head"><strong>{a.ruleName}</strong><span>{new Date(a.matchedAt * 1000).toLocaleString()}</span>{a.isImported && <span className="pill">Imported</span>}</div><div>{a.detail}</div></div>)}</>;
+  return <div className="alerts-list">{rows.map(a => {
+    const match = alertMatchText(a.detail);
+    return <div className={`alert-card category-${a.category}`} key={a.id}>
+      <div className="alert-title">
+        <strong>{a.ruleName || "Alert"}</strong>
+        <span>{new Date(a.matchedAt * 1000).toLocaleString()}</span>
+      </div>
+      <div className="alert-meta">
+        <span>{alertDetailLabel(a.detail)}</span>
+        <span>{a.talkgroupName || `TG ${a.talkgroup}`}</span>
+        <span>{a.systemShortName || "unknown system"}</span>
+        <span>Call {a.callId}</span>
+      </div>
+      <div className="alert-badges">
+        {a.isImported && <span className="pill">Imported</span>}
+        {a.notificationSuppressed && <span className="pill">Notification suppressed</span>}
+        {a.qualityReason && a.qualityReason !== "ok" && <span className="pill">{a.transcriptionStatus}: {a.qualityReason}</span>}
+      </div>
+      <p className="alert-transcript">{highlightText(a.transcription || "No transcript available.", match)}</p>
+      {a.audioUrl && <audio controls preload="metadata" src={a.audioUrl} />}
+    </div>;
+  })}</div>;
 }
 
 function Incidents({ rows }: { rows: Incident[] }) {
@@ -237,14 +258,14 @@ function Incidents({ rows }: { rows: Incident[] }) {
       <p>{i.detail}</p>
       <div className="incident-details">
         <div className="muted">Related calls</div>
-        {i.calls.map(c => <details className="incident-call" key={c.callId}>
-          <summary>
+        {i.calls.map(c => <div className="incident-call" key={c.callId}>
+          <div className="incident-call-head">
             <span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span>
             <span>Call {c.callId}</span>
-          </summary>
+          </div>
           <p>{c.transcript}</p>
           <audio controls preload="metadata" src={c.audioUrl} />
-        </details>)}
+        </div>)}
       </div>
     </details>)}
   </div>;
@@ -290,6 +311,32 @@ function incidentTimeRange(incident: Incident) {
     return `${first.toLocaleString()} - ${last.toLocaleTimeString()}`;
   }
   return `${first.toLocaleString()} - ${last.toLocaleString()}`;
+}
+
+function alertMatchText(detail: string) {
+  const value = detail || "";
+  const separator = value.indexOf(":");
+  return separator >= 0 ? value.slice(separator + 1).trim() : value.trim();
+}
+
+function alertDetailLabel(detail: string) {
+  const value = detail || "alert match";
+  const separator = value.indexOf(":");
+  if (separator < 0) return value;
+  const kind = value.slice(0, separator).trim();
+  const match = value.slice(separator + 1).trim();
+  return `${label(kind)}: ${match}`;
+}
+
+function highlightText(text: string, needle: string) {
+  if (!needle) return text;
+  const index = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (index < 0) return text;
+  return <>
+    {text.slice(0, index)}
+    <mark>{text.slice(index, index + needle.length)}</mark>
+    {text.slice(index + needle.length)}
+  </>;
 }
 
 function confidenceClass(score: number) {

@@ -8,6 +8,14 @@ export type AlertMatch = {
   matchedAt: number;
   isImported: boolean;
   notificationSuppressed: boolean;
+  systemShortName: string;
+  talkgroup: number;
+  talkgroupName: string;
+  category: string;
+  transcription: string;
+  transcriptionStatus: string;
+  qualityReason: string;
+  audioUrl: string;
 };
 export type Incident = {
   id: number;

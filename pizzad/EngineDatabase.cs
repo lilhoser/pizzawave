@@ -183,10 +183,18 @@ public sealed class EngineDatabase
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, call_id, rule_name, detail, matched_at, is_imported, notification_suppressed
-            FROM alert_matches
-            WHERE matched_at >= $start AND matched_at <= $end
-            ORDER BY matched_at DESC
+            SELECT am.id, am.call_id, am.rule_name, am.detail, am.matched_at, am.is_imported, am.notification_suppressed,
+                   COALESCE(c.system_short_name, ''),
+                   COALESCE(c.talkgroup, 0),
+                   COALESCE(c.talkgroup_name, ''),
+                   COALESCE(c.category, 'other'),
+                   COALESCE(c.transcription, ''),
+                   COALESCE(c.transcription_status, ''),
+                   COALESCE(c.quality_reason, '')
+            FROM alert_matches am
+            LEFT JOIN calls c ON c.id = am.call_id
+            WHERE am.matched_at >= $start AND am.matched_at <= $end
+            ORDER BY am.matched_at DESC
             LIMIT 500;
             """;
         Add(command, "$start", start);
@@ -203,7 +211,15 @@ public sealed class EngineDatabase
                 Detail = reader.GetString(3),
                 MatchedAt = reader.GetInt64(4),
                 IsImported = reader.GetInt64(5) != 0,
-                NotificationSuppressed = reader.GetInt64(6) != 0
+                NotificationSuppressed = reader.GetInt64(6) != 0,
+                SystemShortName = reader.GetString(7),
+                Talkgroup = reader.GetInt64(8),
+                TalkgroupName = reader.GetString(9),
+                Category = reader.GetString(10),
+                Transcription = reader.GetString(11),
+                TranscriptionStatus = reader.GetString(12),
+                QualityReason = reader.GetString(13),
+                AudioUrl = $"/api/v1/calls/{reader.GetInt64(1)}/audio"
             });
         }
         return rows;
