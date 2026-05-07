@@ -50,7 +50,9 @@ public sealed class AutomaticInsightsService : BackgroundService
     public async Task<int> GenerateWindowForCallsAsync(List<EngineCall> calls, CancellationToken ct)
     {
         calls = calls
-            .Where(c => !string.IsNullOrWhiteSpace(c.Transcription))
+            .Where(c => string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(c.Transcription))
             .OrderBy(c => c.StartTime)
             .Select(_talkgroups.Enrich)
             .ToList();

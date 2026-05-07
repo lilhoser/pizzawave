@@ -50,17 +50,18 @@ public sealed class EngineDatabase
             INSERT INTO calls (
                 unique_key, start_time, stop_time, source, system_short_name, callstream_call_id,
                 talkgroup, talkgroup_name, frequency, category, audio_path, transcription,
-                transcription_status, is_imported, is_alert_match, raw_metadata_json, created_at_utc, updated_at_utc)
+                transcription_status, quality_reason, is_imported, is_alert_match, raw_metadata_json, created_at_utc, updated_at_utc)
             VALUES (
                 $unique_key, $start_time, $stop_time, $source, $system_short_name, $callstream_call_id,
                 $talkgroup, $talkgroup_name, $frequency, $category, $audio_path, $transcription,
-                $transcription_status, $is_imported, $is_alert_match, $raw_metadata_json, $now, $now)
+                $transcription_status, $quality_reason, $is_imported, $is_alert_match, $raw_metadata_json, $now, $now)
             ON CONFLICT(unique_key) DO UPDATE SET
                 talkgroup_name=excluded.talkgroup_name,
                 category=excluded.category,
                 audio_path=excluded.audio_path,
                 transcription=excluded.transcription,
                 transcription_status=excluded.transcription_status,
+                quality_reason=excluded.quality_reason,
                 is_alert_match=excluded.is_alert_match,
                 updated_at_utc=excluded.updated_at_utc
             RETURNING id;
@@ -79,6 +80,7 @@ public sealed class EngineDatabase
         Add(command, "$audio_path", call.AudioPath);
         Add(command, "$transcription", call.Transcription);
         Add(command, "$transcription_status", call.TranscriptionStatus);
+        Add(command, "$quality_reason", call.QualityReason);
         Add(command, "$is_imported", call.IsImported ? 1 : 0);
         Add(command, "$is_alert_match", call.IsAlertMatch ? 1 : 0);
         Add(command, "$raw_metadata_json", call.RawMetadataJson);
@@ -87,17 +89,18 @@ public sealed class EngineDatabase
         return Convert.ToInt64(result);
     }
 
-    public async Task UpdateCallTranscriptionAsync(long callId, string transcription, string status, bool isAlertMatch, CancellationToken ct)
+    public async Task UpdateCallTranscriptionAsync(long callId, string transcription, string status, string qualityReason, bool isAlertMatch, CancellationToken ct)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
             UPDATE calls
-            SET transcription=$transcription, transcription_status=$status, is_alert_match=$is_alert_match, updated_at_utc=$now
+            SET transcription=$transcription, transcription_status=$status, quality_reason=$quality_reason, is_alert_match=$is_alert_match, updated_at_utc=$now
             WHERE id=$id;
             """;
         Add(command, "$transcription", transcription);
         Add(command, "$status", status);
+        Add(command, "$quality_reason", qualityReason);
         Add(command, "$is_alert_match", isAlertMatch ? 1 : 0);
         Add(command, "$now", DateTime.UtcNow.ToString("O"));
         Add(command, "$id", callId);
@@ -160,6 +163,7 @@ public sealed class EngineDatabase
             SELECT * FROM calls
             WHERE start_time > $start
               AND transcription_status='complete'
+              AND quality_reason='ok'
               AND length(trim(transcription)) > 0
               AND is_imported=0
             ORDER BY start_time ASC, id ASC
@@ -535,6 +539,7 @@ public sealed class EngineDatabase
         AudioPath = reader.GetString(reader.GetOrdinal("audio_path")),
         Transcription = reader.GetString(reader.GetOrdinal("transcription")),
         TranscriptionStatus = reader.GetString(reader.GetOrdinal("transcription_status")),
+        QualityReason = reader.GetString(reader.GetOrdinal("quality_reason")),
         IsImported = reader.GetInt64(reader.GetOrdinal("is_imported")) != 0,
         IsAlertMatch = reader.GetInt64(reader.GetOrdinal("is_alert_match")) != 0,
         RawMetadataJson = reader.GetString(reader.GetOrdinal("raw_metadata_json"))
@@ -561,16 +566,76 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
+    private async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
+        await BackfillTranscriptionQualityAsync(connection, ct);
+    }
+
+    private static async Task AddColumnIfMissingAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "ALTER TABLE incidents ADD COLUMN incident_score REAL NOT NULL DEFAULT 0;";
+        command.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
         try
         {
             await command.ExecuteNonQueryAsync(ct);
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
         {
+        }
+    }
+
+    private async Task BackfillTranscriptionQualityAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        var updates = new List<(long Id, string Status, string Reason)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.CommandText = """
+                SELECT id, transcription, transcription_status
+                FROM calls
+                WHERE transcription_status IN ('complete', 'failed')
+                   OR (transcription_status = 'pending' AND length(trim(transcription)) > 0);
+                """;
+            await using var reader = await select.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.GetInt64(0);
+                var transcript = reader.GetString(1);
+                var status = reader.GetString(2);
+                var quality = TranscriptionQualityClassifier.Classify(transcript, status);
+                if (!string.Equals(status, quality.Status, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(quality.Reason, "ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    updates.Add((id, quality.Status, quality.Reason));
+                }
+            }
+        }
+
+        foreach (var update in updates)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE calls
+                SET transcription_status=$status,
+                    quality_reason=$reason,
+                    updated_at_utc=$now
+                WHERE id=$id;
+                """;
+            Add(command, "$status", update.Status);
+            Add(command, "$reason", update.Reason);
+            Add(command, "$now", DateTime.UtcNow.ToString("O"));
+            Add(command, "$id", update.Id);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        if (updates.Count > 0)
+        {
+            var byReason = updates
+                .GroupBy(u => u.Reason)
+                .OrderByDescending(g => g.Count())
+                .Select(g => $"{g.Key}:{g.Count():N0}");
+            _logger.LogInformation("Reclassified {Count:N0} existing calls for transcription quality ({Reasons})", updates.Count, string.Join(", ", byReason));
         }
     }
 
@@ -590,6 +655,7 @@ public sealed class EngineDatabase
             audio_path TEXT NOT NULL,
             transcription TEXT NOT NULL DEFAULT '',
             transcription_status TEXT NOT NULL DEFAULT 'pending',
+            quality_reason TEXT NOT NULL DEFAULT 'ok',
             is_imported INTEGER NOT NULL DEFAULT 0,
             is_alert_match INTEGER NOT NULL DEFAULT 0,
             raw_metadata_json TEXT NOT NULL DEFAULT '{}',

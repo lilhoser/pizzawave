@@ -43,10 +43,15 @@ public sealed class SummaryService
     {
         try
         {
-            var calls = (await _database.ListCallsAsync(request.Start, request.End, null, ct))
-                .Where(c => !string.IsNullOrWhiteSpace(c.Transcription))
+            var allCalls = await _database.ListCallsAsync(request.Start, request.End, null, ct);
+            var calls = allCalls
+                .Where(c => string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(c.Transcription))
                 .OrderBy(c => c.StartTime)
                 .ToList();
+            var excluded = allCalls.Count(c => string.Equals(c.TranscriptionStatus, "poor_quality", StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(c.TranscriptionStatus, "failed", StringComparison.OrdinalIgnoreCase));
             var batchSize = Math.Max(1, _insights.ConfiguredBatchSize);
             var batches = calls
                 .Select((call, index) => new { call, index })
@@ -57,17 +62,18 @@ public sealed class SummaryService
             var total = batches.Count;
             var completed = 0;
             var incidentCount = 0;
-            await _database.UpdateJobAsync(jobId, "running", total, 0, 0, $"Generating {total:N0} AI summary windows.", true, false, ct);
+            _logger.LogInformation("Summary generation range {Start}-{End}: {Included:N0} calls included, {Excluded:N0} poor-quality/failed calls excluded", request.Start, request.End, calls.Count, excluded);
+            await _database.UpdateJobAsync(jobId, "running", total, 0, 0, $"Generating {total:N0} AI summary windows from {calls.Count:N0} calls; skipped {excluded:N0} poor-quality calls.", true, false, ct);
 
             foreach (var batch in batches)
             {
                 incidentCount += await _insights.GenerateWindowForCallsAsync(batch, ct);
                 completed++;
-                await _database.UpdateJobAsync(jobId, "running", total, completed, 0, $"Generated {completed:N0}/{total:N0} AI summary windows and {incidentCount:N0} incidents.", false, false, ct);
+                await _database.UpdateJobAsync(jobId, "running", total, completed, 0, $"Generated {completed:N0}/{total:N0} AI summary windows and {incidentCount:N0} incidents; skipped {excluded:N0} poor-quality calls.", false, false, ct);
                 await _events.PublishAsync("job_updated", new { jobId, completed, total, incidents = incidentCount }, ct);
             }
 
-            await _database.UpdateJobAsync(jobId, "completed", total, completed, 0, $"Generated {completed:N0} AI summary windows and {incidentCount:N0} incidents.", false, true, ct);
+            await _database.UpdateJobAsync(jobId, "completed", total, completed, 0, $"Generated {completed:N0} AI summary windows and {incidentCount:N0} incidents; skipped {excluded:N0} poor-quality calls.", false, true, ct);
             await _events.PublishAsync("summary_updated", new { request.Start, request.End, incidents = incidentCount }, ct);
         }
         catch (Exception ex)

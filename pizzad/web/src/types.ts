@@ -63,6 +63,7 @@ export type EngineCall = {
   audioPath: string;
   transcription: string;
   transcriptionStatus: string;
+  qualityReason: string;
   isImported: boolean;
   isAlertMatch: boolean;
 };

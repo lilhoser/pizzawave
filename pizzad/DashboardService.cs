@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
-
 namespace pizzad;
 
 public sealed class DashboardService
@@ -198,21 +196,20 @@ public sealed class DashboardService
     }
 
     public static bool IsProblemTranscript(EngineCall call) =>
-        IsTranscriptEmpty(call) || IsTranscriptFailureHint(call) || IsTranscriptInaudibleHint(call) || IsTranscriptShort(call);
+        TranscriptionQualityClassifier.IsProblem(call);
 
-    public static bool IsTranscriptEmpty(EngineCall call) => string.IsNullOrWhiteSpace(call.Transcription);
+    public static bool IsTranscriptEmpty(EngineCall call) =>
+        string.Equals(call.QualityReason, "empty", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsTranscriptShort(EngineCall call) =>
-        !IsTranscriptEmpty(call) &&
-        !IsTranscriptFailureHint(call) &&
-        !IsTranscriptInaudibleHint(call) &&
-        call.Transcription.Trim().Length < 20;
+        string.Equals(call.QualityReason, "too_short", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsTranscriptFailureHint(EngineCall call) =>
-        Regex.IsMatch(call.Transcription ?? string.Empty, @"(failed|error|exception|unable to transcribe)", RegexOptions.IgnoreCase);
+        string.Equals(call.TranscriptionStatus, "failed", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(call.QualityReason, "transcription_error", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsTranscriptInaudibleHint(EngineCall call) =>
-        Regex.IsMatch(call.Transcription ?? string.Empty, @"(\[?inaudible\]?|\[?blank_audio\]?|blank audio|no audio|silence|static|garbled|unintelligible|unclear|distorted|muffled|beeping|music|phone ringing|crickets chirping|\[?pause\]?)", RegexOptions.IgnoreCase);
+        call.QualityReason is "inaudible" or "blank_audio" or "marker_only";
 
     private static string GetTalkgroupLabel(EngineCall call) =>
         string.IsNullOrWhiteSpace(call.TalkgroupName) ? $"TG {call.Talkgroup}" : call.TalkgroupName;

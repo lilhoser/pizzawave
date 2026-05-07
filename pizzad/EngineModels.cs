@@ -19,6 +19,7 @@ public sealed record EngineCall
     public string AudioPath { get; init; } = string.Empty;
     public string Transcription { get; init; } = string.Empty;
     public string TranscriptionStatus { get; init; } = "pending";
+    public string QualityReason { get; init; } = "ok";
     public bool IsImported { get; init; }
     public bool IsAlertMatch { get; init; }
     public string RawMetadataJson { get; init; } = "{}";

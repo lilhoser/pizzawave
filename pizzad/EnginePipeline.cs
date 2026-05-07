@@ -90,8 +90,14 @@ public sealed class EnginePipeline
                 if (call == null)
                     continue;
 
+                var quality = TranscriptionQualityClassifier.Classify(transcription);
                 var alert = _alerts.Evaluate(call, transcription, item.Imported);
-                await _database.UpdateCallTranscriptionAsync(item.CallId, transcription, "complete", alert.IsMatch, ct);
+                await _database.UpdateCallTranscriptionAsync(item.CallId, transcription, quality.Status, quality.Reason, alert.IsMatch, ct);
+
+                if (!quality.IncludeInSummaries)
+                {
+                    _logger.LogInformation("Excluded call {CallId} from AI summaries due to transcription quality: {Reason}", item.CallId, quality.Reason);
+                }
 
                 if (alert.IsMatch)
                 {
@@ -108,12 +114,13 @@ public sealed class EnginePipeline
                 }
 
                 await _events.PublishAsync("call_transcribed", new { callId = item.CallId, imported = item.Imported }, ct);
-                if (!item.Imported && !string.IsNullOrWhiteSpace(transcription))
+                if (!item.Imported && quality.IncludeInSummaries)
                 {
                     var updatedCall = call with
                     {
                         Transcription = transcription,
-                        TranscriptionStatus = "complete",
+                        TranscriptionStatus = quality.Status,
+                        QualityReason = quality.Reason,
                         IsAlertMatch = alert.IsMatch
                     };
                     _insights.Enqueue(updatedCall);
@@ -122,7 +129,7 @@ public sealed class EnginePipeline
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Transcription failed for call {CallId}", item.CallId);
-                await _database.UpdateCallTranscriptionAsync(item.CallId, string.Empty, "failed", false, ct);
+                await _database.UpdateCallTranscriptionAsync(item.CallId, string.Empty, "failed", "transcription_error", false, ct);
             }
             finally
             {
