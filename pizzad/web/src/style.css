@@ -248,6 +248,55 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   align-items: center;
   gap: 6px;
 }
+.quality-audit {
+  display: grid;
+  gap: 10px;
+}
+.audit-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+}
+.audit-table-card {
+  overflow: auto;
+}
+.audit-hour-card {
+  min-width: 320px;
+}
+.audit-sample {
+  border: 1px solid var(--category-border, #36566f);
+  border-left: 4px solid var(--category-color, var(--accent));
+  border-radius: 6px;
+  background: #20252a;
+  margin-top: 8px;
+  padding: 7px;
+}
+.audit-sample > summary {
+  display: grid;
+  grid-template-columns: 150px 95px minmax(160px, 1fr) minmax(170px, 0.8fr) 48px;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  color: #d7ecff;
+  font-size: 12px;
+}
+.audit-sample strong {
+  color: var(--category-color, var(--accent));
+}
+.audit-sample p {
+  margin: 7px 0;
+  color: #dceaf5;
+  line-height: 1.35;
+}
+.audit-sample audio {
+  width: 100%;
+  height: 30px;
+}
 .tr-chart-grid {
   display: flex;
   flex-wrap: wrap;
@@ -507,4 +556,5 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   .category-split-page { grid-template-columns: 1fr; overflow: auto; }
   .left-pane { grid-row: auto; }
   .bar-row { grid-template-columns: 110px 1fr 70px; }
+  .audit-sample > summary { grid-template-columns: 1fr; }
 }

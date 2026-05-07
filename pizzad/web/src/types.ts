@@ -133,8 +133,44 @@ export type TrHealthSummary = {
   charts: TrHealthChart[];
   samples: TrHealth[];
 };
+export type QualityAuditGroup = {
+  label: string;
+  totalCalls: number;
+  problemCalls: number;
+  inaudibleCalls: number;
+  problemPercent: number;
+  inaudiblePercent: number;
+};
+export type QualityAuditHour = { hour: number; totalCalls: number; problemCalls: number; inaudibleCalls: number };
+export type QualityAuditSample = {
+  callId: number;
+  startTime: number;
+  systemShortName: string;
+  source: number;
+  talkgroup: number;
+  talkgroupName: string;
+  category: string;
+  durationSeconds: number;
+  transcriptionStatus: string;
+  qualityReason: string;
+  transcription: string;
+  audioUrl: string;
+};
+export type QualityAudit = {
+  totalCalls: number;
+  problemCalls: number;
+  inaudibleCalls: number;
+  problemPercent: number;
+  inaudiblePercent: number;
+  byReason: QualityAuditGroup[];
+  bySystem: QualityAuditGroup[];
+  byTalkgroup: QualityAuditGroup[];
+  byHour: QualityAuditHour[];
+  samples: QualityAuditSample[];
+};
 export type TrTroubleshoot = {
   health: TrHealthSummary;
+  qualityAudit: QualityAudit;
   config: any;
   logOutput: string;
   diagnostics: string;

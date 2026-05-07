@@ -16,13 +16,15 @@ public sealed class TrHealthTroubleshootService
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly TrConfigService _trConfig;
+    private readonly TalkgroupResolver _talkgroups;
     private readonly ILogger<TrHealthTroubleshootService> _logger;
 
-    public TrHealthTroubleshootService(EngineConfig config, EngineDatabase database, TrConfigService trConfig, ILogger<TrHealthTroubleshootService> logger)
+    public TrHealthTroubleshootService(EngineConfig config, EngineDatabase database, TrConfigService trConfig, TalkgroupResolver talkgroups, ILogger<TrHealthTroubleshootService> logger)
     {
         _config = config;
         _database = database;
         _trConfig = trConfig;
+        _talkgroups = talkgroups;
         _logger = logger;
     }
 
@@ -44,14 +46,92 @@ public sealed class TrHealthTroubleshootService
 
         var logOutput = TailLines(log, 300);
         var health = BuildSummary(summaryRows, selectedRows, rows, bySystem, baseline);
+        var qualityAudit = BuildQualityAudit((await _database.ListCallsAsync(start, end, null, ct)).Select(_talkgroups.Enrich).ToList());
         var diagnostics = BuildDiagnostics(rows, summaryRows, selectedRows, baseline, bySystem, logOutput);
         return new TrTroubleshootDto(
             health,
+            qualityAudit,
             _trConfig.Validate(),
             logOutput,
             diagnostics,
             "TR health AI recommendations are not wired in the web engine yet. Use the health summary, remedies, and metrics tabs for deterministic findings.");
     }
+
+    private static QualityAuditDto BuildQualityAudit(List<EngineCall> calls)
+    {
+        static bool Problem(EngineCall call) => TranscriptionQualityClassifier.IsProblem(call);
+        static bool Inaudible(EngineCall call) => call.QualityReason is "inaudible" or "blank_audio" or "marker_only";
+        static string SystemLabel(EngineCall call) => string.IsNullOrWhiteSpace(call.SystemShortName) ? "Unknown system" : call.SystemShortName;
+        static string TalkgroupLabel(EngineCall call) => string.IsNullOrWhiteSpace(call.TalkgroupName) ? $"TG {call.Talkgroup}" : call.TalkgroupName;
+        static QualityAuditGroupDto GroupRow(string label, IEnumerable<EngineCall> group)
+        {
+            var rows = group.ToList();
+            var total = rows.Count;
+            var problems = rows.Count(Problem);
+            var inaudible = rows.Count(Inaudible);
+            return new QualityAuditGroupDto(
+                label,
+                total,
+                problems,
+                inaudible,
+                Percent(problems, total),
+                Percent(inaudible, total));
+        }
+
+        var total = calls.Count;
+        var problemCalls = calls.Count(Problem);
+        var inaudibleCalls = calls.Count(Inaudible);
+        var problems = calls.Where(Problem).ToList();
+        return new QualityAuditDto(
+            total,
+            problemCalls,
+            inaudibleCalls,
+            Percent(problemCalls, total),
+            Percent(inaudibleCalls, total),
+            problems.GroupBy(c => string.IsNullOrWhiteSpace(c.QualityReason) ? "unknown" : c.QualityReason, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .Select(g => GroupRow(g.Key, g))
+                .ToList(),
+            calls.GroupBy(SystemLabel, StringComparer.OrdinalIgnoreCase)
+                .Select(g => GroupRow(g.Key, g))
+                .Where(r => r.ProblemCalls > 0)
+                .OrderByDescending(r => r.InaudibleCalls)
+                .ThenByDescending(r => r.ProblemCalls)
+                .Take(12)
+                .ToList(),
+            calls.GroupBy(c => $"{TalkgroupLabel(c)} ({c.Talkgroup})", StringComparer.OrdinalIgnoreCase)
+                .Select(g => GroupRow(g.Key, g))
+                .Where(r => r.ProblemCalls > 0)
+                .OrderByDescending(r => r.InaudibleCalls)
+                .ThenByDescending(r => r.ProblemCalls)
+                .Take(12)
+                .ToList(),
+            calls.GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour)
+                .Select(g => new QualityAuditHourDto(g.Key, g.Count(), g.Count(Problem), g.Count(Inaudible)))
+                .OrderBy(r => r.Hour)
+                .ToList(),
+            problems
+                .OrderByDescending(c => Inaudible(c))
+                .ThenByDescending(c => c.StartTime)
+                .Take(30)
+                .Select(c => new QualityAuditSampleDto(
+                    c.Id,
+                    c.StartTime,
+                    SystemLabel(c),
+                    c.Source,
+                    c.Talkgroup,
+                    TalkgroupLabel(c),
+                    c.Category,
+                    Math.Max(0, c.StopTime - c.StartTime),
+                    c.TranscriptionStatus,
+                    c.QualityReason,
+                    c.Transcription,
+                    $"/api/v1/calls/{c.Id}/audio"))
+                .ToList());
+    }
+
+    private static double Percent(int count, int total) =>
+        total <= 0 ? 0 : count * 100.0 / total;
 
     private TrHealthSummaryDto BuildSummary(List<TrHealthSampleDto> recentRows, List<TrHealthSampleDto> selectedRows, List<TrHealthSampleDto> baselineRows, bool bySystem, string baseline)
     {

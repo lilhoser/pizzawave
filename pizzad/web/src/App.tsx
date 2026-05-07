@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityAuditGroup, QualityAuditSample, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -341,7 +341,7 @@ function confidenceClass(score: number) {
 
 function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot | null; rangeHours: number; reload: () => Promise<void> }) {
   const [topTab, setTopTab] = useState<"pizzad" | "tr">("tr");
-  const [trTab, setTrTab] = useState<"summary" | "metrics" | "logs" | "diagnostics" | "insights">("summary");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "quality" | "logs" | "diagnostics" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
@@ -370,6 +370,7 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
+          <button className={trTab === "quality" ? "active" : ""} onClick={() => setTrTab("quality")}>Inaudible Audit</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
           <button className={trTab === "diagnostics" ? "active" : ""} onClick={() => setTrTab("diagnostics")}>Diagnostics</button>
           <button className={trTab === "insights" ? "active" : ""} onClick={() => setTrTab("insights")}>Insights</button>
@@ -382,6 +383,7 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
           </div>
           <div className="tr-chart-grid">{active.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
         </div>}
+        {trTab === "quality" && <QualityAuditView data={data} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
         {trTab === "diagnostics" && <pre className="log-box">{data.diagnostics}</pre>}
         {trTab === "insights" && <div className="card"><button disabled>Generate Recommendation</button><p className="muted">Uses LM Link to summarize issues and baselines.</p><pre className="log-box">{data.insightsText}</pre></div>}
@@ -410,6 +412,76 @@ function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
     <div className="remedy-list"><h3>Suggested Remedies</h3>{data.health.remedies.map(r => <div className={`remedy ${r.isIssue ? "issue" : ""}`} key={r.metric}><strong>{r.metric}</strong><p>{r.notes}</p></div>)}</div>
     <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>Decode 0%</th><th>Avg decode</th><th>Retunes</th><th>No TX</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.decodeZeroPct.toFixed(1)}%</td><td>{r.decodeLines ? (r.decodeRateTotal / r.decodeLines).toFixed(2) : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
   </div>;
+}
+
+function QualityAuditView({ data }: { data: TrTroubleshoot }) {
+  const audit = data.qualityAudit;
+  return <div className="quality-audit">
+    <div className="audit-kpis">
+      <Kpi label="Problem Calls" value={`${audit.problemCalls.toLocaleString()} / ${audit.totalCalls.toLocaleString()}`} subtext={`${audit.problemPercent.toFixed(1)}% poor-quality, failed, empty, short, or inaudible`} />
+      <Kpi label="Inaudible Calls" value={audit.inaudibleCalls.toLocaleString()} subtext={`${audit.inaudiblePercent.toFixed(1)}% of calls in selected range`} />
+    </div>
+    <div className="audit-grid">
+      <AuditTable title="Reasons" rows={audit.byReason} />
+      <AuditTable title="Systems" rows={audit.bySystem} />
+      <AuditTable title="Talkgroups" rows={audit.byTalkgroup} />
+      <QualityAuditHourChart rows={audit.byHour} />
+    </div>
+    <div className="card">
+      <h3>Sample problem calls</h3>
+      {audit.samples.length ? audit.samples.map(sample => <QualityAuditSampleCard sample={sample} key={sample.callId} />) : <p className="muted">No problem calls in the selected range.</p>}
+    </div>
+  </div>;
+}
+
+function AuditTable({ title, rows }: { title: string; rows: QualityAuditGroup[] }) {
+  return <div className="card audit-table-card">
+    <h3>{title}</h3>
+    {rows.length ? <table className="table"><thead><tr><th>Name</th><th>Total</th><th>Problems</th><th>Inaudible</th></tr></thead><tbody>{rows.map(row => <tr key={row.label}>
+      <td>{row.label}</td>
+      <td>{row.totalCalls}</td>
+      <td>{row.problemCalls} <span className="muted">({row.problemPercent.toFixed(1)}%)</span></td>
+      <td>{row.inaudibleCalls} <span className="muted">({row.inaudiblePercent.toFixed(1)}%)</span></td>
+    </tr>)}</tbody></table> : <p className="muted">No problem calls.</p>}
+  </div>;
+}
+
+function QualityAuditHourChart({ rows }: { rows: TrTroubleshoot["qualityAudit"]["byHour"] }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const max = Math.max(1, ...rows.map(r => Math.max(r.problemCalls, r.inaudibleCalls)));
+  return <div className="card chart-card audit-hour-card">
+    <h3>Problems by Hour</h3>
+    <svg className="chart" viewBox="0 0 500 190" role="img" aria-label="Problem and inaudible calls by hour">
+      <line className="axis" x1="32" y1="158" x2="482" y2="158" />
+      <line className="axis" x1="32" y1="28" x2="32" y2="158" />
+      <text className="chart-label" x="4" y="34">{max}</text>
+      {[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}
+      {hours.map(hour => {
+        const row = rows.find(r => r.hour === hour);
+        const problemHeight = ((row?.problemCalls ?? 0) / max) * 118;
+        const inaudibleHeight = ((row?.inaudibleCalls ?? 0) / max) * 118;
+        return <g key={hour}>
+          <rect x={30 + hour * 19} y={158 - problemHeight} width="7" height={problemHeight} fill="#ff6b5a" />
+          <rect x={38 + hour * 19} y={158 - inaudibleHeight} width="7" height={inaudibleHeight} fill="#5aa7ff" />
+        </g>;
+      })}
+    </svg>
+    <Legend items={[["Problems", "#ff6b5a"], ["Inaudible", "#5aa7ff"]]} />
+  </div>;
+}
+
+function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
+  return <details className={`audit-sample category-${sample.category}`}>
+    <summary>
+      <span>{new Date(sample.startTime * 1000).toLocaleString()}</span>
+      <strong>{sample.qualityReason}</strong>
+      <span>{sample.talkgroupName || `TG ${sample.talkgroup}`}</span>
+      <span>{sample.systemShortName} / source {sample.source}</span>
+      <span>{formatDuration(sample.durationSeconds)}</span>
+    </summary>
+    <p>{sample.transcription || "No transcript available."}</p>
+    <audio controls preload="metadata" src={sample.audioUrl} />
+  </details>;
 }
 
 function MetricTable({ title, rows }: { title: string; rows: TrHealthMetric[] }) {
@@ -441,6 +513,12 @@ function TrHealthChartView({ chart }: { chart: TrHealthChart }) {
 
 function formatChartValue(value: number, format: string) {
   return format === "F1" ? value.toFixed(1) : Math.round(value).toLocaleString();
+}
+
+function formatDuration(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  return `${minutes}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Job[]; settingsSections: Record<string, any>; rangeHours: number; reload: () => Promise<void> }) {

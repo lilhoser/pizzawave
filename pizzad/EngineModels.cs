@@ -193,10 +193,47 @@ public sealed record TrHealthSummaryDto
 
 public sealed record TrTroubleshootDto(
     TrHealthSummaryDto Health,
+    QualityAuditDto QualityAudit,
     object Config,
     string LogOutput,
     string Diagnostics,
     string InsightsText);
+
+public sealed record QualityAuditDto(
+    int TotalCalls,
+    int ProblemCalls,
+    int InaudibleCalls,
+    double ProblemPercent,
+    double InaudiblePercent,
+    IReadOnlyList<QualityAuditGroupDto> ByReason,
+    IReadOnlyList<QualityAuditGroupDto> BySystem,
+    IReadOnlyList<QualityAuditGroupDto> ByTalkgroup,
+    IReadOnlyList<QualityAuditHourDto> ByHour,
+    IReadOnlyList<QualityAuditSampleDto> Samples);
+
+public sealed record QualityAuditGroupDto(
+    string Label,
+    int TotalCalls,
+    int ProblemCalls,
+    int InaudibleCalls,
+    double ProblemPercent,
+    double InaudiblePercent);
+
+public sealed record QualityAuditHourDto(int Hour, int TotalCalls, int ProblemCalls, int InaudibleCalls);
+
+public sealed record QualityAuditSampleDto(
+    long CallId,
+    long StartTime,
+    string SystemShortName,
+    int Source,
+    long Talkgroup,
+    string TalkgroupName,
+    string Category,
+    double DurationSeconds,
+    string TranscriptionStatus,
+    string QualityReason,
+    string Transcription,
+    string AudioUrl);
 
 public sealed record TimeRangeQuery(long? Start, long? End)
 {
