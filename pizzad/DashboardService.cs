@@ -63,8 +63,8 @@ public sealed class DashboardService
 
         var groups = calls
             .GroupBy(c => string.IsNullOrWhiteSpace(c.TalkgroupName) ? $"TG {c.Talkgroup}" : c.TalkgroupName)
-            .OrderByDescending(g => g.Max(c => c.StartTime))
-            .Select(g => new CategoryGroupDto(g.Key, g.ToList()))
+            .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => new CategoryGroupDto(g.Key, g.OrderByDescending(c => c.StartTime).ToList()))
             .ToList();
 
         return new CategoryPageDto(category, "talkgroup", groups, insights);
