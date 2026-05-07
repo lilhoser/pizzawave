@@ -21,6 +21,7 @@ Commands:
   build-deb [args...]                 Build self-contained pizzawave .deb
   install-engine --publish-dir PATH
   configure-callstream [--config /etc/trunk-recorder/config.json]
+  setup-lmstudio [args...]            Install/configure LM Studio for insights
   setup-trunk-recorder [args...]      Pass-through to setup_trunk_recorder.sh
   install-stack [args...]             Source-build TR/callstream, then configure callstream
   audit                               Run trunk-recorder setup audit
@@ -41,6 +42,9 @@ case "$cmd" in
     ;;
   configure-callstream)
     exec python3 "$(script_path pizzawave_configure_callstream.py)" "$@"
+    ;;
+  setup-lmstudio)
+    exec "$(script_path setup-lmstudio.sh)" "$@"
     ;;
   setup-trunk-recorder)
     exec "$(script_path setup_trunk_recorder.sh)" "$@"

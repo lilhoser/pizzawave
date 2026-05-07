@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -8,7 +9,7 @@ namespace pizzad;
 
 public sealed class AutomaticInsightsService : BackgroundService
 {
-    private const int DefaultBatchSize = 50;
+    private const int DefaultBatchSize = 20;
     private readonly ConcurrentQueue<EngineCall> _queue = new();
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
@@ -173,14 +174,14 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             model = InsightModel(),
             temperature = 0.1,
-            max_tokens = 8000,
-            response_format = new { type = "json_object" },
+            max_tokens = 1200,
+            response_format = InsightResponseFormat(),
             messages = new[]
             {
                 new
                 {
                     role = "system",
-                    content = "You summarize radio call transcripts into concise actionable incidents. Output JSON only with fields summary_text and notable_events. notable_events is an array of objects with title, detail, category, timestamp, confidence, and call_ids. Choose category from police, fire, ems, traffic, public_works, utilities, other. Each event must include 1-3 call_ids copied exactly from input lines."
+                    content = "You summarize radio call transcripts into concise actionable incidents. Output JSON only with fields summary_text and notable_events. notable_events is an array of objects with title, detail, category, timestamp, confidence, and call_ids. Choose category from police, fire, ems, traffic, public_works, utilities, other. Each event must include 1-3 call_ids copied exactly from input lines, such as C000001234ABC. Do not create an event if you cannot cite at least one exact call_id from the input."
                 },
                 new { role = "user", content = BuildPrompt(calls, start, end) }
             }
@@ -195,7 +196,8 @@ public sealed class AutomaticInsightsService : BackgroundService
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
                 using var response = await client.PostAsync(endpoint, content, ct);
                 var text = await response.Content.ReadAsStringAsync(ct);
-                response.EnsureSuccessStatusCode();
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Automatic insights request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
                 return ParseResponse(text);
             }
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
@@ -230,8 +232,8 @@ public sealed class AutomaticInsightsService : BackgroundService
         foreach (var call in calls.OrderBy(c => c.StartTime))
         {
             var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
-            var line = $"{CallToken(call.Id)} | {local:HH:mm:ss} | {call.SystemShortName} | {Label(call)} | {Trim(call.Transcription, 800)}";
-            if (sb.Length + line.Length > 120_000)
+            var line = $"{CallToken(call.Id)} | {local:HH:mm:ss} | {call.SystemShortName} | {Label(call)} | {Trim(call.Transcription, 220)}";
+            if (sb.Length + line.Length > 12_000)
                 break;
             sb.AppendLine(line);
         }
@@ -281,13 +283,35 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private List<EngineCall> ResolveEventCalls(InsightEvent ev, List<EngineCall> batch)
     {
-        var byToken = batch.ToDictionary(c => CallToken(c.Id), StringComparer.OrdinalIgnoreCase);
-        return ev.CallIds
+        var byToken = new Dictionary<string, EngineCall>(StringComparer.OrdinalIgnoreCase);
+        foreach (var call in batch)
+        {
+            byToken[CallToken(call.Id)] = call;
+            byToken[call.Id.ToString(CultureInfo.InvariantCulture)] = call;
+            byToken[call.Id.ToString("X12", CultureInfo.InvariantCulture)] = call;
+        }
+
+        var resolved = ev.CallIds
             .Select(id => byToken.TryGetValue(id.Trim(), out var call) ? call : null)
             .Where(c => c != null)
             .DistinctBy(c => c!.Id)
             .Cast<EngineCall>()
             .ToList();
+
+        if (resolved.Count > 0)
+            return resolved;
+
+        if (DateTimeOffset.TryParse(ev.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var timestamp))
+        {
+            var eventTime = timestamp.ToUnixTimeSeconds();
+            return batch
+                .Where(c => Math.Abs(c.StartTime - eventTime) <= 90)
+                .OrderBy(c => Math.Abs(c.StartTime - eventTime))
+                .Take(2)
+                .ToList();
+        }
+
+        return resolved;
     }
 
     private bool IsEnabled() =>
@@ -299,11 +323,9 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private int ComputeAdaptiveBatchSize(int pendingCount)
     {
-        if (_failureStreak > 0) return BatchSize();
-        if (pendingCount >= 500) return 200;
-        if (pendingCount >= 250) return 150;
-        if (pendingCount >= 120) return 100;
-        return BatchSize();
+        if (_failureStreak <= 0)
+            return BatchSize();
+        return Math.Max(5, BatchSize() / (1 << Math.Min(_failureStreak, 3)));
     }
 
     private void RotateFailedBatch(List<EngineCall> failedBatch)
@@ -342,6 +364,49 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private static string StripCodeFence(string content) =>
         Regex.Replace(content.Trim(), "^```(?:json)?\\s*|\\s*```$", string.Empty, RegexOptions.IgnoreCase);
+
+    private static object InsightResponseFormat() => new
+    {
+        type = "json_schema",
+        json_schema = new
+        {
+            name = "pizzawave_insight_result",
+            strict = false,
+            schema = new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    summary_text = new { type = "string" },
+                    notable_events = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                title = new { type = "string" },
+                                detail = new { type = "string" },
+                                category = new { type = "string" },
+                                timestamp = new { type = "string" },
+                                confidence = new { type = "number" },
+                                call_ids = new
+                                {
+                                    type = "array",
+                                    items = new { type = "string" }
+                                }
+                            },
+                            required = new[] { "title", "detail", "category", "timestamp", "confidence", "call_ids" }
+                        }
+                    }
+                },
+                required = new[] { "summary_text", "notable_events" }
+            }
+        }
+    };
 
     private sealed record InsightResult(string SummaryText, List<InsightEvent> Events);
     private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds);

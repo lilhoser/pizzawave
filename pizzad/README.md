@@ -55,11 +55,30 @@ The script installer remains available for development:
 sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad
 ```
 
+To install the optional LM Studio service used by `aiInsights` and incident
+summarization:
+
+```bash
+sudo ./scripts/pizzawave setup-lmstudio --user lilhoser --model openai/gpt-oss-20b
+```
+
+Or include it during the script installer flow:
+
+```bash
+sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad --with-lmstudio --lmstudio-user lilhoser
+```
+
+LM Studio is not the transcription engine in this flow. Local Linux
+transcription is still selected separately in `/etc/pizzawave/pizzad.json` with
+`transcription.provider` (`whisper` or `vosk`). LM Studio provides the local
+OpenAI-compatible API at `http://localhost:1234/v1` for `aiInsights`.
+
 The same flow is exposed through the package-style helper:
 
 ```bash
 sudo ./scripts/pizzawave install-engine --publish-dir ./artifacts/pizzad
 sudo ./scripts/pizzawave configure-callstream --config /etc/trunk-recorder/config.json
+sudo ./scripts/pizzawave setup-lmstudio --user lilhoser
 ```
 
 The installer creates:
@@ -90,5 +109,5 @@ The helper creates a timestamped backup before writing.
 - SQLite WAL is the canonical store.
 - Audio is stored on the local filesystem.
 - SFTP import APIs estimate ranges, enforce guardrails, download `.bin` files into local cache, ingest them through the same callstream pipeline, and track remote file status in SQLite.
-- Incident generation is intentionally range-triggered. Generated incidents are persisted and shown by the dashboard.
+- Incident generation is automatic for live transcribed calls. Generated incidents are persisted and shown by the dashboard.
 - Recent 48-hour SFTP reconciliation runs automatically when SFTP import is enabled.

@@ -102,6 +102,7 @@ cp -a "$PUBLISH_DIR"/. "$PKG_ROOT/opt/pizzawave/pizzad"/
 install -m 0755 "$ROOT_DIR/scripts/pizzawave" "$PKG_ROOT/usr/bin/pizzawave"
 install -m 0755 "$ROOT_DIR/scripts/build_pizzawave_deb.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/build_pizzawave_deb.sh"
 install -m 0755 "$ROOT_DIR/scripts/setup_pizzawave_engine.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_pizzawave_engine.sh"
+install -m 0755 "$ROOT_DIR/scripts/setup-lmstudio.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup-lmstudio.sh"
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_configure_callstream.py"
 install -m 0755 "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_trunk_recorder.sh"
 
@@ -150,7 +151,7 @@ cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
     "openAiBaseUrl": "http://localhost:1234/v1",
     "openAiApiKey": "",
     "openAiModel": "",
-    "batchSize": 50,
+    "batchSize": 20,
     "maxPendingCalls": 1000,
     "timeoutMs": 600000,
     "maxRetries": 2

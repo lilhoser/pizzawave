@@ -124,7 +124,7 @@ echo "==> Writing systemd unit: $SERVICE_PATH"
   if [[ "$SKIP_MODEL_LOAD" == "false" ]]; then
     echo "ExecStartPre=$LMS_BIN load $MODEL_ID --yes"
   fi
-  echo "ExecStart=$LMS_BIN server start"
+  echo "ExecStart=$LMS_BIN server start --bind 127.0.0.1 --port 1234"
   echo "ExecStop=$LMS_BIN daemon down"
   echo ""
   echo "[Install]"

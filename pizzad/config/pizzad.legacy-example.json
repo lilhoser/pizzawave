@@ -31,7 +31,7 @@
     "openAiBaseUrl": "http://localhost:1234/v1",
     "openAiApiKey": "",
     "openAiModel": "qwen3.6-35b-a3b@q8_0",
-    "batchSize": 50,
+    "batchSize": 20,
     "maxPendingCalls": 1000,
     "timeoutMs": 600000,
     "maxRetries": 2

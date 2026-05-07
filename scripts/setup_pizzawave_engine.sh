@@ -7,16 +7,24 @@ CONFIG_DIR="/etc/pizzawave"
 DATA_DIR="/var/lib/pizzawave"
 SERVICE_PATH="/etc/systemd/system/pizzad.service"
 PUBLISH_DIR=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_LMSTUDIO="false"
+LMSTUDIO_USER="${SUDO_USER:-${USER:-}}"
+LMSTUDIO_MODEL="openai/gpt-oss-20b"
+LMSTUDIO_SKIP_MODEL_LOAD="false"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  setup_pizzawave_engine.sh --publish-dir <path>
+  setup_pizzawave_engine.sh --publish-dir <path> [--with-lmstudio] [--lmstudio-user <user>] [--lmstudio-model <model>] [--skip-lmstudio-model-load]
 
 Installs PizzaWave Engine (pizzad) as a systemd service.
 Build/publish first, for example:
   dotnet publish ./pizzad/pizzad.csproj -c Release -o ./artifacts/pizzad
   sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad
+
+LM Studio is optional and is used by aiInsights/summarization only. Local Linux
+transcription remains controlled by /etc/pizzawave/pizzad.json.
 USAGE
 }
 
@@ -25,6 +33,22 @@ while [[ $# -gt 0 ]]; do
     --publish-dir)
       PUBLISH_DIR="$2"
       shift 2
+      ;;
+    --with-lmstudio)
+      INSTALL_LMSTUDIO="true"
+      shift
+      ;;
+    --lmstudio-user)
+      LMSTUDIO_USER="$2"
+      shift 2
+      ;;
+    --lmstudio-model)
+      LMSTUDIO_MODEL="$2"
+      shift 2
+      ;;
+    --skip-lmstudio-model-load)
+      LMSTUDIO_SKIP_MODEL_LOAD="true"
+      shift
       ;;
     -h|--help)
       usage
@@ -79,7 +103,7 @@ if [[ ! -f "$CONFIG_DIR/pizzad.json" ]]; then
     "openAiBaseUrl": "http://localhost:1234/v1",
     "openAiApiKey": "",
     "openAiModel": "",
-    "batchSize": 50,
+    "batchSize": 20,
     "maxPendingCalls": 1000,
     "timeoutMs": 600000,
     "maxRetries": 2
@@ -136,6 +160,20 @@ EOF
 systemctl daemon-reload
 systemctl enable pizzad.service
 systemctl restart pizzad.service
+
+if [[ "$INSTALL_LMSTUDIO" == "true" ]]; then
+  LMSTUDIO_SCRIPT="$SCRIPT_DIR/setup-lmstudio.sh"
+  if [[ ! -x "$LMSTUDIO_SCRIPT" ]]; then
+    echo "LM Studio setup script not found or not executable: $LMSTUDIO_SCRIPT" >&2
+    exit 1
+  fi
+
+  LMSTUDIO_ARGS=(--user "$LMSTUDIO_USER" --model "$LMSTUDIO_MODEL")
+  if [[ "$LMSTUDIO_SKIP_MODEL_LOAD" == "true" ]]; then
+    LMSTUDIO_ARGS+=(--skip-model-load)
+  fi
+  "$LMSTUDIO_SCRIPT" "${LMSTUDIO_ARGS[@]}"
+fi
 
 echo "PizzaWave Engine installed."
 echo "Web UI: http://$(hostname -I | awk '{print $1}'):8080"

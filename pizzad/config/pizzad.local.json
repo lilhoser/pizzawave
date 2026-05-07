@@ -29,7 +29,7 @@
     "enabled": false,
     "openAiBaseUrl": "http://localhost:1234/v1",
     "openAiModel": "",
-    "batchSize": 50,
+    "batchSize": 20,
     "maxPendingCalls": 1000,
     "timeoutMs": 600000,
     "maxRetries": 2
