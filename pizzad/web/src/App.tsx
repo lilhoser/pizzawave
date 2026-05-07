@@ -225,33 +225,40 @@ function Incidents({ rows }: { rows: Incident[] }) {
 function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: string; rangeHours: number; reload: () => Promise<void> }) {
   if (!data) return <div className="category-page">Loading...</div>;
   if (mode === "raw") {
-    return <div className="category-page raw-category"><CategoryCallGroups groups={data.groups} /></div>;
+    return <div className="category-page raw-category" data-category={data.category}><CategoryCallGroups groups={data.groups} category={data.category} /></div>;
   }
   async function generate() {
     await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
     await reload();
   }
-  return <div className="category-split-page"><section className="pane insights-pane"><h2>{label(data.category)} Insights</h2><CategoryInsights rows={data.insights} onGenerate={generate} /></section><section className="pane calls-pane"><h2>Calls by Talkgroup</h2><CategoryCallGroups groups={data.groups} /></section></div>;
+  return <div className="category-split-page" data-category={data.category}><section className="pane insights-pane category-pane"><h2>{label(data.category)} Insights</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} /></section><section className="pane calls-pane category-pane"><h2>Calls by Talkgroup</h2><CategoryCallGroups groups={data.groups} category={data.category} /></section></div>;
 }
 
-function CategoryInsights({ rows, onGenerate }: { rows: CategoryInsight[]; onGenerate: () => Promise<void> }) {
+function CategoryInsights({ rows, category, onGenerate }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void> }) {
   if (!rows.length) return <div className="card"><p className="muted">No insight summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
-  return <>{rows.map(item => <details className="insight-tile" key={item.id} open><summary><span>{item.title}</span><strong>{Math.round(item.score * 100)}%</strong></summary><div className="insight-time">{new Date(item.firstSeen * 1000).toLocaleString()} - {new Date(item.lastSeen * 1000).toLocaleTimeString()}</div><p>{item.detail}</p><div className="call-actions"><span className="pill">{item.callCount} source calls</span>{item.calls.slice(0, 3).map(c => <audio key={c.callId} controls preload="none" src={`/api/v1/calls/${c.callId}/audio`} />)}</div></details>)}</>;
+  return <>{rows.map(item => <details className={`insight-tile category-${category}`} key={item.id} open><summary><span>{item.title}</span><strong className={`confidence ${confidenceClass(item.score)}`}>{Math.round(item.score * 100)}%</strong></summary><div className="insight-time">{new Date(item.firstSeen * 1000).toLocaleString()} - {new Date(item.lastSeen * 1000).toLocaleTimeString()}</div><p>{item.detail}</p><div className="call-actions"><span className="pill">{item.callCount} source calls</span>{item.calls.slice(0, 3).map(c => <audio key={c.callId} controls preload="metadata" src={`/api/v1/calls/${c.callId}/audio`} />)}</div></details>)}</>;
 }
 
-function CategoryCallGroups({ groups }: { groups: CategoryPage["groups"] }) {
+function CategoryCallGroups({ groups, category }: { groups: CategoryPage["groups"]; category?: string }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
-  return <>{groups.map(group => <CollapsibleCallGroup group={group} key={group.label} />)}</>;
+  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} key={group.label} />)}</>;
 }
 
-function CollapsibleCallGroup({ group }: { group: CategoryPage["groups"][number] }) {
+function CollapsibleCallGroup({ group, category }: { group: CategoryPage["groups"][number]; category?: string }) {
   const [open, setOpen] = useState(false);
-  return <details className="call-group" open={open} onToggle={e => setOpen(e.currentTarget.open)}><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{open && group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>;
+  const groupCategory = category ?? group.calls[0]?.category ?? "other";
+  return <details className={`call-group category-${groupCategory}`} open={open} onToggle={e => setOpen(e.currentTarget.open)}><summary><span>{group.label}</span><span className="muted">{group.calls.length} calls</span></summary>{open && group.calls.map(c => <CallRow call={c} key={c.id} />)}</details>;
 }
 
 function CallRow({ call }: { call: EngineCall }) {
   const status = call.qualityReason && call.qualityReason !== "ok" ? `${call.transcriptionStatus}: ${call.qualityReason}` : call.transcriptionStatus;
-  return <div className="call"><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+  return <div className={`call category-${call.category}`}><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+}
+
+function confidenceClass(score: number) {
+  if (score >= 0.75) return "confidence-high";
+  if (score >= 0.45) return "confidence-mid";
+  return "confidence-low";
 }
 
 function TroubleshootView({ health, trConfig }: { health: TrHealth[]; trConfig: any }) {
