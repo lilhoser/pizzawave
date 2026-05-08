@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
@@ -37,25 +37,49 @@ function App() {
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
   const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
+  const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
+  const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadSettings = useCallback(async () => {
-    const [engine, transcription, aiInsights, sftp, tr, alerts] = await Promise.all([
-      api.request<any>("/api/v1/settings/engine"),
-      api.request<any>("/api/v1/settings/transcription"),
-      api.request<any>("/api/v1/settings/ai-insights"),
-      api.request<any>("/api/v1/settings/sftp"),
-      api.request<any>("/api/v1/settings/tr"),
-      api.request<any>("/api/v1/settings/alerts")
-    ]);
-    setSettingsSections({
-      engine: engine.values,
-      transcription: transcription.values,
-      "ai-insights": aiInsights.values,
-      sftp: sftp.values,
-      tr: tr.values,
-      alerts: alerts.values
-    });
+    setSettingsLoadState(current => ({ ...current, loading: true, message: "Loading settings...", error: false }));
+    try {
+      const [engine, transcription, aiInsights, sftp, tr, alerts] = await Promise.all([
+        api.request<any>("/api/v1/settings/engine"),
+        api.request<any>("/api/v1/settings/transcription"),
+        api.request<any>("/api/v1/settings/ai-insights"),
+        api.request<any>("/api/v1/settings/sftp"),
+        api.request<any>("/api/v1/settings/tr"),
+        api.request<any>("/api/v1/settings/alerts")
+      ]);
+      setSettingsSections({
+        engine: engine.values,
+        transcription: transcription.values,
+        "ai-insights": aiInsights.values,
+        sftp: sftp.values,
+        tr: tr.values,
+        alerts: alerts.values
+      });
+      setSettingsLoadState(current => ({ loading: false, version: current.version + 1, message: "Settings loaded", error: false }));
+    } catch (error) {
+      setSettingsLoadState(current => ({ loading: false, version: current.version, message: error instanceof Error ? error.message : "Settings load failed", error: true }));
+    }
   }, []);
+
+  async function loadSettingsFile(file: File | undefined) {
+    if (!file) return;
+    setSettingsLoadState(current => ({ ...current, loading: true, message: `Loading ${file.name}...`, error: false }));
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      setSettingsSections(settingsSectionsFromFile(parsed));
+      setSettingsLoadState(current => ({ loading: false, version: current.version + 1, message: `Loaded ${file.name}. Save each changed section to apply it.`, error: false }));
+    } catch (error) {
+      setSettingsLoadState(current => ({ loading: false, version: current.version, message: error instanceof Error ? error.message : "Settings file load failed", error: true }));
+    } finally {
+      if (settingsFileInputRef.current)
+        settingsFileInputRef.current.value = "";
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -115,7 +139,10 @@ function App() {
           <option value="blue">Blue</option>
           <option value="orange">Orange</option>
         </select>
-        {page === "settings" && <button onClick={() => void loadSettings()}>Load Settings</button>}
+        {page === "settings" && <>
+          <input ref={settingsFileInputRef} type="file" accept="application/json,.json" hidden onChange={e => void loadSettingsFile(e.target.files?.[0])} />
+          <button disabled={settingsLoadState.loading} onClick={() => settingsFileInputRef.current?.click()}>{settingsLoadState.loading ? "Loading..." : "Load Settings"}</button>
+        </>}
         {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
           <button className={categoryViewMode === "incidents" ? "active" : ""} onClick={() => setCategoryViewMode("incidents")}>Incidents</button>
           <button className={categoryViewMode === "summaries" ? "active" : ""} onClick={() => setCategoryViewMode("summaries")}>AI Summaries</button>
@@ -135,7 +162,7 @@ function App() {
         {page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
         {categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
         {page === "troubleshoot" && <TroubleshootView data={troubleshoot} rangeHours={rangeHours} reload={load} />}
-        {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} reload={load} />}
+        {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
       </main>
       <footer className="statusbar">
         <span className="pill">Queue {engineHealth?.queueDepth ?? "--"}</span>
@@ -652,7 +679,7 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function SettingsView({ jobs, settingsSections, reload }: { jobs: Job[]; settingsSections: Record<string, any>; reload: () => Promise<void> }) {
+function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { jobs: Job[]; settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void> }) {
   const [sections, setSections] = useState<Record<string, any>>({});
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "error">("info");
@@ -662,7 +689,13 @@ function SettingsView({ jobs, settingsSections, reload }: { jobs: Job[]; setting
   const [models, setModels] = useState<any[]>([]);
   const [modelBusy, setModelBusy] = useState("");
 
-  useEffect(() => { setSections(withSettingsDefaults(settingsSections)); }, [settingsSections]);
+  useEffect(() => {
+    setSections(withSettingsDefaults(settingsSections));
+    if (settingsLoadState.message) {
+      setMessageKind(settingsLoadState.error ? "error" : "info");
+      setMessage(settingsLoadState.message);
+    }
+  }, [settingsSections, settingsLoadState.version]);
   useEffect(() => { void loadModels(); }, []);
 
   const engine = sections.engine ?? {};
@@ -981,6 +1014,24 @@ function withSettingsDefaults(value: Record<string, any>) {
     ...(sections.alerts ?? {})
   };
   return sections;
+}
+
+function settingsSectionsFromFile(input: any) {
+  if (!input || typeof input !== "object")
+    throw new Error("Settings file must contain a JSON object.");
+
+  return withSettingsDefaults({
+    engine: input.engine ?? {
+      server: input.server ?? {},
+      storage: input.storage ?? {},
+      ingest: input.ingest ?? {}
+    },
+    transcription: input.transcription ?? {},
+    "ai-insights": input["ai-insights"] ?? input.aiInsights ?? {},
+    sftp: input.sftp ?? input.sftpImport ?? {},
+    tr: input.tr ?? input.trunkRecorder ?? {},
+    alerts: input.alerts ?? {}
+  });
 }
 
 function numberOrZero(value: string) {
