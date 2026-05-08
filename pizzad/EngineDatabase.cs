@@ -537,6 +537,56 @@ public sealed class EngineDatabase
         return id;
     }
 
+    public async Task<int> RebuildIncidentsFromInsightEventsAsync(long start, long end, CancellationToken ct)
+    {
+        var events = await ListInsightEventsAsync(start, end, ct);
+        var candidates = events
+            .Where(e => e.Calls.Count >= 2)
+            .OrderBy(e => e.FirstSeen)
+            .ToList();
+        if (candidates.Count == 0)
+            return 0;
+
+        await using var connection = OpenConnection();
+        await using (var deleteCalls = connection.CreateCommand())
+        {
+            deleteCalls.CommandText = """
+                DELETE FROM incident_calls
+                WHERE incident_id IN (
+                    SELECT id FROM incidents WHERE last_seen >= $start AND first_seen <= $end
+                );
+                """;
+            Add(deleteCalls, "$start", start);
+            Add(deleteCalls, "$end", end);
+            await deleteCalls.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var deleteIncidents = connection.CreateCommand())
+        {
+            deleteIncidents.CommandText = "DELETE FROM incidents WHERE last_seen >= $start AND first_seen <= $end;";
+            Add(deleteIncidents, "$start", start);
+            Add(deleteIncidents, "$end", end);
+            await deleteIncidents.ExecuteNonQueryAsync(ct);
+        }
+
+        var count = 0;
+        foreach (var ev in candidates)
+        {
+            await AddIncidentAsync(new IncidentDto
+            {
+                Title = ev.Title,
+                Detail = ev.Detail,
+                FirstSeen = ev.FirstSeen,
+                LastSeen = ev.LastSeen,
+                Confidence = ev.Confidence,
+                Calls = ev.Calls
+            }, ct);
+            count++;
+        }
+
+        return count;
+    }
+
     public async Task<long> AddInsightWindowAsync(long start, long end, string summaryText, CancellationToken ct)
     {
         await using var connection = OpenConnection();

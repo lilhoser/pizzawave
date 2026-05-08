@@ -486,48 +486,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             return false;
         }
 
-        var eventTokens = ExtractIncidentTokens($"{ev.Title} {ev.Detail}");
-        if (eventTokens.Count == 0)
-        {
-            reason = "event title/detail did not contain specific incident tokens";
-            return false;
-        }
-
-        var callTokens = calls
-            .Select(c => new
-            {
-                Call = c,
-                EventTokens = ExtractIncidentTokens($"{c.TalkgroupName} {c.Transcription}"),
-                PairTokens = ExtractIncidentTokens(c.Transcription)
-            })
-            .ToList();
-
-        var eventMatchedCalls = callTokens
-            .Where(c => ComputeIncidentSimilarity(eventTokens, c.EventTokens) >= IncidentCallEventThreshold)
-            .Select(c => c.Call)
-            .ToList();
-
-        var maxPairwise = 0.0;
-        for (var i = 0; i < callTokens.Count; i++)
-        {
-            for (var j = i + 1; j < callTokens.Count; j++)
-                maxPairwise = Math.Max(maxPairwise, ComputeIncidentSimilarity(callTokens[i].PairTokens, callTokens[j].PairTokens));
-        }
-
-        if (eventMatchedCalls.Count >= 2 && maxPairwise >= IncidentCorroborationPairThreshold)
-        {
-            reason = $"accepted by event token overlap and transcript corroboration; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}";
-            return true;
-        }
-
-        if (maxPairwise >= IncidentPairThreshold)
-        {
-            reason = $"accepted by strong call transcript overlap; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}";
-            return true;
-        }
-
-        reason = $"insufficient shared signal; eventMatchedCalls={eventMatchedCalls.Count}, maxPairwise={maxPairwise:0.00}, requiredEventPairwise={IncidentCorroborationPairThreshold:0.00}, requiredStrongPairwise={IncidentPairThreshold:0.00}, span={span.TotalMinutes:0.#}m";
-        return false;
+        reason = "multi-call actionable event within incident time window";
+        return true;
     }
 
     private static HashSet<string> ExtractIncidentTokens(string text)

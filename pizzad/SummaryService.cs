@@ -39,6 +39,13 @@ public sealed class SummaryService
         return job with { Id = jobId };
     }
 
+    public async Task<object> RebuildIncidentsForRangeAsync(GenerateSummaryRequest request, CancellationToken ct)
+    {
+        var count = await _database.RebuildIncidentsFromInsightEventsAsync(request.Start, request.End, ct);
+        await _events.PublishAsync("summary_updated", new { request.Start, request.End, incidents = count, rebuilt = true }, ct);
+        return new { incidents = count };
+    }
+
     private async Task RunGenerateAsync(long jobId, GenerateSummaryRequest request, CancellationToken ct)
     {
         try

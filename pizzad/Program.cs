@@ -152,6 +152,14 @@ app.MapPost("/api/v1/incidents/generate", async (HttpContext context, GenerateSu
 .WithName("GenerateIncidents")
 .WithOpenApi();
 
+app.MapPost("/api/v1/incidents/rebuild", async (HttpContext context, GenerateSummaryRequest request, AuthService authService, SummaryService summaries) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await summaries.RebuildIncidentsForRangeAsync(request, context.RequestAborted));
+})
+.WithName("RebuildIncidents")
+.WithOpenApi();
+
 app.MapGet("/api/v1/troubleshoot/tr-health", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
