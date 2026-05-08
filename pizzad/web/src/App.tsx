@@ -38,6 +38,27 @@ function App() {
   const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
 
+  const loadSettings = useCallback(async () => {
+    const [engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
+      api.request<any>("/api/v1/settings/engine"),
+      api.request<any>("/api/v1/settings/transcription"),
+      api.request<any>("/api/v1/settings/ai-insights"),
+      api.request<any>("/api/v1/settings/sftp"),
+      api.request<any>("/api/v1/settings/tr"),
+      api.request<any>("/api/v1/settings/auth"),
+      api.request<any>("/api/v1/settings/alerts")
+    ]);
+    setSettingsSections({
+      engine: engine.values,
+      transcription: transcription.values,
+      "ai-insights": aiInsights.values,
+      sftp: sftp.values,
+      tr: tr.values,
+      auth: auth.values,
+      alerts: alerts.values
+    });
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const [healthStatus, jobRows] = await Promise.all([
@@ -52,26 +73,6 @@ function App() {
         setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}`));
       } else if (page === "troubleshoot") {
         setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
-      } else if (page === "settings") {
-        const [engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
-          api.request<any>("/api/v1/settings/engine"),
-          api.request<any>("/api/v1/settings/transcription"),
-          api.request<any>("/api/v1/settings/ai-insights"),
-          api.request<any>("/api/v1/settings/sftp"),
-          api.request<any>("/api/v1/settings/tr"),
-          api.request<any>("/api/v1/settings/auth"),
-          api.request<any>("/api/v1/settings/alerts")
-        ]);
-        setJobs(jobRows);
-        setSettingsSections({
-          engine: engine.values,
-          transcription: transcription.values,
-          "ai-insights": aiInsights.values,
-          sftp: sftp.values,
-          tr: tr.values,
-          auth: auth.values,
-          alerts: alerts.values
-        });
       }
       setStatus("Live");
     } catch (error) {
@@ -80,6 +81,7 @@ function App() {
   }, [page, rangeHours]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -115,7 +117,7 @@ function App() {
           <option value="blue">Blue</option>
           <option value="orange">Orange</option>
         </select>
-        {page === "settings" && <button onClick={() => void load()}>Load Settings</button>}
+        {page === "settings" && <button onClick={() => void loadSettings()}>Load Settings</button>}
         {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
           <button className={categoryViewMode === "incidents" ? "active" : ""} onClick={() => setCategoryViewMode("incidents")}>Incidents</button>
           <button className={categoryViewMode === "summaries" ? "active" : ""} onClick={() => setCategoryViewMode("summaries")}>AI Summaries</button>
