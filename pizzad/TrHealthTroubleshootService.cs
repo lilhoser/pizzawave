@@ -147,8 +147,7 @@ public sealed class TrHealthTroubleshootService
             };
         }
 
-        var globalRows = recentRows.Where(IsGlobal).ToList();
-        var global = Aggregate(globalRows.Count > 0 ? globalRows : recentRows);
+        var global = AggregateForGlobalDisplay(recentRows);
         var metrics = BuildMetricRows(global);
         var systemRows = BuildSystemRows(recentRows);
         var remedies = BuildRemedies(global);
@@ -172,7 +171,7 @@ public sealed class TrHealthTroubleshootService
 
     private static List<TrHealthMetricDto> BuildMetricRows(TrHealthAggregate agg) =>
     [
-        new("Decode samples at 0/sec", $"{agg.DecodeZeroPercent:F2}%", agg.DecodeZeroPercent >= 25 ? "Frequent zero decode samples suggest unstable control-channel decode." : "Lower is better.", agg.DecodeZeroPercent >= 25.0),
+        new("Decode 0% rate", $"{agg.DecodeZeroPercent:F2}%", agg.DecodeWeightCalls > 0 ? $"Weighted by concluded-call volume across systems ({agg.DecodeWeightCalls:N0} calls)." : "Computed from decode sample lines; lower is better.", agg.DecodeZeroPercent >= 25.0),
         new("Average decode rate", FormatDecodeRateWithConfidence(agg), "Computed from Control Channel Message Decode Rate lines.", HasSufficientDecodeSamples(agg) && agg.AvgDecodeRate <= 0.10),
         new("Decode sample lines", agg.DecodeSampleLines.ToString("N0", CultureInfo.InvariantCulture), "Decode-rate confidence is low when this is small (shown as N/A).", agg.DecodeSampleLines < 20),
         new("Control-channel retunes", agg.Retunes.ToString("N0", CultureInfo.InvariantCulture), "High counts can indicate weak/unstable control-channel reception or incorrect channel list.", agg.Retunes >= Math.Max(20, agg.Windows * 4)),
@@ -244,8 +243,8 @@ public sealed class TrHealthTroubleshootService
         var baselineGlobal = baselineRows.Where(IsGlobal).ToList();
         return
         [
-            BuildChart("Decode Zero Samples", "Y axis: count of Control Channel Message Decode Rate samples at 0/sec", "N0", hours, [("", Hourly(global, hours, a => a.DecodeZero))], baselineGlobal, baseline, a => a.DecodeZero),
-            BuildChart("Average Decode Rate", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, [("", Hourly(global, hours, a => a.AvgDecodeRate))], baselineGlobal, baseline, a => a.AvgDecodeRate),
+            BuildChart("Decode 0% Rate", "Y axis: percent of decode samples at 0/sec; global rate is weighted by system call volume when system rows are available", "F1", hours, [("", HourlyForGlobalDisplay(rows, hours, a => a.DecodeZeroPercent))], baselineRows, baseline, a => a.DecodeZeroPercent, UseGlobalDisplayAggregate: true, BaselineIsRate: true),
+            BuildChart("Average Decode Rate", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, [("", Hourly(global, hours, a => a.AvgDecodeRate))], baselineGlobal, baseline, a => a.AvgDecodeRate, BaselineIsRate: true),
             BuildChart("Control-Channel Retunes", "Y axis: retune events per hour", "N0", hours, [("", Hourly(global, hours, a => a.Retunes))], baselineGlobal, baseline, a => a.Retunes),
             BuildChart("No Transmissions Recorded", "Y axis: calls with no recorded transmissions per hour", "N0", hours, [("", Hourly(global, hours, a => a.NoTxRecorded))], baselineGlobal, baseline, a => a.NoTxRecorded),
             BuildChart("Sample Source Stops", "Y axis: source stopped receiving samples events per hour", "N0", hours, [("", Hourly(global, hours, a => a.SampleStops))], baselineGlobal, baseline, a => a.SampleStops)
@@ -269,22 +268,37 @@ public sealed class TrHealthTroubleshootService
 
         return
         [
-            BuildChart("Decode Zero Samples by System", "Y axis: count of 0/sec decode samples per hour", "N0", hours, Series(a => a.DecodeZero), baselineRows, baseline, a => a.DecodeZero, scopes),
-            BuildChart("Average Decode Rate by System", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, Series(a => a.AvgDecodeRate), baselineRows, baseline, a => a.AvgDecodeRate, scopes),
+            BuildChart("Decode 0% Rate by System", "Y axis: percent of decode samples at 0/sec per hour", "F1", hours, Series(a => a.DecodeZeroPercent), baselineRows, baseline, a => a.DecodeZeroPercent, scopes, BaselineIsRate: true),
+            BuildChart("Average Decode Rate by System", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, Series(a => a.AvgDecodeRate), baselineRows, baseline, a => a.AvgDecodeRate, scopes, BaselineIsRate: true),
             BuildChart("Retunes by System", "Y axis: retune events per hour", "N0", hours, Series(a => a.Retunes), baselineRows, baseline, a => a.Retunes, scopes),
             BuildChart("No Transmissions by System", "Y axis: calls with no recorded transmissions per hour", "N0", hours, Series(a => a.NoTxRecorded), baselineRows, baseline, a => a.NoTxRecorded, scopes),
             BuildChart("Sample Source Stops by System", "Y axis: source stopped receiving samples events per hour", "N0", hours, Series(a => a.SampleStops), baselineRows, baseline, a => a.SampleStops, scopes)
         ];
     }
 
-    private static TrHealthChartDto BuildChart(string title, string yAxis, string format, List<DateTime> hours, List<(string Label, IReadOnlyList<double> Values)> series, List<TrHealthSampleDto> baselineRows, string baseline, Func<TrHealthAggregate, double> selector, IReadOnlyList<string>? scopes = null)
+    private static TrHealthChartDto BuildChart(
+        string title,
+        string yAxis,
+        string format,
+        List<DateTime> hours,
+        List<(string Label, IReadOnlyList<double> Values)> series,
+        List<TrHealthSampleDto> baselineRows,
+        string baseline,
+        Func<TrHealthAggregate, double> selector,
+        IReadOnlyList<string>? scopes = null,
+        bool UseGlobalDisplayAggregate = false,
+        bool BaselineIsRate = false)
     {
         var chartSeries = series.Select(s => new TrHealthSeriesDto(s.Label, s.Values)).ToList();
-        var comparisonRows = scopes == null
+        var comparisonRows = UseGlobalDisplayAggregate
+            ? baselineRows
+            : scopes == null
             ? baselineRows.Where(IsGlobal).ToList()
             : baselineRows.Where(r => scopes.Contains(r.Scope, StringComparer.OrdinalIgnoreCase)).ToList();
         var hasBaselineHistory = HasBaselineHistory(comparisonRows, baseline);
-        var baselineValues = BaselineSeries(comparisonRows, hours, selector, baseline);
+        var baselineValues = UseGlobalDisplayAggregate
+            ? BaselineSeriesForGlobalDisplay(comparisonRows, hours, selector, baseline)
+            : BaselineSeries(comparisonRows, hours, selector, baseline, BaselineIsRate);
         chartSeries.Add(new TrHealthSeriesDto(hasBaselineHistory ? $"{baseline} baseline" : $"{baseline} baseline (no history yet)", baselineValues, true));
 
         return new TrHealthChartDto(title, yAxis, format, hours.Select(h => h.ToString("MM-dd HH:00", CultureInfo.InvariantCulture)).ToList(), chartSeries);
@@ -311,7 +325,20 @@ public sealed class TrHealthTroubleshootService
         }).ToList();
     }
 
-    private static List<double> BaselineSeries(List<TrHealthSampleDto> rows, List<DateTime> hours, Func<TrHealthAggregate, double> selector, string baseline)
+    private static List<double> HourlyForGlobalDisplay(List<TrHealthSampleDto> rows, List<DateTime> hours, Func<TrHealthAggregate, double> selector)
+    {
+        return hours.Select(hour =>
+        {
+            var bucket = rows.Where(r =>
+            {
+                var local = r.WindowEndUtc.ToLocalTime();
+                return local.Year == hour.Year && local.Month == hour.Month && local.Day == hour.Day && local.Hour == hour.Hour;
+            }).ToList();
+            return bucket.Count == 0 ? 0 : selector(AggregateForGlobalDisplay(bucket));
+        }).ToList();
+    }
+
+    private static List<double> BaselineSeries(List<TrHealthSampleDto> rows, List<DateTime> hours, Func<TrHealthAggregate, double> selector, string baseline, bool isRate)
     {
         var cutoff = DateTime.UtcNow.AddDays(-BaselineDays(baseline));
         var baselineRows = rows.Where(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < DateTime.UtcNow.AddHours(-24)).ToList();
@@ -324,7 +351,22 @@ public sealed class TrHealthTroubleshootService
             if (matching.Count == 0)
                 return 0.0;
             var dayCount = Math.Max(1, matching.Select(r => r.WindowEndUtc.ToLocalTime().Date).Distinct().Count());
-            return selector(Aggregate(matching)) / dayCount;
+            var value = selector(Aggregate(matching));
+            return isRate ? value : value / dayCount;
+        }).ToList();
+    }
+
+    private static List<double> BaselineSeriesForGlobalDisplay(List<TrHealthSampleDto> rows, List<DateTime> hours, Func<TrHealthAggregate, double> selector, string baseline)
+    {
+        var cutoff = DateTime.UtcNow.AddDays(-BaselineDays(baseline));
+        var baselineRows = rows.Where(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < DateTime.UtcNow.AddHours(-24)).ToList();
+        if (baselineRows.Count == 0)
+            return hours.Select(_ => 0.0).ToList();
+
+        return hours.Select(hour =>
+        {
+            var matching = baselineRows.Where(r => r.WindowEndUtc.ToLocalTime().Hour == hour.Hour).ToList();
+            return matching.Count == 0 ? 0.0 : selector(AggregateForGlobalDisplay(matching));
         }).ToList();
     }
 
@@ -341,7 +383,9 @@ public sealed class TrHealthTroubleshootService
         sb.AppendLine("-----------------------------------------------");
         sb.AppendLine($"5-minute windows               {agg.Windows}");
         sb.AppendLine($"Decode sample lines            {agg.DecodeSampleLines}");
-        sb.AppendLine($"Decode samples at 0/sec        {agg.DecodeZeroPercent:F2}%");
+        sb.AppendLine($"Decode 0% rate                 {agg.DecodeZeroPercent:F2}%");
+        if (agg.DecodeWeightCalls > 0)
+            sb.AppendLine($"Decode weighting calls         {agg.DecodeWeightCalls}");
         sb.AppendLine($"Average decode rate            {FormatDecodeRateWithConfidence(agg)}");
         sb.AppendLine($"Control-channel retunes        {agg.Retunes}");
         sb.AppendLine($"Recorded calls concluded       {agg.CallsConcluded}");
@@ -484,7 +528,41 @@ public sealed class TrHealthTroubleshootService
             rows.Sum(r => r.UpdateNotGrant),
             rows.Sum(r => r.NoTxRecorded),
             rows.Sum(r => r.SampleStops),
-            rows.Sum(r => r.UnableSource));
+            rows.Sum(r => r.UnableSource),
+            null,
+            0);
+    }
+
+    private static TrHealthAggregate AggregateForGlobalDisplay(List<TrHealthSampleDto> rows)
+    {
+        var systemRows = rows.Where(r => IsDisplaySystemScope(r.Scope)).ToList();
+        if (systemRows.Count == 0)
+        {
+            var globalRows = rows.Where(IsGlobal).ToList();
+            return Aggregate(globalRows.Count > 0 ? globalRows : rows);
+        }
+
+        var aggregate = Aggregate(systemRows);
+        var weighted = systemRows
+            .GroupBy(r => r.Scope, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var groupRows = g.ToList();
+                var decodeLines = groupRows.Sum(r => r.DecodeLines);
+                var decodeZero = groupRows.Sum(r => r.DecodeZero);
+                var calls = groupRows.Sum(r => r.CallsConcluded);
+                var percent = decodeLines == 0 ? 0 : decodeZero * 100.0 / decodeLines;
+                return new { DecodeLines = decodeLines, Calls = calls, Percent = percent };
+            })
+            .Where(s => s.DecodeLines > 0 && s.Calls > 0)
+            .ToList();
+
+        if (weighted.Count == 0)
+            return aggregate;
+
+        var totalCalls = weighted.Sum(s => s.Calls);
+        var weightedPercent = weighted.Sum(s => s.Percent * s.Calls) / Math.Max(1, totalCalls);
+        return aggregate with { WeightedDecodeZeroPercent = weightedPercent, DecodeWeightCalls = totalCalls };
     }
 
     private static bool IsGlobal(TrHealthSampleDto row) => string.Equals(row.Scope, "global", StringComparison.OrdinalIgnoreCase);
@@ -525,9 +603,11 @@ public sealed class TrHealthTroubleshootService
         int UpdateNotGrant,
         int NoTxRecorded,
         int SampleStops,
-        int UnableSource)
+        int UnableSource,
+        double? WeightedDecodeZeroPercent,
+        int DecodeWeightCalls)
     {
-        public double DecodeZeroPercent => DecodeSampleLines == 0 ? 0 : DecodeZero * 100.0 / DecodeSampleLines;
+        public double DecodeZeroPercent => WeightedDecodeZeroPercent ?? (DecodeSampleLines == 0 ? 0 : DecodeZero * 100.0 / DecodeSampleLines);
         public double AvgDecodeRate => DecodeSampleLines == 0 ? 0 : DecodeRateTotal / DecodeSampleLines;
     }
 }

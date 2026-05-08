@@ -23,7 +23,8 @@ public sealed class DashboardService
         var problemCalls = calls.Where(IsProblemTranscript).ToList();
         var qualityBreakdown = BuildQualityBreakdown(problemCalls);
         var topProblemSystem = BuildTopProblemSystem(calls);
-        var topProblemTalkgroup = BuildTopProblemTalkgroup(problemCalls);
+        var healthRows = await _database.ListHealthSamplesAsync(start, end, ct);
+        var decodeKpis = BuildDecodeKpis(healthRows);
         var busiest = calls
             .GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour)
             .OrderByDescending(g => g.Count())
@@ -38,7 +39,8 @@ public sealed class DashboardService
                 new("Incidents", incidents.Count.ToString("N0", CultureInfo.CurrentCulture), "An Incident consists of multiple, related calls"),
                 new("Quality Problems", qualityProblems.ToString("N0", CultureInfo.CurrentCulture), total == 0 ? "No calls in selected range" : $"{qualityProblems * 100.0 / total:F1}% of calls; {qualityBreakdown}"),
                 new("Top Problem System", topProblemSystem.Label, topProblemSystem.ValueText),
-                new("Top Problem TG", topProblemTalkgroup.Label, topProblemTalkgroup.ValueText),
+                decodeKpis.Global,
+                decodeKpis.Systems,
                 new("Busiest Hour", busiest == null ? "--" : $"{busiest.Key:00}:00", busiest == null ? "No calls" : $"{busiest.Count():N0} calls"),
                 new("Unique Talkgroups", calls.Select(c => c.Talkgroup).Distinct().Count().ToString("N0", CultureInfo.CurrentCulture), "Heard in selected range")
             ],
@@ -186,16 +188,6 @@ public sealed class DashboardService
             : new BarStatDto(row.Label, row.Problems, 1, $"{row.Problems:N0}/{row.Total:N0} calls ({row.Problems * 100.0 / Math.Max(1, row.Total):F1}%)");
     }
 
-    private static BarStatDto BuildTopProblemTalkgroup(List<EngineCall> problemCalls)
-    {
-        var row = problemCalls.GroupBy(c => c.Talkgroup)
-            .OrderByDescending(g => g.Count())
-            .FirstOrDefault();
-        return row == null
-            ? new BarStatDto("--", 0, 0, "No problem talkgroups")
-            : new BarStatDto(GetTalkgroupLabel(row.First()), row.Count(), 1, $"{row.Count():N0} problem calls");
-    }
-
     private static IReadOnlyList<BarStatDto> BuildCategoryShare(List<EngineCall> calls)
     {
         var total = Math.Max(1, calls.Count);
@@ -303,4 +295,71 @@ public sealed class DashboardService
         if (seconds < 86400) return $"{Math.Max(1, seconds / 3600)}h each";
         return $"{seconds / 86400.0:F1}d each";
     }
+
+    private static (KpiDto Global, KpiDto Systems) BuildDecodeKpis(List<TrHealthSampleDto> rows)
+    {
+        var systems = rows
+            .Where(r => IsDisplaySystemScope(r.Scope))
+            .GroupBy(r => r.Scope, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var groupRows = g.ToList();
+                var decodeLines = groupRows.Sum(r => r.DecodeLines);
+                var decodeZero = groupRows.Sum(r => r.DecodeZero);
+                var calls = groupRows.Sum(r => r.CallsConcluded);
+                var pct = decodeLines == 0 ? 0 : decodeZero * 100.0 / decodeLines;
+                return new DecodeSystemStat(g.Key, decodeLines, decodeZero, calls, pct);
+            })
+            .Where(s => s.DecodeLines > 0)
+            .OrderByDescending(s => s.Calls)
+            .ThenBy(s => s.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var global = WeightedDecodeZeroPercent(systems, rows);
+        var globalKpi = global == null
+            ? new KpiDto("TR Decode 0%", "N/A", "No TR decode samples in selected range")
+            : new KpiDto("TR Decode 0%", $"{global.Value.Percent:F1}%", $"Weighted by {global.Value.Weight:N0} concluded calls");
+
+        var worst = systems.OrderByDescending(s => s.DecodeZeroPercent).FirstOrDefault();
+        var systemSummary = string.Join(", ", systems.Take(3).Select(s => $"{s.Label} {s.DecodeZeroPercent:F1}%/{s.Calls:N0} calls"));
+        var systemsKpi = worst == null
+            ? new KpiDto("TR Decode Systems", "N/A", "No system-scoped decode samples")
+            : new KpiDto("TR Decode Systems", $"{worst.Label} {worst.DecodeZeroPercent:F1}%", string.IsNullOrWhiteSpace(systemSummary) ? "Worst system decode-zero rate" : systemSummary);
+
+        return (globalKpi, systemsKpi);
+    }
+
+    private static (double Percent, int Weight)? WeightedDecodeZeroPercent(List<DecodeSystemStat> systems, List<TrHealthSampleDto> fallbackRows)
+    {
+        var weighted = systems.Where(s => s.Calls > 0).ToList();
+        if (weighted.Count > 0)
+        {
+            var totalCalls = weighted.Sum(s => s.Calls);
+            var percent = weighted.Sum(s => s.DecodeZeroPercent * s.Calls) / Math.Max(1, totalCalls);
+            return (percent, totalCalls);
+        }
+
+        var globalRows = fallbackRows.Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)).ToList();
+        var rows = globalRows.Count > 0 ? globalRows : fallbackRows;
+        var lines = rows.Sum(r => r.DecodeLines);
+        if (lines == 0)
+            return null;
+        return (rows.Sum(r => r.DecodeZero) * 100.0 / lines, lines);
+    }
+
+    private static bool IsDisplaySystemScope(string? scope)
+    {
+        if (string.IsNullOrWhiteSpace(scope))
+            return false;
+        var value = scope.Trim();
+        if (string.Equals(value, "global", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (value.StartsWith("source", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (value.All(char.IsDigit))
+            return false;
+        return value.Any(char.IsLetter);
+    }
+
+    private sealed record DecodeSystemStat(string Label, int DecodeLines, int DecodeZero, int Calls, double DecodeZeroPercent);
 }
