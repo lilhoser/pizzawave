@@ -652,20 +652,189 @@ function formatDuration(seconds: number) {
 }
 
 function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Job[]; settingsSections: Record<string, any>; rangeHours: number; reload: () => Promise<void> }) {
-  async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
-  async function regenToken() { await api.request("/api/v1/settings/auth/regenerate-token", { method: "POST" }); alert("Token regenerated on server. Update this browser token from the token file."); }
-  async function generate() { await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) }); await reload(); }
-  return <div className="settings-page"><h2>Settings</h2><div className="card"><h3>Jobs / Imports</h3>{jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> - {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}</div><div className="card"><h3>SFTP Import</h3><SftpImport reload={reload} /></div><div className="card"><h3>Summaries / Incidents</h3><button onClick={generate}>Generate incidents for selected range</button></div>{["engine", "transcription", "ai-insights", "sftp", "tr", "alerts", "auth"].map(section => <SettingsJsonEditor section={section} value={settingsSections[section]} reload={reload} key={section} />)}<div className="card"><h3>Auth Token</h3><button onClick={regenToken}>Regenerate token</button></div></div>;
-}
+  const [sections, setSections] = useState<Record<string, any>>({});
+  const [message, setMessage] = useState("");
 
-function SettingsJsonEditor({ section, value, reload }: { section: string; value: any; reload: () => Promise<void> }) {
-  const [text, setText] = useState("");
-  useEffect(() => { setText(JSON.stringify(value ?? {}, null, 2)); }, [value]);
-  async function save() {
-    await api.request(`/api/v1/settings/${section}`, { method: "POST", body: JSON.stringify({ values: JSON.parse(text) }) });
+  useEffect(() => { setSections(cloneSettings(settingsSections)); }, [settingsSections]);
+
+  const engine = sections.engine ?? {};
+  const transcription = sections.transcription ?? {};
+  const aiInsights = sections["ai-insights"] ?? {};
+  const sftp = sections.sftp ?? {};
+  const tr = sections.tr ?? {};
+  const alerts = sections.alerts ?? {};
+  const auth = sections.auth ?? {};
+
+  function update(section: string, path: string[], value: any) {
+    setSections(current => {
+      const next = cloneSettings(current);
+      const root = next[section] ?? {};
+      let target = root;
+      for (const key of path.slice(0, -1)) {
+        target[key] = target[key] && typeof target[key] === "object" ? target[key] : {};
+        target = target[key];
+      }
+      target[path[path.length - 1]] = value;
+      next[section] = root;
+      return next;
+    });
+  }
+
+  async function save(section: string) {
+    await api.request(`/api/v1/settings/${section}`, { method: "POST", body: JSON.stringify({ values: sections[section] ?? {} }) });
+    setMessage(`${label(section)} settings saved`);
     await reload();
   }
-  return <div className="card"><h3>{label(section)} Settings</h3><textarea value={text} onChange={e => setText(e.target.value)} /><button onClick={save}>Save {label(section)}</button></div>;
+
+  async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
+  async function regenToken() {
+    await api.request("/api/v1/settings/auth/regenerate-token", { method: "POST" });
+    setMessage("Token regenerated on server. Update this browser token from the token file.");
+  }
+  async function generate() {
+    await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
+    setMessage("Incident generation queued for selected range");
+    await reload();
+  }
+
+  return <div className="settings-page">
+    <div className="settings-header">
+      <h2>Settings</h2>
+      <div className="settings-header-actions">
+        <button onClick={() => void reload()}>Load</button>
+        <span className="muted">{message || "Changes save by section."}</span>
+      </div>
+    </div>
+
+    <div className="settings-grid">
+      <SettingsCard title="Listen / Storage" onSave={() => save("engine")}>
+        <SettingInput label="Web bind" value={engine.server?.httpBind} onChange={v => update("engine", ["server", "httpBind"], v)} />
+        <SettingInput label="Web port" type="number" value={engine.server?.httpPort} onChange={v => update("engine", ["server", "httpPort"], numberOrZero(v))} />
+        <SettingInput label="Callstream bind" value={engine.ingest?.callstreamBind} onChange={v => update("engine", ["ingest", "callstreamBind"], v)} />
+        <SettingInput label="Callstream port" type="number" value={engine.ingest?.callstreamPort} onChange={v => update("engine", ["ingest", "callstreamPort"], numberOrZero(v))} />
+        <SettingInput label="Database path" value={engine.storage?.databasePath} onChange={v => update("engine", ["storage", "databasePath"], v)} />
+        <SettingInput label="Audio root" value={engine.storage?.audioRoot} onChange={v => update("engine", ["storage", "audioRoot"], v)} />
+        <SettingInput label="Import cache" value={engine.storage?.importCacheRoot} onChange={v => update("engine", ["storage", "importCacheRoot"], v)} />
+        <SettingInput label="App data root" value={engine.storage?.appDataRoot} onChange={v => update("engine", ["storage", "appDataRoot"], v)} />
+      </SettingsCard>
+
+      <SettingsCard title="Transcription" onSave={() => save("transcription")}>
+        <SettingSelect label="Engine" value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
+        <SettingInput label="Whisper model file" value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
+        <SettingInput label="Vosk model path" value={transcription.voskModelPath} onChange={v => update("transcription", ["voskModelPath"], v)} />
+        <SettingInput label="OpenAI-compatible URL" value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
+        <SettingInput label="OpenAI-compatible model" value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
+        <SettingInput label="API key" type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
+        <SettingInput label="Analog sample rate" type="number" value={transcription.analogSampleRate} onChange={v => update("transcription", ["analogSampleRate"], numberOrZero(v))} />
+        <p className="setting-note">Local Linux transcription uses Whisper or Vosk. LM Studio/OpenAI-compatible transcription is available but separate from insights.</p>
+      </SettingsCard>
+
+      <SettingsCard title="Insights (LM Link)" onSave={() => save("ai-insights")}>
+        <SettingCheckbox label="Enable AI usage" checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
+        <SettingInput label="Base URL" value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
+        <SettingInput label="Model" value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
+        <SettingInput label="API key" type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
+        <SettingInput label="Batch size" type="number" value={aiInsights.batchSize} onChange={v => update("ai-insights", ["batchSize"], numberOrZero(v))} />
+        <SettingInput label="Max pending calls" type="number" value={aiInsights.maxPendingCalls} onChange={v => update("ai-insights", ["maxPendingCalls"], numberOrZero(v))} />
+        <SettingInput label="Timeout (ms)" type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
+        <SettingInput label="Retries" type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
+      </SettingsCard>
+
+      <SettingsCard title="Alerts / Email" onSave={() => save("alerts")}>
+        <SettingCheckbox label="Enable email alerts" checked={alerts.emailEnabled} onChange={v => update("alerts", ["emailEnabled"], v)} />
+        <SettingSelect label="Email provider" value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
+        <SettingInput label="Email address" value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
+        <SettingInput label="App password" type="password" value={alerts.emailPassword} onChange={v => update("alerts", ["emailPassword"], v)} />
+        <p className="setting-note">{alerts.rules?.length ?? 0} alert rule(s) configured. Rule management remains in the alerts settings workflow.</p>
+      </SettingsCard>
+
+      <SettingsCard title="SFTP Import" onSave={() => save("sftp")}>
+        <SettingCheckbox label="Enable SFTP import" checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
+        <SettingInput label="Host" value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
+        <SettingInput label="Port" type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
+        <SettingInput label="Username" value={sftp.username} onChange={v => update("sftp", ["username"], v)} />
+        <SettingSelect label="Auth mode" value={sftp.authMode} options={["privateKey", "password"]} onChange={v => update("sftp", ["authMode"], v)} />
+        <SettingInput label="Password" type="password" value={sftp.password} onChange={v => update("sftp", ["password"], v)} />
+        <SettingInput label="Private key path" value={sftp.privateKeyPath} onChange={v => update("sftp", ["privateKeyPath"], v)} />
+        <SettingInput label="Key passphrase" type="password" value={sftp.privateKeyPassphrase} onChange={v => update("sftp", ["privateKeyPassphrase"], v)} />
+        <SettingInput label="Remote root" value={sftp.remoteRoot} onChange={v => update("sftp", ["remoteRoot"], v)} />
+        <SettingInput label="Quick import max hours" type="number" value={sftp.quickImportMaxHours} onChange={v => update("sftp", ["quickImportMaxHours"], numberOrZero(v))} />
+        <SettingInput label="Batch call cap" type="number" value={sftp.defaultBatchCallCap} onChange={v => update("sftp", ["defaultBatchCallCap"], numberOrZero(v))} />
+        <SettingInput label="Batch byte cap" type="number" value={sftp.defaultBatchByteCap} onChange={v => update("sftp", ["defaultBatchByteCap"], numberOrZero(v))} />
+        <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
+      </SettingsCard>
+
+      <SettingsCard title="Trunk Recorder" onSave={() => save("tr")}>
+        <SettingInput label="TR config path" value={tr.configPath} onChange={v => update("tr", ["configPath"], v)} />
+        <SettingInput label="Talkgroups CSV" value={tr.talkgroupsPath} onChange={v => update("tr", ["talkgroupsPath"], v)} />
+        <SettingInput label="Log service name" value={tr.logServiceName} onChange={v => update("tr", ["logServiceName"], v)} />
+        <SettingInput label="Health window minutes" type="number" value={tr.healthWindowMinutes} onChange={v => update("tr", ["healthWindowMinutes"], numberOrZero(v))} />
+        <p className="setting-note">TR config and talkgroup files are viewed and validated elsewhere; these paths tell pizzad where to read them.</p>
+      </SettingsCard>
+
+      <SettingsCard title="Auth Token" onSave={() => save("auth")}>
+        <SettingSelect label="Mode" value={auth.mode} options={["token"]} onChange={v => update("auth", ["mode"], v)} />
+        <SettingCheckbox label="Require token for reads" checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
+        <SettingCheckbox label="Require token for writes" checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
+        <SettingInput label="Token file" value={auth.tokenFile} onChange={v => update("auth", ["tokenFile"], v)} />
+        <button onClick={regenToken}>Regenerate token</button>
+        <p className="setting-note">Token auth is intended for private LAN, Tailscale, or reverse proxy use, not direct public internet exposure.</p>
+      </SettingsCard>
+
+      <div className="card settings-card">
+        <h3>Summaries / Incidents</h3>
+        <p className="setting-note">Generate incidents for the selected global range. AI usage must be enabled in Insights.</p>
+        <button onClick={generate}>Generate incidents for selected range</button>
+      </div>
+
+      <div className="card settings-card wide">
+        <h3>Jobs / Imports</h3>
+        {jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> - {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}
+      </div>
+    </div>
+  </div>;
+}
+
+function SettingsCard({ title, children, onSave }: { title: string; children: React.ReactNode; onSave: () => Promise<void> }) {
+  return <div className="card settings-card">
+    <div className="settings-card-header">
+      <h3>{title}</h3>
+      <button onClick={() => void onSave()}>Save</button>
+    </div>
+    <div className="settings-fields">{children}</div>
+  </div>;
+}
+
+function SettingInput({ label: text, value, onChange, type = "text" }: { label: string; value: any; onChange: (value: string) => void; type?: string }) {
+  return <label className="setting-field">
+    <span>{text}</span>
+    <input type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} />
+  </label>;
+}
+
+function SettingSelect({ label: text, value, options, onChange }: { label: string; value: any; options: string[]; onChange: (value: string) => void }) {
+  return <label className="setting-field">
+    <span>{text}</span>
+    <select value={value ?? ""} onChange={e => onChange(e.target.value)}>
+      {options.map(option => <option value={option} key={option}>{label(option)}</option>)}
+    </select>
+  </label>;
+}
+
+function SettingCheckbox({ label: text, checked, onChange }: { label: string; checked: any; onChange: (value: boolean) => void }) {
+  return <label className="setting-checkbox">
+    <input type="checkbox" checked={Boolean(checked)} onChange={e => onChange(e.target.checked)} />
+    <span>{text}</span>
+  </label>;
+}
+
+function cloneSettings(value: Record<string, any>) {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function numberOrZero(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function SftpImport({ reload }: { reload: () => Promise<void> }) {
