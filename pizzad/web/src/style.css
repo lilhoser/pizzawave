@@ -702,6 +702,22 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #d7dde3;
 }
 .setting-checkbox input { width: auto; }
+.setting-value {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.setting-value span {
+  color: #cbd5de;
+  font-weight: 600;
+}
+.setting-value code {
+  color: #9fc1dd;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .setting-note {
   margin: 2px 0 0;
   color: #9faab5;
@@ -725,4 +741,5 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   .settings-card { grid-template-columns: 1fr; }
   .settings-card-meta { border-right: 0; border-bottom: 1px solid #30363d; padding-right: 0; padding-bottom: 8px; }
   .setting-field { grid-template-columns: 1fr; }
+  .setting-value { grid-template-columns: 1fr; }
 }

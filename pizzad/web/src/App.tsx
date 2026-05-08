@@ -725,17 +725,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
     </div>
 
     <div className="settings-flow">
-      <SettingsCard title="Engine" description="Network listeners and durable local storage used by the always-on pizzad service." busy={savingSection === "engine"} onSave={() => save("engine")}>
-        <SettingInput label="Web bind" description="Address the web UI and API listen on. Use 0.0.0.0 for LAN access." value={engine.server?.httpBind} onChange={v => update("engine", ["server", "httpBind"], v)} />
-        <SettingInput label="Web port" description="HTTP port for the bundled web app and REST API." type="number" value={engine.server?.httpPort} onChange={v => update("engine", ["server", "httpPort"], numberOrZero(v))} />
-        <SettingInput label="Callstream bind" description="Live ingest should usually stay localhost-only." value={engine.ingest?.callstreamBind} onChange={v => update("engine", ["ingest", "callstreamBind"], v)} />
-        <SettingInput label="Callstream port" description="TCP port used by the callstream plugin." type="number" value={engine.ingest?.callstreamPort} onChange={v => update("engine", ["ingest", "callstreamPort"], numberOrZero(v))} />
-        <SettingInput label="Database path" description="SQLite WAL database containing calls, alerts, incidents, jobs, and health samples." value={engine.storage?.databasePath} onChange={v => update("engine", ["storage", "databasePath"], v)} />
-        <SettingInput label="Audio root" description="Canonical local audio store for live and imported calls." value={engine.storage?.audioRoot} onChange={v => update("engine", ["storage", "audioRoot"], v)} />
-        <SettingInput label="Import cache" description="Temporary cache for imported archive files before ingest." value={engine.storage?.importCacheRoot} onChange={v => update("engine", ["storage", "importCacheRoot"], v)} />
-        <SettingInput label="App data root" description="Runtime data used by bundled transcription libraries." value={engine.storage?.appDataRoot} onChange={v => update("engine", ["storage", "appDataRoot"], v)} />
-      </SettingsCard>
-
       <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} onSave={() => save("transcription")}>
         <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
         <SettingInput label="Whisper model file" description="Local Whisper model path used when Engine is Whisper." value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
@@ -743,7 +732,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="OpenAI-compatible URL" description="Base URL for LM Studio/OpenAI-compatible transcription." value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
         <SettingInput label="OpenAI-compatible model" description="Model name sent to the transcription endpoint." value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
         <SettingInput label="API key" description="Optional bearer token for remote transcription endpoints." type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
-        <SettingInput label="Analog sample rate" description="Sample rate passed to local audio processing." type="number" value={transcription.analogSampleRate} onChange={v => update("transcription", ["analogSampleRate"], numberOrZero(v))} />
       </SettingsCard>
 
       <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} onSave={() => save("ai-insights")}>
@@ -751,8 +739,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
         <SettingInput label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
         <SettingInput label="API key" description="Optional bearer token. LM Studio local/link setups may leave this blank." type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
-        <SettingInput label="Batch size" description="Number of eligible calls per summary window." type="number" value={aiInsights.batchSize} onChange={v => update("ai-insights", ["batchSize"], numberOrZero(v))} />
-        <SettingInput label="Max pending calls" description="Backpressure limit for automatic insight generation." type="number" value={aiInsights.maxPendingCalls} onChange={v => update("ai-insights", ["maxPendingCalls"], numberOrZero(v))} />
         <SettingInput label="Timeout (ms)" description="Maximum wait for a single LLM request." type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
       </SettingsCard>
@@ -775,25 +761,12 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="Private key path" description="Path on the pizzad Linux host." value={sftp.privateKeyPath} onChange={v => update("sftp", ["privateKeyPath"], v)} />
         <SettingInput label="Key passphrase" description="Optional passphrase for encrypted private keys." type="password" value={sftp.privateKeyPassphrase} onChange={v => update("sftp", ["privateKeyPassphrase"], v)} />
         <SettingInput label="Remote root" description="Top-level archive directory to search." value={sftp.remoteRoot} onChange={v => update("sftp", ["remoteRoot"], v)} />
-        <SettingInput label="Quick import max hours" description="Maximum range allowed for one-click quick imports." type="number" value={sftp.quickImportMaxHours} onChange={v => update("sftp", ["quickImportMaxHours"], numberOrZero(v))} />
-        <SettingInput label="Batch call cap" description="Default guardrail for larger background import jobs." type="number" value={sftp.defaultBatchCallCap} onChange={v => update("sftp", ["defaultBatchCallCap"], numberOrZero(v))} />
-        <SettingInput label="Batch byte cap" description="Default byte limit for larger background import jobs." type="number" value={sftp.defaultBatchByteCap} onChange={v => update("sftp", ["defaultBatchByteCap"], numberOrZero(v))} />
         <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
 
-      <SettingsCard title="Trunk Recorder" description="Paths and service names pizzad uses to resolve talkgroups and summarize trunk-recorder health." busy={savingSection === "tr"} onSave={() => save("tr")}>
-        <SettingInput label="TR config path" description="JSON config read for system names and source mapping." value={tr.configPath} onChange={v => update("tr", ["configPath"], v)} />
-        <SettingInput label="Talkgroups CSV" description="CSV used to resolve talkgroup IDs to friendly names and categories." value={tr.talkgroupsPath} onChange={v => update("tr", ["talkgroupsPath"], v)} />
-        <SettingInput label="Log service name" description="systemd unit name read through journald for health metrics." value={tr.logServiceName} onChange={v => update("tr", ["logServiceName"], v)} />
-        <SettingInput label="Health window minutes" description="Sampling window for summarized TR health rows." type="number" value={tr.healthWindowMinutes} onChange={v => update("tr", ["healthWindowMinutes"], numberOrZero(v))} />
-        <p className="setting-note">TR config and talkgroup files are viewed and validated elsewhere; these paths tell pizzad where to read them.</p>
-      </SettingsCard>
-
-      <SettingsCard title="Auth Token" description="Simple token protection for settings and other write/admin actions." busy={savingSection === "auth"} onSave={() => save("auth")}>
-        <SettingSelect label="Mode" description="v1 supports token auth only." value={auth.mode} options={["token"]} onChange={v => update("auth", ["mode"], v)} />
+      <SettingsCard title="Security" description="Simple token protection for private LAN, Tailscale, or reverse-proxy deployments." busy={savingSection === "auth"} onSave={() => save("auth")}>
         <SettingCheckbox label="Require token for reads" description="When enabled, dashboard/category reads also need the token." checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
         <SettingCheckbox label="Require token for writes" description="Protects settings changes, jobs, imports, and generation actions." checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
-        <SettingInput label="Token file" description="Path where the installer-generated token is stored." value={auth.tokenFile} onChange={v => update("auth", ["tokenFile"], v)} />
         <button onClick={regenToken}>Regenerate token</button>
         <p className="setting-note">Token auth is intended for private LAN, Tailscale, or reverse proxy use, not direct public internet exposure.</p>
       </SettingsCard>
@@ -816,6 +789,23 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         </div>
         <div className="settings-fields">
         {jobs.length ? jobs.map(j => <div className="job" key={j.id}><div className="job-head"><strong>{j.type}</strong><span className={`job-status status-${j.status}`}>{j.status}</span></div><div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><div className="job-actions"><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button><button onClick={() => deleteJob(j.id)} disabled={j.status === "running" || j.status === "queued" || j.status === "paused"}>Delete</button></div></div>) : <span className="muted">No jobs</span>}
+        </div>
+      </div>
+
+      <div className="card settings-card">
+        <div className="settings-card-meta">
+          <h3>System Info</h3>
+          <p>Installer-owned paths and listener settings. Change these through package config, service files, or helper scripts.</p>
+        </div>
+        <div className="settings-fields">
+          <SettingValue label="Web endpoint" value={`${engine.server?.httpBind ?? "0.0.0.0"}:${engine.server?.httpPort ?? 8080}`} />
+          <SettingValue label="Callstream endpoint" value={`${engine.ingest?.callstreamBind ?? "127.0.0.1"}:${engine.ingest?.callstreamPort ?? 9123}`} />
+          <SettingValue label="Database path" value={engine.storage?.databasePath} />
+          <SettingValue label="Audio root" value={engine.storage?.audioRoot} />
+          <SettingValue label="TR config path" value={tr.configPath} />
+          <SettingValue label="Talkgroups CSV" value={tr.talkgroupsPath} />
+          <SettingValue label="TR service name" value={tr.logServiceName} />
+          <SettingValue label="Auth token file" value={auth.tokenFile} />
         </div>
       </div>
     </div>
@@ -855,6 +845,10 @@ function SettingCheckbox({ label: text, description, checked, onChange }: { labe
     <input type="checkbox" checked={Boolean(checked)} onChange={e => onChange(e.target.checked)} />
     <span>{text}<small>{description}</small></span>
   </label>;
+}
+
+function SettingValue({ label: text, value }: { label: string; value: any }) {
+  return <div className="setting-value"><span>{text}</span><code>{value || "--"}</code></div>;
 }
 
 function cloneSettings(value: Record<string, any>) {
