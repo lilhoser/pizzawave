@@ -654,6 +654,8 @@ function formatDuration(seconds: number) {
 function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Job[]; settingsSections: Record<string, any>; rangeHours: number; reload: () => Promise<void> }) {
   const [sections, setSections] = useState<Record<string, any>>({});
   const [message, setMessage] = useState("");
+  const [messageKind, setMessageKind] = useState<"info" | "error">("info");
+  const [savingSection, setSavingSection] = useState("");
 
   useEffect(() => { setSections(withSettingsDefaults(settingsSections)); }, [settingsSections]);
 
@@ -681,9 +683,20 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   }
 
   async function save(section: string) {
-    await api.request(`/api/v1/settings/${section}`, { method: "POST", body: JSON.stringify({ values: sections[section] ?? {} }) });
-    setMessage(`${label(section)} settings saved`);
-    await reload();
+    setSavingSection(section);
+    setMessageKind("info");
+    setMessage(`Saving ${label(section)} settings...`);
+    try {
+      await api.request(`/api/v1/settings/${section}`, { method: "POST", body: JSON.stringify({ values: sections[section] ?? {} }) });
+      setMessageKind("info");
+      setMessage(`${label(section)} settings saved`);
+      await reload();
+    } catch (error) {
+      setMessageKind("error");
+      setMessage(error instanceof Error && error.message ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setSavingSection("");
+    }
   }
 
   async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
@@ -707,12 +720,12 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
       <h2>Settings</h2>
       <div className="settings-header-actions">
         <button onClick={() => void reload()}>Load</button>
-        <span className="muted">{message || "Changes save by section."}</span>
+        <span className={messageKind === "error" ? "settings-message error" : "settings-message"}>{message || "Changes save by section."}</span>
       </div>
     </div>
 
     <div className="settings-flow">
-      <SettingsCard title="Engine" description="Network listeners and durable local storage used by the always-on pizzad service." onSave={() => save("engine")}>
+      <SettingsCard title="Engine" description="Network listeners and durable local storage used by the always-on pizzad service." busy={savingSection === "engine"} onSave={() => save("engine")}>
         <SettingInput label="Web bind" description="Address the web UI and API listen on. Use 0.0.0.0 for LAN access." value={engine.server?.httpBind} onChange={v => update("engine", ["server", "httpBind"], v)} />
         <SettingInput label="Web port" description="HTTP port for the bundled web app and REST API." type="number" value={engine.server?.httpPort} onChange={v => update("engine", ["server", "httpPort"], numberOrZero(v))} />
         <SettingInput label="Callstream bind" description="Live ingest should usually stay localhost-only." value={engine.ingest?.callstreamBind} onChange={v => update("engine", ["ingest", "callstreamBind"], v)} />
@@ -723,7 +736,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="App data root" description="Runtime data used by bundled transcription libraries." value={engine.storage?.appDataRoot} onChange={v => update("engine", ["storage", "appDataRoot"], v)} />
       </SettingsCard>
 
-      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." onSave={() => save("transcription")}>
+      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} onSave={() => save("transcription")}>
         <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
         <SettingInput label="Whisper model file" description="Local Whisper model path used when Engine is Whisper." value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
         <SettingInput label="Vosk model path" description="Local Vosk model directory used when Engine is Vosk." value={transcription.voskModelPath} onChange={v => update("transcription", ["voskModelPath"], v)} />
@@ -733,7 +746,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="Analog sample rate" description="Sample rate passed to local audio processing." type="number" value={transcription.analogSampleRate} onChange={v => update("transcription", ["analogSampleRate"], numberOrZero(v))} />
       </SettingsCard>
 
-      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." onSave={() => save("ai-insights")}>
+      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} onSave={() => save("ai-insights")}>
         <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
         <SettingInput label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
@@ -744,7 +757,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
       </SettingsCard>
 
-      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." onSave={() => save("alerts")}>
+      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." busy={savingSection === "alerts"} onSave={() => save("alerts")}>
         <SettingCheckbox label="Enable email alerts" description="Turns live outbound email delivery on or off." checked={alerts.emailEnabled} onChange={v => update("alerts", ["emailEnabled"], v)} />
         <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
         <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
@@ -752,7 +765,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <p className="setting-note">{alerts.rules?.length ?? 0} alert rule(s) configured. Rule management remains in the alerts settings workflow.</p>
       </SettingsCard>
 
-      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." onSave={() => save("sftp")}>
+      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} onSave={() => save("sftp")}>
         <SettingCheckbox label="Enable SFTP import" description="Allows quick imports and larger background priming jobs." checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
         <SettingInput label="Host" description="SFTP server hostname or IP address." value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
         <SettingInput label="Port" description="SFTP port, normally 22." type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
@@ -768,7 +781,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
 
-      <SettingsCard title="Trunk Recorder" description="Paths and service names pizzad uses to resolve talkgroups and summarize trunk-recorder health." onSave={() => save("tr")}>
+      <SettingsCard title="Trunk Recorder" description="Paths and service names pizzad uses to resolve talkgroups and summarize trunk-recorder health." busy={savingSection === "tr"} onSave={() => save("tr")}>
         <SettingInput label="TR config path" description="JSON config read for system names and source mapping." value={tr.configPath} onChange={v => update("tr", ["configPath"], v)} />
         <SettingInput label="Talkgroups CSV" description="CSV used to resolve talkgroup IDs to friendly names and categories." value={tr.talkgroupsPath} onChange={v => update("tr", ["talkgroupsPath"], v)} />
         <SettingInput label="Log service name" description="systemd unit name read through journald for health metrics." value={tr.logServiceName} onChange={v => update("tr", ["logServiceName"], v)} />
@@ -776,7 +789,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <p className="setting-note">TR config and talkgroup files are viewed and validated elsewhere; these paths tell pizzad where to read them.</p>
       </SettingsCard>
 
-      <SettingsCard title="Auth Token" description="Simple token protection for settings and other write/admin actions." onSave={() => save("auth")}>
+      <SettingsCard title="Auth Token" description="Simple token protection for settings and other write/admin actions." busy={savingSection === "auth"} onSave={() => save("auth")}>
         <SettingSelect label="Mode" description="v1 supports token auth only." value={auth.mode} options={["token"]} onChange={v => update("auth", ["mode"], v)} />
         <SettingCheckbox label="Require token for reads" description="When enabled, dashboard/category reads also need the token." checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
         <SettingCheckbox label="Require token for writes" description="Protects settings changes, jobs, imports, and generation actions." checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
@@ -809,12 +822,12 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   </div>;
 }
 
-function SettingsCard({ title, description, children, onSave }: { title: string; description: string; children: React.ReactNode; onSave: () => Promise<void> }) {
+function SettingsCard({ title, description, children, busy, onSave }: { title: string; description: string; children: React.ReactNode; busy?: boolean; onSave: () => Promise<void> }) {
   return <div className="card settings-card">
     <div className="settings-card-meta">
       <h3>{title}</h3>
       <p>{description}</p>
-      <button onClick={() => void onSave()}>Save</button>
+      <button disabled={busy} onClick={() => void onSave()}>{busy ? "Saving..." : "Save"}</button>
     </div>
     <div className="settings-fields">{children}</div>
   </div>;

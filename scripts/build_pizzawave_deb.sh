@@ -208,7 +208,7 @@ fi
 chown -R "\$SERVICE_USER:\$SERVICE_USER" "\$DATA_DIR"
 chown -R root:"\$SERVICE_USER" "\$CONFIG_DIR"
 chmod 0750 "\$CONFIG_DIR"
-chmod 0640 "\$CONFIG_DIR/pizzad.json" || true
+chmod 0660 "\$CONFIG_DIR/pizzad.json" || true
 chmod 0640 "\$CONFIG_DIR/pizzad.token" || true
 
 if getent group systemd-journal >/dev/null 2>&1; then

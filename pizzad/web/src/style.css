@@ -630,6 +630,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   align-items: center;
   gap: 10px;
 }
+.settings-message {
+  color: #9faab5;
+  font-size: 12px;
+}
+.settings-message.error {
+  color: #ffd6d1;
+}
 .settings-flow {
   display: grid;
   gap: 10px;
