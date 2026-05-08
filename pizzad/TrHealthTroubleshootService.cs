@@ -78,6 +78,20 @@ public sealed class TrHealthTroubleshootService
                 Percent(inaudible, total));
         }
 
+        static QualityAuditGroupDto ReasonRow(string label, IEnumerable<EngineCall> group, int totalProblems)
+        {
+            var rows = group.ToList();
+            var count = rows.Count;
+            var inaudible = rows.Count(Inaudible);
+            return new QualityAuditGroupDto(
+                label,
+                count,
+                count,
+                inaudible,
+                Percent(count, totalProblems),
+                Percent(inaudible, count));
+        }
+
         var total = calls.Count;
         var problemCalls = calls.Count(Problem);
         var inaudibleCalls = calls.Count(Inaudible);
@@ -90,7 +104,7 @@ public sealed class TrHealthTroubleshootService
             Percent(inaudibleCalls, total),
             problems.GroupBy(c => string.IsNullOrWhiteSpace(c.QualityReason) ? "unknown" : c.QualityReason, StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(g => g.Count())
-                .Select(g => GroupRow(g.Key, g))
+                .Select(g => ReasonRow(g.Key, g, problemCalls))
                 .ToList(),
             calls.GroupBy(SystemLabel, StringComparer.OrdinalIgnoreCase)
                 .Select(g => GroupRow(g.Key, g))
