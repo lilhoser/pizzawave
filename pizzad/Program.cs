@@ -252,6 +252,18 @@ app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long i
 .WithName("JobControl")
 .WithOpenApi();
 
+app.MapDelete("/api/v1/jobs/{id:long}", async (HttpContext context, long id, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    var job = await database.GetJobAsync(id, context.RequestAborted);
+    if (job == null) return Results.NotFound();
+    if (job.Status is "running" or "queued" or "paused")
+        return Results.Conflict("Cancel or wait for the job to finish before deleting it.");
+    return await database.DeleteJobAsync(id, context.RequestAborted) ? Results.Ok(new { deleted = true, id }) : Results.NotFound();
+})
+.WithName("JobDelete")
+.WithOpenApi();
+
 app.MapPost("/api/v1/imports/sftp/estimate", async (HttpContext context, SftpEstimateRequest request, AuthService authService, SftpImportService imports) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

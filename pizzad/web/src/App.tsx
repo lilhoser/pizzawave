@@ -687,6 +687,11 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   }
 
   async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
+  async function deleteJob(id: number) {
+    await api.request(`/api/v1/jobs/${id}`, { method: "DELETE" });
+    setMessage(`Deleted job ${id}`);
+    await reload();
+  }
   async function regenToken() {
     await api.request("/api/v1/settings/auth/regenerate-token", { method: "POST" });
     setMessage("Token regenerated on server. Update this browser token from the token file.");
@@ -706,125 +711,135 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
       </div>
     </div>
 
-    <div className="settings-grid">
-      <SettingsCard title="Listen / Storage" onSave={() => save("engine")}>
-        <SettingInput label="Web bind" value={engine.server?.httpBind} onChange={v => update("engine", ["server", "httpBind"], v)} />
-        <SettingInput label="Web port" type="number" value={engine.server?.httpPort} onChange={v => update("engine", ["server", "httpPort"], numberOrZero(v))} />
-        <SettingInput label="Callstream bind" value={engine.ingest?.callstreamBind} onChange={v => update("engine", ["ingest", "callstreamBind"], v)} />
-        <SettingInput label="Callstream port" type="number" value={engine.ingest?.callstreamPort} onChange={v => update("engine", ["ingest", "callstreamPort"], numberOrZero(v))} />
-        <SettingInput label="Database path" value={engine.storage?.databasePath} onChange={v => update("engine", ["storage", "databasePath"], v)} />
-        <SettingInput label="Audio root" value={engine.storage?.audioRoot} onChange={v => update("engine", ["storage", "audioRoot"], v)} />
-        <SettingInput label="Import cache" value={engine.storage?.importCacheRoot} onChange={v => update("engine", ["storage", "importCacheRoot"], v)} />
-        <SettingInput label="App data root" value={engine.storage?.appDataRoot} onChange={v => update("engine", ["storage", "appDataRoot"], v)} />
+    <div className="settings-flow">
+      <SettingsCard title="Engine" description="Network listeners and durable local storage used by the always-on pizzad service." onSave={() => save("engine")}>
+        <SettingInput label="Web bind" description="Address the web UI and API listen on. Use 0.0.0.0 for LAN access." value={engine.server?.httpBind} onChange={v => update("engine", ["server", "httpBind"], v)} />
+        <SettingInput label="Web port" description="HTTP port for the bundled web app and REST API." type="number" value={engine.server?.httpPort} onChange={v => update("engine", ["server", "httpPort"], numberOrZero(v))} />
+        <SettingInput label="Callstream bind" description="Live ingest should usually stay localhost-only." value={engine.ingest?.callstreamBind} onChange={v => update("engine", ["ingest", "callstreamBind"], v)} />
+        <SettingInput label="Callstream port" description="TCP port used by the callstream plugin." type="number" value={engine.ingest?.callstreamPort} onChange={v => update("engine", ["ingest", "callstreamPort"], numberOrZero(v))} />
+        <SettingInput label="Database path" description="SQLite WAL database containing calls, alerts, incidents, jobs, and health samples." value={engine.storage?.databasePath} onChange={v => update("engine", ["storage", "databasePath"], v)} />
+        <SettingInput label="Audio root" description="Canonical local audio store for live and imported calls." value={engine.storage?.audioRoot} onChange={v => update("engine", ["storage", "audioRoot"], v)} />
+        <SettingInput label="Import cache" description="Temporary cache for imported archive files before ingest." value={engine.storage?.importCacheRoot} onChange={v => update("engine", ["storage", "importCacheRoot"], v)} />
+        <SettingInput label="App data root" description="Runtime data used by bundled transcription libraries." value={engine.storage?.appDataRoot} onChange={v => update("engine", ["storage", "appDataRoot"], v)} />
       </SettingsCard>
 
-      <SettingsCard title="Transcription" onSave={() => save("transcription")}>
-        <SettingSelect label="Engine" value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
-        <SettingInput label="Whisper model file" value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
-        <SettingInput label="Vosk model path" value={transcription.voskModelPath} onChange={v => update("transcription", ["voskModelPath"], v)} />
-        <SettingInput label="OpenAI-compatible URL" value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
-        <SettingInput label="OpenAI-compatible model" value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
-        <SettingInput label="API key" type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
-        <SettingInput label="Analog sample rate" type="number" value={transcription.analogSampleRate} onChange={v => update("transcription", ["analogSampleRate"], numberOrZero(v))} />
-        <p className="setting-note">Local Linux transcription uses Whisper or Vosk. LM Studio/OpenAI-compatible transcription is available but separate from insights.</p>
+      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." onSave={() => save("transcription")}>
+        <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
+        <SettingInput label="Whisper model file" description="Local Whisper model path used when Engine is Whisper." value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
+        <SettingInput label="Vosk model path" description="Local Vosk model directory used when Engine is Vosk." value={transcription.voskModelPath} onChange={v => update("transcription", ["voskModelPath"], v)} />
+        <SettingInput label="OpenAI-compatible URL" description="Base URL for LM Studio/OpenAI-compatible transcription." value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
+        <SettingInput label="OpenAI-compatible model" description="Model name sent to the transcription endpoint." value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
+        <SettingInput label="API key" description="Optional bearer token for remote transcription endpoints." type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
+        <SettingInput label="Analog sample rate" description="Sample rate passed to local audio processing." type="number" value={transcription.analogSampleRate} onChange={v => update("transcription", ["analogSampleRate"], numberOrZero(v))} />
       </SettingsCard>
 
-      <SettingsCard title="Insights (LM Link)" onSave={() => save("ai-insights")}>
-        <SettingCheckbox label="Enable AI usage" checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
-        <SettingInput label="Base URL" value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
-        <SettingInput label="Model" value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
-        <SettingInput label="API key" type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
-        <SettingInput label="Batch size" type="number" value={aiInsights.batchSize} onChange={v => update("ai-insights", ["batchSize"], numberOrZero(v))} />
-        <SettingInput label="Max pending calls" type="number" value={aiInsights.maxPendingCalls} onChange={v => update("ai-insights", ["maxPendingCalls"], numberOrZero(v))} />
-        <SettingInput label="Timeout (ms)" type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
-        <SettingInput label="Retries" type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
+      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." onSave={() => save("ai-insights")}>
+        <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
+        <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
+        <SettingInput label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
+        <SettingInput label="API key" description="Optional bearer token. LM Studio local/link setups may leave this blank." type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
+        <SettingInput label="Batch size" description="Number of eligible calls per summary window." type="number" value={aiInsights.batchSize} onChange={v => update("ai-insights", ["batchSize"], numberOrZero(v))} />
+        <SettingInput label="Max pending calls" description="Backpressure limit for automatic insight generation." type="number" value={aiInsights.maxPendingCalls} onChange={v => update("ai-insights", ["maxPendingCalls"], numberOrZero(v))} />
+        <SettingInput label="Timeout (ms)" description="Maximum wait for a single LLM request." type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
+        <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
       </SettingsCard>
 
-      <SettingsCard title="Alerts / Email" onSave={() => save("alerts")}>
-        <SettingCheckbox label="Enable email alerts" checked={alerts.emailEnabled} onChange={v => update("alerts", ["emailEnabled"], v)} />
-        <SettingSelect label="Email provider" value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
-        <SettingInput label="Email address" value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
-        <SettingInput label="App password" type="password" value={alerts.emailPassword} onChange={v => update("alerts", ["emailPassword"], v)} />
+      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." onSave={() => save("alerts")}>
+        <SettingCheckbox label="Enable email alerts" description="Turns live outbound email delivery on or off." checked={alerts.emailEnabled} onChange={v => update("alerts", ["emailEnabled"], v)} />
+        <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
+        <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
+        <SettingInput label="App password" description="Provider-specific app password or SMTP credential." type="password" value={alerts.emailPassword} onChange={v => update("alerts", ["emailPassword"], v)} />
         <p className="setting-note">{alerts.rules?.length ?? 0} alert rule(s) configured. Rule management remains in the alerts settings workflow.</p>
       </SettingsCard>
 
-      <SettingsCard title="SFTP Import" onSave={() => save("sftp")}>
-        <SettingCheckbox label="Enable SFTP import" checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
-        <SettingInput label="Host" value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
-        <SettingInput label="Port" type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
-        <SettingInput label="Username" value={sftp.username} onChange={v => update("sftp", ["username"], v)} />
-        <SettingSelect label="Auth mode" value={sftp.authMode} options={["privateKey", "password"]} onChange={v => update("sftp", ["authMode"], v)} />
-        <SettingInput label="Password" type="password" value={sftp.password} onChange={v => update("sftp", ["password"], v)} />
-        <SettingInput label="Private key path" value={sftp.privateKeyPath} onChange={v => update("sftp", ["privateKeyPath"], v)} />
-        <SettingInput label="Key passphrase" type="password" value={sftp.privateKeyPassphrase} onChange={v => update("sftp", ["privateKeyPassphrase"], v)} />
-        <SettingInput label="Remote root" value={sftp.remoteRoot} onChange={v => update("sftp", ["remoteRoot"], v)} />
-        <SettingInput label="Quick import max hours" type="number" value={sftp.quickImportMaxHours} onChange={v => update("sftp", ["quickImportMaxHours"], numberOrZero(v))} />
-        <SettingInput label="Batch call cap" type="number" value={sftp.defaultBatchCallCap} onChange={v => update("sftp", ["defaultBatchCallCap"], numberOrZero(v))} />
-        <SettingInput label="Batch byte cap" type="number" value={sftp.defaultBatchByteCap} onChange={v => update("sftp", ["defaultBatchByteCap"], numberOrZero(v))} />
+      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." onSave={() => save("sftp")}>
+        <SettingCheckbox label="Enable SFTP import" description="Allows quick imports and larger background priming jobs." checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
+        <SettingInput label="Host" description="SFTP server hostname or IP address." value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
+        <SettingInput label="Port" description="SFTP port, normally 22." type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
+        <SettingInput label="Username" description="Account used to read archive files." value={sftp.username} onChange={v => update("sftp", ["username"], v)} />
+        <SettingSelect label="Auth mode" description="Private key is preferred; password auth is available for simpler archives." value={sftp.authMode} options={["privateKey", "password"]} onChange={v => update("sftp", ["authMode"], v)} />
+        <SettingInput label="Password" description="Used only when auth mode is password." type="password" value={sftp.password} onChange={v => update("sftp", ["password"], v)} />
+        <SettingInput label="Private key path" description="Path on the pizzad Linux host." value={sftp.privateKeyPath} onChange={v => update("sftp", ["privateKeyPath"], v)} />
+        <SettingInput label="Key passphrase" description="Optional passphrase for encrypted private keys." type="password" value={sftp.privateKeyPassphrase} onChange={v => update("sftp", ["privateKeyPassphrase"], v)} />
+        <SettingInput label="Remote root" description="Top-level archive directory to search." value={sftp.remoteRoot} onChange={v => update("sftp", ["remoteRoot"], v)} />
+        <SettingInput label="Quick import max hours" description="Maximum range allowed for one-click quick imports." type="number" value={sftp.quickImportMaxHours} onChange={v => update("sftp", ["quickImportMaxHours"], numberOrZero(v))} />
+        <SettingInput label="Batch call cap" description="Default guardrail for larger background import jobs." type="number" value={sftp.defaultBatchCallCap} onChange={v => update("sftp", ["defaultBatchCallCap"], numberOrZero(v))} />
+        <SettingInput label="Batch byte cap" description="Default byte limit for larger background import jobs." type="number" value={sftp.defaultBatchByteCap} onChange={v => update("sftp", ["defaultBatchByteCap"], numberOrZero(v))} />
         <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
 
-      <SettingsCard title="Trunk Recorder" onSave={() => save("tr")}>
-        <SettingInput label="TR config path" value={tr.configPath} onChange={v => update("tr", ["configPath"], v)} />
-        <SettingInput label="Talkgroups CSV" value={tr.talkgroupsPath} onChange={v => update("tr", ["talkgroupsPath"], v)} />
-        <SettingInput label="Log service name" value={tr.logServiceName} onChange={v => update("tr", ["logServiceName"], v)} />
-        <SettingInput label="Health window minutes" type="number" value={tr.healthWindowMinutes} onChange={v => update("tr", ["healthWindowMinutes"], numberOrZero(v))} />
+      <SettingsCard title="Trunk Recorder" description="Paths and service names pizzad uses to resolve talkgroups and summarize trunk-recorder health." onSave={() => save("tr")}>
+        <SettingInput label="TR config path" description="JSON config read for system names and source mapping." value={tr.configPath} onChange={v => update("tr", ["configPath"], v)} />
+        <SettingInput label="Talkgroups CSV" description="CSV used to resolve talkgroup IDs to friendly names and categories." value={tr.talkgroupsPath} onChange={v => update("tr", ["talkgroupsPath"], v)} />
+        <SettingInput label="Log service name" description="systemd unit name read through journald for health metrics." value={tr.logServiceName} onChange={v => update("tr", ["logServiceName"], v)} />
+        <SettingInput label="Health window minutes" description="Sampling window for summarized TR health rows." type="number" value={tr.healthWindowMinutes} onChange={v => update("tr", ["healthWindowMinutes"], numberOrZero(v))} />
         <p className="setting-note">TR config and talkgroup files are viewed and validated elsewhere; these paths tell pizzad where to read them.</p>
       </SettingsCard>
 
-      <SettingsCard title="Auth Token" onSave={() => save("auth")}>
-        <SettingSelect label="Mode" value={auth.mode} options={["token"]} onChange={v => update("auth", ["mode"], v)} />
-        <SettingCheckbox label="Require token for reads" checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
-        <SettingCheckbox label="Require token for writes" checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
-        <SettingInput label="Token file" value={auth.tokenFile} onChange={v => update("auth", ["tokenFile"], v)} />
+      <SettingsCard title="Auth Token" description="Simple token protection for settings and other write/admin actions." onSave={() => save("auth")}>
+        <SettingSelect label="Mode" description="v1 supports token auth only." value={auth.mode} options={["token"]} onChange={v => update("auth", ["mode"], v)} />
+        <SettingCheckbox label="Require token for reads" description="When enabled, dashboard/category reads also need the token." checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
+        <SettingCheckbox label="Require token for writes" description="Protects settings changes, jobs, imports, and generation actions." checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
+        <SettingInput label="Token file" description="Path where the installer-generated token is stored." value={auth.tokenFile} onChange={v => update("auth", ["tokenFile"], v)} />
         <button onClick={regenToken}>Regenerate token</button>
         <p className="setting-note">Token auth is intended for private LAN, Tailscale, or reverse proxy use, not direct public internet exposure.</p>
       </SettingsCard>
 
       <div className="card settings-card">
-        <h3>Summaries / Incidents</h3>
-        <p className="setting-note">Generate incidents for the selected global range. AI usage must be enabled in Insights.</p>
+        <div className="settings-card-meta">
+          <h3>Summaries / Incidents</h3>
+          <p>Runs guarded incident generation for the current dashboard time range.</p>
+        </div>
+        <div className="settings-fields">
+        <p className="setting-note">AI usage must be enabled in Insights. Poor-quality transcripts are excluded from summary windows.</p>
         <button onClick={generate}>Generate incidents for selected range</button>
+        </div>
       </div>
 
       <div className="card settings-card wide">
-        <h3>Jobs / Imports</h3>
-        {jobs.length ? jobs.map(j => <div className="job" key={j.id}><strong>{j.type}</strong> - {j.status}<div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button></div>) : <span className="muted">No jobs</span>}
+        <div className="settings-card-meta">
+          <h3>Jobs / Imports</h3>
+          <p>Background work created by SFTP imports, diagnostics, transcription experiments, and summary generation.</p>
+        </div>
+        <div className="settings-fields">
+        {jobs.length ? jobs.map(j => <div className="job" key={j.id}><div className="job-head"><strong>{j.type}</strong><span className={`job-status status-${j.status}`}>{j.status}</span></div><div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><div className="job-actions"><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button><button onClick={() => deleteJob(j.id)} disabled={j.status === "running" || j.status === "queued" || j.status === "paused"}>Delete</button></div></div>) : <span className="muted">No jobs</span>}
+        </div>
       </div>
     </div>
   </div>;
 }
 
-function SettingsCard({ title, children, onSave }: { title: string; children: React.ReactNode; onSave: () => Promise<void> }) {
+function SettingsCard({ title, description, children, onSave }: { title: string; description: string; children: React.ReactNode; onSave: () => Promise<void> }) {
   return <div className="card settings-card">
-    <div className="settings-card-header">
+    <div className="settings-card-meta">
       <h3>{title}</h3>
+      <p>{description}</p>
       <button onClick={() => void onSave()}>Save</button>
     </div>
     <div className="settings-fields">{children}</div>
   </div>;
 }
 
-function SettingInput({ label: text, value, onChange, type = "text" }: { label: string; value: any; onChange: (value: string) => void; type?: string }) {
+function SettingInput({ label: text, description, value, onChange, type = "text" }: { label: string; description: string; value: any; onChange: (value: string) => void; type?: string }) {
   return <label className="setting-field">
-    <span>{text}</span>
+    <span>{text}<small>{description}</small></span>
     <input type={type} value={value ?? ""} onChange={e => onChange(e.target.value)} />
   </label>;
 }
 
-function SettingSelect({ label: text, value, options, onChange }: { label: string; value: any; options: string[]; onChange: (value: string) => void }) {
+function SettingSelect({ label: text, description, value, options, onChange }: { label: string; description: string; value: any; options: string[]; onChange: (value: string) => void }) {
   return <label className="setting-field">
-    <span>{text}</span>
+    <span>{text}<small>{description}</small></span>
     <select value={value ?? ""} onChange={e => onChange(e.target.value)}>
       {options.map(option => <option value={option} key={option}>{label(option)}</option>)}
     </select>
   </label>;
 }
 
-function SettingCheckbox({ label: text, checked, onChange }: { label: string; checked: any; onChange: (value: boolean) => void }) {
+function SettingCheckbox({ label: text, description, checked, onChange }: { label: string; description: string; checked: any; onChange: (value: boolean) => void }) {
   return <label className="setting-checkbox">
     <input type="checkbox" checked={Boolean(checked)} onChange={e => onChange(e.target.checked)} />
-    <span>{text}</span>
+    <span>{text}<small>{description}</small></span>
   </label>;
 }
 

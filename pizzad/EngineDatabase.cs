@@ -323,6 +323,15 @@ public sealed class EngineDatabase
         };
     }
 
+    public async Task<bool> DeleteJobAsync(long id, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM jobs WHERE id=$id;";
+        Add(command, "$id", id);
+        return await command.ExecuteNonQueryAsync(ct) > 0;
+    }
+
     public async Task SaveDiagnosticResultAsync(DiagnosticToolResultDto result, CancellationToken ct)
     {
         await using var connection = OpenConnection();
