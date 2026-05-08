@@ -31,6 +31,41 @@ public sealed class SftpImportService
         _logger = logger;
     }
 
+    public async Task<SftpAvailabilityResponse> GetAvailabilityAsync(CancellationToken ct)
+    {
+        var cfg = _config.SftpImport;
+        if (!cfg.Enabled)
+            return new SftpAvailabilityResponse(false, false, cfg.Host, NormalizeRemoteRoot(cfg.RemoteRoot), null, null, 0, 0, 0, 0, "SFTP import is disabled.");
+
+        var stats = new SftpAvailabilityStats();
+        using var client = CreateClient();
+        client.Connect();
+        DiscoverAvailabilityRecursive(client, NormalizeRemoteRoot(cfg.RemoteRoot), stats, ct, depth: 0);
+        await Task.CompletedTask;
+
+        var earliest = stats.EarliestLocal;
+        var latest = stats.LatestLocal;
+        var available = earliest.HasValue && latest.HasValue;
+        var range = available
+            ? $"Archive folders are visible from {earliest.GetValueOrDefault():d} to {latest.GetValueOrDefault():d}. Pick a range and click Estimate for exact file counts."
+            : "No dated archive folders were visible under the configured remote root.";
+        if (stats.SkippedDirectories > 0)
+            range += $" Skipped {stats.SkippedDirectories:N0} unreadable folder(s).";
+
+        return new SftpAvailabilityResponse(
+            true,
+            available,
+            cfg.Host,
+            NormalizeRemoteRoot(cfg.RemoteRoot),
+            earliest,
+            latest,
+            stats.DateFolderCount,
+            stats.TotalBytes,
+            stats.ScannedDirectories,
+            stats.SkippedDirectories,
+            range);
+    }
+
     public async Task<SftpEstimateResponse> EstimateAsync(SftpEstimateRequest request, CancellationToken ct)
     {
         if (!_config.SftpImport.Enabled)
@@ -324,6 +359,78 @@ public sealed class SftpImportService
         return entry.LastWriteTime == DateTime.MinValue ? null : entry.LastWriteTime;
     }
 
+    private static void DiscoverAvailabilityRecursive(
+        SftpClient client,
+        string remotePath,
+        SftpAvailabilityStats stats,
+        CancellationToken ct,
+        int depth)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (depth > 8)
+            return;
+
+        IEnumerable<ISftpFile> entries;
+        try
+        {
+            entries = client.ListDirectory(remotePath).ToList();
+            stats.ScannedDirectories++;
+        }
+        catch (SftpPermissionDeniedException)
+        {
+            stats.SkippedDirectories++;
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (entry.Name is "." or "..")
+                continue;
+
+            if (!entry.IsDirectory)
+                continue;
+
+            var date = TryParseArchivePathDate(entry.FullName);
+            if (date.HasValue)
+            {
+                stats.DateFolderCount++;
+                stats.EarliestLocal = !stats.EarliestLocal.HasValue || date.Value < stats.EarliestLocal.Value ? date.Value : stats.EarliestLocal;
+                stats.LatestLocal = !stats.LatestLocal.HasValue || date.Value > stats.LatestLocal.Value ? date.Value : stats.LatestLocal;
+                continue;
+            }
+
+            DiscoverAvailabilityRecursive(client, entry.FullName, stats, ct, depth + 1);
+        }
+    }
+
+    private static DateTime? TryParseArchivePathDate(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i <= parts.Length - 3; i++)
+        {
+            if (int.TryParse(parts[i], out var year) &&
+                int.TryParse(parts[i + 1], out var month) &&
+                int.TryParse(parts[i + 2], out var day) &&
+                year is >= 2000 and <= 2100 &&
+                month is >= 1 and <= 12 &&
+                day is >= 1 and <= 31)
+                return new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Local);
+        }
+
+        var match = Regex.Match(normalized, @"(?<year>\d{4})[-_](?<month>\d{1,2})[-_](?<day>\d{1,2})");
+        if (!match.Success)
+            return null;
+
+        var y = int.Parse(match.Groups["year"].Value);
+        var m = int.Parse(match.Groups["month"].Value);
+        var d = int.Parse(match.Groups["day"].Value);
+        return y is >= 2000 and <= 2100 && m is >= 1 and <= 12 && d is >= 1 and <= 31
+            ? new DateTime(y, m, d, 0, 0, 0, DateTimeKind.Local)
+            : null;
+    }
+
     private string BuildCachePath(SftpArchiveCandidate candidate)
     {
         var relative = candidate.RemotePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
@@ -373,4 +480,14 @@ public sealed class SftpImportService
     private static long ToUnix(DateTime local) => new DateTimeOffset(local).ToUnixTimeSeconds();
 
     private sealed record SftpArchiveCandidate(string RemotePath, string Name, DateTime TimestampLocal, long Size);
+
+    private sealed class SftpAvailabilityStats
+    {
+        public DateTime? EarliestLocal { get; set; }
+        public DateTime? LatestLocal { get; set; }
+        public int DateFolderCount { get; set; }
+        public long TotalBytes { get; set; }
+        public int ScannedDirectories { get; set; }
+        public int SkippedDirectories { get; set; }
+    }
 }

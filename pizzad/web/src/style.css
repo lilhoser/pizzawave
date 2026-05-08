@@ -783,6 +783,25 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .settings-subsection h4 { margin: 0 0 6px; }
 .settings-subsection input { margin: 0 6px 6px 0; }
+.archive-availability {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.archive-availability p {
+  margin: 3px 0 0;
+}
+.archive-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: flex-start;
+}
 @media (max-width: 900px) {
   .app { grid-template-columns: 138px 1fr; }
   .dashboard { grid-template-columns: 1fr; grid-template-rows: auto auto auto; overflow: auto; }

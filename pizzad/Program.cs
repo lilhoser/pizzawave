@@ -280,6 +280,21 @@ app.MapPost("/api/v1/imports/sftp/estimate", async (HttpContext context, SftpEst
 .WithName("SftpEstimate")
 .WithOpenApi();
 
+app.MapGet("/api/v1/imports/sftp/availability", async (HttpContext context, AuthService authService, SftpImportService imports) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await imports.GetAvailabilityAsync(context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SftpAvailability")
+.WithOpenApi();
+
 app.MapPost("/api/v1/imports/sftp/import", async (HttpContext context, SftpImportRequest request, AuthService authService, SftpImportService imports) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

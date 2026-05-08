@@ -252,6 +252,19 @@ public sealed record SftpEstimateRequest(DateTime StartLocal, DateTime EndLocal)
 
 public sealed record SftpEstimateResponse(int CandidateCount, long CandidateBytes, bool ExceedsQuickImportWindow, string Message);
 
+public sealed record SftpAvailabilityResponse(
+    bool Enabled,
+    bool Available,
+    string Host,
+    string RemoteRoot,
+    DateTime? EarliestLocal,
+    DateTime? LatestLocal,
+    int FileCount,
+    long TotalBytes,
+    int ScannedDirectories,
+    int SkippedDirectories,
+    string Message);
+
 public sealed record SftpImportRequest(DateTime StartLocal, DateTime EndLocal, bool ConfirmLargeImport, int? CallCap, long? ByteCap);
 
 public sealed record SettingsSectionDto(string Section, object Values);

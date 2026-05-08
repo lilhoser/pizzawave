@@ -1018,6 +1018,29 @@ function SftpImport({ reload }: { reload: () => Promise<void> }) {
   const [end, setEnd] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
+  const [availability, setAvailability] = useState<any>(null);
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+
+  useEffect(() => { void loadAvailability(); }, []);
+
+  async function loadAvailability() {
+    setAvailabilityBusy(true);
+    try {
+      setAvailability(await api.request<any>("/api/v1/imports/sftp/availability"));
+    } catch (error) {
+      setAvailability({ available: false, message: `Availability check failed: ${error instanceof Error ? error.message : String(error)}` });
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  }
+
+  function fillAvailableRange(hours?: number) {
+    if (!availability?.earliestLocal || !availability?.latestLocal) return;
+    const latest = new Date(availability.latestLocal);
+    const earliest = hours ? new Date(Math.max(new Date(availability.earliestLocal).getTime(), latest.getTime() - hours * 3600_000)) : new Date(availability.earliestLocal);
+    setStart(toDateTimeInput(earliest));
+    setEnd(toDateTimeInput(latest));
+  }
 
   function requestBody() {
     if (!start || !end) throw new Error("Choose both start and end dates.");
@@ -1055,7 +1078,32 @@ function SftpImport({ reload }: { reload: () => Promise<void> }) {
     }
   }
 
-  return <><p className="muted">Quick imports are capped at 48h. Larger imports prime the pizzastack as throttled background jobs.</p><input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /><input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /><button disabled={!!busy} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button><button disabled={!!busy} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button><button disabled={!!busy} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button><div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div></>;
+  return <>
+    <p className="muted">Quick imports are capped at 48h. Larger imports prime the pizzastack as throttled background jobs.</p>
+    <div className="archive-availability">
+      <div>
+        <strong>Visible archive</strong>
+        <p className={availability?.available ? "settings-message ok" : "settings-message error"}>{availabilityBusy ? "Checking SFTP archive..." : availability?.message ?? "Archive availability has not been checked."}</p>
+        {availability?.available && <p className="muted">{availability.scannedDirectories?.toLocaleString()} folder(s) scanned; {availability.skippedDirectories?.toLocaleString()} unreadable folder(s) skipped.</p>}
+      </div>
+      <div className="archive-actions">
+        <button disabled={availabilityBusy} onClick={() => void loadAvailability()}>{availabilityBusy ? "Checking..." : "Refresh"}</button>
+        <button disabled={!availability?.available} onClick={() => fillAvailableRange(48)}>Use latest 48h</button>
+        <button disabled={!availability?.available} onClick={() => fillAvailableRange()}>Use full range</button>
+      </div>
+    </div>
+    <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} />
+    <input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} />
+    <button disabled={!!busy} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
+    <button disabled={!!busy} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
+    <button disabled={!!busy} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
+    <div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div>
+  </>;
+}
+
+function toDateTimeInput(date: Date) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
 }
 
 function navIcon(item: Page) {
