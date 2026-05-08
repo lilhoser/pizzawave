@@ -1,4 +1,5 @@
 using Renci.SshNet;
+using Renci.SshNet.Common;
 using Renci.SshNet.Sftp;
 using pizzalib;
 using System.Text.RegularExpressions;
@@ -250,7 +251,17 @@ public sealed class SftpImportService
         if (depth > 8)
             return;
 
-        foreach (var entry in client.ListDirectory(remotePath))
+        IEnumerable<ISftpFile> entries;
+        try
+        {
+            entries = client.ListDirectory(remotePath).ToList();
+        }
+        catch (SftpPermissionDeniedException)
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
             if (entry.Name is "." or "..")

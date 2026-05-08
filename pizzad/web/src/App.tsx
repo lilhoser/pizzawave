@@ -39,13 +39,12 @@ function App() {
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
 
   const loadSettings = useCallback(async () => {
-    const [engine, transcription, aiInsights, sftp, tr, auth, alerts] = await Promise.all([
+    const [engine, transcription, aiInsights, sftp, tr, alerts] = await Promise.all([
       api.request<any>("/api/v1/settings/engine"),
       api.request<any>("/api/v1/settings/transcription"),
       api.request<any>("/api/v1/settings/ai-insights"),
       api.request<any>("/api/v1/settings/sftp"),
       api.request<any>("/api/v1/settings/tr"),
-      api.request<any>("/api/v1/settings/auth"),
       api.request<any>("/api/v1/settings/alerts")
     ]);
     setSettingsSections({
@@ -54,7 +53,6 @@ function App() {
       "ai-insights": aiInsights.values,
       sftp: sftp.values,
       tr: tr.values,
-      auth: auth.values,
       alerts: alerts.values
     });
   }, []);
@@ -137,7 +135,7 @@ function App() {
         {page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
         {categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
         {page === "troubleshoot" && <TroubleshootView data={troubleshoot} rangeHours={rangeHours} reload={load} />}
-        {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} rangeHours={rangeHours} reload={load} />}
+        {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} reload={load} />}
       </main>
       <footer className="statusbar">
         <span className="pill">Queue {engineHealth?.queueDepth ?? "--"}</span>
@@ -654,7 +652,7 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Job[]; settingsSections: Record<string, any>; rangeHours: number; reload: () => Promise<void> }) {
+function SettingsView({ jobs, settingsSections, reload }: { jobs: Job[]; settingsSections: Record<string, any>; reload: () => Promise<void> }) {
   const [sections, setSections] = useState<Record<string, any>>({});
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "error">("info");
@@ -673,7 +671,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   const sftp = sections.sftp ?? {};
   const tr = sections.tr ?? {};
   const alerts = sections.alerts ?? {};
-  const auth = sections.auth ?? {};
 
   function update(section: string, path: string[], value: any) {
     setSections(current => {
@@ -765,16 +762,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
     setMessage(`Deleted job ${id}`);
     await reload();
   }
-  async function regenToken() {
-    await api.request("/api/v1/settings/auth/regenerate-token", { method: "POST" });
-    setMessage("Token regenerated on server. Update this browser token from the token file.");
-  }
-  async function generate() {
-    await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
-    setMessage("Incident generation queued for selected range");
-    await reload();
-  }
-
   return <div className="settings-page">
     <div className="settings-header">
       <h2>Settings</h2>
@@ -832,24 +819,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
 
-      <SettingsCard title="Security" description="Simple token protection for private LAN, Tailscale, or reverse-proxy deployments." busy={savingSection === "auth"} testing={testingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")} onTest={() => saveWithTest("auth")}>
-        <SettingCheckbox label="Require token for reads" description="When enabled, dashboard/category reads also need the token." checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
-        <SettingCheckbox label="Require token for writes" description="Protects settings changes, jobs, imports, and generation actions." checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
-        <button onClick={regenToken}>Regenerate token</button>
-        <p className="setting-note">Token auth is intended for private LAN, Tailscale, or reverse proxy use, not direct public internet exposure.</p>
-      </SettingsCard>
-
-      <div className="card settings-card">
-        <div className="settings-card-meta">
-          <h3>Summaries / Incidents</h3>
-          <p>Runs guarded incident generation for the current dashboard time range.</p>
-        </div>
-        <div className="settings-fields">
-        <p className="setting-note">AI usage must be enabled in Insights. Poor-quality transcripts are excluded from summary windows.</p>
-        <button onClick={generate}>Generate incidents for selected range</button>
-        </div>
-      </div>
-
       <div className="card settings-card wide">
         <div className="settings-card-meta">
           <h3>Jobs / Imports</h3>
@@ -873,7 +842,6 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
           <SettingValue label="TR config path" value={tr.configPath} />
           <SettingValue label="Talkgroups CSV" value={tr.talkgroupsPath} />
           <SettingValue label="TR service name" value={tr.logServiceName} />
-          <SettingValue label="Auth token file" value={auth.tokenFile} />
         </div>
       </div>
     </div>
@@ -1012,13 +980,6 @@ function withSettingsDefaults(value: Record<string, any>) {
     rules: [],
     ...(sections.alerts ?? {})
   };
-  sections.auth = {
-    mode: "token",
-    readRequiresAuth: false,
-    writeRequiresAuth: false,
-    tokenFile: "/etc/pizzawave/pizzad.token",
-    ...(sections.auth ?? {})
-  };
   return sections;
 }
 
@@ -1056,9 +1017,45 @@ function SftpImport({ reload }: { reload: () => Promise<void> }) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [message, setMessage] = useState("");
-  async function estimate() { const r = await api.request<any>("/api/v1/imports/sftp/estimate", { method: "POST", body: JSON.stringify({ startLocal: new Date(start).toISOString(), endLocal: new Date(end).toISOString() }) }); setMessage(r.message); }
-  async function run(confirmLargeImport: boolean) { const r = await api.request<Job>("/api/v1/imports/sftp/import", { method: "POST", body: JSON.stringify({ startLocal: new Date(start).toISOString(), endLocal: new Date(end).toISOString(), confirmLargeImport }) }); setMessage(`Queued job ${r.id}`); await reload(); }
-  return <><p className="muted">Quick imports are capped at 48h. Larger imports prime the pizzastack as throttled background jobs.</p><input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /><input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /><button onClick={estimate}>Estimate</button><button onClick={() => run(false)}>Quick Import</button><button onClick={() => run(true)}>Prime Pizzastack</button><div className="muted">{message}</div></>;
+  const [busy, setBusy] = useState("");
+
+  function requestBody() {
+    if (!start || !end) throw new Error("Choose both start and end dates.");
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) throw new Error("Choose a valid date range.");
+    if (endDate <= startDate) throw new Error("End must be after start.");
+    return { startLocal: startDate.toISOString(), endLocal: endDate.toISOString() };
+  }
+
+  async function estimate() {
+    setBusy("estimate");
+    setMessage("Estimating SFTP import...");
+    try {
+      const r = await api.request<any>("/api/v1/imports/sftp/estimate", { method: "POST", body: JSON.stringify(requestBody()) });
+      setMessage(r.message ?? `Found ${r.candidateCount ?? 0} candidate file(s).`);
+    } catch (error) {
+      setMessage(`Estimate failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function run(confirmLargeImport: boolean) {
+    setBusy(confirmLargeImport ? "prime" : "quick");
+    setMessage(confirmLargeImport ? "Queueing prime import..." : "Queueing quick import...");
+    try {
+      const r = await api.request<Job>("/api/v1/imports/sftp/import", { method: "POST", body: JSON.stringify({ ...requestBody(), confirmLargeImport }) });
+      setMessage(`Queued job ${r.id}`);
+      await reload();
+    } catch (error) {
+      setMessage(`Import failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return <><p className="muted">Quick imports are capped at 48h. Larger imports prime the pizzastack as throttled background jobs.</p><input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /><input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /><button disabled={!!busy} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button><button disabled={!!busy} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button><button disabled={!!busy} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button><div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div></>;
 }
 
 function navIcon(item: Page) {

@@ -1,21 +1,19 @@
 export class ApiClient {
-  token = localStorage.getItem("pizzad-token") ?? "";
-
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
-    if (this.token) headers.set("Authorization", `Bearer ${this.token}`);
     if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    let response = await fetch(path, { ...init, headers });
-    if (response.status === 401) {
-      const token = window.prompt("PizzaWave token");
-      if (token) {
-        this.token = token;
-        localStorage.setItem("pizzad-token", token);
-        headers.set("Authorization", `Bearer ${token}`);
-        response = await fetch(path, { ...init, headers });
+    const response = await fetch(path, { ...init, headers });
+    if (!response.ok) {
+      const text = await response.text();
+      let message = text || `${response.status} ${response.statusText}`;
+      try {
+        const parsed = JSON.parse(text);
+        message = parsed.message ?? parsed.title ?? message;
+      } catch {
+        // Keep the raw response text when the body is not JSON.
       }
+      throw new Error(message);
     }
-    if (!response.ok) throw new Error(await response.text());
     return response.json() as Promise<T>;
   }
 }

@@ -637,6 +637,9 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .settings-message.error {
   color: #ffd6d1;
 }
+.settings-message.ok {
+  color: #c8f6d9;
+}
 .settings-flow {
   display: grid;
   gap: 10px;

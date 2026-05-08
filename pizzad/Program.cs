@@ -268,7 +268,14 @@ app.MapDelete("/api/v1/jobs/{id:long}", async (HttpContext context, long id, Aut
 app.MapPost("/api/v1/imports/sftp/estimate", async (HttpContext context, SftpEstimateRequest request, AuthService authService, SftpImportService imports) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await imports.EstimateAsync(request, context.RequestAborted));
+    try
+    {
+        return Results.Ok(await imports.EstimateAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
 })
 .WithName("SftpEstimate")
 .WithOpenApi();
@@ -276,7 +283,14 @@ app.MapPost("/api/v1/imports/sftp/estimate", async (HttpContext context, SftpEst
 app.MapPost("/api/v1/imports/sftp/import", async (HttpContext context, SftpImportRequest request, AuthService authService, SftpImportService imports) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await imports.StartImportAsync(request, context.RequestAborted));
+    try
+    {
+        return Results.Ok(await imports.StartImportAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
 })
 .WithName("SftpImport")
 .WithOpenApi();
