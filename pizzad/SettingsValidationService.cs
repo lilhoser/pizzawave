@@ -1,13 +1,17 @@
 using Renci.SshNet;
+using pizzalib;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.IO.Compression;
 
 namespace pizzad;
 
 public sealed class SettingsValidationService
 {
     private readonly EngineConfig _config;
+    private readonly EngineDatabase _database;
 
     private static readonly Dictionary<string, string> WhisperModels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -17,9 +21,15 @@ public sealed class SettingsValidationService
         ["medium"] = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
     };
 
-    public SettingsValidationService(EngineConfig config)
+    private static readonly Dictionary<string, string> VoskModels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["small-en-us"] = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+    };
+
+    public SettingsValidationService(EngineConfig config, EngineDatabase database)
     {
         _config = config;
+        _database = database;
     }
 
     public async Task<object> TestAsync(string section, CancellationToken ct)
@@ -46,26 +56,19 @@ public sealed class SettingsValidationService
     {
         var dir = WhisperModelDirectory();
         Directory.CreateDirectory(dir);
-        var rows = WhisperModels.Keys.Select(name =>
-        {
-            var path = WhisperModelPath(name);
-            var file = new FileInfo(path);
-            return new
-            {
-                id = name,
-                label = $"Whisper {name}",
-                path,
-                installed = file.Exists,
-                bytes = file.Exists ? file.Length : 0
-            };
-        });
-        return rows;
+        var whisper = WhisperModels.Keys.Select(name => ModelRow("whisper", name, $"Whisper {name}", WhisperModelPath(name), File.Exists(WhisperModelPath(name)) ? new FileInfo(WhisperModelPath(name)).Length : 0));
+        var vosk = VoskModels.Keys.Select(name => ModelRow("vosk", name, $"Vosk {name}", VoskModelPath(name), Directory.Exists(VoskModelPath(name)) ? DirectorySize(VoskModelPath(name)) : 0));
+        return whisper.Concat(vosk);
     }
 
     public async Task<object> DownloadWhisperModelAsync(string model, CancellationToken ct)
     {
+        if (model.StartsWith("vosk-", StringComparison.OrdinalIgnoreCase))
+            return await DownloadVoskModelAsync(model["vosk-".Length..], ct);
+        if (model.StartsWith("whisper-", StringComparison.OrdinalIgnoreCase))
+            model = model["whisper-".Length..];
         if (!WhisperModels.TryGetValue(model, out var url))
-            return new { ok = false, message = "Unknown Whisper model." };
+            return new { ok = false, message = "Unknown model." };
 
         Directory.CreateDirectory(WhisperModelDirectory());
         var path = WhisperModelPath(model);
@@ -82,32 +85,58 @@ public sealed class SettingsValidationService
 
     public object DeleteWhisperModel(string model)
     {
+        if (model.StartsWith("vosk-", StringComparison.OrdinalIgnoreCase))
+            return DeleteVoskModel(model["vosk-".Length..]);
+        if (model.StartsWith("whisper-", StringComparison.OrdinalIgnoreCase))
+            model = model["whisper-".Length..];
         if (!WhisperModels.ContainsKey(model))
-            return new { ok = false, message = "Unknown Whisper model." };
+            return new { ok = false, message = "Unknown model." };
         var path = WhisperModelPath(model);
         if (File.Exists(path))
             File.Delete(path);
         return new { ok = true, message = $"Removed Whisper {model}.", path };
     }
 
-    private Task<object> TestTranscriptionAsync(CancellationToken ct)
+    private async Task<object> TestTranscriptionAsync(CancellationToken ct)
     {
         var provider = (_config.Transcription.Provider ?? "none").Trim().ToLowerInvariant();
         if (provider == "none")
-            return Task.FromResult<object>(new { ok = true, message = "Transcription is disabled." });
+            return new { ok = true, message = "Transcription is disabled." };
+
+        var call = await FindRecentAudioCallAsync(ct);
+        if (call == null)
+            return new { ok = false, message = "No recent audio call was found for transcription testing." };
+
+        var audioPath = Path.GetFullPath(Path.Combine(_config.Storage.AudioRoot, call.AudioPath));
+        if (!File.Exists(audioPath))
+            return new { ok = false, message = $"Recent call audio file was not found: {audioPath}" };
+        var testAudioPath = await CreateTranscriptionTestAudioAsync(call, audioPath, ct);
+
+        var started = DateTime.UtcNow;
+        string text;
         if (provider == "whisper")
         {
             var path = ResolveWhisperPath();
-            return Task.FromResult<object>(new { ok = File.Exists(path), message = File.Exists(path) ? $"Whisper model found: {path}" : $"Whisper model not found: {path}" });
+            if (!File.Exists(path))
+                return new { ok = false, message = $"Whisper model not found: {path}" };
+            using var transcriber = new pizzalib.Whisper(LocalSettings("whisper"));
+            await transcriber.Initialize();
+            text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
+            return TranscriptionResult(call, text, started);
         }
         if (provider == "vosk")
         {
             var path = _config.Transcription.VoskModelPath;
-            return Task.FromResult<object>(new { ok = Directory.Exists(path), message = Directory.Exists(path) ? $"Vosk model directory found: {path}" : $"Vosk model directory not found: {path}" });
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                return new { ok = false, message = $"Vosk model directory not found: {path}" };
+            using var transcriber = new pizzalib.VoskTranscriber(LocalSettings("vosk"));
+            await transcriber.Initialize();
+            text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
+            return TranscriptionResult(call, text, started);
         }
         if (provider is "lmstudio" or "openai")
-            return TestOpenAiEndpointAsync(_config.Transcription.OpenAiBaseUrl, _config.Transcription.OpenAiApiKey, _config.Transcription.OpenAiModel, audio: true, ct);
-        return Task.FromResult<object>(new { ok = false, message = $"Unknown transcription provider: {provider}" });
+            return await TestOpenAiTranscriptionAsync(call, testAudioPath, ct);
+        return new { ok = false, message = $"Unknown transcription provider: {provider}" };
     }
 
     private async Task<object> TestAiInsightsAsync(CancellationToken ct)
@@ -143,7 +172,7 @@ public sealed class SettingsValidationService
         if (string.IsNullOrWhiteSpace(baseUrl))
             return new { ok = false, message = "Base URL is required." };
         if (audio)
-            return new { ok = true, message = "Endpoint format is configured. Full audio transcription testing requires a sample call." };
+            return new { ok = true, message = "Endpoint format is configured." };
         if (string.IsNullOrWhiteSpace(model))
             return new { ok = false, message = "Model is required." };
 
@@ -176,10 +205,150 @@ public sealed class SettingsValidationService
 
     private string WhisperModelDirectory() => Path.Combine(_config.Storage.AppDataRoot, "pizzawave", "model");
     private string WhisperModelPath(string model) => Path.Combine(WhisperModelDirectory(), $"ggml-{model}.bin");
+    private string VoskModelDirectory() => Path.Combine(_config.Storage.AppDataRoot, "pizzawave", "model");
+    private string VoskModelPath(string model) => Path.Combine(VoskModelDirectory(), model == "small-en-us" ? "vosk-model-small-en-us-0.15" : model);
     private string ResolveWhisperPath() => string.IsNullOrWhiteSpace(_config.Transcription.WhisperModelFile) ? WhisperModelPath("base") : _config.Transcription.WhisperModelFile;
     private string InsightBaseUrl() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) ? _config.Transcription.OpenAiBaseUrl : _config.AiInsights.OpenAiBaseUrl;
     private string InsightApiKey() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiApiKey) ? _config.Transcription.OpenAiApiKey : _config.AiInsights.OpenAiApiKey;
     private string InsightModel() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel) ? _config.Transcription.OpenAiModel : _config.AiInsights.OpenAiModel;
     private static string NormalizeRemoteRoot(string value) => string.IsNullOrWhiteSpace(value) ? "/" : value.Replace('\\', '/');
     private static string Trim(string text, int max) => string.IsNullOrEmpty(text) || text.Length <= max ? text : text[..max];
+
+    private static object ModelRow(string engine, string id, string label, string path, long bytes) => new
+    {
+        id = $"{engine}-{id}",
+        engine,
+        label,
+        path,
+        installed = engine == "whisper" ? File.Exists(path) : Directory.Exists(path),
+        bytes
+    };
+
+    private async Task<object> DownloadVoskModelAsync(string model, CancellationToken ct)
+    {
+        if (!VoskModels.TryGetValue(model, out var url))
+            return new { ok = false, message = "Unknown Vosk model." };
+        Directory.CreateDirectory(VoskModelDirectory());
+        var zip = Path.Combine(VoskModelDirectory(), $"{model}.zip.download");
+        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        await using (var input = await client.GetStreamAsync(url, ct))
+        await using (var output = File.Open(zip, FileMode.Create, FileAccess.Write, FileShare.None))
+            await input.CopyToAsync(output, ct);
+        var path = VoskModelPath(model);
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+        ZipFile.ExtractToDirectory(zip, VoskModelDirectory(), overwriteFiles: true);
+        File.Delete(zip);
+        return new { ok = true, message = $"Downloaded Vosk {model}.", path };
+    }
+
+    private object DeleteVoskModel(string model)
+    {
+        if (!VoskModels.ContainsKey(model))
+            return new { ok = false, message = "Unknown Vosk model." };
+        var path = VoskModelPath(model);
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+        return new { ok = true, message = $"Removed Vosk {model}.", path };
+    }
+
+    private async Task<EngineCall?> FindRecentAudioCallAsync(CancellationToken ct)
+    {
+        var end = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        foreach (var days in new[] { 1, 7, 30 })
+        {
+            var calls = await _database.ListCallsAsync(end - days * 86400L, end, null, ct);
+            var candidates = calls
+                .Where(c => !string.IsNullOrWhiteSpace(c.AudioPath) && File.Exists(Path.Combine(_config.Storage.AudioRoot, c.AudioPath)))
+                .ToList();
+            var call = candidates.FirstOrDefault(c =>
+                string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(c.Transcription)) ?? candidates.FirstOrDefault();
+            if (call != null)
+                return call;
+        }
+        return null;
+    }
+
+    private async Task<string> CreateTranscriptionTestAudioAsync(EngineCall call, string inputPath, CancellationToken ct)
+    {
+        var dir = Path.Combine(_config.Storage.AppDataRoot, "settings-tests");
+        Directory.CreateDirectory(dir);
+        var outputPath = Path.Combine(dir, $"call-{call.Id}-16k.wav");
+        if (!File.Exists(outputPath) || File.GetLastWriteTimeUtc(outputPath) < File.GetLastWriteTimeUtc(inputPath))
+            await RunFfmpegAsync(inputPath, outputPath, ["-ar", "16000", "-ac", "1"], ct);
+        return outputPath;
+    }
+
+    private static async Task RunFfmpegAsync(string inputPath, string outputPath, IReadOnlyList<string> args, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo("ffmpeg")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true
+        };
+        foreach (var arg in new[] { "-y", "-hide_banner", "-loglevel", "error", "-i", inputPath })
+            psi.ArgumentList.Add(arg);
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+        psi.ArgumentList.Add(outputPath);
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Unable to start ffmpeg.");
+        await process.WaitForExitAsync(ct);
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(await process.StandardError.ReadToEndAsync(ct));
+    }
+
+    private Settings LocalSettings(string engine) => new()
+    {
+        TranscriptionEngine = engine,
+        WhisperModelFile = ResolveWhisperPath(),
+        VoskModelPath = _config.Transcription.VoskModelPath
+    };
+
+    private static async Task<MemoryStream> LoadAudioAsync(string path, CancellationToken ct)
+    {
+        var bytes = await File.ReadAllBytesAsync(path, ct);
+        return new MemoryStream(bytes);
+    }
+
+    private object TranscriptionResult(EngineCall call, string text, DateTime started)
+    {
+        text = (text ?? string.Empty).Trim();
+        var elapsed = DateTime.UtcNow - started;
+        return new
+        {
+            ok = !string.IsNullOrWhiteSpace(text),
+            message = string.IsNullOrWhiteSpace(text)
+                ? $"Test call {call.Id} produced an empty transcription in {elapsed.TotalSeconds:0.0}s."
+                : $"Test call {call.Id} transcribed in {elapsed.TotalSeconds:0.0}s: {Trim(text, 160)}"
+        };
+    }
+
+    private async Task<object> TestOpenAiTranscriptionAsync(EngineCall call, string audioPath, CancellationToken ct)
+    {
+        var baseUrl = (_config.Transcription.OpenAiBaseUrl ?? string.Empty).TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            return new { ok = false, message = "Base URL is required." };
+        var model = string.IsNullOrWhiteSpace(_config.Transcription.OpenAiModel) ? "whisper-1" : _config.Transcription.OpenAiModel;
+        var started = DateTime.UtcNow;
+        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        if (!string.IsNullOrWhiteSpace(_config.Transcription.OpenAiApiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _config.Transcription.OpenAiApiKey);
+        using var content = new MultipartFormDataContent();
+        var audio = new ByteArrayContent(await File.ReadAllBytesAsync(audioPath, ct));
+        audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+        content.Add(audio, "file", Path.GetFileName(audioPath));
+        content.Add(new StringContent(model), "model");
+        using var response = await client.PostAsync($"{baseUrl}/audio/transcriptions", content, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            return new { ok = false, message = $"HTTP {(int)response.StatusCode}: {Trim(json, 300)}" };
+        using var doc = JsonDocument.Parse(json);
+        var text = doc.RootElement.TryGetProperty("text", out var prop) ? prop.GetString() ?? string.Empty : json;
+        return TranscriptionResult(call, text, started);
+    }
+
+    private static long DirectorySize(string path) =>
+        Directory.Exists(path) ? Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length) : 0;
 }

@@ -782,15 +782,22 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
     </div>
 
     <div className="settings-flow">
-      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} testing={testingSection === "transcription"} status={sectionStatus.transcription} onSave={() => save("transcription")} onTest={() => test("transcription")}>
+      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} testing={testingSection === "transcription"} status={sectionStatus.transcription} onSave={() => save("transcription")} onTest={() => saveWithTest("transcription")}>
         <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
-        <SettingSelect label="Whisper preset" description="Select an installed or downloadable local Whisper model." value={whisperPreset(transcription.whisperModelFile)} options={["custom", "tiny", "base", "small", "medium"]} onChange={v => update("transcription", ["whisperModelFile"], v === "custom" ? transcription.whisperModelFile : whisperPath(v))} />
-        <SettingInput label="Whisper model file" description="Local Whisper model path used when Engine is Whisper." value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
-        <WhisperModelManager rows={models} busy={modelBusy} onUse={path => update("transcription", ["whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
-        <SettingInput label="Vosk model path" description="Local Vosk model directory used when Engine is Vosk." value={transcription.voskModelPath} onChange={v => update("transcription", ["voskModelPath"], v)} />
-        <SettingInput label="OpenAI-compatible URL" description="Base URL for LM Studio/OpenAI-compatible transcription." value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
-        <SettingInput label="OpenAI-compatible model" description="Model name sent to the transcription endpoint." value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
-        <SettingInput label="API key" description="Optional bearer token for remote transcription endpoints." type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
+        {transcription.provider === "whisper" && <>
+          <SettingSelect label="Whisper model" description="Select a managed model. Download missing models below." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update("transcription", ["whisperModelFile"], modelPath(models, v))} />
+          <ModelManager engine="whisper" rows={models} busy={modelBusy} selectedPath={transcription.whisperModelFile} onUse={path => update("transcription", ["whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
+        </>}
+        {transcription.provider === "vosk" && <>
+          <SettingSelect label="Vosk model" description="Select a managed model. Download missing models below." value={modelIdForPath(models, "vosk", transcription.voskModelPath)} options={modelOptions(models, "vosk")} onChange={v => update("transcription", ["voskModelPath"], modelPath(models, v))} />
+          <ModelManager engine="vosk" rows={models} busy={modelBusy} selectedPath={transcription.voskModelPath} onUse={path => update("transcription", ["voskModelPath"], path)} onDownload={downloadModel} onDelete={deleteModel} />
+        </>}
+        {(transcription.provider === "lmstudio" || transcription.provider === "openai") && <>
+          <SettingInput label="Base URL" description="OpenAI-compatible audio transcription endpoint base URL." value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
+          <SettingInput label="Model" description="Model name sent to the audio transcription endpoint." value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
+          <SettingInput label="API key" description="Optional bearer token for remote transcription endpoints." type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
+        </>}
+        {transcription.provider === "none" && <p className="setting-note">New calls will be stored without transcription.</p>}
       </SettingsCard>
 
       <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => test("ai-insights")}>
@@ -802,7 +809,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
       </SettingsCard>
 
-      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." busy={savingSection === "alerts"} testing={testingSection === "alerts"} status={sectionStatus.alerts} onSave={() => save("alerts")} onTest={() => test("alerts")}>
+      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." busy={savingSection === "alerts"} testing={testingSection === "alerts"} status={sectionStatus.alerts} onSave={() => save("alerts")} onTest={() => saveWithTest("alerts")}>
         <SettingCheckbox label="Enable email alerts" description="Turns live outbound email delivery on or off." checked={alerts.emailEnabled} onChange={v => update("alerts", ["emailEnabled"], v)} />
         <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
         <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
@@ -810,7 +817,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <p className="setting-note">{alerts.rules?.length ?? 0} alert rule(s) configured. Rule management remains in the alerts settings workflow.</p>
       </SettingsCard>
 
-      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} testing={testingSection === "sftp"} status={sectionStatus.sftp} onSave={() => save("sftp")} onTest={() => test("sftp")}>
+      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} testing={testingSection === "sftp"} status={sectionStatus.sftp} onSave={() => save("sftp")} onTest={() => saveWithTest("sftp")}>
         <SettingCheckbox label="Enable SFTP import" description="Allows quick imports and larger background priming jobs." checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
         <SettingInput label="Host" description="SFTP server hostname or IP address." value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
         <SettingInput label="Port" description="SFTP port, normally 22." type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
@@ -823,7 +830,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
 
-      <SettingsCard title="Security" description="Simple token protection for private LAN, Tailscale, or reverse-proxy deployments." busy={savingSection === "auth"} testing={testingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")} onTest={() => test("auth")}>
+      <SettingsCard title="Security" description="Simple token protection for private LAN, Tailscale, or reverse-proxy deployments." busy={savingSection === "auth"} testing={testingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")} onTest={() => saveWithTest("auth")}>
         <SettingCheckbox label="Require token for reads" description="When enabled, dashboard/category reads also need the token." checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
         <SettingCheckbox label="Require token for writes" description="Protects settings changes, jobs, imports, and generation actions." checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
         <button onClick={regenToken}>Regenerate token</button>
@@ -914,11 +921,12 @@ function SettingValue({ label: text, value }: { label: string; value: any }) {
   return <div className="setting-value"><span>{text}</span><code>{value || "--"}</code></div>;
 }
 
-function WhisperModelManager({ rows, busy, onUse, onDownload, onDelete }: { rows: any[]; busy: string; onUse: (path: string) => void; onDownload: (model: string) => Promise<void>; onDelete: (model: string) => Promise<void> }) {
+function ModelManager({ engine, rows, busy, selectedPath, onUse, onDownload, onDelete }: { engine: string; rows: any[]; busy: string; selectedPath: string; onUse: (path: string) => void; onDownload: (model: string) => Promise<void>; onDelete: (model: string) => Promise<void> }) {
+  rows = rows.filter(row => row.engine === engine);
   if (!rows.length) return null;
   return <div className="model-manager">
     {rows.map(row => <div className="model-row" key={row.id}>
-      <span><strong>{row.label}</strong><small>{row.installed ? `${formatBytes(row.bytes)} installed` : "Not installed"}</small></span>
+      <span><strong>{row.label}</strong><small>{row.installed ? `${formatBytes(row.bytes)} installed${row.path === selectedPath ? " - selected" : ""}` : "Not installed"}</small></span>
       <div>
         {row.installed && <button onClick={() => onUse(row.path)}>Use</button>}
         {row.installed ? <button disabled={busy === row.id} onClick={() => void onDelete(row.id)}>{busy === row.id ? "Removing..." : "Remove"}</button> : <button disabled={busy === row.id} onClick={() => void onDownload(row.id)}>{busy === row.id ? "Downloading..." : "Download"}</button>}
@@ -1017,13 +1025,17 @@ function numberOrZero(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function whisperPath(model: string) {
-  return `/var/lib/pizzawave/appdata/pizzawave/model/ggml-${model}.bin`;
+function modelOptions(rows: any[], engine: string) {
+  const filtered = rows.filter(row => row.engine === engine);
+  return filtered.length ? filtered.map(row => row.id) : ["none"];
 }
 
-function whisperPreset(path: string) {
-  const match = /ggml-(tiny|base|small|medium)\.bin$/i.exec(path ?? "");
-  return match ? match[1].toLowerCase() : "custom";
+function modelPath(rows: any[], id: string) {
+  return rows.find(row => row.id === id)?.path ?? "";
+}
+
+function modelIdForPath(rows: any[], engine: string, path: string) {
+  return rows.find(row => row.engine === engine && row.path === path)?.id ?? rows.find(row => row.engine === engine)?.id ?? "none";
 }
 
 function formatBytes(bytes: number) {
