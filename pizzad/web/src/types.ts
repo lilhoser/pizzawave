@@ -82,6 +82,7 @@ export type CategoryPage = {
   groupBy: string;
   groups: { label: string; calls: EngineCall[] }[];
   insights: CategoryInsight[];
+  incidents: Incident[];
 };
 export type Job = {
   id: number;

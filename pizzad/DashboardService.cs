@@ -62,10 +62,12 @@ public sealed class DashboardService
         var calls = Enrich(await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.Category, category, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var insights = BuildCategoryInsights(await _database.ListInsightEventsAsync(start, end, ct), calls);
+        var insightEvents = await _database.ListInsightEventsAsync(start, end, ct);
+        var insights = BuildCategoryInsights(insightEvents, calls);
+        var incidents = BuildCategoryIncidents(await ListIncidentsAsync(start, end, ct), calls);
         if (string.Equals(groupBy, "none", StringComparison.OrdinalIgnoreCase))
         {
-            return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)], insights);
+            return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)], insights, incidents);
         }
 
         var groups = calls
@@ -74,7 +76,7 @@ public sealed class DashboardService
             .Select(g => new CategoryGroupDto(g.Key, g.OrderByDescending(c => c.StartTime).ToList()))
             .ToList();
 
-        return new CategoryPageDto(category, "talkgroup", groups, insights);
+        return new CategoryPageDto(category, "talkgroup", groups, insights, incidents);
     }
 
     public Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
@@ -94,7 +96,7 @@ public sealed class DashboardService
                 Insight = i,
                 Calls = i.Calls.Where(c => categoryCallIds.Contains(c.CallId)).ToList()
             })
-            .Where(x => x.Calls.Count > 0)
+            .Where(x => x.Calls.Count == 1 && x.Insight.Calls.Count == 1)
             .OrderByDescending(x => x.Insight.LastSeen)
             .ThenByDescending(x => x.Insight.Confidence)
             .Select(x => new CategoryInsightDto(
@@ -106,6 +108,17 @@ public sealed class DashboardService
                 x.Insight.Confidence,
                 x.Calls.Count,
                 x.Calls))
+            .Take(100)
+            .ToList();
+    }
+
+    private static IReadOnlyList<IncidentDto> BuildCategoryIncidents(List<IncidentDto> incidents, List<EngineCall> categoryCalls)
+    {
+        var categoryCallIds = categoryCalls.Select(c => c.Id).ToHashSet();
+        return incidents
+            .Where(i => i.Calls.Count >= 2 && i.Calls.Any(c => categoryCallIds.Contains(c.CallId)))
+            .OrderByDescending(i => i.LastSeen)
+            .ThenByDescending(i => i.Confidence)
             .Take(100)
             .ToList();
     }

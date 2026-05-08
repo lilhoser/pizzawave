@@ -106,7 +106,8 @@ public sealed record CategoryPageDto(
     string Category,
     string GroupBy,
     IReadOnlyList<CategoryGroupDto> Groups,
-    IReadOnlyList<CategoryInsightDto> Insights);
+    IReadOnlyList<CategoryInsightDto> Insights,
+    IReadOnlyList<IncidentDto> Incidents);
 
 public sealed record IncidentDto
 {

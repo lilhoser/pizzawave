@@ -7,6 +7,7 @@ import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 type Page = "dashboard" | "troubleshoot" | "settings" | typeof categories[number];
+type CategoryViewMode = "incidents" | "summaries" | "raw";
 const categoryColors: Record<string, string> = {
   police: "#5aa7ff",
   fire: "#ff6b5a",
@@ -25,7 +26,10 @@ function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [rangeHours, setRangeHours] = useState(24);
   const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
-  const [categoryViewMode, setCategoryViewMode] = useState(() => localStorage.getItem("pizzawave-category-view") || "split");
+  const [categoryViewMode, setCategoryViewMode] = useState<CategoryViewMode>(() => {
+    const saved = localStorage.getItem("pizzawave-category-view");
+    return saved === "summaries" || saved === "raw" ? saved : "incidents";
+  });
   const [status, setStatus] = useState("Starting");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [category, setCategory] = useState<CategoryPage | null>(null);
@@ -112,7 +116,8 @@ function App() {
           <option value="orange">Orange</option>
         </select>
         {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
-          <button className={categoryViewMode === "split" ? "active" : ""} onClick={() => setCategoryViewMode("split")}>Insights + Calls</button>
+          <button className={categoryViewMode === "incidents" ? "active" : ""} onClick={() => setCategoryViewMode("incidents")}>Incidents</button>
+          <button className={categoryViewMode === "summaries" ? "active" : ""} onClick={() => setCategoryViewMode("summaries")}>AI Summaries</button>
           <button className={categoryViewMode === "raw" ? "active" : ""} onClick={() => setCategoryViewMode("raw")}>Raw Calls</button>
         </div>}
         <span className="pill">{status}</span>
@@ -263,7 +268,7 @@ function Incidents({ rows }: { rows: Incident[] }) {
   </div>;
 }
 
-function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: string; rangeHours: number; reload: () => Promise<void> }) {
+function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void> }) {
   if (!data) return <div className="category-page">Loading...</div>;
   if (mode === "raw") {
     return <div className="category-page raw-category" data-category={data.category}><CategoryCallGroups groups={data.groups} category={data.category} /></div>;
@@ -272,12 +277,43 @@ function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage |
     await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
     await reload();
   }
-  return <div className="category-split-page" data-category={data.category}><section className="pane insights-pane category-pane"><h2>{label(data.category)} Insights</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} /></section><section className="pane calls-pane category-pane"><h2>Calls by Talkgroup</h2><CategoryCallGroups groups={data.groups} category={data.category} /></section></div>;
+  if (mode === "summaries") {
+    return <div className="category-page" data-category={data.category}><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} /></div>;
+  }
+  return <div className="category-page" data-category={data.category}><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} /></div>;
 }
 
 function CategoryInsights({ rows, category, onGenerate }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void> }) {
-  if (!rows.length) return <div className="card"><p className="muted">No insight summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
+  if (!rows.length) return <div className="card"><p className="muted">No single-call AI summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
   return <>{rows.map(item => <article className={`insight-tile category-${category}`} key={item.id}><div className="insight-head"><span>{item.title}</span><strong className={`confidence ${confidenceClass(item.score)}`}>{Math.round(item.score * 100)}%</strong></div><div className="insight-time">{new Date((item.calls[0]?.rawTimestamp ?? item.firstSeen) * 1000).toLocaleString()}</div><p>{item.detail}</p>{item.calls.length > 0 && <details className="source-shelf"><summary>Transcript and audio</summary><div className="call-actions">{item.calls.map(c => <div className="incident-call" key={c.callId}><div className="incident-call-head"><span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span><span>Call {c.callId}</span></div><p>{c.transcript}</p><audio controls preload="metadata" src={c.audioUrl} /></div>)}</div></details>}</article>)}</>;
+}
+
+function CategoryIncidents({ rows, category, onGenerate }: { rows: Incident[]; category: string; onGenerate: () => Promise<void> }) {
+  if (!rows.length) return <div className="card"><p className="muted">No incidents available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate incidents now</button></div>;
+  return <div className="incident-explorer category-incident-list">
+    {rows.map(i => <details className={`incident-card category-${category}`} key={i.id}>
+      <summary>
+        <span>{i.title}</span>
+        <span className="muted">{i.calls.length} calls</span>
+      </summary>
+      <div className="incident-meta">
+        <span>{incidentTimeRange(i)}</span>
+        <strong className={`confidence ${confidenceClass(i.confidence)}`}>{Math.round(i.confidence * 100)}%</strong>
+      </div>
+      <p>{i.detail}</p>
+      <div className="incident-details">
+        <div className="muted">Related calls across all categories</div>
+        {i.calls.map(c => <div className="incident-call" key={c.callId}>
+          <div className="incident-call-head">
+            <span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span>
+            <span>Call {c.callId}</span>
+          </div>
+          <p>{c.transcript}</p>
+          <audio controls preload="metadata" src={c.audioUrl} />
+        </div>)}
+      </div>
+    </details>)}
+  </div>;
 }
 
 function CategoryCallGroups({ groups, category }: { groups: CategoryPage["groups"]; category?: string }) {
