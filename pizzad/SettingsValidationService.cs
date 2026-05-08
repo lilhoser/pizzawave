@@ -261,13 +261,48 @@ public sealed class SettingsValidationService
             var candidates = calls
                 .Where(c => !string.IsNullOrWhiteSpace(c.AudioPath) && File.Exists(Path.Combine(_config.Storage.AudioRoot, c.AudioPath)))
                 .ToList();
-            var call = candidates.FirstOrDefault(c =>
-                string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(c.Transcription)) ?? candidates.FirstOrDefault();
+            var call = candidates
+                .Select(c => new { Call = c, Score = TranscriptionTestSampleScore(c) })
+                .Where(row => row.Score > 0)
+                .OrderByDescending(row => row.Score)
+                .ThenByDescending(row => row.Call.StartTime)
+                .Select(row => row.Call)
+                .FirstOrDefault() ?? candidates.FirstOrDefault();
             if (call != null)
                 return call;
         }
         return null;
+    }
+
+    private static int TranscriptionTestSampleScore(EngineCall call)
+    {
+        var text = (call.Transcription ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+
+        var lower = text.ToLowerInvariant();
+        if (lower.Contains("[inaudible]") || lower.Contains("[blank_audio]") || lower.Contains("[silence]") || lower.Contains("no speech"))
+            return 0;
+
+        var letters = text.Count(char.IsLetter);
+        var digits = text.Count(char.IsDigit);
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Count(word => word.Count(char.IsLetter) >= 3);
+        var significant = Math.Max(1, letters + digits);
+        var alphaRatio = letters / (double)significant;
+        var digitRatio = digits / (double)significant;
+        if (letters < 20 || words < 4 || alphaRatio < 0.55 || digitRatio > 0.30)
+            return 0;
+
+        var duration = Math.Max(0, call.StopTime - call.StartTime);
+        var score = letters + words * 12;
+        if (string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase))
+            score += 1000;
+        if (string.Equals(call.TranscriptionStatus, "done", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(call.TranscriptionStatus, "completed", StringComparison.OrdinalIgnoreCase))
+            score += 100;
+        if (duration is >= 3 and <= 60)
+            score += 75;
+        return score;
     }
 
     private async Task<string> CreateTranscriptionTestAudioAsync(EngineCall call, string inputPath, CancellationToken ct)
@@ -320,9 +355,16 @@ public sealed class SettingsValidationService
         {
             ok = !string.IsNullOrWhiteSpace(text),
             message = string.IsNullOrWhiteSpace(text)
-                ? $"Test call {call.Id} produced an empty transcription in {elapsed.TotalSeconds:0.0}s."
-                : $"Test call {call.Id} transcribed in {elapsed.TotalSeconds:0.0}s: {Trim(text, 160)}"
+                ? $"Test call {FormatCallContext(call)} produced an empty transcription in {elapsed.TotalSeconds:0.0}s."
+                : $"Test call {FormatCallContext(call)} transcribed in {elapsed.TotalSeconds:0.0}s: {Trim(text, 160)}"
         };
+    }
+
+    private static string FormatCallContext(EngineCall call)
+    {
+        var when = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+        var tg = string.IsNullOrWhiteSpace(call.TalkgroupName) ? call.Talkgroup.ToString() : call.TalkgroupName;
+        return $"{call.Id} ({when}, {call.Category}, {tg})";
     }
 
     private async Task<object> TestOpenAiTranscriptionAsync(EngineCall call, string audioPath, CancellationToken ct)
