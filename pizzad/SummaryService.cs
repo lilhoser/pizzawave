@@ -21,6 +21,9 @@ public sealed class SummaryService
 
     public async Task<JobDto> GenerateForRangeAsync(GenerateSummaryRequest request, CancellationToken ct)
     {
+        if (!_insights.IsConfiguredAndEnabled)
+            throw new InvalidOperationException("AI insights are disabled or not fully configured. Enable aiInsights.enabled and configure the AI endpoint/model before generating incidents.");
+
         var span = request.End - request.Start;
         if (span > 7 * 24 * 3600 && !request.ConfirmLargeRange)
             throw new InvalidOperationException("Summary generation for ranges larger than one week requires confirmation.");

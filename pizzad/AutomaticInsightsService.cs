@@ -51,8 +51,13 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     public int ConfiguredBatchSize => BatchSize();
 
+    public bool IsConfiguredAndEnabled => IsEnabled();
+
     public async Task<int> GenerateWindowForCallsAsync(List<EngineCall> calls, CancellationToken ct)
     {
+        if (!IsEnabled())
+            throw new InvalidOperationException("AI insights are disabled or not fully configured.");
+
         calls = calls
             .Where(c => string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
