@@ -115,6 +115,7 @@ function App() {
           <option value="blue">Blue</option>
           <option value="orange">Orange</option>
         </select>
+        {page === "settings" && <button onClick={() => void load()}>Load Settings</button>}
         {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
           <button className={categoryViewMode === "incidents" ? "active" : ""} onClick={() => setCategoryViewMode("incidents")}>Incidents</button>
           <button className={categoryViewMode === "summaries" ? "active" : ""} onClick={() => setCategoryViewMode("summaries")}>AI Summaries</button>
@@ -656,8 +657,13 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "error">("info");
   const [savingSection, setSavingSection] = useState("");
+  const [sectionStatus, setSectionStatus] = useState<Record<string, { kind: "ok" | "error" | "info"; text: string }>>({});
+  const [testingSection, setTestingSection] = useState("");
+  const [models, setModels] = useState<any[]>([]);
+  const [modelBusy, setModelBusy] = useState("");
 
   useEffect(() => { setSections(withSettingsDefaults(settingsSections)); }, [settingsSections]);
+  useEffect(() => { void loadModels(); }, []);
 
   const engine = sections.engine ?? {};
   const transcription = sections.transcription ?? {};
@@ -690,12 +696,64 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
       await api.request(`/api/v1/settings/${section}`, { method: "POST", body: JSON.stringify({ values: sections[section] ?? {} }) });
       setMessageKind("info");
       setMessage(`${label(section)} settings saved`);
+      setSectionStatus(current => ({ ...current, [section]: { kind: "ok", text: "Saved" } }));
       await reload();
     } catch (error) {
+      const text = error instanceof Error && error.message ? error.message : "Save failed.";
       setMessageKind("error");
-      setMessage(error instanceof Error && error.message ? `Save failed: ${error.message}` : "Save failed.");
+      setMessage(`Save failed: ${text}`);
+      setSectionStatus(current => ({ ...current, [section]: { kind: "error", text } }));
     } finally {
       setSavingSection("");
+    }
+  }
+
+  async function test(section: string) {
+    setTestingSection(section);
+    setSectionStatus(current => ({ ...current, [section]: { kind: "info", text: "Testing..." } }));
+    try {
+      const result = await api.request<any>(`/api/v1/settings/${section}/test`, { method: "POST" });
+      setSectionStatus(current => ({ ...current, [section]: { kind: result.ok ? "ok" : "error", text: result.message ?? "Test complete" } }));
+    } catch (error) {
+      const text = error instanceof Error && error.message ? error.message : "Test failed.";
+      setSectionStatus(current => ({ ...current, [section]: { kind: "error", text } }));
+    } finally {
+      setTestingSection("");
+    }
+  }
+
+  async function saveWithTest(section: string) {
+    await save(section);
+    await test(section);
+  }
+
+  async function loadModels() {
+    try {
+      setModels(await api.request<any[]>("/api/v1/settings/transcription/models"));
+    } catch {
+      setModels([]);
+    }
+  }
+
+  async function downloadModel(model: string) {
+    setModelBusy(model);
+    try {
+      const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}/download`, { method: "POST" });
+      setSectionStatus(current => ({ ...current, transcription: { kind: result.ok ? "ok" : "error", text: result.message ?? "Download complete" } }));
+      await loadModels();
+    } finally {
+      setModelBusy("");
+    }
+  }
+
+  async function deleteModel(model: string) {
+    setModelBusy(model);
+    try {
+      const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}`, { method: "DELETE" });
+      setSectionStatus(current => ({ ...current, transcription: { kind: result.ok ? "ok" : "error", text: result.message ?? "Removed" } }));
+      await loadModels();
+    } finally {
+      setModelBusy("");
     }
   }
 
@@ -719,22 +777,23 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
     <div className="settings-header">
       <h2>Settings</h2>
       <div className="settings-header-actions">
-        <button onClick={() => void reload()}>Load</button>
         <span className={messageKind === "error" ? "settings-message error" : "settings-message"}>{message || "Changes save by section."}</span>
       </div>
     </div>
 
     <div className="settings-flow">
-      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} onSave={() => save("transcription")}>
+      <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} testing={testingSection === "transcription"} status={sectionStatus.transcription} onSave={() => save("transcription")} onTest={() => test("transcription")}>
         <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
+        <SettingSelect label="Whisper preset" description="Select an installed or downloadable local Whisper model." value={whisperPreset(transcription.whisperModelFile)} options={["custom", "tiny", "base", "small", "medium"]} onChange={v => update("transcription", ["whisperModelFile"], v === "custom" ? transcription.whisperModelFile : whisperPath(v))} />
         <SettingInput label="Whisper model file" description="Local Whisper model path used when Engine is Whisper." value={transcription.whisperModelFile} onChange={v => update("transcription", ["whisperModelFile"], v)} />
+        <WhisperModelManager rows={models} busy={modelBusy} onUse={path => update("transcription", ["whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
         <SettingInput label="Vosk model path" description="Local Vosk model directory used when Engine is Vosk." value={transcription.voskModelPath} onChange={v => update("transcription", ["voskModelPath"], v)} />
         <SettingInput label="OpenAI-compatible URL" description="Base URL for LM Studio/OpenAI-compatible transcription." value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
         <SettingInput label="OpenAI-compatible model" description="Model name sent to the transcription endpoint." value={transcription.openAiModel} onChange={v => update("transcription", ["openAiModel"], v)} />
         <SettingInput label="API key" description="Optional bearer token for remote transcription endpoints." type="password" value={transcription.openAiApiKey} onChange={v => update("transcription", ["openAiApiKey"], v)} />
       </SettingsCard>
 
-      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} onSave={() => save("ai-insights")}>
+      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => test("ai-insights")}>
         <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
         <SettingInput label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
@@ -743,7 +802,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
       </SettingsCard>
 
-      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." busy={savingSection === "alerts"} onSave={() => save("alerts")}>
+      <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." busy={savingSection === "alerts"} testing={testingSection === "alerts"} status={sectionStatus.alerts} onSave={() => save("alerts")} onTest={() => test("alerts")}>
         <SettingCheckbox label="Enable email alerts" description="Turns live outbound email delivery on or off." checked={alerts.emailEnabled} onChange={v => update("alerts", ["emailEnabled"], v)} />
         <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
         <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
@@ -751,7 +810,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <p className="setting-note">{alerts.rules?.length ?? 0} alert rule(s) configured. Rule management remains in the alerts settings workflow.</p>
       </SettingsCard>
 
-      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} onSave={() => save("sftp")}>
+      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} testing={testingSection === "sftp"} status={sectionStatus.sftp} onSave={() => save("sftp")} onTest={() => test("sftp")}>
         <SettingCheckbox label="Enable SFTP import" description="Allows quick imports and larger background priming jobs." checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
         <SettingInput label="Host" description="SFTP server hostname or IP address." value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
         <SettingInput label="Port" description="SFTP port, normally 22." type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
@@ -764,7 +823,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
         <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
 
-      <SettingsCard title="Security" description="Simple token protection for private LAN, Tailscale, or reverse-proxy deployments." busy={savingSection === "auth"} onSave={() => save("auth")}>
+      <SettingsCard title="Security" description="Simple token protection for private LAN, Tailscale, or reverse-proxy deployments." busy={savingSection === "auth"} testing={testingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")} onTest={() => test("auth")}>
         <SettingCheckbox label="Require token for reads" description="When enabled, dashboard/category reads also need the token." checked={auth.readRequiresAuth} onChange={v => update("auth", ["readRequiresAuth"], v)} />
         <SettingCheckbox label="Require token for writes" description="Protects settings changes, jobs, imports, and generation actions." checked={auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
         <button onClick={regenToken}>Regenerate token</button>
@@ -812,12 +871,16 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   </div>;
 }
 
-function SettingsCard({ title, description, children, busy, onSave }: { title: string; description: string; children: React.ReactNode; busy?: boolean; onSave: () => Promise<void> }) {
+function SettingsCard({ title, description, children, busy, testing, status, onSave, onTest }: { title: string; description: string; children: React.ReactNode; busy?: boolean; testing?: boolean; status?: { kind: "ok" | "error" | "info"; text: string }; onSave: () => Promise<void>; onTest?: () => Promise<void> }) {
   return <div className="card settings-card">
     <div className="settings-card-meta">
       <h3>{title}</h3>
       <p>{description}</p>
-      <button disabled={busy} onClick={() => void onSave()}>{busy ? "Saving..." : "Save"}</button>
+      <div className="settings-card-actions">
+        {onTest && <button disabled={testing || busy} onClick={() => void onTest()}>{testing ? "Testing..." : "Test"}</button>}
+        <button disabled={busy || testing} onClick={() => void onSave()}>{busy ? "Saving..." : "Save"}</button>
+      </div>
+      {status && <span className={`section-status ${status.kind}`}>{status.text}</span>}
     </div>
     <div className="settings-fields">{children}</div>
   </div>;
@@ -849,6 +912,19 @@ function SettingCheckbox({ label: text, description, checked, onChange }: { labe
 
 function SettingValue({ label: text, value }: { label: string; value: any }) {
   return <div className="setting-value"><span>{text}</span><code>{value || "--"}</code></div>;
+}
+
+function WhisperModelManager({ rows, busy, onUse, onDownload, onDelete }: { rows: any[]; busy: string; onUse: (path: string) => void; onDownload: (model: string) => Promise<void>; onDelete: (model: string) => Promise<void> }) {
+  if (!rows.length) return null;
+  return <div className="model-manager">
+    {rows.map(row => <div className="model-row" key={row.id}>
+      <span><strong>{row.label}</strong><small>{row.installed ? `${formatBytes(row.bytes)} installed` : "Not installed"}</small></span>
+      <div>
+        {row.installed && <button onClick={() => onUse(row.path)}>Use</button>}
+        {row.installed ? <button disabled={busy === row.id} onClick={() => void onDelete(row.id)}>{busy === row.id ? "Removing..." : "Remove"}</button> : <button disabled={busy === row.id} onClick={() => void onDownload(row.id)}>{busy === row.id ? "Downloading..." : "Download"}</button>}
+      </div>
+    </div>)}
+  </div>;
 }
 
 function cloneSettings(value: Record<string, any>) {
@@ -939,6 +1015,27 @@ function withSettingsDefaults(value: Record<string, any>) {
 function numberOrZero(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function whisperPath(model: string) {
+  return `/var/lib/pizzawave/appdata/pizzawave/model/ggml-${model}.bin`;
+}
+
+function whisperPreset(path: string) {
+  const match = /ggml-(tiny|base|small|medium)\.bin$/i.exec(path ?? "");
+  return match ? match[1].toLowerCase() : "custom";
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index++;
+  }
+  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function SftpImport({ reload }: { reload: () => Promise<void> }) {

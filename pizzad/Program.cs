@@ -34,6 +34,7 @@ builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddSingleton<TrConfigService>();
 builder.Services.AddSingleton<TrHealthTroubleshootService>();
 builder.Services.AddSingleton<DiagnosticToolService>();
+builder.Services.AddSingleton<SettingsValidationService>();
 builder.Services.AddHostedService<CallstreamListener>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
 builder.Services.AddHostedService<TrHealthCollector>();
@@ -337,6 +338,38 @@ app.MapPost("/api/v1/settings/{section}", (HttpContext context, string section, 
     return Results.Ok(new { saved = section });
 })
 .WithName("SettingsSave")
+.WithOpenApi();
+
+app.MapPost("/api/v1/settings/{section}/test", async (HttpContext context, string section, AuthService authService, SettingsValidationService validation) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await validation.TestAsync(section, context.RequestAborted));
+})
+.WithName("SettingsTest")
+.WithOpenApi();
+
+app.MapGet("/api/v1/settings/transcription/models", (HttpContext context, AuthService authService, SettingsValidationService validation) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(validation.ListWhisperModels());
+})
+.WithName("WhisperModels")
+.WithOpenApi();
+
+app.MapPost("/api/v1/settings/transcription/models/{model}/download", async (HttpContext context, string model, AuthService authService, SettingsValidationService validation) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await validation.DownloadWhisperModelAsync(model, context.RequestAborted));
+})
+.WithName("WhisperModelDownload")
+.WithOpenApi();
+
+app.MapDelete("/api/v1/settings/transcription/models/{model}", (HttpContext context, string model, AuthService authService, SettingsValidationService validation) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(validation.DeleteWhisperModel(model));
+})
+.WithName("WhisperModelDelete")
 .WithOpenApi();
 
 app.MapPost("/api/v1/settings/auth/regenerate-token", (HttpContext context, AuthService authService) =>

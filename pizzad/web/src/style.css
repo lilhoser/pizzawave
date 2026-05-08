@@ -664,6 +664,33 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   line-height: 1.4;
   margin: 0;
 }
+.settings-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.section-status {
+  border: 1px solid #46515c;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  max-width: 100%;
+}
+.section-status.ok {
+  color: #c8f6d9;
+  border-color: #54d68a;
+  background: rgba(84, 214, 138, 0.12);
+}
+.section-status.error {
+  color: #ffd6d1;
+  border-color: #ff6b5a;
+  background: rgba(255, 107, 90, 0.12);
+}
+.section-status.info {
+  color: #d7ecff;
+  border-color: var(--accent);
+  background: rgba(90, 167, 255, 0.12);
+}
 .settings-fields {
   display: grid;
   gap: 8px;
@@ -723,6 +750,28 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #9faab5;
   font-size: 12px;
   line-height: 1.35;
+}
+.model-manager {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 7px;
+}
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.model-row small {
+  display: block;
+  color: #8e99a3;
+  font-size: 11px;
+}
+.model-row div {
+  display: flex;
+  gap: 6px;
 }
 .settings-subsection {
   border-top: 1px solid #30363d;
