@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityAuditGroup, QualityAuditSample, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityAuditGroup, QualityAuditSample, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -341,7 +341,7 @@ function confidenceClass(score: number) {
 
 function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot | null; rangeHours: number; reload: () => Promise<void> }) {
   const [topTab, setTopTab] = useState<"pizzad" | "tr">("tr");
-  const [trTab, setTrTab] = useState<"summary" | "metrics" | "quality" | "logs" | "diagnostics" | "insights">("summary");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "quality" | "tools" | "logs" | "diagnostics" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
@@ -371,6 +371,7 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
           <button className={trTab === "quality" ? "active" : ""} onClick={() => setTrTab("quality")}>Inaudible Audit</button>
+          <button className={trTab === "tools" ? "active" : ""} onClick={() => setTrTab("tools")}>Tools</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
           <button className={trTab === "diagnostics" ? "active" : ""} onClick={() => setTrTab("diagnostics")}>Diagnostics</button>
           <button className={trTab === "insights" ? "active" : ""} onClick={() => setTrTab("insights")}>Insights</button>
@@ -384,6 +385,7 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
           <div className="tr-chart-grid">{active.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
         </div>}
         {trTab === "quality" && <QualityAuditView data={data} />}
+        {trTab === "tools" && <TroubleshootTools rangeHours={rangeHours} reload={reload} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
         {trTab === "diagnostics" && <pre className="log-box">{data.diagnostics}</pre>}
         {trTab === "insights" && <div className="card"><button disabled>Generate Recommendation</button><p className="muted">Uses LM Link to summarize issues and baselines.</p><pre className="log-box">{data.insightsText}</pre></div>}
@@ -482,6 +484,73 @@ function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
     <p>{sample.transcription || "No transcript available."}</p>
     <audio controls preload="metadata" src={sample.audioUrl} />
   </details>;
+}
+
+function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload: () => Promise<void> }) {
+  const [callIds, setCallIds] = useState("");
+  const [sampleCount, setSampleCount] = useState(5);
+  const [models, setModels] = useState("local-current");
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [result, setResult] = useState<DiagnosticToolResult | null>(null);
+  const [message, setMessage] = useState("");
+
+  const body = () => ({
+    ...rangeBody(rangeHours),
+    sampleCount,
+    callIds: callIds.split(",").map(v => Number(v.trim())).filter(v => Number.isFinite(v) && v > 0),
+    models: models.split(",").map(v => v.trim()).filter(Boolean)
+  });
+
+  async function start(path: string) {
+    setResult(null);
+    const job = await api.request<Job>(path, { method: "POST", body: JSON.stringify(body()) });
+    setJobId(job.id);
+    setMessage(`Queued job ${job.id}. Results appear here when it completes.`);
+    await reload();
+  }
+
+  async function loadResult(id = jobId) {
+    if (!id) return;
+    const rows = await api.request<DiagnosticToolResult>(`/api/v1/troubleshoot/tools/results/${id}`);
+    setResult(rows);
+    setMessage(`Loaded ${rows.rows.length} result rows for job ${id}.`);
+  }
+
+  return <div className="tools-page">
+    <div className="card">
+      <h3>Diagnostic Tool Inputs</h3>
+      <p className="muted">Leave call IDs blank to sample recent poor-quality calls from the selected global range. Tools are experimental and never update stored transcripts.</p>
+      <label>Call IDs <input className="wide-input" value={callIds} onChange={e => setCallIds(e.target.value)} placeholder="6095,6061,5909" /></label>
+      <label>Sample count <input type="number" min={1} max={20} value={sampleCount} onChange={e => setSampleCount(Number(e.target.value))} /></label>
+      <label>Models <input className="wide-input" value={models} onChange={e => setModels(e.target.value)} placeholder="local-current, openai:gpt-4o-transcribe" /></label>
+      <div>
+        <button onClick={() => start("/api/v1/troubleshoot/tools/audio-experiment")}>Run Audio Cleanup Experiment</button>
+        <button onClick={() => start("/api/v1/troubleshoot/tools/transcription-bakeoff")}>Run Transcription Bakeoff</button>
+      </div>
+      <div className="muted">{message}</div>
+      <div>
+        <input type="number" placeholder="Job ID" value={jobId ?? ""} onChange={e => setJobId(Number(e.target.value) || null)} />
+        <button onClick={() => void loadResult()}>Load Result</button>
+      </div>
+    </div>
+    {result && <DiagnosticResultView result={result} />}
+  </div>;
+}
+
+function DiagnosticResultView({ result }: { result: DiagnosticToolResult }) {
+  return <div className="card diagnostic-results">
+    <h3>{label(result.tool)} Results</h3>
+    <table className="table"><thead><tr><th>Call</th><th>Variant</th><th>Model</th><th>Status</th><th>Score</th><th>Time</th><th>Transcript</th><th>Audio</th></tr></thead><tbody>{result.rows.map((row, index) => <tr key={`${row.callId}-${row.variant}-${row.model}-${index}`} className={row.score > 0 ? "useful-row" : ""}>
+      <td>{row.callId}</td>
+      <td>{row.variant}</td>
+      <td>{row.model}</td>
+      <td>{row.status}</td>
+      <td>{row.score}</td>
+      <td>{(row.durationMs / 1000).toFixed(1)}s</td>
+      <td>{row.transcript || row.notes}</td>
+      <td>{row.audioUrl ? <audio controls preload="metadata" src={row.audioUrl} /> : <span className="muted">n/a</span>}</td>
+    </tr>)}</tbody></table>
+  </div>;
 }
 
 function MetricTable({ title, rows }: { title: string; rows: TrHealthMetric[] }) {

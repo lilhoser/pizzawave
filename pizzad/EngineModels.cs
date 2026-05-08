@@ -261,6 +261,30 @@ public sealed record GenerateSummaryRequest(long Start, long End, bool ConfirmLa
 
 public sealed record SaveSettingsRequest(JsonElement Values);
 
+public sealed record DiagnosticToolRequest(
+    IReadOnlyList<long>? CallIds,
+    long? Start,
+    long? End,
+    int? SampleCount,
+    IReadOnlyList<string>? Models);
+
+public sealed record DiagnosticToolResultDto(
+    long JobId,
+    string Tool,
+    DateTime CreatedAtUtc,
+    IReadOnlyList<DiagnosticToolRowDto> Rows);
+
+public sealed record DiagnosticToolRowDto(
+    long CallId,
+    string Variant,
+    string Model,
+    string Status,
+    int Score,
+    double DurationMs,
+    string Transcript,
+    string AudioUrl,
+    string Notes);
+
 public sealed class EngineSectionUpdate
 {
     public ServerConfig? Server { get; set; }

@@ -90,6 +90,23 @@ export type Job = {
   failed: number;
   message: string;
 };
+export type DiagnosticToolRow = {
+  callId: number;
+  variant: string;
+  model: string;
+  status: string;
+  score: number;
+  durationMs: number;
+  transcript: string;
+  audioUrl: string;
+  notes: string;
+};
+export type DiagnosticToolResult = {
+  jobId: number;
+  tool: string;
+  createdAtUtc: string;
+  rows: DiagnosticToolRow[];
+};
 export type EngineHealth = {
   status: string;
   version: string;

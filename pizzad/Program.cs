@@ -33,6 +33,7 @@ builder.Services.AddSingleton<SftpImportService>();
 builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddSingleton<TrConfigService>();
 builder.Services.AddSingleton<TrHealthTroubleshootService>();
+builder.Services.AddSingleton<DiagnosticToolService>();
 builder.Services.AddHostedService<CallstreamListener>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
 builder.Services.AddHostedService<TrHealthCollector>();
@@ -175,6 +176,40 @@ app.MapGet("/api/v1/troubleshoot/tr-config", (HttpContext context, AuthService a
     return Results.Ok(trConfig.Validate());
 })
 .WithName("TrConfigValidate")
+.WithOpenApi();
+
+app.MapPost("/api/v1/troubleshoot/tools/audio-experiment", async (HttpContext context, DiagnosticToolRequest request, AuthService authService, DiagnosticToolService tools) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await tools.StartAudioExperimentAsync(request, context.RequestAborted));
+})
+.WithName("DiagnosticAudioExperiment")
+.WithOpenApi();
+
+app.MapPost("/api/v1/troubleshoot/tools/transcription-bakeoff", async (HttpContext context, DiagnosticToolRequest request, AuthService authService, DiagnosticToolService tools) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await tools.StartTranscriptionBakeoffAsync(request, context.RequestAborted));
+})
+.WithName("DiagnosticTranscriptionBakeoff")
+.WithOpenApi();
+
+app.MapGet("/api/v1/troubleshoot/tools/results/{jobId:long}", async (HttpContext context, long jobId, AuthService authService, DiagnosticToolService tools) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var result = await tools.GetResultAsync(jobId, context.RequestAborted);
+    return result == null ? Results.NotFound() : Results.Ok(result);
+})
+.WithName("DiagnosticToolResult")
+.WithOpenApi();
+
+app.MapGet("/api/v1/troubleshoot/tools/results/{jobId:long}/audio/{callId:long}/{fileName}", (HttpContext context, long jobId, long callId, string fileName, AuthService authService, DiagnosticToolService tools) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var path = tools.GetDiagnosticAudioPath(jobId, callId, fileName);
+    return string.IsNullOrWhiteSpace(path) ? Results.NotFound() : Results.File(path, "audio/wav", enableRangeProcessing: true);
+})
+.WithName("DiagnosticToolAudio")
 .WithOpenApi();
 
 app.MapGet("/api/v1/jobs", async (HttpContext context, AuthService authService, EngineDatabase database) =>

@@ -323,6 +323,42 @@ public sealed class EngineDatabase
         };
     }
 
+    public async Task SaveDiagnosticResultAsync(DiagnosticToolResultDto result, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO diagnostic_results (job_id, tool, result_json, created_at_utc)
+            VALUES ($job_id, $tool, $result_json, $created_at_utc)
+            ON CONFLICT(job_id) DO UPDATE SET
+                tool=excluded.tool,
+                result_json=excluded.result_json,
+                created_at_utc=excluded.created_at_utc;
+            """;
+        Add(command, "$job_id", result.JobId);
+        Add(command, "$tool", result.Tool);
+        Add(command, "$result_json", JsonSerializer.Serialize(result.Rows, EngineConfig.JsonOptions()));
+        Add(command, "$created_at_utc", result.CreatedAtUtc.ToString("O"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<DiagnosticToolResultDto?> GetDiagnosticResultAsync(long jobId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT job_id, tool, result_json, created_at_utc FROM diagnostic_results WHERE job_id=$job_id;";
+        Add(command, "$job_id", jobId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        return new DiagnosticToolResultDto(
+            reader.GetInt64(0),
+            reader.GetString(1),
+            DateTime.Parse(reader.GetString(3)),
+            JsonSerializer.Deserialize<List<DiagnosticToolRowDto>>(reader.GetString(2), EngineConfig.JsonOptions()) ?? []);
+    }
+
     public async Task InsertHealthSampleAsync(TrHealthSampleDto sample, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -779,6 +815,13 @@ public sealed class EngineDatabase
             );
 
             CREATE INDEX IF NOT EXISTS idx_insight_events_time ON insight_events(last_seen DESC, confidence DESC);
+            CREATE TABLE IF NOT EXISTS diagnostic_results (
+                job_id INTEGER PRIMARY KEY,
+                tool TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            );
             """, ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
     }
@@ -970,6 +1013,14 @@ public sealed class EngineDatabase
             started_at_utc TEXT NULL,
             finished_at_utc TEXT NULL,
             payload_json TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS diagnostic_results (
+            job_id INTEGER PRIMARY KEY,
+            tool TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS backfill_items (
