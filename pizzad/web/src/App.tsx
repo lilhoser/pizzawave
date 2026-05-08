@@ -40,30 +40,53 @@ function App() {
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const fetchSettingsSections = useCallback(async () => {
+    const [engine, transcription, aiInsights, sftp, tr, alerts] = await Promise.all([
+      api.request<any>("/api/v1/settings/engine"),
+      api.request<any>("/api/v1/settings/transcription"),
+      api.request<any>("/api/v1/settings/ai-insights"),
+      api.request<any>("/api/v1/settings/sftp"),
+      api.request<any>("/api/v1/settings/tr"),
+      api.request<any>("/api/v1/settings/alerts")
+    ]);
+    return {
+      engine: engine.values,
+      transcription: transcription.values,
+      "ai-insights": aiInsights.values,
+      sftp: sftp.values,
+      tr: tr.values,
+      alerts: alerts.values
+    };
+  }, []);
+
   const loadSettings = useCallback(async () => {
     setSettingsLoadState(current => ({ ...current, loading: true, message: "Loading settings...", error: false }));
     try {
-      const [engine, transcription, aiInsights, sftp, tr, alerts] = await Promise.all([
-        api.request<any>("/api/v1/settings/engine"),
-        api.request<any>("/api/v1/settings/transcription"),
-        api.request<any>("/api/v1/settings/ai-insights"),
-        api.request<any>("/api/v1/settings/sftp"),
-        api.request<any>("/api/v1/settings/tr"),
-        api.request<any>("/api/v1/settings/alerts")
-      ]);
-      setSettingsSections({
-        engine: engine.values,
-        transcription: transcription.values,
-        "ai-insights": aiInsights.values,
-        sftp: sftp.values,
-        tr: tr.values,
-        alerts: alerts.values
-      });
+      setSettingsSections(await fetchSettingsSections());
       setSettingsLoadState(current => ({ loading: false, version: current.version + 1, message: "Settings loaded", error: false }));
     } catch (error) {
       setSettingsLoadState(current => ({ loading: false, version: current.version, message: error instanceof Error ? error.message : "Settings load failed", error: true }));
     }
-  }, []);
+  }, [fetchSettingsSections]);
+
+  async function exportSettingsFile() {
+    setSettingsLoadState(current => ({ ...current, loading: true, message: "Exporting settings...", error: false }));
+    try {
+      const sections = await fetchSettingsSections();
+      const json = JSON.stringify(settingsFileFromSections(sections), null, 2);
+      const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pizzawave-settings-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setSettingsLoadState(current => ({ loading: false, version: current.version, message: "Settings exported", error: false }));
+    } catch (error) {
+      setSettingsLoadState(current => ({ loading: false, version: current.version, message: error instanceof Error ? error.message : "Settings export failed", error: true }));
+    }
+  }
 
   async function loadSettingsFile(file: File | undefined) {
     if (!file) return;
@@ -142,6 +165,7 @@ function App() {
         {page === "settings" && <>
           <input ref={settingsFileInputRef} type="file" accept="application/json,.json" hidden onChange={e => void loadSettingsFile(e.target.files?.[0])} />
           <button disabled={settingsLoadState.loading} onClick={() => settingsFileInputRef.current?.click()}>{settingsLoadState.loading ? "Loading..." : "Load Settings"}</button>
+          <button disabled={settingsLoadState.loading} onClick={() => void exportSettingsFile()}>Export Settings</button>
         </>}
         {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
           <button className={categoryViewMode === "incidents" ? "active" : ""} onClick={() => setCategoryViewMode("incidents")}>Incidents</button>
@@ -1032,6 +1056,20 @@ function settingsSectionsFromFile(input: any) {
     tr: input.tr ?? input.trunkRecorder ?? {},
     alerts: input.alerts ?? {}
   });
+}
+
+function settingsFileFromSections(sections: Record<string, any>) {
+  const normalized = withSettingsDefaults(sections);
+  return {
+    server: normalized.engine.server,
+    storage: normalized.engine.storage,
+    ingest: normalized.engine.ingest,
+    transcription: normalized.transcription,
+    aiInsights: normalized["ai-insights"],
+    sftpImport: normalized.sftp,
+    trunkRecorder: normalized.tr,
+    alerts: normalized.alerts
+  };
 }
 
 function numberOrZero(value: string) {
