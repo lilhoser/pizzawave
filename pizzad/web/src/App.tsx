@@ -270,17 +270,21 @@ function Incidents({ rows }: { rows: Incident[] }) {
 
 function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void> }) {
   if (!data) return <div className="category-page">Loading...</div>;
-  if (mode === "raw") {
-    return <div className="category-page raw-category" data-category={data.category}><CategoryCallGroups groups={data.groups} category={data.category} /></div>;
-  }
   async function generate() {
     await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
     await reload();
   }
-  if (mode === "summaries") {
-    return <div className="category-page" data-category={data.category}><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} /></div>;
-  }
-  return <div className="category-page" data-category={data.category}><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} /></div>;
+  return <div className="category-split-page" data-category={data.category}>
+    <section className="pane insights-pane category-pane">
+      {mode === "summaries" && <><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} /></>}
+      {mode === "raw" && <><h2>{label(data.category)} Raw Calls</h2><RawCallList groups={data.groups} /></>}
+      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} /></>}
+    </section>
+    <section className="pane calls-pane category-pane">
+      <h2>Calls by Talkgroup</h2>
+      <CategoryCallGroups groups={data.groups} category={data.category} />
+    </section>
+  </div>;
 }
 
 function CategoryInsights({ rows, category, onGenerate }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void> }) {
@@ -319,6 +323,12 @@ function CategoryIncidents({ rows, category, onGenerate }: { rows: Incident[]; c
 function CategoryCallGroups({ groups, category }: { groups: CategoryPage["groups"]; category?: string }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
   return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} key={group.label} />)}</>;
+}
+
+function RawCallList({ groups }: { groups: CategoryPage["groups"] }) {
+  const calls = groups.flatMap(g => g.calls).sort((a, b) => b.startTime - a.startTime);
+  if (!calls.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
+  return <>{calls.map(call => <CallRow call={call} key={call.id} />)}</>;
 }
 
 function CollapsibleCallGroup({ group, category }: { group: CategoryPage["groups"][number]; category?: string }) {
