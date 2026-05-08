@@ -20,6 +20,10 @@ public sealed class DashboardService
         var total = calls.Count;
         var alertRate = total == 0 ? 0 : alerts.Select(a => a.CallId).Distinct().Count() * 100.0 / total;
         var qualityProblems = calls.Count(IsProblemTranscript);
+        var problemCalls = calls.Where(IsProblemTranscript).ToList();
+        var qualityBreakdown = BuildQualityBreakdown(problemCalls);
+        var topProblemSystem = BuildTopProblemSystem(calls);
+        var topProblemTalkgroup = BuildTopProblemTalkgroup(problemCalls);
         var busiest = calls
             .GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour)
             .OrderByDescending(g => g.Count())
@@ -32,7 +36,9 @@ public sealed class DashboardService
                 new("Total Calls", total.ToString("N0", CultureInfo.CurrentCulture), "Selected range"),
                 new("Alert Rate", $"{alertRate:F1}%", "Calls matching alert rules"),
                 new("Incidents", incidents.Count.ToString("N0", CultureInfo.CurrentCulture), "An Incident consists of multiple, related calls"),
-                new("Quality Problems", qualityProblems.ToString("N0", CultureInfo.CurrentCulture), "Empty, failed, inaudible, or short transcripts"),
+                new("Quality Problems", qualityProblems.ToString("N0", CultureInfo.CurrentCulture), total == 0 ? "No calls in selected range" : $"{qualityProblems * 100.0 / total:F1}% of calls; {qualityBreakdown}"),
+                new("Top Problem System", topProblemSystem.Label, topProblemSystem.ValueText),
+                new("Top Problem TG", topProblemTalkgroup.Label, topProblemTalkgroup.ValueText),
                 new("Busiest Hour", busiest == null ? "--" : $"{busiest.Key:00}:00", busiest == null ? "No calls" : $"{busiest.Count():N0} calls"),
                 new("Unique Talkgroups", calls.Select(c => c.Talkgroup).Distinct().Count().ToString("N0", CultureInfo.CurrentCulture), "Heard in selected range")
             ],
@@ -147,6 +153,49 @@ public sealed class DashboardService
             .ToList();
     }
 
+    private static string BuildQualityBreakdown(List<EngineCall> problemCalls)
+    {
+        if (problemCalls.Count == 0) return "no quality problems";
+        var parts = new[]
+        {
+            (Label: "inaudible", Count: problemCalls.Count(IsTranscriptInaudibleHint)),
+            (Label: "short", Count: problemCalls.Count(IsTranscriptShort)),
+            (Label: "empty", Count: problemCalls.Count(IsTranscriptEmpty)),
+            (Label: "failed", Count: problemCalls.Count(IsTranscriptFailureHint))
+        }
+        .Where(p => p.Count > 0)
+        .Select(p => $"{p.Count:N0} {p.Label}");
+        return string.Join(", ", parts);
+    }
+
+    private static BarStatDto BuildTopProblemSystem(List<EngineCall> calls)
+    {
+        var row = calls.GroupBy(c => string.IsNullOrWhiteSpace(c.SystemShortName) ? "Unknown system" : c.SystemShortName)
+            .Select(g =>
+            {
+                var total = g.Count();
+                var problems = g.Count(IsProblemTranscript);
+                return new { Label = g.Key, Total = total, Problems = problems };
+            })
+            .Where(r => r.Problems > 0)
+            .OrderByDescending(r => r.Problems)
+            .ThenByDescending(r => r.Total)
+            .FirstOrDefault();
+        return row == null
+            ? new BarStatDto("--", 0, 0, "No quality problems")
+            : new BarStatDto(row.Label, row.Problems, 1, $"{row.Problems:N0}/{row.Total:N0} calls ({row.Problems * 100.0 / Math.Max(1, row.Total):F1}%)");
+    }
+
+    private static BarStatDto BuildTopProblemTalkgroup(List<EngineCall> problemCalls)
+    {
+        var row = problemCalls.GroupBy(c => c.Talkgroup)
+            .OrderByDescending(g => g.Count())
+            .FirstOrDefault();
+        return row == null
+            ? new BarStatDto("--", 0, 0, "No problem talkgroups")
+            : new BarStatDto(GetTalkgroupLabel(row.First()), row.Count(), 1, $"{row.Count():N0} problem calls");
+    }
+
     private static IReadOnlyList<BarStatDto> BuildCategoryShare(List<EngineCall> calls)
     {
         var total = Math.Max(1, calls.Count);
@@ -159,25 +208,38 @@ public sealed class DashboardService
     private static IReadOnlyList<TopTalkgroupDto> BuildTopTalkgroups(List<EngineCall> calls, long start, long end)
     {
         var total = Math.Max(1, calls.Count);
+        var trendBins = TrendBinCount(start, end);
         return calls.GroupBy(c => c.Talkgroup)
             .OrderByDescending(g => g.Count())
             .Take(12)
-            .Select(g => new TopTalkgroupDto(
-                GetTalkgroupLabel(g.First()),
-                g.Key,
-                g.Count(),
-                g.Count() / (double)total,
-                g.Max(c => c.StartTime),
-                BuildTrend(g.ToList(), start, end, 12),
-                FormatEndpoint(start),
-                FormatBucket(start, end, 12),
-                FormatEndpoint(end)))
+            .Select(g =>
+            {
+                var trendCounts = BuildTrendCounts(g.ToList(), start, end, trendBins);
+                return new TopTalkgroupDto(
+                    GetTalkgroupLabel(g.First()),
+                    g.Key,
+                    g.Count(),
+                    g.Count() / (double)total,
+                    g.Max(c => c.StartTime),
+                    NormalizeTrend(trendCounts),
+                    trendCounts,
+                    BuildTrendLabels(start, end, trendBins),
+                    FormatEndpoint(start),
+                    FormatBucket(start, end, trendBins),
+                    FormatEndpoint(end));
+            })
             .ToList();
     }
 
-    private static IReadOnlyList<double> BuildTrend(List<EngineCall> calls, long start, long end, int bins)
+    private static int TrendBinCount(long start, long end)
     {
-        var counts = new double[bins];
+        var hours = Math.Max(1, (int)Math.Ceiling((end - start) / 3600.0));
+        return Math.Clamp(hours, 12, 48);
+    }
+
+    private static IReadOnlyList<int> BuildTrendCounts(List<EngineCall> calls, long start, long end, int bins)
+    {
+        var counts = new int[bins];
         var span = Math.Max(1, end - start);
         foreach (var call in calls)
         {
@@ -185,8 +247,25 @@ public sealed class DashboardService
             index = Math.Clamp(index, 0, bins - 1);
             counts[index]++;
         }
+        return counts.ToList();
+    }
+
+    private static IReadOnlyList<double> NormalizeTrend(IReadOnlyList<int> counts)
+    {
         var max = Math.Max(1, counts.Max());
-        return counts.Select(c => c / max).ToList();
+        return counts.Select(c => c / (double)max).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildTrendLabels(long start, long end, int bins)
+    {
+        var labels = new List<string>(bins);
+        var span = Math.Max(1, end - start);
+        for (var i = 0; i < bins; i++)
+        {
+            var bucketStart = start + (long)Math.Floor(span * (i / (double)bins));
+            labels.Add(DateTimeOffset.FromUnixTimeSeconds(bucketStart).ToLocalTime().ToString("M/d HH:mm", CultureInfo.CurrentCulture));
+        }
+        return labels;
     }
 
     public static string NormalizeCategory(string category)

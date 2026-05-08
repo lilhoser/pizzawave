@@ -72,6 +72,8 @@ public sealed record TopTalkgroupDto(
     double Share,
     long LastHeard,
     IReadOnlyList<double> Trend,
+    IReadOnlyList<int> TrendCounts,
+    IReadOnlyList<string> TrendLabels,
     string TrendStartLabel,
     string TrendBucketLabel,
     string TrendEndLabel);

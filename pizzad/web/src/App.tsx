@@ -147,9 +147,7 @@ function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; r
       <section className="pane left-pane">
         <div className="section kpis">{data.kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
         <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /><TopTalkgroups rows={data.topTalkgroups} /></div>
-        <div className="section"><h3>Quality</h3><QualityByHourChart rows={data.qualityByHour} /><Bars title="Inaudible by System" rows={data.inaudibleBySystem} /><Bars title="Problem Talkgroups" rows={data.problemTalkgroups} /></div>
         <div className="section"><h3>Distribution</h3><Bars title="Category Share" rows={data.categoryShare} /></div>
-        <div className="section"><h3>Exploration</h3><p className="muted">Server-computed dashboard data keeps browser behavior consistent with native clients.</p></div>
       </section>
       <section className="pane"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></section>
       <section className="pane"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} /></section>
@@ -175,7 +173,7 @@ function VolumeByHourChart({ rows }: { rows: HourCategory[] }) {
   const points = (values: number[]) => values
     .map((value, hour) => `${36 + hour * 19},${158 - value / max * 118}`)
     .join(" ");
-  return <div className="card chart-card"><h4>Calls by Hour and Category</h4><svg className="chart" viewBox="0 0 500 190" role="img" aria-label="Calls by hour and category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div>;
+  return <div className="card chart-card"><h4>Calls by Hour and Category</h4><svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Calls by hour and category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div>;
 }
 
 function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
@@ -186,7 +184,7 @@ function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
     return row ? keys.reduce((sum, key) => sum + row[key], 0) : 0;
   });
   const max = Math.max(1, ...totals);
-  return <div className="card chart-card"><h4>Quality Problems by Hour</h4><svg className="chart" viewBox="0 0 500 190" role="img" aria-label="Quality problems by hour"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" /><text className="chart-label" x="4" y="34">{max}</text>{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}{hours.map(hour => {
+  return <div className="card chart-card"><h4>Quality Problems by Hour</h4><svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Quality problems by hour"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" /><text className="chart-label" x="4" y="34">{max}</text>{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}{hours.map(hour => {
     const row = rows.find(r => r.hour === hour);
     let y = 158;
     return keys.map(key => {
@@ -203,7 +201,7 @@ function Legend({ items }: { items: string[][] }) {
 }
 
 function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {
-  return <table className="table"><thead><tr><th>Talkgroup</th><th>Calls</th><th>Share</th><th>Trend</th></tr></thead><tbody>{rows.map(r => <tr key={r.talkgroup}><td>{r.label}</td><td>{r.count}</td><td>{(r.share * 100).toFixed(1)}%</td><td><div>{r.trend.map((v, i) => <span className="trend" style={{ height: 4 + v * 18 }} key={i} />)}</div><div className="muted">{r.trendStartLabel} - {r.trendBucketLabel} - {r.trendEndLabel}</div></td></tr>)}</tbody></table>;
+  return <table className="table top-talkgroups"><thead><tr><th>Talkgroup</th><th>Calls</th><th>Share</th><th>Trend</th></tr></thead><tbody>{rows.map(r => <tr key={r.talkgroup}><td>{r.label}</td><td>{r.count}</td><td>{(r.share * 100).toFixed(1)}%</td><td><div className="trend-bars" aria-label={`${r.label} trend, ${r.trendBucketLabel}`}>{r.trend.map((v, i) => <span className="trend" title={`${r.trendLabels?.[i] ?? "Bucket"}: ${r.trendCounts?.[i] ?? 0} calls`} style={{ height: 4 + v * 30 }} key={i} />)}</div><div className="muted">Hourly volume; hover bars for counts</div></td></tr>)}</tbody></table>;
 }
 
 function Alerts({ rows }: { rows: AlertMatch[] }) {
@@ -341,7 +339,7 @@ function confidenceClass(score: number) {
 
 function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot | null; rangeHours: number; reload: () => Promise<void> }) {
   const [topTab, setTopTab] = useState<"pizzad" | "tr">("tr");
-  const [trTab, setTrTab] = useState<"summary" | "metrics" | "quality" | "tools" | "logs" | "diagnostics" | "insights">("summary");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "tools" | "logs" | "diagnostics" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
@@ -363,14 +361,17 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
         <button onClick={() => void reload()}>Refresh Health</button>
       </div>
       {topTab === "pizzad" && <div className="trouble-panel">
-        <h2>Pizzad Diagnostics</h2>
-        <pre className="log-box">{data.diagnostics}</pre>
+        <h2>Pizzad Quality</h2>
+        <QualityAuditView data={data} />
+        <div className="card">
+          <h2>Pizzad Diagnostics</h2>
+          <pre className="log-box">{data.diagnostics}</pre>
+        </div>
       </div>}
       {topTab === "tr" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
-          <button className={trTab === "quality" ? "active" : ""} onClick={() => setTrTab("quality")}>Inaudible Audit</button>
           <button className={trTab === "tools" ? "active" : ""} onClick={() => setTrTab("tools")}>Tools</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
           <button className={trTab === "diagnostics" ? "active" : ""} onClick={() => setTrTab("diagnostics")}>Diagnostics</button>
@@ -384,7 +385,6 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
           </div>
           <div className="tr-chart-grid">{active.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
         </div>}
-        {trTab === "quality" && <QualityAuditView data={data} />}
         {trTab === "tools" && <TroubleshootTools rangeHours={rangeHours} reload={reload} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
         {trTab === "diagnostics" && <pre className="log-box">{data.diagnostics}</pre>}
@@ -453,7 +453,7 @@ function QualityAuditHourChart({ rows }: { rows: TrTroubleshoot["qualityAudit"][
   const max = Math.max(1, ...rows.map(r => Math.max(r.problemCalls, r.inaudibleCalls)));
   return <div className="card chart-card audit-hour-card">
     <h3>Problems by Hour</h3>
-    <svg className="chart" viewBox="0 0 500 190" role="img" aria-label="Problem and inaudible calls by hour">
+    <svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Problem and inaudible calls by hour">
       <line className="axis" x1="32" y1="158" x2="482" y2="158" />
       <line className="axis" x1="32" y1="28" x2="32" y2="158" />
       <text className="chart-label" x="4" y="34">{max}</text>

@@ -43,6 +43,8 @@ export type TopTalkgroup = {
   share: number;
   lastHeard: number;
   trend: number[];
+  trendCounts: number[];
+  trendLabels: string[];
   trendStartLabel: string;
   trendBucketLabel: string;
   trendEndLabel: string;

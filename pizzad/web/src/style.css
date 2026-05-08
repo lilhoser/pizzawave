@@ -147,6 +147,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .chart-card { overflow: hidden; }
 .chart {
   width: 100%;
+  max-width: 520px;
   height: 190px;
   display: block;
 }
@@ -187,7 +188,23 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .bar span { display: block; height: 100%; background: var(--accent); }
 .table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .table th, .table td { border-bottom: 1px solid #30363d; padding: 6px 4px; text-align: left; }
-.trend { display: inline-block; width: 6px; background: var(--accent); margin-right: 2px; vertical-align: bottom; }
+.top-talkgroups th:last-child, .top-talkgroups td:last-child { min-width: 220px; }
+.trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+  min-width: 210px;
+  height: 38px;
+}
+.trend {
+  display: inline-block;
+  flex: 1 1 0;
+  max-width: 10px;
+  min-width: 3px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
 .category-page, .settings-page, .trouble-page { height: 100%; overflow: auto; padding: 10px; }
 .trouble-tabs {
   display: flex;

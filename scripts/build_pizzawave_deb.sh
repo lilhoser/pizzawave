@@ -226,7 +226,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
   systemctl enable pizzad.service || true
   systemctl restart pizzad.service || true
-  systemctl restart trunk-recorder.service || true
+  systemctl try-restart --no-block trunk-recorder.service || true
 fi
 
 cat <<'MSG'
