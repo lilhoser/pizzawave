@@ -470,7 +470,7 @@ function QualityAuditView({ data }: { data: TrTroubleshoot }) {
       <Kpi label="Inaudible Calls" value={audit.inaudibleCalls.toLocaleString()} subtext={`${audit.inaudiblePercent.toFixed(1)}% of calls in selected range`} />
     </div>
     <div className="audit-grid">
-      <AuditTable title="Reasons" rows={audit.byReason} />
+      <AuditTable title="Reasons" rows={audit.byReason} mode="reason" />
       <AuditTable title="Systems" rows={audit.bySystem} />
       <AuditTable title="Talkgroups" rows={audit.byTalkgroup} />
       <QualityAuditHourChart rows={audit.byHour} />
@@ -482,14 +482,15 @@ function QualityAuditView({ data }: { data: TrTroubleshoot }) {
   </div>;
 }
 
-function AuditTable({ title, rows }: { title: string; rows: QualityAuditGroup[] }) {
+function AuditTable({ title, rows, mode = "default" }: { title: string; rows: QualityAuditGroup[]; mode?: "default" | "reason" }) {
+  const reasonMode = mode === "reason";
   return <div className="card audit-table-card">
     <h3>{title}</h3>
-    {rows.length ? <table className="table"><thead><tr><th>Name</th><th>Total</th><th>Problems</th><th>Inaudible</th></tr></thead><tbody>{rows.map(row => <tr key={row.label}>
+    {rows.length ? <table className="table"><thead><tr><th>{reasonMode ? "Reason" : "Name"}</th><th>{reasonMode ? "Calls" : "Total"}</th><th>{reasonMode ? "Share" : "Problems"}</th>{!reasonMode && <th>Inaudible</th>}</tr></thead><tbody>{rows.map(row => <tr key={row.label}>
       <td>{row.label}</td>
       <td>{row.totalCalls}</td>
-      <td>{row.problemCalls} <span className="muted">({row.problemPercent.toFixed(1)}%)</span></td>
-      <td>{row.inaudibleCalls} <span className="muted">({row.inaudiblePercent.toFixed(1)}%)</span></td>
+      <td>{reasonMode ? <span>{row.problemPercent.toFixed(1)}%</span> : <span>{row.problemCalls} <span className="muted">({row.problemPercent.toFixed(1)}%)</span></span>}</td>
+      {!reasonMode && <td>{row.inaudibleCalls} <span className="muted">({row.inaudiblePercent.toFixed(1)}%)</span></td>}
     </tr>)}</tbody></table> : <p className="muted">No problem calls.</p>}
   </div>;
 }
