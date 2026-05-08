@@ -655,7 +655,7 @@ function SettingsView({ jobs, settingsSections, rangeHours, reload }: { jobs: Jo
   const [sections, setSections] = useState<Record<string, any>>({});
   const [message, setMessage] = useState("");
 
-  useEffect(() => { setSections(cloneSettings(settingsSections)); }, [settingsSections]);
+  useEffect(() => { setSections(withSettingsDefaults(settingsSections)); }, [settingsSections]);
 
   const engine = sections.engine ?? {};
   const transcription = sections.transcription ?? {};
@@ -828,9 +828,10 @@ function SettingInput({ label: text, description, value, onChange, type = "text"
 }
 
 function SettingSelect({ label: text, description, value, options, onChange }: { label: string; description: string; value: any; options: string[]; onChange: (value: string) => void }) {
+  const selected = options.includes(value) ? value : options[0];
   return <label className="setting-field">
     <span>{text}<small>{description}</small></span>
-    <select value={value ?? ""} onChange={e => onChange(e.target.value)}>
+    <select value={selected} onChange={e => onChange(e.target.value)}>
       {options.map(option => <option value={option} key={option}>{label(option)}</option>)}
     </select>
   </label>;
@@ -845,6 +846,87 @@ function SettingCheckbox({ label: text, description, checked, onChange }: { labe
 
 function cloneSettings(value: Record<string, any>) {
   return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function withSettingsDefaults(value: Record<string, any>) {
+  const sections = cloneSettings(value);
+  sections.engine = {
+    server: { httpBind: "0.0.0.0", httpPort: 8080, ...(sections.engine?.server ?? {}) },
+    ingest: { callstreamBind: "127.0.0.1", callstreamPort: 9123, maxConcurrentClients: 4, ...(sections.engine?.ingest ?? {}) },
+    storage: {
+      databasePath: "/var/lib/pizzawave/pizzad.db",
+      audioRoot: "/var/lib/pizzawave/audio",
+      importCacheRoot: "/var/lib/pizzawave/import-cache",
+      appDataRoot: "/var/lib/pizzawave/appdata",
+      ...(sections.engine?.storage ?? {})
+    }
+  };
+  sections.transcription = {
+    provider: "none",
+    whisperModelFile: "",
+    voskModelPath: "",
+    openAiBaseUrl: "http://localhost:1234/v1",
+    openAiApiKey: "",
+    openAiModel: "",
+    analogSampleRate: 8000,
+    ...(sections.transcription ?? {})
+  };
+  sections.transcription.provider = sections.transcription.provider || "none";
+  sections.transcription.whisperModelFile = sections.transcription.whisperModelFile ?? "";
+  sections.transcription.voskModelPath = sections.transcription.voskModelPath ?? "";
+  sections.transcription.openAiBaseUrl = sections.transcription.openAiBaseUrl || "http://localhost:1234/v1";
+  sections.transcription.openAiApiKey = sections.transcription.openAiApiKey ?? "";
+  sections.transcription.openAiModel = sections.transcription.openAiModel ?? "";
+  sections.transcription.analogSampleRate = sections.transcription.analogSampleRate || 8000;
+  sections["ai-insights"] = {
+    enabled: false,
+    openAiBaseUrl: "",
+    openAiApiKey: "",
+    openAiModel: "",
+    batchSize: 50,
+    maxPendingCalls: 1000,
+    timeoutMs: 600000,
+    maxRetries: 2,
+    ...(sections["ai-insights"] ?? {})
+  };
+  sections.sftp = {
+    enabled: false,
+    host: "",
+    port: 22,
+    username: "",
+    authMode: "privateKey",
+    password: "",
+    privateKeyPath: "",
+    privateKeyPassphrase: "",
+    remoteRoot: "",
+    quickImportMaxHours: 48,
+    defaultBatchCallCap: 5000,
+    defaultBatchByteCap: 21474836480,
+    ...(sections.sftp ?? {})
+  };
+  sections.tr = {
+    configPath: "/etc/trunk-recorder/config.json",
+    talkgroupsPath: "/etc/trunk-recorder/talkgroups.csv",
+    logServiceName: "trunk-recorder",
+    healthWindowMinutes: 5,
+    ...(sections.tr ?? {})
+  };
+  sections.alerts = {
+    emailEnabled: false,
+    emailProvider: "gmail",
+    emailUser: "",
+    emailPassword: "",
+    rules: [],
+    ...(sections.alerts ?? {})
+  };
+  sections.auth = {
+    mode: "token",
+    readRequiresAuth: false,
+    writeRequiresAuth: false,
+    tokenFile: "/etc/pizzawave/pizzad.token",
+    ...(sections.auth ?? {})
+  };
+  return sections;
 }
 
 function numberOrZero(value: string) {

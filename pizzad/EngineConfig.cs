@@ -51,14 +51,52 @@ public sealed class EngineConfig
 
     private void ApplyDefaults()
     {
+        Server.HttpBind = string.IsNullOrWhiteSpace(Server.HttpBind) ? "0.0.0.0" : Server.HttpBind.Trim();
+        if (Server.HttpPort <= 0) Server.HttpPort = 8080;
         Storage.DatabasePath = ExpandPath(Storage.DatabasePath);
         Storage.AudioRoot = ExpandPath(Storage.AudioRoot);
         Storage.ImportCacheRoot = ExpandPath(Storage.ImportCacheRoot);
+        Storage.AppDataRoot = ExpandPath(Storage.AppDataRoot);
         Auth.TokenFile = ExpandPath(Auth.TokenFile);
+        Ingest.CallstreamBind = string.IsNullOrWhiteSpace(Ingest.CallstreamBind) ? "127.0.0.1" : Ingest.CallstreamBind.Trim();
+        if (Ingest.CallstreamPort <= 0) Ingest.CallstreamPort = 9123;
+        if (Ingest.MaxConcurrentClients <= 0) Ingest.MaxConcurrentClients = 4;
+        Transcription.Provider = string.IsNullOrWhiteSpace(Transcription.Provider) ? "none" : Transcription.Provider.Trim();
+        Transcription.WhisperModelFile ??= string.Empty;
+        Transcription.VoskModelPath ??= string.Empty;
+        Transcription.OpenAiBaseUrl = string.IsNullOrWhiteSpace(Transcription.OpenAiBaseUrl) ? "http://localhost:1234/v1" : Transcription.OpenAiBaseUrl.Trim();
+        Transcription.OpenAiApiKey ??= string.Empty;
+        Transcription.OpenAiModel ??= string.Empty;
+        if (Transcription.AnalogSampleRate <= 0) Transcription.AnalogSampleRate = 8000;
+        AiInsights.OpenAiBaseUrl ??= string.Empty;
+        AiInsights.OpenAiApiKey ??= string.Empty;
+        AiInsights.OpenAiModel ??= string.Empty;
+        if (AiInsights.BatchSize <= 0) AiInsights.BatchSize = 50;
+        if (AiInsights.MaxPendingCalls <= 0) AiInsights.MaxPendingCalls = 1000;
+        if (AiInsights.TimeoutMs <= 0) AiInsights.TimeoutMs = 600000;
+        if (AiInsights.MaxRetries < 0) AiInsights.MaxRetries = 0;
+        SftpImport.Host ??= string.Empty;
+        if (SftpImport.Port <= 0) SftpImport.Port = 22;
+        SftpImport.Username ??= string.Empty;
+        SftpImport.AuthMode = string.IsNullOrWhiteSpace(SftpImport.AuthMode) ? "privateKey" : SftpImport.AuthMode.Trim();
+        SftpImport.Password ??= string.Empty;
+        SftpImport.PrivateKeyPath ??= string.Empty;
+        SftpImport.PrivateKeyPassphrase ??= string.Empty;
+        SftpImport.RemoteRoot ??= string.Empty;
+        if (SftpImport.QuickImportMaxHours <= 0) SftpImport.QuickImportMaxHours = 48;
+        if (SftpImport.DefaultBatchCallCap <= 0) SftpImport.DefaultBatchCallCap = 5000;
+        if (SftpImport.DefaultBatchByteCap <= 0) SftpImport.DefaultBatchByteCap = 20L * 1024 * 1024 * 1024;
         TrunkRecorder.ConfigPath = ExpandPath(TrunkRecorder.ConfigPath);
+        TrunkRecorder.TalkgroupsPath = ExpandPath(TrunkRecorder.TalkgroupsPath);
         TrunkRecorder.LogServiceName = string.IsNullOrWhiteSpace(TrunkRecorder.LogServiceName)
             ? "trunk-recorder"
             : TrunkRecorder.LogServiceName.Trim();
+        if (TrunkRecorder.HealthWindowMinutes <= 0) TrunkRecorder.HealthWindowMinutes = 5;
+        Auth.Mode = string.IsNullOrWhiteSpace(Auth.Mode) ? "token" : Auth.Mode.Trim();
+        Alerts.EmailProvider = string.IsNullOrWhiteSpace(Alerts.EmailProvider) ? "gmail" : Alerts.EmailProvider.Trim();
+        Alerts.EmailUser ??= string.Empty;
+        Alerts.EmailPassword ??= string.Empty;
+        Alerts.Rules ??= new();
     }
 
     public static JsonSerializerOptions JsonOptions() => new()
