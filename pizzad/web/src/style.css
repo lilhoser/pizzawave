@@ -802,6 +802,24 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   justify-content: flex-end;
   align-content: flex-start;
 }
+.model-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.model-chip small {
+  color: #9faab5;
+}
 @media (max-width: 900px) {
   .app { grid-template-columns: 138px 1fr; }
   .dashboard { grid-template-columns: 1fr; grid-template-rows: auto auto auto; overflow: auto; }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityAuditGroup, QualityAuditSample, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityAuditGroup, QualityAuditSample, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -600,26 +600,37 @@ function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
 }
 
 function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload: () => Promise<void> }) {
-  const [callIds, setCallIds] = useState("");
-  const [sampleCount, setSampleCount] = useState(5);
-  const [models, setModels] = useState("local-current");
+  const [diagnosticModels, setDiagnosticModels] = useState<DiagnosticModel[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
   const [result, setResult] = useState<DiagnosticToolResult | null>(null);
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const body = () => ({
-    ...rangeBody(rangeHours),
-    sampleCount,
-    callIds: callIds.split(",").map(v => Number(v.trim())).filter(v => Number.isFinite(v) && v > 0),
-    models: models.split(",").map(v => v.trim()).filter(Boolean)
-  });
+  useEffect(() => { void loadModels(); }, []);
 
-  async function start(path: string) {
+  async function loadModels() {
+    try {
+      setDiagnosticModels(await api.request<DiagnosticModel[]>("/api/v1/troubleshoot/tools/transcription-models"));
+    } catch (error) {
+      setMessage(`Model discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+      setDiagnosticModels([]);
+    }
+  }
+
+  async function start() {
     setResult(null);
-    const job = await api.request<Job>(path, { method: "POST", body: JSON.stringify(body()) });
-    setJobId(job.id);
-    setMessage(`Queued job ${job.id}. Results appear here when it completes.`);
-    await reload();
+    setBusy(true);
+    setMessage("Queueing transcription experiment...");
+    try {
+      const job = await api.request<Job>("/api/v1/troubleshoot/tools/transcription-experiment", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), sampleCount: 50 }) });
+      setJobId(job.id);
+      setMessage(`Queued job ${job.id}. It will sample up to 50 recent calls, run each discovered model, and try baseline plus cleanup audio variants.`);
+      await reload();
+    } catch (error) {
+      setMessage(`Experiment failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadResult(id = jobId) {
@@ -631,14 +642,14 @@ function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload:
 
   return <div className="tools-page">
     <div className="card">
-      <h3>Diagnostic Tool Inputs</h3>
-      <p className="muted">Leave call IDs blank to sample recent poor-quality calls from the selected global range. Tools are experimental and never update stored transcripts.</p>
-      <label>Call IDs <input className="wide-input" value={callIds} onChange={e => setCallIds(e.target.value)} placeholder="6095,6061,5909" /></label>
-      <label>Sample count <input type="number" min={1} max={20} value={sampleCount} onChange={e => setSampleCount(Number(e.target.value))} /></label>
-      <label>Models <input className="wide-input" value={models} onChange={e => setModels(e.target.value)} placeholder="local-current, openai:gpt-4o-transcribe" /></label>
+      <h3>Transcription Experiment</h3>
+      <p className="muted">Samples up to 50 recent calls from the selected global range. Each discovered transcription model runs against baseline audio plus cleanup variants. Results never update stored transcripts.</p>
+      <div className="model-chip-list">
+        {diagnosticModels.length ? diagnosticModels.map(model => <span className="model-chip" key={model.id}><strong>{model.label}</strong><small>{model.engine}</small></span>) : <span className="muted">No downloaded local models or configured LM/OpenAI transcription model discovered.</span>}
+      </div>
       <div>
-        <button onClick={() => start("/api/v1/troubleshoot/tools/audio-experiment")}>Run Audio Cleanup Experiment</button>
-        <button onClick={() => start("/api/v1/troubleshoot/tools/transcription-bakeoff")}>Run Transcription Bakeoff</button>
+        <button disabled={busy || diagnosticModels.length === 0} onClick={() => void start()}>{busy ? "Queueing..." : "Run 50-Call Transcription Experiment"}</button>
+        <button onClick={() => void loadModels()}>Refresh Models</button>
       </div>
       <div className="muted">{message}</div>
       <div>

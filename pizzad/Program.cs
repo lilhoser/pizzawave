@@ -218,6 +218,29 @@ app.MapPost("/api/v1/troubleshoot/tools/transcription-bakeoff", async (HttpConte
 .WithName("DiagnosticTranscriptionBakeoff")
 .WithOpenApi();
 
+app.MapGet("/api/v1/troubleshoot/tools/transcription-models", (HttpContext context, AuthService authService, DiagnosticToolService tools) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(tools.ListDiagnosticModels());
+})
+.WithName("DiagnosticTranscriptionModels")
+.WithOpenApi();
+
+app.MapPost("/api/v1/troubleshoot/tools/transcription-experiment", async (HttpContext context, DiagnosticToolRequest request, AuthService authService, DiagnosticToolService tools) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await tools.StartUnifiedTranscriptionExperimentAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("DiagnosticTranscriptionExperiment")
+.WithOpenApi();
+
 app.MapGet("/api/v1/troubleshoot/tools/results/{jobId:long}", async (HttpContext context, long jobId, AuthService authService, DiagnosticToolService tools) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

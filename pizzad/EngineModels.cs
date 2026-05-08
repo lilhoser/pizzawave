@@ -288,6 +288,13 @@ public sealed record DiagnosticToolRequest(
     int? SampleCount,
     IReadOnlyList<string>? Models);
 
+public sealed record DiagnosticModelDto(
+    string Id,
+    string Label,
+    string Engine,
+    bool Available,
+    string Detail);
+
 public sealed record DiagnosticToolResultDto(
     long JobId,
     string Tool,

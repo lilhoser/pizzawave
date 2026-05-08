@@ -41,6 +41,27 @@ public sealed class DiagnosticToolService
         return (await _database.GetJobAsync(jobId, ct))!;
     }
 
+    public IReadOnlyList<DiagnosticModelDto> ListDiagnosticModels()
+    {
+        return DiscoverModels()
+            .Select(m => new DiagnosticModelDto(m.Id, m.Label, m.Engine, true, m.Detail))
+            .ToList();
+    }
+
+    public async Task<JobDto> StartUnifiedTranscriptionExperimentAsync(DiagnosticToolRequest request, CancellationToken ct)
+    {
+        var calls = await ResolveCallsAsync(request with { SampleCount = request.SampleCount ?? 50 }, ct);
+        var models = DiscoverModels();
+        if (models.Count == 0)
+            throw new InvalidOperationException("No downloaded local transcription models or configured LM/OpenAI-compatible transcription model were found.");
+        var variantsPerCall = 4;
+        var total = calls.Count * models.Count * variantsPerCall;
+        var jobId = await CreateJobAsync("diagnostic_transcription_experiment", total, $"Transcription experiment queued for {calls.Count:N0} calls, {models.Count:N0} model(s), and {variantsPerCall:N0} audio variant(s).", ct);
+        _ = Task.Run(() => RunUnifiedTranscriptionExperimentAsync(jobId, calls, models, total, CancellationToken.None));
+        await _events.PublishAsync("job_updated", new { jobId, type = "diagnostic_transcription_experiment", status = "queued" }, ct);
+        return (await _database.GetJobAsync(jobId, ct))!;
+    }
+
     public Task<DiagnosticToolResultDto?> GetResultAsync(long jobId, CancellationToken ct) =>
         _database.GetDiagnosticResultAsync(jobId, ct);
 
@@ -58,11 +79,11 @@ public sealed class DiagnosticToolService
 
     private async Task<List<EngineCall>> ResolveCallsAsync(DiagnosticToolRequest request, CancellationToken ct)
     {
-        var max = Math.Clamp(request.SampleCount ?? 8, 1, 20);
+        var max = Math.Clamp(request.SampleCount ?? 50, 1, 50);
         if (request.CallIds is { Count: > 0 })
         {
             var selected = new List<EngineCall>();
-            foreach (var id in request.CallIds.Distinct().Take(20))
+            foreach (var id in request.CallIds.Distinct().Take(50))
             {
                 var call = await _database.GetCallAsync(id, ct);
                 if (call != null && !string.IsNullOrWhiteSpace(call.AudioPath))
@@ -75,12 +96,51 @@ public sealed class DiagnosticToolService
 
         var range = new TimeRangeQuery(request.Start, request.End).Resolve();
         var calls = await _database.ListCallsAsync(range.Start, range.End, null, ct);
-        return calls
+        var problem = calls
             .Where(c => !string.IsNullOrWhiteSpace(c.AudioPath) && TranscriptionQualityClassifier.IsProblem(c))
             .OrderByDescending(c => c.QualityReason is "inaudible" or "blank_audio" or "marker_only")
             .ThenByDescending(c => c.StopTime - c.StartTime)
+            .ToList();
+        var fallback = calls
+            .Where(c => !string.IsNullOrWhiteSpace(c.AudioPath) && !problem.Any(p => p.Id == c.Id))
+            .OrderByDescending(c => c.StartTime)
+            .ToList();
+        return problem.Concat(fallback)
+            .Where(c => File.Exists(InputPath(c)))
             .Take(max)
             .ToList();
+    }
+
+    private async Task RunUnifiedTranscriptionExperimentAsync(long jobId, List<EngineCall> calls, List<DiagnosticTranscriptionModel> models, int total, CancellationToken ct)
+    {
+        var rows = new List<DiagnosticToolRowDto>();
+        var completed = 0;
+        try
+        {
+            await _database.UpdateJobAsync(jobId, "running", total, 0, 0, "Running transcription experiment across models and audio cleanup variants...", true, false, ct);
+            foreach (var call in calls)
+            {
+                var variants = await BuildAudioVariantsAsync(jobId, call, ct);
+                foreach (var variant in variants)
+                {
+                    foreach (var model in models)
+                    {
+                        rows.Add(await TranscribeWithModelAsync(call.Id, variant.Name, model, variant.Path, variant.AudioUrl, ct));
+                        completed++;
+                        await _database.UpdateJobAsync(jobId, "running", total, completed, 0, $"Processed {completed:N0}/{total:N0} transcription runs.", false, false, ct);
+                        if (completed % 10 == 0)
+                            await _events.PublishAsync("job_updated", new { jobId, completed, total }, ct);
+                    }
+                }
+            }
+
+            await SaveCompleteAsync(jobId, "transcription_experiment", rows, $"Transcription experiment finished: {UsefulCount(rows):N0} potentially useful transcription(s).", ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Diagnostic transcription experiment {JobId} failed", jobId);
+            await _database.UpdateJobAsync(jobId, "failed", null, completed, 1, ex.Message, false, true, CancellationToken.None);
+        }
     }
 
     private async Task RunAudioExperimentAsync(long jobId, List<EngineCall> calls, CancellationToken ct)
@@ -203,6 +263,72 @@ public sealed class DiagnosticToolService
         }
     }
 
+    private Task<DiagnosticToolRowDto> TranscribeWithModelAsync(long callId, string variant, DiagnosticTranscriptionModel model, string audioPath, string audioUrl, CancellationToken ct)
+    {
+        return model.Engine switch
+        {
+            "whisper" => TranscribeWhisperAsync(callId, variant, model, audioPath, audioUrl, ct),
+            "vosk" => TranscribeVoskAsync(callId, variant, model, audioPath, audioUrl, ct),
+            "openai" => TranscribeOpenAiCompatibleAsync(callId, variant, model, audioPath, audioUrl, ct),
+            _ => Task.FromResult(new DiagnosticToolRowDto(callId, variant, model.Label, "error", 0, 0, string.Empty, audioUrl, $"Unknown model engine: {model.Engine}"))
+        };
+    }
+
+    private async Task<DiagnosticToolRowDto> TranscribeWhisperAsync(long callId, string variant, DiagnosticTranscriptionModel model, string audioPath, string audioUrl, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var settings = new Settings
+            {
+                TranscriptionEngine = "whisper",
+                WhisperModelFile = model.Value,
+                TranscriptionModelPreset = string.Empty
+            };
+            using var whisper = new pizzalib.Whisper(settings);
+            await whisper.Initialize();
+            await using var file = File.OpenRead(audioPath);
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            ms.Position = 0;
+            var text = (await whisper.TranscribeCall(ms)).Trim();
+            sw.Stop();
+            return Row(callId, variant, model.Label, text, sw.Elapsed.TotalMilliseconds, audioUrl);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticToolRowDto(callId, variant, model.Label, "error", 0, sw.Elapsed.TotalMilliseconds, string.Empty, audioUrl, ex.Message);
+        }
+    }
+
+    private async Task<DiagnosticToolRowDto> TranscribeVoskAsync(long callId, string variant, DiagnosticTranscriptionModel model, string audioPath, string audioUrl, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var settings = new Settings
+            {
+                TranscriptionEngine = "vosk",
+                VoskModelPath = model.Value
+            };
+            using var vosk = new pizzalib.VoskTranscriber(settings);
+            await vosk.Initialize();
+            await using var file = File.OpenRead(audioPath);
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            ms.Position = 0;
+            var text = (await vosk.TranscribeCall(ms)).Trim();
+            sw.Stop();
+            return Row(callId, variant, model.Label, text, sw.Elapsed.TotalMilliseconds, audioUrl);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticToolRowDto(callId, variant, model.Label, "error", 0, sw.Elapsed.TotalMilliseconds, string.Empty, audioUrl, ex.Message);
+        }
+    }
+
     private async Task<DiagnosticToolRowDto> TranscribeOpenAiCompatibleAsync(long callId, string modelSpec, string audioPath, CancellationToken ct)
     {
         var model = modelSpec["openai:".Length..].Trim();
@@ -237,6 +363,41 @@ public sealed class DiagnosticToolService
         }
     }
 
+    private async Task<DiagnosticToolRowDto> TranscribeOpenAiCompatibleAsync(long callId, string variant, DiagnosticTranscriptionModel modelSpec, string audioPath, string audioUrl, CancellationToken ct)
+    {
+        var model = modelSpec.Value;
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var baseUrl = (modelSpec.Detail ?? string.Empty).TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                throw new InvalidOperationException("OpenAI-compatible transcription base URL is not configured.");
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+            var apiKey = string.Equals(baseUrl, (_config.AiInsights.OpenAiBaseUrl ?? string.Empty).TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+                ? _config.AiInsights.OpenAiApiKey
+                : _config.Transcription.OpenAiApiKey;
+            if (!string.IsNullOrWhiteSpace(apiKey))
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            using var content = new MultipartFormDataContent();
+            var audio = new ByteArrayContent(await File.ReadAllBytesAsync(audioPath, ct));
+            audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+            content.Add(audio, "file", "call.wav");
+            content.Add(new StringContent(model), "model");
+            using var response = await client.PostAsync($"{baseUrl}/audio/transcriptions", content, ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            var text = doc.RootElement.TryGetProperty("text", out var prop) ? prop.GetString() ?? string.Empty : json;
+            sw.Stop();
+            return Row(callId, variant, modelSpec.Label, text, sw.Elapsed.TotalMilliseconds, audioUrl);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticToolRowDto(callId, variant, modelSpec.Label, "error", 0, sw.Elapsed.TotalMilliseconds, string.Empty, audioUrl, ex.Message);
+        }
+    }
+
     private DiagnosticToolRowDto Row(long callId, string variant, string model, string text, double durationMs, string audioUrl)
     {
         var score = Score(text);
@@ -258,6 +419,43 @@ public sealed class DiagnosticToolService
     {
         var rows = (models ?? ["local-current"]).Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToList();
         return rows.Count == 0 ? ["local-current"] : rows;
+    }
+
+    private List<DiagnosticTranscriptionModel> DiscoverModels()
+    {
+        var rows = new List<DiagnosticTranscriptionModel>();
+        var modelRoot = Path.Combine(_config.Storage.AppDataRoot, "pizzawave", "model");
+        if (Directory.Exists(modelRoot))
+        {
+            foreach (var file in Directory.EnumerateFiles(modelRoot, "ggml-*.bin").OrderBy(Path.GetFileName))
+            {
+                var name = Path.GetFileNameWithoutExtension(file).Replace("ggml-", "", StringComparison.OrdinalIgnoreCase);
+                rows.Add(new DiagnosticTranscriptionModel($"whisper:{name}", $"Whisper {name}", "whisper", file, file));
+            }
+
+            foreach (var dir in Directory.EnumerateDirectories(modelRoot, "vosk-model*").OrderBy(Path.GetFileName))
+            {
+                var name = Path.GetFileName(dir);
+                rows.Add(new DiagnosticTranscriptionModel($"vosk:{name}", $"Vosk {name}", "vosk", dir, dir));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_config.Transcription.OpenAiBaseUrl) && !string.IsNullOrWhiteSpace(_config.Transcription.OpenAiModel))
+        {
+            var model = _config.Transcription.OpenAiModel.Trim();
+            rows.Add(new DiagnosticTranscriptionModel($"openai:{model}", $"LM/OpenAI {model}", "openai", model, _config.Transcription.OpenAiBaseUrl.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel))
+        {
+            var model = _config.AiInsights.OpenAiModel.Trim();
+            rows.Add(new DiagnosticTranscriptionModel($"lmlink:{model}", $"LM Link {model}", "openai", model, _config.AiInsights.OpenAiBaseUrl.Trim()));
+        }
+
+        return rows
+            .GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
     }
 
     private string ResolveWhisperModelPath(string? model)
@@ -308,4 +506,6 @@ public sealed class DiagnosticToolService
             return string.Empty;
         return path;
     }
+
+    private sealed record DiagnosticTranscriptionModel(string Id, string Label, string Engine, string Value, string Detail);
 }

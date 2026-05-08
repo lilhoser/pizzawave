@@ -105,12 +105,19 @@ export type DiagnosticToolRow = {
   notes: string;
 };
 export type DiagnosticToolResult = {
-  jobId: number;
-  tool: string;
-  createdAtUtc: string;
-  rows: DiagnosticToolRow[];
-};
-export type EngineHealth = {
+    jobId: number;
+    tool: string;
+    createdAtUtc: string;
+    rows: DiagnosticToolRow[];
+  };
+  export type DiagnosticModel = {
+    id: string;
+    label: string;
+    engine: string;
+    available: boolean;
+    detail: string;
+  };
+  export type EngineHealth = {
   status: string;
   version: string;
   databasePath: string;
