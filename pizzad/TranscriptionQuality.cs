@@ -19,7 +19,7 @@ public static class TranscriptionQualityClassifier
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex MarkerPattern = new(
-        @"\[(?:\s*)(inaudible|blank_audio|blank audio|silence|no audio|beeping|beep|music|pause|static|background noise|birds chirping|crickets chirping|phone ringing)(?:\s*)\]",
+        @"\[(?:\s*)(inaudible|blank_audio|blank audio|silence|no audio|beeping|beep|music|pause|static|background noise|birds chirping|crickets chirping|phone ringing)(?:\s*)\]|\binaudible\b|\bunintelligible\b|\bunclear audio\b|\bblank audio\b|\bno audio\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex WordPattern = new(
@@ -38,16 +38,16 @@ public static class TranscriptionQualityClassifier
         if (FailurePattern.IsMatch(text))
             return new("failed", "transcription_error", false);
 
-        if (InaudiblePattern.IsMatch(text))
-            return new("poor_quality", "inaudible", false);
-
-        if (BlankSilencePattern.IsMatch(text))
-            return new("poor_quality", "blank_audio", false);
-
         var withoutMarkers = MarkerPattern.Replace(text, " ");
         var words = WordPattern.Matches(withoutMarkers).Count;
         if (words == 0)
+        {
+            if (InaudiblePattern.IsMatch(text))
+                return new("poor_quality", "inaudible", false);
+            if (BlankSilencePattern.IsMatch(text))
+                return new("poor_quality", "blank_audio", false);
             return new("poor_quality", "marker_only", false);
+        }
 
         if (words < 3)
             return new("poor_quality", "too_short", false);

@@ -845,9 +845,9 @@ public sealed class EngineDatabase
         await using (var select = connection.CreateCommand())
         {
             select.CommandText = """
-                SELECT id, transcription, transcription_status
+                SELECT id, transcription, transcription_status, quality_reason
                 FROM calls
-                WHERE transcription_status IN ('complete', 'failed')
+                WHERE transcription_status IN ('complete', 'failed', 'poor_quality')
                    OR (transcription_status = 'pending' AND length(trim(transcription)) > 0);
                 """;
             await using var reader = await select.ExecuteReaderAsync(ct);
@@ -856,9 +856,10 @@ public sealed class EngineDatabase
                 var id = reader.GetInt64(0);
                 var transcript = reader.GetString(1);
                 var status = reader.GetString(2);
+                var reason = reader.GetString(3);
                 var quality = TranscriptionQualityClassifier.Classify(transcript, status);
                 if (!string.Equals(status, quality.Status, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(quality.Reason, "ok", StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(reason, quality.Reason, StringComparison.OrdinalIgnoreCase))
                 {
                     updates.Add((id, quality.Status, quality.Reason));
                 }
