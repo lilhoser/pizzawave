@@ -385,10 +385,12 @@ function confidenceClass(score: number) {
 
 function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot | null; rangeHours: number; reload: () => Promise<void> }) {
   const [topTab, setTopTab] = useState<"pizzad" | "tr">("tr");
-  const [trTab, setTrTab] = useState<"summary" | "metrics" | "tools" | "logs" | "diagnostics" | "insights">("summary");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "tools" | "logs" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
+  const [insightText, setInsightText] = useState("");
+  const [insightBusy, setInsightBusy] = useState(false);
 
   useEffect(() => {
     if (topTab !== "tr" || trTab !== "metrics") return;
@@ -399,6 +401,20 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
 
   if (!data) return <div className="trouble-page">Loading troubleshoot data...</div>;
   const active = metricsData ?? data;
+  async function generateTroubleshootInsights() {
+    setInsightBusy(true);
+    try {
+      const response = await api.request<{ text: string }>("/api/v1/troubleshoot/insights", {
+        method: "POST",
+        body: JSON.stringify({ ...rangeBody(rangeHours), bySystem, baseline })
+      });
+      setInsightText(response.text);
+    } catch (error) {
+      setInsightText(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInsightBusy(false);
+    }
+  }
   return (
     <div className="trouble-page">
       <div className="trouble-tabs">
@@ -409,10 +425,6 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
       {topTab === "pizzad" && <div className="trouble-panel">
         <h2>Pizzad Quality</h2>
         <QualityAuditView data={data} />
-        <div className="card">
-          <h2>Pizzad Diagnostics</h2>
-          <pre className="log-box">{data.diagnostics}</pre>
-        </div>
       </div>}
       {topTab === "tr" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
@@ -420,7 +432,6 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
           <button className={trTab === "tools" ? "active" : ""} onClick={() => setTrTab("tools")}>Tools</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
-          <button className={trTab === "diagnostics" ? "active" : ""} onClick={() => setTrTab("diagnostics")}>Diagnostics</button>
           <button className={trTab === "insights" ? "active" : ""} onClick={() => setTrTab("insights")}>Insights</button>
         </div>
         {trTab === "summary" && <TrHealthSummaryView data={data} />}
@@ -433,8 +444,11 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
         </div>}
         {trTab === "tools" && <TroubleshootTools rangeHours={rangeHours} reload={reload} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
-        {trTab === "diagnostics" && <pre className="log-box">{data.diagnostics}</pre>}
-        {trTab === "insights" && <div className="card"><button disabled>Generate Recommendation</button><p className="muted">Uses LM Link to summarize issues and baselines.</p><pre className="log-box">{data.insightsText}</pre></div>}
+        {trTab === "insights" && <div className="card">
+          <button disabled={insightBusy} onClick={() => void generateTroubleshootInsights()}>{insightBusy ? "Generating..." : "Generate Recommendation"}</button>
+          <p className="muted">Sends the current health summary, system rows, chart series, and quality snapshot to the configured AI insights endpoint.</p>
+          <pre className="log-box">{insightText || data.insightsText}</pre>
+        </div>}
       </div>}
     </div>
   );

@@ -178,6 +178,14 @@ app.MapGet("/api/v1/troubleshoot", async (HttpContext context, long? start, long
 .WithName("Troubleshoot")
 .WithOpenApi();
 
+app.MapPost("/api/v1/troubleshoot/insights", async (HttpContext context, TroubleshootInsightRequest request, AuthService authService, TrHealthTroubleshootService troubleshoot) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await troubleshoot.GenerateInsightsAsync(request.Start, request.End, request.BySystem, string.IsNullOrWhiteSpace(request.Baseline) ? "7d" : request.Baseline, context.RequestAborted));
+})
+.WithName("TroubleshootInsights")
+.WithOpenApi();
+
 app.MapGet("/api/v1/troubleshoot/tr-config", (HttpContext context, AuthService authService, TrConfigService trConfig) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

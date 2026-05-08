@@ -262,6 +262,10 @@ public sealed record JobControlRequest(string Action);
 
 public sealed record GenerateSummaryRequest(long Start, long End, bool ConfirmLargeRange);
 
+public sealed record TroubleshootInsightRequest(long Start, long End, bool BySystem, string Baseline);
+
+public sealed record TroubleshootInsightResponse(string Text);
+
 public sealed record SaveSettingsRequest(JsonElement Values);
 
 public sealed record DiagnosticToolRequest(

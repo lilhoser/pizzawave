@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace pizzad;
@@ -54,7 +56,65 @@ public sealed class TrHealthTroubleshootService
             _trConfig.Validate(),
             logOutput,
             diagnostics,
-            "TR health AI recommendations are not wired in the web engine yet. Use the health summary, remedies, and metrics tabs for deterministic findings.");
+            "Click Generate Recommendation to send the current troubleshooting snapshot to the configured AI insights endpoint.");
+    }
+
+    public async Task<TroubleshootInsightResponse> GenerateInsightsAsync(long start, long end, bool bySystem, string baseline, CancellationToken ct)
+    {
+        if (!_config.AiInsights.Enabled)
+            return new TroubleshootInsightResponse("AI insights are disabled in Settings > ai-insights.");
+
+        var baseUrl = InsightBaseUrl().TrimEnd('/');
+        var model = InsightModel();
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(model))
+            return new TroubleshootInsightResponse("AI insights require aiInsights.openAiBaseUrl and aiInsights.openAiModel, or fallback transcription OpenAI-compatible settings.");
+
+        var snapshot = await BuildAsync(start, end, bySystem, baseline, ct);
+        var prompt = BuildTroubleshootInsightPrompt(snapshot, start, end, bySystem, baseline);
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, _config.AiInsights.TimeoutMs)) };
+        var apiKey = InsightApiKey();
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        var body = new
+        {
+            model,
+            messages = new[]
+            {
+                new { role = "system", content = "You are a practical trunk-recorder and radio-transcription troubleshooting assistant. Give concise, actionable recommendations. Prefer concrete next checks over generic advice." },
+                new { role = "user", content = prompt }
+            },
+            temperature = 0.2,
+            max_tokens = 1200
+        };
+
+        var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
+        _logger.LogInformation("Calling troubleshoot insights endpoint {Endpoint} with model {Model} ({PayloadChars} chars)", $"{baseUrl}/chat/completions", model, payload.Length);
+        Exception? last = null;
+        for (var attempt = 0; attempt <= Math.Max(0, _config.AiInsights.MaxRetries); attempt++)
+        {
+            try
+            {
+                using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+                using var response = await client.PostAsync($"{baseUrl}/chat/completions", content, ct);
+                var text = await response.Content.ReadAsStringAsync(ct);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Troubleshoot insights request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
+                return new TroubleshootInsightResponse(ExtractChatContent(text));
+            }
+            catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
+            {
+                last = ex;
+                await Task.Delay(500, ct);
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                break;
+            }
+        }
+
+        return new TroubleshootInsightResponse($"Troubleshoot insights failed: {last?.Message ?? "unknown error"}");
     }
 
     private static QualityAuditDto BuildQualityAudit(List<EngineCall> calls)
@@ -433,6 +493,88 @@ public sealed class TrHealthTroubleshootService
         sb.AppendLine($"scopes: {string.Join(", ", scopes)}");
         return sb.ToString();
     }
+
+    private static string BuildTroubleshootInsightPrompt(TrTroubleshootDto snapshot, long start, long end, bool bySystem, string baseline)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Review this PizzaWave/trunk-recorder troubleshooting snapshot and return actionable suggestions.");
+        sb.AppendLine("Focus on root-cause hypotheses, what to check next, and which metric supports each suggestion.");
+        sb.AppendLine("Do not restate every metric. Keep the response concise.");
+        sb.AppendLine();
+        sb.AppendLine($"Range UTC: {DateTimeOffset.FromUnixTimeSeconds(start):O} to {DateTimeOffset.FromUnixTimeSeconds(end):O}");
+        sb.AppendLine($"Metrics mode: {(bySystem ? "by system" : "global")}; baseline: {baseline}");
+        sb.AppendLine();
+        sb.AppendLine("Health title:");
+        sb.AppendLine(snapshot.Health.Title);
+        sb.AppendLine();
+        sb.AppendLine("Health summary:");
+        sb.AppendLine(snapshot.Health.SummaryText);
+        sb.AppendLine();
+        sb.AppendLine("Metric rows:");
+        foreach (var metric in snapshot.Health.Metrics)
+            sb.AppendLine($"- {metric.Metric}: {metric.Value}; issue={metric.IsIssue}; notes={metric.Notes}");
+        sb.AppendLine();
+        sb.AppendLine("System rows:");
+        foreach (var system in snapshot.Health.Systems.Take(12))
+            sb.AppendLine($"- {system.Metric}: {system.Value}; issue={system.IsIssue}; notes={system.Notes}");
+        sb.AppendLine();
+        sb.AppendLine("Current deterministic remedies:");
+        foreach (var remedy in snapshot.Health.Remedies)
+            sb.AppendLine($"- {remedy.Metric}: {remedy.Notes}; issue={remedy.IsIssue}");
+        sb.AppendLine();
+        sb.AppendLine("Chart data:");
+        foreach (var chart in snapshot.Health.Charts.Take(8))
+        {
+            sb.AppendLine($"- {chart.Title} ({chart.YAxisLabel}, format {chart.ValueFormat})");
+            sb.AppendLine($"  labels: {string.Join(", ", chart.Labels.TakeLast(12))}");
+            foreach (var series in chart.Series.Take(5))
+                sb.AppendLine($"  series {series.Label}: {string.Join(", ", series.Values.TakeLast(12).Select(v => v.ToString("0.##", CultureInfo.InvariantCulture)))}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("Transcription quality snapshot:");
+        sb.AppendLine($"- total calls: {snapshot.QualityAudit.TotalCalls:N0}");
+        sb.AppendLine($"- problem calls: {snapshot.QualityAudit.ProblemCalls:N0} ({snapshot.QualityAudit.ProblemPercent:F1}%)");
+        sb.AppendLine($"- inaudible calls: {snapshot.QualityAudit.InaudibleCalls:N0} ({snapshot.QualityAudit.InaudiblePercent:F1}%)");
+        sb.AppendLine("- reasons:");
+        foreach (var row in snapshot.QualityAudit.ByReason)
+            sb.AppendLine($"  - {row.Label}: {row.TotalCalls:N0} calls, share {row.ProblemPercent:F1}%");
+        sb.AppendLine("- systems:");
+        foreach (var row in snapshot.QualityAudit.BySystem.Take(8))
+            sb.AppendLine($"  - {row.Label}: {row.ProblemCalls:N0}/{row.TotalCalls:N0} problem calls ({row.ProblemPercent:F1}%), inaudible {row.InaudibleCalls:N0}");
+        sb.AppendLine();
+        sb.AppendLine("Return sections: Findings, Next checks, Dashboard/collector improvements. Use bullets.");
+        return Trim(sb.ToString(), 18000);
+    }
+
+    private string InsightBaseUrl() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl)
+        ? _config.Transcription.OpenAiBaseUrl
+        : _config.AiInsights.OpenAiBaseUrl;
+
+    private string InsightApiKey() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiApiKey)
+        ? _config.Transcription.OpenAiApiKey
+        : _config.AiInsights.OpenAiApiKey;
+
+    private string InsightModel() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel)
+        ? _config.Transcription.OpenAiModel
+        : _config.AiInsights.OpenAiModel;
+
+    private static string ExtractChatContent(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
+        {
+            var first = choices.EnumerateArray().FirstOrDefault();
+            if (first.ValueKind == JsonValueKind.Object &&
+                first.TryGetProperty("message", out var message) &&
+                message.TryGetProperty("content", out var content))
+                return content.GetString() ?? string.Empty;
+        }
+        return json;
+    }
+
+    private static string Trim(string text, int max) =>
+        string.IsNullOrEmpty(text) || text.Length <= max ? text : text[..max];
 
     private async Task<string> ReadJournalAsync(int lines, CancellationToken ct)
     {
