@@ -961,17 +961,15 @@ function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> 
   }
 
   return <div className="trouble-panel jobs-panel">
-    <div className="settings-flow">
-      <div className="card settings-card wide">
-        <div className="settings-card-meta">
+    <div className="card jobs-card">
+        <div className="jobs-card-head">
           <h3>Jobs</h3>
           <p>Background work created by imports, diagnostics, transcription experiments, and summary generation.</p>
           {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "section-status error" : "section-status ok"}>{message}</span>}
         </div>
-        <div className="settings-fields">
+        <div className="jobs-table-wrap">
           <JobsTable jobs={jobs} onControl={control} onDelete={deleteJob} />
         </div>
-      </div>
     </div>
   </div>;
 }

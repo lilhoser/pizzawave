@@ -1060,15 +1060,43 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   margin-bottom: 4px;
 }
 .job-actions { margin-top: 6px; }
+.jobs-card {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 0;
+}
+.jobs-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.jobs-card-head h3 {
+  margin: 0;
+}
+.jobs-card-head p {
+  margin: 0;
+  color: #9faab5;
+  font-size: 12px;
+}
+.jobs-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
 .jobs-table {
-  min-width: 920px;
+  width: 100%;
+  min-width: 900px;
+  table-layout: fixed;
 }
-.jobs-table th:last-child,
-.jobs-table td:last-child {
-  width: 150px;
-}
+.jobs-table th:nth-child(1), .jobs-table td:nth-child(1) { width: 52px; }
+.jobs-table th:nth-child(2), .jobs-table td:nth-child(2) { width: 145px; }
+.jobs-table th:nth-child(3), .jobs-table td:nth-child(3) { width: 95px; }
+.jobs-table th:nth-child(4), .jobs-table td:nth-child(4) { width: 105px; }
+.jobs-table th:nth-child(5), .jobs-table td:nth-child(5) { width: 190px; }
+.jobs-table th:nth-child(7), .jobs-table td:nth-child(7) { width: 150px; }
 .jobs-table td {
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .job-times {
   color: #9faab5;
@@ -1079,7 +1107,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   white-space: nowrap;
 }
 .job-actions-cell {
-  min-width: 150px;
+  width: 150px;
 }
 .job-actions-cell > div {
   display: flex;
