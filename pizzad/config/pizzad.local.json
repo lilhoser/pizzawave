@@ -24,6 +24,8 @@
     "provider": "none",
     "analogSampleRate": 8000,
     "openAiBaseUrl": "http://localhost:1234/v1",
+    "whisperThreads": 2,
+    "liveTranscriptionWorkers": 1,
     "livePressureQueueDepth": 200
   },
   "aiInsights": {

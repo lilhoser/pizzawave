@@ -26,6 +26,11 @@ public sealed class SystemManagerService
         var appDrive = DriveInfo.GetDrives().FirstOrDefault(d => d.IsReady && dbPath.StartsWith(d.RootDirectory.FullName, StringComparison.OrdinalIgnoreCase));
 
         var tableCounts = await TableCountsAsync(ct);
+        const int throughputWindowMinutes = 10;
+        var now = DateTime.UtcNow;
+        var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
+        var recentCalls = await _database.CountCallsStartedSinceAsync(recentStartUnix, ct);
+        var recentTranscribed = await _database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
         var trUnitName = string.IsNullOrWhiteSpace(_config.TrunkRecorder.LogServiceName)
             ? "trunk-recorder"
             : _config.TrunkRecorder.LogServiceName.Trim();
@@ -54,7 +59,14 @@ public sealed class SystemManagerService
                 backlogQueueDepth = _pipeline.BacklogQueueDepth,
                 pressureThreshold = _pipeline.LivePressureQueueDepth,
                 underPressure = _pipeline.IsUnderLivePressure,
-                pendingTranscriptions = await _database.CountPendingTranscriptionCallsAsync(ct)
+                pendingTranscriptions = await _database.CountPendingTranscriptionCallsAsync(ct),
+                liveTranscriptionWorkers = _pipeline.LiveTranscriptionWorkerCount,
+                whisperThreadsPerWorker = _pipeline.WhisperThreadsPerWorker,
+                throughputWindowMinutes,
+                recentCallsIngested = recentCalls,
+                recentCallsTranscribed = recentTranscribed,
+                recentIngestPerMinute = recentCalls / (double)throughputWindowMinutes,
+                recentTranscribedPerMinute = recentTranscribed / (double)throughputWindowMinutes
             },
             storage = new
             {

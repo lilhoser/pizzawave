@@ -171,6 +171,12 @@ function App() {
   const queueBlocked = Boolean(engineHealth?.workBlockedReason);
   const queueHealth = queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
   const queueHealthText = queueHealth === "clear" ? "Queue OK" : queueHealth === "pressure" ? `Queue pressure ${queueDepth.toLocaleString()}` : `Queue draining ${queueDepth.toLocaleString()}`;
+  const transcriptionRateTitle = engineHealth
+    ? `${engineHealth.recentCallsIngested.toLocaleString()} calls ingested and ${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s).`
+    : "Recent transcription throughput.";
+  const transcriptionRateText = engineHealth
+    ? `Transcribe ${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min of ${engineHealth.recentIngestPerMinute.toFixed(1)}/min`
+    : "Transcribe --/min";
 
   const inSetup = Boolean(setupStatus && !setupStatus.completed);
 
@@ -229,6 +235,7 @@ function App() {
         <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
         <span className="pill">Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</span>
         <span className="pill">Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</span>
+        <span className="pill" title={transcriptionRateTitle}>{transcriptionRateText}</span>
         <span className={`pill queue-health queue-${queueHealth}`} title={engineHealth?.workBlockedReason ?? "Transcription queue is clear."}>{queueHealthText}</span>
         {activeJobCount > 0 && <span className="pill">Jobs {activeJobCount}</span>}
       </footer>}
@@ -857,6 +864,8 @@ function PizzadServiceManager({ runtime }: { runtime: any | null }) {
       <Kpi label="CPU Time" value={`${Number(runtime.process?.totalProcessorTimeSeconds || 0).toFixed(0)}s`} subtext={`${runtime.process?.threadCount ?? 0} thread(s)`} />
       <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
       <Kpi label="Queue Health" value={runtime.queues?.underPressure ? "Pressure" : runtime.queues?.transcriptionQueueDepth > 0 ? "Draining" : "OK"} subtext={`${(runtime.queues?.pendingTranscriptions ?? 0).toLocaleString()} pending, ${(runtime.queues?.priorityLiveQueueDepth ?? 0).toLocaleString()} priority`} />
+      <Kpi label="Transcription Rate" value={`${Number(runtime.queues?.recentCallsTranscribed || 0).toFixed(0)} / ${Number(runtime.queues?.recentCallsIngested || 0).toFixed(0)}`} subtext={`${Number(runtime.queues?.recentTranscribedPerMinute || 0).toFixed(1)}/min done vs ${Number(runtime.queues?.recentIngestPerMinute || 0).toFixed(1)}/min in`} />
+      <Kpi label="Whisper Shape" value={`${runtime.queues?.liveTranscriptionWorkers ?? 0} x ${runtime.queues?.whisperThreadsPerWorker ?? 0}`} subtext="workers x threads per worker" />
     </div>
     <div className="card">
       <h3>Services</h3>
@@ -2681,6 +2690,9 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
         <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
         {transcription.provider === "whisper" && <>
           <SettingSelect label="Whisper model" description="Select a managed model. Download missing models below." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update("transcription", ["whisperModelFile"], modelPath(models, v))} />
+          <SettingInput label="Live workers" description="Number of calls transcribed at the same time. On Raspberry Pi, try 1 or 2; higher values can reduce overall stability." type="number" value={transcription.liveTranscriptionWorkers ?? 1} onChange={v => update("transcription", ["liveTranscriptionWorkers"], numberOrZero(v))} />
+          <SettingInput label="Threads per worker" description="CPU threads used by each Whisper worker. A good RPI experiment is 2x1 versus 1x2." type="number" value={transcription.whisperThreads ?? 2} onChange={v => update("transcription", ["whisperThreads"], numberOrZero(v))} />
+          <SettingInput label="Queue pressure threshold" description="Live queue depth where newer live calls are prioritized over stale pending calls." type="number" value={transcription.livePressureQueueDepth ?? 200} onChange={v => update("transcription", ["livePressureQueueDepth"], numberOrZero(v))} />
           <ModelManager engine="whisper" rows={models} busy={modelBusy} selectedPath={transcription.whisperModelFile} onUse={path => update("transcription", ["whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
         </>}
         {transcription.provider === "vosk" && <>
@@ -2942,6 +2954,9 @@ function withSettingsDefaults(value: Record<string, any>) {
     openAiApiKey: "",
     openAiModel: "",
     analogSampleRate: 8000,
+    whisperThreads: 2,
+    liveTranscriptionWorkers: 1,
+    livePressureQueueDepth: 200,
     ...(sections.transcription ?? {})
   };
   sections.transcription.provider = sections.transcription.provider || "none";
@@ -2951,6 +2966,9 @@ function withSettingsDefaults(value: Record<string, any>) {
   sections.transcription.openAiApiKey = sections.transcription.openAiApiKey ?? "";
   sections.transcription.openAiModel = sections.transcription.openAiModel ?? "";
   sections.transcription.analogSampleRate = sections.transcription.analogSampleRate || 8000;
+  sections.transcription.whisperThreads = sections.transcription.whisperThreads || 2;
+  sections.transcription.liveTranscriptionWorkers = sections.transcription.liveTranscriptionWorkers || 1;
+  sections.transcription.livePressureQueueDepth = sections.transcription.livePressureQueueDepth || 200;
   sections["ai-insights"] = {
     enabled: false,
     openAiBaseUrl: "",

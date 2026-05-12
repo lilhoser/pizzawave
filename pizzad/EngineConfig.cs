@@ -83,12 +83,15 @@ public sealed class EngineConfig
         Transcription.OpenAiModel ??= string.Empty;
         if (Transcription.AnalogSampleRate <= 0) Transcription.AnalogSampleRate = 8000;
         if (Transcription.LivePressureQueueDepth <= 0) Transcription.LivePressureQueueDepth = 200;
+        if (Transcription.LiveTranscriptionWorkers <= 0) Transcription.LiveTranscriptionWorkers = 1;
+        Transcription.LiveTranscriptionWorkers = Math.Clamp(Transcription.LiveTranscriptionWorkers, 1, 4);
         if (Transcription.WhisperThreads <= 0)
         {
             Transcription.WhisperThreads = RuntimeInformation.ProcessArchitecture is Architecture.Arm64 or Architecture.Arm
                 ? Math.Min(2, Math.Max(1, Environment.ProcessorCount / 2))
                 : Math.Min(4, Math.Max(2, Environment.ProcessorCount / 4));
         }
+        Transcription.WhisperThreads = Math.Clamp(Transcription.WhisperThreads, 1, 8);
         AiInsights.OpenAiBaseUrl ??= string.Empty;
         AiInsights.OpenAiApiKey ??= string.Empty;
         AiInsights.OpenAiModel ??= string.Empty;
@@ -264,6 +267,7 @@ public sealed class TranscriptionConfig
     public string OpenAiModel { get; set; } = string.Empty;
     public int AnalogSampleRate { get; set; } = 8000;
     public int WhisperThreads { get; set; }
+    public int LiveTranscriptionWorkers { get; set; } = 1;
     public int LivePressureQueueDepth { get; set; } = 200;
 }
 

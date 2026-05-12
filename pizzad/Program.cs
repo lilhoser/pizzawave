@@ -90,6 +90,11 @@ app.MapGet("/api/v1/auth-init", (AuthService authService) => Results.Ok(authServ
 app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, CancellationToken ct) =>
 {
     var pendingTranscriptions = await database.CountPendingTranscriptionCallsAsync(ct);
+    const int throughputWindowMinutes = 10;
+    var now = DateTime.UtcNow;
+    var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
+    var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, ct);
+    var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
     var blockedReason = pendingTranscriptions > 0
         ? $"Imports and AI summary generation are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
         : null;
@@ -106,8 +111,15 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
         pipeline.IsUnderLivePressure,
         pipeline.LivePressureQueueDepth,
         pendingTranscriptions,
+        pipeline.LiveTranscriptionWorkerCount,
+        pipeline.WhisperThreadsPerWorker,
+        throughputWindowMinutes,
+        recentCalls,
+        recentTranscribed,
+        recentCalls / (double)throughputWindowMinutes,
+        recentTranscribed / (double)throughputWindowMinutes,
         blockedReason,
-        DateTime.UtcNow));
+        now));
 })
     .WithName("Health")
     .WithOpenApi();

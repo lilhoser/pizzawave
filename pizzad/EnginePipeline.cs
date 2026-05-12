@@ -22,8 +22,7 @@ public sealed class EnginePipeline
     private readonly SemaphoreSlim _liveSignal = new(0);
     private readonly SemaphoreSlim _backlogSignal = new(0);
     private readonly Settings _pizzalibSettings;
-    private readonly SemaphoreSlim _liveTranscriptionLock = new(1, 1);
-    private ITranscriber? _liveTranscriber;
+    private readonly List<ITranscriber> _liveTranscribers = [];
     private readonly List<BacklogTranscriberSet> _backlogTranscribers = [];
     private string _provider = "none";
     private DateTimeOffset _nextPressureLogAt = DateTimeOffset.MinValue;
@@ -34,6 +33,8 @@ public sealed class EnginePipeline
     public int BacklogQueueDepth => _backlogQueue.Count;
     public bool IsUnderLivePressure => LiveQueueDepth >= LivePressureQueueDepth;
     public int LivePressureQueueDepth => Math.Max(1, _config.Transcription.LivePressureQueueDepth);
+    public int LiveTranscriptionWorkerCount => _liveTranscribers.Count;
+    public int WhisperThreadsPerWorker => Math.Max(1, _config.Transcription.WhisperThreads);
 
     public EnginePipeline(
         EngineConfig config,
@@ -59,11 +60,16 @@ public sealed class EnginePipeline
         _provider = (_config.Transcription.Provider ?? "none").Trim().ToLowerInvariant();
         if (_provider is "whisper" or "vosk")
         {
-            _liveTranscriber = _provider == "vosk"
-                ? new VoskTranscriber(_pizzalibSettings)
-                : new pizzalib.Whisper(_pizzalibSettings);
-            await _liveTranscriber.Initialize();
-            _logger.LogInformation("Live transcription provider initialized: {Provider}", _provider);
+            var liveWorkers = _provider == "whisper" ? ResolveLiveWorkerCount(_config) : 1;
+            for (var i = 1; i <= liveWorkers; i++)
+            {
+                ITranscriber transcriber = _provider == "vosk"
+                    ? new VoskTranscriber(_pizzalibSettings)
+                    : new pizzalib.Whisper(_pizzalibSettings);
+                await transcriber.Initialize();
+                _liveTranscribers.Add(transcriber);
+            }
+            _logger.LogInformation("Live transcription provider initialized: {Provider}; workers={Workers}; whisperThreadsPerWorker={Threads}", _provider, _liveTranscribers.Count, WhisperThreadsPerWorker);
 
             if (_provider == "whisper")
             {
@@ -101,7 +107,15 @@ public sealed class EnginePipeline
             }
         }
 
-        _ = Task.Run(() => LiveTranscriptionLoopAsync(ct), ct);
+        if (_liveTranscribers.Count > 0)
+        {
+            foreach (var transcriber in _liveTranscribers)
+                _ = Task.Run(() => LiveTranscriptionLoopAsync(transcriber, ct), ct);
+        }
+        else
+        {
+            _ = Task.Run(() => LiveTranscriptionLoopAsync(null, ct), ct);
+        }
         if (_backlogTranscribers.Count > 0)
         {
             foreach (var transcribers in _backlogTranscribers)
@@ -208,7 +222,7 @@ public sealed class EnginePipeline
         }
     }
 
-    private async Task LiveTranscriptionLoopAsync(CancellationToken ct)
+    private async Task LiveTranscriptionLoopAsync(ITranscriber? transcriber, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -216,7 +230,7 @@ public sealed class EnginePipeline
             if (!_priorityLiveStack.TryPop(out var item) && !_liveQueue.TryDequeue(out item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: false, backlogTranscribers: null, ct);
+            await ProcessTranscriptionItemAsync(item, backlog: false, transcriber, backlogTranscribers: null, ct);
         }
     }
 
@@ -228,15 +242,15 @@ public sealed class EnginePipeline
             if (!_backlogQueue.TryDequeue(out var item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: true, transcribers, ct);
+            await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, transcribers, ct);
         }
     }
 
-    private async Task ProcessTranscriptionItemAsync(TranscriptionQueueItem item, bool backlog, BacklogTranscriberSet? backlogTranscribers, CancellationToken ct)
+    private async Task ProcessTranscriptionItemAsync(TranscriptionQueueItem item, bool backlog, ITranscriber? liveTranscriber, BacklogTranscriberSet? backlogTranscribers, CancellationToken ct)
     {
         try
         {
-            var transcription = backlog ? await TranscribeBacklogAsync(item, backlogTranscribers, ct) : await TranscribeAsync(item, ct);
+            var transcription = backlog ? await TranscribeBacklogAsync(item, backlogTranscribers, ct) : await TranscribeAsync(item, liveTranscriber, ct);
             var call = await _database.GetCallAsync(item.CallId, ct);
             if (call == null)
                 return;
@@ -289,7 +303,7 @@ public sealed class EnginePipeline
         }
     }
 
-    private async Task<string> TranscribeAsync(TranscriptionQueueItem item, CancellationToken ct)
+    private async Task<string> TranscribeAsync(TranscriptionQueueItem item, ITranscriber? transcriber, CancellationToken ct)
     {
         if (_provider == "none")
             return string.Empty;
@@ -300,7 +314,7 @@ public sealed class EnginePipeline
 
         if (_provider is "whisper" or "vosk")
         {
-            if (_liveTranscriber == null)
+            if (transcriber == null)
             {
                 wav.Dispose();
                 return string.Empty;
@@ -311,15 +325,7 @@ public sealed class EnginePipeline
                 using var localWav = _provider == "whisper"
                     ? await EnsureWhisperInputAsync(wav, item.CallId, ct)
                     : wav;
-                await _liveTranscriptionLock.WaitAsync(ct);
-                try
-                {
-                    return await _liveTranscriber.TranscribeCall(localWav);
-                }
-                finally
-                {
-                    _liveTranscriptionLock.Release();
-                }
+                return await transcriber.TranscribeCall(localWav);
             }
             finally
             {
@@ -341,7 +347,7 @@ public sealed class EnginePipeline
     private async Task<string> TranscribeBacklogAsync(TranscriptionQueueItem item, BacklogTranscriberSet? transcribers, CancellationToken ct)
     {
         if (_provider != "whisper" || transcribers == null)
-            return await TranscribeAsync(item, ct);
+            return await TranscribeAsync(item, _liveTranscribers.FirstOrDefault(), ct);
 
         var fast = await TranscribeWithAsync(item, transcribers.Fast, ct);
         var fastQuality = TranscriptionQualityClassifier.Classify(fast);
@@ -587,6 +593,12 @@ public sealed class EnginePipeline
         if (Environment.ProcessorCount <= 4)
             return 0;
         return 1;
+    }
+
+    private static int ResolveLiveWorkerCount(EngineConfig config)
+    {
+        var configured = config.Transcription.LiveTranscriptionWorkers;
+        return Math.Clamp(configured <= 0 ? 1 : configured, 1, 4);
     }
 
     private sealed record TranscriptionQueueItem(long CallId, RawCallData? Raw, string AudioPath, bool Imported, bool SuppressDownstream, TranscriptionWorkKind Kind);

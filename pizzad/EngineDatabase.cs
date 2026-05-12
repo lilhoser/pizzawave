@@ -107,6 +107,26 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<long> CountCallsStartedSinceAsync(long startUnix, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        return await CountAsync(connection, "SELECT COUNT(*) FROM calls WHERE start_time >= $start;", startUnix, 0, ct);
+    }
+
+    public async Task<long> CountTranscriptionCompletionsSinceAsync(DateTime utcStart, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM calls
+            WHERE updated_at_utc >= $start
+              AND transcription_status IN ('complete', 'poor_quality', 'failed');
+            """;
+        Add(command, "$start", utcStart.ToString("O"));
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct) ?? 0);
+    }
+
     public async Task AddAlertMatchAsync(AlertMatchDto match, CancellationToken ct)
     {
         await using var connection = OpenConnection();

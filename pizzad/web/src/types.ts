@@ -163,6 +163,13 @@ export type EngineHealth = {
   queueUnderPressure: boolean;
   queuePressureThreshold: number;
   pendingTranscriptions: number;
+  liveTranscriptionWorkers: number;
+  whisperThreadsPerWorker: number;
+  throughputWindowMinutes: number;
+  recentCallsIngested: number;
+  recentCallsTranscribed: number;
+  recentIngestPerMinute: number;
+  recentTranscribedPerMinute: number;
   workBlockedReason?: string | null;
   serverTimeUtc: string;
 };

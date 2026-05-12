@@ -290,6 +290,13 @@ public sealed record HealthDto(
     bool QueueUnderPressure,
     int QueuePressureThreshold,
     long PendingTranscriptions,
+    int LiveTranscriptionWorkers,
+    int WhisperThreadsPerWorker,
+    int ThroughputWindowMinutes,
+    long RecentCallsIngested,
+    long RecentCallsTranscribed,
+    double RecentIngestPerMinute,
+    double RecentTranscribedPerMinute,
     string? WorkBlockedReason,
     DateTime ServerTimeUtc);
 
