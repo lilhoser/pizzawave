@@ -22,7 +22,8 @@
   },
   "transcription": {
     "provider": "whisper",
-    "analogSampleRate": 8000
+    "analogSampleRate": 8000,
+    "livePressureQueueDepth": 200
   },
   "aiInsights": {
     "enabled": true,

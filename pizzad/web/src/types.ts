@@ -157,6 +157,13 @@ export type EngineHealth = {
   databasePath: string;
   audioRoot: string;
   queueDepth: number;
+  liveQueueDepth: number;
+  priorityLiveQueueDepth: number;
+  backlogQueueDepth: number;
+  queueUnderPressure: boolean;
+  queuePressureThreshold: number;
+  pendingTranscriptions: number;
+  workBlockedReason?: string | null;
   serverTimeUtc: string;
 };
 export type TrHealth = {

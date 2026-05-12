@@ -48,7 +48,13 @@ public sealed class SystemManagerService
             },
             queues = new
             {
-                transcriptionQueueDepth = _pipeline.QueueDepth
+                transcriptionQueueDepth = _pipeline.QueueDepth,
+                liveQueueDepth = _pipeline.LiveQueueDepth,
+                priorityLiveQueueDepth = _pipeline.PriorityLiveQueueDepth,
+                backlogQueueDepth = _pipeline.BacklogQueueDepth,
+                pressureThreshold = _pipeline.LivePressureQueueDepth,
+                underPressure = _pipeline.IsUnderLivePressure,
+                pendingTranscriptions = await _database.CountPendingTranscriptionCallsAsync(ct)
             },
             storage = new
             {

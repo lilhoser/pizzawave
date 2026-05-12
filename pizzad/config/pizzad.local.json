@@ -23,7 +23,8 @@
   "transcription": {
     "provider": "none",
     "analogSampleRate": 8000,
-    "openAiBaseUrl": "http://localhost:1234/v1"
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "livePressureQueueDepth": 200
   },
   "aiInsights": {
     "enabled": false,

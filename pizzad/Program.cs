@@ -87,15 +87,28 @@ app.MapGet("/api/v1/auth-init", (AuthService authService) => Results.Ok(authServ
     .WithName("AuthInit")
     .WithOpenApi();
 
-app.MapGet("/api/v1/health", (EngineConfig cfg, EnginePipeline pipeline) =>
-    Results.Ok(new HealthDto(
+app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, CancellationToken ct) =>
+{
+    var pendingTranscriptions = await database.CountPendingTranscriptionCallsAsync(ct);
+    var blockedReason = pendingTranscriptions > 0
+        ? $"Imports and AI summary generation are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
+        : null;
+    return Results.Ok(new HealthDto(
         "ok",
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev",
         cfg.Branding.StackName,
         cfg.Storage.DatabasePath,
         cfg.Storage.AudioRoot,
         pipeline.QueueDepth,
-        DateTime.UtcNow)))
+        pipeline.LiveQueueDepth,
+        pipeline.PriorityLiveQueueDepth,
+        pipeline.BacklogQueueDepth,
+        pipeline.IsUnderLivePressure,
+        pipeline.LivePressureQueueDepth,
+        pendingTranscriptions,
+        blockedReason,
+        DateTime.UtcNow));
+})
     .WithName("Health")
     .WithOpenApi();
 

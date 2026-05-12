@@ -66,6 +66,7 @@ public sealed class LocalImportService
 
     public async Task<LocalImportEstimateResponse> EstimateAsync(LocalImportEstimateRequest request, CancellationToken ct)
     {
+        await EnsureImportAllowedAsync(ct);
         var captureDir = ResolveCaptureDir();
         if (string.IsNullOrWhiteSpace(captureDir) || !Directory.Exists(captureDir))
             return new LocalImportEstimateResponse(0, 0, false, "Local TR captureDir is not available.");
@@ -124,6 +125,7 @@ public sealed class LocalImportService
 
     private async Task<JobDto> StartImportAsync(LocalImportRequest request, CancellationToken ct, string? messageOverride)
     {
+        await EnsureImportAllowedAsync(ct);
         var canceled = await _database.CancelStaleActiveJobsAsync(
             "local_import",
             StaleActiveJobAge,
@@ -163,6 +165,13 @@ public sealed class LocalImportService
         _ = Task.Run(() => RunImportJobAsync(jobId, request, cts.Token));
         await _events.PublishAsync("job_updated", new { jobId, type = "local_import", status = "queued" }, ct);
         return job with { Id = jobId };
+    }
+
+    private async Task EnsureImportAllowedAsync(CancellationToken ct)
+    {
+        var pending = await _database.CountPendingTranscriptionCallsAsync(ct);
+        if (pending > 0)
+            throw new InvalidOperationException($"Local import is paused until the transcription queue drains. Pending transcriptions: {pending:N0}.");
     }
 
     public async Task<JobDto?> ControlJobAsync(long jobId, string action, CancellationToken ct)

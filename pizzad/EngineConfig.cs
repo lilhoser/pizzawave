@@ -82,6 +82,7 @@ public sealed class EngineConfig
         Transcription.OpenAiApiKey ??= string.Empty;
         Transcription.OpenAiModel ??= string.Empty;
         if (Transcription.AnalogSampleRate <= 0) Transcription.AnalogSampleRate = 8000;
+        if (Transcription.LivePressureQueueDepth <= 0) Transcription.LivePressureQueueDepth = 200;
         if (Transcription.WhisperThreads <= 0)
         {
             Transcription.WhisperThreads = RuntimeInformation.ProcessArchitecture is Architecture.Arm64 or Architecture.Arm
@@ -263,6 +264,7 @@ public sealed class TranscriptionConfig
     public string OpenAiModel { get; set; } = string.Empty;
     public int AnalogSampleRate { get; set; } = 8000;
     public int WhisperThreads { get; set; }
+    public int LivePressureQueueDepth { get; set; } = 200;
 }
 
 public sealed class AiInsightsConfig

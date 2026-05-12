@@ -168,6 +168,9 @@ function App() {
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
   const activeJobCount = jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length;
   const queueDepth = engineHealth?.queueDepth ?? 0;
+  const queueBlocked = Boolean(engineHealth?.workBlockedReason);
+  const queueHealth = queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
+  const queueHealthText = queueHealth === "clear" ? "Queue OK" : queueHealth === "pressure" ? `Queue pressure ${queueDepth.toLocaleString()}` : `Queue draining ${queueDepth.toLocaleString()}`;
 
   const inSetup = Boolean(setupStatus && !setupStatus.completed);
 
@@ -216,8 +219,8 @@ function App() {
       <main className={`main ${inSetup ? "setup-main" : ""}`}>
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
-        {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
-        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} />}
+        {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} />}
+        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} />}
       </main>
       {!inSetup && <footer className="statusbar">
@@ -226,7 +229,7 @@ function App() {
         <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
         <span className="pill">Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</span>
         <span className="pill">Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</span>
-        {queueDepth > 0 && <span className="pill">Queue {queueDepth}</span>}
+        <span className={`pill queue-health queue-${queueHealth}`} title={engineHealth?.workBlockedReason ?? "Transcription queue is clear."}>{queueHealthText}</span>
         {activeJobCount > 0 && <span className="pill">Jobs {activeJobCount}</span>}
       </footer>}
     </div>
@@ -591,8 +594,9 @@ function Incidents({ rows, locationMap, onShowLocation }: { rows: Incident[]; lo
   </div>;
 }
 
-function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void> }) {
+function CategoryView({ data, mode, rangeHours, reload, engineHealth }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
   if (!data) return <div className="category-page">Loading...</div>;
+  const generationBlocked = Boolean(engineHealth?.workBlockedReason);
   async function generate() {
     try {
       await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(Math.min(rangeHours, 24)), confirmLargeRange: false }) });
@@ -603,9 +607,9 @@ function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage |
   }
   return <div className="category-split-page" data-category={data.category}>
     <section className="pane insights-pane category-pane">
-      {mode === "summaries" && <><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} /></>}
+      {mode === "summaries" && <><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.workBlockedReason} /></>}
       {mode === "raw" && <><h2>{label(data.category)} Raw Calls</h2><RawCallList groups={data.groups} /></>}
-      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} /></>}
+      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.workBlockedReason} /></>}
     </section>
     <section className="pane calls-pane category-pane">
       <h2>Calls by Talkgroup</h2>
@@ -614,13 +618,13 @@ function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage |
   </div>;
 }
 
-function CategoryInsights({ rows, category, onGenerate }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void> }) {
-  if (!rows.length) return <div className="card"><p className="muted">No single-call AI summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
+function CategoryInsights({ rows, category, onGenerate, generationBlocked, blockedReason }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void>; generationBlocked: boolean; blockedReason?: string | null }) {
+  if (!rows.length) return <div className="card"><p className="muted">No single-call AI summaries available for this category and time range.</p>{generationBlocked && <p className="settings-message error">{blockedReason}</p>}<button disabled={generationBlocked} onClick={() => void onGenerate()}>Generate summaries now</button></div>;
   return <>{rows.map(item => <article className={`insight-tile category-${category}`} key={item.id}><div className="insight-head"><span>{item.title}</span><strong className={`confidence ${confidenceClass(item.score)}`}>{Math.round(item.score * 100)}%</strong></div><div className="insight-time">{new Date((item.calls[0]?.rawTimestamp ?? item.firstSeen) * 1000).toLocaleString()}</div><p>{item.detail}</p>{item.calls.length > 0 && <details className="source-shelf"><summary>Transcript and audio</summary><div className="call-actions">{item.calls.map(c => <IncidentSourceCall call={c} key={c.callId} />)}</div></details>}</article>)}</>;
 }
 
-function CategoryIncidents({ rows, category, onGenerate }: { rows: Incident[]; category: string; onGenerate: () => Promise<void> }) {
-  if (!rows.length) return <div className="card"><p className="muted">No incidents available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate incidents now</button></div>;
+function CategoryIncidents({ rows, category, onGenerate, generationBlocked, blockedReason }: { rows: Incident[]; category: string; onGenerate: () => Promise<void>; generationBlocked: boolean; blockedReason?: string | null }) {
+  if (!rows.length) return <div className="card"><p className="muted">No incidents available for this category and time range.</p>{generationBlocked && <p className="settings-message error">{blockedReason}</p>}<button disabled={generationBlocked} onClick={() => void onGenerate()}>Generate incidents now</button></div>;
   const sortedRows = sortIncidents(rows);
   return <div className="incident-explorer category-incident-list">
     {sortedRows.map(i => <details className={`incident-card category-${category}`} key={i.id}>
@@ -749,7 +753,7 @@ function confidenceClass(score: number) {
   return "confidence-low";
 }
 
-function SystemView({ data, jobs, rangeHours, reload }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void> }) {
+function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
   const [topTab, setTopTab] = useState<"pizzad" | "tr" | "tokens">("pizzad");
   const [pizzadTab, setPizzadTab] = useState<"service" | "storage" | "imports" | "jobs" | "quality">("service");
   const [trTab, setTrTab] = useState<"summary" | "metrics" | "tools" | "logs" | "insights">("summary");
@@ -810,7 +814,7 @@ function SystemView({ data, jobs, rangeHours, reload }: { data: TrTroubleshoot |
         </div>
         {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} />}
         {pizzadTab === "storage" && <PizzadStorageManager runtime={runtime} />}
-        {pizzadTab === "imports" && <ImportsPanel reload={reload} />}
+        {pizzadTab === "imports" && <ImportsPanel reload={reload} engineHealth={engineHealth} />}
         {pizzadTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
         {pizzadTab === "quality" && <QualityAuditView data={data} />}
       </div>}
@@ -852,6 +856,7 @@ function PizzadServiceManager({ runtime }: { runtime: any | null }) {
       <Kpi label="TR Service" value={runtime.service?.trunkRecorder?.active || "unknown"} subtext={runtime.service?.trunkRecorder?.unit || "configured trunk-recorder unit"} />
       <Kpi label="CPU Time" value={`${Number(runtime.process?.totalProcessorTimeSeconds || 0).toFixed(0)}s`} subtext={`${runtime.process?.threadCount ?? 0} thread(s)`} />
       <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
+      <Kpi label="Queue Health" value={runtime.queues?.underPressure ? "Pressure" : runtime.queues?.transcriptionQueueDepth > 0 ? "Draining" : "OK"} subtext={`${(runtime.queues?.pendingTranscriptions ?? 0).toLocaleString()} pending, ${(runtime.queues?.priorityLiveQueueDepth ?? 0).toLocaleString()} priority`} />
     </div>
     <div className="card">
       <h3>Services</h3>
@@ -874,7 +879,7 @@ function PizzadStorageManager({ runtime }: { runtime: any | null }) {
     <div className="audit-kpis">
       <Kpi label="Database" value={formatBytes(runtime.storage?.databaseBytes || 0)} subtext={runtime.storage?.databasePath || "SQLite WAL store"} />
       <Kpi label="Audio Store" value={formatBytes(runtime.storage?.sampledAudioBytes || 0)} subtext={`${(runtime.storage?.sampledAudioFiles || 0).toLocaleString()} sampled file(s)${runtime.storage?.audioSampleTruncated ? " (sample capped)" : ""}`} />
-      <Kpi label="Queue" value={(runtime.queues?.transcriptionQueueDepth || 0).toLocaleString()} subtext="Transcription queue depth" />
+      <Kpi label="Queue" value={(runtime.queues?.transcriptionQueueDepth || 0).toLocaleString()} subtext={`${(runtime.queues?.liveQueueDepth ?? 0).toLocaleString()} live, ${(runtime.queues?.backlogQueueDepth ?? 0).toLocaleString()} backlog`} />
     </div>
     <div className="card">
       <h3>Database Tables</h3>
@@ -918,22 +923,24 @@ function TokenBarChart({ title, rows }: { title: string; rows: { label: string; 
   return <div className="card audit-table-card"><h3>{title}</h3>{rows.length ? rows.map(row => <div className="bar-row" key={row.label}><span>{row.label}</span><div className="bar"><span style={{ width: `${Math.max(2, row.totalTokens / max * 100)}%` }} /></div><span>{formatCompact(row.totalTokens)} / {row.requests}</span></div>) : <p className="muted">No recorded usage.</p>}</div>;
 }
 
-function ImportsPanel({ reload }: { reload: () => Promise<void> }) {
+function ImportsPanel({ reload, engineHealth }: { reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
+  const blockedReason = engineHealth?.workBlockedReason ?? "";
   return <div className="trouble-panel imports-panel">
+    {blockedReason && <div className="settings-message error import-blocker">{blockedReason}</div>}
     <div className="settings-flow">
       <div className="card settings-card wide">
         <div className="settings-card-meta">
           <h3>Local TR Import</h3>
           <p>Imports existing .bin recordings from the active trunk-recorder captureDir on this machine. Source files are read-only; imported calls are copied into the PizzaWave audio store.</p>
         </div>
-        <div className="settings-fields"><LocalImport reload={reload} /></div>
+        <div className="settings-fields"><LocalImport reload={reload} blockedReason={blockedReason} /></div>
       </div>
       <div className="card settings-card wide">
         <div className="settings-card-meta">
           <h3>SFTP Import</h3>
           <p>Imports .bin recordings from a remote SFTP archive. Use this for Synology or other long-term archive stores.</p>
         </div>
-        <div className="settings-fields"><SftpImport reload={reload} /></div>
+        <div className="settings-fields"><SftpImport reload={reload} blockedReason={blockedReason} /></div>
       </div>
     </div>
   </div>;
@@ -3288,7 +3295,7 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-function SftpImport({ reload }: { reload: () => Promise<void> }) {
+function SftpImport({ reload, blockedReason }: { reload: () => Promise<void>; blockedReason?: string }) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [message, setMessage] = useState("");
@@ -3369,14 +3376,15 @@ function SftpImport({ reload }: { reload: () => Promise<void> }) {
     </div>
     <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} />
     <input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} />
-    <button disabled={!!busy} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
-    <button disabled={!!busy} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
-    <button disabled={!!busy} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
+    {blockedReason && <div className="settings-message error">{blockedReason}</div>}
+    <button disabled={!!busy || Boolean(blockedReason)} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
+    <button disabled={!!busy || Boolean(blockedReason)} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
+    <button disabled={!!busy || Boolean(blockedReason)} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
     <div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div>
   </>;
 }
 
-function LocalImport({ reload }: { reload: () => Promise<void> }) {
+function LocalImport({ reload, blockedReason }: { reload: () => Promise<void>; blockedReason?: string }) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [message, setMessage] = useState("");
@@ -3458,9 +3466,10 @@ function LocalImport({ reload }: { reload: () => Promise<void> }) {
     </div>
     <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} />
     <input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} />
-    <button disabled={!!busy || !availability?.available} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
-    <button disabled={!!busy || !availability?.available} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
-    <button disabled={!!busy || !availability?.available} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
+    {blockedReason && <div className="settings-message error">{blockedReason}</div>}
+    <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
+    <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
+    <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
     <div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div>
   </>;
 }

@@ -85,6 +85,25 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   background: #252b31;
   white-space: nowrap;
 }
+
+.queue-clear {
+  border-color: rgba(80, 190, 120, 0.45);
+  color: #6ee7a0;
+}
+
+.queue-draining {
+  border-color: rgba(247, 201, 72, 0.55);
+  color: #f7c948;
+}
+
+.queue-pressure {
+  border-color: rgba(255, 107, 90, 0.65);
+  color: #ff8b7e;
+}
+
+.import-blocker {
+  margin-bottom: 12px;
+}
 .segmented {
   display: inline-flex;
   border: 1px solid #3f474f;

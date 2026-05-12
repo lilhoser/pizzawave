@@ -284,6 +284,13 @@ public sealed record HealthDto(
     string DatabasePath,
     string AudioRoot,
     int QueueDepth,
+    int LiveQueueDepth,
+    int PriorityLiveQueueDepth,
+    int BacklogQueueDepth,
+    bool QueueUnderPressure,
+    int QueuePressureThreshold,
+    long PendingTranscriptions,
+    string? WorkBlockedReason,
     DateTime ServerTimeUtc);
 
 public sealed record StatusSummaryDto(int Calls, int Incidents, int Alerts, long Tokens);

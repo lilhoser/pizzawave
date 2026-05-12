@@ -70,6 +70,7 @@ public sealed class SftpImportService
 
     public async Task<SftpEstimateResponse> EstimateAsync(SftpEstimateRequest request, CancellationToken ct)
     {
+        await EnsureImportAllowedAsync(ct);
         if (!_config.SftpImport.Enabled)
             return new SftpEstimateResponse(0, 0, false, "SFTP import is disabled.");
 
@@ -129,6 +130,7 @@ public sealed class SftpImportService
 
     private async Task<JobDto> StartImportAsync(SftpImportRequest request, CancellationToken ct, string? messageOverride)
     {
+        await EnsureImportAllowedAsync(ct);
         var canceled = await _database.CancelStaleActiveJobsAsync(
             "sftp_import",
             StaleActiveJobAge,
@@ -171,6 +173,13 @@ public sealed class SftpImportService
         _ = Task.Run(() => RunImportJobAsync(jobId, request, jobLabel, cts.Token));
         await _events.PublishAsync("job_updated", new { jobId, type = "sftp_import", status = "queued" }, ct);
         return job with { Id = jobId };
+    }
+
+    private async Task EnsureImportAllowedAsync(CancellationToken ct)
+    {
+        var pending = await _database.CountPendingTranscriptionCallsAsync(ct);
+        if (pending > 0)
+            throw new InvalidOperationException($"SFTP import is paused until the transcription queue drains. Pending transcriptions: {pending:N0}.");
     }
 
     public async Task<JobDto?> ControlJobAsync(long jobId, string action, CancellationToken ct)

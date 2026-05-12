@@ -17,6 +17,7 @@ public sealed class EnginePipeline
     private readonly AutomaticInsightsService _insights;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<TranscriptionQueueItem> _liveQueue = new();
+    private readonly ConcurrentStack<TranscriptionQueueItem> _priorityLiveStack = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _backlogQueue = new();
     private readonly SemaphoreSlim _liveSignal = new(0);
     private readonly SemaphoreSlim _backlogSignal = new(0);
@@ -25,8 +26,14 @@ public sealed class EnginePipeline
     private ITranscriber? _liveTranscriber;
     private readonly List<BacklogTranscriberSet> _backlogTranscribers = [];
     private string _provider = "none";
+    private DateTimeOffset _nextPressureLogAt = DateTimeOffset.MinValue;
 
-    public int QueueDepth => _liveQueue.Count + _backlogQueue.Count;
+    public int QueueDepth => LiveQueueDepth + _backlogQueue.Count;
+    public int LiveQueueDepth => _liveQueue.Count + _priorityLiveStack.Count;
+    public int PriorityLiveQueueDepth => _priorityLiveStack.Count;
+    public int BacklogQueueDepth => _backlogQueue.Count;
+    public bool IsUnderLivePressure => LiveQueueDepth >= LivePressureQueueDepth;
+    public int LivePressureQueueDepth => Math.Max(1, _config.Transcription.LivePressureQueueDepth);
 
     public EnginePipeline(
         EngineConfig config,
@@ -176,7 +183,22 @@ public sealed class EnginePipeline
     {
         if (item.Kind == TranscriptionWorkKind.Live)
         {
-            _liveQueue.Enqueue(item);
+            if (_liveQueue.Count + _priorityLiveStack.Count >= LivePressureQueueDepth)
+            {
+                _priorityLiveStack.Push(item);
+                if (DateTimeOffset.UtcNow >= _nextPressureLogAt)
+                {
+                    _logger.LogWarning(
+                        "Live transcription queue is under pressure: {QueueDepth:N0} live call(s) queued. New live calls are being prioritized until the queue drains below {Threshold:N0}.",
+                        LiveQueueDepth,
+                        LivePressureQueueDepth);
+                    _nextPressureLogAt = DateTimeOffset.UtcNow.AddMinutes(1);
+                }
+            }
+            else
+            {
+                _liveQueue.Enqueue(item);
+            }
             _liveSignal.Release();
         }
         else
@@ -191,7 +213,7 @@ public sealed class EnginePipeline
         while (!ct.IsCancellationRequested)
         {
             await _liveSignal.WaitAsync(ct);
-            if (!_liveQueue.TryDequeue(out var item))
+            if (!_priorityLiveStack.TryPop(out var item) && !_liveQueue.TryDequeue(out item))
                 continue;
 
             await ProcessTranscriptionItemAsync(item, backlog: false, backlogTranscribers: null, ct);
