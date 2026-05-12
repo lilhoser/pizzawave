@@ -8,6 +8,7 @@ import "./style.css";
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 type Page = "dashboard" | "system" | "settings" | typeof categories[number];
 type CategoryViewMode = "incidents" | "summaries" | "raw";
+type DashboardTab = "around" | "stats" | "alerts";
 const categoryColors: Record<string, string> = {
   police: "#5aa7ff",
   fire: "#ff6b5a",
@@ -234,21 +235,37 @@ function App() {
 
 function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void> }) {
   const [focusedLocationKey, setFocusedLocationKey] = useState<string | null>(null);
+  const [tab, setTab] = useState<DashboardTab>("around");
   if (!data) return <div className="pane">Loading dashboard...</div>;
   const hiddenKpis = new Set(["alert rate", "token usage", "incidents", "top problem system", "tr decode 0%", "tr worst decode", "busiest hour", "unique talkgroups"]);
   const visibleKpis = data.kpis.filter(k => !hiddenKpis.has(k.label.trim().toLowerCase()));
   const incidentLocationMap = buildIncidentLocationMap(data.locationHeat);
   return (
-    <div className="dashboard">
-      <section className="pane dashboard-primary">
-        <div className="section kpis">{visibleKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
-        <div className="section"><h3>Geolocated Calls Heat Map</h3><LocationHeatMap rows={data.locationHeat} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} /></div>
-        <div className="section"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} /></div>
-      </section>
-      <section className="pane dashboard-secondary">
-        <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /></div>
-        <div className="section"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></div>
-      </section>
+    <div className="dashboard-shell">
+      <div className="dashboard-tabs">
+        <button className={tab === "around" ? "active" : ""} onClick={() => setTab("around")}>Around me</button>
+        <button className={tab === "stats" ? "active" : ""} onClick={() => setTab("stats")}>Statistics</button>
+        <button className={tab === "alerts" ? "active" : ""} onClick={() => setTab("alerts")}>Alerts</button>
+      </div>
+      {tab === "around" && <div className="dashboard dashboard-around">
+        <section className="pane dashboard-map-pane">
+          <div className="section"><h3>Geolocated Calls Heat Map</h3><LocationHeatMap rows={data.locationHeat} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} /></div>
+        </section>
+        <section className="pane dashboard-incidents-pane">
+          <div className="section"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} /></div>
+        </section>
+      </div>}
+      {tab === "stats" && <div className="dashboard dashboard-stats">
+        <section className="pane dashboard-kpis-pane">
+          <div className="section kpis">{visibleKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
+        </section>
+        <section className="pane dashboard-charts-pane">
+          <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /></div>
+        </section>
+      </div>}
+      {tab === "alerts" && <div className="dashboard dashboard-alerts">
+        <section className="pane dashboard-alerts-pane"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></section>
+      </div>}
     </div>
   );
 }
@@ -319,12 +336,23 @@ function Legend({ items }: { items: string[][] }) {
 }
 
 function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[]; focusedKey?: string | null; onFocusKey?: (key: string | null) => void }) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
   const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
   const areaKey = useMemo(() => Array.from(new Set(rows.map(row => row.areaId))).sort().join("|"), [rows]);
   const lastAreaKey = useRef(areaKey);
+  const [mapSize, setMapSize] = useState({ width: 760, height: 520 });
   const [zoom, setZoom] = useState(9);
   const [center, setCenter] = useState(defaultCenter);
   const [selected, setSelected] = useState<LocationHeat | null>(null);
+  useEffect(() => {
+    const element = mapRef.current;
+    if (!element) return;
+    const update = () => setMapSize({ width: Math.max(320, element.clientWidth), height: Math.max(260, element.clientHeight) });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (areaKey === lastAreaKey.current) return;
     lastAreaKey.current = areaKey;
@@ -343,7 +371,7 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
       <p className="muted">No street or address references detected in the selected range.</p>
     </div>;
   }
-  const viewport = buildMapViewport(zoom, center);
+  const viewport = buildMapViewport(zoom, center, mapSize);
   const tiles = mapTiles(viewport);
   const points = rows.map(row => ({ row, point: projectHeatPoint(row, viewport) }));
 
@@ -362,7 +390,7 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
   return <div className="card location-heat-card">
     <div className="location-heat-note">Calls are plotted from geocoded transcript location references within the monitored system area. Popup details show the matched geocoder result and source calls.</div>
     <div className={`location-map-shell ${selected ? "has-selection" : ""}`}>
-    <div className="location-map" role="img" aria-label="Geolocated calls heat map" onWheel={handleWheel}>
+    <div className="location-map" ref={mapRef} role="img" aria-label="Geolocated calls heat map" onWheel={handleWheel}>
       <div className="map-zoom-controls"><button onClick={() => setZoom(current => Math.min(14, current + 1))} aria-label="Zoom in">+</button><button onClick={() => setZoom(current => Math.max(8, current - 1))} aria-label="Zoom out">-</button><span>{zoom}</span></div>
       {tiles.map(tile => <img
         src={`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`}
@@ -445,9 +473,9 @@ function defaultMapCenter(rows: LocationHeat[]): GeoPoint {
   return { lat: (north + south) / 2, lon: (west + east) / 2 };
 }
 
-function buildMapViewport(zoom: number, centerPoint: GeoPoint): MapViewport {
+function buildMapViewport(zoom: number, centerPoint: GeoPoint, size: { width: number; height: number }): MapViewport {
   const center = latLonToWorld(centerPoint.lat, centerPoint.lon, zoom);
-  return { zoom, width: 760, height: 430, centerWorldX: center.x, centerWorldY: center.y };
+  return { zoom, width: size.width, height: size.height, centerWorldX: center.x, centerWorldY: center.y };
 }
 
 function mapTiles(viewport: MapViewport) {
