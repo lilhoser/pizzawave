@@ -179,7 +179,6 @@ public sealed partial class SetupTrConfigBuilderService
         var root = new Dictionary<string, object?>
         {
             ["ver"] = 2,
-            ["captureDir"] = "/var/lib/pizzawave/audio",
             ["logDir"] = "/var/log/trunk-recorder",
             ["sources"] = sources.Select((source, index) => new Dictionary<string, object?>
             {

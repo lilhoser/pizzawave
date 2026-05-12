@@ -81,9 +81,14 @@ patch_callstream() {
   local config_path="${2:-/etc/trunk-recorder/config.json}"
   local host="${3:-127.0.0.1}"
   local port="${4:-9123}"
+  local disable_capture_dir="0"
   local restart_unit="${5:-}"
+  if [[ "${5:-}" == "1" || "${5:-}" == "0" || "${5:-}" == "true" || "${5:-}" == "false" ]]; then
+    disable_capture_dir="${5:-0}"
+    restart_unit="${6:-}"
+  fi
 
-  python3 - "$config_path" "$host" "$port" <<'PY'
+  python3 - "$config_path" "$host" "$port" "$disable_capture_dir" <<'PY'
 import json
 import shutil
 import sys
@@ -93,6 +98,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 host = sys.argv[2]
 port = int(sys.argv[3])
+disable_capture_dir = str(sys.argv[4]).lower() in ("1", "true", "yes")
 if not path.exists():
     raise SystemExit(f"TR config not found: {path}")
 
@@ -120,6 +126,8 @@ callstream["name"] = "callstream"
 callstream["library"] = callstream.get("library") or "libcallstream.so"
 callstream["host"] = host
 callstream["port"] = port
+if disable_capture_dir:
+    data.pop("captureDir", None)
 
 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 print(backup)

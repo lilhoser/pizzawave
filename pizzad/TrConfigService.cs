@@ -114,6 +114,8 @@ public sealed class TrConfigService
         callstream["library"] = callstream["library"]?.GetValue<string>() ?? "libcallstream.so";
         callstream["host"] = _config.Ingest.CallstreamBind;
         callstream["port"] = _config.Ingest.CallstreamPort;
+        if (request.DisableCaptureDir)
+            obj.Remove("captureDir");
 
         var helper = FindAdminHelper();
         string backup;
@@ -134,6 +136,7 @@ public sealed class TrConfigService
                 path,
                 _config.Ingest.CallstreamBind,
                 _config.Ingest.CallstreamPort.ToString(),
+                request.DisableCaptureDir ? "1" : "0",
                 request.RestartTr ? TrUnitName() : string.Empty,
                 ct);
             if (result.ExitCode != 0)
@@ -145,8 +148,9 @@ public sealed class TrConfigService
         _config.Save();
         _logger.LogInformation("Patched callstream in TR config {Path}; backup {Backup}", path, backup);
 
-        var message = $"Patched callstream config. {restartMessage}";
-        return new SetupValidationResult(true, message, new { path, backup, target = $"{_config.Ingest.CallstreamBind}:{_config.Ingest.CallstreamPort}", restarted = request.RestartTr });
+        var captureMessage = request.DisableCaptureDir ? " Removed captureDir so callstream/PizzaWave owns persistence." : string.Empty;
+        var message = $"Patched callstream config.{captureMessage} {restartMessage}";
+        return new SetupValidationResult(true, message, new { path, backup, target = $"{_config.Ingest.CallstreamBind}:{_config.Ingest.CallstreamPort}", captureDirDisabled = request.DisableCaptureDir, restarted = request.RestartTr });
     }
 
     private static string NormalizeJson(JsonNode node) =>
@@ -211,7 +215,7 @@ public sealed class TrConfigService
         return candidates.FirstOrDefault(File.Exists);
     }
 
-    private static async Task<(int ExitCode, string Output)> RunAdminHelperAsync(string helper, string action, string path, string host, string port, string unit, CancellationToken ct)
+    private static async Task<(int ExitCode, string Output)> RunAdminHelperAsync(string helper, string action, string path, string host, string port, string disableCaptureDir, string unit, CancellationToken ct)
     {
         var psi = new ProcessStartInfo("sudo")
         {
@@ -224,6 +228,7 @@ public sealed class TrConfigService
         psi.ArgumentList.Add(path);
         psi.ArgumentList.Add(host);
         psi.ArgumentList.Add(port);
+        psi.ArgumentList.Add(disableCaptureDir);
         if (!string.IsNullOrWhiteSpace(unit))
             psi.ArgumentList.Add(unit);
         using var process = Process.Start(psi);

@@ -250,7 +250,7 @@ public sealed record SetupTrConfigDraftRequest(
 
 public sealed record SetupTrConfigSaveRequest(string ConfigJson);
 
-public sealed record SetupTrConfigPatchRequest(bool RestartTr = false);
+public sealed record SetupTrConfigPatchRequest(bool RestartTr = false, bool DisableCaptureDir = false);
 
 public sealed record SetupTrConfigSourceDto(
     string Label,

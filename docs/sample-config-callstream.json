@@ -2,7 +2,6 @@
     "ver": 2,
     "defaultMode": "digital",
     "logFile": true,
-	"captureDir": "/var/lib/trunk-recorder/recordings",
     "logDir": "/var/log/trunk-recorder",
     "tempDir": "/var/lib/trunk-recorder/tmp",
     "frequencyFormat": "mhz",

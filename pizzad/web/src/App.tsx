@@ -1831,7 +1831,7 @@ function SetupWizard({ status, reload }: { status: SetupStatus; reload: () => Pr
 
   async function patchCallstreamInline() {
     await saveSetupValues();
-    const result = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/patch-callstream", { method: "POST", body: JSON.stringify({ restartTr: false }) });
+    const result = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/patch-callstream", { method: "POST", body: JSON.stringify({ restartTr: false, disableCaptureDir: trInstallMode === "freshTr" }) });
     setMessage(result.message);
     await validateSetupSection("callstream");
     if (!result.ok) throw new Error(result.message);
@@ -2143,7 +2143,7 @@ function SetupWizard({ status, reload }: { status: SetupStatus; reload: () => Pr
             {trDraft && <TrConfigDraftPreview draft={trDraft} />}
           </>}
           {trInstallMode === "freshTr" && trConfigMode === "pasteJson" && <textarea value={trConfigJson} onChange={e => setTrConfigJson(e.target.value)} placeholder="{ ... trunk-recorder config.json ... }" />}
-          <div className="setup-note">Click Next to validate the TR config, patch callstream, and verify health access.</div>
+          <div className="setup-note">{trInstallMode === "freshTr" ? "Click Next to validate the TR config, patch callstream, remove captureDir so PizzaWave owns call persistence, and verify health access." : "Click Next to validate the TR config, patch callstream, and verify health access. Existing captureDir settings are preserved in reuse mode for local import compatibility."}</div>
         </SetupSection>}
 
         {currentStep.id === "talkgroups" && <SetupSection title="Talkgroups" description="Talkgroup CSV is required. Import from RadioReference or paste the pizzapi-compatible CSV, then review rows before saving.">

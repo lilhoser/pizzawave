@@ -101,6 +101,7 @@ sudo ./scripts/pizzawave_configure_callstream.py --config /etc/trunk-recorder/co
 ```
 
 The helper creates a timestamped backup before writing.
+Fresh PizzaWave-managed trunk-recorder configs omit `captureDir`; callstream delivers completed calls to `pizzad`, and `pizzad` owns the canonical local audio store. Reused TR rigs keep their existing `captureDir` unless you explicitly remove it, which preserves local import compatibility for existing recordings.
 
 ## Security
 
