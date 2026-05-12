@@ -171,7 +171,7 @@ function App() {
   const queueRateSuffix = engineHealth ? ` (${transcribedPerMinute.toFixed(1)}/min)` : "";
   const queuePressureNote = queueBlocked ? "; imports/AI paused" : "";
   const queueHealthText = queueHealth === "clear"
-    ? `Queue OK${queueRateSuffix}`
+    ? `Queue OK ${queueDepth.toLocaleString()}${queueRateSuffix}`
     : queueHealth === "pressure"
       ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
       : `Queue draining ${queueDepth.toLocaleString()}${queueRateSuffix}`;
