@@ -435,6 +435,14 @@ public sealed class DashboardService
         text = Regex.Replace(text, @"\b(boulevard|blvd\.)\b", "blvd");
         text = Regex.Replace(text, @"\b(highway|hwy\.)\b", "hwy");
         text = Regex.Replace(text, @"\b(route|rte\.)\b", "rte");
+        text = Regex.Replace(text, @"\b(north\s*east|northeast|ne)\b", "ne");
+        text = Regex.Replace(text, @"\b(north\s*west|northwest|nw)\b", "nw");
+        text = Regex.Replace(text, @"\b(south\s*east|southeast|se)\b", "se");
+        text = Regex.Replace(text, @"\b(south\s*west|southwest|sw)\b", "sw");
+        text = Regex.Replace(text, @"\b(north|n)\b", "n");
+        text = Regex.Replace(text, @"\b(south|s)\b", "s");
+        text = Regex.Replace(text, @"\b(east|e)\b", "e");
+        text = Regex.Replace(text, @"\b(west|w)\b", "w");
         text = Regex.Replace(text, @"[^a-z0-9]+", " ").Trim();
         return text;
     }
