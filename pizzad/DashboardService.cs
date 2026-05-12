@@ -7,6 +7,7 @@ public sealed class DashboardService
     private static readonly Regex AddressStreetRegex = new(@"\b\d{1,5}\s+(?:[a-z0-9]+\.?\s+){0,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex StreetRegex = new(@"\b(?:[a-z]+\.?\s+){1,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HighwayRegex = new(@"\b(?:i[-\s]?\d{1,3}|interstate\s+\d{1,3}|us\s+\d{1,3}|hwy\s+\d{1,3}|highway\s+\d{1,3}|sr\s+\d{1,3}|state\s+route\s+\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex LocalPlaceRegex = new(@"\b(?:fort\s+oglethorpe|east\s+ridge|lookout\s+mountain|soddy[-\s]+daisy|signal\s+mountain|ooltewah|collegedale|hixson|cleveland|chattanooga)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex LocationSuffixRegex = new(@"\b(street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> LocalHighwayKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -195,7 +196,30 @@ public sealed class DashboardService
 
             foreach (var location in ExtractLocations(call.Transcription))
             {
-                candidates.Add(new LocationCandidate(area, call, location));
+                candidates.Add(new LocationCandidate(area, call, location, false));
+            }
+        }
+
+        var callsById = calls.ToDictionary(c => c.Id);
+        foreach (var incident in incidents)
+        {
+            var incidentCalls = incident.Calls
+                .Select(c => callsById.TryGetValue(c.CallId, out var call) ? call : null)
+                .Where(c => c != null)
+                .Cast<EngineCall>()
+                .ToList();
+            if (incidentCalls.Count == 0)
+                continue;
+
+            var area = ResolveIncidentArea(incidentCalls, areaRows);
+            if (area == null)
+                continue;
+
+            var text = $"{incident.Title}. {incident.Detail}";
+            foreach (var location in ExtractLocations(text))
+            {
+                foreach (var call in incidentCalls)
+                    candidates.Add(new LocationCandidate(area, call, location, true));
             }
         }
 
@@ -216,6 +240,7 @@ public sealed class DashboardService
                     rows.Max(r => r.Call.StartTime),
                     category,
                     rows.Select(r => r.Call.Id).Distinct().OrderByDescending(id => id).Take(8).ToList(),
+                    rows.Any(r => r.FromIncident),
                     rows
                         .GroupBy(r => r.Call.Id)
                         .Select(r => r.First().Call)
@@ -231,7 +256,8 @@ public sealed class DashboardService
                         .ToList());
             })
             .Where(r => r.Count > 0)
-            .OrderByDescending(r => r.Count)
+            .OrderByDescending(r => r.FromIncident)
+            .ThenByDescending(r => r.Count)
             .ThenByDescending(r => r.LastHeard)
             .Take(30)
             .ToList();
@@ -241,11 +267,11 @@ public sealed class DashboardService
         foreach (var group in grouped)
         {
             var geocode = await _geocoding.GetCachedAsync(group.Location, group.Area, ct);
-            if (geocode == null && liveGeocodeAttempts < 2)
+            if (geocode == null && liveGeocodeAttempts < 6)
             {
                 liveGeocodeAttempts++;
                 using var geocodeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                geocodeCts.CancelAfter(TimeSpan.FromSeconds(2.5));
+                geocodeCts.CancelAfter(TimeSpan.FromSeconds(2));
                 geocode = await _geocoding.ResolveAsync(group.Location, group.Area, geocodeCts.Token);
             }
 
@@ -303,6 +329,18 @@ public sealed class DashboardService
                 system.Contains(alias, StringComparison.OrdinalIgnoreCase)));
     }
 
+    private static MonitoredAreaConfig? ResolveIncidentArea(List<EngineCall> calls, IReadOnlyList<MonitoredAreaConfig> areas)
+    {
+        return calls
+            .Select(c => ResolveArea(c.SystemShortName, areas))
+            .Where(a => a != null)
+            .Cast<MonitoredAreaConfig>()
+            .GroupBy(a => a.AreaId, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.First())
+            .FirstOrDefault();
+    }
+
     private static IEnumerable<string> ExtractLocations(string transcription)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -312,6 +350,7 @@ public sealed class DashboardService
             .ToList();
         foreach (var text in addressMatches
                      .Concat(HighwayRegex.Matches(transcription).Cast<Match>().Select(m => CleanLocationText(m.Value)).Where(IsPlausibleLocation))
+                     .Concat(LocalPlaceRegex.Matches(transcription).Cast<Match>().Select(m => CleanLocationText(m.Value)).Where(IsPlausibleLocation))
                      .Concat(StreetRegex.Matches(transcription).Cast<Match>()
                          .Select(m => CleanLocationText(m.Value))
                          .Where(IsPlausibleLocation)
@@ -341,6 +380,8 @@ public sealed class DashboardService
             key.StartsWith("hwy ") || key.StartsWith("highway ") || key.StartsWith("sr ") ||
             key.StartsWith("state route "))
             return LocalHighwayKeys.Contains(key);
+        if (LocalPlaceRegex.IsMatch(text))
+            return true;
 
         if (!LocationSuffixRegex.IsMatch(text))
             return false;
@@ -668,7 +709,7 @@ public sealed class DashboardService
         public double AvgDecodeRate => DecodeLines == 0 ? 0 : DecodeRateTotal / DecodeLines;
     }
 
-    private sealed record LocationCandidate(MonitoredAreaConfig Area, EngineCall Call, string LocationText);
+    private sealed record LocationCandidate(MonitoredAreaConfig Area, EngineCall Call, string LocationText, bool FromIncident);
 
     private sealed record LocationGroup(
         MonitoredAreaConfig Area,
@@ -677,5 +718,6 @@ public sealed class DashboardService
         long LastHeard,
         string Category,
         List<long> CallIds,
+        bool FromIncident,
         List<LocationHeatCallDto> SourceCalls);
 }

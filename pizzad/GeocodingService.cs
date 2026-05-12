@@ -41,7 +41,7 @@ public sealed class GeocodingService
 
     public async Task<(GeocodeCacheDto? Row, bool FromCache)> ResolveWithStatusAsync(string locationText, MonitoredAreaConfig area, CancellationToken ct)
     {
-        var query = $"{locationText}, {area.AreaLabel}, Tennessee, USA";
+        var query = BuildQuery(locationText, area);
         var cacheKey = CacheKey(area.AreaId, locationText);
         var cached = await _database.GetGeocodeCacheAsync(cacheKey, ct);
         if (cached != null)
@@ -75,7 +75,7 @@ public sealed class GeocodingService
                 return (await CacheNegativeAsync(cacheKey, query, locationText, area, ct), false);
             }
 
-            if (!WithinBounds(lat, lon, area))
+            if (!WithinBounds(lat, lon, area) && !IsKnownNearbyPlace(locationText))
             {
                 _logger.LogInformation("Rejected geocode match outside bounds for '{Query}': {DisplayName}", query, best.DisplayName);
                 return (await CacheNegativeAsync(cacheKey, query, locationText, area, ct), false);
@@ -138,6 +138,16 @@ public sealed class GeocodingService
 
     private static bool WithinBounds(double lat, double lon, MonitoredAreaConfig area) =>
         lat <= area.North && lat >= area.South && lon >= area.West && lon <= area.East;
+
+    private static string BuildQuery(string locationText, MonitoredAreaConfig area)
+    {
+        if (locationText.Contains("fort oglethorpe", StringComparison.OrdinalIgnoreCase))
+            return $"{locationText}, Georgia, USA";
+        return $"{locationText}, {area.AreaLabel}, Tennessee, USA";
+    }
+
+    private static bool IsKnownNearbyPlace(string locationText) =>
+        locationText.Contains("fort oglethorpe", StringComparison.OrdinalIgnoreCase);
 
     private static bool LooksRelevant(string locationText, string displayName)
     {
