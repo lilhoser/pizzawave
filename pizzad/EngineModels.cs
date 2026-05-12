@@ -91,7 +91,8 @@ public sealed record LocationHeatCallDto(
     long RawTimestamp,
     string Category,
     string TalkgroupName,
-    string Transcript);
+    string Transcript,
+    string AudioUrl);
 
 public sealed record GeocodeCacheDto
 {

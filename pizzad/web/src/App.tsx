@@ -436,6 +436,7 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
           <strong>Call {call.callId}</strong>
           <span>{relativeTime(call.rawTimestamp)} / {label(call.category)} / {call.talkgroupName}</span>
           <p>{call.transcript}</p>
+          {call.audioUrl && <audio controls preload="metadata" src={call.audioUrl} />}
         </div>)}
       </div>}
       <span className="muted">Calls: {selected.callIds.join(", ")}</span>
@@ -444,8 +445,9 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
     <div className="location-heat-list">
       {rows.slice(0, 8).map(row => <button type="button" onClick={() => focusLocation(row)} key={`${row.areaId}-${row.locationText}-list`}>
         <strong>{row.locationText}</strong>
-        <span>{row.areaLabel}</span>
+        <span>{relativeTime(row.lastHeard)}</span>
         <span>{row.count} call{row.count === 1 ? "" : "s"}</span>
+        {row.incidentLinks?.length > 0 && <span className="location-incident-badge">Incident</span>}
       </button>)}
     </div>
   </div>;
@@ -2541,6 +2543,12 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
     void loadAiModels();
   }, [sections["ai-insights"]?.enabled, sections["ai-insights"]?.openAiBaseUrl]);
   useEffect(() => {
+    const current = sections["ai-insights"]?.openAiModel;
+    if (!sections["ai-insights"]?.enabled || aiModels.length === 0) return;
+    if (!current || !aiModels.includes(current))
+      update("ai-insights", ["openAiModel"], aiModels[0]);
+  }, [aiModels, sections["ai-insights"]?.enabled, sections["ai-insights"]?.openAiModel]);
+  useEffect(() => {
     if (!modelBusy) return;
     const timer = window.setInterval(() => void loadModels(), 1500);
     return () => window.clearInterval(timer);
@@ -2678,7 +2686,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
         {transcription.provider === "none" && <p className="setting-note">New calls will be stored without transcription.</p>}
       </SettingsCard>
 
-      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => test("ai-insights")}>
+      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => saveWithTest("ai-insights")}>
         <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
         {aiInsights.enabled && aiModels.length > 0

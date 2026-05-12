@@ -226,7 +226,8 @@ public sealed class DashboardService
                             c.StartTime,
                             NormalizeCategory(c.Category),
                             GetTalkgroupLabel(c),
-                            PreviewTranscript(c.Transcription)))
+                            PreviewTranscript(c.Transcription),
+                            $"/api/v1/calls/{c.Id}/audio"))
                         .ToList());
             })
             .Where(r => r.Count > 0)

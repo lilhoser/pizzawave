@@ -70,7 +70,7 @@ export type LocationHeat = {
   callIds: number[];
   incidentTitles: string[];
   incidentLinks: { incidentId: number; title: string }[];
-  sourceCalls: { callId: number; rawTimestamp: number; category: string; talkgroupName: string; transcript: string }[];
+  sourceCalls: { callId: number; rawTimestamp: number; category: string; talkgroupName: string; transcript: string; audioUrl: string }[];
 };
 export type QualityHour = { hour: number; empty: number; failure: number; inaudible: number; short: number };
 export type Dashboard = {
