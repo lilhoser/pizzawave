@@ -13,7 +13,7 @@ from collections import defaultdict
 CSV_HEADER = (
     "ts_start,ts_end,scope,decode_lines,decode_zero,decode_nonzero,avg_decode_rate,"
     "grant_updates,retunes,calls_started,calls_concluded,update_not_grant,no_tx_recorded,"
-    "sample_stops,unable_source,tuning_err_samples,tuning_err_avg_abs_hz,tuning_err_max_abs_hz"
+    "recorder_exhausted,sample_stops,unable_source,tuning_err_samples,tuning_err_avg_abs_hz,tuning_err_max_abs_hz"
 )
 
 TR_TS_RE = re.compile(r"\[(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]")
@@ -40,6 +40,7 @@ def ensure_schema(conn):
         "decode_rate_total": "REAL NOT NULL DEFAULT 0",
         "update_not_grant": "INTEGER NOT NULL DEFAULT 0",
         "no_tx_recorded": "INTEGER NOT NULL DEFAULT 0",
+        "recorder_exhausted": "INTEGER NOT NULL DEFAULT 0",
         "tuning_err_samples": "INTEGER NOT NULL DEFAULT 0",
         "tuning_err_total_abs_hz": "REAL NOT NULL DEFAULT 0",
         "tuning_err_max_abs_hz": "REAL NOT NULL DEFAULT 0",
@@ -83,7 +84,7 @@ def bucket_from_lines(scope, start, lines):
     tuning_samples = 0
     tuning_total = 0.0
     tuning_max = 0.0
-    retunes = calls_started = calls_concluded = update_not_grant = no_tx = sample_stops = unable_source = 0
+    retunes = calls_started = calls_concluded = update_not_grant = no_tx = recorder_exhausted = sample_stops = unable_source = 0
 
     for line in lines:
         lower = line.lower()
@@ -108,8 +109,10 @@ def bucket_from_lines(scope, start, lines):
             calls_concluded += 1
         if "update not grant" in lower or "this was an update" in lower:
             update_not_grant += 1
+        if "only 0 recorders are available" in lower:
+            recorder_exhausted += 1
         if ("no transmissions were recorded" in lower or "no transmission" in lower or "no tx" in lower
-                or "not recording transmission" in lower or "only 0 recorders are available" in lower):
+                or "not recording transmission" in lower):
             no_tx += 1
         if "has stopped receiving samples" in lower or "sample stop" in lower or "stopped samples" in lower:
             sample_stops += 1
@@ -129,6 +132,7 @@ def bucket_from_lines(scope, start, lines):
         "calls_concluded": calls_concluded,
         "update_not_grant": update_not_grant,
         "no_tx_recorded": no_tx,
+        "recorder_exhausted": recorder_exhausted,
         "sample_stops": sample_stops,
         "unable_source": unable_source,
         "tuning_err_samples": tuning_samples,
@@ -205,6 +209,7 @@ def rows_from_csv(path):
                 "calls_concluded": int(float(r.get("calls_concluded") or 0)),
                 "update_not_grant": int(float(r.get("update_not_grant") or 0)),
                 "no_tx_recorded": int(float(r.get("no_tx_recorded") or 0)),
+                "recorder_exhausted": int(float(r.get("recorder_exhausted") or 0)),
                 "sample_stops": int(float(r.get("sample_stops") or 0)),
                 "unable_source": int(float(r.get("unable_source") or 0)),
                 "tuning_err_samples": tuning_samples,
@@ -219,9 +224,9 @@ def write_rows(conn, rows):
     sql_insert = """
         INSERT INTO tr_health_samples (
             window_start_utc, window_end_utc, scope, decode_lines, decode_zero, decode_zero_pct,
-            decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded,
+            decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded, recorder_exhausted,
             sample_stops, unable_source, tuning_err_samples, tuning_err_total_abs_hz, tuning_err_max_abs_hz)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     with conn:
         for r in rows:
@@ -232,7 +237,7 @@ def write_rows(conn, rows):
             conn.execute(sql_insert, (
                 start, end, scope, r["decode_lines"], r["decode_zero"], r["decode_zero_pct"],
                 r["decode_rate_total"], r["retunes"], r["calls_started"], r["calls_concluded"],
-                r["update_not_grant"], r["no_tx_recorded"], r["sample_stops"], r["unable_source"],
+                r["update_not_grant"], r["no_tx_recorded"], r["recorder_exhausted"], r["sample_stops"], r["unable_source"],
                 r["tuning_err_samples"], r["tuning_err_total_abs_hz"], r["tuning_err_max_abs_hz"],
             ))
 
