@@ -257,13 +257,14 @@ public sealed class DashboardService
         {
             var group = g.Group;
             var callIds = group.CallIds.ToHashSet();
-            var incidentTitles = incidents
+            var incidentLinks = incidents
                 .Where(i => i.Calls.Any(c => callIds.Contains(c.CallId)))
                 .OrderByDescending(i => i.LastSeen)
-                .Select(i => string.IsNullOrWhiteSpace(i.Title) ? "Radio incident" : i.Title)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(i => new LocationHeatIncidentDto(i.Id, string.IsNullOrWhiteSpace(i.Title) ? "Radio incident" : i.Title))
+                .DistinctBy(i => i.IncidentId)
                 .Take(4)
                 .ToList();
+            var incidentTitles = incidentLinks.Select(i => i.Title).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             return new LocationHeatDto(
                 group.Area.AreaId,
                 group.Area.AreaLabel,
@@ -282,6 +283,7 @@ public sealed class DashboardService
                 group.Category,
                 group.CallIds,
                 incidentTitles,
+                incidentLinks,
                 group.SourceCalls);
         }).ToList();
     }

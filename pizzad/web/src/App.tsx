@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, TokenUsageReport, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, TalkgroupOption, TokenUsageReport, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -233,20 +233,38 @@ function App() {
 }
 
 function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void> }) {
+  const [focusedLocationKey, setFocusedLocationKey] = useState<string | null>(null);
   if (!data) return <div className="pane">Loading dashboard...</div>;
+  const hiddenKpis = new Set(["alert rate", "token usage", "incidents", "top problem system", "tr decode 0%", "tr worst decode", "busiest hour", "unique talkgroups"]);
+  const visibleKpis = data.kpis.filter(k => !hiddenKpis.has(k.label.trim().toLowerCase()));
+  const incidentLocationMap = buildIncidentLocationMap(data.locationHeat);
   return (
     <div className="dashboard">
-      <section className="pane dashboard-kpi-alerts">
-        <div className="section kpis">{data.kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
+      <section className="pane dashboard-primary">
+        <div className="section kpis">{visibleKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
+        <div className="section"><h3>Geolocated Calls Heat Map</h3><LocationHeatMap rows={data.locationHeat} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} /></div>
+        <div className="section"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} /></div>
+      </section>
+      <section className="pane dashboard-secondary">
+        <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /></div>
         <div className="section"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></div>
       </section>
-      <section className="pane dashboard-charts">
-        <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /></div>
-        <div className="section"><h3>Geolocated Calls Heat Map</h3><LocationHeatMap rows={data.locationHeat} /></div>
-      </section>
-      <section className="pane dashboard-incidents"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} /></section>
     </div>
   );
+}
+
+function locationKey(row: LocationHeat) {
+  return `${row.areaId}|${row.locationText}`.toLowerCase();
+}
+
+function buildIncidentLocationMap(rows: LocationHeat[]) {
+  const map = new Map<number, LocationHeat>();
+  for (const row of rows) {
+    for (const link of row.incidentLinks ?? []) {
+      if (!map.has(link.incidentId)) map.set(link.incidentId, row);
+    }
+  }
+  return map;
 }
 
 function ProfileSwitcher({ state, onChange }: { state: ProfileState; onChange: (id: string) => Promise<void> }) {
@@ -300,22 +318,25 @@ function Legend({ items }: { items: string[][] }) {
   return <div className="legend">{items.map(([name, color]) => <span key={name}><i style={{ background: color }} />{name}</span>)}</div>;
 }
 
-function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
+function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[]; focusedKey?: string | null; onFocusKey?: (key: string | null) => void }) {
   const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
   const areaKey = useMemo(() => Array.from(new Set(rows.map(row => row.areaId))).sort().join("|"), [rows]);
   const lastAreaKey = useRef(areaKey);
   const [zoom, setZoom] = useState(9);
   const [center, setCenter] = useState(defaultCenter);
   const [selected, setSelected] = useState<LocationHeat | null>(null);
-  const [popupAnchor, setPopupAnchor] = useState<{ x: number; y: number; placement: "right" | "left" } | null>(null);
   useEffect(() => {
     if (areaKey === lastAreaKey.current) return;
     lastAreaKey.current = areaKey;
     setCenter(defaultMapCenter(rows));
     setZoom(9);
     setSelected(null);
-    setPopupAnchor(null);
   }, [areaKey, rows]);
+  useEffect(() => {
+    if (!focusedKey) return;
+    const row = rows.find(r => locationKey(r) === focusedKey);
+    if (row) focusLocation(row);
+  }, [focusedKey, rows]);
 
   if (!rows.length) {
     return <div className="card location-heat-card">
@@ -326,18 +347,11 @@ function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
   const tiles = mapTiles(viewport);
   const points = rows.map(row => ({ row, point: projectHeatPoint(row, viewport) }));
 
-  function focusRow(row: LocationHeat, event: React.MouseEvent<HTMLButtonElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const popupWidth = Math.min(320, Math.max(260, window.innerWidth - 24));
-    const rightX = rect.right + 14;
-    const canFitRight = rightX + popupWidth <= window.innerWidth - 12;
-    const x = canFitRight ? rightX : Math.max(12, rect.left - 14);
-    const y = rect.top + rect.height / 2;
-    const nextCenter = approximateHeatLatLon(row);
+  function focusLocation(row: LocationHeat) {
     setSelected(row);
-    setPopupAnchor({ x, y, placement: canFitRight ? "right" : "left" });
-    setCenter(nextCenter);
+    setCenter(approximateHeatLatLon(row));
     setZoom(current => Math.max(current, 12));
+    onFocusKey?.(locationKey(row));
   }
 
   function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
@@ -347,8 +361,9 @@ function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
 
   return <div className="card location-heat-card">
     <div className="location-heat-note">Calls are plotted from geocoded transcript location references within the monitored system area. Popup details show the matched geocoder result and source calls.</div>
+    <div className={`location-map-shell ${selected ? "has-selection" : ""}`}>
     <div className="location-map" role="img" aria-label="Geolocated calls heat map" onWheel={handleWheel}>
-      <div className="map-zoom-pill">Zoom {zoom}</div>
+      <div className="map-zoom-controls"><button onClick={() => setZoom(current => Math.min(14, current + 1))} aria-label="Zoom in">+</button><button onClick={() => setZoom(current => Math.max(8, current - 1))} aria-label="Zoom out">-</button><span>{zoom}</span></div>
       {tiles.map(tile => <img
         src={`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`}
         style={{ left: tile.left, top: tile.top }}
@@ -367,10 +382,10 @@ function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
       {points.map(({ row, point }) => {
         const size = 22 + row.intensity * 36;
         return <button
-          className={`heat-dot map-heat-dot category-${row.category || "other"}`}
+          className={`heat-dot map-heat-dot category-${row.category || "other"} ${selected && locationKey(selected) === locationKey(row) ? "active" : ""}`}
           style={{ left: `${point.x}%`, top: `${point.y}%`, width: size, height: size }}
           title={`${row.locationText}: ${row.count} call${row.count === 1 ? "" : "s"}; latest ${new Date(row.lastHeard * 1000).toLocaleString()}; calls ${row.callIds.join(", ")}`}
-          onClick={event => focusRow(row, event)}
+          onClick={() => focusLocation(row)}
           key={`${row.areaId}-${row.locationText}`}
         >
           <span>{row.count}</span>
@@ -378,16 +393,16 @@ function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
       })}
       <a className="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
     </div>
-    {selected && popupAnchor && <div className={`map-popup top-layer ${popupAnchor.placement}`} style={popupViewportStyle(popupAnchor)}>
-      <button className="map-popup-close" aria-label="Close location details" onClick={() => { setSelected(null); setPopupAnchor(null); }}>x</button>
+    {selected && <div className="map-popup side-panel">
+      <button className="map-popup-close" aria-label="Close location details" onClick={() => { setSelected(null); onFocusKey?.(null); }}>x</button>
         <strong>{selected.locationText}</strong>
         <span>{selected.areaLabel} / {label(selected.category)}</span>
         <span>{selected.count} call{selected.count === 1 ? "" : "s"}; latest {relativeTime(selected.lastHeard)}</span>
         <span className="map-geocode">Matched: {selected.geocodeDisplayName}</span>
         <span className="muted">{selected.geocodeProvider} / {selected.geocodePrecision} / {(selected.geocodeConfidence * 100).toFixed(0)}% confidence</span>
-      {selected.incidentTitles?.length > 0
-        ? <div className="map-popup-incidents">{selected.incidentTitles.map(title => <p key={title}>{title}</p>)}</div>
-        : <span className="muted">No generated incident links these source calls yet.</span>}
+      {selected.incidentLinks?.length > 0
+        ? <div className="map-popup-incidents">{selected.incidentLinks.map(link => <a href={`#incident-${link.incidentId}`} key={link.incidentId}>{link.title}</a>)}</div>
+        : <span className="muted">No incident currently contains these exact source calls.</span>}
       {selected.sourceCalls?.length > 0 && <div className="map-popup-calls">
         {selected.sourceCalls.map(call => <div key={call.callId}>
           <strong>Call {call.callId}</strong>
@@ -397,12 +412,13 @@ function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
       </div>}
       <span className="muted">Calls: {selected.callIds.join(", ")}</span>
     </div>}
+    </div>
     <div className="location-heat-list">
-      {rows.slice(0, 8).map(row => <div key={`${row.areaId}-${row.locationText}-list`}>
+      {rows.slice(0, 8).map(row => <button type="button" onClick={() => focusLocation(row)} key={`${row.areaId}-${row.locationText}-list`}>
         <strong>{row.locationText}</strong>
         <span>{row.areaLabel}</span>
         <span>{row.count} call{row.count === 1 ? "" : "s"}</span>
-      </div>)}
+      </button>)}
     </div>
   </div>;
 }
@@ -483,13 +499,6 @@ function projectBounds(bounds: GeoBounds, viewport: MapViewport) {
   return { left: `${left}%`, top: `${top}%`, width: `${right - left}%`, height: `${bottom - top}%` };
 }
 
-function popupViewportStyle(anchor: { x: number; y: number; placement: "right" | "left" }): React.CSSProperties {
-  return {
-    left: anchor.x,
-    top: Math.max(24, Math.min(window.innerHeight - 24, anchor.y))
-  };
-}
-
 function latLonToWorld(lat: number, lon: number, zoom: number) {
   const sinLat = Math.sin(lat * Math.PI / 180);
   const scale = 256 * 2 ** zoom;
@@ -529,7 +538,7 @@ function Alerts({ rows }: { rows: AlertMatch[] }) {
   })}</div>;
 }
 
-function Incidents({ rows }: { rows: Incident[] }) {
+function Incidents({ rows, locationMap, onShowLocation }: { rows: Incident[]; locationMap?: Map<number, LocationHeat>; onShowLocation?: (key: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   if (!rows.length) return <div className="card"><p className="muted">No incidents detected.</p></div>;
   const sortedRows = sortIncidents(rows);
@@ -538,14 +547,17 @@ function Incidents({ rows }: { rows: Incident[] }) {
       <strong>Active Incidents</strong>
       <button onClick={() => setExpanded(v => !v)}>{expanded ? "Collapse All" : "Expand All"}</button>
     </div>
-    {sortedRows.map(i => <details className={`incident-card category-${i.category || "other"}`} key={i.id} open={expanded}>
-      <IncidentSummary incident={i} />
+    {sortedRows.map(i => {
+      const linkedLocation = locationMap?.get(i.id);
+      return <details id={`incident-${i.id}`} className={`incident-card category-${i.category || "other"}`} key={i.id} open={expanded}>
+      <IncidentSummary incident={i} linkedLocation={linkedLocation} onShowLocation={onShowLocation} />
       <p>{i.detail}</p>
       <div className="incident-details">
         <div className="muted">Related calls</div>
         {i.calls.map(c => <IncidentSourceCall call={c} key={c.callId} />)}
       </div>
-    </details>)}
+    </details>;
+    })}
   </div>;
 }
 
@@ -601,10 +613,11 @@ function IncidentSourceCall({ call }: { call: Incident["calls"][number] }) {
   </div>;
 }
 
-function IncidentSummary({ incident }: { incident: Incident }) {
+function IncidentSummary({ incident, linkedLocation, onShowLocation }: { incident: Incident; linkedLocation?: LocationHeat; onShowLocation?: (key: string) => void }) {
   return <summary>
     <span className="incident-title">{incident.title}</span>
     <span className="incident-summary-meta">
+      {linkedLocation && <button type="button" className="geo-badge" title={`Show ${linkedLocation.locationText} on map`} onClick={event => { event.preventDefault(); event.stopPropagation(); onShowLocation?.(locationKey(linkedLocation)); }}>Map</button>}
       <span className="incident-time">{relativeIncidentTime(incident)}</span>
       <span className="muted">{incident.calls.length} calls</span>
       <strong className={`confidence confidence-circle ${confidenceClass(incident.confidence)}`}>{Math.round(incident.confidence * 100)}</strong>
@@ -823,12 +836,10 @@ function PizzadServiceManager({ runtime }: { runtime: any | null }) {
 function PizzadStorageManager({ runtime }: { runtime: any | null }) {
   if (!runtime) return <div className="card">Loading storage status...</div>;
   const tables = Object.entries(runtime.tables ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const diskUsed = Math.max(0, (runtime.storage?.diskTotalBytes || 0) - (runtime.storage?.diskFreeBytes || 0));
   return <div className="system-manager-grid">
     <div className="audit-kpis">
       <Kpi label="Database" value={formatBytes(runtime.storage?.databaseBytes || 0)} subtext={runtime.storage?.databasePath || "SQLite WAL store"} />
       <Kpi label="Audio Store" value={formatBytes(runtime.storage?.sampledAudioBytes || 0)} subtext={`${(runtime.storage?.sampledAudioFiles || 0).toLocaleString()} sampled file(s)${runtime.storage?.audioSampleTruncated ? " (sample capped)" : ""}`} />
-      <Kpi label="Disk Used" value={formatBytes(diskUsed)} subtext={`${formatBytes(runtime.storage?.diskFreeBytes || 0)} free on ${runtime.storage?.diskRoot || "disk"}`} />
       <Kpi label="Queue" value={(runtime.queues?.transcriptionQueueDepth || 0).toLocaleString()} subtext="Transcription queue depth" />
     </div>
     <div className="card">
@@ -952,13 +963,13 @@ function JobsTable({ jobs, onControl, onDelete }: { jobs: Job[]; onControl: (id:
           {job.finishedAtUtc && <span>Finished {formatJobDate(job.finishedAtUtc)}</span>}
         </td>
         <td>{job.message}</td>
-        <td className="job-actions-cell">
+        <td className="job-actions-cell"><div>
           {active ? <>
             {job.status === "running" && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
             {job.status === "paused" && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
             {(job.status === "queued" || job.status === "running" || job.status === "paused") && <button onClick={() => void onControl(job.id, "cancel")}>Cancel</button>}
           </> : <button onClick={() => void onDelete(job.id)}>Delete</button>}
-        </td>
+        </div></td>
       </tr>;
     })}</tbody>
   </table>;
@@ -2485,6 +2496,8 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
   const [sectionStatus, setSectionStatus] = useState<Record<string, { kind: "ok" | "error" | "info"; text: string }>>({});
   const [testingSection, setTestingSection] = useState("");
   const [models, setModels] = useState<any[]>([]);
+  const [aiModels, setAiModels] = useState<string[]>([]);
+  const [aiModelsMessage, setAiModelsMessage] = useState("");
   const [modelBusy, setModelBusy] = useState("");
 
   useEffect(() => {
@@ -2496,6 +2509,10 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
   }, [settingsSections, settingsLoadState.version]);
   useEffect(() => { void loadModels(); }, []);
   useEffect(() => {
+    if (!sections["ai-insights"]?.enabled) return;
+    void loadAiModels();
+  }, [sections["ai-insights"]?.enabled, sections["ai-insights"]?.openAiBaseUrl]);
+  useEffect(() => {
     if (!modelBusy) return;
     const timer = window.setInterval(() => void loadModels(), 1500);
     return () => window.clearInterval(timer);
@@ -2504,7 +2521,6 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
   const engine = sections.engine ?? {};
   const transcription = sections.transcription ?? {};
   const aiInsights = sections["ai-insights"] ?? {};
-  const sftp = sections.sftp ?? {};
   const tr = sections.tr ?? {};
   const alerts = sections.alerts ?? {};
 
@@ -2570,6 +2586,19 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
     }
   }
 
+  async function loadAiModels() {
+    setAiModelsMessage("Loading models...");
+    try {
+      const result = await api.request<any>("/api/v1/settings/ai-insights/models");
+      const rows = Array.isArray(result.models) ? result.models : [];
+      setAiModels(rows);
+      setAiModelsMessage(result.message ?? (rows.length ? `Found ${rows.length} model(s).` : "No models returned."));
+    } catch (error) {
+      setAiModels([]);
+      setAiModelsMessage(error instanceof Error ? error.message : "Unable to load models.");
+    }
+  }
+
   async function downloadModel(model: string) {
     setModelBusy(model);
     try {
@@ -2624,7 +2653,10 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
       <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => test("ai-insights")}>
         <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
-        <SettingInput label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />
+        {aiInsights.enabled && aiModels.length > 0
+          ? <SettingSelect label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} options={aiModels} onChange={v => update("ai-insights", ["openAiModel"], v)} />
+          : <SettingInput label="Model" description="Chat model used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />}
+        {aiInsights.enabled && <div className="setting-inline-actions"><button type="button" onClick={() => void loadAiModels()}>Refresh models</button><span className="muted">{aiModelsMessage}</span></div>}
         <SettingInput label="API key" description="Optional bearer token. LM Studio local/link setups may leave this blank." type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
         <SettingInput label="Timeout (ms)" description="Maximum wait for a single LLM request." type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
@@ -2639,18 +2671,6 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
       </SettingsCard>
 
       <ProfilesSettingsCard profileState={profileState} setProfileState={setProfileState} reload={reload} />
-
-      <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} testing={testingSection === "sftp"} status={sectionStatus.sftp} onSave={() => save("sftp")} onTest={() => saveWithTest("sftp")}>
-        <SettingCheckbox label="Enable SFTP import" description="Allows quick imports and larger background priming jobs." checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
-        <SettingInput label="Host" description="SFTP server hostname or IP address." value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
-        <SettingInput label="Port" description="SFTP port, normally 22." type="number" value={sftp.port} onChange={v => update("sftp", ["port"], numberOrZero(v))} />
-        <SettingInput label="Username" description="Account used to read archive files." value={sftp.username} onChange={v => update("sftp", ["username"], v)} />
-        <SettingSelect label="Auth mode" description="Private key is preferred; password auth is available for simpler archives." value={sftp.authMode} options={["privateKey", "password"]} onChange={v => update("sftp", ["authMode"], v)} />
-        <SettingInput label="Password" description="Used only when auth mode is password." type="password" value={sftp.password} onChange={v => update("sftp", ["password"], v)} />
-        <SettingInput label="Private key path" description="Path on the pizzad Linux host." value={sftp.privateKeyPath} onChange={v => update("sftp", ["privateKeyPath"], v)} />
-        <SettingInput label="Key passphrase" description="Optional passphrase for encrypted private keys." type="password" value={sftp.privateKeyPassphrase} onChange={v => update("sftp", ["privateKeyPassphrase"], v)} />
-        <SettingInput label="Remote root" description="Top-level archive directory to search." value={sftp.remoteRoot} onChange={v => update("sftp", ["remoteRoot"], v)} />
-      </SettingsCard>
 
       <div className="card settings-card">
         <div className="settings-card-meta">
@@ -2689,7 +2709,14 @@ function SettingsCard({ title, description, children, busy, testing, status, onS
 function ProfilesSettingsCard({ profileState, setProfileState, reload }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void> }) {
   const [draft, setDraft] = useState<ProfileState | null>(profileState);
   const [message, setMessage] = useState("");
+  const [talkgroups, setTalkgroups] = useState<TalkgroupOption[]>([]);
+  const [talkgroupPickerProfile, setTalkgroupPickerProfile] = useState<string | null>(null);
+  const [talkgroupFilter, setTalkgroupFilter] = useState("");
   useEffect(() => setDraft(profileState), [profileState]);
+  useEffect(() => {
+    if (!talkgroupPickerProfile || talkgroups.length) return;
+    void api.request<TalkgroupOption[]>("/api/v1/talkgroups").then(setTalkgroups).catch(() => setTalkgroups([]));
+  }, [talkgroupPickerProfile, talkgroups.length]);
   if (!draft) return null;
 
   function updateProfile(id: string, patch: Partial<ProcessingProfile>) {
@@ -2723,7 +2750,9 @@ function ProfilesSettingsCard({ profileState, setProfileState, reload }: { profi
     </div>
     <div className="settings-fields">
       <label className="setting-field"><span>Active profile<small>Applied to navigation and server-computed dashboard data.</small></span><select value={draft.activeProfileId} onChange={e => setDraft({ ...draft, activeProfileId: e.target.value })}>{draft.profiles.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
-      {draft.profiles.map(profile => <div className="profile-editor" key={profile.id}>
+      {draft.profiles.map(profile => {
+        const selectedCount = profile.allowedTalkgroups?.length ?? 0;
+        return <div className="profile-editor" key={profile.id}>
         <input value={profile.name} onChange={e => updateProfile(profile.id, { name: e.target.value })} />
         <div className="profile-checks">
           <label><input type="checkbox" checked={profile.includePolice} onChange={e => updateProfile(profile.id, { includePolice: e.target.checked })} /> Police</label>
@@ -2732,9 +2761,57 @@ function ProfilesSettingsCard({ profileState, setProfileState, reload }: { profi
           <label><input type="checkbox" checked={profile.includeTraffic} onChange={e => updateProfile(profile.id, { includeTraffic: e.target.checked })} /> Traffic</label>
           <label><input type="checkbox" checked={profile.includeOther} onChange={e => updateProfile(profile.id, { includeOther: e.target.checked })} /> Other</label>
         </div>
-        <label className="setting-field"><span>Allowed talkgroups<small>Comma-separated IDs. Leave blank to include all talkgroups in enabled categories.</small></span><input value={(profile.allowedTalkgroups ?? []).join(",")} onChange={e => updateProfile(profile.id, { allowedTalkgroups: parseTalkgroups(e.target.value) })} /></label>
+        <div className="talkgroup-select-row">
+          <div><strong>Allowed talkgroups</strong><small>{selectedCount ? `${selectedCount} selected` : "All talkgroups in enabled categories"}</small></div>
+          <button type="button" onClick={() => setTalkgroupPickerProfile(profile.id)}>Select talkgroups</button>
+          {selectedCount > 0 && <button type="button" onClick={() => updateProfile(profile.id, { allowedTalkgroups: [] })}>Clear</button>}
+        </div>
         <button disabled={draft.profiles.length <= 1} onClick={() => deleteProfile(profile.id)}>Delete</button>
-      </div>)}
+      </div>;
+      })}
+    </div>
+    {talkgroupPickerProfile && <TalkgroupPicker
+      rows={talkgroups}
+      filter={talkgroupFilter}
+      setFilter={setTalkgroupFilter}
+      selected={draft.profiles.find(p => p.id === talkgroupPickerProfile)?.allowedTalkgroups ?? []}
+      onClose={() => setTalkgroupPickerProfile(null)}
+      onApply={ids => {
+        updateProfile(talkgroupPickerProfile, { allowedTalkgroups: ids });
+        setTalkgroupPickerProfile(null);
+      }}
+    />}
+  </div>;
+}
+
+function TalkgroupPicker({ rows, selected, filter, setFilter, onApply, onClose }: { rows: TalkgroupOption[]; selected: number[]; filter: string; setFilter: (value: string) => void; onApply: (ids: number[]) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState<Set<number>>(new Set(selected));
+  useEffect(() => setDraft(new Set(selected)), [selected.join(",")]);
+  const needle = filter.trim().toLowerCase();
+  const filtered = rows.filter(row => !needle || row.label.toLowerCase().includes(needle) || row.category.toLowerCase().includes(needle) || String(row.talkgroup).includes(needle)).slice(0, 500);
+  function toggle(id: number, checked: boolean) {
+    setDraft(current => {
+      const next = new Set(current);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+  return <div className="modal-backdrop">
+    <div className="talkgroup-picker card">
+      <div className="talkgroup-picker-head">
+        <div><h3>Select Talkgroups</h3><p className="muted">Leave the selection empty to include all talkgroups in enabled categories.</p></div>
+        <button onClick={onClose}>Close</button>
+      </div>
+      <input placeholder="Filter by name, category, or ID" value={filter} onChange={e => setFilter(e.target.value)} />
+      <div className="talkgroup-picker-table">
+        <table className="table compact-table"><thead><tr><th></th><th>ID</th><th>Name</th><th>Category</th></tr></thead><tbody>{filtered.map(row => <tr key={row.talkgroup}>
+          <td><input type="checkbox" checked={draft.has(row.talkgroup)} onChange={e => toggle(row.talkgroup, e.target.checked)} /></td>
+          <td>{row.talkgroup}</td>
+          <td>{row.label}</td>
+          <td><span className={`pill category-${row.category}`}>{label(row.category)}</span></td>
+        </tr>)}</tbody></table>
+      </div>
+      <div className="settings-card-actions"><span className="muted">{draft.size} selected</span><button onClick={() => setDraft(new Set())}>Clear selection</button><button onClick={() => onApply(Array.from(draft).sort((a, b) => a - b))}>Apply</button></div>
     </div>
   </div>;
 }

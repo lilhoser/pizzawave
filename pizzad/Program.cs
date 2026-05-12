@@ -530,6 +530,15 @@ app.MapPost("/api/v1/profiles", (HttpContext context, SaveProfilesRequest reques
 .WithName("ProfilesSave")
 .WithOpenApi();
 
+app.MapGet("/api/v1/talkgroups", (HttpContext context, AuthService authService, TalkgroupResolver talkgroups) =>
+{
+    if (!authService.IsReadAllowed(context))
+        return Results.Unauthorized();
+    return Results.Ok(talkgroups.ListOptions());
+})
+.WithName("TalkgroupsList")
+.WithOpenApi();
+
 app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, SftpImportService sftpImports, LocalImportService localImports) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

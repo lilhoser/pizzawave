@@ -69,6 +69,7 @@ export type LocationHeat = {
   category: string;
   callIds: number[];
   incidentTitles: string[];
+  incidentLinks: { incidentId: number; title: string }[];
   sourceCalls: { callId: number; rawTimestamp: number; category: string; talkgroupName: string; transcript: string }[];
 };
 export type QualityHour = { hour: number; empty: number; failure: number; inaudible: number; short: number };
@@ -243,6 +244,7 @@ export type TokenUsageEntry = { id: number; timestampUtc: string; triggerActivit
 export type TokenUsageReport = { ledger: string; summary: TokenUsageSummary; byDay: TokenUsageBucket[]; byTrigger: TokenUsageBucket[]; entries: TokenUsageEntry[] };
 export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeOther: boolean; allowedTalkgroups: number[]; createdAtUtc?: string; updatedAtUtc?: string };
 export type ProfileState = { activeProfileId: string; profiles: ProcessingProfile[] };
+export type TalkgroupOption = { talkgroup: number; label: string; category: string };
 export type SetupCheck = { id: string; label: string; required: boolean; ok: boolean; message: string };
 export type SetupStatus = {
   completed: boolean;

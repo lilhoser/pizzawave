@@ -81,7 +81,10 @@ public sealed record LocationHeatDto(
     string Category,
     IReadOnlyList<long> CallIds,
     IReadOnlyList<string> IncidentTitles,
+    IReadOnlyList<LocationHeatIncidentDto> IncidentLinks,
     IReadOnlyList<LocationHeatCallDto> SourceCalls);
+
+public sealed record LocationHeatIncidentDto(long IncidentId, string Title);
 
 public sealed record LocationHeatCallDto(
     long CallId,
@@ -479,6 +482,8 @@ public sealed record SetupValidationResult(bool Ok, string Message, object? Deta
 public sealed record ProfileStateDto(Guid ActiveProfileId, IReadOnlyList<ProcessingProfile> Profiles);
 
 public sealed record SaveProfilesRequest(Guid ActiveProfileId, IReadOnlyList<ProcessingProfile> Profiles);
+
+public sealed record TalkgroupOptionDto(long Talkgroup, string Label, string Category);
 
 public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);
 

@@ -47,6 +47,19 @@ public sealed class TalkgroupResolver
         return new ResolvedTalkgroup(label, NormalizeCategory(row.Category, row.Tag, row.Description, row.AlphaTag));
     }
 
+    public IReadOnlyList<TalkgroupOptionDto> ListOptions()
+    {
+        return GetTalkgroups()
+            .OrderBy(r => r.Value.AlphaTag)
+            .ThenBy(r => r.Key)
+            .Select(r =>
+            {
+                var resolved = Resolve(r.Key);
+                return new TalkgroupOptionDto(r.Key, resolved.Label, resolved.Category);
+            })
+            .ToList();
+    }
+
     private Dictionary<long, Talkgroup> GetTalkgroups()
     {
         var path = _config.TrunkRecorder.TalkgroupsPath;
