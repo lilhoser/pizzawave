@@ -2,22 +2,27 @@ namespace pizzad;
 
 public sealed class SummaryService
 {
-    private const long MaxManualSummarySpanSeconds = 24 * 3600;
     private const long MaxManualSummaryEndSkewSeconds = 2 * 3600;
     private readonly Dictionary<long, CancellationTokenSource> _runningJobs = new();
     private readonly object _jobGate = new();
+    private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
+    private readonly EnginePipeline _pipeline;
     private readonly AutomaticInsightsService _insights;
     private readonly EventStream _events;
     private readonly ILogger<SummaryService> _logger;
 
     public SummaryService(
+        EngineConfig config,
         EngineDatabase database,
+        EnginePipeline pipeline,
         AutomaticInsightsService insights,
         EventStream events,
         ILogger<SummaryService> logger)
     {
+        _config = config;
         _database = database;
+        _pipeline = pipeline;
         _insights = insights;
         _events = events;
         _logger = logger;
@@ -33,11 +38,14 @@ public sealed class SummaryService
         var span = request.End - request.Start;
         if (span <= 0)
             throw new InvalidOperationException("Summary generation requires a valid time range.");
-        if (span > MaxManualSummarySpanSeconds)
-            throw new InvalidOperationException("AI summary and incident generation is limited to the most recent 24 hours. Historical import backfill is intentionally disabled because LM Studio processing can take days on large ranges.");
+        var maxLookbackHours = Math.Max(1, _config.AiInsights.MaxManualLookbackHours);
+        if (span > maxLookbackHours * 3600L)
+            throw new InvalidOperationException($"AI summary and incident generation is limited to the most recent {maxLookbackHours} hour(s). Historical import backfill is intentionally disabled because LM Studio processing can take days on large ranges.");
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         if (request.End < now - MaxManualSummaryEndSkewSeconds)
             throw new InvalidOperationException("AI summary and incident generation is only available for the current/recent range. Historical backfill is intentionally disabled.");
+        if (_config.AiInsights.MaxQueueDepthForManualSummary > 0 && _pipeline.QueueDepth > _config.AiInsights.MaxQueueDepthForManualSummary)
+            throw new InvalidOperationException($"AI summary generation is disabled while transcription/import backlog is high. Queue depth is {_pipeline.QueueDepth:N0}; configured limit is {_config.AiInsights.MaxQueueDepthForManualSummary:N0}.");
 
         var job = new JobDto
         {
@@ -102,6 +110,11 @@ public sealed class SummaryService
                 .GroupBy(x => x.index / batchSize)
                 .Select(g => g.Select(x => x.call).ToList())
                 .ToList();
+
+            var maxCalls = Math.Max(1, _config.AiInsights.MaxManualSummaryCalls);
+            var maxWindows = Math.Max(1, _config.AiInsights.MaxManualSummaryWindows);
+            if (calls.Count > maxCalls || batches.Count > maxWindows)
+                throw new InvalidOperationException($"AI summary generation would process {calls.Count:N0} live calls across {batches.Count:N0} LM window(s), above configured limits of {maxCalls:N0} calls and {maxWindows:N0} windows. Narrow the range or raise the Insights guardrails.");
 
             var total = batches.Count;
             var completed = 0;

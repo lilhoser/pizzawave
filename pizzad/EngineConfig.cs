@@ -95,6 +95,10 @@ public sealed class EngineConfig
         if (AiInsights.MaxPendingCalls <= 0) AiInsights.MaxPendingCalls = 1000;
         if (AiInsights.TimeoutMs <= 0) AiInsights.TimeoutMs = 600000;
         if (AiInsights.MaxRetries < 0) AiInsights.MaxRetries = 0;
+        if (AiInsights.MaxManualLookbackHours <= 0) AiInsights.MaxManualLookbackHours = 24;
+        if (AiInsights.MaxManualSummaryCalls <= 0) AiInsights.MaxManualSummaryCalls = 300;
+        if (AiInsights.MaxManualSummaryWindows <= 0) AiInsights.MaxManualSummaryWindows = 20;
+        if (AiInsights.MaxQueueDepthForManualSummary < 0) AiInsights.MaxQueueDepthForManualSummary = 0;
         SftpImport.Host ??= string.Empty;
         if (SftpImport.Port <= 0) SftpImport.Port = 22;
         SftpImport.Username ??= string.Empty;
@@ -271,6 +275,10 @@ public sealed class AiInsightsConfig
     public int MaxPendingCalls { get; set; } = 1000;
     public int TimeoutMs { get; set; } = 600000;
     public int MaxRetries { get; set; } = 2;
+    public int MaxManualLookbackHours { get; set; } = 24;
+    public int MaxManualSummaryCalls { get; set; } = 300;
+    public int MaxManualSummaryWindows { get; set; } = 20;
+    public int MaxQueueDepthForManualSummary { get; set; } = 100;
 }
 
 public sealed class SftpImportConfig

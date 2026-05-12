@@ -32,7 +32,11 @@
     "batchSize": 20,
     "maxPendingCalls": 1000,
     "timeoutMs": 600000,
-    "maxRetries": 2
+    "maxRetries": 2,
+    "maxManualLookbackHours": 24,
+    "maxManualSummaryCalls": 300,
+    "maxManualSummaryWindows": 20,
+    "maxQueueDepthForManualSummary": 100
   },
   "sftpImport": {
     "enabled": true,

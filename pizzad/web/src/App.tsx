@@ -2688,7 +2688,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
         {transcription.provider === "none" && <p className="setting-note">New calls will be stored without transcription.</p>}
       </SettingsCard>
 
-      <SettingsCard title="Insights (LM Link)" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => saveWithTest("ai-insights")}>
+      <SettingsCard title="AI Insights" description="One switch controls all LLM usage: call summaries, incidents, and troubleshooting recommendations." busy={savingSection === "ai-insights"} testing={testingSection === "ai-insights"} status={sectionStatus["ai-insights"]} onSave={() => saveWithTest("ai-insights")} onTest={() => saveWithTest("ai-insights")}>
         <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={v => update("ai-insights", ["enabled"], v)} />
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint base URL, often an LM Studio server." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
         {aiInsights.enabled && aiModels.length > 0
@@ -2698,6 +2698,10 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
         <SettingInput label="API key" description="Optional bearer token. LM Studio local/link setups may leave this blank." type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
         <SettingInput label="Timeout (ms)" description="Maximum wait for a single LLM request." type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
+        <SettingInput label="Max manual lookback (hours)" description="Largest recent range allowed for Generate summaries/incidents. Keep this low on RPI/LM Link systems." type="number" value={aiInsights.maxManualLookbackHours ?? 24} onChange={v => update("ai-insights", ["maxManualLookbackHours"], numberOrZero(v))} />
+        <SettingInput label="Max manual calls" description="Hard stop before sending too many calls to the LLM in one generation job." type="number" value={aiInsights.maxManualSummaryCalls ?? 300} onChange={v => update("ai-insights", ["maxManualSummaryCalls"], numberOrZero(v))} />
+        <SettingInput label="Max manual windows" description="Hard stop on the number of LLM summary windows produced by one generation job." type="number" value={aiInsights.maxManualSummaryWindows ?? 20} onChange={v => update("ai-insights", ["maxManualSummaryWindows"], numberOrZero(v))} />
+        <SettingInput label="Max queue depth to run" description="Blocks manual generation while transcription/import backlog is above this value. Use 0 to disable this check." type="number" value={aiInsights.maxQueueDepthForManualSummary ?? 100} onChange={v => update("ai-insights", ["maxQueueDepthForManualSummary"], numberOrZero(v))} />
       </SettingsCard>
 
       <SettingsCard title="Alerts / Email" description="Outbound notification settings for live alert matches. Imported calls still store matches but suppress live notifications." busy={savingSection === "alerts"} testing={testingSection === "alerts"} status={sectionStatus.alerts} onSave={() => save("alerts")} onTest={() => saveWithTest("alerts")}>
