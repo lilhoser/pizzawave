@@ -992,7 +992,7 @@ function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
     <MetricTable title="Health Metrics" rows={data.health.metrics} />
     <MetricTable title="Systems" rows={data.health.systems} />
     <div className="remedy-list"><h3>Suggested Remedies</h3>{data.health.remedies.map(r => <div className={`remedy ${r.isIssue ? "issue" : ""}`} key={r.metric}><strong>{r.metric}</strong><p>{r.notes}</p></div>)}</div>
-    <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>Decode 0%</th><th>Avg decode</th><th>Retunes</th><th>No TX</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.decodeZeroPct.toFixed(1)}%</td><td>{r.decodeLines ? (r.decodeRateTotal / r.decodeLines).toFixed(2) : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
+    <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>Decode 0%</th><th>Avg decode</th><th>Retunes</th><th>No TX</th><th>Recorder exhausted</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.decodeZeroPct.toFixed(1)}%</td><td>{r.decodeLines ? (r.decodeRateTotal / r.decodeLines).toFixed(2) : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.recorderExhausted}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
   </div>;
 }
 

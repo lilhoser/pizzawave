@@ -187,6 +187,7 @@ public sealed class TrHealthCollector : BackgroundService
         || sample.CallsConcluded > 0
         || sample.UpdateNotGrant > 0
         || sample.NoTxRecorded > 0
+        || sample.RecorderExhausted > 0
         || sample.SampleStops > 0
         || sample.UnableSource > 0
         || sample.TuningErrSamples > 0;
@@ -235,8 +236,8 @@ public sealed class TrHealthCollector : BackgroundService
             NoTxRecorded = Count(log, "No Transmissions were recorded")
                 + Count(log, "no transmission")
                 + Count(log, "no tx")
-                + Count(log, "not recording transmission")
-                + Count(log, "only 0 recorders are available"),
+                + Count(log, "not recording transmission"),
+            RecorderExhausted = Count(log, "only 0 recorders are available"),
             SampleStops = Count(log, "has stopped receiving samples")
                 + Count(log, "sample stop")
                 + Count(log, "stopped samples"),

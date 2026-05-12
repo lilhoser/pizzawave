@@ -688,11 +688,11 @@ public sealed class EngineDatabase
         command.CommandText = """
             INSERT INTO tr_health_samples (
                 window_start_utc, window_end_utc, scope, decode_lines, decode_zero, decode_zero_pct,
-                decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded,
+                decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded, recorder_exhausted,
                 sample_stops, unable_source, tuning_err_samples, tuning_err_total_abs_hz, tuning_err_max_abs_hz)
             VALUES (
                 $window_start_utc, $window_end_utc, $scope, $decode_lines, $decode_zero, $decode_zero_pct,
-                $decode_rate_total, $retunes, $calls_started, $calls_concluded, $update_not_grant, $no_tx_recorded,
+                $decode_rate_total, $retunes, $calls_started, $calls_concluded, $update_not_grant, $no_tx_recorded, $recorder_exhausted,
                 $sample_stops, $unable_source, $tuning_err_samples, $tuning_err_total_abs_hz, $tuning_err_max_abs_hz);
             """;
         Add(command, "$window_start_utc", sample.WindowStartUtc.ToString("O"));
@@ -707,6 +707,7 @@ public sealed class EngineDatabase
         Add(command, "$calls_concluded", sample.CallsConcluded);
         Add(command, "$update_not_grant", sample.UpdateNotGrant);
         Add(command, "$no_tx_recorded", sample.NoTxRecorded);
+        Add(command, "$recorder_exhausted", sample.RecorderExhausted);
         Add(command, "$sample_stops", sample.SampleStops);
         Add(command, "$unable_source", sample.UnableSource);
         Add(command, "$tuning_err_samples", sample.TuningErrSamples);
@@ -784,6 +785,7 @@ public sealed class EngineDatabase
                 CallsConcluded = reader.GetInt32(reader.GetOrdinal("calls_concluded")),
                 UpdateNotGrant = reader.GetInt32(reader.GetOrdinal("update_not_grant")),
                 NoTxRecorded = reader.GetInt32(reader.GetOrdinal("no_tx_recorded")),
+                RecorderExhausted = reader.GetInt32(reader.GetOrdinal("recorder_exhausted")),
                 SampleStops = reader.GetInt32(reader.GetOrdinal("sample_stops")),
                 UnableSource = reader.GetInt32(reader.GetOrdinal("unable_source")),
                 TuningErrSamples = reader.GetInt32(reader.GetOrdinal("tuning_err_samples")),
@@ -1257,6 +1259,7 @@ public sealed class EngineDatabase
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "update_not_grant", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "no_tx_recorded", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "recorder_exhausted", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_samples", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_total_abs_hz", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_max_abs_hz", "REAL NOT NULL DEFAULT 0", ct);
@@ -1400,6 +1403,7 @@ public sealed class EngineDatabase
                   AND calls_concluded = 0
                   AND update_not_grant = 0
                   AND no_tx_recorded = 0
+                  AND recorder_exhausted = 0
                   AND sample_stops = 0
                   AND unable_source = 0
                   AND tuning_err_samples = 0;
@@ -1615,6 +1619,7 @@ public sealed class EngineDatabase
             calls_concluded INTEGER NOT NULL DEFAULT 0,
             update_not_grant INTEGER NOT NULL DEFAULT 0,
             no_tx_recorded INTEGER NOT NULL DEFAULT 0,
+            recorder_exhausted INTEGER NOT NULL DEFAULT 0,
             sample_stops INTEGER NOT NULL DEFAULT 0,
             unable_source INTEGER NOT NULL DEFAULT 0,
             tuning_err_samples INTEGER NOT NULL DEFAULT 0,

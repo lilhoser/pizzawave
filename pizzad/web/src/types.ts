@@ -172,6 +172,7 @@ export type TrHealth = {
   callsConcluded: number;
   updateNotGrant: number;
   noTxRecorded: number;
+  recorderExhausted: number;
   sampleStops: number;
   unableSource: number;
   tuningErrSamples: number;

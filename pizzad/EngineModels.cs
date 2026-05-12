@@ -302,6 +302,7 @@ public sealed record TrHealthSampleDto
     public int CallsConcluded { get; init; }
     public int UpdateNotGrant { get; init; }
     public int NoTxRecorded { get; init; }
+    public int RecorderExhausted { get; init; }
     public int SampleStops { get; init; }
     public int UnableSource { get; init; }
     public int TuningErrSamples { get; init; }

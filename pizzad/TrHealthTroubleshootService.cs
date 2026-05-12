@@ -250,7 +250,8 @@ public sealed class TrHealthTroubleshootService
         new("Decode sample lines", agg.DecodeSampleLines.ToString("N0", CultureInfo.InvariantCulture), "Decode-rate confidence is low when this is small (shown as N/A).", agg.DecodeSampleLines < 20),
         new("Control-channel retunes", agg.Retunes.ToString("N0", CultureInfo.InvariantCulture), "High counts can indicate weak/unstable control-channel reception or incorrect channel list.", agg.Retunes >= Math.Max(20, agg.Windows * 4)),
         new("Recorded calls concluded", agg.CallsConcluded.ToString("N0", CultureInfo.InvariantCulture), "Count of Concluding Recorded Call lines.", false),
-        new("No transmissions recorded", agg.NoTxRecorded.ToString("N0", CultureInfo.InvariantCulture), "Includes no transmissions and recorder capacity failures.", agg.NoTxRecorded > 0),
+        new("No transmissions recorded", agg.NoTxRecorded.ToString("N0", CultureInfo.InvariantCulture), "Calls where trunk-recorder reported no transmission audio was recorded.", agg.NoTxRecorded > 0),
+        new("Recorder capacity exhausted", agg.RecorderExhausted.ToString("N0", CultureInfo.InvariantCulture), "Calls dropped because all configured recorders for the needed source/system were busy.", agg.RecorderExhausted > 0),
         new("Sample-source stops", agg.SampleStops.ToString("N0", CultureInfo.InvariantCulture), "Nonzero means trunk-recorder reported a source stopped receiving samples.", agg.SampleStops > 0),
         new("No source covering frequency", agg.UnableSource.ToString("N0", CultureInfo.InvariantCulture), "Usually points to source min/max coverage or SDR count/configuration.", agg.UnableSource > 0),
         new("5-minute windows parsed", agg.Windows.ToString("N0", CultureInfo.InvariantCulture), "Number of summary buckets generated from logs.", false)
@@ -269,9 +270,10 @@ public sealed class TrHealthTroubleshootService
                     || agg.SampleStops > 0
                     || agg.UnableSource > 0
                     || agg.NoTxRecorded > 0
+                    || agg.RecorderExhausted > 0
                     || (agg.CallsConcluded >= 100 && HasSufficientDecodeSamples(agg) && agg.AvgDecodeRate <= 0.10)
                     || (agg.CallsConcluded >= 100 && agg.DecodeSampleLines < 20);
-                var notes = $"decodeSamples={agg.DecodeSampleLines:N0}, decode0={agg.DecodeZeroPercent:F2}%, avg={FormatDecodeRateWithConfidence(agg)}, retunes={agg.Retunes:N0}, calls={agg.CallsConcluded:N0}, noTx={agg.NoTxRecorded:N0}";
+                var notes = $"decodeSamples={agg.DecodeSampleLines:N0}, decode0={agg.DecodeZeroPercent:F2}%, avg={FormatDecodeRateWithConfidence(agg)}, retunes={agg.Retunes:N0}, calls={agg.CallsConcluded:N0}, noTx={agg.NoTxRecorded:N0}, recorderExhausted={agg.RecorderExhausted:N0}";
                 return new TrHealthMetricDto(g.Key, issue ? "Issues detected" : "No obvious issues", notes, issue);
             })
             .ToList();
@@ -291,7 +293,9 @@ public sealed class TrHealthTroubleshootService
         if (agg.UnableSource > 0)
             rows.Add(new("No source covering frequency", "-", "Check source min/max ranges and whether enough SDRs cover all voice channels.", true));
         if (agg.NoTxRecorded > 0)
-            rows.Add(new("No transmissions recorded", "-", "This can follow UPDATE-not-GRANT events, poor decode, or recorder contention.", true));
+            rows.Add(new("No transmissions recorded", "-", "This can follow UPDATE-not-GRANT events or poor decode where trunk-recorder starts a call but captures no usable transmission audio.", true));
+        if (agg.RecorderExhausted > 0)
+            rows.Add(new("Recorder capacity exhausted", "-", "Increase digitalRecorders or SDR coverage for busy systems; trunk-recorder reported calls it could not assign because no recorder was free.", true));
         if (rows.Count == 0)
             rows.Add(new("No obvious remedies", "-", "The current summary did not cross the built-in thresholds.", false));
         return rows;
@@ -321,6 +325,7 @@ public sealed class TrHealthTroubleshootService
             BuildChart("Average Decode Rate", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, [("", Hourly(global, hours, a => a.AvgDecodeRate))], baselineGlobal, baseline, a => a.AvgDecodeRate, BaselineIsRate: true),
             BuildChart("Control-Channel Retunes", "Y axis: retune events per hour", "N0", hours, [("", Hourly(global, hours, a => a.Retunes))], baselineGlobal, baseline, a => a.Retunes),
             BuildChart("No Transmissions Recorded", "Y axis: calls with no recorded transmissions per hour", "N0", hours, [("", Hourly(global, hours, a => a.NoTxRecorded))], baselineGlobal, baseline, a => a.NoTxRecorded),
+            BuildChart("Recorder Capacity Exhausted", "Y axis: calls dropped because no recorder was available per hour", "N0", hours, [("", Hourly(global, hours, a => a.RecorderExhausted))], baselineGlobal, baseline, a => a.RecorderExhausted),
             BuildChart("Sample Source Stops", "Y axis: source stopped receiving samples events per hour", "N0", hours, [("", Hourly(global, hours, a => a.SampleStops))], baselineGlobal, baseline, a => a.SampleStops)
         ];
     }
@@ -329,7 +334,7 @@ public sealed class TrHealthTroubleshootService
     {
         var scopes = rows.Where(r => IsDisplaySystemScope(r.Scope))
             .GroupBy(r => r.Scope, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(g => g.Sum(r => r.DecodeZero + r.Retunes + r.NoTxRecorded + r.SampleStops))
+            .OrderByDescending(g => g.Sum(r => r.DecodeZero + r.Retunes + r.NoTxRecorded + r.RecorderExhausted + r.SampleStops))
             .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
             .Take(3)
             .Select(g => g.Key)
@@ -346,6 +351,7 @@ public sealed class TrHealthTroubleshootService
             BuildChart("Average Decode Rate by System", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, Series(a => a.AvgDecodeRate), baselineRows, baseline, a => a.AvgDecodeRate, scopes, BaselineIsRate: true),
             BuildChart("Retunes by System", "Y axis: retune events per hour", "N0", hours, Series(a => a.Retunes), baselineRows, baseline, a => a.Retunes, scopes),
             BuildChart("No Transmissions by System", "Y axis: calls with no recorded transmissions per hour", "N0", hours, Series(a => a.NoTxRecorded), baselineRows, baseline, a => a.NoTxRecorded, scopes),
+            BuildChart("Recorder Capacity Exhausted by System", "Y axis: calls dropped because no recorder was available per hour", "N0", hours, Series(a => a.RecorderExhausted), baselineRows, baseline, a => a.RecorderExhausted, scopes),
             BuildChart("Sample Source Stops by System", "Y axis: source stopped receiving samples events per hour", "N0", hours, Series(a => a.SampleStops), baselineRows, baseline, a => a.SampleStops, scopes)
         ];
     }
@@ -483,6 +489,7 @@ public sealed class TrHealthTroubleshootService
         sb.AppendLine($"Control-channel retunes        {agg.Retunes}");
         sb.AppendLine($"Recorded calls concluded       {agg.CallsConcluded}");
         sb.AppendLine($"No transmissions recorded      {agg.NoTxRecorded}");
+        sb.AppendLine($"Recorder capacity exhausted    {agg.RecorderExhausted}");
         sb.AppendLine($"Sample-source stops            {agg.SampleStops}");
         sb.AppendLine($"No source covering frequency   {agg.UnableSource}");
         sb.AppendLine($"last window end: {last.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
@@ -702,6 +709,7 @@ public sealed class TrHealthTroubleshootService
             rows.Sum(r => r.CallsConcluded),
             rows.Sum(r => r.UpdateNotGrant),
             rows.Sum(r => r.NoTxRecorded),
+            rows.Sum(r => r.RecorderExhausted),
             rows.Sum(r => r.SampleStops),
             rows.Sum(r => r.UnableSource),
             null,
@@ -777,6 +785,7 @@ public sealed class TrHealthTroubleshootService
         int CallsConcluded,
         int UpdateNotGrant,
         int NoTxRecorded,
+        int RecorderExhausted,
         int SampleStops,
         int UnableSource,
         double? WeightedDecodeZeroPercent,
