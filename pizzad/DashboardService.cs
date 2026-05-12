@@ -4,8 +4,9 @@ namespace pizzad;
 
 public sealed class DashboardService
 {
-    private static readonly Regex AddressStreetRegex = new(@"\b\d{1,5}\s+(?:[a-z0-9]+\.?\s+){0,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex StreetRegex = new(@"\b(?:[a-z]+\.?\s+){1,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private const string DirectionalSuffixPattern = @"(?:\s+(?:n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest))?";
+    private static readonly Regex AddressStreetRegex = new(@"\b\d{1,5}\s+(?:[a-z0-9]+\.?\s+){0,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)" + DirectionalSuffixPattern + @"\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex StreetRegex = new(@"\b(?:[a-z]+\.?\s+){1,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)" + DirectionalSuffixPattern + @"\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HighwayRegex = new(@"\b(?:i[-\s]?\d{1,3}|interstate\s+\d{1,3}|us\s+\d{1,3}|hwy\s+\d{1,3}|highway\s+\d{1,3}|sr\s+\d{1,3}|state\s+route\s+\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex LocalPlaceRegex = new(@"\b(?:fort\s+oglethorpe|east\s+ridge|lookout\s+mountain|soddy[-\s]+daisy|signal\s+mountain|ooltewah|collegedale|hixson|cleveland|chattanooga)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex LocationSuffixRegex = new(@"\b(street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -211,11 +212,11 @@ public sealed class DashboardService
             if (incidentCalls.Count == 0)
                 continue;
 
-            var area = ResolveIncidentArea(incidentCalls, areaRows);
+            var text = $"{incident.Title}. {incident.Detail}";
+            var area = ResolveIncidentArea(incidentCalls, areaRows, text);
             if (area == null)
                 continue;
 
-            var text = $"{incident.Title}. {incident.Detail}";
             foreach (var location in ExtractLocations(text))
             {
                 foreach (var call in incidentCalls)
@@ -329,8 +330,16 @@ public sealed class DashboardService
                 system.Contains(alias, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static MonitoredAreaConfig? ResolveIncidentArea(List<EngineCall> calls, IReadOnlyList<MonitoredAreaConfig> areas)
+    private static MonitoredAreaConfig? ResolveIncidentArea(List<EngineCall> calls, IReadOnlyList<MonitoredAreaConfig> areas, string incidentText)
     {
+        var incidentKey = NormalizeLocationKey(incidentText);
+        var mentionedArea = areas.FirstOrDefault(area =>
+            Mentioned(incidentKey, area.AreaLabel) ||
+            Mentioned(incidentKey, area.SystemShortName) ||
+            area.Aliases.Any(alias => Mentioned(incidentKey, alias)));
+        if (mentionedArea != null)
+            return mentionedArea;
+
         return calls
             .Select(c => ResolveArea(c.SystemShortName, areas))
             .Where(a => a != null)
@@ -339,6 +348,15 @@ public sealed class DashboardService
             .OrderByDescending(g => g.Count())
             .Select(g => g.First())
             .FirstOrDefault();
+    }
+
+    private static bool Mentioned(string normalizedText, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        var normalizedValue = NormalizeLocationKey(value);
+        return !string.IsNullOrWhiteSpace(normalizedValue) &&
+               Regex.IsMatch(normalizedText, $@"\b{Regex.Escape(normalizedValue)}\b", RegexOptions.IgnoreCase);
     }
 
     private static IEnumerable<string> ExtractLocations(string transcription)
