@@ -763,7 +763,7 @@ app.MapPost("/api/v1/settings/transcription/models/{model}/download", async (Htt
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     try
     {
-        return Results.Ok(await validation.DownloadWhisperModelAsync(model, context.RequestAborted));
+        return Results.Ok(await validation.StartModelDownloadAsync(model, context.RequestAborted));
     }
     catch (Exception ex)
     {

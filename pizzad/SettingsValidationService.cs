@@ -12,6 +12,7 @@ public sealed class SettingsValidationService
 {
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
+    private readonly ILogger<SettingsValidationService> _logger;
     private static readonly SemaphoreSlim ModelDownloadLock = new(1, 1);
 
     private static readonly Dictionary<string, string> WhisperModels = new(StringComparer.OrdinalIgnoreCase)
@@ -27,10 +28,11 @@ public sealed class SettingsValidationService
         ["small-en-us"] = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
     };
 
-    public SettingsValidationService(EngineConfig config, EngineDatabase database)
+    public SettingsValidationService(EngineConfig config, EngineDatabase database, ILogger<SettingsValidationService> logger)
     {
         _config = config;
         _database = database;
+        _logger = logger;
     }
 
     public async Task<object> TestAsync(string section, CancellationToken ct)
@@ -62,10 +64,10 @@ public sealed class SettingsValidationService
         return whisper.Concat(vosk);
     }
 
-    public async Task<object> DownloadWhisperModelAsync(string model, CancellationToken ct)
+    public async Task<object> StartModelDownloadAsync(string model, CancellationToken ct)
     {
         if (model.StartsWith("vosk-", StringComparison.OrdinalIgnoreCase))
-            return await DownloadVoskModelAsync(model["vosk-".Length..], ct);
+            return await StartVoskModelDownloadAsync(model["vosk-".Length..], ct);
         if (model.StartsWith("whisper-", StringComparison.OrdinalIgnoreCase))
             model = model["whisper-".Length..];
         if (!WhisperModels.TryGetValue(model, out var url))
@@ -84,6 +86,27 @@ public sealed class SettingsValidationService
         if (!await ModelDownloadLock.WaitAsync(0, ct))
             return new { ok = false, message = "Another model download is already running. Wait for it to finish before starting another." };
 
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DownloadWhisperModelCoreAsync(model, url, path, tmp, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Whisper model download failed for {Model}", model);
+            }
+            finally
+            {
+                ModelDownloadLock.Release();
+            }
+        }, CancellationToken.None);
+
+        return new { ok = true, message = $"Started Whisper {model} download. It will continue in the background.", path };
+    }
+
+    private async Task DownloadWhisperModelCoreAsync(string model, string url, string path, string tmp, CancellationToken ct)
+    {
         try
         {
             if (File.Exists(tmp))
@@ -97,17 +120,13 @@ public sealed class SettingsValidationService
                 await input.CopyToAsync(output, ct);
             }
             File.Move(tmp, path, overwrite: true);
-            return new { ok = true, message = $"Downloaded Whisper {model}.", path };
+            _logger.LogInformation("Downloaded Whisper model {Model} to {Path}", model, path);
         }
         catch
         {
             if (File.Exists(tmp))
                 File.Delete(tmp);
             throw;
-        }
-        finally
-        {
-            ModelDownloadLock.Release();
         }
     }
 
@@ -316,10 +335,37 @@ public sealed class SettingsValidationService
         };
     }
 
-    private async Task<object> DownloadVoskModelAsync(string model, CancellationToken ct)
+    private async Task<object> StartVoskModelDownloadAsync(string model, CancellationToken ct)
     {
         if (!VoskModels.TryGetValue(model, out var url))
             return new { ok = false, message = "Unknown Vosk model." };
+        var path = VoskModelPath(model);
+        if (Directory.Exists(path))
+            return new { ok = true, message = $"Vosk {model} is already downloaded.", path };
+        if (!await ModelDownloadLock.WaitAsync(0, ct))
+            return new { ok = false, message = "Another model download is already running. Wait for it to finish before starting another." };
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DownloadVoskModelCoreAsync(model, url, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Vosk model download failed for {Model}", model);
+            }
+            finally
+            {
+                ModelDownloadLock.Release();
+            }
+        }, CancellationToken.None);
+
+        return new { ok = true, message = $"Started Vosk {model} download. It will continue in the background.", path };
+    }
+
+    private async Task DownloadVoskModelCoreAsync(string model, string url, CancellationToken ct)
+    {
         Directory.CreateDirectory(VoskModelDirectory());
         var zip = Path.Combine(VoskModelDirectory(), $"{model}.zip.download");
         using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
@@ -331,7 +377,7 @@ public sealed class SettingsValidationService
             Directory.Delete(path, recursive: true);
         ZipFile.ExtractToDirectory(zip, VoskModelDirectory(), overwriteFiles: true);
         File.Delete(zip);
-        return new { ok = true, message = $"Downloaded Vosk {model}.", path };
+        _logger.LogInformation("Downloaded Vosk model {Model} to {Path}", model, path);
     }
 
     private object DeleteVoskModel(string model)
