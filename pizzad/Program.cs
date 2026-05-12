@@ -526,6 +526,29 @@ app.MapGet("/api/v1/system/runtime", async (HttpContext context, AuthService aut
 .WithName("SystemRuntime")
 .WithOpenApi();
 
+app.MapPost("/api/v1/system/services/{service}/restart", async (string service, HttpContext context, AuthService authService, SetupJobService jobs) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    var action = service.Trim().ToLowerInvariant() switch
+    {
+        "pizzad" => "restart-pizzad",
+        "tr" or "trunk-recorder" or "trunkrecorder" => "restart-tr",
+        _ => string.Empty
+    };
+    if (string.IsNullOrWhiteSpace(action))
+        return Results.BadRequest(new { message = "Unsupported service restart target." });
+    try
+    {
+        return Results.Ok(await jobs.StartAsync(action, confirmed: true, parameters: null, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SystemServiceRestart")
+.WithOpenApi();
+
 app.MapGet("/api/v1/profiles", (HttpContext context, AuthService authService, EngineConfig cfg) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

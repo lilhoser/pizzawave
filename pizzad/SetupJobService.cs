@@ -113,6 +113,7 @@ public sealed class SetupJobService
             "prepare-existing-tr" => ("setup_prepare_existing_tr", "Backing up TR and removing legacy pizzapi/tr-health artifacts.", 2),
             "remove-legacy-pizzapi" => ("setup_remove_legacy_pizzapi", "Removing legacy pizzapi/tr-health artifacts while preserving trunk-recorder.", 1),
             "restart-pizzad" => ("setup_restart_pizzad", "Restarting pizzad and verifying service health.", 2),
+            "restart-tr" => ("system_restart_tr", "Restarting trunk-recorder service.", 1),
             "lmstudio-prime" => ("setup_lmstudio_prime", "Installing/checking LM Studio CLI and LM Link service support.", 3),
             "sdr-prime" => ("setup_sdr_prime", "Installing/checking RTL-SDR and GQRX tooling.", 5),
             "tr-stop-for-calibration" => ("setup_tr_stop_for_calibration", "Stopping trunk-recorder so GQRX can use the SDRs.", 1),
@@ -168,6 +169,9 @@ public sealed class SetupJobService
                     break;
                 case "restart-pizzad":
                     await RunRestartPizzadAsync(jobId, ct);
+                    break;
+                case "restart-tr":
+                    await RunRestartTrAsync(jobId, ct);
                     break;
                 case "lmstudio-prime":
                     await RunLmStudioPrimeAsync(jobId, ct);
@@ -244,6 +248,13 @@ public sealed class SetupJobService
         await _database.UpdateJobAsync(jobId, "running", 2, 1, 0, "Restart requested. Waiting for pizzad health.", false, false, ct);
         await LogAsync(jobId, "info", "Restart requested. The job may finish after the service comes back and resumes background work.", ct);
         await _database.UpdateJobAsync(jobId, "completed", 2, 2, 0, "pizzad restart requested. Verify health after the page reconnects.", false, true, ct);
+        await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
+    }
+
+    private async Task RunRestartTrAsync(long jobId, CancellationToken ct)
+    {
+        await RunAdminHelperAsync(jobId, "restart-tr", ct);
+        await _database.UpdateJobAsync(jobId, "completed", 1, 1, 0, "trunk-recorder restart requested.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 

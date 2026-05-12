@@ -773,6 +773,8 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
   const [tokenUsage, setTokenUsage] = useState<TokenUsageReport | null>(null);
   const [insightText, setInsightText] = useState("");
   const [insightBusy, setInsightBusy] = useState(false);
+  const [restartBusy, setRestartBusy] = useState<"" | "pizzad" | "trunk-recorder">("");
+  const [restartMessages, setRestartMessages] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (topTab !== "pizzad") return;
@@ -805,6 +807,19 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
       setInsightBusy(false);
     }
   }
+  async function restartService(service: "pizzad" | "trunk-recorder") {
+    setRestartBusy(service);
+    setRestartMessages(current => ({ ...current, [service]: `Restarting ${service === "pizzad" ? "pizzad" : "trunk-recorder"}...` }));
+    try {
+      const job = await api.request<Job>(`/api/v1/system/services/${service}/restart`, { method: "POST" });
+      setRestartMessages(current => ({ ...current, [service]: `Restart queued as job ${job.id}.` }));
+      setTimeout(() => void reload(), service === "pizzad" ? 6000 : 1500);
+    } catch (error) {
+      setRestartMessages(current => ({ ...current, [service]: error instanceof Error ? error.message : "Restart failed." }));
+    } finally {
+      setRestartBusy("");
+    }
+  }
   return (
     <div className="trouble-page">
       <div className="trouble-tabs">
@@ -821,13 +836,21 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
           <button className={pizzadTab === "jobs" ? "active" : ""} onClick={() => setPizzadTab("jobs")}>Queue / Jobs</button>
           <button className={pizzadTab === "quality" ? "active" : ""} onClick={() => setPizzadTab("quality")}>Pizzad Quality</button>
         </div>
-        {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} />}
+        {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} restartBusy={restartBusy === "pizzad"} restartMessage={restartMessages.pizzad ?? ""} onRestart={() => restartService("pizzad")} />}
         {pizzadTab === "storage" && <PizzadStorageManager runtime={runtime} />}
         {pizzadTab === "imports" && <ImportsPanel reload={reload} engineHealth={engineHealth} />}
         {pizzadTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
         {pizzadTab === "quality" && <QualityAuditView data={data} />}
       </div>}
       {topTab === "tr" && <div className="trouble-panel">
+        <div className="system-action-bar">
+          <div>
+            <strong>Trunk Recorder</strong>
+            <small>Restart after TR config, source, or calibration changes.</small>
+          </div>
+          <button className="danger-button" disabled={restartBusy === "trunk-recorder"} onClick={() => void restartService("trunk-recorder")}>{restartBusy === "trunk-recorder" ? "Restarting..." : "Restart Trunk Recorder"}</button>
+          {restartMessages["trunk-recorder"] && <span className={restartMessages["trunk-recorder"].includes("failed") || restartMessages["trunk-recorder"].includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessages["trunk-recorder"]}</span>}
+        </div>
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
@@ -856,10 +879,18 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
   );
 }
 
-function PizzadServiceManager({ runtime }: { runtime: any | null }) {
+function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart }: { runtime: any | null; restartBusy: boolean; restartMessage: string; onRestart: () => void }) {
   if (!runtime) return <div className="card">Loading service status...</div>;
   const services = [runtime.service?.pizzad, runtime.service?.trunkRecorder].filter(Boolean);
   return <div className="system-manager-grid">
+    <div className="system-action-bar">
+      <div>
+        <strong>Pizzad</strong>
+        <small>Restart after settings that affect engine startup, transcription workers, or service environment.</small>
+      </div>
+      <button className="danger-button" disabled={restartBusy} onClick={onRestart}>{restartBusy ? "Restarting..." : "Restart Pizzad"}</button>
+      {restartMessage && <span className={restartMessage.includes("failed") || restartMessage.includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessage}</span>}
+    </div>
     <div className="audit-kpis">
       <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} subtext={runtime.service?.pizzad?.enabled || "systemd enabled state"} />
       <Kpi label="TR Service" value={runtime.service?.trunkRecorder?.active || "unknown"} subtext={runtime.service?.trunkRecorder?.unit || "configured trunk-recorder unit"} />
