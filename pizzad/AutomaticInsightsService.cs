@@ -10,7 +10,12 @@ namespace pizzad;
 public sealed class AutomaticInsightsService : BackgroundService
 {
     private const int DefaultBatchSize = 50;
-    private const int MaxPromptChars = 120_000;
+    private const int NormalPromptCharLimit = 24_000;
+    private const int CompactPromptCharLimit = 12_000;
+    private const int NormalTranscriptCharLimit = 500;
+    private const int CompactTranscriptCharLimit = 220;
+    private const int NormalMaxOutputTokens = 2_000;
+    private const int CompactMaxOutputTokens = 1_200;
     private const double IncidentCallEventThreshold = 0.24;
     private const double IncidentCorroborationPairThreshold = 0.12;
     private const double IncidentPairThreshold = 0.34;
@@ -72,7 +77,7 @@ public sealed class AutomaticInsightsService : BackgroundService
 
         var start = calls.Min(c => c.StartTime);
         var end = calls.Max(c => Math.Max(c.StartTime, c.StopTime));
-        var result = await SummarizeWindowAsync(calls, start, end, ct);
+        var result = await SummarizeWindowAsync(calls, start, end, InsightPromptMode.CompactManual, ct);
         var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
         await PersistInsightEventsAsync(windowId, result, calls, ct);
         var incidents = await PersistIncidentsAsync(result, calls, ct);
@@ -160,7 +165,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         var end = batch.Max(c => Math.Max(c.StartTime, c.StopTime));
         try
         {
-            var result = await SummarizeWindowAsync(batch, start, end, ct);
+            var result = await SummarizeWindowAsync(batch, start, end, InsightPromptMode.NormalLive, ct);
             var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
             await PersistInsightEventsAsync(windowId, result, batch, ct);
             var incidents = await PersistIncidentsAsync(result, batch, ct);
@@ -276,8 +281,9 @@ public sealed class AutomaticInsightsService : BackgroundService
             _logger.LogInformation("Persisted 0 insight events for window {WindowId}; summary was: {Summary}", windowId, Trim(result.SummaryText, 300));
     }
 
-    private async Task<InsightResult> SummarizeWindowAsync(List<EngineCall> calls, long start, long end, CancellationToken ct)
+    private async Task<InsightResult> SummarizeWindowAsync(List<EngineCall> calls, long start, long end, InsightPromptMode mode, CancellationToken ct)
     {
+        var budget = PromptBudget.For(mode);
         var baseUrl = InsightBaseUrl().TrimEnd('/');
         var endpoint = $"{baseUrl}/chat/completions";
         using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, _config.AiInsights.TimeoutMs)) };
@@ -289,7 +295,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             model = InsightModel(),
             temperature = 0.1,
-            max_tokens = 8000,
+            max_tokens = budget.MaxOutputTokens,
             response_format = InsightResponseFormat(),
             messages = new[]
             {
@@ -298,12 +304,12 @@ public sealed class AutomaticInsightsService : BackgroundService
                     role = "system",
                     content = "You summarize radio call transcripts into concise, actionable category insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include one or more matching call_ids copied exactly from the provided call lines. Extract useful intelligence from radio shorthand when supported by context, including common 10-codes, status codes, disposition codes, and spoken numeric codes such as 10-7, 10-49, 1049, code 16, signal codes, unit status, locations, hazards, vehicles, people, and outcomes. Preserve the original code in detail text when its meaning is uncertain; do not invent local code meanings. Omit routine acknowledgements and 'no incident' findings."
                 },
-                new { role = "user", content = BuildPrompt(calls, start, end) }
+                new { role = "user", content = BuildPrompt(calls, start, end, budget) }
             }
         };
 
         var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
-        _logger.LogInformation("Calling LM Studio insights endpoint {Endpoint} with model {Model} for {Calls} calls ({PayloadChars} chars)", endpoint, InsightModel(), calls.Count, payload.Length);
+        _logger.LogInformation("Calling LM Studio insights endpoint {Endpoint} with model {Model} for {Calls} calls ({PayloadChars} chars, mode={Mode}, promptLimit={PromptLimit}, transcriptLimit={TranscriptLimit}, maxTokens={MaxTokens})", endpoint, InsightModel(), calls.Count, payload.Length, mode, budget.PromptCharLimit, budget.TranscriptCharLimit, budget.MaxOutputTokens);
         Exception? last = null;
         for (var attempt = 0; attempt <= Math.Max(0, _config.AiInsights.MaxRetries); attempt++)
         {
@@ -388,7 +394,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         return 0;
     }
 
-    private string BuildPrompt(List<EngineCall> calls, long start, long end)
+    private string BuildPrompt(List<EngineCall> calls, long start, long end, PromptBudget budget)
     {
         var sb = new StringBuilder();
         var targetEventCount = calls.Count switch
@@ -426,8 +432,8 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
             var prefix = call.IsAlertMatch ? "[ALERT] " : string.Empty;
-            var line = $"- [id:{CallToken(call.Id)}] [{local:h:mm tt}] {call.SystemShortName} | {Label(call)}: {prefix}{call.Transcription}";
-            if (usedChars + line.Length + Environment.NewLine.Length > MaxPromptChars)
+            var line = $"- [id:{CallToken(call.Id)}] [{local:h:mm tt}] {call.SystemShortName} | {Label(call)}: {prefix}{Trim(call.Transcription, budget.TranscriptCharLimit)}";
+            if (usedChars + line.Length + Environment.NewLine.Length > budget.PromptCharLimit)
                 break;
 
             lines.Add(line);
@@ -435,7 +441,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         }
 
         var omitted = Math.Max(0, calls.Count - lines.Count);
-        sb.AppendLine($"Analyzing {lines.Count} calls (alerts prioritized, prompt budget {MaxPromptChars:N0} chars, omitted {omitted}):");
+        sb.AppendLine($"Analyzing {lines.Count} calls (alerts prioritized, prompt budget {budget.PromptCharLimit:N0} chars, transcript trim {budget.TranscriptCharLimit:N0} chars, omitted {omitted}):");
         foreach (var line in lines)
             sb.AppendLine(line);
 
@@ -694,4 +700,13 @@ public sealed class AutomaticInsightsService : BackgroundService
     private sealed record InsightResult(string SummaryText, List<InsightEvent> Events);
     private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds, List<CallEvidence> CallEvidence);
     private sealed record CallEvidence(string CallId, string Evidence);
+    private enum InsightPromptMode { NormalLive, CompactManual }
+    private sealed record PromptBudget(int PromptCharLimit, int TranscriptCharLimit, int MaxOutputTokens)
+    {
+        public static PromptBudget For(InsightPromptMode mode) => mode switch
+        {
+            InsightPromptMode.CompactManual => new PromptBudget(CompactPromptCharLimit, CompactTranscriptCharLimit, CompactMaxOutputTokens),
+            _ => new PromptBudget(NormalPromptCharLimit, NormalTranscriptCharLimit, NormalMaxOutputTokens)
+        };
+    }
 }
