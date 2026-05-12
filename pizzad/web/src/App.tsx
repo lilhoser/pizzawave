@@ -170,13 +170,16 @@ function App() {
   const queueDepth = engineHealth?.queueDepth ?? 0;
   const queueBlocked = Boolean(engineHealth?.workBlockedReason);
   const queueHealth = queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
-  const queueHealthText = queueHealth === "clear" ? "Queue OK" : queueHealth === "pressure" ? `Queue pressure ${queueDepth.toLocaleString()}` : `Queue draining ${queueDepth.toLocaleString()}`;
-  const transcriptionRateTitle = engineHealth
-    ? `${engineHealth.recentCallsIngested.toLocaleString()} calls ingested and ${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s).`
-    : "Recent transcription throughput.";
-  const transcriptionRateText = engineHealth
-    ? `Transcribe ${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min of ${engineHealth.recentIngestPerMinute.toFixed(1)}/min`
-    : "Transcribe --/min";
+  const transcribedPerMinute = engineHealth?.recentTranscribedPerMinute ?? 0;
+  const queueRateSuffix = engineHealth ? ` (${transcribedPerMinute.toFixed(1)}/min)` : "";
+  const queueHealthText = queueHealth === "clear"
+    ? `Queue OK${queueRateSuffix}`
+    : queueHealth === "pressure"
+      ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}`
+      : `Queue draining ${queueDepth.toLocaleString()}${queueRateSuffix}`;
+  const queueHealthTitle = engineHealth
+    ? `${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min) and ${engineHealth.recentCallsIngested.toLocaleString()} calls ingested (${engineHealth.recentIngestPerMinute.toFixed(1)}/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${engineHealth.workBlockedReason ?? ""}`.trim()
+    : "Transcription queue is clear.";
 
   const inSetup = Boolean(setupStatus && !setupStatus.completed);
 
@@ -235,8 +238,7 @@ function App() {
         <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
         <span className="pill">Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</span>
         <span className="pill">Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</span>
-        <span className="pill" title={transcriptionRateTitle}>{transcriptionRateText}</span>
-        <span className={`pill queue-health queue-${queueHealth}`} title={engineHealth?.workBlockedReason ?? "Transcription queue is clear."}>{queueHealthText}</span>
+        <span className={`pill queue-health queue-${queueHealth}`} title={queueHealthTitle}>{queueHealthText}</span>
         {activeJobCount > 0 && <span className="pill">Jobs {activeJobCount}</span>}
       </footer>}
     </div>
