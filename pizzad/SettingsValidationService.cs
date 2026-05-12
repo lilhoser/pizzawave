@@ -14,6 +14,8 @@ public sealed class SettingsValidationService
     private readonly EngineDatabase _database;
     private readonly ILogger<SettingsValidationService> _logger;
     private static readonly SemaphoreSlim ModelDownloadLock = new(1, 1);
+    private static readonly HashSet<string> ActiveModelDownloads = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object ActiveModelDownloadsGate = new();
 
     private static readonly Dictionary<string, string> WhisperModels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -98,10 +100,12 @@ public sealed class SettingsValidationService
             }
             finally
             {
+                MarkDownloadInactive($"whisper-{model}");
                 ModelDownloadLock.Release();
             }
         }, CancellationToken.None);
 
+        MarkDownloadActive($"whisper-{model}");
         return new { ok = true, message = $"Started Whisper {model} download. It will continue in the background.", path };
     }
 
@@ -316,23 +320,45 @@ public sealed class SettingsValidationService
 
     private static object ModelRow(string engine, string id, string label, string path, long bytes)
     {
-        var downloading = engine == "whisper" && File.Exists($"{path}.download");
+        var modelId = $"{engine}-{id}";
+        var partialPath = engine == "whisper" ? $"{path}.download" : Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, $"{id}.zip.download");
+        var downloading = File.Exists(partialPath);
         var installed = engine == "whisper" ? File.Exists(path) : Directory.Exists(path);
+        var activeDownload = IsDownloadActive(modelId);
         var displayBytes = installed
             ? bytes
             : downloading
-                ? new FileInfo($"{path}.download").Length
+                ? new FileInfo(partialPath).Length
                 : 0;
         return new
         {
-            id = $"{engine}-{id}",
+            id = modelId,
             engine,
             label,
             path,
             installed,
             downloading,
+            activeDownload,
             bytes = displayBytes
         };
+    }
+
+    private static void MarkDownloadActive(string modelId)
+    {
+        lock (ActiveModelDownloadsGate)
+            ActiveModelDownloads.Add(modelId);
+    }
+
+    private static void MarkDownloadInactive(string modelId)
+    {
+        lock (ActiveModelDownloadsGate)
+            ActiveModelDownloads.Remove(modelId);
+    }
+
+    private static bool IsDownloadActive(string modelId)
+    {
+        lock (ActiveModelDownloadsGate)
+            return ActiveModelDownloads.Contains(modelId);
     }
 
     private async Task<object> StartVoskModelDownloadAsync(string model, CancellationToken ct)
@@ -357,10 +383,12 @@ public sealed class SettingsValidationService
             }
             finally
             {
+                MarkDownloadInactive($"vosk-{model}");
                 ModelDownloadLock.Release();
             }
         }, CancellationToken.None);
 
+        MarkDownloadActive($"vosk-{model}");
         return new { ok = true, message = $"Started Vosk {model} download. It will continue in the background.", path };
     }
 

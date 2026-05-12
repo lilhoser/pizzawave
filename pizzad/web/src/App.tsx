@@ -2898,13 +2898,22 @@ function ModelManager({ engine, rows, busy, selectedPath, onUse, onDownload, onD
   if (!rows.length) return null;
   const anyBusy = Boolean(busy);
   return <div className="model-manager">
-    {rows.map(row => <div className="model-row" key={row.id}>
-      <span><strong>{row.label}</strong><small>{row.installed ? `${formatBytes(row.bytes)} installed${row.path === selectedPath ? " - selected" : ""}` : row.downloading ? `Partial download: ${formatBytes(row.bytes)}` : "Not installed"}</small></span>
+    {rows.map(row => {
+      const status = row.installed
+        ? `${formatBytes(row.bytes)} installed${row.path === selectedPath ? " - selected" : ""}`
+        : row.activeDownload
+          ? `Downloading: ${formatBytes(row.bytes)}`
+          : row.downloading
+            ? `Partial download: ${formatBytes(row.bytes)}`
+            : "Not installed";
+      return <div className="model-row" key={row.id}>
+      <span><strong>{row.label}</strong><small>{status}</small></span>
       <div>
         {row.installed && <button disabled={anyBusy} onClick={() => onUse(row.path)}>Use</button>}
-        {row.installed ? <button disabled={anyBusy} onClick={() => void onDelete(row.id)}>{busy === row.id ? "Removing..." : "Remove"}</button> : <button disabled={anyBusy} onClick={() => void onDownload(row.id)}>{busy === row.id ? "Downloading..." : row.downloading ? "Retry" : "Download"}</button>}
+        {row.installed ? <button disabled={anyBusy} onClick={() => void onDelete(row.id)}>{busy === row.id ? "Removing..." : "Remove"}</button> : <button disabled={anyBusy || row.activeDownload} onClick={() => void onDownload(row.id)}>{busy === row.id || row.activeDownload ? "Downloading..." : row.downloading ? "Retry" : "Download"}</button>}
       </div>
-    </div>)}
+    </div>;
+    })}
   </div>;
 }
 
