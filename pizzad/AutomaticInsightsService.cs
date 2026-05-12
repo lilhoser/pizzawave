@@ -25,6 +25,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private readonly object _gate = new();
     private string? _priorSummary;
     private DateTimeOffset _nextAttemptAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _nextQueueGateLogAt = DateTimeOffset.MinValue;
     private int _failureStreak;
 
     public AutomaticInsightsService(
@@ -123,6 +124,24 @@ public sealed class AutomaticInsightsService : BackgroundService
     {
         if (DateTimeOffset.UtcNow < _nextAttemptAt)
             return;
+
+        var maxQueueDepth = _config.AiInsights.MaxQueueDepthForManualSummary;
+        if (maxQueueDepth > 0)
+        {
+            var pendingTranscriptions = await _database.CountPendingTranscriptionCallsAsync(ct);
+            if (pendingTranscriptions > maxQueueDepth)
+            {
+                if (DateTimeOffset.UtcNow >= _nextQueueGateLogAt)
+                {
+                    _logger.LogInformation(
+                        "Automatic AI insights paused while transcription backlog is high: {Pending:N0} pending call(s), configured limit {Limit:N0}",
+                        pendingTranscriptions,
+                        maxQueueDepth);
+                    _nextQueueGateLogAt = DateTimeOffset.UtcNow.AddMinutes(1);
+                }
+                return;
+            }
+        }
 
         List<EngineCall> batch;
         lock (_gate)

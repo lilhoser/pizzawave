@@ -265,6 +265,19 @@ public sealed class EngineDatabase
         return calls;
     }
 
+    public async Task<long> CountPendingTranscriptionCallsAsync(CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM calls
+            WHERE transcription_status='pending'
+              AND length(trim(audio_path)) > 0;
+            """;
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct));
+    }
+
     public async Task<List<EngineCall>> ListTranscriptionErrorCallsAsync(int limit, CancellationToken ct)
     {
         await using var connection = OpenConnection();
