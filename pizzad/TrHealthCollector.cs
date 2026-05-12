@@ -77,9 +77,10 @@ public sealed class TrHealthCollector : BackgroundService
         var samplesWritten = 1;
         await _database.InsertHealthSampleAsync(global, ct);
 
+        var logLines = log.Split('\n');
         foreach (var scope in ExtractSystemScopes(log))
         {
-            var scopedLines = string.Join('\n', log.Split('\n').Where(line => line.Contains($"[{scope}]", StringComparison.OrdinalIgnoreCase)));
+            var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractSystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
             if (scopedLines.Length == 0)
                 continue;
             await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
@@ -222,7 +223,7 @@ public sealed class TrHealthCollector : BackgroundService
         {
             WindowStartUtc = startUtc,
             WindowEndUtc = endUtc,
-            Scope = scope,
+            Scope = NormalizeScope(scope),
             DecodeLines = decodeLines,
             DecodeZero = decodeZero,
             DecodeZeroPct = decodeLines == 0 ? 0 : decodeZero * 100.0 / decodeLines,
@@ -247,12 +248,20 @@ public sealed class TrHealthCollector : BackgroundService
     }
 
     private static IReadOnlyList<string> ExtractSystemScopes(string log) =>
-        SystemScopeRegex.Matches(log)
-            .Select(m => m.Groups["scope"].Value)
+        log.Split('\n')
+            .Select(ExtractSystemScope)
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Where(s => !s.All(char.IsDigit) && !s.StartsWith("source", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static string ExtractSystemScope(string line)
+    {
+        var match = SystemScopeRegex.Match(line);
+        return match.Success ? NormalizeScope(match.Groups["scope"].Value) : string.Empty;
+    }
+
+    private static string NormalizeScope(string scope) => scope.Trim();
 
     private static int Count(string haystack, string needle) =>
         Regex.Matches(haystack, Regex.Escape(needle), RegexOptions.IgnoreCase).Count;

@@ -1313,6 +1313,7 @@ public sealed class EngineDatabase
             CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id, id);
             """, ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
+        await NormalizeTrHealthScopesAsync(connection, ct);
         await RemoveDuplicateIncidentCallLinksAsync(connection, ct);
         await RemoveInvalidIncidentLinksAsync(connection, ct);
     }
@@ -1382,6 +1383,41 @@ public sealed class EngineDatabase
                 .Select(g => $"{g.Key}:{g.Count():N0}");
             _logger.LogInformation("Reclassified {Count:N0} existing calls for transcription quality ({Reasons})", updates.Count, string.Join(", ", byReason));
         }
+    }
+
+    private async Task NormalizeTrHealthScopesAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using (var deleteEmptyWhitespaceScopes = connection.CreateCommand())
+        {
+            deleteEmptyWhitespaceScopes.CommandText = """
+                DELETE FROM tr_health_samples
+                WHERE scope != trim(scope)
+                  AND decode_lines = 0
+                  AND decode_zero = 0
+                  AND decode_rate_total = 0
+                  AND retunes = 0
+                  AND calls_started = 0
+                  AND calls_concluded = 0
+                  AND update_not_grant = 0
+                  AND no_tx_recorded = 0
+                  AND sample_stops = 0
+                  AND unable_source = 0
+                  AND tuning_err_samples = 0;
+                """;
+            var removed = await deleteEmptyWhitespaceScopes.ExecuteNonQueryAsync(ct);
+            if (removed > 0)
+                _logger.LogInformation("Removed {Count:N0} empty TR health sample(s) with whitespace-padded scope names", removed);
+        }
+
+        await using var trimScopes = connection.CreateCommand();
+        trimScopes.CommandText = """
+            UPDATE tr_health_samples
+            SET scope = trim(scope)
+            WHERE scope != trim(scope);
+            """;
+        var normalized = await trimScopes.ExecuteNonQueryAsync(ct);
+        if (normalized > 0)
+            _logger.LogInformation("Normalized {Count:N0} TR health sample scope name(s)", normalized);
     }
 
     private async Task RemoveInvalidIncidentLinksAsync(SqliteConnection connection, CancellationToken ct)

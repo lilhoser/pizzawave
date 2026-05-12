@@ -7,7 +7,7 @@ public sealed record TranscriptionQuality(string Status, string Reason, bool Inc
 public static class TranscriptionQualityClassifier
 {
     private static readonly Regex FailurePattern = new(
-        @"\b(failed|error|exception|unable to transcribe)\b",
+        @"\b(transcription failed|transcribe failed|ffmpeg failed|exception|unable to transcribe|unable to normalize whisper audio)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex InaudiblePattern = new(
@@ -28,12 +28,13 @@ public static class TranscriptionQualityClassifier
 
     public static TranscriptionQuality Classify(string? transcript, string? statusHint = null)
     {
-        if (string.Equals(statusHint, "failed", StringComparison.OrdinalIgnoreCase))
-            return new("failed", "transcription_error", false);
-
         var text = transcript ?? string.Empty;
         if (string.IsNullOrWhiteSpace(text))
+        {
+            if (string.Equals(statusHint, "failed", StringComparison.OrdinalIgnoreCase))
+                return new("failed", "transcription_error", false);
             return new("poor_quality", "empty", false);
+        }
 
         if (FailurePattern.IsMatch(text))
             return new("failed", "transcription_error", false);
