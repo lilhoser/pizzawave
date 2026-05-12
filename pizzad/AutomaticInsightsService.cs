@@ -272,6 +272,8 @@ public sealed class AutomaticInsightsService : BackgroundService
         await _database.ReplaceInsightEventsAsync(windowId, events, ct);
         if (events.Count > 0)
             _logger.LogInformation("Persisted {Count} insight event(s) for window {WindowId}", events.Count, windowId);
+        else
+            _logger.LogInformation("Persisted 0 insight events for window {WindowId}; summary was: {Summary}", windowId, Trim(result.SummaryText, 300));
     }
 
     private async Task<InsightResult> SummarizeWindowAsync(List<EngineCall> calls, long start, long end, CancellationToken ct)
@@ -401,23 +403,18 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("/no_think");
         sb.AppendLine("Return only the final JSON object in message.content. Do not place the answer in reasoning_content.");
         sb.AppendLine($"Window: {DateTimeOffset.FromUnixTimeSeconds(start).ToLocalTime()} to {DateTimeOffset.FromUnixTimeSeconds(end).ToLocalTime()}");
-        if (!string.IsNullOrWhiteSpace(_priorSummary))
-        {
-            sb.AppendLine("Prior summary:");
-            sb.AppendLine(_priorSummary);
-        }
-
         sb.AppendLine("Category guidance: each notable event must use one of these categories exactly:");
         sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
         sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
-        sb.AppendLine("Insight guidance: notable_events may describe a single important call or multiple related calls. Incidents will be derived later from multi-call notable events.");
+        sb.AppendLine("Insight guidance: notable_events are AI summary cards for category pages. They may describe one useful source call or multiple clearly related calls. Incidents are derived later only from notable_events that contain 2 or more strongly related calls.");
+        sb.AppendLine("Single-call guidance: include a one-call notable_event when a call contains actionable or situationally useful information, such as a dispatched complaint, medical transport, fire response, BOLO/vehicle/person description, road hazard, pursuit, crash, alarm, disturbance, arrest/custody, welfare check, address/location, agency handoff, or meaningful radio-code/status detail.");
         sb.AppendLine("Incident grouping guidance: a multi-call notable_event must be one real-world event, not a topic bucket. Do not group calls merely because they are close in time, share a category, share an agency, share a talkgroup, or are routine unit/admin/status traffic.");
         sb.AppendLine("Concrete anchor guidance: include multiple call_ids only when every included call shares concrete evidence such as the same address/street/intersection, landmark, patient, person/name, vehicle/plate, unit continuation, radio channel handoff, or an explicit reference to the same call. If a call lacks a concrete anchor to the event, omit it.");
-        sb.AppendLine("Routine exclusion guidance: do not create notable_events for routine acknowledgements, unit availability, 10-7/10-8 status only, license/warrant checks without a broader event, generic dispatch coordination, administrative updates, or isolated unclear/inaudible calls.");
+        sb.AppendLine("Routine exclusion guidance: do not create notable_events for pure acknowledgements, availability only, radio checks, administrative chatter, generic dispatch coordination with no event detail, or isolated unclear/inaudible calls. Do not treat the whole window as routine if some individual calls contain useful dispatch intelligence.");
         sb.AppendLine("Linkage guidance: each notable event must include one or more call_ids copied exactly from input lines. Include every clearly related source call in this window, but do not pad an event with weakly related calls. Each call_id may belong to at most one notable_event.");
         sb.AppendLine("Evidence guidance: for every included call_id, add a call_evidence entry {call_id, evidence}. The evidence must be a short anchor phrase explaining why that call belongs to this event, such as an address, road, unit handoff, patient/vehicle detail, or quoted shared phrase.");
         sb.AppendLine("Radio-code guidance: police/fire/EMS traffic often uses compact codes. Treat patterns like 10-7, 10-49/1049, code 16, signal codes, unit status, and disposition codes as important evidence. Include the code and any context-supported meaning in notable event details; if the meaning is ambiguous, keep the code verbatim instead of guessing.");
-        sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Return an empty notable_events array when there is nothing notable. Keep each detail concise (1 sentence).");
+        sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Prefer several precise single-call insights over one generic 'routine traffic' summary. Return an empty notable_events array only when every call is truly routine or unusable. Keep each detail concise (1 sentence).");
 
         var prioritizedCalls = calls
             .OrderByDescending(c => c.IsAlertMatch)
