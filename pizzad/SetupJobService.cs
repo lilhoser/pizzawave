@@ -244,10 +244,10 @@ public sealed class SetupJobService
 
     private async Task RunRestartPizzadAsync(long jobId, CancellationToken ct)
     {
-        await RunCommandAsync(jobId, "sudo", "systemctl restart pizzad.service", ct);
+        await RunAdminHelperAsync(jobId, "restart-pizzad", ct);
         await _database.UpdateJobAsync(jobId, "running", 2, 1, 0, "Restart requested. Waiting for pizzad health.", false, false, ct);
-        await LogAsync(jobId, "info", "Restart requested. The job may finish after the service comes back and resumes background work.", ct);
-        await _database.UpdateJobAsync(jobId, "completed", 2, 2, 0, "pizzad restart requested. Verify health after the page reconnects.", false, true, ct);
+        await LogAsync(jobId, "info", "Restart was scheduled out-of-process so pizzad can stop cleanly.", ct);
+        await _database.UpdateJobAsync(jobId, "completed", 2, 2, 0, "pizzad restart scheduled. The page will reconnect after the service comes back.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 

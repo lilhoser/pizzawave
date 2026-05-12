@@ -141,8 +141,8 @@ PY
 }
 
 restart_pizzad() {
-  systemctl restart pizzad.service
-  echo "Restarted pizzad.service."
+  nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-restart-pizzad.log 2>&1 &
+  echo "Scheduled pizzad.service restart."
 }
 
 install_sdr_tools() {
