@@ -155,13 +155,10 @@ function App() {
 
   useEffect(() => {
     const events = new EventSource("/api/v1/events/stream");
-    for (const type of ["call_ingested", "call_transcribed", "alert_matched", "job_updated", "summary_updated", "health_updated"]) {
-      events.addEventListener(type, () => void load());
-    }
     events.addEventListener("connected", () => setStatus("Live"));
     events.onerror = () => setStatus("Reconnecting");
     return () => events.close();
-  }, [load]);
+  }, []);
 
   const nav = useMemo(() => ["dashboard", ...categories, "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
@@ -172,10 +169,11 @@ function App() {
   const queueHealth = queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
   const transcribedPerMinute = engineHealth?.recentTranscribedPerMinute ?? 0;
   const queueRateSuffix = engineHealth ? ` (${transcribedPerMinute.toFixed(1)}/min)` : "";
+  const queuePressureNote = queueBlocked ? "; imports/AI paused" : "";
   const queueHealthText = queueHealth === "clear"
     ? `Queue OK${queueRateSuffix}`
     : queueHealth === "pressure"
-      ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}`
+      ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
       : `Queue draining ${queueDepth.toLocaleString()}${queueRateSuffix}`;
   const queueHealthTitle = engineHealth
     ? `${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min) and ${engineHealth.recentCallsIngested.toLocaleString()} calls ingested (${engineHealth.recentIngestPerMinute.toFixed(1)}/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${engineHealth.workBlockedReason ?? ""}`.trim()
@@ -216,7 +214,7 @@ function App() {
           <button className={categoryViewMode === "raw" ? "active" : ""} onClick={() => setCategoryViewMode("raw")}>Raw Calls</button>
         </div>}
         <span className="pill" title="Live means the browser is connected to pizzad and receiving server-sent refresh events.">{status}</span>
-        <span className="pill" title="REST loads page data; SSE keeps the page refreshed when calls, alerts, jobs, summaries, incidents, or health metrics change.">REST + SSE</span>
+        <span className="pill" title="Page data loads once and refreshes only when you press Refresh. SSE is kept only for connection status.">Manual refresh</span>
       </header>
       {!inSetup && <aside className="nav">
         {visibleNav.map(item => (
@@ -898,6 +896,7 @@ function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart 
       <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
       <Kpi label="Queue Health" value={runtime.queues?.underPressure ? "Pressure" : runtime.queues?.transcriptionQueueDepth > 0 ? "Draining" : "OK"} subtext={`${(runtime.queues?.pendingTranscriptions ?? 0).toLocaleString()} pending, ${(runtime.queues?.priorityLiveQueueDepth ?? 0).toLocaleString()} priority`} />
       <Kpi label="Transcription Rate" value={`${Number(runtime.queues?.recentCallsTranscribed || 0).toFixed(0)} / ${Number(runtime.queues?.recentCallsIngested || 0).toFixed(0)}`} subtext={`${Number(runtime.queues?.recentTranscribedPerMinute || 0).toFixed(1)}/min done vs ${Number(runtime.queues?.recentIngestPerMinute || 0).toFixed(1)}/min in`} />
+      <Kpi label="Transcription Latency" value={`${Number(runtime.queues?.averageTranscriptionSeconds || 0).toFixed(1)}s`} subtext={`${Number(runtime.queues?.averageAudioSeconds || 0).toFixed(1)}s audio avg; ${Number(runtime.queues?.averageTranscriptionRealtimeFactor || 0).toFixed(1)}x realtime`} />
       <Kpi label="Whisper Shape" value={`${runtime.queues?.liveTranscriptionWorkers ?? 0} x ${runtime.queues?.whisperThreadsPerWorker ?? 0}`} subtext="workers x threads per worker" />
     </div>
     <div className="card">

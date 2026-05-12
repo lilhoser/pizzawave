@@ -297,6 +297,10 @@ public sealed record HealthDto(
     long RecentCallsTranscribed,
     double RecentIngestPerMinute,
     double RecentTranscribedPerMinute,
+    int RecentTranscriptionSamples,
+    double AverageTranscriptionSeconds,
+    double AverageAudioSeconds,
+    double AverageTranscriptionRealtimeFactor,
     string? WorkBlockedReason,
     DateTime ServerTimeUtc);
 

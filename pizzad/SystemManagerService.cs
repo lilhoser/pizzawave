@@ -31,6 +31,7 @@ public sealed class SystemManagerService
         var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
         var recentCalls = await _database.CountCallsStartedSinceAsync(recentStartUnix, ct);
         var recentTranscribed = await _database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
+        var transcriptionPerformance = _pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
         var trUnitName = string.IsNullOrWhiteSpace(_config.TrunkRecorder.LogServiceName)
             ? "trunk-recorder"
             : _config.TrunkRecorder.LogServiceName.Trim();
@@ -66,7 +67,11 @@ public sealed class SystemManagerService
                 recentCallsIngested = recentCalls,
                 recentCallsTranscribed = recentTranscribed,
                 recentIngestPerMinute = recentCalls / (double)throughputWindowMinutes,
-                recentTranscribedPerMinute = recentTranscribed / (double)throughputWindowMinutes
+                recentTranscribedPerMinute = recentTranscribed / (double)throughputWindowMinutes,
+                recentTranscriptionSamples = transcriptionPerformance.Count,
+                averageTranscriptionSeconds = transcriptionPerformance.AverageWallSeconds,
+                averageAudioSeconds = transcriptionPerformance.AverageAudioSeconds,
+                averageTranscriptionRealtimeFactor = transcriptionPerformance.AverageRealtimeFactor
             },
             storage = new
             {

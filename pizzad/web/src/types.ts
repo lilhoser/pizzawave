@@ -170,6 +170,10 @@ export type EngineHealth = {
   recentCallsTranscribed: number;
   recentIngestPerMinute: number;
   recentTranscribedPerMinute: number;
+  recentTranscriptionSamples: number;
+  averageTranscriptionSeconds: number;
+  averageAudioSeconds: number;
+  averageTranscriptionRealtimeFactor: number;
   workBlockedReason?: string | null;
   serverTimeUtc: string;
 };

@@ -95,6 +95,7 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
     var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
     var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, ct);
     var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
+    var transcriptionPerformance = pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
     var blockedReason = pendingTranscriptions > 0
         ? $"Imports and AI summary generation are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
         : null;
@@ -118,6 +119,10 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
         recentTranscribed,
         recentCalls / (double)throughputWindowMinutes,
         recentTranscribed / (double)throughputWindowMinutes,
+        transcriptionPerformance.Count,
+        transcriptionPerformance.AverageWallSeconds,
+        transcriptionPerformance.AverageAudioSeconds,
+        transcriptionPerformance.AverageRealtimeFactor,
         blockedReason,
         now));
 })

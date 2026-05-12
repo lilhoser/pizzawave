@@ -24,6 +24,7 @@ public sealed class EnginePipeline
     private readonly Settings _pizzalibSettings;
     private readonly List<ITranscriber> _liveTranscribers = [];
     private readonly List<BacklogTranscriberSet> _backlogTranscribers = [];
+    private readonly ConcurrentQueue<TranscriptionPerformanceSample> _performanceSamples = new();
     private string _provider = "none";
     private DateTimeOffset _nextPressureLogAt = DateTimeOffset.MinValue;
 
@@ -250,7 +251,10 @@ public sealed class EnginePipeline
     {
         try
         {
+            var startedAt = DateTimeOffset.UtcNow;
+            var stopwatch = Stopwatch.StartNew();
             var transcription = backlog ? await TranscribeBacklogAsync(item, backlogTranscribers, ct) : await TranscribeAsync(item, liveTranscriber, ct);
+            stopwatch.Stop();
             var call = await _database.GetCallAsync(item.CallId, ct);
             if (call == null)
                 return;
@@ -261,6 +265,7 @@ public sealed class EnginePipeline
                 ? new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty)
                 : _alerts.Evaluate(call, transcription, item.Imported);
             await _database.UpdateCallTranscriptionAsync(item.CallId, transcription, quality.Status, quality.Reason, alert.IsMatch, ct);
+            RecordTranscriptionPerformance(startedAt, stopwatch.Elapsed, Math.Max(0, call.StopTime - call.StartTime), backlog);
 
             if (!quality.IncludeInSummaries)
                 _logger.LogInformation("Excluded call {CallId} from AI summaries due to transcription quality: {Reason}", item.CallId, quality.Reason);
@@ -292,6 +297,10 @@ public sealed class EnginePipeline
                 _insights.Enqueue(updatedCall);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("Transcription canceled during shutdown for call {CallId}; it will remain pending for recovery", item.CallId);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Transcription failed for call {CallId}", item.CallId);
@@ -301,6 +310,36 @@ public sealed class EnginePipeline
         {
             item.Raw?.Dispose();
         }
+    }
+
+    public TranscriptionPerformanceSnapshot GetTranscriptionPerformance(TimeSpan window)
+    {
+        var cutoff = DateTimeOffset.UtcNow.Subtract(window);
+        while (_performanceSamples.TryPeek(out var sample) && sample.CompletedAt < cutoff)
+            _performanceSamples.TryDequeue(out _);
+
+        var samples = _performanceSamples.Where(s => s.CompletedAt >= cutoff).ToArray();
+        if (samples.Length == 0)
+            return new TranscriptionPerformanceSnapshot(0, 0, 0, 0, 0, 0);
+
+        var avgWall = samples.Average(s => s.WallSeconds);
+        var avgAudio = samples.Average(s => s.AudioSeconds);
+        var ratio = avgAudio > 0 ? avgWall / avgAudio : 0;
+        return new TranscriptionPerformanceSnapshot(
+            samples.Length,
+            samples.Count(s => !s.Backlog),
+            samples.Count(s => s.Backlog),
+            avgWall,
+            avgAudio,
+            ratio);
+    }
+
+    private void RecordTranscriptionPerformance(DateTimeOffset startedAt, TimeSpan wallTime, double audioSeconds, bool backlog)
+    {
+        _performanceSamples.Enqueue(new TranscriptionPerformanceSample(DateTimeOffset.UtcNow, wallTime.TotalSeconds, audioSeconds, backlog));
+        var cutoff = startedAt.Subtract(TimeSpan.FromMinutes(30));
+        while (_performanceSamples.TryPeek(out var sample) && sample.CompletedAt < cutoff)
+            _performanceSamples.TryDequeue(out _);
     }
 
     private async Task<string> TranscribeAsync(TranscriptionQueueItem item, ITranscriber? transcriber, CancellationToken ct)
@@ -603,6 +642,15 @@ public sealed class EnginePipeline
 
     private sealed record TranscriptionQueueItem(long CallId, RawCallData? Raw, string AudioPath, bool Imported, bool SuppressDownstream, TranscriptionWorkKind Kind);
     private sealed record BacklogTranscriberSet(int WorkerId, ITranscriber Fast, ITranscriber Primary, string FastModel, string PrimaryModel);
+    private sealed record TranscriptionPerformanceSample(DateTimeOffset CompletedAt, double WallSeconds, double AudioSeconds, bool Backlog);
     private enum TranscriptionWorkKind { Live, Backlog }
     private sealed record WavFormat(int SampleRate, int Channels);
 }
+
+public sealed record TranscriptionPerformanceSnapshot(
+    int Count,
+    int LiveCount,
+    int BacklogCount,
+    double AverageWallSeconds,
+    double AverageAudioSeconds,
+    double AverageRealtimeFactor);
