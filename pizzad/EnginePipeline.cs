@@ -17,7 +17,7 @@ public sealed class EnginePipeline
     private readonly AutomaticInsightsService _insights;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<TranscriptionQueueItem> _liveQueue = new();
-    private readonly ConcurrentStack<TranscriptionQueueItem> _priorityLiveStack = new();
+    private readonly ConcurrentQueue<TranscriptionQueueItem> _priorityLiveQueue = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _backlogQueue = new();
     private readonly SemaphoreSlim _liveSignal = new(0);
     private readonly SemaphoreSlim _backlogSignal = new(0);
@@ -29,8 +29,8 @@ public sealed class EnginePipeline
     private DateTimeOffset _nextPressureLogAt = DateTimeOffset.MinValue;
 
     public int QueueDepth => LiveQueueDepth + _backlogQueue.Count;
-    public int LiveQueueDepth => _liveQueue.Count + _priorityLiveStack.Count;
-    public int PriorityLiveQueueDepth => _priorityLiveStack.Count;
+    public int LiveQueueDepth => _liveQueue.Count + _priorityLiveQueue.Count;
+    public int PriorityLiveQueueDepth => _priorityLiveQueue.Count;
     public int BacklogQueueDepth => _backlogQueue.Count;
     public bool IsUnderLivePressure => LiveQueueDepth >= LivePressureQueueDepth;
     public int LivePressureQueueDepth => Math.Max(1, _config.Transcription.LivePressureQueueDepth);
@@ -198,9 +198,9 @@ public sealed class EnginePipeline
     {
         if (item.Kind == TranscriptionWorkKind.Live)
         {
-            if (_liveQueue.Count + _priorityLiveStack.Count >= LivePressureQueueDepth)
+            if (_liveQueue.Count + _priorityLiveQueue.Count >= LivePressureQueueDepth)
             {
-                _priorityLiveStack.Push(item);
+                _priorityLiveQueue.Enqueue(item);
                 if (DateTimeOffset.UtcNow >= _nextPressureLogAt)
                 {
                     _logger.LogWarning(
@@ -228,7 +228,7 @@ public sealed class EnginePipeline
         while (!ct.IsCancellationRequested)
         {
             await _liveSignal.WaitAsync(ct);
-            if (!_priorityLiveStack.TryPop(out var item) && !_liveQueue.TryDequeue(out item))
+            if (!_priorityLiveQueue.TryDequeue(out var item) && !_liveQueue.TryDequeue(out item))
                 continue;
 
             await ProcessTranscriptionItemAsync(item, backlog: false, transcriber, backlogTranscribers: null, ct);
@@ -453,6 +453,12 @@ public sealed class EnginePipeline
             return wav;
         }
 
+        if (TryNormalizePcm8kMonoTo16kMono(wav, info, out var normalized))
+        {
+            _logger.LogDebug("Normalized call {CallId} audio for Whisper in-process from 8 kHz mono PCM to 16 kHz mono", callId);
+            return normalized;
+        }
+
         var tempDir = Path.Combine(_config.Storage.AppDataRoot, "transcription-normalize");
         Directory.CreateDirectory(tempDir);
         var input = Path.Combine(tempDir, $"call-{callId}-{Guid.NewGuid():N}-in.wav");
@@ -463,7 +469,7 @@ public sealed class EnginePipeline
             await File.WriteAllBytesAsync(input, wav.ToArray(), ct);
             await RunFfmpegAsync(input, output, ct);
             var bytes = await File.ReadAllBytesAsync(output, ct);
-            _logger.LogDebug("Normalized call {CallId} audio for Whisper from {SampleRate} Hz/{Channels} channel(s) to 16 kHz mono", callId, info?.SampleRate, info?.Channels);
+            _logger.LogDebug("Normalized call {CallId} audio for Whisper with ffmpeg from {SampleRate} Hz/{Channels} channel(s) to 16 kHz mono", callId, info?.SampleRate, info?.Channels);
             return new MemoryStream(bytes);
         }
         finally
@@ -495,13 +501,43 @@ public sealed class EnginePipeline
         try
         {
             var bytes = wav.ToArray();
-            if (bytes.Length < 28 ||
+            if (bytes.Length < 44 ||
                 bytes[0] != (byte)'R' || bytes[1] != (byte)'I' || bytes[2] != (byte)'F' || bytes[3] != (byte)'F' ||
                 bytes[8] != (byte)'W' || bytes[9] != (byte)'A' || bytes[10] != (byte)'V' || bytes[11] != (byte)'E')
                 return null;
-            var channels = BitConverter.ToInt16(bytes, 22);
-            var sampleRate = BitConverter.ToInt32(bytes, 24);
-            return new WavFormat(sampleRate, channels);
+
+            short audioFormat = 0;
+            short channels = 0;
+            var sampleRate = 0;
+            short bitsPerSample = 0;
+            var dataOffset = -1;
+            var dataSize = 0;
+            var offset = 12;
+            while (offset + 8 <= bytes.Length)
+            {
+                var chunkId = BitConverter.ToInt32(bytes, offset);
+                var chunkSize = BitConverter.ToInt32(bytes, offset + 4);
+                var chunkData = offset + 8;
+                if (chunkSize < 0 || chunkData + chunkSize > bytes.Length)
+                    break;
+
+                if (chunkId == 0x20746d66 && chunkSize >= 16)
+                {
+                    audioFormat = BitConverter.ToInt16(bytes, chunkData);
+                    channels = BitConverter.ToInt16(bytes, chunkData + 2);
+                    sampleRate = BitConverter.ToInt32(bytes, chunkData + 4);
+                    bitsPerSample = BitConverter.ToInt16(bytes, chunkData + 14);
+                }
+                else if (chunkId == 0x61746164)
+                {
+                    dataOffset = chunkData;
+                    dataSize = chunkSize;
+                }
+
+                offset = chunkData + chunkSize + (chunkSize % 2);
+            }
+
+            return new WavFormat(audioFormat, sampleRate, channels, bitsPerSample, dataOffset, dataSize);
         }
         catch
         {
@@ -511,6 +547,59 @@ public sealed class EnginePipeline
         {
             wav.Position = 0;
         }
+    }
+
+    private static bool TryNormalizePcm8kMonoTo16kMono(MemoryStream wav, WavFormat? info, out MemoryStream normalized)
+    {
+        normalized = null!;
+        if (info is not { AudioFormat: 1, SampleRate: 8000, Channels: 1, BitsPerSample: 16 } ||
+            info.DataOffset < 0 ||
+            info.DataSize <= 0)
+            return false;
+
+        var source = wav.ToArray();
+        if (info.DataOffset + info.DataSize > source.Length)
+            return false;
+
+        var sampleCount = info.DataSize / 2;
+        if (sampleCount <= 0)
+            return false;
+
+        var outputDataSize = sampleCount * 4;
+        var output = new byte[44 + outputDataSize];
+        WriteAscii(output, 0, "RIFF");
+        BitConverter.GetBytes(output.Length - 8).CopyTo(output, 4);
+        WriteAscii(output, 8, "WAVE");
+        WriteAscii(output, 12, "fmt ");
+        BitConverter.GetBytes(16).CopyTo(output, 16);
+        BitConverter.GetBytes((short)1).CopyTo(output, 20);
+        BitConverter.GetBytes((short)1).CopyTo(output, 22);
+        BitConverter.GetBytes(16000).CopyTo(output, 24);
+        BitConverter.GetBytes(32000).CopyTo(output, 28);
+        BitConverter.GetBytes((short)2).CopyTo(output, 32);
+        BitConverter.GetBytes((short)16).CopyTo(output, 34);
+        WriteAscii(output, 36, "data");
+        BitConverter.GetBytes(outputDataSize).CopyTo(output, 40);
+
+        var outOffset = 44;
+        var inOffset = info.DataOffset;
+        for (var i = 0; i < sampleCount; i++)
+        {
+            output[outOffset++] = source[inOffset];
+            output[outOffset++] = source[inOffset + 1];
+            output[outOffset++] = source[inOffset];
+            output[outOffset++] = source[inOffset + 1];
+            inOffset += 2;
+        }
+
+        normalized = new MemoryStream(output);
+        return true;
+    }
+
+    private static void WriteAscii(byte[] target, int offset, string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+            target[offset + i] = (byte)value[i];
     }
 
     private static void TryDelete(string path)
@@ -644,7 +733,7 @@ public sealed class EnginePipeline
     private sealed record BacklogTranscriberSet(int WorkerId, ITranscriber Fast, ITranscriber Primary, string FastModel, string PrimaryModel);
     private sealed record TranscriptionPerformanceSample(DateTimeOffset CompletedAt, double WallSeconds, double AudioSeconds, bool Backlog);
     private enum TranscriptionWorkKind { Live, Backlog }
-    private sealed record WavFormat(int SampleRate, int Channels);
+    private sealed record WavFormat(short AudioFormat, int SampleRate, short Channels, short BitsPerSample, int DataOffset, int DataSize);
 }
 
 public sealed record TranscriptionPerformanceSnapshot(

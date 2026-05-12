@@ -16,6 +16,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private const int CompactTranscriptCharLimit = 220;
     private const int NormalMaxOutputTokens = 2_000;
     private const int CompactMaxOutputTokens = 1_200;
+    private const int CompactMaxEvents = 4;
     private const double IncidentCallEventThreshold = 0.24;
     private const double IncidentCorroborationPairThreshold = 0.12;
     private const double IncidentPairThreshold = 0.34;
@@ -321,8 +322,21 @@ public sealed class AutomaticInsightsService : BackgroundService
                 if (!response.IsSuccessStatusCode)
                     throw new InvalidOperationException($"Automatic insights request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
                 _logger.LogInformation("LM Studio insights response received for {Calls} calls ({ResponseChars} chars)", calls.Count, text.Length);
+                var usage = ExtractUsage(text);
+                if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+                {
+                    var message = $"LM response was truncated at max_tokens={budget.MaxOutputTokens}; retry with a smaller summary window.";
+                    await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, message, ct);
+                    throw new InsightResponseTruncatedException(message);
+                }
+
+                var parsed = ParseResponse(text);
                 await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ct);
-                return ParseResponse(text);
+                return parsed;
+            }
+            catch (InsightResponseTruncatedException)
+            {
+                throw;
             }
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
             {
@@ -397,7 +411,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private string BuildPrompt(List<EngineCall> calls, long start, long end, PromptBudget budget)
     {
         var sb = new StringBuilder();
-        var targetEventCount = calls.Count switch
+        var targetEventCount = budget.MaxEvents > 0 ? budget.MaxEvents : calls.Count switch
         {
             >= 300 => 18,
             >= 200 => 16,
@@ -701,12 +715,14 @@ public sealed class AutomaticInsightsService : BackgroundService
     private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds, List<CallEvidence> CallEvidence);
     private sealed record CallEvidence(string CallId, string Evidence);
     private enum InsightPromptMode { NormalLive, CompactManual }
-    private sealed record PromptBudget(int PromptCharLimit, int TranscriptCharLimit, int MaxOutputTokens)
+    private sealed record PromptBudget(int PromptCharLimit, int TranscriptCharLimit, int MaxOutputTokens, int MaxEvents = 0)
     {
         public static PromptBudget For(InsightPromptMode mode) => mode switch
         {
-            InsightPromptMode.CompactManual => new PromptBudget(CompactPromptCharLimit, CompactTranscriptCharLimit, CompactMaxOutputTokens),
+            InsightPromptMode.CompactManual => new PromptBudget(CompactPromptCharLimit, CompactTranscriptCharLimit, CompactMaxOutputTokens, CompactMaxEvents),
             _ => new PromptBudget(NormalPromptCharLimit, NormalTranscriptCharLimit, NormalMaxOutputTokens)
         };
     }
 }
+
+public sealed class InsightResponseTruncatedException(string message) : InvalidOperationException(message);

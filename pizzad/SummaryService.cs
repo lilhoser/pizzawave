@@ -118,6 +118,7 @@ public sealed class SummaryService
 
             var total = batches.Count;
             var completed = 0;
+            var failed = 0;
             var incidentCount = 0;
             _logger.LogInformation("Summary generation range {Start}-{End}: {Included:N0} live calls included, {Excluded:N0} poor-quality/failed calls excluded, {ImportedExcluded:N0} imported calls excluded", request.Start, request.End, calls.Count, excluded, importedExcluded);
             await _database.UpdateJobAsync(jobId, "running", total, 0, 0, $"Generating {total:N0} AI summary windows from {calls.Count:N0} live calls; skipped {excluded:N0} poor-quality calls and {importedExcluded:N0} imported calls.", true, false, ct);
@@ -138,13 +139,15 @@ public sealed class SummaryService
                     false,
                     ct);
                 await _events.PublishAsync("job_updated", new { jobId, completed, total, waitingOnLm = true, window = next }, ct);
-                incidentCount += await _insights.GenerateWindowForCallsAsync(batch, ct);
+                var result = await GenerateBatchWithSplittingAsync(batch, ct);
+                incidentCount += result.Incidents;
                 completed++;
-                await _database.UpdateJobAsync(jobId, "running", total, completed, 0, $"Generated {completed:N0}/{total:N0} AI summary windows and {incidentCount:N0} incidents; skipped {excluded:N0} poor-quality calls and {importedExcluded:N0} imported calls.", false, false, ct);
-                await _events.PublishAsync("job_updated", new { jobId, completed, total, incidents = incidentCount }, ct);
+                failed += result.FailedWindows;
+                await _database.UpdateJobAsync(jobId, "running", total, completed, failed, $"Generated {completed:N0}/{total:N0} AI summary windows and {incidentCount:N0} incidents; failed/skipped {failed:N0} split window(s); skipped {excluded:N0} poor-quality calls and {importedExcluded:N0} imported calls.", false, false, ct);
+                await _events.PublishAsync("job_updated", new { jobId, completed, total, incidents = incidentCount, failed }, ct);
             }
 
-            await _database.UpdateJobAsync(jobId, "completed", total, completed, 0, $"Generated {completed:N0} AI summary windows and {incidentCount:N0} incidents; skipped {excluded:N0} poor-quality calls and {importedExcluded:N0} imported calls.", false, true, ct);
+            await _database.UpdateJobAsync(jobId, "completed", total, completed, failed, $"Generated {completed:N0} AI summary windows and {incidentCount:N0} incidents; failed/skipped {failed:N0} split window(s); skipped {excluded:N0} poor-quality calls and {importedExcluded:N0} imported calls.", false, true, ct);
             await _events.PublishAsync("summary_updated", new { request.Start, request.End, incidents = incidentCount }, ct);
         }
         catch (OperationCanceledException)
@@ -168,4 +171,31 @@ public sealed class SummaryService
             }
         }
     }
+
+    private async Task<BatchGenerationResult> GenerateBatchWithSplittingAsync(List<EngineCall> batch, CancellationToken ct)
+    {
+        try
+        {
+            return new BatchGenerationResult(await _insights.GenerateWindowForCallsAsync(batch, ct), 0);
+        }
+        catch (InsightResponseTruncatedException ex) when (batch.Count > 5)
+        {
+            var midpoint = batch.Count / 2;
+            _logger.LogWarning(ex, "AI summary window for {Count} call(s) was truncated; splitting into {LeftCount}+{RightCount} call windows", batch.Count, midpoint, batch.Count - midpoint);
+            var left = await GenerateBatchWithSplittingAsync(batch.Take(midpoint).ToList(), ct);
+            var right = await GenerateBatchWithSplittingAsync(batch.Skip(midpoint).ToList(), ct);
+            return new BatchGenerationResult(left.Incidents + right.Incidents, left.FailedWindows + right.FailedWindows);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Skipping AI summary split window containing {Count} call(s)", batch.Count);
+            return new BatchGenerationResult(0, 1);
+        }
+    }
+
+    private sealed record BatchGenerationResult(int Incidents, int FailedWindows);
 }
