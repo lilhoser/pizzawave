@@ -26,7 +26,6 @@ public sealed class AutomaticInsightsService : BackgroundService
     private string? _priorSummary;
     private DateTimeOffset _nextAttemptAt = DateTimeOffset.MinValue;
     private int _failureStreak;
-    private bool _backlogSeeded;
 
     public AutomaticInsightsService(
         EngineConfig config,
@@ -90,7 +89,6 @@ public sealed class AutomaticInsightsService : BackgroundService
             {
                 if (_config.Setup.Completed && IsEnabled())
                 {
-                    await SeedBacklogIfNeededAsync(stoppingToken);
                     DrainQueue();
                     await PumpAsync(stoppingToken);
                 }
@@ -102,21 +100,6 @@ public sealed class AutomaticInsightsService : BackgroundService
 
             await Task.Delay(1000, stoppingToken).ContinueWith(_ => { }, CancellationToken.None);
         }
-    }
-
-    private async Task SeedBacklogIfNeededAsync(CancellationToken ct)
-    {
-        if (_backlogSeeded)
-            return;
-
-        _backlogSeeded = true;
-        var watermark = await _database.GetLatestInsightWindowEndAsync(ct);
-        var batchLimit = Math.Max(BatchSize(), 1) * 3;
-        var backlog = await _database.ListCompletedCallsAfterAsync(watermark, batchLimit, ct);
-        foreach (var call in backlog)
-            Enqueue(call);
-        if (backlog.Count > 0)
-            _logger.LogInformation("Seeded {Count} calls into automatic insights backlog after {Watermark}", backlog.Count, watermark);
     }
 
     private void DrainQueue()

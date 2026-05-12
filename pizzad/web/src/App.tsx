@@ -594,8 +594,12 @@ function Incidents({ rows, locationMap, onShowLocation }: { rows: Incident[]; lo
 function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void> }) {
   if (!data) return <div className="category-page">Loading...</div>;
   async function generate() {
-    await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), confirmLargeRange: rangeHours > 168 }) });
-    await reload();
+    try {
+      await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(Math.min(rangeHours, 24)), confirmLargeRange: false }) });
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Summary generation failed");
+    }
   }
   return <div className="category-split-page" data-category={data.category}>
     <section className="pane insights-pane category-pane">
@@ -993,8 +997,8 @@ function JobsTable({ jobs, onControl, onDelete }: { jobs: Job[]; onControl: (id:
         <td>{job.message}</td>
         <td className="job-actions-cell"><div>
           {active ? <>
-            {job.status === "running" && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
-            {job.status === "paused" && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
+            {job.type !== "summary_generation" && job.status === "running" && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
+            {job.type !== "summary_generation" && job.status === "paused" && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
             {(job.status === "queued" || job.status === "running" || job.status === "paused") && <button onClick={() => void onControl(job.id, "cancel")}>Cancel</button>}
           </> : <button onClick={() => void onDelete(job.id)}>Delete</button>}
         </div></td>
@@ -1004,7 +1008,7 @@ function JobsTable({ jobs, onControl, onDelete }: { jobs: Job[]; onControl: (id:
 }
 
 function isActiveJob(job: Job) {
-  return job.status === "queued" || job.status === "running" || job.status === "paused";
+  return job.status === "queued" || job.status === "running" || job.status === "paused" || job.status === "canceling";
 }
 
 function formatJobDate(value?: string | null) {

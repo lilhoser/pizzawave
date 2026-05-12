@@ -539,7 +539,7 @@ app.MapGet("/api/v1/talkgroups", (HttpContext context, AuthService authService, 
 .WithName("TalkgroupsList")
 .WithOpenApi();
 
-app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, SftpImportService sftpImports, LocalImportService localImports) =>
+app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, SftpImportService sftpImports, LocalImportService localImports, SummaryService summaries) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var job = await database.GetJobAsync(id, context.RequestAborted);
@@ -550,6 +550,7 @@ app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long i
         {
             "sftp_import" => await sftpImports.ControlJobAsync(id, request.Action, context.RequestAborted),
             "local_import" => await localImports.ControlJobAsync(id, request.Action, context.RequestAborted),
+            "summary_generation" => await summaries.ControlJobAsync(id, request.Action, context.RequestAborted),
             _ => throw new InvalidOperationException("This job type does not support pause/resume/cancel.")
         };
         return updated == null ? Results.NotFound() : Results.Ok(updated);
