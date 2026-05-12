@@ -4,12 +4,14 @@ public sealed class RecentReconciliationService : BackgroundService
 {
     private readonly EngineConfig _config;
     private readonly SftpImportService _sftp;
+    private readonly LocalImportService _local;
     private readonly ILogger<RecentReconciliationService> _logger;
 
-    public RecentReconciliationService(EngineConfig config, SftpImportService sftp, ILogger<RecentReconciliationService> logger)
+    public RecentReconciliationService(EngineConfig config, SftpImportService sftp, LocalImportService local, ILogger<RecentReconciliationService> logger)
     {
         _config = config;
         _sftp = sftp;
+        _local = local;
         _logger = logger;
     }
 
@@ -20,11 +22,17 @@ public sealed class RecentReconciliationService : BackgroundService
         {
             try
             {
+                var end = DateTime.Now;
+                var start = end.AddHours(-Math.Max(1, _config.SftpImport.QuickImportMaxHours));
+                var localJob = await _local.StartRecentReconciliationAsync(start, end, stoppingToken);
+                if (localJob is not null)
+                    _logger.LogInformation("Recent 48h local TR reconciliation queued job {JobId}", localJob.Id);
+
                 if (_config.SftpImport.Enabled)
                 {
-                    var end = DateTime.Now;
-                    var start = end.AddHours(-Math.Max(1, _config.SftpImport.QuickImportMaxHours));
-                    await _sftp.StartImportAsync(new SftpImportRequest(start, end, ConfirmLargeImport: false, CallCap: null, ByteCap: null), stoppingToken);
+                    var job = await _sftp.StartRecentReconciliationAsync(start, end, stoppingToken);
+                    if (job is not null)
+                        _logger.LogInformation("Recent 48h SFTP reconciliation queued job {JobId}", job.Id);
                 }
             }
             catch (Exception ex)

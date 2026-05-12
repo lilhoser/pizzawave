@@ -124,6 +124,98 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task AddLmUsageAsync(TokenUsageEntryDto entry, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO lm_usage (
+                timestamp_utc, trigger_activity, request_kind, success, error, endpoint, request_model, response_model,
+                finish_reason, input_chars, payload_chars, prompt_tokens, completion_tokens, total_tokens)
+            VALUES (
+                $timestamp_utc, $trigger_activity, $request_kind, $success, $error, $endpoint, $request_model, $response_model,
+                $finish_reason, $input_chars, $payload_chars, $prompt_tokens, $completion_tokens, $total_tokens);
+            """;
+        Add(command, "$timestamp_utc", entry.TimestampUtc.ToString("O"));
+        Add(command, "$trigger_activity", entry.TriggerActivity);
+        Add(command, "$request_kind", entry.RequestKind);
+        Add(command, "$success", entry.Success ? 1 : 0);
+        Add(command, "$error", entry.Error);
+        Add(command, "$endpoint", entry.Endpoint);
+        Add(command, "$request_model", entry.RequestModel);
+        Add(command, "$response_model", entry.ResponseModel);
+        Add(command, "$finish_reason", entry.FinishReason);
+        Add(command, "$input_chars", entry.InputChars);
+        Add(command, "$payload_chars", entry.PayloadChars);
+        Add(command, "$prompt_tokens", entry.PromptTokens);
+        Add(command, "$completion_tokens", entry.CompletionTokens);
+        Add(command, "$total_tokens", entry.TotalTokens);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<GeocodeCacheDto?> GetGeocodeCacheAsync(string cacheKey, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM geocode_cache WHERE cache_key=$cache_key;";
+        Add(command, "$cache_key", cacheKey);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+        return new GeocodeCacheDto
+        {
+            CacheKey = reader.GetString(reader.GetOrdinal("cache_key")),
+            Provider = reader.GetString(reader.GetOrdinal("provider")),
+            Query = reader.GetString(reader.GetOrdinal("query")),
+            AreaId = reader.GetString(reader.GetOrdinal("area_id")),
+            LocationText = reader.GetString(reader.GetOrdinal("location_text")),
+            DisplayName = reader.GetString(reader.GetOrdinal("display_name")),
+            Precision = reader.GetString(reader.GetOrdinal("precision")),
+            Confidence = reader.GetDouble(reader.GetOrdinal("confidence")),
+            Latitude = reader.GetDouble(reader.GetOrdinal("latitude")),
+            Longitude = reader.GetDouble(reader.GetOrdinal("longitude")),
+            CreatedAtUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("created_at_utc"))),
+            UpdatedAtUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("updated_at_utc")))
+        };
+    }
+
+    public async Task UpsertGeocodeCacheAsync(GeocodeCacheDto row, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO geocode_cache (
+                cache_key, provider, query, area_id, location_text, display_name, precision,
+                confidence, latitude, longitude, created_at_utc, updated_at_utc)
+            VALUES (
+                $cache_key, $provider, $query, $area_id, $location_text, $display_name, $precision,
+                $confidence, $latitude, $longitude, $created_at_utc, $updated_at_utc)
+            ON CONFLICT(cache_key) DO UPDATE SET
+                provider=excluded.provider,
+                query=excluded.query,
+                display_name=excluded.display_name,
+                precision=excluded.precision,
+                confidence=excluded.confidence,
+                latitude=excluded.latitude,
+                longitude=excluded.longitude,
+                updated_at_utc=excluded.updated_at_utc;
+            """;
+        var now = DateTime.UtcNow.ToString("O");
+        Add(command, "$cache_key", row.CacheKey);
+        Add(command, "$provider", row.Provider);
+        Add(command, "$query", row.Query);
+        Add(command, "$area_id", row.AreaId);
+        Add(command, "$location_text", row.LocationText);
+        Add(command, "$display_name", row.DisplayName);
+        Add(command, "$precision", row.Precision);
+        Add(command, "$confidence", row.Confidence);
+        Add(command, "$latitude", row.Latitude);
+        Add(command, "$longitude", row.Longitude);
+        Add(command, "$created_at_utc", row.CreatedAtUtc == default ? now : row.CreatedAtUtc.ToString("O"));
+        Add(command, "$updated_at_utc", now);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<EngineCall?> GetCallAsync(long id, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -142,8 +234,7 @@ public sealed class EngineDatabase
             SELECT * FROM calls
             WHERE start_time >= $start AND start_time <= $end
               AND ($category IS NULL OR category=$category)
-            ORDER BY start_time DESC
-            LIMIT 5000;
+            ORDER BY start_time DESC;
             """;
         Add(command, "$start", start);
         Add(command, "$end", end);
@@ -153,6 +244,60 @@ public sealed class EngineDatabase
         while (await reader.ReadAsync(ct))
             calls.Add(ReadCall(reader));
         return calls;
+    }
+
+    public async Task<List<EngineCall>> ListPendingTranscriptionCallsAsync(int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM calls
+            WHERE transcription_status='pending'
+              AND length(trim(audio_path)) > 0
+            ORDER BY start_time ASC, id ASC
+            LIMIT $limit;
+            """;
+        Add(command, "$limit", Math.Max(1, limit));
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            calls.Add(ReadCall(reader));
+        return calls;
+    }
+
+    public async Task<List<EngineCall>> ListTranscriptionErrorCallsAsync(int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM calls
+            WHERE transcription_status='failed'
+              AND quality_reason='transcription_error'
+              AND length(trim(audio_path)) > 0
+            ORDER BY start_time DESC, id DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$limit", Math.Max(1, limit));
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            calls.Add(ReadCall(reader));
+        return calls;
+    }
+
+    public async Task<StatusSummaryDto> BuildStatusSummaryAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        var calls = await CountAsync(connection, "SELECT COUNT(*) FROM calls WHERE start_time >= $start AND start_time <= $end;", start, end, ct);
+        var alerts = await CountAsync(connection, "SELECT COUNT(*) FROM alert_matches WHERE matched_at >= $start AND matched_at <= $end;", start, end, ct);
+        var incidents = await CountAsync(connection, """
+            SELECT COUNT(*)
+            FROM incidents i
+            WHERE i.last_seen >= $start AND i.first_seen <= $end
+              AND (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = i.id) >= 2;
+            """, start, end, ct);
+        var tokens = await CountIsoAsync(connection, "SELECT COALESCE(SUM(CASE WHEN total_tokens > 0 THEN total_tokens ELSE prompt_tokens + completion_tokens END), 0) FROM lm_usage WHERE timestamp_utc >= $start AND timestamp_utc <= $end;", start, end, ct);
+        return new StatusSummaryDto((int)calls, (int)incidents, (int)alerts, tokens);
     }
 
     public async Task<List<EngineCall>> ListCompletedCallsAfterAsync(long startExclusive, int limit, CancellationToken ct)
@@ -272,6 +417,58 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task AddJobLogAsync(long jobId, string stream, string text, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO job_logs (job_id, timestamp_utc, stream, text)
+            VALUES ($job_id, $timestamp_utc, $stream, $text);
+            """;
+        Add(command, "$job_id", jobId);
+        Add(command, "$timestamp_utc", DateTime.UtcNow.ToString("O"));
+        Add(command, "$stream", string.IsNullOrWhiteSpace(stream) ? "info" : stream.Trim());
+        Add(command, "$text", text ?? string.Empty);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> HasActiveJobAsync(string type, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM jobs
+            WHERE type = $type
+              AND status IN ('queued', 'running', 'paused');
+            """;
+        Add(command, "$type", type);
+        var result = await command.ExecuteScalarAsync(ct);
+        return Convert.ToInt64(result) > 0;
+    }
+
+    public async Task<int> CancelStaleActiveJobsAsync(string type, TimeSpan minAge, string message, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        var now = DateTime.UtcNow;
+        var cutoff = now.Subtract(minAge).ToString("O");
+        command.CommandText = """
+            UPDATE jobs
+            SET status = 'canceled',
+                message = $message,
+                finished_at_utc = $now
+            WHERE type = $type
+              AND status IN ('queued', 'running', 'paused')
+              AND created_at_utc < $cutoff;
+            """;
+        Add(command, "$type", type);
+        Add(command, "$message", message);
+        Add(command, "$now", now.ToString("O"));
+        Add(command, "$cutoff", cutoff);
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<List<JobDto>> ListJobsAsync(CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -296,6 +493,30 @@ public sealed class EngineDatabase
             });
         }
         return jobs;
+    }
+
+    public async Task<TokenUsageReportDto> GetTokenUsageAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM lm_usage
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end
+            ORDER BY timestamp_utc DESC
+            LIMIT 500;
+            """;
+        Add(command, "$start", DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime.ToString("O"));
+        Add(command, "$end", DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime.ToString("O"));
+        var rows = new List<TokenUsageEntryDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            rows.Add(ReadLmUsage(reader));
+        var summary = SummarizeTokenUsage(rows);
+        var byDay = rows.GroupBy(r => r.TimestampUtc.ToLocalTime().ToString("MM/dd"))
+            .Select(g => TokenBucket(g.Key, g)).OrderBy(x => x.Label).ToList();
+        var byTrigger = rows.GroupBy(r => string.IsNullOrWhiteSpace(r.TriggerActivity) ? "other" : r.TriggerActivity)
+            .Select(g => TokenBucket(g.Key, g)).OrderByDescending(x => x.TotalTokens).ToList();
+        return new TokenUsageReportDto("sqlite:lm_usage", summary, byDay, byTrigger, rows);
     }
 
     public async Task<JobDto?> GetJobAsync(long id, CancellationToken ct)
@@ -323,13 +544,73 @@ public sealed class EngineDatabase
         };
     }
 
+    public async Task<List<JobLogDto>> ListJobLogsAsync(long jobId, long afterId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, job_id, timestamp_utc, stream, text
+            FROM job_logs
+            WHERE job_id=$job_id AND id > $after_id
+            ORDER BY id ASC
+            LIMIT 500;
+            """;
+        Add(command, "$job_id", jobId);
+        Add(command, "$after_id", afterId);
+        var rows = new List<JobLogDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new JobLogDto(
+                reader.GetInt64(0),
+                reader.GetInt64(1),
+                DateTime.Parse(reader.GetString(2)),
+                reader.GetString(3),
+                reader.GetString(4)));
+        }
+        return rows;
+    }
+
     public async Task<bool> DeleteJobAsync(long id, CancellationToken ct)
     {
         await using var connection = OpenConnection();
+        await using (var logs = connection.CreateCommand())
+        {
+            logs.CommandText = "DELETE FROM job_logs WHERE job_id=$id;";
+            Add(logs, "$id", id);
+            await logs.ExecuteNonQueryAsync(ct);
+        }
         await using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM jobs WHERE id=$id;";
         Add(command, "$id", id);
         return await command.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    public async Task<int> DeleteJobsByTypePrefixAsync(string typePrefix, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using (var deleteResults = connection.CreateCommand())
+        {
+            deleteResults.CommandText = """
+                DELETE FROM diagnostic_results
+                WHERE job_id IN (
+                    SELECT id FROM jobs
+                    WHERE type LIKE $type_prefix
+                      AND status NOT IN ('running', 'queued', 'paused')
+                );
+                """;
+            Add(deleteResults, "$type_prefix", $"{typePrefix}%");
+            await deleteResults.ExecuteNonQueryAsync(ct);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM jobs
+            WHERE type LIKE $type_prefix
+              AND status NOT IN ('running', 'queued', 'paused');
+            """;
+        Add(command, "$type_prefix", $"{typePrefix}%");
+        return await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task SaveDiagnosticResultAsync(DiagnosticToolResultDto result, CancellationToken ct)
@@ -532,11 +813,31 @@ public sealed class EngineDatabase
         Add(command, "$created_at_utc", DateTime.UtcNow.ToString("O"));
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
 
+        var callIds = incident.Calls.Select(c => c.CallId).Distinct().ToList();
+        if (callIds.Count < 2)
+        {
+            await tx.RollbackAsync(ct);
+            return 0;
+        }
+
+        foreach (var callId in callIds)
+        {
+            await using var existing = connection.CreateCommand();
+            existing.Transaction = (SqliteTransaction)tx;
+            existing.CommandText = "SELECT incident_id FROM incident_calls WHERE call_id=$call_id LIMIT 1;";
+            Add(existing, "$call_id", callId);
+            if (await existing.ExecuteScalarAsync(ct) != null)
+            {
+                await tx.RollbackAsync(ct);
+                return 0;
+            }
+        }
+
         foreach (var call in incident.Calls)
         {
             await using var link = connection.CreateCommand();
             link.Transaction = (SqliteTransaction)tx;
-            link.CommandText = "INSERT OR IGNORE INTO incident_calls (incident_id, call_id) VALUES ($incident_id, $call_id);";
+            link.CommandText = "INSERT INTO incident_calls (incident_id, call_id) VALUES ($incident_id, $call_id);";
             Add(link, "$incident_id", id);
             Add(link, "$call_id", call.CallId);
             await link.ExecuteNonQueryAsync(ct);
@@ -551,7 +852,8 @@ public sealed class EngineDatabase
         var events = await ListInsightEventsAsync(start, end, ct);
         var candidates = events
             .Where(e => e.Calls.Count >= 2)
-            .OrderBy(e => e.FirstSeen)
+            .OrderByDescending(e => e.Confidence)
+            .ThenByDescending(e => e.LastSeen)
             .ToList();
         if (candidates.Count == 0)
             return 0;
@@ -579,18 +881,37 @@ public sealed class EngineDatabase
         }
 
         var count = 0;
+        var claimedCallIds = new HashSet<long>();
         foreach (var ev in candidates)
         {
-            await AddIncidentAsync(new IncidentDto
+            var calls = ev.Calls.Where(c => !claimedCallIds.Contains(c.CallId)).ToList();
+            if (calls.Count < 2)
+                continue;
+
+            var validation = IncidentCandidateValidator.Validate(ev.Title, ev.Detail, calls.Select(ToIncidentCandidateCall).ToList());
+            if (!validation.IsValid)
+                continue;
+
+            var validatedCallIds = validation.Calls.Select(c => c.CallId).ToHashSet();
+            calls = calls.Where(c => validatedCallIds.Contains(c.CallId)).ToList();
+            if (calls.Count < 2)
+                continue;
+
+            var id = await AddIncidentAsync(new IncidentDto
             {
                 Title = ev.Title,
                 Detail = ev.Detail,
-                FirstSeen = ev.FirstSeen,
-                LastSeen = ev.LastSeen,
+                FirstSeen = calls.Min(c => c.RawTimestamp),
+                LastSeen = calls.Max(c => c.RawTimestamp),
                 Confidence = ev.Confidence,
-                Calls = ev.Calls
+                Calls = calls
             }, ct);
-            count++;
+            if (id > 0)
+            {
+                foreach (var call in calls)
+                    claimedCallIds.Add(call.CallId);
+                count++;
+            }
         }
 
         return count;
@@ -736,17 +1057,30 @@ public sealed class EngineDatabase
                 Calls = await ListIncidentCallsAsync(connection, incidentId, ct)
             });
         }
-        return incidents;
+        return incidents
+            .Where(i => i.Calls.Count >= 2)
+            .Select(i => i with { Category = DominantIncidentCategory(i.Calls) })
+            .ToList();
     }
+
+    private static string DominantIncidentCategory(IReadOnlyList<IncidentCallDto> calls) =>
+        calls.GroupBy(c => string.IsNullOrWhiteSpace(c.Category) ? "other" : c.Category)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Key)
+            .FirstOrDefault() ?? "other";
 
     private static async Task<List<IncidentCallDto>> ListIncidentCallsAsync(SqliteConnection connection, long incidentId, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT c.id, c.start_time, c.transcription
+            SELECT c.id, c.start_time, c.transcription, COALESCE(c.category, 'other'), COALESCE(c.talkgroup_name, ''), COALESCE(c.system_short_name, '')
             FROM incident_calls ic
             JOIN calls c ON c.id = ic.call_id
             WHERE ic.incident_id = $incident_id
+              AND c.transcription_status = 'complete'
+              AND c.quality_reason = 'ok'
+              AND length(trim(c.transcription)) > 0
             ORDER BY c.start_time ASC;
             """;
         Add(command, "$incident_id", incidentId);
@@ -759,7 +1093,10 @@ public sealed class EngineDatabase
                 callId,
                 reader.GetInt64(1),
                 reader.GetString(2),
-                $"/api/v1/calls/{callId}/audio"));
+                $"/api/v1/calls/{callId}/audio",
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5)));
         }
         return calls;
     }
@@ -772,9 +1109,12 @@ public sealed class EngineDatabase
         var parameters = callIds.Select((_, i) => $"$id{i}").ToArray();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT id, start_time, transcription
+            SELECT id, start_time, transcription, COALESCE(category, 'other'), COALESCE(talkgroup_name, ''), COALESCE(system_short_name, '')
             FROM calls
             WHERE id IN ({string.Join(",", parameters)})
+              AND transcription_status = 'complete'
+              AND quality_reason = 'ok'
+              AND length(trim(transcription)) > 0
             ORDER BY start_time ASC;
             """;
         for (var i = 0; i < callIds.Count; i++)
@@ -789,10 +1129,16 @@ public sealed class EngineDatabase
                 callId,
                 reader.GetInt64(1),
                 reader.GetString(2),
-                $"/api/v1/calls/{callId}/audio"));
+                $"/api/v1/calls/{callId}/audio",
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5)));
         }
         return calls;
     }
+
+    private static IncidentCandidateCall ToIncidentCandidateCall(IncidentCallDto call) =>
+        new(call.CallId, call.RawTimestamp, call.Transcript, call.Category, call.TalkgroupName, call.SystemShortName);
 
     private static IReadOnlyList<long> ParseCallIds(string json)
     {
@@ -842,6 +1188,61 @@ public sealed class EngineDatabase
         command.Parameters.Add(parameter);
     }
 
+    private static async Task<long> CountAsync(SqliteConnection connection, string sql, long start, long end, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct));
+    }
+
+    private static async Task<long> CountIsoAsync(SqliteConnection connection, string sql, long start, long end, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        Add(command, "$start", DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime.ToString("O"));
+        Add(command, "$end", DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime.ToString("O"));
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct));
+    }
+
+    private static TokenUsageEntryDto ReadLmUsage(SqliteDataReader reader) => new(
+        reader.GetInt64(reader.GetOrdinal("id")),
+        DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc"))),
+        reader.GetString(reader.GetOrdinal("trigger_activity")),
+        reader.GetString(reader.GetOrdinal("request_kind")),
+        reader.GetInt64(reader.GetOrdinal("success")) != 0,
+        reader.GetString(reader.GetOrdinal("error")),
+        reader.GetString(reader.GetOrdinal("endpoint")),
+        reader.GetString(reader.GetOrdinal("request_model")),
+        reader.GetString(reader.GetOrdinal("response_model")),
+        reader.GetString(reader.GetOrdinal("finish_reason")),
+        reader.GetInt32(reader.GetOrdinal("input_chars")),
+        reader.GetInt32(reader.GetOrdinal("payload_chars")),
+        reader.GetInt32(reader.GetOrdinal("prompt_tokens")),
+        reader.GetInt32(reader.GetOrdinal("completion_tokens")),
+        reader.GetInt32(reader.GetOrdinal("total_tokens")));
+
+    private static TokenUsageBucketDto TokenBucket(string label, IEnumerable<TokenUsageEntryDto> rows)
+    {
+        var list = rows.ToList();
+        return new TokenUsageBucketDto(
+            label,
+            list.Sum(r => (long)(r.TotalTokens > 0 ? r.TotalTokens : r.PromptTokens + r.CompletionTokens)),
+            list.Sum(r => (long)r.PromptTokens),
+            list.Sum(r => (long)r.CompletionTokens),
+            list.Count);
+    }
+
+    private static TokenUsageSummaryDto SummarizeTokenUsage(IEnumerable<TokenUsageEntryDto> rows)
+    {
+        var list = rows.ToList();
+        var prompt = list.Sum(r => (long)r.PromptTokens);
+        var completion = list.Sum(r => (long)r.CompletionTokens);
+        var total = list.Sum(r => (long)(r.TotalTokens > 0 ? r.TotalTokens : r.PromptTokens + r.CompletionTokens));
+        return new TokenUsageSummaryDto(list.Count, list.Count(r => r.Success), list.Count(r => !r.Success), prompt, completion, total, (prompt / 1_000_000d * 2.00) + (completion / 1_000_000d * 8.00));
+    }
+
     private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
@@ -881,8 +1282,39 @@ public sealed class EngineDatabase
                 created_at_utc TEXT NOT NULL,
                 FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS lm_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp_utc TEXT NOT NULL,
+                trigger_activity TEXT NOT NULL DEFAULT 'other',
+                request_kind TEXT NOT NULL DEFAULT 'chat.completions',
+                success INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                endpoint TEXT NOT NULL DEFAULT '',
+                request_model TEXT NOT NULL DEFAULT '',
+                response_model TEXT NOT NULL DEFAULT '',
+                finish_reason TEXT NOT NULL DEFAULT '',
+                input_chars INTEGER NOT NULL DEFAULT 0,
+                payload_chars INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
+
+            CREATE TABLE IF NOT EXISTS job_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                timestamp_utc TEXT NOT NULL,
+                stream TEXT NOT NULL DEFAULT 'info',
+                text TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id, id);
             """, ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
+        await RemoveDuplicateIncidentCallLinksAsync(connection, ct);
+        await RemoveInvalidIncidentLinksAsync(connection, ct);
     }
 
     private static async Task AddColumnIfMissingAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken ct)
@@ -952,6 +1384,84 @@ public sealed class EngineDatabase
         }
     }
 
+    private async Task RemoveInvalidIncidentLinksAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using (var deleteLinks = connection.CreateCommand())
+        {
+            deleteLinks.CommandText = """
+                DELETE FROM incident_calls
+                WHERE call_id IN (
+                    SELECT id
+                    FROM calls
+                    WHERE transcription_status != 'complete'
+                       OR quality_reason != 'ok'
+                       OR transcription IS NULL
+                       OR length(trim(transcription)) = 0
+                );
+                """;
+            var removedLinks = await deleteLinks.ExecuteNonQueryAsync(ct);
+            if (removedLinks > 0)
+                _logger.LogInformation("Removed {Count:N0} invalid incident call link(s) whose calls are not eligible for incidents", removedLinks);
+        }
+
+        await using (var deleteIncidents = connection.CreateCommand())
+        {
+            deleteIncidents.CommandText = """
+                DELETE FROM incidents
+                WHERE (
+                    SELECT COUNT(*)
+                    FROM incident_calls ic
+                    WHERE ic.incident_id = incidents.id
+                ) < 2;
+                """;
+            var removedIncidents = await deleteIncidents.ExecuteNonQueryAsync(ct);
+            if (removedIncidents > 0)
+                _logger.LogInformation("Removed {Count:N0} incident(s) left with fewer than two valid source calls", removedIncidents);
+        }
+    }
+
+    private async Task RemoveDuplicateIncidentCallLinksAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using (var deleteDuplicateLinks = connection.CreateCommand())
+        {
+            deleteDuplicateLinks.CommandText = """
+                DELETE FROM incident_calls
+                WHERE rowid NOT IN (
+                    SELECT kept_rowid
+                    FROM (
+                        SELECT
+                            ic.rowid AS kept_rowid,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ic.call_id
+                                ORDER BY i.incident_score DESC, i.last_seen DESC, i.id DESC
+                            ) AS rn
+                        FROM incident_calls ic
+                        JOIN incidents i ON i.id = ic.incident_id
+                    )
+                    WHERE rn = 1
+                );
+                """;
+            var removed = await deleteDuplicateLinks.ExecuteNonQueryAsync(ct);
+            if (removed > 0)
+                _logger.LogInformation("Removed {Count:N0} duplicate incident call link(s); each call may belong to only one incident", removed);
+        }
+
+        await using (var deleteIncidents = connection.CreateCommand())
+        {
+            deleteIncidents.CommandText = """
+                DELETE FROM incidents
+                WHERE (
+                    SELECT COUNT(*)
+                    FROM incident_calls ic
+                    WHERE ic.incident_id = incidents.id
+                ) < 2;
+                """;
+            var removedIncidents = await deleteIncidents.ExecuteNonQueryAsync(ct);
+            if (removedIncidents > 0)
+                _logger.LogInformation("Removed {Count:N0} incident(s) left with fewer than two source calls after duplicate-link cleanup", removedIncidents);
+        }
+    }
+
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS calls (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -993,6 +1503,23 @@ public sealed class EngineDatabase
         );
 
         CREATE INDEX IF NOT EXISTS idx_alert_matches_time ON alert_matches(matched_at DESC);
+
+        CREATE TABLE IF NOT EXISTS geocode_cache (
+            cache_key TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            query TEXT NOT NULL,
+            area_id TEXT NOT NULL,
+            location_text TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            precision TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_geocode_cache_area ON geocode_cache(area_id, location_text);
 
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1075,6 +1602,17 @@ public sealed class EngineDatabase
             payload_json TEXT NOT NULL DEFAULT '{}'
         );
 
+        CREATE TABLE IF NOT EXISTS job_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            timestamp_utc TEXT NOT NULL,
+            stream TEXT NOT NULL DEFAULT 'info',
+            text TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id, id);
+
         CREATE TABLE IF NOT EXISTS diagnostic_results (
             job_id INTEGER PRIMARY KEY,
             tool TEXT NOT NULL,
@@ -1082,6 +1620,25 @@ public sealed class EngineDatabase
             created_at_utc TEXT NOT NULL,
             FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS lm_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL,
+            trigger_activity TEXT NOT NULL DEFAULT 'other',
+            request_kind TEXT NOT NULL DEFAULT 'chat.completions',
+            success INTEGER NOT NULL DEFAULT 0,
+            error TEXT NOT NULL DEFAULT '',
+            endpoint TEXT NOT NULL DEFAULT '',
+            request_model TEXT NOT NULL DEFAULT '',
+            response_model TEXT NOT NULL DEFAULT '',
+            finish_reason TEXT NOT NULL DEFAULT '',
+            input_chars INTEGER NOT NULL DEFAULT 0,
+            payload_chars INTEGER NOT NULL DEFAULT 0,
+            prompt_tokens INTEGER NOT NULL DEFAULT 0,
+            completion_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
 
         CREATE TABLE IF NOT EXISTS backfill_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

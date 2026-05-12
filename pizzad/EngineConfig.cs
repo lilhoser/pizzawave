@@ -1,11 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Runtime.InteropServices;
 
 namespace pizzad;
 
 public sealed class EngineConfig
 {
     public ServerConfig Server { get; set; } = new();
+    public BrandingConfig Branding { get; set; } = new();
     public AuthConfig Auth { get; set; } = new();
     public StorageConfig Storage { get; set; } = new();
     public IngestConfig Ingest { get; set; } = new();
@@ -14,6 +16,9 @@ public sealed class EngineConfig
     public SftpImportConfig SftpImport { get; set; } = new();
     public TrunkRecorderConfig TrunkRecorder { get; set; } = new();
     public AlertConfig Alerts { get; set; } = new();
+    public ProfileConfig Profiles { get; set; } = new();
+    public LocationConfig Locations { get; set; } = new();
+    public SetupConfig Setup { get; set; } = new();
 
     [JsonIgnore]
     public string ConfigPath { get; set; } = string.Empty;
@@ -32,8 +37,16 @@ public sealed class EngineConfig
         else
         {
             var json = File.ReadAllText(path);
+            using var document = JsonDocument.Parse(json);
+            var hasSetupSection = document.RootElement.TryGetProperty("setup", out _);
             config = JsonSerializer.Deserialize<EngineConfig>(json, JsonOptions()) ?? new EngineConfig();
             config.ConfigPath = path;
+            if (!hasSetupSection)
+            {
+                config.Setup.Completed = true;
+                config.Setup.CompletedAtUtc = DateTime.UtcNow;
+                config.Setup.CurrentStep = "complete";
+            }
         }
 
         config.ApplyDefaults();
@@ -51,6 +64,7 @@ public sealed class EngineConfig
 
     private void ApplyDefaults()
     {
+        Branding.StackName = string.IsNullOrWhiteSpace(Branding.StackName) ? "Pizzastack" : Branding.StackName.Trim();
         Server.HttpBind = string.IsNullOrWhiteSpace(Server.HttpBind) ? "0.0.0.0" : Server.HttpBind.Trim();
         if (Server.HttpPort <= 0) Server.HttpPort = 8080;
         Storage.DatabasePath = ExpandPath(Storage.DatabasePath);
@@ -68,6 +82,12 @@ public sealed class EngineConfig
         Transcription.OpenAiApiKey ??= string.Empty;
         Transcription.OpenAiModel ??= string.Empty;
         if (Transcription.AnalogSampleRate <= 0) Transcription.AnalogSampleRate = 8000;
+        if (Transcription.WhisperThreads <= 0)
+        {
+            Transcription.WhisperThreads = RuntimeInformation.ProcessArchitecture is Architecture.Arm64 or Architecture.Arm
+                ? Math.Min(2, Math.Max(1, Environment.ProcessorCount / 2))
+                : Math.Min(4, Math.Max(2, Environment.ProcessorCount / 4));
+        }
         AiInsights.OpenAiBaseUrl ??= string.Empty;
         AiInsights.OpenAiApiKey ??= string.Empty;
         AiInsights.OpenAiModel ??= string.Empty;
@@ -97,6 +117,65 @@ public sealed class EngineConfig
         Alerts.EmailUser ??= string.Empty;
         Alerts.EmailPassword ??= string.Empty;
         Alerts.Rules ??= new();
+        Profiles.Items ??= new();
+        if (Profiles.Items.Count == 0)
+            Profiles.Items.Add(new ProcessingProfile { Name = "Default" });
+        if (Profiles.ActiveProfileId == Guid.Empty || Profiles.Items.All(p => p.Id != Profiles.ActiveProfileId))
+            Profiles.ActiveProfileId = Profiles.Items[0].Id;
+        foreach (var profile in Profiles.Items)
+        {
+            profile.Name = string.IsNullOrWhiteSpace(profile.Name) ? "Profile" : profile.Name.Trim();
+            profile.AllowedTalkgroups ??= new();
+        }
+        Locations.MonitoredAreas ??= new();
+        if (Locations.MonitoredAreas.Count == 0)
+        {
+            Locations.MonitoredAreas.Add(new MonitoredAreaConfig
+            {
+                AreaId = "hamilton-county-tn",
+                AreaLabel = "Hamilton County, TN",
+                SystemShortName = "whiteoak-hamilton",
+                North = 35.47,
+                South = 34.98,
+                West = -85.47,
+                East = -84.98,
+                Aliases = ["whiteoak-hamilton", "whiteoakmt-hamilton", "hamilton"]
+            });
+            Locations.MonitoredAreas.Add(new MonitoredAreaConfig
+            {
+                AreaId = "bradley-county-tn",
+                AreaLabel = "Bradley County, TN",
+                SystemShortName = "bradley",
+                North = 35.33,
+                South = 34.90,
+                West = -85.10,
+                East = -84.55,
+                Aliases = ["bradley", "whiteoakmt-nbradley", "nbradley"]
+            });
+            Locations.MonitoredAreas.Add(new MonitoredAreaConfig
+            {
+                AreaId = "cleveland-tn",
+                AreaLabel = "Cleveland, TN",
+                SystemShortName = "cleveland",
+                North = 35.24,
+                South = 35.07,
+                West = -84.96,
+                East = -84.78,
+                Aliases = ["cleveland", "whiteoakmt-cleveland"]
+            });
+        }
+        foreach (var area in Locations.MonitoredAreas)
+        {
+            area.AreaId = string.IsNullOrWhiteSpace(area.AreaId) ? Slug(area.AreaLabel) : area.AreaId.Trim();
+            area.AreaLabel = string.IsNullOrWhiteSpace(area.AreaLabel) ? area.AreaId : area.AreaLabel.Trim();
+            area.SystemShortName = string.IsNullOrWhiteSpace(area.SystemShortName) ? area.AreaId : area.SystemShortName.Trim();
+            area.Aliases ??= new();
+            if (area.Aliases.Count == 0)
+                area.Aliases.Add(area.SystemShortName);
+            if (area.North == 0 && area.South == 0 && area.West == 0 && area.East == 0)
+                ApplyDefaultBounds(area);
+        }
+        Setup.CurrentStep = string.IsNullOrWhiteSpace(Setup.CurrentStep) ? "stack" : Setup.CurrentStep.Trim();
     }
 
     public static JsonSerializerOptions JsonOptions() => new()
@@ -114,6 +193,31 @@ public sealed class EngineConfig
         return Environment.ExpandEnvironmentVariables(path)
             .Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
+
+    private static string Slug(string value)
+    {
+        value = string.IsNullOrWhiteSpace(value) ? "area" : value.Trim().ToLowerInvariant();
+        var chars = value.Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray();
+        return string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static void ApplyDefaultBounds(MonitoredAreaConfig area)
+    {
+        if (area.AreaId.Equals("hamilton-county-tn", StringComparison.OrdinalIgnoreCase) ||
+            area.SystemShortName.Contains("hamilton", StringComparison.OrdinalIgnoreCase))
+            (area.North, area.South, area.West, area.East) = (35.47, 34.98, -85.47, -84.98);
+        else if (area.AreaId.Equals("cleveland-tn", StringComparison.OrdinalIgnoreCase) ||
+                 area.SystemShortName.Contains("cleveland", StringComparison.OrdinalIgnoreCase))
+            (area.North, area.South, area.West, area.East) = (35.24, 35.07, -84.96, -84.78);
+        else if (area.AreaId.Equals("bradley-county-tn", StringComparison.OrdinalIgnoreCase) ||
+                 area.SystemShortName.Contains("bradley", StringComparison.OrdinalIgnoreCase))
+            (area.North, area.South, area.West, area.East) = (35.33, 34.90, -85.10, -84.55);
+    }
+}
+
+public sealed class BrandingConfig
+{
+    public string StackName { get; set; } = "Pizzastack";
 }
 
 public sealed class ServerConfig
@@ -154,6 +258,7 @@ public sealed class TranscriptionConfig
     public string OpenAiApiKey { get; set; } = string.Empty;
     public string OpenAiModel { get; set; } = string.Empty;
     public int AnalogSampleRate { get; set; } = 8000;
+    public int WhisperThreads { get; set; }
 }
 
 public sealed class AiInsightsConfig
@@ -213,4 +318,62 @@ public sealed class EngineAlertRule
     public string Frequency { get; set; } = "realtime";
     public bool Autoplay { get; set; } = true;
     public List<long> Talkgroups { get; set; } = new();
+}
+
+public sealed class ProfileConfig
+{
+    public Guid ActiveProfileId { get; set; }
+    public List<ProcessingProfile> Items { get; set; } = new();
+}
+
+public sealed class LocationConfig
+{
+    public List<MonitoredAreaConfig> MonitoredAreas { get; set; } = new();
+}
+
+public sealed class SetupConfig
+{
+    public bool Completed { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public int WizardVersion { get; set; } = 1;
+    public string CurrentStep { get; set; } = "stack";
+    public string InstallMode { get; set; } = "reuseExistingTr";
+    public string TrConfigMode { get; set; } = "radioReference";
+    public bool TrDetected { get; set; }
+    public bool TrConfigured { get; set; }
+    public bool TalkgroupsValidated { get; set; }
+    public bool CallstreamValidated { get; set; }
+    public bool TranscriptionValidated { get; set; }
+    public bool MonitoredAreasValidated { get; set; }
+    public bool HealthValidated { get; set; }
+    public bool AiInsightsSkippedOrValidated { get; set; } = true;
+    public bool AlertsSkippedOrValidated { get; set; } = true;
+    public bool SftpSkippedOrValidated { get; set; } = true;
+    public bool CalibrationSkippedOrCompleted { get; set; } = true;
+}
+
+public sealed class MonitoredAreaConfig
+{
+    public string AreaId { get; set; } = string.Empty;
+    public string AreaLabel { get; set; } = string.Empty;
+    public string SystemShortName { get; set; } = string.Empty;
+    public double North { get; set; }
+    public double South { get; set; }
+    public double West { get; set; }
+    public double East { get; set; }
+    public List<string> Aliases { get; set; } = new();
+}
+
+public sealed class ProcessingProfile
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "Default";
+    public bool IncludePolice { get; set; } = true;
+    public bool IncludeFire { get; set; } = true;
+    public bool IncludeEMS { get; set; } = true;
+    public bool IncludeTraffic { get; set; } = true;
+    public bool IncludeOther { get; set; } = true;
+    public List<long> AllowedTalkgroups { get; set; } = new();
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }

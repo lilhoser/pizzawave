@@ -141,8 +141,9 @@ def rows_from_journal(service, start, end):
     args = [
         "journalctl",
         "-u", service,
-        "--since", start.strftime("%Y-%m-%d %H:%M:%S"),
-        "--until", end.strftime("%Y-%m-%d %H:%M:%S"),
+        "--utc",
+        "--since", start.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "--until", end.strftime("%Y-%m-%d %H:%M:%S UTC"),
         "--no-pager",
         "-o", "cat",
     ]

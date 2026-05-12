@@ -369,13 +369,16 @@ public sealed class TrHealthTroubleshootService
             : scopes == null
             ? baselineRows.Where(IsGlobal).ToList()
             : baselineRows.Where(r => scopes.Contains(r.Scope, StringComparer.OrdinalIgnoreCase)).ToList();
-        var hasBaselineHistory = HasBaselineHistory(comparisonRows, baseline);
-        var baselineValues = UseGlobalDisplayAggregate
-            ? BaselineSeriesForGlobalDisplay(comparisonRows, hours, selector, baseline)
-            : BaselineSeries(comparisonRows, hours, selector, baseline, BaselineIsRate);
-        chartSeries.Add(new TrHealthSeriesDto(hasBaselineHistory ? $"{baseline} baseline" : $"{baseline} baseline (no history yet)", baselineValues, true));
+        var baselineInfo = BaselineInfo(comparisonRows, baseline);
+        if (baselineInfo.ShouldShow)
+        {
+            var baselineValues = UseGlobalDisplayAggregate
+                ? BaselineSeriesForGlobalDisplay(comparisonRows, hours, selector, baseline)
+                : BaselineSeries(comparisonRows, hours, selector, baseline, BaselineIsRate);
+            chartSeries.Add(new TrHealthSeriesDto($"{baseline} baseline", baselineValues, true));
+        }
 
-        return new TrHealthChartDto(title, yAxis, format, hours.Select(h => h.ToString("MM-dd HH:00", CultureInfo.InvariantCulture)).ToList(), chartSeries);
+        return new TrHealthChartDto(title, yAxis, format, hours.Select(h => h.ToString("MM-dd HH:00", CultureInfo.InvariantCulture)).ToList(), chartSeries, baselineInfo.Note);
     }
 
     private static List<DateTime> BuildHourLabels(List<TrHealthSampleDto> rows) =>
@@ -444,10 +447,26 @@ public sealed class TrHealthTroubleshootService
         }).ToList();
     }
 
-    private static bool HasBaselineHistory(List<TrHealthSampleDto> rows, string baseline)
+    private static (bool ShouldShow, string Note) BaselineInfo(List<TrHealthSampleDto> rows, string baseline)
     {
         var cutoff = DateTime.UtcNow.AddDays(-BaselineDays(baseline));
-        return rows.Any(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < DateTime.UtcNow.AddHours(-24));
+        var baselineRows = rows.Where(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < DateTime.UtcNow.AddHours(-24)).ToList();
+        var requestedDays = BaselineDays(baseline);
+        if (baselineRows.Count == 0)
+            return (false, $"Baseline hidden: no stored history older than 24h for the selected {baseline} window.");
+
+        var first = baselineRows.Min(r => r.WindowStartUtc);
+        var last = baselineRows.Max(r => r.WindowEndUtc);
+        var availableDays = Math.Max(0, (last - first).TotalDays);
+        var bucketCount = baselineRows.Count;
+        var note = $"Baseline: {baseline}, {availableDays:F1}d available from {bucketCount:N0} health bucket{(bucketCount == 1 ? "" : "s")}.";
+        if (availableDays < requestedDays * 0.9)
+            note += $" Partial history; requested {requestedDays}d.";
+
+        var enoughHistory = bucketCount >= 24 && availableDays >= 0.25;
+        return enoughHistory
+            ? (true, note)
+            : (false, $"Baseline hidden: only {availableDays:F1}d / {bucketCount:N0} bucket{(bucketCount == 1 ? "" : "s")} available.");
     }
 
     private static string BuildSummaryText(TrHealthAggregate agg, IReadOnlyList<TrHealthMetricDto> systems, DateTime last)

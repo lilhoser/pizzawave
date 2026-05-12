@@ -20,6 +20,9 @@ public sealed class EngineAlertService
 
     public EngineAlertMatchResult Evaluate(EngineCall call, string transcription, bool imported)
     {
+        if (!_config.Setup.Completed)
+            return new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty);
+
         foreach (var rule in _config.Alerts.Rules.Where(r => r.Enabled))
         {
             if (rule.Talkgroups.Count > 0 && !rule.Talkgroups.Contains(call.Talkgroup))

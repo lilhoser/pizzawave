@@ -7,6 +7,7 @@
     <Configurations>Debug;Release;DEBUG_X64_CUDA;RELEASE_X64_CUDA</Configurations>
     <AssemblyName>pizzad</AssemblyName>
     <RootNamespace>pizzad</RootNamespace>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,13 +31,13 @@
     </Content>
   </ItemGroup>
 
-  <Target Name="BuildWebUi" BeforeTargets="ComputeFilesToPublish" Condition="'$(PIZZAD_SKIP_WEB_BUILD)' != 'true'">
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm install" />
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm run build" />
+  <Target Name="CleanWebUiOutput" BeforeTargets="BuildWebUi" Condition="'$(PIZZAD_SKIP_WEB_BUILD)' != 'true'">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\wwwroot\assets" />
+    <Delete Files="$(MSBuildProjectDirectory)\wwwroot\index.html" />
   </Target>
 
-  <Target Name="BuildWebUiForVisualStudio" BeforeTargets="Build" Condition="'$(BuildingInsideVisualStudio)' == 'true' Or '$(PIZZAD_BUILD_WEB_UI)' == 'true'">
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm install" Condition="!Exists('$(MSBuildProjectDirectory)\web\node_modules')" />
+  <Target Name="BuildWebUi" BeforeTargets="ResolveStaticWebAssetsInputs" Condition="'$(PIZZAD_SKIP_WEB_BUILD)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm install" />
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)\web" Command="npm run build" />
   </Target>
 

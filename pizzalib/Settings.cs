@@ -64,6 +64,12 @@ namespace pizzalib
             get => transcriptionEngine;
             set => transcriptionEngine = value;
         }
+        [JsonProperty("whisperThreads")]
+        public int WhisperThreads
+        {
+            get => whisperThreads;
+            set => whisperThreads = value;
+        }
         [JsonProperty("transcriptionModelPreset")]
         public string TranscriptionModelPreset
         {
@@ -174,6 +180,8 @@ namespace pizzalib
         public string? whisperModelFile;
         [JsonIgnore]
         public string transcriptionEngine = "whisper";
+        [JsonIgnore]
+        public int whisperThreads;
         [JsonIgnore]
         public string transcriptionModelPreset = string.Empty;
         [JsonIgnore]

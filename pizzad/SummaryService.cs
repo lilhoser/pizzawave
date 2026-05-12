@@ -21,6 +21,8 @@ public sealed class SummaryService
 
     public async Task<JobDto> GenerateForRangeAsync(GenerateSummaryRequest request, CancellationToken ct)
     {
+        if (!_insights.IsSetupComplete)
+            throw new InvalidOperationException("Setup is not complete. Summary and incident generation are disabled in limited mode.");
         if (!_insights.IsConfiguredAndEnabled)
             throw new InvalidOperationException("AI insights are disabled or not fully configured. Enable aiInsights.enabled and configure the AI endpoint/model before generating incidents.");
 

@@ -30,11 +30,17 @@ public sealed class TrHealthCollector : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.LogInformation(
+            "TR health collector starting: service={ServiceName}, windowMinutes={WindowMinutes}",
+            _config.TrunkRecorder.LogServiceName,
+            Math.Max(1, _config.TrunkRecorder.HealthWindowMinutes));
+
         await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                _logger.LogInformation("TR health collector polling");
                 await CollectOnceAsync(stoppingToken);
             }
             catch (Exception ex)
@@ -51,13 +57,24 @@ public sealed class TrHealthCollector : BackgroundService
         if (OperatingSystem.IsWindows())
             return;
 
-        var end = DateTime.UtcNow;
-        var start = end.AddMinutes(-Math.Max(1, _config.TrunkRecorder.HealthWindowMinutes));
+        var windowMinutes = Math.Max(1, _config.TrunkRecorder.HealthWindowMinutes);
+        var end = FloorWindow(DateTime.UtcNow, windowMinutes);
+        var start = end.AddMinutes(-windowMinutes);
         var log = await ReadJournalAsync(start, end, ct);
-        if (string.IsNullOrWhiteSpace(log))
+        if (string.IsNullOrWhiteSpace(log) || IsEmptyJournalResult(log))
+        {
+            _logger.LogDebug("TR health collection found no journal rows for {Start:u} - {End:u}", start, end);
             return;
+        }
 
         var global = BuildSample("global", start, end, log);
+        if (!HasAnyHealthSignal(global))
+        {
+            _logger.LogDebug("TR health collection skipped empty window {Start:u} - {End:u}", start, end);
+            return;
+        }
+
+        var samplesWritten = 1;
         await _database.InsertHealthSampleAsync(global, ct);
 
         foreach (var scope in ExtractSystemScopes(log))
@@ -66,28 +83,112 @@ public sealed class TrHealthCollector : BackgroundService
             if (scopedLines.Length == 0)
                 continue;
             await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
+            samplesWritten++;
         }
 
         await _events.PublishAsync("health_updated", new { windowStartUtc = start, windowEndUtc = end }, ct);
+        _logger.LogInformation(
+            "TR health collected {SamplesWritten} sample(s) for {Start:u} - {End:u}: decodeLines={DecodeLines}, callsStarted={CallsStarted}, callsConcluded={CallsConcluded}",
+            samplesWritten,
+            start,
+            end,
+            global.DecodeLines,
+            global.CallsStarted,
+            global.CallsConcluded);
     }
 
     private async Task<string> ReadJournalAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
     {
-        var args = $"-u {_config.TrunkRecorder.LogServiceName} --since \"{startUtc:yyyy-MM-dd HH:mm:ss}\" --until \"{endUtc:yyyy-MM-dd HH:mm:ss}\" --no-pager";
-        var psi = new ProcessStartInfo("journalctl", args)
+        var psi = new ProcessStartInfo("journalctl")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
+
+        psi.ArgumentList.Add("-u");
+        psi.ArgumentList.Add(_config.TrunkRecorder.LogServiceName);
+        psi.ArgumentList.Add("--utc");
+        psi.ArgumentList.Add("--since");
+        psi.ArgumentList.Add(startUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC");
+        psi.ArgumentList.Add("--until");
+        psi.ArgumentList.Add(endUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC");
+        psi.ArgumentList.Add("--no-pager");
+
         using var process = Process.Start(psi);
         if (process == null)
             return string.Empty;
 
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return output;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+
+        var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            var output = await outputTask;
+            var error = await errorTask;
+            if (process.ExitCode != 0)
+            {
+                _logger.LogWarning(
+                    "TR health journalctl exited with code {ExitCode} for {Start:u} - {End:u}: {Error}",
+                    process.ExitCode,
+                    startUtc,
+                    endUtc,
+                    TrimForLog(error));
+            }
+
+            return output;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            TryKill(process);
+            _logger.LogWarning("TR health journalctl timed out for {Start:u} - {End:u}", startUtc, endUtc);
+            return string.Empty;
+        }
     }
+
+    private static DateTime FloorWindow(DateTime value, int windowMinutes)
+    {
+        value = value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+        var ticks = TimeSpan.FromMinutes(windowMinutes).Ticks;
+        return new DateTime(value.Ticks - value.Ticks % ticks, DateTimeKind.Utc);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best effort cleanup only.
+        }
+    }
+
+    private static string TrimForLog(string value)
+    {
+        value = value.Trim();
+        return value.Length <= 500 ? value : value[..500];
+    }
+
+    private static bool IsEmptyJournalResult(string log) =>
+        log.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(line => line.StartsWith("-- No entries --", StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasAnyHealthSignal(TrHealthSampleDto sample) =>
+        sample.DecodeLines > 0
+        || sample.Retunes > 0
+        || sample.CallsStarted > 0
+        || sample.CallsConcluded > 0
+        || sample.UpdateNotGrant > 0
+        || sample.NoTxRecorded > 0
+        || sample.SampleStops > 0
+        || sample.UnableSource > 0
+        || sample.TuningErrSamples > 0;
 
     public static TrHealthSampleDto BuildSample(string scope, DateTime startUtc, DateTime endUtc, string log)
     {

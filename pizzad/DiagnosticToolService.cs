@@ -8,7 +8,10 @@ namespace pizzad;
 
 public sealed class DiagnosticToolService
 {
-    private static readonly Regex BadTranscriptPattern = new(@"\[(?:\s*)(?:inaudible|blank_audio|blank audio|silence|no audio)(?:\s*)\]|\binaudible\b|^\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WordPattern = new(@"[A-Za-z0-9']+", RegexOptions.Compiled);
+    private static readonly Regex MarkerPattern = new(@"\[(?:\s*)(?:inaudible|blank_audio|blank audio|silence|no audio|audio cuts? out|multiple people speaking(?: at once)?|interposing voices|applause|video playing|music|laughter|coughing)(?:\s*)\]|\((?:\s*)(?:indistinct|inaudible)(?:\s*)\)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BadPhrasePattern = new(@"\b(?:blank[_ ]?audio|no audio|audio cuts? out|multiple people speaking(?: at once)?|interposing voices|indistinct|no speech|video playing)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RadioSignalPattern = new(@"\b(?:\d{2,4}|county|dispatch|engine|medic|unit|respond|route|en\s?route|scene|patient|traffic|accident|crash|vehicle|fire|police|officer|deputy|ems|squad|station|channel|copy|clear|available|signal|north|south|east|west|road|street|avenue|highway|mile|block|central|warrant)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
@@ -51,9 +54,9 @@ public sealed class DiagnosticToolService
     public async Task<JobDto> StartUnifiedTranscriptionExperimentAsync(DiagnosticToolRequest request, CancellationToken ct)
     {
         var calls = await ResolveCallsAsync(request with { SampleCount = request.SampleCount ?? 50 }, ct);
-        var models = DiscoverModels();
+        var models = ResolveExperimentModels(request);
         if (models.Count == 0)
-            throw new InvalidOperationException("No downloaded local transcription models or configured LM/OpenAI-compatible transcription model were found.");
+            throw new InvalidOperationException("Select at least one downloaded local model or configured LM/OpenAI-compatible transcription model.");
         var variantsPerCall = 4;
         var total = calls.Count * models.Count * variantsPerCall;
         var jobId = await CreateJobAsync("diagnostic_transcription_experiment", total, $"Transcription experiment queued for {calls.Count:N0} calls, {models.Count:N0} model(s), and {variantsPerCall:N0} audio variant(s).", ct);
@@ -64,6 +67,9 @@ public sealed class DiagnosticToolService
 
     public Task<DiagnosticToolResultDto?> GetResultAsync(long jobId, CancellationToken ct) =>
         _database.GetDiagnosticResultAsync(jobId, ct);
+
+    public Task<int> ClearExperimentResultsAsync(CancellationToken ct) =>
+        _database.DeleteJobsByTypePrefixAsync("diagnostic_", ct);
 
     private async Task<long> CreateJobAsync(string type, int total, string message, CancellationToken ct)
     {
@@ -134,7 +140,7 @@ public sealed class DiagnosticToolService
                 }
             }
 
-            await SaveCompleteAsync(jobId, "transcription_experiment", rows, $"Transcription experiment finished: {UsefulCount(rows):N0} potentially useful transcription(s).", ct);
+            await SaveCompleteAsync(jobId, "transcription_experiment", rows, $"Transcription experiment finished: {UsefulCount(rows):N0} likely useful transcription(s).", ct);
         }
         catch (Exception ex)
         {
@@ -162,7 +168,7 @@ public sealed class DiagnosticToolService
                 await _events.PublishAsync("job_updated", new { jobId, completed, total = calls.Count }, ct);
             }
 
-            await SaveCompleteAsync(jobId, "audio_experiment", rows, $"Audio experiment finished: {UsefulCount(rows):N0} potentially useful transcription(s).", ct);
+            await SaveCompleteAsync(jobId, "audio_experiment", rows, $"Audio experiment finished: {UsefulCount(rows):N0} likely useful transcription(s).", ct);
         }
         catch (Exception ex)
         {
@@ -192,7 +198,7 @@ public sealed class DiagnosticToolService
                 }
             }
 
-            await SaveCompleteAsync(jobId, "transcription_bakeoff", rows, $"Bakeoff finished: {UsefulCount(rows):N0} potentially useful transcription(s).", ct);
+            await SaveCompleteAsync(jobId, "transcription_bakeoff", rows, $"Bakeoff finished: {UsefulCount(rows):N0} likely useful transcription(s).", ct);
         }
         catch (Exception ex)
         {
@@ -373,9 +379,11 @@ public sealed class DiagnosticToolService
             if (string.IsNullOrWhiteSpace(baseUrl))
                 throw new InvalidOperationException("OpenAI-compatible transcription base URL is not configured.");
             using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-            var apiKey = string.Equals(baseUrl, (_config.AiInsights.OpenAiBaseUrl ?? string.Empty).TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
-                ? _config.AiInsights.OpenAiApiKey
-                : _config.Transcription.OpenAiApiKey;
+            var apiKey = !string.IsNullOrWhiteSpace(modelSpec.ApiKey)
+                ? modelSpec.ApiKey
+                : string.Equals(baseUrl, (_config.AiInsights.OpenAiBaseUrl ?? string.Empty).TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+                    ? _config.AiInsights.OpenAiApiKey
+                    : _config.Transcription.OpenAiApiKey;
             if (!string.IsNullOrWhiteSpace(apiKey))
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             using var content = new MultipartFormDataContent();
@@ -401,19 +409,54 @@ public sealed class DiagnosticToolService
     private DiagnosticToolRowDto Row(long callId, string variant, string model, string text, double durationMs, string audioUrl)
     {
         var score = Score(text);
-        var status = score > 0 ? "potentially_useful" : "not_useful";
-        return new DiagnosticToolRowDto(callId, variant, model, status, score, durationMs, text, audioUrl, score > 0 ? string.Empty : "Empty, inaudible, or likely hallucinated.");
+        return new DiagnosticToolRowDto(callId, variant, model, score.Status, score.Value, durationMs, text, audioUrl, score.Notes);
     }
 
-    private static int Score(string text)
+    private static TranscriptScore Score(string text)
     {
-        if (BadTranscriptPattern.IsMatch(text))
-            return 0;
-        return Regex.Matches(text, @"[A-Za-z0-9']+").Count;
+        if (string.IsNullOrWhiteSpace(text))
+            return new TranscriptScore(0, "not_useful", "Empty transcript.");
+
+        var withoutMarkers = MarkerPattern.Replace(text, " ");
+        var words = WordPattern.Matches(withoutMarkers).Select(m => m.Value.ToLowerInvariant()).ToList();
+        if (words.Count == 0)
+            return new TranscriptScore(0, "not_useful", "Marker-only non-speech transcript.");
+
+        var markerSeen = MarkerPattern.IsMatch(text) || BadPhrasePattern.IsMatch(text);
+        if (markerSeen && words.Count < 6)
+            return new TranscriptScore(0, "not_useful", "Mostly non-speech marker text.");
+
+        if (LooksRepetitive(words))
+            return new TranscriptScore(0, "artifact", "Likely hallucinated repetition or low lexical diversity.");
+
+        if (words.Count < 4)
+            return new TranscriptScore(0, "not_useful", "Too short to evaluate.");
+
+        var hasRadioSignal = RadioSignalPattern.IsMatch(withoutMarkers);
+        if (!hasRadioSignal && words.Count < 10)
+            return new TranscriptScore(0, "uncertain", "Short transcript with no radio-domain signal.");
+
+        var notes = markerSeen ? "Contains a non-speech marker, but enough remaining text to review." : string.Empty;
+        var status = hasRadioSignal ? "likely_useful" : "review";
+        return new TranscriptScore(words.Count, status, notes);
     }
 
     private static int UsefulCount(IEnumerable<DiagnosticToolRowDto> rows) =>
-        rows.Count(r => r.Score > 0);
+        rows.Count(r => r.Status is "likely_useful" or "review");
+
+    private static bool LooksRepetitive(IReadOnlyList<string> words)
+    {
+        if (words.Count < 8)
+            return false;
+        var uniqueRatio = words.Distinct(StringComparer.OrdinalIgnoreCase).Count() / (double)words.Count;
+        if (uniqueRatio < 0.42)
+            return true;
+        if (words.Count < 12)
+            return false;
+        return words.Zip(words.Skip(1), (a, b) => $"{a} {b}")
+            .GroupBy(g => g, StringComparer.OrdinalIgnoreCase)
+            .Any(g => g.Count() >= 4);
+    }
 
     private static List<string> NormalizeModels(IReadOnlyList<string>? models)
     {
@@ -430,31 +473,62 @@ public sealed class DiagnosticToolService
             foreach (var file in Directory.EnumerateFiles(modelRoot, "ggml-*.bin").OrderBy(Path.GetFileName))
             {
                 var name = Path.GetFileNameWithoutExtension(file).Replace("ggml-", "", StringComparison.OrdinalIgnoreCase);
-                rows.Add(new DiagnosticTranscriptionModel($"whisper:{name}", $"Whisper {name}", "whisper", file, file));
+                rows.Add(new DiagnosticTranscriptionModel($"whisper:{name}", $"Whisper {name}", "whisper", file, file, string.Empty));
             }
 
             foreach (var dir in Directory.EnumerateDirectories(modelRoot, "vosk-model*").OrderBy(Path.GetFileName))
             {
                 var name = Path.GetFileName(dir);
-                rows.Add(new DiagnosticTranscriptionModel($"vosk:{name}", $"Vosk {name}", "vosk", dir, dir));
+                rows.Add(new DiagnosticTranscriptionModel($"vosk:{name}", $"Vosk {name}", "vosk", dir, dir, string.Empty));
             }
         }
 
         if (!string.IsNullOrWhiteSpace(_config.Transcription.OpenAiBaseUrl) && !string.IsNullOrWhiteSpace(_config.Transcription.OpenAiModel))
         {
             var model = _config.Transcription.OpenAiModel.Trim();
-            rows.Add(new DiagnosticTranscriptionModel($"openai:{model}", $"LM/OpenAI {model}", "openai", model, _config.Transcription.OpenAiBaseUrl.Trim()));
+            rows.Add(new DiagnosticTranscriptionModel($"openai:{model}", $"LM/OpenAI {model}", "openai", model, _config.Transcription.OpenAiBaseUrl.Trim(), _config.Transcription.OpenAiApiKey));
         }
 
         if (!string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel))
         {
             var model = _config.AiInsights.OpenAiModel.Trim();
-            rows.Add(new DiagnosticTranscriptionModel($"lmlink:{model}", $"LM Link {model}", "openai", model, _config.AiInsights.OpenAiBaseUrl.Trim()));
+            rows.Add(new DiagnosticTranscriptionModel($"lmlink:{model}", $"LM Link {model}", "openai", model, _config.AiInsights.OpenAiBaseUrl.Trim(), _config.AiInsights.OpenAiApiKey));
         }
 
         return rows
             .GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())
+            .ToList();
+    }
+
+    private List<DiagnosticTranscriptionModel> ResolveExperimentModels(DiagnosticToolRequest request)
+    {
+        var discovered = DiscoverModels();
+        var selectedIds = request.Models?
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Select(m => m.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var rows = selectedIds is { Count: > 0 }
+            ? discovered.Where(m => selectedIds.Contains(m.Id)).ToList()
+            : discovered;
+
+        foreach (var custom in request.CustomModels ?? [])
+        {
+            var model = custom.Model?.Trim() ?? string.Empty;
+            var baseUrl = custom.BaseUrl?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(baseUrl))
+                continue;
+            var engine = string.Equals(custom.Engine, "lmlink", StringComparison.OrdinalIgnoreCase) ? "lmlink" : "openai";
+            var labelPrefix = engine == "lmlink" ? "LM Link" : "OpenAI";
+            var label = string.IsNullOrWhiteSpace(custom.Label) ? $"{labelPrefix} {model}" : custom.Label.Trim();
+            var id = $"custom:{engine}:{model}:{Math.Abs(HashCode.Combine(baseUrl, model, label))}";
+            rows.Add(new DiagnosticTranscriptionModel(id, label, "openai", model, baseUrl, custom.ApiKey ?? string.Empty));
+        }
+
+        return rows
+            .GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .Take(8)
             .ToList();
     }
 
@@ -507,5 +581,6 @@ public sealed class DiagnosticToolService
         return path;
     }
 
-    private sealed record DiagnosticTranscriptionModel(string Id, string Label, string Engine, string Value, string Detail);
+    private sealed record DiagnosticTranscriptionModel(string Id, string Label, string Engine, string Value, string Detail, string ApiKey);
+    private sealed record TranscriptScore(int Value, string Status, string Notes);
 }

@@ -16,6 +16,8 @@ public sealed class SftpImportService
     private readonly object _jobLock = new();
     private readonly Dictionary<long, CancellationTokenSource> _runningJobs = new();
     private readonly HashSet<long> _pausedJobs = new();
+    private static readonly TimeSpan StaleActiveJobAge = TimeSpan.FromHours(6);
+    private const string RecentReconciliationLabel = "Recent 48h SFTP reconciliation";
 
     public SftpImportService(
         EngineConfig config,
@@ -91,13 +93,61 @@ public sealed class SftpImportService
                 : $"Quick import estimate: {filtered.Count:N0} new files, {FormatBytes(filtered.Sum(c => c.Size))}.");
     }
 
-    public async Task<JobDto> StartImportAsync(SftpImportRequest request, CancellationToken ct)
+    public async Task<JobDto?> StartRecentReconciliationAsync(DateTime startLocal, DateTime endLocal, CancellationToken ct)
     {
+        var canceled = await _database.CancelStaleActiveJobsAsync(
+            "sftp_import",
+            StaleActiveJobAge,
+            "Canceled stale SFTP import job after pizzad restart; no worker was attached.",
+            ct);
+        if (canceled > 0)
+            _logger.LogWarning("Canceled {Count} stale SFTP import job(s) before recent reconciliation", canceled);
+
+        if (await _database.HasActiveJobAsync("sftp_import", ct))
+        {
+            _logger.LogInformation("Skipping recent SFTP reconciliation because another SFTP import job is active");
+            return null;
+        }
+
+        var estimate = await EstimateAsync(new SftpEstimateRequest(startLocal, endLocal), ct);
+        if (estimate.CandidateCount <= 0)
+        {
+            _logger.LogInformation("Skipping recent SFTP reconciliation: no new SFTP files in {StartLocal:u} - {EndLocal:u}", startLocal, endLocal);
+            return null;
+        }
+
+        return await StartImportAsync(
+            new SftpImportRequest(startLocal, endLocal, ConfirmLargeImport: false, CallCap: null, ByteCap: null),
+            ct,
+            $"{RecentReconciliationLabel} queued.");
+    }
+
+    public Task<JobDto> StartImportAsync(SftpImportRequest request, CancellationToken ct)
+    {
+        return StartImportAsync(request, ct, null);
+    }
+
+    private async Task<JobDto> StartImportAsync(SftpImportRequest request, CancellationToken ct, string? messageOverride)
+    {
+        var canceled = await _database.CancelStaleActiveJobsAsync(
+            "sftp_import",
+            StaleActiveJobAge,
+            "Canceled stale SFTP import job after pizzad restart; no worker was attached.",
+            ct);
+        if (canceled > 0)
+            _logger.LogWarning("Canceled {Count} stale SFTP import job(s) before starting a new import", canceled);
+
+        if (await _database.HasActiveJobAsync("sftp_import", ct))
+            throw new InvalidOperationException("Another SFTP import is already queued, running, or paused.");
+
         var span = request.EndLocal - request.StartLocal;
         if (span.TotalHours > _config.SftpImport.QuickImportMaxHours && !request.ConfirmLargeImport)
             throw new InvalidOperationException("Large SFTP imports require explicit confirmation.");
 
         var estimate = await EstimateAsync(new SftpEstimateRequest(request.StartLocal, request.EndLocal), ct);
+        if (estimate.CandidateCount <= 0)
+            throw new InvalidOperationException("No new SFTP files were found for the selected range.");
+
         var callCap = request.CallCap ?? _config.SftpImport.DefaultBatchCallCap;
         var byteCap = request.ByteCap ?? _config.SftpImport.DefaultBatchByteCap;
         if (!request.ConfirmLargeImport && (estimate.CandidateCount > callCap || estimate.CandidateBytes > byteCap))
@@ -108,16 +158,17 @@ public sealed class SftpImportService
             Type = "sftp_import",
             Status = "queued",
             Total = estimate.CandidateCount,
-            Message = span.TotalHours > _config.SftpImport.QuickImportMaxHours
+            Message = messageOverride ?? (span.TotalHours > _config.SftpImport.QuickImportMaxHours
                 ? "Large pizzastack prime import queued."
-                : "Quick SFTP import queued.",
+                : "Quick SFTP import queued."),
             CreatedAtUtc = DateTime.UtcNow
         };
         var jobId = await _database.AddJobAsync(job, ct);
         var cts = new CancellationTokenSource();
         lock (_jobLock)
             _runningJobs[jobId] = cts;
-        _ = Task.Run(() => RunImportJobAsync(jobId, request, cts.Token));
+        var jobLabel = messageOverride is null ? "SFTP import" : RecentReconciliationLabel;
+        _ = Task.Run(() => RunImportJobAsync(jobId, request, jobLabel, cts.Token));
         await _events.PublishAsync("job_updated", new { jobId, type = "sftp_import", status = "queued" }, ct);
         return job with { Id = jobId };
     }
@@ -152,7 +203,7 @@ public sealed class SftpImportService
         return await _database.GetJobAsync(jobId, ct);
     }
 
-    private async Task RunImportJobAsync(long jobId, SftpImportRequest request, CancellationToken ct)
+    private async Task RunImportJobAsync(long jobId, SftpImportRequest request, string jobLabel, CancellationToken ct)
     {
         var completed = 0;
         var failed = 0;
@@ -160,8 +211,21 @@ public sealed class SftpImportService
         {
             await _database.UpdateJobAsync(jobId, "running", null, 0, 0, "Discovering SFTP archive files...", setStarted: true, setFinished: false, ct);
             await _events.PublishAsync("job_updated", new { jobId, status = "running" }, ct);
-            var candidates = await DiscoverCandidatesAsync(request.StartLocal, request.EndLocal, ct);
-            await _database.UpdateJobAsync(jobId, "running", candidates.Count, 0, 0, $"Importing {candidates.Count:N0} files...", false, false, ct);
+            var discovered = await DiscoverCandidatesAsync(request.StartLocal, request.EndLocal, ct);
+            var candidates = new List<SftpArchiveCandidate>();
+            foreach (var candidate in discovered)
+            {
+                var backfillStatus = await _database.GetBackfillItemStatusAsync("sftp", candidate.RemotePath, ct);
+                if (!string.Equals(backfillStatus, "imported", StringComparison.OrdinalIgnoreCase))
+                    candidates.Add(candidate);
+            }
+            await _database.UpdateJobAsync(jobId, "running", candidates.Count, 0, 0, $"Importing {candidates.Count:N0} new file(s)...", false, false, ct);
+            if (candidates.Count == 0)
+            {
+                await _database.UpdateJobAsync(jobId, "completed", 0, 0, 0, $"{jobLabel} finished: no new files.", false, true, ct);
+                await _events.PublishAsync("job_updated", new { jobId, status = "completed", completed = 0, failed = 0, total = 0 }, ct);
+                return;
+            }
 
             using var client = CreateClient();
             client.Connect();
@@ -174,7 +238,7 @@ public sealed class SftpImportService
                     var priorStatus = await _database.GetBackfillItemStatusAsync("sftp", candidate.RemotePath, ct);
                     if (string.Equals(priorStatus, "imported", StringComparison.OrdinalIgnoreCase))
                     {
-                        completed++;
+                        _logger.LogInformation("Skipping already-imported SFTP file {RemotePath}", candidate.RemotePath);
                         continue;
                     }
                     var localPath = BuildCachePath(candidate);
@@ -222,7 +286,7 @@ public sealed class SftpImportService
             }
 
             var status = failed == 0 ? "completed" : "completed_with_errors";
-            await _database.UpdateJobAsync(jobId, status, candidates.Count, completed, failed, $"SFTP import finished: {completed:N0} imported, {failed:N0} failed.", false, true, ct);
+            await _database.UpdateJobAsync(jobId, status, candidates.Count, completed, failed, $"{jobLabel} finished: {completed:N0} imported, {failed:N0} failed.", false, true, ct);
             await _events.PublishAsync("job_updated", new { jobId, status, completed, failed, total = candidates.Count }, ct);
         }
         catch (OperationCanceledException)

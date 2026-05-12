@@ -44,7 +44,7 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     public void Enqueue(EngineCall call)
     {
-        if (!IsEnabled())
+        if (!_config.Setup.Completed || !IsEnabled())
             return;
         _queue.Enqueue(_talkgroups.Enrich(call));
     }
@@ -52,6 +52,8 @@ public sealed class AutomaticInsightsService : BackgroundService
     public int ConfiguredBatchSize => BatchSize();
 
     public bool IsConfiguredAndEnabled => IsEnabled();
+
+    public bool IsSetupComplete => _config.Setup.Completed;
 
     public async Task<int> GenerateWindowForCallsAsync(List<EngineCall> calls, CancellationToken ct)
     {
@@ -86,7 +88,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             try
             {
-                if (IsEnabled())
+                if (_config.Setup.Completed && IsEnabled())
                 {
                     await SeedBacklogIfNeededAsync(stoppingToken);
                     DrainQueue();
@@ -185,30 +187,36 @@ public sealed class AutomaticInsightsService : BackgroundService
     private async Task<int> PersistIncidentsAsync(InsightResult result, List<EngineCall> batch, CancellationToken ct)
     {
         var incidents = 0;
+        var claimedCallIds = new HashSet<long>();
         foreach (var ev in result.Events.Where(IsActionableEvent))
         {
-            var calls = ResolveEventCalls(ev, batch);
+            var calls = ResolveEventCalls(ev, batch)
+                .Where(c => !claimedCallIds.Contains(c.Id))
+                .ToList();
             if (calls.Count < 2)
             {
                 _logger.LogInformation(
-                    "Skipped AI event '{Title}' because it linked {CallCount} call(s); incidents require at least 2 related calls.",
+                    "Skipped AI event '{Title}' because it linked {CallCount} unclaimed call(s); incidents require at least 2 related calls.",
                     ev.Title,
                     calls.Count);
                 continue;
             }
 
-            if (!IsValidIncidentCandidate(ev, calls, out var rejectReason))
+            var validation = IncidentCandidateValidator.Validate(ev.Title, ev.Detail, calls.Select(ToIncidentCandidateCall).ToList());
+            if (!validation.IsValid)
             {
                 _logger.LogInformation(
                     "Rejected AI incident candidate '{Title}' with {CallCount} call(s): {Reason}. Calls={CallIds}",
                     ev.Title,
                     calls.Count,
-                    rejectReason,
+                    validation.Reason,
                     string.Join(",", calls.Select(c => c.Id)));
                 continue;
             }
+            var validatedCallIds = validation.Calls.Select(c => c.CallId).ToHashSet();
+            calls = calls.Where(c => validatedCallIds.Contains(c.Id)).ToList();
 
-            await _database.AddIncidentAsync(new IncidentDto
+            var incidentId = await _database.AddIncidentAsync(new IncidentDto
             {
                 Title = string.IsNullOrWhiteSpace(ev.Title) ? "Radio incident" : ev.Title.Trim(),
                 Detail = string.IsNullOrWhiteSpace(ev.Detail) ? result.SummaryText : ev.Detail.Trim(),
@@ -217,6 +225,17 @@ public sealed class AutomaticInsightsService : BackgroundService
                 Confidence = Math.Clamp(ev.Confidence, 0, 1),
                 Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
             }, ct);
+            if (incidentId <= 0)
+            {
+                _logger.LogInformation(
+                    "Skipped AI incident candidate '{Title}' because one or more calls are already linked to an existing incident. Calls={CallIds}",
+                    ev.Title,
+                    string.Join(",", calls.Select(c => c.Id)));
+                continue;
+            }
+
+            foreach (var call in calls)
+                claimedCallIds.Add(call.Id);
             incidents++;
         }
 
@@ -273,7 +292,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 new
                 {
                     role = "system",
-                    content = "You summarize radio call transcripts into concise, actionable category insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include one or more matching call_ids copied exactly from the provided call lines. Omit routine acknowledgements and 'no incident' findings."
+                    content = "You summarize radio call transcripts into concise, actionable category insights. Output JSON with fields summary_text and notable_events (list of {title, detail, category, timestamp, confidence, call_ids}). For each notable event: choose exactly one category from [police, fire, ems, traffic, public_works, utilities, other], set timestamp as local HH:mm (24h), and include one or more matching call_ids copied exactly from the provided call lines. Extract useful intelligence from radio shorthand when supported by context, including common 10-codes, status codes, disposition codes, and spoken numeric codes such as 10-7, 10-49, 1049, code 16, signal codes, unit status, locations, hazards, vehicles, people, and outcomes. Preserve the original code in detail text when its meaning is uncertain; do not invent local code meanings. Omit routine acknowledgements and 'no incident' findings."
                 },
                 new { role = "user", content = BuildPrompt(calls, start, end) }
             }
@@ -292,21 +311,77 @@ public sealed class AutomaticInsightsService : BackgroundService
                 if (!response.IsSuccessStatusCode)
                     throw new InvalidOperationException($"Automatic insights request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
                 _logger.LogInformation("LM Studio insights response received for {Calls} calls ({ResponseChars} chars)", calls.Count, text.Length);
+                await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ct);
                 return ParseResponse(text);
             }
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
             {
                 last = ex;
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
                 await Task.Delay(500, ct);
             }
             catch (Exception ex)
             {
                 last = ex;
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
                 break;
             }
         }
 
         throw new InvalidOperationException(last?.Message ?? "Automatic insights request failed.", last);
+    }
+
+    private async Task RecordUsageAsync(string responseText, string endpoint, int payloadChars, int inputChars, int attempt, bool success, string error, CancellationToken ct)
+    {
+        var usage = ExtractUsage(responseText);
+        await _database.AddLmUsageAsync(new TokenUsageEntryDto(
+            0,
+            DateTime.UtcNow,
+            "automatic insights",
+            "chat.completions",
+            success,
+            error,
+            endpoint,
+            InsightModel(),
+            usage.ResponseModel,
+            usage.FinishReason,
+            inputChars,
+            payloadChars,
+            usage.PromptTokens,
+            usage.CompletionTokens,
+            usage.TotalTokens), ct);
+    }
+
+    private static (int PromptTokens, int CompletionTokens, int TotalTokens, string ResponseModel, string FinishReason) ExtractUsage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return (0, 0, 0, string.Empty, string.Empty);
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            var prompt = ReadInt(root, "usage", "prompt_tokens", "promptTokens");
+            var completion = ReadInt(root, "usage", "completion_tokens", "completionTokens");
+            var total = ReadInt(root, "usage", "total_tokens", "totalTokens");
+            var model = root.TryGetProperty("model", out var m) ? m.GetString() ?? string.Empty : string.Empty;
+            var finish = string.Empty;
+            if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0 &&
+                choices[0].TryGetProperty("finish_reason", out var f))
+                finish = f.GetString() ?? string.Empty;
+            return (prompt, completion, total, model, finish);
+        }
+        catch
+        {
+            return (0, 0, 0, string.Empty, string.Empty);
+        }
+    }
+
+    private static int ReadInt(JsonElement root, string parent, string snake, string camel)
+    {
+        if (!root.TryGetProperty(parent, out var obj)) return 0;
+        if (obj.TryGetProperty(snake, out var a) && a.TryGetInt32(out var av)) return av;
+        if (obj.TryGetProperty(camel, out var b) && b.TryGetInt32(out var bv)) return bv;
+        return 0;
     }
 
     private string BuildPrompt(List<EngineCall> calls, long start, long end)
@@ -334,7 +409,12 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("police, fire, ems, traffic, public_works, utilities, other");
         sb.AppendLine("Timestamp guidance: include timestamp as local HH:mm (24h) using the provided call times.");
         sb.AppendLine("Insight guidance: notable_events may describe a single important call or multiple related calls. Incidents will be derived later from multi-call notable events.");
-        sb.AppendLine("Linkage guidance: each notable event must include one or more call_ids copied exactly from input lines. Include every clearly related source call in this window.");
+        sb.AppendLine("Incident grouping guidance: a multi-call notable_event must be one real-world event, not a topic bucket. Do not group calls merely because they are close in time, share a category, share an agency, share a talkgroup, or are routine unit/admin/status traffic.");
+        sb.AppendLine("Concrete anchor guidance: include multiple call_ids only when every included call shares concrete evidence such as the same address/street/intersection, landmark, patient, person/name, vehicle/plate, unit continuation, radio channel handoff, or an explicit reference to the same call. If a call lacks a concrete anchor to the event, omit it.");
+        sb.AppendLine("Routine exclusion guidance: do not create notable_events for routine acknowledgements, unit availability, 10-7/10-8 status only, license/warrant checks without a broader event, generic dispatch coordination, administrative updates, or isolated unclear/inaudible calls.");
+        sb.AppendLine("Linkage guidance: each notable event must include one or more call_ids copied exactly from input lines. Include every clearly related source call in this window, but do not pad an event with weakly related calls. Each call_id may belong to at most one notable_event.");
+        sb.AppendLine("Evidence guidance: for every included call_id, add a call_evidence entry {call_id, evidence}. The evidence must be a short anchor phrase explaining why that call belongs to this event, such as an address, road, unit handoff, patient/vehicle detail, or quoted shared phrase.");
+        sb.AppendLine("Radio-code guidance: police/fire/EMS traffic often uses compact codes. Treat patterns like 10-7, 10-49/1049, code 16, signal codes, unit status, and disposition codes as important evidence. Include the code and any context-supported meaning in notable event details; if the meaning is ambiguous, keep the code verbatim instead of guessing.");
         sb.AppendLine($"Coverage guidance: target up to {targetEventCount} notable_events for this window when evidence supports it. Return an empty notable_events array when there is nothing notable. Keep each detail concise (1 sentence).");
 
         var prioritizedCalls = calls
@@ -406,7 +486,8 @@ public sealed class AutomaticInsightsService : BackgroundService
                     GetString(item, "category"),
                     GetString(item, "timestamp"),
                     item.TryGetProperty("confidence", out var confidence) && confidence.TryGetDouble(out var score) ? score : 0,
-                    ids));
+                    ids,
+                    ReadEvidence(item)));
             }
         }
         return new InsightResult(summary, events);
@@ -456,9 +537,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (ev.CallIds.Count < 2)
             return false;
 
-        return !Regex.IsMatch(combined,
-            @"\b(no|none|not|without|unclear)\b.{0,40}\b(incident|event|actionable|emergency|issue|activity)\b|\b(no event detected|no clear incident|no actionable incident|no notable event|nothing notable|routine traffic only|routine chatter|non.?incident)\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return IncidentCandidateValidator.IsActionableText(title, detail, ev.CallIds.Count);
     }
 
     private static bool IsNotableInsightEvent(InsightEvent ev)
@@ -469,67 +548,14 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (string.IsNullOrWhiteSpace(combined) || ev.CallIds.Count == 0)
             return false;
 
-        return !Regex.IsMatch(combined,
-            @"\b(no|none|not|without|unclear)\b.{0,40}\b(incident|event|actionable|emergency|issue|activity)\b|\b(no event detected|no clear incident|no actionable incident|no notable event|nothing notable|routine traffic only|routine chatter|non.?incident)\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    }
-
-    private static bool IsValidIncidentCandidate(InsightEvent ev, List<EngineCall> calls, out string reason)
-    {
-        if (calls.Count < 2)
-        {
-            reason = "fewer than 2 resolved calls";
-            return false;
-        }
-
-        var first = calls.Min(c => c.StartTime);
-        var last = calls.Max(c => c.StartTime);
-        var span = TimeSpan.FromSeconds(Math.Max(0, last - first));
-        if (span > MaxIncidentSpan)
-        {
-            reason = $"call span {span.TotalMinutes:0.#}m exceeds {MaxIncidentSpan.TotalMinutes:0.#}m";
-            return false;
-        }
-
-        reason = "multi-call actionable event within incident time window";
-        return true;
-    }
-
-    private static HashSet<string> ExtractIncidentTokens(string text)
-    {
-        var stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "call","calls","unit","units","officer","officers","dispatch","reported","advised","responding",
-            "response","scene","area","update","updates","subject","caller","vehicle","police","fire","ems",
-            "medical","traffic","north","south","east","west","street","road","drive","avenue","near","copy",
-            "copies","clear","clearance","radio","county","city","sheriff","department","channel","station"
-        };
-        var cleaned = Regex.Replace((text ?? string.Empty).ToLowerInvariant(), @"[^a-z0-9\s]", " ");
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var token in cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (token.Length < 4 || stop.Contains(token))
-                continue;
-            tokens.Add(token);
-        }
-        return tokens;
-    }
-
-    private static double ComputeIncidentSimilarity(HashSet<string> a, HashSet<string> b)
-    {
-        if (a.Count == 0 || b.Count == 0)
-            return 0;
-        var intersection = a.Count(b.Contains);
-        var union = a.Count + b.Count - intersection;
-        var jaccard = union <= 0 ? 0 : intersection / (double)union;
-        var containment = intersection / (double)Math.Min(a.Count, b.Count);
-        return Math.Max(jaccard, containment * 0.72);
+        return IncidentCandidateValidator.IsNotableText(title, detail, ev.CallIds.Count);
     }
 
     private static string NormalizeEventText(string value) =>
         Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
 
     private bool IsEnabled() =>
+        _config.Setup.Completed &&
         _config.AiInsights.Enabled &&
         !string.IsNullOrWhiteSpace(InsightBaseUrl()) &&
         !string.IsNullOrWhiteSpace(InsightModel());
@@ -576,6 +602,21 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private static string GetString(JsonElement item, string name) =>
         item.TryGetProperty(name, out var value) ? value.GetString() ?? string.Empty : string.Empty;
+
+    private static List<CallEvidence> ReadEvidence(JsonElement item)
+    {
+        var evidence = new List<CallEvidence>();
+        if (!item.TryGetProperty("call_evidence", out var array) || array.ValueKind != JsonValueKind.Array)
+            return evidence;
+        foreach (var row in array.EnumerateArray())
+        {
+            evidence.Add(new CallEvidence(GetString(row, "call_id"), GetString(row, "evidence")));
+        }
+        return evidence;
+    }
+
+    private static IncidentCandidateCall ToIncidentCandidateCall(EngineCall call) =>
+        new(call.Id, call.StartTime, call.Transcription, call.Category, call.TalkgroupName, call.SystemShortName);
 
     private static string StripCodeFence(string content) =>
         Regex.Replace(content.Trim(), "^```(?:json)?\\s*|\\s*```$", string.Empty, RegexOptions.IgnoreCase);
@@ -626,6 +667,20 @@ public sealed class AutomaticInsightsService : BackgroundService
                                     type = "array",
                                     items = new { type = "string" },
                                     minItems = 1
+                                },
+                                call_evidence = new
+                                {
+                                    type = "array",
+                                    items = new
+                                    {
+                                        type = "object",
+                                        properties = new
+                                        {
+                                            call_id = new { type = "string" },
+                                            evidence = new { type = "string" }
+                                        },
+                                        required = new[] { "call_id", "evidence" }
+                                    }
                                 }
                             },
                             required = new[] { "title", "detail", "category", "timestamp", "confidence", "call_ids" }
@@ -638,5 +693,6 @@ public sealed class AutomaticInsightsService : BackgroundService
     };
 
     private sealed record InsightResult(string SummaryText, List<InsightEvent> Events);
-    private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds);
+    private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds, List<CallEvidence> CallEvidence);
+    private sealed record CallEvidence(string CallId, string Evidence);
 }

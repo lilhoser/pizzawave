@@ -48,6 +48,7 @@ public sealed record DashboardDto
 {
     public IReadOnlyList<KpiDto> Kpis { get; init; } = [];
     public IReadOnlyList<HourCategoryDto> VolumeByHourCategory { get; init; } = [];
+    public IReadOnlyList<LocationHeatDto> LocationHeat { get; init; } = [];
     public IReadOnlyList<QualityHourDto> QualityByHour { get; init; } = [];
     public IReadOnlyList<BarStatDto> ProblemTalkgroups { get; init; } = [];
     public IReadOnlyList<BarStatDto> InaudibleBySystem { get; init; } = [];
@@ -55,11 +56,55 @@ public sealed record DashboardDto
     public IReadOnlyList<TopTalkgroupDto> TopTalkgroups { get; init; } = [];
     public IReadOnlyList<AlertMatchDto> Alerts { get; init; } = [];
     public IReadOnlyList<IncidentDto> Incidents { get; init; } = [];
+    public TokenUsageSummaryDto TokenUsage { get; init; } = new();
 }
 
 public sealed record KpiDto(string Label, string Value, string Subtext);
 
 public sealed record HourCategoryDto(int Hour, string Category, int Count);
+
+public sealed record LocationHeatDto(
+    string AreaId,
+    string AreaLabel,
+    string SystemShortName,
+    string LocationText,
+    string GeocodeQuery,
+    string GeocodeDisplayName,
+    string GeocodeProvider,
+    string GeocodePrecision,
+    double GeocodeConfidence,
+    double Latitude,
+    double Longitude,
+    int Count,
+    double Intensity,
+    long LastHeard,
+    string Category,
+    IReadOnlyList<long> CallIds,
+    IReadOnlyList<string> IncidentTitles,
+    IReadOnlyList<LocationHeatCallDto> SourceCalls);
+
+public sealed record LocationHeatCallDto(
+    long CallId,
+    long RawTimestamp,
+    string Category,
+    string TalkgroupName,
+    string Transcript);
+
+public sealed record GeocodeCacheDto
+{
+    public string CacheKey { get; init; } = string.Empty;
+    public string Provider { get; init; } = string.Empty;
+    public string Query { get; init; } = string.Empty;
+    public string AreaId { get; init; } = string.Empty;
+    public string LocationText { get; init; } = string.Empty;
+    public string DisplayName { get; init; } = string.Empty;
+    public string Precision { get; init; } = "unknown";
+    public double Confidence { get; init; }
+    public double Latitude { get; init; }
+    public double Longitude { get; init; }
+    public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
+}
 
 public sealed record QualityHourDto(int Hour, int Empty, int Failure, int Inaudible, int Short);
 
@@ -114,13 +159,21 @@ public sealed record IncidentDto
     public long Id { get; init; }
     public string Title { get; init; } = string.Empty;
     public string Detail { get; init; } = string.Empty;
+    public string Category { get; init; } = "other";
     public long FirstSeen { get; init; }
     public long LastSeen { get; init; }
     public double Confidence { get; init; }
     public IReadOnlyList<IncidentCallDto> Calls { get; init; } = [];
 }
 
-public sealed record IncidentCallDto(long CallId, long RawTimestamp, string Transcript, string AudioUrl);
+public sealed record IncidentCallDto(
+    long CallId,
+    long RawTimestamp,
+    string Transcript,
+    string AudioUrl,
+    string Category = "other",
+    string TalkgroupName = "",
+    string SystemShortName = "");
 
 public sealed record JobDto
 {
@@ -136,13 +189,100 @@ public sealed record JobDto
     public DateTime? FinishedAtUtc { get; init; }
 }
 
+public sealed record JobLogDto(
+    long Id,
+    long JobId,
+    DateTime TimestampUtc,
+    string Stream,
+    string Text);
+
+public sealed record SetupJobRequest(string Action, bool Confirmed = false, JsonElement? Parameters = null);
+
+public sealed record SetupArtifactDto(string Path, bool Exists, string Notes);
+
+public sealed record SetupArtifactReportDto(
+    bool HasBlockingArtifacts,
+    IReadOnlyList<SetupArtifactDto> Artifacts,
+    IReadOnlyList<string> ManualCommands);
+
+public sealed record SetupSdrDeviceDto(int Index, string Serial, string Label, string UsbLine, string Warning);
+
+public sealed record SetupSdrDetectionDto(
+    IReadOnlyList<SetupSdrDeviceDto> Devices,
+    string RawOutput,
+    string Message);
+
+public sealed record SetupTalkgroupParseRequest(string? CsvText = null, string? RadioReferenceSid = null, string? RadioReferenceUrl = null, bool IncludeNormallyExcluded = false);
+
+public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows);
+
+public sealed record SetupTalkgroupRowDto
+{
+    public long Id { get; init; }
+    public string Mode { get; init; } = string.Empty;
+    public string AlphaTag { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public string Tag { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public string OpsCategory { get; init; } = "other";
+    public bool Included { get; init; } = true;
+    public string ExclusionReason { get; init; } = string.Empty;
+}
+
+public sealed record SetupTalkgroupPreviewDto(
+    IReadOnlyList<SetupTalkgroupRowDto> Rows,
+    IReadOnlyDictionary<string, int> IncludedByCategory,
+    int IncludedCount,
+    int ExcludedCount,
+    string Diagnostics);
+
+public sealed record SetupTrConfigDraftRequest(
+    string? RadioReferenceSid = null,
+    string? RadioReferenceUrl = null,
+    string? HtmlText = null,
+    string? SiteNames = null,
+    string? SdrSerials = null,
+    int SampleRate = 2400000);
+
+public sealed record SetupTrConfigSaveRequest(string ConfigJson);
+
+public sealed record SetupTrConfigPatchRequest(bool RestartTr = false);
+
+public sealed record SetupTrConfigSourceDto(
+    string Label,
+    string Serial,
+    long CenterFrequency,
+    int SampleRate,
+    IReadOnlyList<double> CoveredFrequenciesMhz,
+    IReadOnlyList<double> OmittedFrequenciesMhz);
+
+public sealed record SetupTrConfigSystemDto(
+    string SystemName,
+    string ShortName,
+    string SiteName,
+    IReadOnlyList<double> FrequenciesMhz,
+    IReadOnlyList<double> ControlChannelsMhz,
+    long CenterFrequency,
+    string AssignedSerial,
+    string Warning);
+
+public sealed record SetupTrConfigDraftDto(
+    string ConfigJson,
+    IReadOnlyList<SetupTrConfigSystemDto> Systems,
+    IReadOnlyList<SetupTrConfigSourceDto> Sources,
+    IReadOnlyList<string> Warnings,
+    string Diagnostics);
+
 public sealed record HealthDto(
     string Status,
     string Version,
+    string StackName,
     string DatabasePath,
     string AudioRoot,
     int QueueDepth,
     DateTime ServerTimeUtc);
+
+public sealed record StatusSummaryDto(int Calls, int Incidents, int Alerts, long Tokens);
 
 public sealed record AuthInitDto(string Mode, bool ReadRequiresAuth, bool WriteRequiresAuth);
 
@@ -178,7 +318,8 @@ public sealed record TrHealthChartDto(
     string YAxisLabel,
     string ValueFormat,
     IReadOnlyList<string> Labels,
-    IReadOnlyList<TrHealthSeriesDto> Series);
+    IReadOnlyList<TrHealthSeriesDto> Series,
+    string BaselineNote);
 
 public sealed record TrHealthSummaryDto
 {
@@ -201,6 +342,41 @@ public sealed record TrTroubleshootDto(
     string LogOutput,
     string Diagnostics,
     string InsightsText);
+
+public sealed record TokenUsageSummaryDto(
+    int Requests = 0,
+    int Successes = 0,
+    int Failures = 0,
+    long PromptTokens = 0,
+    long CompletionTokens = 0,
+    long TotalTokens = 0,
+    double EstimatedStandardCost = 0);
+
+public sealed record TokenUsageBucketDto(string Label, long TotalTokens, long PromptTokens, long CompletionTokens, int Requests);
+
+public sealed record TokenUsageEntryDto(
+    long Id,
+    DateTime TimestampUtc,
+    string TriggerActivity,
+    string RequestKind,
+    bool Success,
+    string Error,
+    string Endpoint,
+    string RequestModel,
+    string ResponseModel,
+    string FinishReason,
+    int InputChars,
+    int PayloadChars,
+    int PromptTokens,
+    int CompletionTokens,
+    int TotalTokens);
+
+public sealed record TokenUsageReportDto(
+    string Ledger,
+    TokenUsageSummaryDto Summary,
+    IReadOnlyList<TokenUsageBucketDto> ByDay,
+    IReadOnlyList<TokenUsageBucketDto> ByTrigger,
+    IReadOnlyList<TokenUsageEntryDto> Entries);
 
 public sealed record QualityAuditDto(
     int TotalCalls,
@@ -267,7 +443,41 @@ public sealed record SftpAvailabilityResponse(
 
 public sealed record SftpImportRequest(DateTime StartLocal, DateTime EndLocal, bool ConfirmLargeImport, int? CallCap, long? ByteCap);
 
+public sealed record LocalImportEstimateRequest(DateTime StartLocal, DateTime EndLocal);
+
+public sealed record LocalImportEstimateResponse(int CandidateCount, long CandidateBytes, bool ExceedsQuickImportWindow, string Message);
+
+public sealed record LocalArchiveAvailabilityResponse(
+    bool Available,
+    string CaptureDir,
+    DateTime? EarliestLocal,
+    DateTime? LatestLocal,
+    int FileCount,
+    long TotalBytes,
+    int ScannedDirectories,
+    int SkippedDirectories,
+    string Message);
+
+public sealed record LocalImportRequest(DateTime StartLocal, DateTime EndLocal, bool ConfirmLargeImport, int? CallCap, long? ByteCap);
+
 public sealed record SettingsSectionDto(string Section, object Values);
+
+public sealed record SetupStatusDto(
+    bool Completed,
+    string CurrentStep,
+    IReadOnlyList<SetupCheckDto> Checks,
+    object Detection,
+    object Values);
+
+public sealed record SetupCheckDto(string Id, string Label, bool Required, bool Ok, string Message);
+
+public sealed record SetupSaveRequest(JsonElement Values);
+
+public sealed record SetupValidationResult(bool Ok, string Message, object? Detail = null);
+
+public sealed record ProfileStateDto(Guid ActiveProfileId, IReadOnlyList<ProcessingProfile> Profiles);
+
+public sealed record SaveProfilesRequest(Guid ActiveProfileId, IReadOnlyList<ProcessingProfile> Profiles);
 
 public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);
 
@@ -279,6 +489,8 @@ public sealed record TroubleshootInsightRequest(long Start, long End, bool BySys
 
 public sealed record TroubleshootInsightResponse(string Text);
 
+public sealed record RetryTranscriptionErrorsRequest(int Limit = 100);
+
 public sealed record SaveSettingsRequest(JsonElement Values);
 
 public sealed record DiagnosticToolRequest(
@@ -286,7 +498,15 @@ public sealed record DiagnosticToolRequest(
     long? Start,
     long? End,
     int? SampleCount,
-    IReadOnlyList<string>? Models);
+    IReadOnlyList<string>? Models,
+    IReadOnlyList<DiagnosticCustomModelRequest>? CustomModels);
+
+public sealed record DiagnosticCustomModelRequest(
+    string Engine,
+    string Label,
+    string BaseUrl,
+    string Model,
+    string ApiKey);
 
 public sealed record DiagnosticModelDto(
     string Id,
@@ -314,6 +534,7 @@ public sealed record DiagnosticToolRowDto(
 
 public sealed class EngineSectionUpdate
 {
+    public BrandingConfig? Branding { get; set; }
     public ServerConfig? Server { get; set; }
     public StorageConfig? Storage { get; set; }
     public IngestConfig? Ingest { get; set; }

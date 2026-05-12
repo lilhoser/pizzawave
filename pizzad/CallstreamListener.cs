@@ -22,6 +22,14 @@ public sealed class CallstreamListener : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        while (!_config.Setup.Completed && !stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("callstream ingest disabled until PizzaWave setup is complete.");
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken).ContinueWith(_ => { }, CancellationToken.None);
+        }
+        if (stoppingToken.IsCancellationRequested)
+            return;
+
         var address = IPAddress.Parse(_config.Ingest.CallstreamBind);
         var endpoint = new IPEndPoint(address, _config.Ingest.CallstreamPort);
         var listener = new TcpListener(endpoint);
@@ -58,7 +66,14 @@ public sealed class CallstreamListener : BackgroundService
         finally
         {
             listener.Stop();
-            await Task.WhenAll(active.Values);
+            var activeTasks = active.Values.ToArray();
+            if (activeTasks.Length > 0)
+            {
+                var allClients = Task.WhenAll(activeTasks);
+                var completed = await Task.WhenAny(allClients, Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None));
+                if (completed != allClients)
+                    _logger.LogWarning("Timed out waiting for {Count} active callstream client task(s) during shutdown", activeTasks.Length);
+            }
         }
     }
 

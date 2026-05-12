@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, QualityAuditGroup, QualityAuditSample, QualityHour, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, TokenUsageReport, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
-type Page = "dashboard" | "troubleshoot" | "settings" | typeof categories[number];
+type Page = "dashboard" | "system" | "settings" | typeof categories[number];
 type CategoryViewMode = "incidents" | "summaries" | "raw";
 const categoryColors: Record<string, string> = {
   police: "#5aa7ff",
@@ -35,6 +35,9 @@ function App() {
   const [category, setCategory] = useState<CategoryPage | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
+  const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null);
+  const [profileState, setProfileState] = useState<ProfileState | null>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
@@ -106,17 +109,29 @@ function App() {
 
   const load = useCallback(async () => {
     try {
-      const [healthStatus, jobRows] = await Promise.all([
+      const setup = await api.request<SetupStatus>("/api/v1/setup/status");
+      setSetupStatus(setup);
+      if (!setup.completed) {
+        const healthStatus = await api.request<EngineHealth>("/api/v1/health");
+        setEngineHealth(healthStatus);
+        setStatus("Setup");
+        return;
+      }
+      const [healthStatus, jobRows, summary, profiles] = await Promise.all([
         api.request<EngineHealth>("/api/v1/health"),
-        api.request<Job[]>("/api/v1/jobs")
+        api.request<Job[]>("/api/v1/jobs"),
+        api.request<StatusSummary>(`/api/v1/status?${rangeQuery(rangeHours)}`),
+        api.request<ProfileState>("/api/v1/profiles")
       ]);
       setEngineHealth(healthStatus);
       setJobs(jobRows);
+      setStatusSummary(summary);
+      setProfileState(profiles);
       if (page === "dashboard") {
         setDashboard(await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`));
       } else if (categories.includes(page as any)) {
         setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}`));
-      } else if (page === "troubleshoot") {
+      } else if (page === "system") {
         setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
       }
       setStatus("Live");
@@ -147,12 +162,21 @@ function App() {
     return () => events.close();
   }, [load]);
 
-  const nav = useMemo(() => ["dashboard", ...categories, "troubleshoot", "settings"] as Page[], []);
+  const nav = useMemo(() => ["dashboard", ...categories, "system", "settings"] as Page[], []);
+  const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
+  const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
+  const activeJobCount = jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length;
+  const queueDepth = engineHealth?.queueDepth ?? 0;
+
+  const inSetup = Boolean(setupStatus && !setupStatus.completed);
 
   return (
-    <div className="app">
+    <div className={`app ${inSetup ? "setup-mode" : ""}`}>
       <header className="topbar">
-        <div className="brand"><Radio size={18} /> PizzaWave Engine</div>
+        <div className="brand">
+          <img src="/logo-small.png" alt="" />
+          <span className="brand-text"><strong>PizzaWave</strong><small>{engineHealth?.stackName ?? "Pizzastack"}</small></span>
+        </div>
         <select value={rangeHours} onChange={e => setRangeHours(Number(e.target.value))}>
           <option value={24}>24h</option>
           <option value={48}>2d</option>
@@ -162,6 +186,12 @@ function App() {
           <option value="blue">Blue</option>
           <option value="orange">Orange</option>
         </select>
+        {profileState && <ProfileSwitcher state={profileState} onChange={async id => {
+          const next = { ...profileState, activeProfileId: id };
+          setProfileState(next);
+          await api.request<ProfileState>("/api/v1/profiles", { method: "POST", body: JSON.stringify(next) });
+          await load();
+        }} />}
         {page === "settings" && <>
           <input ref={settingsFileInputRef} type="file" accept="application/json,.json" hidden onChange={e => void loadSettingsFile(e.target.files?.[0])} />
           <button disabled={settingsLoadState.loading} onClick={() => settingsFileInputRef.current?.click()}>{settingsLoadState.loading ? "Loading..." : "Load Settings"}</button>
@@ -172,27 +202,32 @@ function App() {
           <button className={categoryViewMode === "summaries" ? "active" : ""} onClick={() => setCategoryViewMode("summaries")}>AI Summaries</button>
           <button className={categoryViewMode === "raw" ? "active" : ""} onClick={() => setCategoryViewMode("raw")}>Raw Calls</button>
         </div>}
-        <span className="pill">{status}</span>
-        <span className="pill">REST + SSE</span>
+        <span className="pill" title="Live means the browser is connected to pizzad and receiving server-sent refresh events.">{status}</span>
+        <span className="pill" title="REST loads page data; SSE keeps the page refreshed when calls, alerts, jobs, summaries, incidents, or health metrics change.">REST + SSE</span>
       </header>
-      <aside className="nav">
-        {nav.map(item => (
+      {!inSetup && <aside className="nav">
+        {visibleNav.map(item => (
           <button className={item === page ? "active" : ""} onClick={() => setPage(item)} key={item}>
             {navIcon(item)} {label(item)}
           </button>
         ))}
-      </aside>
-      <main className="main">
-        {page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
-        {categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
-        {page === "troubleshoot" && <TroubleshootView data={troubleshoot} rangeHours={rangeHours} reload={load} />}
-        {page === "settings" && <SettingsView jobs={jobs} settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
+      </aside>}
+      <main className={`main ${inSetup ? "setup-main" : ""}`}>
+        {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} />}
+        {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
+        {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} />}
+        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} />}
+        {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} />}
       </main>
-      <footer className="statusbar">
-        <span className="pill">Queue {engineHealth?.queueDepth ?? "--"}</span>
-        <span className="pill">Jobs {jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length}</span>
-        <span className="muted">{dashboard ? `${dashboard.incidents.length} incidents in selected range` : "Incidents are generated automatically from live transcribed call batches."}</span>
-      </footer>
+      {!inSetup && <footer className="statusbar">
+        <span className="pill">Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</span>
+        <span className="status-separator">|</span>
+        <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
+        <span className="pill">Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</span>
+        <span className="pill">Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</span>
+        {queueDepth > 0 && <span className="pill">Queue {queueDepth}</span>}
+        {activeJobCount > 0 && <span className="pill">Jobs {activeJobCount}</span>}
+      </footer>}
     </div>
   );
 }
@@ -201,15 +236,23 @@ function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; r
   if (!data) return <div className="pane">Loading dashboard...</div>;
   return (
     <div className="dashboard">
-      <section className="pane left-pane">
+      <section className="pane dashboard-kpi-alerts">
         <div className="section kpis">{data.kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
-        <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /><TopTalkgroups rows={data.topTalkgroups} /></div>
-        <div className="section"><h3>Distribution</h3><Bars title="Category Share" rows={data.categoryShare} /></div>
+        <div className="section"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></div>
       </section>
-      <section className="pane"><h2><Bell size={16} /> Alerts</h2><Alerts rows={data.alerts} /></section>
-      <section className="pane"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} /></section>
+      <section className="pane dashboard-charts">
+        <div className="section"><h3>Volume Patterns</h3><VolumeByHourChart rows={data.volumeByHourCategory} /></div>
+        <div className="section"><h3>Geolocated Calls Heat Map</h3><LocationHeatMap rows={data.locationHeat} /></div>
+      </section>
+      <section className="pane dashboard-incidents"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} /></section>
     </div>
   );
+}
+
+function ProfileSwitcher({ state, onChange }: { state: ProfileState; onChange: (id: string) => Promise<void> }) {
+  return <select aria-label="Processing profile" value={state.activeProfileId} onChange={e => void onChange(e.target.value)}>
+    {state.profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}
+  </select>;
 }
 
 function Kpi({ label, value, subtext }: { label: string; value: string; subtext: string }) {
@@ -230,7 +273,7 @@ function VolumeByHourChart({ rows }: { rows: HourCategory[] }) {
   const points = (values: number[]) => values
     .map((value, hour) => `${36 + hour * 19},${158 - value / max * 118}`)
     .join(" ");
-  return <div className="card chart-card"><h4>Calls by Hour and Category</h4><svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Calls by hour and category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div>;
+  return <div className="card chart-card"><h4>Calls by Hour and Category</h4><div className="chart-with-legend"><svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Calls by hour and category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div></div>;
 }
 
 function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
@@ -255,6 +298,205 @@ function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
 
 function Legend({ items }: { items: string[][] }) {
   return <div className="legend">{items.map(([name, color]) => <span key={name}><i style={{ background: color }} />{name}</span>)}</div>;
+}
+
+function LocationHeatMap({ rows }: { rows: LocationHeat[] }) {
+  const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
+  const areaKey = useMemo(() => Array.from(new Set(rows.map(row => row.areaId))).sort().join("|"), [rows]);
+  const lastAreaKey = useRef(areaKey);
+  const [zoom, setZoom] = useState(9);
+  const [center, setCenter] = useState(defaultCenter);
+  const [selected, setSelected] = useState<LocationHeat | null>(null);
+  const [popupAnchor, setPopupAnchor] = useState<{ x: number; y: number; placement: "right" | "left" } | null>(null);
+  useEffect(() => {
+    if (areaKey === lastAreaKey.current) return;
+    lastAreaKey.current = areaKey;
+    setCenter(defaultMapCenter(rows));
+    setZoom(9);
+    setSelected(null);
+    setPopupAnchor(null);
+  }, [areaKey, rows]);
+
+  if (!rows.length) {
+    return <div className="card location-heat-card">
+      <p className="muted">No street or address references detected in the selected range.</p>
+    </div>;
+  }
+  const viewport = buildMapViewport(zoom, center);
+  const tiles = mapTiles(viewport);
+  const points = rows.map(row => ({ row, point: projectHeatPoint(row, viewport) }));
+
+  function focusRow(row: LocationHeat, event: React.MouseEvent<HTMLButtonElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const popupWidth = Math.min(320, Math.max(260, window.innerWidth - 24));
+    const rightX = rect.right + 14;
+    const canFitRight = rightX + popupWidth <= window.innerWidth - 12;
+    const x = canFitRight ? rightX : Math.max(12, rect.left - 14);
+    const y = rect.top + rect.height / 2;
+    const nextCenter = approximateHeatLatLon(row);
+    setSelected(row);
+    setPopupAnchor({ x, y, placement: canFitRight ? "right" : "left" });
+    setCenter(nextCenter);
+    setZoom(current => Math.max(current, 12));
+  }
+
+  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setZoom(current => Math.max(8, Math.min(14, current + (event.deltaY < 0 ? 1 : -1))));
+  }
+
+  return <div className="card location-heat-card">
+    <div className="location-heat-note">Calls are plotted from geocoded transcript location references within the monitored system area. Popup details show the matched geocoder result and source calls.</div>
+    <div className="location-map" role="img" aria-label="Geolocated calls heat map" onWheel={handleWheel}>
+      <div className="map-zoom-pill">Zoom {zoom}</div>
+      {tiles.map(tile => <img
+        src={`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`}
+        style={{ left: tile.left, top: tile.top }}
+        alt=""
+        draggable={false}
+        key={`${tile.z}-${tile.x}-${tile.y}`}
+      />)}
+      {Object.entries(monitoredAreaBounds).map(([areaId, bounds]) => {
+        const box = projectBounds(bounds, viewport);
+        const label = rows.find(row => row.areaId === areaId)?.areaLabel;
+        if (!label) return null;
+        return <div className="map-area-box" style={{ left: box.left, top: box.top, width: box.width, height: box.height }} key={areaId}>
+          <span>{label}</span>
+        </div>;
+      })}
+      {points.map(({ row, point }) => {
+        const size = 22 + row.intensity * 36;
+        return <button
+          className={`heat-dot map-heat-dot category-${row.category || "other"}`}
+          style={{ left: `${point.x}%`, top: `${point.y}%`, width: size, height: size }}
+          title={`${row.locationText}: ${row.count} call${row.count === 1 ? "" : "s"}; latest ${new Date(row.lastHeard * 1000).toLocaleString()}; calls ${row.callIds.join(", ")}`}
+          onClick={event => focusRow(row, event)}
+          key={`${row.areaId}-${row.locationText}`}
+        >
+          <span>{row.count}</span>
+        </button>;
+      })}
+      <a className="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
+    </div>
+    {selected && popupAnchor && <div className={`map-popup top-layer ${popupAnchor.placement}`} style={popupViewportStyle(popupAnchor)}>
+      <button className="map-popup-close" aria-label="Close location details" onClick={() => { setSelected(null); setPopupAnchor(null); }}>x</button>
+        <strong>{selected.locationText}</strong>
+        <span>{selected.areaLabel} / {label(selected.category)}</span>
+        <span>{selected.count} call{selected.count === 1 ? "" : "s"}; latest {relativeTime(selected.lastHeard)}</span>
+        <span className="map-geocode">Matched: {selected.geocodeDisplayName}</span>
+        <span className="muted">{selected.geocodeProvider} / {selected.geocodePrecision} / {(selected.geocodeConfidence * 100).toFixed(0)}% confidence</span>
+      {selected.incidentTitles?.length > 0
+        ? <div className="map-popup-incidents">{selected.incidentTitles.map(title => <p key={title}>{title}</p>)}</div>
+        : <span className="muted">No generated incident links these source calls yet.</span>}
+      {selected.sourceCalls?.length > 0 && <div className="map-popup-calls">
+        {selected.sourceCalls.map(call => <div key={call.callId}>
+          <strong>Call {call.callId}</strong>
+          <span>{relativeTime(call.rawTimestamp)} / {label(call.category)} / {call.talkgroupName}</span>
+          <p>{call.transcript}</p>
+        </div>)}
+      </div>}
+      <span className="muted">Calls: {selected.callIds.join(", ")}</span>
+    </div>}
+    <div className="location-heat-list">
+      {rows.slice(0, 8).map(row => <div key={`${row.areaId}-${row.locationText}-list`}>
+        <strong>{row.locationText}</strong>
+        <span>{row.areaLabel}</span>
+        <span>{row.count} call{row.count === 1 ? "" : "s"}</span>
+      </div>)}
+    </div>
+  </div>;
+}
+
+type GeoBounds = { north: number; south: number; west: number; east: number };
+type GeoPoint = { lat: number; lon: number };
+type MapViewport = { zoom: number; width: number; height: number; centerWorldX: number; centerWorldY: number };
+const monitoredAreaBounds: Record<string, GeoBounds> = {
+  "hamilton-county-tn": { north: 35.47, south: 34.98, west: -85.47, east: -84.98 },
+  "bradley-county-tn": { north: 35.33, south: 34.90, west: -85.10, east: -84.55 },
+  "cleveland-tn": { north: 35.24, south: 35.07, west: -84.96, east: -84.78 }
+};
+
+function defaultMapCenter(rows: LocationHeat[]): GeoPoint {
+  const bounds = rows
+    .map(row => monitoredAreaBounds[row.areaId])
+    .filter(Boolean);
+  if (!bounds.length)
+    return { lat: 35.18, lon: -85.02 };
+  const north = Math.max(...bounds.map(b => b.north), 35.47);
+  const south = Math.min(...bounds.map(b => b.south), 34.90);
+  const west = Math.min(...bounds.map(b => b.west), -85.47);
+  const east = Math.max(...bounds.map(b => b.east), -84.55);
+  return { lat: (north + south) / 2, lon: (west + east) / 2 };
+}
+
+function buildMapViewport(zoom: number, centerPoint: GeoPoint): MapViewport {
+  const center = latLonToWorld(centerPoint.lat, centerPoint.lon, zoom);
+  return { zoom, width: 760, height: 430, centerWorldX: center.x, centerWorldY: center.y };
+}
+
+function mapTiles(viewport: MapViewport) {
+  const tileSize = 256;
+  const startX = Math.floor((viewport.centerWorldX - viewport.width / 2) / tileSize);
+  const endX = Math.floor((viewport.centerWorldX + viewport.width / 2) / tileSize);
+  const startY = Math.floor((viewport.centerWorldY - viewport.height / 2) / tileSize);
+  const endY = Math.floor((viewport.centerWorldY + viewport.height / 2) / tileSize);
+  const tiles: { x: number; y: number; z: number; left: number; top: number }[] = [];
+  const max = 2 ** viewport.zoom;
+  for (let x = startX; x <= endX; x++) {
+    for (let y = startY; y <= endY; y++) {
+      if (y < 0 || y >= max) continue;
+      tiles.push({
+        x: ((x % max) + max) % max,
+        y,
+        z: viewport.zoom,
+        left: Math.round(x * tileSize - viewport.centerWorldX + viewport.width / 2),
+        top: Math.round(y * tileSize - viewport.centerWorldY + viewport.height / 2)
+      });
+    }
+  }
+  return tiles;
+}
+
+function projectHeatPoint(row: LocationHeat, viewport: MapViewport) {
+  const world = latLonToWorldPoint(approximateHeatLatLon(row), viewport.zoom);
+  return {
+    x: (world.x - viewport.centerWorldX + viewport.width / 2) / viewport.width * 100,
+    y: (world.y - viewport.centerWorldY + viewport.height / 2) / viewport.height * 100
+  };
+}
+
+function approximateHeatLatLon(row: LocationHeat): GeoPoint {
+  return { lat: row.latitude, lon: row.longitude };
+}
+
+function latLonToWorldPoint(point: GeoPoint, zoom: number) {
+  return latLonToWorld(point.lat, point.lon, zoom);
+}
+
+function projectBounds(bounds: GeoBounds, viewport: MapViewport) {
+  const nw = latLonToWorld(bounds.north, bounds.west, viewport.zoom);
+  const se = latLonToWorld(bounds.south, bounds.east, viewport.zoom);
+  const left = (nw.x - viewport.centerWorldX + viewport.width / 2) / viewport.width * 100;
+  const top = (nw.y - viewport.centerWorldY + viewport.height / 2) / viewport.height * 100;
+  const right = (se.x - viewport.centerWorldX + viewport.width / 2) / viewport.width * 100;
+  const bottom = (se.y - viewport.centerWorldY + viewport.height / 2) / viewport.height * 100;
+  return { left: `${left}%`, top: `${top}%`, width: `${right - left}%`, height: `${bottom - top}%` };
+}
+
+function popupViewportStyle(anchor: { x: number; y: number; placement: "right" | "left" }): React.CSSProperties {
+  return {
+    left: anchor.x,
+    top: Math.max(24, Math.min(window.innerHeight - 24, anchor.y))
+  };
+}
+
+function latLonToWorld(lat: number, lon: number, zoom: number) {
+  const sinLat = Math.sin(lat * Math.PI / 180);
+  const scale = 256 * 2 ** zoom;
+  return {
+    x: (lon + 180) / 360 * scale,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale
+  };
 }
 
 function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {
@@ -290,31 +532,18 @@ function Alerts({ rows }: { rows: AlertMatch[] }) {
 function Incidents({ rows }: { rows: Incident[] }) {
   const [expanded, setExpanded] = useState(false);
   if (!rows.length) return <div className="card"><p className="muted">No incidents detected.</p></div>;
+  const sortedRows = sortIncidents(rows);
   return <div className="incident-explorer">
     <div className="incident-toolbar">
       <strong>Active Incidents</strong>
       <button onClick={() => setExpanded(v => !v)}>{expanded ? "Collapse All" : "Expand All"}</button>
     </div>
-    {rows.map(i => <details className="incident-card" key={i.id} open={expanded}>
-      <summary>
-        <span>{i.title}</span>
-        <span className="muted">{i.calls.length} calls</span>
-      </summary>
-      <div className="incident-meta">
-        <span>{incidentTimeRange(i)}</span>
-        <strong className={`confidence ${confidenceClass(i.confidence)}`}>{Math.round(i.confidence * 100)}%</strong>
-      </div>
+    {sortedRows.map(i => <details className={`incident-card category-${i.category || "other"}`} key={i.id} open={expanded}>
+      <IncidentSummary incident={i} />
       <p>{i.detail}</p>
       <div className="incident-details">
         <div className="muted">Related calls</div>
-        {i.calls.map(c => <div className="incident-call" key={c.callId}>
-          <div className="incident-call-head">
-            <span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span>
-            <span>Call {c.callId}</span>
-          </div>
-          <p>{c.transcript}</p>
-          <audio controls preload="metadata" src={c.audioUrl} />
-        </div>)}
+        {i.calls.map(c => <IncidentSourceCall call={c} key={c.callId} />)}
       </div>
     </details>)}
   </div>;
@@ -341,35 +570,46 @@ function CategoryView({ data, mode, rangeHours, reload }: { data: CategoryPage |
 
 function CategoryInsights({ rows, category, onGenerate }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void> }) {
   if (!rows.length) return <div className="card"><p className="muted">No single-call AI summaries available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate summaries now</button></div>;
-  return <>{rows.map(item => <article className={`insight-tile category-${category}`} key={item.id}><div className="insight-head"><span>{item.title}</span><strong className={`confidence ${confidenceClass(item.score)}`}>{Math.round(item.score * 100)}%</strong></div><div className="insight-time">{new Date((item.calls[0]?.rawTimestamp ?? item.firstSeen) * 1000).toLocaleString()}</div><p>{item.detail}</p>{item.calls.length > 0 && <details className="source-shelf"><summary>Transcript and audio</summary><div className="call-actions">{item.calls.map(c => <div className="incident-call" key={c.callId}><div className="incident-call-head"><span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span><span>Call {c.callId}</span></div><p>{c.transcript}</p><audio controls preload="metadata" src={c.audioUrl} /></div>)}</div></details>}</article>)}</>;
+  return <>{rows.map(item => <article className={`insight-tile category-${category}`} key={item.id}><div className="insight-head"><span>{item.title}</span><strong className={`confidence ${confidenceClass(item.score)}`}>{Math.round(item.score * 100)}%</strong></div><div className="insight-time">{new Date((item.calls[0]?.rawTimestamp ?? item.firstSeen) * 1000).toLocaleString()}</div><p>{item.detail}</p>{item.calls.length > 0 && <details className="source-shelf"><summary>Transcript and audio</summary><div className="call-actions">{item.calls.map(c => <IncidentSourceCall call={c} key={c.callId} />)}</div></details>}</article>)}</>;
 }
 
 function CategoryIncidents({ rows, category, onGenerate }: { rows: Incident[]; category: string; onGenerate: () => Promise<void> }) {
   if (!rows.length) return <div className="card"><p className="muted">No incidents available for this category and time range.</p><button onClick={() => void onGenerate()}>Generate incidents now</button></div>;
+  const sortedRows = sortIncidents(rows);
   return <div className="incident-explorer category-incident-list">
-    {rows.map(i => <details className={`incident-card category-${category}`} key={i.id}>
-      <summary>
-        <span>{i.title}</span>
-        <span className="muted">{i.calls.length} calls</span>
-      </summary>
-      <div className="incident-meta">
-        <span>{incidentTimeRange(i)}</span>
-        <strong className={`confidence ${confidenceClass(i.confidence)}`}>{Math.round(i.confidence * 100)}%</strong>
-      </div>
+    {sortedRows.map(i => <details className={`incident-card category-${category}`} key={i.id}>
+      <IncidentSummary incident={i} />
       <p>{i.detail}</p>
       <div className="incident-details">
         <div className="muted">Related calls across all categories</div>
-        {i.calls.map(c => <div className="incident-call" key={c.callId}>
-          <div className="incident-call-head">
-            <span>{new Date(c.rawTimestamp * 1000).toLocaleString()}</span>
-            <span>Call {c.callId}</span>
-          </div>
-          <p>{c.transcript}</p>
-          <audio controls preload="metadata" src={c.audioUrl} />
-        </div>)}
+        {i.calls.map(c => <IncidentSourceCall call={c} key={c.callId} />)}
       </div>
     </details>)}
   </div>;
+}
+
+function IncidentSourceCall({ call }: { call: Incident["calls"][number] }) {
+  const category = call.category || "other";
+  const transcript = call.transcript?.trim();
+  return <div className={`incident-call category-${category}`}>
+    <div className="incident-call-head">
+      <span>{new Date(call.rawTimestamp * 1000).toLocaleString()}</span>
+      <span>{label(category)} / Call {call.callId}</span>
+    </div>
+    <div className="transcript-block">{transcript || "No transcript stored for this source call."}</div>
+    <audio controls preload="metadata" src={call.audioUrl} />
+  </div>;
+}
+
+function IncidentSummary({ incident }: { incident: Incident }) {
+  return <summary>
+    <span className="incident-title">{incident.title}</span>
+    <span className="incident-summary-meta">
+      <span className="incident-time">{relativeIncidentTime(incident)}</span>
+      <span className="muted">{incident.calls.length} calls</span>
+      <strong className={`confidence confidence-circle ${confidenceClass(incident.confidence)}`}>{Math.round(incident.confidence * 100)}</strong>
+    </span>
+  </summary>;
 }
 
 function CategoryCallGroups({ groups, category }: { groups: CategoryPage["groups"]; category?: string }) {
@@ -391,7 +631,15 @@ function CollapsibleCallGroup({ group, category }: { group: CategoryPage["groups
 
 function CallRow({ call }: { call: EngineCall }) {
   const status = call.qualityReason && call.qualityReason !== "ok" ? `${call.transcriptionStatus}: ${call.qualityReason}` : call.transcriptionStatus;
-  return <div className={`call category-${call.category}`}><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{call.transcription || "Pending transcription"}</div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+  const transcript = call.transcription?.trim();
+  const missingText = call.transcriptionStatus === "pending"
+    ? "Pending transcription"
+    : `No transcript available (${status || "not transcribed"}).`;
+  return <div className={`call category-${call.category}`}><div className="call-head"><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div>{transcript || missingText}</div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+}
+
+function sortIncidents(rows: Incident[]) {
+  return [...rows].sort((a, b) => (b.lastSeen - a.lastSeen) || (b.confidence - a.confidence));
 }
 
 function incidentTimeRange(incident: Incident) {
@@ -401,6 +649,25 @@ function incidentTimeRange(incident: Incident) {
     return `${first.toLocaleString()} - ${last.toLocaleTimeString()}`;
   }
   return `${first.toLocaleString()} - ${last.toLocaleString()}`;
+}
+
+function relativeIncidentTime(incident: Incident) {
+  return relativeTime(incident.lastSeen);
+}
+
+function relativeTime(unixSeconds: number) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
 function alertMatchText(detail: string) {
@@ -435,23 +702,34 @@ function confidenceClass(score: number) {
   return "confidence-low";
 }
 
-function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot | null; rangeHours: number; reload: () => Promise<void> }) {
-  const [topTab, setTopTab] = useState<"pizzad" | "tr">("tr");
+function SystemView({ data, jobs, rangeHours, reload }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void> }) {
+  const [topTab, setTopTab] = useState<"pizzad" | "tr" | "tokens">("pizzad");
+  const [pizzadTab, setPizzadTab] = useState<"service" | "storage" | "imports" | "jobs" | "quality">("service");
   const [trTab, setTrTab] = useState<"summary" | "metrics" | "tools" | "logs" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
+  const [runtime, setRuntime] = useState<any | null>(null);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageReport | null>(null);
   const [insightText, setInsightText] = useState("");
   const [insightBusy, setInsightBusy] = useState(false);
 
+  useEffect(() => {
+    if (topTab !== "pizzad") return;
+    void api.request<any>("/api/v1/system/runtime").then(setRuntime).catch(() => setRuntime(null));
+  }, [topTab, pizzadTab, jobs.length]);
   useEffect(() => {
     if (topTab !== "tr" || trTab !== "metrics") return;
     void api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=${bySystem}&baseline=${baseline}`)
       .then(setMetricsData)
       .catch(() => setMetricsData(null));
   }, [topTab, trTab, bySystem, baseline, rangeHours]);
+  useEffect(() => {
+    if (topTab !== "tokens") return;
+    void api.request<TokenUsageReport>(`/api/v1/system/token-usage?${rangeQuery(rangeHours)}`).then(setTokenUsage).catch(() => setTokenUsage(null));
+  }, [topTab, rangeHours]);
 
-  if (!data) return <div className="trouble-page">Loading troubleshoot data...</div>;
+  if (!data) return <div className="trouble-page">Loading system data...</div>;
   const active = metricsData ?? data;
   async function generateTroubleshootInsights() {
     setInsightBusy(true);
@@ -472,11 +750,22 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
       <div className="trouble-tabs">
         <button className={topTab === "pizzad" ? "active" : ""} onClick={() => setTopTab("pizzad")}>Pizzad</button>
         <button className={topTab === "tr" ? "active" : ""} onClick={() => setTopTab("tr")}>Trunk Recorder</button>
-        <button onClick={() => void reload()}>Refresh Health</button>
+        <button className={topTab === "tokens" ? "active" : ""} onClick={() => setTopTab("tokens")}>Token Usage</button>
+        <button onClick={() => void reload()}>Refresh</button>
       </div>
       {topTab === "pizzad" && <div className="trouble-panel">
-        <h2>Pizzad Quality</h2>
-        <QualityAuditView data={data} />
+        <div className="trouble-tabs nested">
+          <button className={pizzadTab === "service" ? "active" : ""} onClick={() => setPizzadTab("service")}>Service Manager</button>
+          <button className={pizzadTab === "storage" ? "active" : ""} onClick={() => setPizzadTab("storage")}>DB / Storage</button>
+          <button className={pizzadTab === "imports" ? "active" : ""} onClick={() => setPizzadTab("imports")}>Imports</button>
+          <button className={pizzadTab === "jobs" ? "active" : ""} onClick={() => setPizzadTab("jobs")}>Queue / Jobs</button>
+          <button className={pizzadTab === "quality" ? "active" : ""} onClick={() => setPizzadTab("quality")}>Pizzad Quality</button>
+        </div>
+        {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} />}
+        {pizzadTab === "storage" && <PizzadStorageManager runtime={runtime} />}
+        {pizzadTab === "imports" && <ImportsPanel reload={reload} />}
+        {pizzadTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
+        {pizzadTab === "quality" && <QualityAuditView data={data} />}
       </div>}
       {topTab === "tr" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
@@ -502,8 +791,187 @@ function TroubleshootView({ data, rangeHours, reload }: { data: TrTroubleshoot |
           <pre className="log-box">{insightText || data.insightsText}</pre>
         </div>}
       </div>}
+      {topTab === "tokens" && <TokenUsagePanel report={tokenUsage} />}
     </div>
   );
+}
+
+function PizzadServiceManager({ runtime }: { runtime: any | null }) {
+  if (!runtime) return <div className="card">Loading service status...</div>;
+  const services = [runtime.service?.pizzad, runtime.service?.trunkRecorder].filter(Boolean);
+  return <div className="system-manager-grid">
+    <div className="audit-kpis">
+      <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} subtext={runtime.service?.pizzad?.enabled || "systemd enabled state"} />
+      <Kpi label="TR Service" value={runtime.service?.trunkRecorder?.active || "unknown"} subtext={runtime.service?.trunkRecorder?.unit || "configured trunk-recorder unit"} />
+      <Kpi label="CPU Time" value={`${Number(runtime.process?.totalProcessorTimeSeconds || 0).toFixed(0)}s`} subtext={`${runtime.process?.threadCount ?? 0} thread(s)`} />
+      <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
+    </div>
+    <div className="card">
+      <h3>Services</h3>
+      <table className="table"><thead><tr><th>Unit</th><th>Active</th><th>Enabled</th><th>Substate</th><th>Main PID</th><th>Started</th></tr></thead><tbody>{services.map((svc: any) => <tr key={svc.unit}>
+        <td>{svc.unit}</td>
+        <td><span className={`job-status ${svc.ok ? "status-completed" : "status-failed"}`}>{svc.active || "unknown"}</span></td>
+        <td>{svc.enabled || "--"}</td>
+        <td>{svc.detail?.SubState || "--"}</td>
+        <td>{svc.detail?.MainPID || "--"}</td>
+        <td>{svc.detail?.ActiveEnterTimestamp || "--"}</td>
+      </tr>)}</tbody></table>
+    </div>
+  </div>;
+}
+
+function PizzadStorageManager({ runtime }: { runtime: any | null }) {
+  if (!runtime) return <div className="card">Loading storage status...</div>;
+  const tables = Object.entries(runtime.tables ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const diskUsed = Math.max(0, (runtime.storage?.diskTotalBytes || 0) - (runtime.storage?.diskFreeBytes || 0));
+  return <div className="system-manager-grid">
+    <div className="audit-kpis">
+      <Kpi label="Database" value={formatBytes(runtime.storage?.databaseBytes || 0)} subtext={runtime.storage?.databasePath || "SQLite WAL store"} />
+      <Kpi label="Audio Store" value={formatBytes(runtime.storage?.sampledAudioBytes || 0)} subtext={`${(runtime.storage?.sampledAudioFiles || 0).toLocaleString()} sampled file(s)${runtime.storage?.audioSampleTruncated ? " (sample capped)" : ""}`} />
+      <Kpi label="Disk Used" value={formatBytes(diskUsed)} subtext={`${formatBytes(runtime.storage?.diskFreeBytes || 0)} free on ${runtime.storage?.diskRoot || "disk"}`} />
+      <Kpi label="Queue" value={(runtime.queues?.transcriptionQueueDepth || 0).toLocaleString()} subtext="Transcription queue depth" />
+    </div>
+    <div className="card">
+      <h3>Database Tables</h3>
+      <table className="table compact-table"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>{tables.map(([name, count]) => <tr key={name}><td>{name}</td><td>{Number(count).toLocaleString()}</td></tr>)}</tbody></table>
+    </div>
+  </div>;
+}
+
+function TokenUsagePanel({ report }: { report: TokenUsageReport | null }) {
+  if (!report) return <div className="trouble-panel"><div className="card">Loading token usage...</div></div>;
+  return <div className="trouble-panel token-usage-panel">
+    <div className="audit-kpis">
+      <Kpi label="Total Tokens" value={formatCompact(report.summary.totalTokens)} subtext={`${report.summary.requests.toLocaleString()} LM request(s)`} />
+      <Kpi label="Prompt Tokens" value={formatCompact(report.summary.promptTokens)} subtext="Input/context tokens" />
+      <Kpi label="Completion Tokens" value={formatCompact(report.summary.completionTokens)} subtext="Generated output tokens" />
+      <Kpi label="Estimated Cost" value={`$${report.summary.estimatedStandardCost.toFixed(2)}`} subtext="Standard estimate at $2/$8 per 1M" />
+    </div>
+    <div className="tr-chart-grid">
+      <TokenBarChart title="Tokens by Day" rows={report.byDay} />
+      <TokenBarChart title="Tokens by Activity" rows={report.byTrigger} />
+    </div>
+    <div className="card">
+      <h3>Recorded Usage</h3>
+      <p className="muted">{report.ledger}</p>
+      <table className="table jobs-table"><thead><tr><th>Time</th><th>Activity</th><th>Status</th><th>Model</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Finish</th></tr></thead><tbody>{report.entries.map(row => <tr key={row.id}>
+        <td>{new Date(row.timestampUtc).toLocaleString()}</td>
+        <td>{row.triggerActivity}</td>
+        <td>{row.success ? "ok" : row.error || "fail"}</td>
+        <td>{row.responseModel || row.requestModel}</td>
+        <td>{row.promptTokens.toLocaleString()}</td>
+        <td>{row.completionTokens.toLocaleString()}</td>
+        <td>{(row.totalTokens || row.promptTokens + row.completionTokens).toLocaleString()}</td>
+        <td>{row.finishReason}</td>
+      </tr>)}</tbody></table>
+    </div>
+  </div>;
+}
+
+function TokenBarChart({ title, rows }: { title: string; rows: { label: string; totalTokens: number; requests: number }[] }) {
+  const max = Math.max(1, ...rows.map(r => r.totalTokens));
+  return <div className="card audit-table-card"><h3>{title}</h3>{rows.length ? rows.map(row => <div className="bar-row" key={row.label}><span>{row.label}</span><div className="bar"><span style={{ width: `${Math.max(2, row.totalTokens / max * 100)}%` }} /></div><span>{formatCompact(row.totalTokens)} / {row.requests}</span></div>) : <p className="muted">No recorded usage.</p>}</div>;
+}
+
+function ImportsPanel({ reload }: { reload: () => Promise<void> }) {
+  return <div className="trouble-panel imports-panel">
+    <div className="settings-flow">
+      <div className="card settings-card wide">
+        <div className="settings-card-meta">
+          <h3>Local TR Import</h3>
+          <p>Imports existing .bin recordings from the active trunk-recorder captureDir on this machine. Source files are read-only; imported calls are copied into the PizzaWave audio store.</p>
+        </div>
+        <div className="settings-fields"><LocalImport reload={reload} /></div>
+      </div>
+      <div className="card settings-card wide">
+        <div className="settings-card-meta">
+          <h3>SFTP Import</h3>
+          <p>Imports .bin recordings from a remote SFTP archive. Use this for Synology or other long-term archive stores.</p>
+        </div>
+        <div className="settings-fields"><SftpImport reload={reload} /></div>
+      </div>
+    </div>
+  </div>;
+}
+
+function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> }) {
+  const [message, setMessage] = useState("");
+
+  async function control(id: number, action: string) {
+    setMessage(`${label(action)} job ${id}...`);
+    try {
+      await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) });
+      setMessage(`${label(action)} sent for job ${id}`);
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function deleteJob(id: number) {
+    setMessage(`Deleting job ${id}...`);
+    try {
+      await api.request(`/api/v1/jobs/${id}`, { method: "DELETE" });
+      setMessage(`Deleted job ${id}`);
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return <div className="trouble-panel jobs-panel">
+    <div className="settings-flow">
+      <div className="card settings-card wide">
+        <div className="settings-card-meta">
+          <h3>Jobs</h3>
+          <p>Background work created by imports, diagnostics, transcription experiments, and summary generation.</p>
+          {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "section-status error" : "section-status ok"}>{message}</span>}
+        </div>
+        <div className="settings-fields">
+          <JobsTable jobs={jobs} onControl={control} onDelete={deleteJob} />
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+function JobsTable({ jobs, onControl, onDelete }: { jobs: Job[]; onControl: (id: number, action: string) => Promise<void>; onDelete: (id: number) => Promise<void> }) {
+  if (!jobs.length) return <span className="muted">No jobs</span>;
+  return <table className="table jobs-table">
+    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Timestamps</th><th>Message</th><th>Actions</th></tr></thead>
+    <tbody>{jobs.map(job => {
+      const active = isActiveJob(job);
+      return <tr key={job.id}>
+        <td>{job.id}</td>
+        <td>{label(job.type)}</td>
+        <td><span className={`job-status status-${job.status}`}>{job.status}</span></td>
+        <td>{job.completed.toLocaleString()}/{job.total.toLocaleString()}<br /><span className="muted">{job.failed.toLocaleString()} failed</span></td>
+        <td className="job-times">
+          <span>Created {formatJobDate(job.createdAtUtc)}</span>
+          {job.startedAtUtc && <span>Started {formatJobDate(job.startedAtUtc)}</span>}
+          {job.finishedAtUtc && <span>Finished {formatJobDate(job.finishedAtUtc)}</span>}
+        </td>
+        <td>{job.message}</td>
+        <td className="job-actions-cell">
+          {active ? <>
+            {job.status === "running" && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
+            {job.status === "paused" && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
+            {(job.status === "queued" || job.status === "running" || job.status === "paused") && <button onClick={() => void onControl(job.id, "cancel")}>Cancel</button>}
+          </> : <button onClick={() => void onDelete(job.id)}>Delete</button>}
+        </td>
+      </tr>;
+    })}</tbody>
+  </table>;
+}
+
+function isActiveJob(job: Job) {
+  return job.status === "queued" || job.status === "running" || job.status === "paused";
+}
+
+function formatJobDate(value?: string | null) {
+  if (!value) return "--";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
@@ -601,6 +1069,9 @@ function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
 
 function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload: () => Promise<void> }) {
   const [diagnosticModels, setDiagnosticModels] = useState<DiagnosticModel[]>([]);
+  const [selectedModels, setSelectedModels] = useState<Record<string, boolean>>({});
+  const [customModels, setCustomModels] = useState<Array<{ engine: string; label: string; baseUrl: string; model: string; apiKey: string }>>([]);
+  const [customDraft, setCustomDraft] = useState({ engine: "lmlink", label: "", baseUrl: "http://localhost:1234/v1", model: "", apiKey: "" });
   const [jobId, setJobId] = useState<number | null>(null);
   const [result, setResult] = useState<DiagnosticToolResult | null>(null);
   const [message, setMessage] = useState("");
@@ -610,7 +1081,15 @@ function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload:
 
   async function loadModels() {
     try {
-      setDiagnosticModels(await api.request<DiagnosticModel[]>("/api/v1/troubleshoot/tools/transcription-models"));
+      const rows = await api.request<DiagnosticModel[]>("/api/v1/troubleshoot/tools/transcription-models");
+      setDiagnosticModels(rows);
+      setSelectedModels(current => {
+        const next = { ...current };
+        for (const row of rows) {
+          if (next[row.id] === undefined) next[row.id] = row.engine !== "openai";
+        }
+        return next;
+      });
     } catch (error) {
       setMessage(`Model discovery failed: ${error instanceof Error ? error.message : String(error)}`);
       setDiagnosticModels([]);
@@ -622,9 +1101,11 @@ function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload:
     setBusy(true);
     setMessage("Queueing transcription experiment...");
     try {
-      const job = await api.request<Job>("/api/v1/troubleshoot/tools/transcription-experiment", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), sampleCount: 50 }) });
+      const models = diagnosticModels.filter(model => selectedModels[model.id]).map(model => model.id);
+      const enabledCustom = customModels.filter(model => model.model.trim() && model.baseUrl.trim());
+      const job = await api.request<Job>("/api/v1/troubleshoot/tools/transcription-experiment", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), sampleCount: 50, models, customModels: enabledCustom }) });
       setJobId(job.id);
-      setMessage(`Queued job ${job.id}. It will sample up to 50 recent calls, run each discovered model, and try baseline plus cleanup audio variants.`);
+      setMessage(`Queued job ${job.id}. It will sample up to 50 recent calls, run ${models.length + enabledCustom.length} selected model(s), and try baseline plus cleanup audio variants.`);
       await reload();
     } catch (error) {
       setMessage(`Experiment failed to start: ${error instanceof Error ? error.message : String(error)}`);
@@ -640,16 +1121,66 @@ function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload:
     setMessage(`Loaded ${rows.rows.length} result rows for job ${id}.`);
   }
 
+  function addCustomModel() {
+    if (!customDraft.model.trim() || !customDraft.baseUrl.trim()) {
+      setMessage("Custom model requires a base URL and model name.");
+      return;
+    }
+    setCustomModels(rows => [...rows, { ...customDraft, label: customDraft.label.trim() || `${customDraft.engine === "lmlink" ? "LM Link" : "OpenAI"} ${customDraft.model.trim()}` }]);
+    setCustomDraft(current => ({ ...current, label: "", model: "", apiKey: "" }));
+  }
+
+  async function clearResults() {
+    setBusy(true);
+    try {
+      const response = await api.request<{ deleted: number }>("/api/v1/troubleshoot/tools/results", { method: "DELETE" });
+      setResult(null);
+      setJobId(null);
+      setMessage(`Cleared ${response.deleted} completed diagnostic experiment job(s).`);
+      await reload();
+    } catch (error) {
+      setMessage(`Clear failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selectedCount = diagnosticModels.filter(model => selectedModels[model.id]).length + customModels.length;
+
   return <div className="tools-page">
     <div className="card">
       <h3>Transcription Experiment</h3>
-      <p className="muted">Samples up to 50 recent calls from the selected global range. Each discovered transcription model runs against baseline audio plus cleanup variants. Results never update stored transcripts.</p>
-      <div className="model-chip-list">
-        {diagnosticModels.length ? diagnosticModels.map(model => <span className="model-chip" key={model.id}><strong>{model.label}</strong><small>{model.engine}</small></span>) : <span className="muted">No downloaded local models or configured LM/OpenAI transcription model discovered.</span>}
+      <p className="muted">Samples up to 50 recent calls from the selected global range. Selected models run against baseline audio plus cleanup variants. Results never update stored transcripts.</p>
+      <div className="model-selector">
+        <h4>Discovered models</h4>
+        {diagnosticModels.length ? diagnosticModels.map(model => <label className="model-choice" key={model.id}>
+          <input type="checkbox" checked={!!selectedModels[model.id]} onChange={e => setSelectedModels(current => ({ ...current, [model.id]: e.target.checked }))} />
+          <span><strong>{model.label}</strong><small>{model.engine} - {model.detail}</small></span>
+        </label>) : <span className="muted">No downloaded local models or configured LM/OpenAI transcription model discovered.</span>}
       </div>
+      <div className="custom-model-editor">
+        <h4>Add LM Link / OpenAI-compatible model</h4>
+        <select value={customDraft.engine} onChange={e => setCustomDraft(current => ({ ...current, engine: e.target.value }))}>
+          <option value="lmlink">LM Link</option>
+          <option value="openai">OpenAI-compatible</option>
+        </select>
+        <input placeholder="Base URL" value={customDraft.baseUrl} onChange={e => setCustomDraft(current => ({ ...current, baseUrl: e.target.value }))} />
+        <input placeholder="Model name" value={customDraft.model} onChange={e => setCustomDraft(current => ({ ...current, model: e.target.value }))} />
+        <input placeholder="Label (optional)" value={customDraft.label} onChange={e => setCustomDraft(current => ({ ...current, label: e.target.value }))} />
+        <input placeholder="Token/API key (optional)" type="password" value={customDraft.apiKey} onChange={e => setCustomDraft(current => ({ ...current, apiKey: e.target.value }))} />
+        <button onClick={addCustomModel}>Add Model</button>
+      </div>
+      {customModels.length > 0 && <div className="model-chip-list">
+        {customModels.map((model, index) => <span className="model-chip" key={`${model.engine}-${model.baseUrl}-${model.model}-${index}`}>
+          <strong>{model.label}</strong><small>{model.engine} - {model.model}</small>
+          <button onClick={() => setCustomModels(rows => rows.filter((_, i) => i !== index))}>Remove</button>
+        </span>)}
+      </div>
+      }
       <div>
-        <button disabled={busy || diagnosticModels.length === 0} onClick={() => void start()}>{busy ? "Queueing..." : "Run 50-Call Transcription Experiment"}</button>
+        <button disabled={busy || selectedCount === 0} onClick={() => void start()}>{busy ? "Queueing..." : "Run 50-Call Transcription Experiment"}</button>
         <button onClick={() => void loadModels()}>Refresh Models</button>
+        <button disabled={busy} onClick={() => void clearResults()}>Clear Experiment Results</button>
       </div>
       <div className="muted">{message}</div>
       <div>
@@ -691,6 +1222,7 @@ function TrHealthChartView({ chart }: { chart: TrHealthChart }) {
   return <div className="card tr-chart-card">
     <h3>{chart.title}</h3>
     <p className="muted">{chart.yAxisLabel}</p>
+    {chart.baselineNote && <p className="baseline-note">{chart.baselineNote}</p>}
     <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
       <line className="axis" x1={left} y1={top} x2={left} y2={top + plotH} />
       <line className="axis" x1={left} y1={top + plotH} x2={left + plotW} y2={top + plotH} />
@@ -714,7 +1246,1238 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { jobs: Job[]; settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void> }) {
+function formatHz(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "unknown";
+  if (value >= 1_000_000)
+    return `${(value / 1_000_000).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")} MHz`;
+  if (value >= 1_000)
+    return `${(value / 1_000).toFixed(1)} kHz`;
+  return `${value} Hz`;
+}
+
+function SetupWizard({ status, reload }: { status: SetupStatus; reload: () => Promise<void> }) {
+  const [draft, setDraft] = useState<any>(() => setupDraftFromStatus(status));
+  const [trConfigJson, setTrConfigJson] = useState("");
+  const [talkgroupsCsv, setTalkgroupsCsv] = useState("");
+  const [talkgroupSid, setTalkgroupSid] = useState("");
+  const [includeExcludedTalkgroups, setIncludeExcludedTalkgroups] = useState(false);
+  const [talkgroupPreview, setTalkgroupPreview] = useState<SetupTalkgroupPreview | null>(null);
+  const [trDraftSid, setTrDraftSid] = useState("");
+  const [trDraftUrl, setTrDraftUrl] = useState("");
+  const [trDraftHtml, setTrDraftHtml] = useState("");
+  const [trDraftSites, setTrDraftSites] = useState("");
+  const [trDraftSerials, setTrDraftSerials] = useState("");
+  const [trDraftRate, setTrDraftRate] = useState("2400000");
+  const [trDraft, setTrDraft] = useState<SetupTrConfigDraft | null>(null);
+  const [message, setMessage] = useState("Complete the required sections to unlock normal PizzaWave operation.");
+  const [busy, setBusy] = useState("");
+  const [artifactReport, setArtifactReport] = useState<SetupArtifactReport | null>(null);
+  const [setupJob, setSetupJob] = useState<Job | null>(null);
+  const [setupJobContext, setSetupJobContext] = useState("");
+  const [setupLogs, setSetupLogs] = useState<JobLog[]>([]);
+  const [sdrDetection, setSdrDetection] = useState<SetupSdrDetection | null>(null);
+  const [sftpAvailability, setSftpAvailability] = useState<any>(null);
+  const [models, setModels] = useState<any[]>([]);
+  const [aiModels, setAiModels] = useState<string[]>([]);
+  const [modelBusy, setModelBusy] = useState("");
+  const [restartVerified, setRestartVerified] = useState(status.completed);
+  const [wizardStep, setWizardStep] = useState(status.currentStep || "stack");
+  const [expandedSetupStep, setExpandedSetupStep] = useState(status.currentStep || "stack");
+  const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
+  const [trInstallMode, setTrInstallMode] = useState((status.values?.setup?.installMode === "freshTr" ? "freshTr" : "reuseExistingTr") as "reuseExistingTr" | "freshTr");
+  const [trConfigMode, setTrConfigMode] = useState((status.values?.setup?.trConfigMode === "pasteJson" ? "pasteJson" : "radioReference") as "radioReference" | "pasteJson");
+  const [confirmFreshBuild, setConfirmFreshBuild] = useState(false);
+  const [calibrationMode, setCalibrationMode] = useState<"skip" | "prepare">("skip");
+  const [calibrationPlan, setCalibrationPlan] = useState<SetupCalibrationPlan | null>(null);
+  const [calibrationInputs, setCalibrationInputs] = useState<Record<string, { gain: string; errorHz: string; ppm: string }>>({});
+  const [calibrationSweep, setCalibrationSweep] = useState({ rangeHz: "1200", stepHz: "300", warmupSec: "20", durationSec: "240" });
+  const setupLogLastId = useRef(0);
+  const setupJobRunning = Boolean(setupJob && ["queued", "running", "paused"].includes(setupJob.status));
+  const calibrationJobRunning = setupJobRunning && setupJobContext === "calibration";
+
+  useEffect(() => {
+    setDraft(setupDraftFromStatus(status));
+    setRestartVerified(status.completed);
+    if (!setupJobRunning)
+      setWizardStep(current => current || status.currentStep || "stack");
+    setTrInstallMode(status.values?.setup?.installMode === "freshTr" ? "freshTr" : "reuseExistingTr");
+    setTrConfigMode(status.values?.setup?.trConfigMode === "pasteJson" ? "pasteJson" : "radioReference");
+  }, [status, setupJobRunning]);
+  useEffect(() => {
+    if (!setupJobRunning && status.currentStep)
+      setExpandedSetupStep(status.currentStep);
+  }, [status.currentStep, setupJobRunning]);
+  useEffect(() => {
+    if (setupJob)
+      setJobDrawerOpen(true);
+  }, [setupJob?.id]);
+  useEffect(() => { void loadModels(); }, []);
+  useEffect(() => {
+    if (!modelBusy) return;
+    const timer = window.setInterval(() => void loadModels(), 1500);
+    return () => window.clearInterval(timer);
+  }, [modelBusy]);
+  useEffect(() => {
+    if (trInstallMode === "freshTr" && !artifactReport && !busy) void loadArtifacts();
+  }, [trInstallMode]);
+  useEffect(() => {
+    if (!setupJob || !["queued", "running", "paused"].includes(setupJob.status)) return;
+    const timer = window.setInterval(() => {
+      void refreshSetupJob(setupJob.id);
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [setupJob]);
+  useEffect(() => {
+    if (wizardStep === "calibration") void loadCalibrationPlan();
+  }, [wizardStep, draft.trunkRecorder?.configPath]);
+
+  function update(path: string[], value: any) {
+    setDraft((current: any) => {
+      const next = cloneSettings(current);
+      let target = next;
+      for (const key of path.slice(0, -1)) {
+        const actualKey: any = /^\d+$/.test(key) ? Number(key) : key;
+        target[actualKey] = target[actualKey] && typeof target[actualKey] === "object" ? target[actualKey] : {};
+        target = target[actualKey];
+      }
+      const leaf: any = /^\d+$/.test(path[path.length - 1]) ? Number(path[path.length - 1]) : path[path.length - 1];
+      target[leaf] = value;
+      return next;
+    });
+  }
+
+  async function save() {
+    setBusy("save");
+    setMessage("Saving setup values...");
+    try {
+      await saveSetupValues();
+      setRestartVerified(false);
+      setMessage("Setup values saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Save failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveSetupValues() {
+    const values: any = cloneSettings(draft);
+    values.setup = { ...(values.setup ?? {}), currentStep: wizardStep, installMode: trInstallMode, trConfigMode };
+    if (trConfigJson.trim()) values.trConfigJson = trConfigJson;
+    if (talkgroupsCsv.trim()) values.talkgroupsCsv = talkgroupsCsv;
+    return await api.request<SetupStatus>("/api/v1/setup/save", { method: "POST", body: JSON.stringify({ values }) });
+  }
+
+  async function validateSetupSection(section: string, saveFirst = true) {
+    if (saveFirst) await saveSetupValues();
+    const result = await api.request<SetupValidationResult>(`/api/v1/setup/validate/${section}`, { method: "POST" });
+    setMessage(result.message);
+    await reload();
+    if (!result.ok) throw new Error(result.message);
+    return result;
+  }
+
+  async function validate(section: string) {
+    setBusy(section);
+    setMessage(`Validating ${label(section)}...`);
+    try {
+      await save();
+      await validateSetupSection(section);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Validation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function detect() {
+    setBusy("detect");
+    try {
+      const result = await api.request<any>("/api/v1/setup/detect-tr");
+      setMessage(result.found ? `TR detected. Config: ${result.configPath}` : "TR was not detected. Install trunk-recorder before completing setup.");
+      await reload();
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loadModels() {
+    try {
+      setModels(await api.request<any[]>("/api/v1/settings/transcription/models"));
+    } catch {
+      setModels([]);
+    }
+  }
+
+  async function downloadModel(model: string) {
+    setModelBusy(model);
+    try {
+      const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}/download`, { method: "POST" });
+      setMessage(result.message ?? "Model download completed.");
+      if (result.ok !== false && result.path && model.startsWith("whisper-"))
+        update(["transcription", "whisperModelFile"], result.path);
+      await loadModels();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Model download failed.");
+    } finally {
+      setModelBusy("");
+    }
+  }
+
+  async function deleteModel(model: string) {
+    setModelBusy(model);
+    try {
+      const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}`, { method: "DELETE" });
+      setMessage(result.message ?? "Model removed.");
+      await loadModels();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Model removal failed.");
+    } finally {
+      setModelBusy("");
+    }
+  }
+
+  async function complete() {
+    setBusy("complete");
+    try {
+      await save();
+      if (!restartVerified && !status.completed)
+        throw new Error("Run Apply & Restart first, then complete setup.");
+      await api.request<SetupStatus>("/api/v1/setup/complete", { method: "POST" });
+      setMessage("Setup complete. Loading PizzaWave...");
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Setup could not be completed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function finishSetup() {
+    setBusy("finish-setup");
+    try {
+      if (requiredOpen.length > 0)
+        throw new Error("Complete the required setup checks before finishing.");
+      await applyRestartAndValidateInline();
+      const completed = await api.request<SetupStatus>("/api/v1/setup/complete", { method: "POST" });
+      setMessage("Setup complete. Loading PizzaWave...");
+      await reload();
+      return completed;
+    } catch (error) {
+      setRestartVerified(false);
+      setMessage(error instanceof Error ? error.message : "Setup could not be completed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyRestartAndValidate() {
+    setBusy("restart-pizzad");
+    try {
+      await applyRestartAndValidateInline();
+    } catch (error) {
+      setRestartVerified(false);
+      setMessage(error instanceof Error ? error.message : "Restart validation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyRestartAndValidateInline() {
+    await saveSetupValues();
+    setMessage("Applying settings and restarting pizzad...");
+    const job = await beginSetupJob("restart-pizzad", true, "finish");
+    await refreshSetupJob(job.id);
+    await waitForHealth();
+    setMessage("pizzad is back. Re-running required setup validations...");
+    const result = await api.request<SetupValidationResult>("/api/v1/setup/validate-required", { method: "POST" });
+    setRestartVerified(result.ok);
+    setMessage(result.message);
+    await reload();
+    if (!result.ok) throw new Error(result.message);
+    return result;
+  }
+
+  async function waitForHealth() {
+    await new Promise(resolve => window.setTimeout(resolve, 1800));
+    let lastError = "";
+    for (let i = 0; i < 45; i++) {
+      try {
+        await api.request<EngineHealth>("/api/v1/health");
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "health check failed";
+        await new Promise(resolve => window.setTimeout(resolve, 1000));
+      }
+    }
+    throw new Error(`pizzad did not become healthy after restart: ${lastError}`);
+  }
+
+  async function loadArtifacts() {
+    setBusy("artifacts");
+    try {
+      const report = await api.request<SetupArtifactReport>("/api/v1/setup/tr-artifacts");
+      setArtifactReport(report);
+      setMessage(report.hasBlockingArtifacts ? "TR artifacts found. Review them before starting a source-build install." : "No blocking TR install artifacts found.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Artifact check failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function detectSdrs() {
+    setBusy("sdr-detect");
+    try {
+      const result = await api.request<SetupSdrDetection>("/api/v1/setup/sdrs");
+      setSdrDetection(result);
+      if (result.devices.some(device => device.serial)) {
+        setTrDraftSerials(result.devices.map(device => device.serial).filter(Boolean).join(","));
+      }
+      setMessage(result.message);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "SDR detection failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loadCalibrationPlan() {
+    setBusy("calibration-plan");
+    try {
+      const plan = await api.request<SetupCalibrationPlan>("/api/v1/setup/calibration/plan");
+      setCalibrationPlan(plan);
+      setCalibrationInputs(current => {
+        const next = { ...current };
+        for (const source of plan.sources) {
+          const key = String(source.index);
+          next[key] = next[key] ?? { gain: source.gain ?? "", errorHz: source.errorHz ? String(source.errorHz) : "", ppm: "" };
+        }
+        return next;
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Calibration plan could not be loaded.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function openGqrx(sourceIndex: number, frequencyHz: number) {
+    setBusy(`gqrx-${sourceIndex}`);
+    try {
+      const result = await api.request<SetupValidationResult>("/api/v1/setup/calibration/open-gqrx", {
+        method: "POST",
+        body: JSON.stringify({ sourceIndex, frequencyHz })
+      });
+      setMessage(result.message);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to open gqrx.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function startSetupJob(action: string, confirmed = false) {
+    setBusy(action);
+    try {
+      const job = await beginSetupJob(action, confirmed, currentStep.id);
+      setMessage(`Started setup job ${job.id}: ${job.message}`);
+      await refreshSetupJob(job.id);
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Setup job failed to start.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function beginSetupJob(action: string, confirmed = false, context = currentStep.id, parameters?: any) {
+    const job = await api.request<Job>("/api/v1/setup/jobs", { method: "POST", body: JSON.stringify({ action, confirmed, parameters }) });
+    setSetupJob(job);
+    setSetupJobContext(context);
+    setupLogLastId.current = 0;
+    setSetupLogs([]);
+    return job;
+  }
+
+  async function runSetupJobToCompletion(action: string, confirmed = false, context = currentStep.id) {
+    const job = await beginSetupJob(action, confirmed, context);
+    setMessage(`Running ${label(action)}...`);
+    for (let i = 0; i < 180; i++) {
+      await refreshSetupJob(job.id);
+      const jobs = await api.request<Job[]>("/api/v1/jobs");
+      const current = jobs.find(row => row.id === job.id);
+      if (current) setSetupJob(current);
+      if (current?.status === "completed") return current;
+      if (current?.status === "failed" || current?.status === "canceled")
+        throw new Error(current.message || `${label(action)} failed.`);
+      await new Promise(resolve => window.setTimeout(resolve, 1000));
+    }
+    throw new Error(`${label(action)} did not finish in time. Check System > Jobs.`);
+  }
+
+  async function runCalibrationSweep(parameters: any) {
+    setBusy("tr-calibration-sweep");
+    try {
+      setWizardStep("calibration");
+      update(["setup", "currentStep"], "calibration");
+      const job = await beginSetupJob("tr-calibration-sweep", true, "calibration", parameters);
+      setMessage(`Started calibration sweep job ${job.id}. Watch the live output below; the wizard will keep buttons disabled while it runs.`);
+      await refreshSetupJob(job.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Calibration sweep failed to start.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function stopCalibrationJob() {
+    setBusy("tr-calibration-cancel");
+    try {
+      const job = await beginSetupJob("tr-calibration-cancel", true, "calibration");
+      setMessage(`Requested calibration stop with job ${job.id}.`);
+      await refreshSetupJob(job.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Calibration stop failed to start.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function refreshSetupJob(jobId: number) {
+    const [jobs, logs] = await Promise.all([
+      api.request<Job[]>("/api/v1/jobs"),
+      api.request<JobLog[]>(`/api/v1/jobs/${jobId}/logs?afterId=${setupLogLastId.current}`)
+    ]);
+    const job = jobs.find(j => j.id === jobId);
+    if (job) setSetupJob(job);
+    if (logs.length) {
+      setupLogLastId.current = logs[logs.length - 1].id;
+      setSetupLogs(current => [...current, ...logs]);
+    }
+  }
+
+  async function previewTalkgroups(source: "csv" | "rr") {
+    setBusy(`talkgroups-${source}`);
+    try {
+      const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
+        method: "POST",
+        body: JSON.stringify(source === "rr"
+          ? { radioReferenceSid: talkgroupSid, includeNormallyExcluded: includeExcludedTalkgroups }
+          : { csvText: talkgroupsCsv, includeNormallyExcluded: includeExcludedTalkgroups })
+      });
+      setTalkgroupPreview(preview);
+      setMessage(`Previewed ${preview.rows.length.toLocaleString()} talkgroups: ${preview.includedCount.toLocaleString()} included, ${preview.excludedCount.toLocaleString()} excluded.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup preview failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveTalkgroupPreview() {
+    if (!talkgroupPreview) return;
+    setBusy("talkgroups-save");
+    try {
+      await saveTalkgroupPreviewInline();
+      await validateSetupSection("talkgroups");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup save failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveTalkgroupPreviewInline() {
+    if (!talkgroupPreview) throw new Error("Preview or import talkgroups before continuing.");
+    const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", { method: "POST", body: JSON.stringify({ rows: talkgroupPreview.rows }) });
+    setTalkgroupPreview(saved);
+    setMessage(saved.diagnostics);
+    return saved;
+  }
+
+  function updateTalkgroupRow(index: number, patch: Partial<SetupTalkgroupRow>) {
+    setTalkgroupPreview(current => {
+      if (!current) return current;
+      const rows = current.rows.map((row, i) => i === index ? { ...row, ...patch } : row);
+      const included = rows.filter(row => row.included);
+      const includedByCategory = included.reduce<Record<string, number>>((acc, row) => {
+        const key = row.opsCategory || "other";
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {});
+      return { ...current, rows, includedCount: included.length, excludedCount: rows.length - included.length, includedByCategory };
+    });
+  }
+
+  function addTalkgroupRow() {
+    setTalkgroupPreview(current => {
+      const rows = current?.rows ?? [];
+      const nextId = rows.reduce((max, row) => Math.max(max, row.id), 0) + 1;
+      const nextRows = [...rows, { id: nextId, mode: "D", alphaTag: "", description: "", tag: "", category: "other", opsCategory: "other", included: true, exclusionReason: "" }];
+      return {
+        rows: nextRows,
+        includedByCategory: nextRows.filter(row => row.included).reduce<Record<string, number>>((acc, row) => {
+          const key = row.opsCategory || "other";
+          acc[key] = (acc[key] ?? 0) + 1;
+          return acc;
+        }, {}),
+        includedCount: nextRows.filter(row => row.included).length,
+        excludedCount: nextRows.filter(row => !row.included).length,
+        diagnostics: current?.diagnostics ?? "Manual talkgroup rows."
+      };
+    });
+  }
+
+  async function draftTrConfig() {
+    setBusy("tr-config-draft");
+    try {
+      const draftResult = await api.request<SetupTrConfigDraft>("/api/v1/setup/tr-config/draft", {
+        method: "POST",
+        body: JSON.stringify({
+          radioReferenceSid: trDraftSid,
+          radioReferenceUrl: trDraftUrl,
+          htmlText: trDraftHtml,
+          siteNames: trDraftSites,
+          sdrSerials: trDraftSerials,
+          sampleRate: Number(trDraftRate) || 2400000
+        })
+      });
+      setTrDraft(draftResult);
+      setTrConfigJson(draftResult.configJson);
+      setMessage(`${draftResult.diagnostics} Review the generated JSON before saving.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "TR config draft failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveDraftTrConfig() {
+    const configJson = trConfigJson.trim() || trDraft?.configJson || "";
+    if (!configJson) return;
+    setBusy("tr-config-save");
+    try {
+      const result = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/save", { method: "POST", body: JSON.stringify({ configJson }) });
+      setMessage(result.message);
+      await validate("tr");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "TR config save failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function patchCallstream() {
+    setBusy("patch-callstream");
+    try {
+      await patchCallstreamInline();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Callstream patch failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function patchCallstreamInline() {
+    await saveSetupValues();
+    const result = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/patch-callstream", { method: "POST", body: JSON.stringify({ restartTr: false }) });
+    setMessage(result.message);
+    await validateSetupSection("callstream");
+    if (!result.ok) throw new Error(result.message);
+    return result;
+  }
+
+  async function loadSftpAvailability() {
+    setBusy("sftp-availability");
+    try {
+      await save();
+      const result = await api.request<any>("/api/v1/imports/sftp/availability");
+      setSftpAvailability(result);
+      setMessage(result.message ?? "SFTP availability checked.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "SFTP availability check failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function queueQuickSftpImport() {
+    setBusy("sftp-quick-import");
+    try {
+      await save();
+      const latest = sftpAvailability?.latestLocal ? new Date(sftpAvailability.latestLocal) : new Date();
+      const start = new Date(latest.getTime() - 48 * 3600_000);
+      const job = await api.request<Job>("/api/v1/imports/sftp/import", {
+        method: "POST",
+        body: JSON.stringify({ startLocal: start.toISOString(), endLocal: latest.toISOString(), confirmLargeImport: false })
+      });
+      setMessage(`Queued quick SFTP import job ${job.id}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Quick SFTP import failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loadAiModels() {
+    setBusy("ai-models");
+    try {
+      await loadAiModelsInline();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load AI model list.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loadAiModelsInline() {
+    await saveSetupValues();
+    const result = await api.request<any>("/api/v1/settings/ai-insights/models");
+    const modelRows = result.models ?? [];
+    setAiModels(modelRows);
+    setMessage(result.message ?? "Model list loaded.");
+    let selectedModel = "";
+    if (modelRows.length > 0 && !ai.openAiModel) {
+      selectedModel = modelRows[0];
+      update(["aiInsights", "openAiModel"], modelRows[0]);
+      const values: any = cloneSettings(draft);
+      values.aiInsights = { ...(values.aiInsights ?? {}), openAiModel: modelRows[0] };
+      values.setup = { ...(values.setup ?? {}), currentStep: wizardStep, installMode: trInstallMode, trConfigMode };
+      await api.request<SetupStatus>("/api/v1/setup/save", { method: "POST", body: JSON.stringify({ values }) });
+    }
+    return selectedModel;
+  }
+
+  function skipOptional(section: "ai-insights" | "alerts" | "sftp" | "calibration") {
+    if (section === "ai-insights") update(["aiInsights", "enabled"], false);
+    if (section === "alerts") update(["alerts", "emailEnabled"], false);
+    if (section === "sftp") update(["sftpImport", "enabled"], false);
+    if (section === "calibration") update(["setup", "calibrationSkippedOrCompleted"], true);
+    setMessage(`${label(section)} skipped. Save progress to persist this choice.`);
+  }
+
+  const checks = status.checks ?? [];
+  const requiredOpen = checks.filter(c => c.required && !c.ok);
+  const tr = draft.trunkRecorder ?? {};
+  const transcription = draft.transcription ?? {};
+  const ai = draft.aiInsights ?? {};
+  const alerts = draft.alerts ?? {};
+  const sftp = draft.sftpImport ?? {};
+  const branding = draft.branding ?? {};
+  const locations = draft.locations?.monitoredAreas ?? [];
+  const checkStepMap: Record<string, string> = {
+    tr: "tr",
+    callstream: "tr",
+    health: "tr",
+    talkgroups: "talkgroups",
+    transcription: "transcription",
+    locations: "areas",
+    "ai-insights": "ai",
+    alerts: "alerts",
+    sftp: "sftp",
+    calibration: "calibration"
+  };
+  const baseSetupSteps = [
+    { id: "stack", title: "Stack" },
+    { id: "tr", title: "TR Config" },
+    { id: "talkgroups", title: "Talkgroups" },
+    { id: "transcription", title: "Transcription" },
+    { id: "areas", title: "Areas" },
+    { id: "ai", title: "AI Insights" },
+    { id: "alerts", title: "Alerts" },
+    { id: "sftp", title: "Imports" },
+    { id: "calibration", title: "Calibration" },
+    { id: "finish", title: "Finish" }
+  ];
+  const setupSteps = baseSetupSteps.map(step => {
+    const stepChecks = checks.filter(check => checkStepMap[check.id] === step.id);
+    const requiredMissing = stepChecks.some(check => check.required && !check.ok);
+    let ok = stepChecks.length > 0 && stepChecks.every(check => check.ok);
+    let blocked = requiredMissing;
+    if (step.id === "stack") {
+      ok = Boolean(status.detection?.found) || trInstallMode === "freshTr";
+      blocked = !ok;
+    }
+    if (step.id === "calibration") {
+      ok = ok && !calibrationJobRunning;
+    }
+    if (step.id === "finish") {
+      ok = requiredOpen.length === 0 && restartVerified && !setupJobRunning;
+      blocked = requiredOpen.length > 0 || setupJobRunning;
+    }
+    return { ...step, checks: stepChecks, ok, blocked };
+  });
+  const stepIndex = Math.max(0, setupSteps.findIndex(step => step.id === wizardStep));
+  const currentStep = setupSteps[stepIndex] ?? setupSteps[0];
+
+  function goStep(id: string) {
+    if (setupJobRunning) {
+      setMessage("A setup job is running. Stop or wait for it before changing steps.");
+      return;
+    }
+    setWizardStep(id);
+    update(["setup", "currentStep"], id);
+    if (setupJobContext && setupJobContext !== id && !["queued", "running", "paused"].includes(setupJob?.status ?? "")) {
+      setSetupJob(null);
+      setSetupLogs([]);
+      setSetupJobContext("");
+    }
+  }
+
+  function selectSetupStep(id: string) {
+    setExpandedSetupStep(current => current === id && wizardStep !== id ? "" : id);
+    goStep(id);
+  }
+
+  async function nextStep() {
+    const nextId = setupSteps[Math.min(setupSteps.length - 1, stepIndex + 1)].id;
+    setBusy(`advance-${currentStep.id}`);
+    try {
+      await performCurrentStepWork();
+      goStep(nextId);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "This step could not be completed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function previousStep() {
+    goStep(setupSteps[Math.max(0, stepIndex - 1)].id);
+  }
+
+  async function performCurrentStepWork() {
+    if (currentStep.id === "stack") {
+      await saveSetupValues();
+      setMessage("Backing up existing TR files before continuing...");
+      await runSetupJobToCompletion("backup-existing-tr", true);
+      if (trInstallMode === "freshTr")
+        await loadArtifacts();
+      setMessage("TR backup complete. Review the job output below.");
+      return;
+    }
+
+    if (currentStep.id === "tr") {
+      await validateSetupSection("tr");
+      await patchCallstreamInline();
+      await validateSetupSection("health");
+      return;
+    }
+
+    if (currentStep.id === "talkgroups") {
+      if (talkgroupPreview)
+        await saveTalkgroupPreviewInline();
+      await validateSetupSection("talkgroups");
+      return;
+    }
+
+    if (currentStep.id === "transcription") {
+      await validateSetupSection("transcription");
+      return;
+    }
+
+    if (currentStep.id === "areas") {
+      await validateSetupSection("locations");
+      return;
+    }
+
+    if (currentStep.id === "ai") {
+      let modelWasSaved = false;
+      if (ai.enabled && !ai.openAiModel && ai.openAiBaseUrl)
+        modelWasSaved = Boolean(await loadAiModelsInline());
+      await validateSetupSection("ai-insights", !modelWasSaved);
+      return;
+    }
+
+    if (currentStep.id === "alerts") {
+      await validateSetupSection("alerts");
+      return;
+    }
+
+    if (currentStep.id === "sftp") {
+      await validateSetupSection("sftp");
+      return;
+    }
+
+    if (currentStep.id === "calibration") {
+      if (calibrationMode === "prepare") {
+        const plan = calibrationPlan ?? await api.request<SetupCalibrationPlan>("/api/v1/setup/calibration/plan");
+        if (!plan.systems.length || !plan.sources.length)
+          throw new Error("Calibration needs a valid TR config with systems and SDR sources before it can prepare guidance.");
+        await runSetupJobToCompletion("tr-calibration-prime", true, "calibration");
+        update(["setup", "calibrationSkippedOrCompleted"], true);
+        await saveSetupValues();
+      } else {
+        update(["setup", "calibrationSkippedOrCompleted"], true);
+        await saveSetupValues();
+      }
+    }
+  }
+
+  return <div className="setup-page">
+    <div className="setup-hero">
+      <div>
+        <h1>PizzaWave Setup</h1>
+        <p>First-run setup walks through one decision at a time. Progress saves automatically as you move through the wizard.</p>
+      </div>
+    </div>
+    <div className="setup-message">{message}</div>
+    <div className="setup-wizard-layout">
+      <div className="card setup-checklist">
+        <h3>Completion Gate</h3>
+        <div className="setup-step-list">
+          {setupSteps.map((step, i) => {
+            const expanded = expandedSetupStep === step.id;
+            return <div className={`setup-step-item ${step.id === currentStep.id ? "active" : ""} ${step.ok ? "ok" : ""} ${step.blocked ? "blocked" : ""} ${expanded ? "expanded" : ""}`} key={step.id}>
+              <button type="button" className="setup-step-button" onClick={() => selectSetupStep(step.id)}>
+                <span>{i + 1}</span>
+                <strong>{step.title}</strong>
+                <em>{step.ok ? "OK" : step.blocked ? "Required" : "Open"}</em>
+              </button>
+              {expanded && <div className="setup-step-checks">
+                {step.checks.length > 0
+                  ? step.checks.map(check => <div className={`setup-check compact ${check.ok ? "ok" : check.required ? "blocked" : "optional"}`} key={check.id}>
+                    <span>{check.ok ? "OK" : check.required ? "Required" : "Optional"}</span>
+                    <strong>{check.label}</strong>
+                    <small>{check.message}</small>
+                  </div>)
+                  : <div className="setup-note">{step.id === "stack"
+                    ? "Choose whether to reuse the existing TR install or build a fresh one."
+                    : step.id === "finish"
+                      ? (requiredOpen.length > 0 ? `${requiredOpen.length} required check(s) still need validation.` : restartVerified ? "Restart verification has passed." : "Finish applies settings and verifies the restart.")
+                      : "This step has no validation checks yet."}</div>}
+              </div>}
+            </div>;
+          })}
+        </div>
+      </div>
+      <div className="setup-step-panel">
+        {currentStep.id === "stack" && <SetupSection title="Stack" description="Choose whether this machine already has a working trunk-recorder install or should be built fresh.">
+          <SettingInput label="Pizzastack name" description="Shown under the PizzaWave logo." value={branding.stackName} onChange={v => update(["branding", "stackName"], v)} />
+          <div className="setup-choice-grid">
+            <ChoiceCard active={trInstallMode === "reuseExistingTr"} title="Reuse existing TR" description="Best for an existing Raspberry Pi rig. PizzaWave will validate the config, patch callstream, and leave your working TR install in place." onClick={() => { setTrInstallMode("reuseExistingTr"); update(["setup", "installMode"], "reuseExistingTr"); }} />
+            <ChoiceCard active={trInstallMode === "freshTr"} title="Fresh TR setup" description="Build trunk-recorder from source. Existing TR files are backed up automatically; blocking artifacts are listed before you proceed." onClick={() => { setTrInstallMode("freshTr"); update(["setup", "installMode"], "freshTr"); }} />
+          </div>
+          <div className="setup-detection-card">
+            <strong>{status.detection?.found ? "Existing trunk-recorder detected" : "No working trunk-recorder install detected yet"}</strong>
+            <small>{status.detection?.configExists ? `Config: ${status.detection.configPath}` : "Config file was not found at the configured path."}</small>
+            <small>{status.detection?.serviceActive ? "TR service is currently running." : "TR service is not active."}</small>
+          </div>
+          {trInstallMode === "freshTr" && <>
+            <div className="setup-note">Fresh setup will back up existing TR config/service files automatically before building. PizzaWave will not delete artifacts for you; if something blocks install, it will show what you need to remove.</div>
+            {artifactReport && <ArtifactReport report={artifactReport} />}
+            {artifactReport?.hasBlockingArtifacts && <SettingCheckbox label="I reviewed the existing artifacts and want to source-build anyway" description="Use this only after removing or intentionally keeping the listed files." checked={confirmFreshBuild} onChange={setConfirmFreshBuild} />}
+            <button disabled={Boolean(busy) || (artifactReport?.hasBlockingArtifacts && !confirmFreshBuild)} onClick={() => void startSetupJob("tr-source-build", confirmFreshBuild)}>{busy === "tr-source-build" ? "Building..." : "Build trunk-recorder from source"}</button>
+          </>}
+          {trInstallMode === "reuseExistingTr" && <div className="setup-note">When you click Next, PizzaWave backs up TR files automatically and leaves trunk-recorder itself in place.</div>}
+        </SetupSection>}
+
+        {currentStep.id === "tr" && <SetupSection title="TR Config" description={trInstallMode === "reuseExistingTr" ? "Using the existing TR config. Draft/import tools are hidden because they are not relevant in reuse mode." : "Create or import the trunk-recorder config for a fresh install."}>
+          <SettingInput label="TR config path" description="Existing or generated trunk-recorder config.json." value={tr.configPath} onChange={v => update(["trunkRecorder", "configPath"], v)} />
+          <SettingInput label="TR log service" description="Systemd service name used for health collection." value={tr.logServiceName} onChange={v => update(["trunkRecorder", "logServiceName"], v)} />
+          {trInstallMode === "freshTr" && <div className="setup-choice-grid">
+            <ChoiceCard active={trConfigMode === "radioReference"} title="Draft from RadioReference" description="Fetch or paste a RadioReference page and let PizzaWave draft systems, sources, and center frequencies." onClick={() => { setTrConfigMode("radioReference"); update(["setup", "trConfigMode"], "radioReference"); }} />
+            <ChoiceCard active={trConfigMode === "pasteJson"} title="Paste config JSON" description="Use an already prepared trunk-recorder config.json." onClick={() => { setTrConfigMode("pasteJson"); update(["setup", "trConfigMode"], "pasteJson"); }} />
+          </div>}
+          {trInstallMode === "freshTr" && trConfigMode === "radioReference" && <>
+            <SettingInput label="RadioReference SID" description="Fetch directly when possible. Paste page HTML below if RadioReference blocks automated fetch." value={trDraftSid} onChange={setTrDraftSid} />
+            <SettingInput label="RadioReference URL" description="Optional full system URL. Used instead of SID when supplied." value={trDraftUrl} onChange={setTrDraftUrl} />
+            <SettingInput label="Site names" description="Comma-separated site names to include. Leave blank to infer site names from the page." value={trDraftSites} onChange={setTrDraftSites} />
+            <SettingInput label="RTL-SDR serials" description="Comma-separated serials. Detection temporarily stops TR if it is running, then restarts it afterward." value={trDraftSerials} onChange={setTrDraftSerials} />
+            <button disabled={Boolean(busy)} onClick={() => void detectSdrs()}>{busy === "sdr-detect" ? "Detecting..." : "Detect SDR serials"}</button>
+            {sdrDetection && <SdrDetectionPanel detection={sdrDetection} />}
+            <SettingInput label="Sample rate" description="Default 2400000. Used to calculate center frequencies and omitted channels." value={trDraftRate} onChange={setTrDraftRate} />
+            <textarea value={trDraftHtml} onChange={e => setTrDraftHtml(e.target.value)} placeholder="Optional pasted RadioReference page HTML/source" />
+            <div className="setup-button-row"><button disabled={Boolean(busy) || (!trDraftSid.trim() && !trDraftUrl.trim() && !trDraftHtml.trim())} onClick={() => void draftTrConfig()}>{busy === "tr-config-draft" ? "Drafting..." : "Draft config"}</button><button disabled={Boolean(busy) || !trConfigJson.trim()} onClick={() => void saveDraftTrConfig()}>{busy === "tr-config-save" ? "Saving..." : "Save TR config"}</button></div>
+            {trDraft && <TrConfigDraftPreview draft={trDraft} />}
+          </>}
+          {trInstallMode === "freshTr" && trConfigMode === "pasteJson" && <textarea value={trConfigJson} onChange={e => setTrConfigJson(e.target.value)} placeholder="{ ... trunk-recorder config.json ... }" />}
+          <div className="setup-note">Click Next to validate the TR config, patch callstream, and verify health access.</div>
+        </SetupSection>}
+
+        {currentStep.id === "talkgroups" && <SetupSection title="Talkgroups" description="Talkgroup CSV is required. Import from RadioReference or paste the pizzapi-compatible CSV, then review rows before saving.">
+          <SettingInput label="Talkgroups CSV path" description="Required before setup can complete." value={tr.talkgroupsPath} onChange={v => update(["trunkRecorder", "talkgroupsPath"], v)} />
+          <SettingInput label="RadioReference SID" description="Example: 6355 from https://www.radioreference.com/db/sid/6355." value={talkgroupSid} onChange={setTalkgroupSid} />
+          <SettingCheckbox label="Include encrypted/unknown/unwanted rows" description="Normally excluded by default. You can still include individual rows below." checked={includeExcludedTalkgroups} onChange={setIncludeExcludedTalkgroups} />
+          <button disabled={Boolean(busy) || !talkgroupSid.trim()} onClick={() => void previewTalkgroups("rr")}>{busy === "talkgroups-rr" ? "Fetching..." : "Fetch RR talkgroups"}</button>
+          <textarea value={talkgroupsCsv} onChange={e => setTalkgroupsCsv(e.target.value)} placeholder="Decimal,Alpha Tag,Description,Category" />
+          <div className="setup-button-row"><button disabled={Boolean(busy) || !talkgroupsCsv.trim()} onClick={() => void previewTalkgroups("csv")}>{busy === "talkgroups-csv" ? "Parsing..." : "Preview CSV"}</button><button disabled={Boolean(busy)} onClick={addTalkgroupRow}>Add row</button></div>
+          {talkgroupPreview && <TalkgroupPreviewTable preview={talkgroupPreview} updateRow={updateTalkgroupRow} />}
+          <div className="setup-note">Click Next to save included rows and validate the talkgroup CSV.</div>
+        </SetupSection>}
+
+        {currentStep.id === "transcription" && <SetupSection title="Transcription" description="Required. Choose a transcription engine and run an actual sample transcription test.">
+          <SettingSelect label="Engine" description="Provider for turning calls into text." value={transcription.provider} options={["none", "whisper", "lmstudio", "openai"]} onChange={v => update(["transcription", "provider"], v)} />
+          {transcription.provider === "whisper" && <>
+            <SettingSelect label="Whisper model" description="Base or medium are the recommended setup choices." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update(["transcription", "whisperModelFile"], modelPath(models, v))} />
+            <ModelManager engine="whisper" rows={models} busy={modelBusy} selectedPath={transcription.whisperModelFile} onUse={path => update(["transcription", "whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
+          </>}
+          {(transcription.provider === "lmstudio" || transcription.provider === "openai") && <>
+            <SettingInput label="Base URL" description="OpenAI-compatible audio transcription endpoint." value={transcription.openAiBaseUrl} onChange={v => update(["transcription", "openAiBaseUrl"], v)} />
+            <SettingInput label="Model" description="Audio transcription model name." value={transcription.openAiModel} onChange={v => update(["transcription", "openAiModel"], v)} />
+            <SettingInput label="API key" description="Optional bearer token." type="password" value={transcription.openAiApiKey} onChange={v => update(["transcription", "openAiApiKey"], v)} />
+          </>}
+          <div className="setup-note">Click Next to test the selected transcription provider. Fresh installs with no calls yet will validate the provider/model and skip the sample call.</div>
+        </SetupSection>}
+
+        {currentStep.id === "areas" && <SetupSection title="Monitored Areas" description="Required for geocoding/map context. Each TR system shortName needs one monitored area.">
+          {locations.map((area: any, i: number) => <div className="setup-area" key={area.areaId ?? i}>
+            <SettingInput label="System short name" description="Must match TR system shortName or alias." value={area.systemShortName} onChange={v => update(["locations", "monitoredAreas", String(i), "systemShortName"], v)} />
+            <SettingInput label="Area label" description="County/city label used by map searches." value={area.areaLabel} onChange={v => update(["locations", "monitoredAreas", String(i), "areaLabel"], v)} />
+          </div>)}
+          <div className="setup-note">Click Next to validate monitored areas against the TR system short names.</div>
+        </SetupSection>}
+
+        {currentStep.id === "ai" && <SetupSection title="AI Insights / LM Link" description="Optional. Required only for summaries, incidents, and LLM troubleshooting suggestions. LM Link must be linked with `lms login` before remote models appear.">
+          <div className="setup-note">The deb includes the LM Studio setup script but does not install/link LM Studio until you choose to prepare it here.</div>
+          <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("lmstudio-prime")}>{busy === "lmstudio-prime" || (setupJobContext === "ai" && setupJobRunning) ? "Preparing..." : "Prepare LM Link support"}</button>
+          <SettingCheckbox label="Enable AI insights" description="Used for summaries, incidents, and troubleshooting suggestions." checked={ai.enabled} onChange={v => update(["aiInsights", "enabled"], v)} />
+          <SettingInput label="Insights base URL" description="Usually LM Studio /v1 endpoint." value={ai.openAiBaseUrl} onChange={v => update(["aiInsights", "openAiBaseUrl"], v)} />
+          {aiModels.length > 0
+            ? <SettingSelect label="Insights model" description="Loaded from the configured LM Link/OpenAI-compatible endpoint." value={ai.openAiModel} options={aiModels} onChange={v => update(["aiInsights", "openAiModel"], v)} />
+            : <SettingInput label="Insights model" description="Chat model for summaries/incidents. Use Load models when LM Link is reachable." value={ai.openAiModel} onChange={v => update(["aiInsights", "openAiModel"], v)} />}
+          <div className="setup-note">{ai.enabled ? "Click Next to load available models when needed and test AI insights." : "AI insights are disabled. Click Next to mark this optional step skipped."}</div>
+        </SetupSection>}
+
+        {currentStep.id === "alerts" && <SetupSection title="Email Alerts" description="Optional. Live alert emails need an address and app password. Imported/historical alert matches never send email.">
+          <SettingCheckbox label="Enable email alerts" description="Optional live alert notifications." checked={alerts.emailEnabled} onChange={v => update(["alerts", "emailEnabled"], v)} />
+          {alerts.emailEnabled && <>
+            <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update(["alerts", "emailProvider"], v)} />
+            <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update(["alerts", "emailUser"], v)} />
+            <SettingInput label="App password" description="Provider-specific app password or SMTP credential." type="password" value={alerts.emailPassword} onChange={v => update(["alerts", "emailPassword"], v)} />
+          </>}
+          <div className="setup-note">{alerts.emailEnabled ? "Click Next to validate email alert settings." : "Email alerts are disabled. Click Next to mark this optional step skipped."}</div>
+        </SetupSection>}
+
+        {currentStep.id === "sftp" && <SetupSection title="Imports" description="Optional. Import existing TR .bin recordings into the local PizzaWave store. Local import uses the current TR captureDir; SFTP import reads a remote archive without modifying it.">
+          <div className="setup-nested">
+            <h4>Local TR recordings</h4>
+            <LocalImport reload={reload} />
+          </div>
+          <div className="setup-nested">
+            <h4>SFTP archive</h4>
+          <SettingCheckbox label="Enable SFTP import" description="Optional import from existing .bin archives." checked={sftp.enabled} onChange={v => update(["sftpImport", "enabled"], v)} />
+          {sftp.enabled && <>
+            <SettingInput label="SFTP host" description="Archive host or IP. The source is read-only; imported calls are copied locally." value={sftp.host} onChange={v => update(["sftpImport", "host"], v)} />
+            <SettingInput label="SFTP port" description="Normally 22." type="number" value={sftp.port} onChange={v => update(["sftpImport", "port"], numberOrZero(v))} />
+            <SettingInput label="SFTP username" description="Account used to read archive files." value={sftp.username} onChange={v => update(["sftpImport", "username"], v)} />
+            <SettingSelect label="SFTP auth mode" description="Private key is preferred; password auth is supported." value={sftp.authMode} options={["privateKey", "password"]} onChange={v => update(["sftpImport", "authMode"], v)} />
+            {sftp.authMode === "password"
+              ? <SettingInput label="Password" description="Stored in pizzad settings if used." type="password" value={sftp.password} onChange={v => update(["sftpImport", "password"], v)} />
+              : <SettingInput label="Private key path" description="Path on the Linux host." value={sftp.privateKeyPath} onChange={v => update(["sftpImport", "privateKeyPath"], v)} />}
+            <SettingInput label="Remote root" description="Top-level TR archive directory." value={sftp.remoteRoot} onChange={v => update(["sftpImport", "remoteRoot"], v)} />
+          <div className="setup-button-row"><button disabled={Boolean(busy)} onClick={() => void loadSftpAvailability()}>{busy === "sftp-availability" ? "Checking..." : "Check archive"}</button><button disabled={Boolean(busy) || !sftpAvailability?.available} onClick={() => void queueQuickSftpImport()}>{busy === "sftp-quick-import" ? "Queueing..." : "Queue last 48h import"}</button></div>
+          {sftpAvailability && <div className="setup-note">{sftpAvailability.message} {sftpAvailability.available ? `${sftpAvailability.fileCount?.toLocaleString?.() ?? sftpAvailability.fileCount} file(s), ${formatBytes(sftpAvailability.totalBytes ?? 0)} visible.` : ""}</div>}
+        </>}
+          </div>
+          <div className="setup-note">{sftp.enabled ? "Click Next to validate SFTP settings." : "SFTP import is disabled. Click Next to mark this optional step skipped."}</div>
+        </SetupSection>}
+
+        {currentStep.id === "calibration" && <SetupSection title="TR Calibration" description="Optional. This prepares the exact commands and checks needed for tuning. It does not change TR config unless you later choose to apply findings.">
+          <div className="setup-note">PizzaWave reads the TR config and builds the tuning plan from known systems, control channels, configured source windows, and SDR assignments. SDR priming installs RTL-SDR utilities and the available GQRX package when the OS repository provides one; some Raspberry Pi images may require a separate ARM-compatible GQRX install.</div>
+          {status.detection?.serviceActive && <div className="setup-warning-list">
+            <div>trunk-recorder is currently running. GQRX usually cannot open the SDRs while TR owns them. Stop TR before using the GQRX buttons; the sweep job will restart TR repeatedly for its test passes.</div>
+            <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("tr-stop-for-calibration")}>{busy === "tr-stop-for-calibration" ? "Stopping..." : "Stop TR for calibration"}</button>
+          </div>}
+          <a href="https://gqrx.dk/doc/practical-tricks-and-tips" target="_blank" rel="noreferrer">GQRX tuning reference</a>
+          <div className="setup-choice-grid">
+            <ChoiceCard disabled={Boolean(busy) || setupJobRunning} active={calibrationMode === "skip"} title="Skip for now" description="Finish setup without calibration. Calibration tools remain available later in System." onClick={() => setCalibrationMode("skip")} />
+            <ChoiceCard disabled={Boolean(busy) || setupJobRunning} active={calibrationMode === "prepare"} title="Guided tuning plan" description="Step through each configured system/source, open GQRX with the right frequency context, and prepare tr_tune.sh commands." onClick={() => setCalibrationMode("prepare")} />
+          </div>
+          {calibrationMode === "prepare" && <>
+            <div className="setup-note">This plan is loaded from the current TR config when you enter the calibration step. It will update automatically after the TR config step is changed.</div>
+            <div className="settings-grid">
+              <SettingInput label="Sweep range Hz" description="Default 1200: tests base error plus/minus this amount." value={calibrationSweep.rangeHz} onChange={v => setCalibrationSweep(current => ({ ...current, rangeHz: v }))} />
+              <SettingInput label="Step Hz" description="Default 300: spacing between error candidates." value={calibrationSweep.stepHz} onChange={v => setCalibrationSweep(current => ({ ...current, stepHz: v }))} />
+              <SettingInput label="Warmup seconds" description="Default 20 seconds per candidate before metrics are counted." value={calibrationSweep.warmupSec} onChange={v => setCalibrationSweep(current => ({ ...current, warmupSec: v }))} />
+              <SettingInput label="Measure seconds" description="Default 240 seconds per candidate. Shorter test runs are possible later." value={calibrationSweep.durationSec} onChange={v => setCalibrationSweep(current => ({ ...current, durationSec: v }))} />
+            </div>
+            <GuidedCalibrationPlan
+              plan={calibrationPlan}
+              inputs={calibrationInputs}
+              sweep={calibrationSweep}
+              busy={Boolean(busy) || setupJobRunning}
+              setInput={(sourceIndex, key, value) => setCalibrationInputs(current => ({ ...current, [sourceIndex]: { ...(current[sourceIndex] ?? { gain: "", errorHz: "", ppm: "" }), [key]: value } }))}
+              openGqrx={openGqrx}
+              runSweep={runCalibrationSweep}
+            />
+            <div className="setup-note">Next runs only the preflight: it verifies the tuning helper exists and checks whether TR owns the SDRs. The full per-system sweep commands above are intentionally presented for review before you run them.</div>
+          </>}
+          <div className="setup-note">{calibrationMode === "prepare" ? "Enter gain and error/PPM as you work through each proposed SDR. If an SDR source has no error yet, the command uses its current TR config error as the baseline." : "Click Next to skip calibration for now."}</div>
+        </SetupSection>}
+
+        {currentStep.id === "finish" && <SetupSection title="Finish" description="This applies the saved settings, restarts pizzad, re-validates the required checks, then exits setup mode so normal ingest and processing can start.">
+          <SetupReview status={status} requiredOpen={requiredOpen} restartVerified={restartVerified} />
+          <div className="setup-button-row"><button disabled={Boolean(busy) || setupJobRunning || requiredOpen.length > 0} onClick={() => void finishSetup()}>{busy === "finish-setup" ? "Finishing..." : "Finish setup"}</button></div>
+        </SetupSection>}
+
+        <div className="setup-nav-row">
+          <button disabled={stepIndex === 0 || Boolean(busy) || setupJobRunning} onClick={previousStep}>Back</button>
+          {stepIndex < setupSteps.length - 1 && <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void nextStep()}>{busy === `advance-${currentStep.id}` ? "Working..." : "Next"}</button>}
+        </div>
+      </div>
+    </div>
+    <SetupJobDrawer job={setupJob} logs={setupLogs} running={setupJobRunning} onStopCalibration={stopCalibrationJob} stopping={busy === "tr-calibration-cancel"} open={jobDrawerOpen} setOpen={setJobDrawerOpen} />
+  </div>;
+}
+
+function SetupSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return <div className="card setup-section"><h3>{title}</h3><p>{description}</p><div className="settings-fields">{children}</div></div>;
+}
+
+function ChoiceCard({ active, title, description, disabled, onClick }: { active: boolean; title: string; description: string; disabled?: boolean; onClick: () => void }) {
+  return <button type="button" className={`setup-choice ${active ? "active" : ""}`} disabled={disabled} onClick={onClick}>
+    <span className="setup-choice-toggle">{active ? "On" : "Off"}</span>
+    <strong>{title}</strong>
+    <small>{description}</small>
+  </button>;
+}
+
+function CalibrationPlanCard({ plan }: { plan: ReturnType<typeof buildCalibrationPlan> }) {
+  return <div className="calibration-plan">
+    <div className="setup-job-head">
+      <strong>Planned tr_tune.sh workflow</strong>
+      <span className="pill">{plan.baseError === null ? "Needs base error" : `${plan.passCount} passes`}</span>
+      <span className="pill">{plan.estimatedSeconds > 0 ? `About ${formatElapsed(plan.estimatedSeconds)}` : "Time unknown"}</span>
+    </div>
+    <div className="calibration-plan-grid">
+      <div><span>Base error</span><strong>{plan.baseError === null ? "Not calculated" : `${plan.baseError} Hz`}</strong><small>{plan.baseSource}</small></div>
+      <div><span>Error candidates</span><strong>{plan.candidateSummary}</strong><small>centered on the GQRX/default value</small></div>
+      <div><span>Per pass</span><strong>{plan.warmupSec}s warmup + {plan.durationSec}s measure</strong><small>TR restarts for each candidate</small></div>
+    </div>
+    <ol className="calibration-step-list">
+      <li>Stop trunk-recorder for the candidate pass so the selected RTL-SDR can be claimed cleanly.</li>
+      <li>Patch a temporary TR config with the candidate error, modulation, control channel, device serial, and optional gain.</li>
+      <li>Start TR, wait for warmup, then collect journald metrics for the measurement window.</li>
+      <li>Score decode samples, zero-decode share, average/max decode rate, retunes, no-transmission, update-not-grant, started calls, and concluded calls.</li>
+      <li>Restore the baseline config unless the sweep is explicitly run with a leave-last-config option, then show findings for user review.</li>
+    </ol>
+    {plan.ppmCommand && <div>
+      <strong>PPM conversion command</strong>
+      <pre className="command-box">{plan.ppmCommand}</pre>
+    </div>}
+    <div>
+      <strong>Error sweep command</strong>
+      <pre className="command-box">{plan.errorSweepCommand || "Enter system shortName, control channel, RTL-SDR serial, and either base error or center Hz + PPM to generate the command."}</pre>
+    </div>
+    <small className="setup-note">A decode rate above 2 msg/sec is acceptable but marginal. Prefer the candidate with stable decode, low zero-decode share, and fewer retunes over a single noisy peak.</small>
+  </div>;
+}
+
+function GuidedCalibrationPlan({
+  plan,
+  inputs,
+  sweep,
+  busy,
+  setInput,
+  openGqrx,
+  runSweep
+}: {
+  plan: SetupCalibrationPlan | null;
+  inputs: Record<string, { gain: string; errorHz: string; ppm: string }>;
+  sweep: { rangeHz: string; stepHz: string; warmupSec: string; durationSec: string };
+  busy: boolean;
+  setInput: (sourceIndex: string, key: "gain" | "errorHz" | "ppm", value: string) => void;
+  openGqrx: (sourceIndex: number, frequencyHz: number) => Promise<void>;
+  runSweep: (parameters: any) => Promise<void>;
+}) {
+  if (!plan) return <div className="calibration-plan"><div className="setup-note">Loading TR-derived calibration plan...</div></div>;
+  const sourceByIndex = new Map(plan.sources.map(source => [source.index, source]));
+  const rangeHz = Math.max(0, numberOrDefault(sweep.rangeHz, 1200));
+  const stepHz = Math.max(1, numberOrDefault(sweep.stepHz, 300));
+  const warmupSec = Math.max(0, numberOrDefault(sweep.warmupSec, 20));
+  const durationSec = Math.max(1, numberOrDefault(sweep.durationSec, 240));
+  const passCount = Math.floor((rangeHz * 2) / stepHz) + 1;
+  const estimatedSeconds = passCount * (warmupSec + durationSec);
+  return <div className="calibration-plan">
+    <div className="setup-job-head">
+      <strong>TR-derived tuning plan</strong>
+      <span className="pill">{plan.systems.length} system(s)</span>
+      <span className="pill">{plan.sources.length} SDR source(s)</span>
+      <span className="pill">{passCount} passes/tuner</span>
+      <span className="pill">About {formatElapsed(estimatedSeconds)} each</span>
+    </div>
+    <div className="setup-note">{plan.diagnostics}</div>
+    {plan.warnings.length > 0 && <div className="setup-warning-list">{plan.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+    <div className="calibration-guided-grid">
+      {plan.systems.map(system => <div className="calibration-system-card" key={system.shortName}>
+        <div className="setup-job-head">
+          <strong>{system.shortName}</strong>
+          <span className="pill">{system.modulation || "qpsk"}</span>
+          <span className="pill">Needs {system.requiredSdrCount} SDR tuner{system.requiredSdrCount === 1 ? "" : "s"}</span>
+        </div>
+        <div className="calibration-plan-grid">
+          <div><span>Control channels</span><strong>{formatFrequencyList(system.controlChannelsHz)}</strong><small>TR rotates among these; the active one is whichever control channel is currently carrying decode messages. Start with the first listed channel, then try the others if decode is poor.</small></div>
+          <div><span>Voice frequencies</span><strong>{system.voiceFrequenciesHz.length ? formatFrequencyList(system.voiceFrequenciesHz) : "Not needed for control-channel tuning"}</strong><small>TR configs normally do not list every voice frequency. Calibration tunes control-channel decode, so this is not a blocker.</small></div>
+          <div><span>Required tuner coverage</span><strong>{system.requiredRanges.map(range => formatFrequencyRange(range.lowHz, range.highHz)).join("; ") || "None"}</strong><small>Calculated from known control channels and configured SDR sample rate.</small></div>
+        </div>
+        {system.warnings.length > 0 && <div className="setup-warning-list">{system.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+        {system.proposedSourceIndexes.map(sourceIndex => {
+          const source = sourceByIndex.get(sourceIndex);
+          if (!source) return null;
+          const input = inputs[String(source.index)] ?? { gain: source.gain ?? "", errorHz: source.errorHz ? String(source.errorHz) : "", ppm: "" };
+          const frequency = system.controlChannelsHz[0] ?? source.centerFrequency;
+          const command = buildGuidedSweepCommand(system.shortName, system.modulation, source, input, frequency, sweep);
+          const parameters = buildGuidedSweepParameters(system.shortName, system.modulation, source, input, frequency, sweep);
+          return <div className="calibration-source-card" key={`${system.shortName}-${source.index}`}>
+            <div className="setup-job-head">
+              <strong>Source {source.index}</strong>
+              <span className="pill">{source.serial ? `rtl=${source.serial}` : source.device || "rtl source"}</span>
+              <span className="pill">{formatHz(source.centerFrequency)} center</span>
+              <span className="pill">{formatHz(source.sampleRate)} rate</span>
+            </div>
+            <div className="settings-grid">
+              <SettingInput label="GQRX gain" description={`Current config value: ${source.gain || "blank"}.`} value={input.gain} onChange={v => setInput(String(source.index), "gain", v)} />
+              <SettingInput label="Error Hz" description={`Current config value: ${source.errorHz || 0}. Overrides PPM if supplied.`} value={input.errorHz} onChange={v => setInput(String(source.index), "errorHz", v)} />
+              <SettingInput label="PPM" description="Optional. Used only if Error Hz is blank." value={input.ppm} onChange={v => setInput(String(source.index), "ppm", v)} />
+            </div>
+            <div className="setup-button-row">
+              <button disabled={busy} onClick={() => void openGqrx(source.index, frequency)}>Open GQRX at control channel</button>
+              <button disabled={busy} onClick={() => void openGqrx(source.index, source.centerFrequency)}>Open GQRX at SDR center</button>
+            </div>
+            <strong>Planned sweep</strong>
+            <pre className="command-box">{command}</pre>
+            <button disabled={busy} onClick={() => void runSweep(parameters)}>Run this sweep in wizard</button>
+          </div>;
+        })}
+      </div>)}
+    </div>
+  </div>;
+}
+
+function SetupReview({ status, requiredOpen, restartVerified }: { status: SetupStatus; requiredOpen: SetupStatus["checks"]; restartVerified: boolean }) {
+  const values: any = status.values ?? {};
+  const tr = values.trunkRecorder ?? {};
+  const transcription = values.transcription ?? {};
+  const ai = values.aiInsights ?? {};
+  const sftp = values.sftpImport ?? {};
+  return <div className="setup-review">
+    <h4>Review Before Complete</h4>
+    <div><span>TR config</span><code>{tr.configPath ?? "/etc/trunk-recorder/config.json"}</code></div>
+    <div><span>Talkgroups</span><code>{tr.talkgroupsPath ?? "/etc/trunk-recorder/talkgroups.csv"}</code></div>
+    <div><span>Transcription</span><code>{transcription.provider ?? "none"}</code></div>
+    <div><span>AI insights</span><code>{ai.enabled ? ai.openAiModel || "enabled" : "disabled"}</code></div>
+    <div><span>SFTP import</span><code>{sftp.enabled ? sftp.host || "enabled" : "disabled"}</code></div>
+    {requiredOpen.length > 0
+      ? <small>{requiredOpen.length} required section{requiredOpen.length === 1 ? "" : "s"} still need validation.</small>
+      : restartVerified
+        ? <small>Restart verification passed. Completing setup enables normal operation.</small>
+        : <small>Run Apply & Restart before completing setup.</small>}
+  </div>;
+}
+
+function ArtifactReport({ report }: { report: SetupArtifactReport }) {
+  return <div className="setup-artifacts">
+    <strong>{report.hasBlockingArtifacts ? "Existing TR artifacts found" : "Artifact check"}</strong>
+    {report.hasBlockingArtifacts && <p className="setup-note">These only block a clean source-build reinstall. They are expected when side-loading an existing working TR setup.</p>}
+    {report.artifacts.map(artifact => <div className={artifact.exists ? "found" : "ok"} key={artifact.path}>
+      <span>{artifact.exists ? "Found" : "Missing"}</span>
+      <code>{artifact.path}</code>
+      <small>{artifact.notes}</small>
+    </div>)}
+    {report.manualCommands.length > 0 && <pre>{report.manualCommands.join("\n")}</pre>}
+  </div>;
+}
+
+function SetupJobPanel({ job, logs }: { job: Job | null; logs: JobLog[] }) {
+  if (!job) return null;
+  return <div className="setup-job-panel">
+    <div className="setup-job-head">
+      <strong>Job {job.id}: {label(job.type)}</strong>
+      <span className={`job-status ${job.status}`}>{job.status}</span>
+      <span>{job.completed}/{job.total}</span>
+    </div>
+    <div className="muted">{job.message}</div>
+    <pre>{logs.length ? logs.map(log => `[${new Date(log.timestampUtc).toLocaleTimeString()}] ${log.stream}: ${log.text}`).join("\n") : "Waiting for job output..."}</pre>
+  </div>;
+}
+
+function SetupJobDrawer({ job, logs, running, onStopCalibration, stopping, open, setOpen }: { job: Job | null; logs: JobLog[]; running: boolean; onStopCalibration: () => Promise<void>; stopping: boolean; open: boolean; setOpen: (open: boolean) => void }) {
+  const isCalibration = Boolean(job?.type.includes("calibration"));
+  return <div className={`setup-job-drawer ${open ? "open" : ""}`}>
+    <button type="button" className="setup-job-tab" onClick={() => setOpen(!open)}>{open ? "Hide logs" : "Logs"}</button>
+    <div className="setup-job-head">
+      <strong>{job ? `Job ${job.id}: ${label(job.type)}` : "Setup logs"}</strong>
+      {job && <span className={`job-status ${job.status}`}>{job.status}</span>}
+      {job && <span>{job.completed}/{job.total}</span>}
+      <span className="muted">{job?.message ?? "No setup job has run in this session."}</span>
+      {isCalibration && running && <button disabled={stopping} onClick={() => void onStopCalibration()}>{stopping ? "Stopping..." : "Stop calibration job"}</button>}
+    </div>
+    <pre>{logs.length ? logs.map(log => `[${new Date(log.timestampUtc).toLocaleTimeString()}] ${log.stream}: ${log.text}`).join("\n") : job ? "Waiting for job output..." : "No setup job output yet."}</pre>
+  </div>;
+}
+
+function TrConfigDraftPreview({ draft }: { draft: SetupTrConfigDraft }) {
+  return <div className="tr-config-draft">
+    <div className="setup-job-head">
+      <strong>{draft.systems.length} system/site draft(s)</strong>
+      <span>{draft.sources.length} SDR source(s)</span>
+    </div>
+    <div className="muted">{draft.diagnostics}</div>
+    {draft.warnings.length > 0 && <div className="setup-warning-list">{draft.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+    <table className="table">
+      <thead><tr><th>Site</th><th>Short name</th><th>Serial</th><th>Center</th><th>Control</th><th>Coverage</th><th>Warning</th></tr></thead>
+      <tbody>{draft.systems.map(system => {
+        const source = draft.sources.find(s => s.label === system.shortName);
+        return <tr key={`${system.shortName}-${system.siteName}`}>
+          <td>{system.siteName}</td>
+          <td>{system.shortName}</td>
+          <td>{system.assignedSerial || "unassigned"}</td>
+          <td>{formatHz(system.centerFrequency)}</td>
+          <td>{system.controlChannelsMhz.map(f => f.toFixed(4)).join(", ")}</td>
+          <td>{source ? `${source.coveredFrequenciesMhz.length} covered / ${source.omittedFrequenciesMhz.length} omitted` : `${system.frequenciesMhz.length} frequencies`}</td>
+          <td>{system.warning}</td>
+        </tr>;
+      })}</tbody>
+    </table>
+  </div>;
+}
+
+function SdrDetectionPanel({ detection }: { detection: SetupSdrDetection }) {
+  return <div className="sdr-detection">
+    <strong>{detection.message}</strong>
+    {detection.devices.length > 0 && <table className="table">
+      <thead><tr><th>#</th><th>Serial</th><th>Device</th><th>Warning</th></tr></thead>
+      <tbody>{detection.devices.map(device => <tr key={`${device.index}-${device.serial || device.usbLine}`}>
+        <td>{device.index}</td>
+        <td>{device.serial || "unknown"}</td>
+        <td>{device.label || device.usbLine}</td>
+        <td>{device.warning}</td>
+      </tr>)}</tbody>
+    </table>}
+    <details><summary>Raw SDR output</summary><pre>{detection.rawOutput}</pre></details>
+  </div>;
+}
+
+function TalkgroupPreviewTable({ preview, updateRow }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void }) {
+  const categories = ["police", "fire", "ems", "traffic", "other"];
+  return <div className="talkgroup-preview">
+    <div className="setup-job-head">
+      <strong>{preview.includedCount.toLocaleString()} included / {preview.excludedCount.toLocaleString()} excluded</strong>
+      {Object.entries(preview.includedByCategory).map(([category, count]) => <span className={`pill category-${category}`} key={category}>{label(category)} {count}</span>)}
+    </div>
+    <div className="muted">{preview.diagnostics}</div>
+    <div className="talkgroup-preview-table">
+      <table className="table">
+        <thead><tr><th>Use</th><th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Category</th><th>Reason</th></tr></thead>
+        <tbody>{preview.rows.slice(0, 500).map((row, index) => <tr className={row.included ? "" : "excluded-row"} key={row.id}>
+          <td><input type="checkbox" checked={row.included} onChange={e => updateRow(index, { included: e.target.checked })} /></td>
+          <td><input type="number" value={row.id} onChange={e => updateRow(index, { id: numberOrZero(e.target.value) })} /></td>
+          <td>{row.mode}</td>
+          <td><input value={row.alphaTag} onChange={e => updateRow(index, { alphaTag: e.target.value })} /></td>
+          <td><input value={row.description} onChange={e => updateRow(index, { description: e.target.value })} /></td>
+          <td><input value={row.tag} onChange={e => updateRow(index, { tag: e.target.value })} /></td>
+          <td><select value={row.opsCategory} onChange={e => updateRow(index, { opsCategory: e.target.value })}>{categories.map(c => <option key={c} value={c}>{label(c)}</option>)}</select></td>
+          <td>{row.exclusionReason}</td>
+        </tr>)}</tbody>
+      </table>
+      {preview.rows.length > 500 && <div className="muted">Showing first 500 rows. Save still writes all included rows.</div>}
+    </div>
+  </div>;
+}
+
+function SettingsView({ settingsSections, settingsLoadState, reload, profileState, setProfileState }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void>; profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void }) {
   const [sections, setSections] = useState<Record<string, any>>({});
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "error">("info");
@@ -732,6 +2495,11 @@ function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { j
     }
   }, [settingsSections, settingsLoadState.version]);
   useEffect(() => { void loadModels(); }, []);
+  useEffect(() => {
+    if (!modelBusy) return;
+    const timer = window.setInterval(() => void loadModels(), 1500);
+    return () => window.clearInterval(timer);
+  }, [modelBusy]);
 
   const engine = sections.engine ?? {};
   const transcription = sections.transcription ?? {};
@@ -807,6 +2575,8 @@ function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { j
     try {
       const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}/download`, { method: "POST" });
       setSectionStatus(current => ({ ...current, transcription: { kind: result.ok ? "ok" : "error", text: result.message ?? "Download complete" } }));
+      if (result.ok !== false && result.path && model.startsWith("whisper-"))
+        update("transcription", ["whisperModelFile"], result.path);
       await loadModels();
     } finally {
       setModelBusy("");
@@ -824,12 +2594,6 @@ function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { j
     }
   }
 
-  async function control(id: number, action: string) { await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) }); await reload(); }
-  async function deleteJob(id: number) {
-    await api.request(`/api/v1/jobs/${id}`, { method: "DELETE" });
-    setMessage(`Deleted job ${id}`);
-    await reload();
-  }
   return <div className="settings-page">
     <div className="settings-header">
       <h2>Settings</h2>
@@ -874,6 +2638,8 @@ function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { j
         <p className="setting-note">{alerts.rules?.length ?? 0} alert rule(s) configured. Rule management remains in the alerts settings workflow.</p>
       </SettingsCard>
 
+      <ProfilesSettingsCard profileState={profileState} setProfileState={setProfileState} reload={reload} />
+
       <SettingsCard title="SFTP Import" description="Reads historical trunk-recorder .bin files from an archive and imports them into the normal local call store." busy={savingSection === "sftp"} testing={testingSection === "sftp"} status={sectionStatus.sftp} onSave={() => save("sftp")} onTest={() => saveWithTest("sftp")}>
         <SettingCheckbox label="Enable SFTP import" description="Allows quick imports and larger background priming jobs." checked={sftp.enabled} onChange={v => update("sftp", ["enabled"], v)} />
         <SettingInput label="Host" description="SFTP server hostname or IP address." value={sftp.host} onChange={v => update("sftp", ["host"], v)} />
@@ -884,18 +2650,7 @@ function SettingsView({ jobs, settingsSections, settingsLoadState, reload }: { j
         <SettingInput label="Private key path" description="Path on the pizzad Linux host." value={sftp.privateKeyPath} onChange={v => update("sftp", ["privateKeyPath"], v)} />
         <SettingInput label="Key passphrase" description="Optional passphrase for encrypted private keys." type="password" value={sftp.privateKeyPassphrase} onChange={v => update("sftp", ["privateKeyPassphrase"], v)} />
         <SettingInput label="Remote root" description="Top-level archive directory to search." value={sftp.remoteRoot} onChange={v => update("sftp", ["remoteRoot"], v)} />
-        <div className="settings-subsection"><h4>Run Import</h4><SftpImport reload={reload} /></div>
       </SettingsCard>
-
-      <div className="card settings-card wide">
-        <div className="settings-card-meta">
-          <h3>Jobs / Imports</h3>
-          <p>Background work created by SFTP imports, diagnostics, transcription experiments, and summary generation.</p>
-        </div>
-        <div className="settings-fields">
-        {jobs.length ? jobs.map(j => <div className="job" key={j.id}><div className="job-head"><strong>{j.type}</strong><span className={`job-status status-${j.status}`}>{j.status}</span></div><div className="muted">{j.completed}/{j.total} complete, {j.failed} failed - {j.message}</div><div className="job-actions"><button onClick={() => control(j.id, "pause")}>Pause</button><button onClick={() => control(j.id, "resume")}>Resume</button><button onClick={() => control(j.id, "cancel")}>Cancel</button><button onClick={() => deleteJob(j.id)} disabled={j.status === "running" || j.status === "queued" || j.status === "paused"}>Delete</button></div></div>) : <span className="muted">No jobs</span>}
-        </div>
-      </div>
 
       <div className="card settings-card">
         <div className="settings-card-meta">
@@ -931,6 +2686,59 @@ function SettingsCard({ title, description, children, busy, testing, status, onS
   </div>;
 }
 
+function ProfilesSettingsCard({ profileState, setProfileState, reload }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void> }) {
+  const [draft, setDraft] = useState<ProfileState | null>(profileState);
+  const [message, setMessage] = useState("");
+  useEffect(() => setDraft(profileState), [profileState]);
+  if (!draft) return null;
+
+  function updateProfile(id: string, patch: Partial<ProcessingProfile>) {
+    setDraft(current => current && ({ ...current, profiles: current.profiles.map(p => p.id === id ? { ...p, ...patch } : p) }));
+  }
+  function addProfile() {
+    const id = crypto.randomUUID();
+    setDraft(current => current && ({ ...current, profiles: [...current.profiles, { id, name: "New Profile", includePolice: true, includeFire: true, includeEMS: true, includeTraffic: true, includeOther: true, allowedTalkgroups: [] }] }));
+  }
+  function deleteProfile(id: string) {
+    setDraft(current => {
+      if (!current || current.profiles.length <= 1) return current;
+      const profiles = current.profiles.filter(p => p.id !== id);
+      return { activeProfileId: current.activeProfileId === id ? profiles[0].id : current.activeProfileId, profiles };
+    });
+  }
+  async function saveProfiles() {
+    setMessage("Saving profiles...");
+    const saved = await api.request<ProfileState>("/api/v1/profiles", { method: "POST", body: JSON.stringify(draft) });
+    setDraft(saved);
+    setProfileState(saved);
+    setMessage("Profiles saved");
+    await reload();
+  }
+  return <div className="card settings-card wide">
+    <div className="settings-card-meta">
+      <h3>Profiles</h3>
+      <p>Profiles control which categories and optional talkgroups are visible and included in dashboard/category calculations.</p>
+      <div className="settings-card-actions"><button onClick={addProfile}>Create</button><button onClick={() => void saveProfiles()}>Save</button></div>
+      {message && <span className="section-status ok">{message}</span>}
+    </div>
+    <div className="settings-fields">
+      <label className="setting-field"><span>Active profile<small>Applied to navigation and server-computed dashboard data.</small></span><select value={draft.activeProfileId} onChange={e => setDraft({ ...draft, activeProfileId: e.target.value })}>{draft.profiles.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
+      {draft.profiles.map(profile => <div className="profile-editor" key={profile.id}>
+        <input value={profile.name} onChange={e => updateProfile(profile.id, { name: e.target.value })} />
+        <div className="profile-checks">
+          <label><input type="checkbox" checked={profile.includePolice} onChange={e => updateProfile(profile.id, { includePolice: e.target.checked })} /> Police</label>
+          <label><input type="checkbox" checked={profile.includeFire} onChange={e => updateProfile(profile.id, { includeFire: e.target.checked })} /> Fire</label>
+          <label><input type="checkbox" checked={profile.includeEMS} onChange={e => updateProfile(profile.id, { includeEMS: e.target.checked })} /> EMS</label>
+          <label><input type="checkbox" checked={profile.includeTraffic} onChange={e => updateProfile(profile.id, { includeTraffic: e.target.checked })} /> Traffic</label>
+          <label><input type="checkbox" checked={profile.includeOther} onChange={e => updateProfile(profile.id, { includeOther: e.target.checked })} /> Other</label>
+        </div>
+        <label className="setting-field"><span>Allowed talkgroups<small>Comma-separated IDs. Leave blank to include all talkgroups in enabled categories.</small></span><input value={(profile.allowedTalkgroups ?? []).join(",")} onChange={e => updateProfile(profile.id, { allowedTalkgroups: parseTalkgroups(e.target.value) })} /></label>
+        <button disabled={draft.profiles.length <= 1} onClick={() => deleteProfile(profile.id)}>Delete</button>
+      </div>)}
+    </div>
+  </div>;
+}
+
 function SettingInput({ label: text, description, value, onChange, type = "text" }: { label: string; description: string; value: any; onChange: (value: string) => void; type?: string }) {
   return <label className="setting-field">
     <span>{text}<small>{description}</small></span>
@@ -962,12 +2770,13 @@ function SettingValue({ label: text, value }: { label: string; value: any }) {
 function ModelManager({ engine, rows, busy, selectedPath, onUse, onDownload, onDelete }: { engine: string; rows: any[]; busy: string; selectedPath: string; onUse: (path: string) => void; onDownload: (model: string) => Promise<void>; onDelete: (model: string) => Promise<void> }) {
   rows = rows.filter(row => row.engine === engine);
   if (!rows.length) return null;
+  const anyBusy = Boolean(busy);
   return <div className="model-manager">
     {rows.map(row => <div className="model-row" key={row.id}>
-      <span><strong>{row.label}</strong><small>{row.installed ? `${formatBytes(row.bytes)} installed${row.path === selectedPath ? " - selected" : ""}` : "Not installed"}</small></span>
+      <span><strong>{row.label}</strong><small>{row.installed ? `${formatBytes(row.bytes)} installed${row.path === selectedPath ? " - selected" : ""}` : row.downloading ? `Partial download: ${formatBytes(row.bytes)}` : "Not installed"}</small></span>
       <div>
-        {row.installed && <button onClick={() => onUse(row.path)}>Use</button>}
-        {row.installed ? <button disabled={busy === row.id} onClick={() => void onDelete(row.id)}>{busy === row.id ? "Removing..." : "Remove"}</button> : <button disabled={busy === row.id} onClick={() => void onDownload(row.id)}>{busy === row.id ? "Downloading..." : "Download"}</button>}
+        {row.installed && <button disabled={anyBusy} onClick={() => onUse(row.path)}>Use</button>}
+        {row.installed ? <button disabled={anyBusy} onClick={() => void onDelete(row.id)}>{busy === row.id ? "Removing..." : "Remove"}</button> : <button disabled={anyBusy} onClick={() => void onDownload(row.id)}>{busy === row.id ? "Downloading..." : row.downloading ? "Retry" : "Download"}</button>}
       </div>
     </div>)}
   </div>;
@@ -1083,6 +2892,71 @@ function settingsFileFromSections(sections: Record<string, any>) {
   };
 }
 
+function setupDraftFromStatus(status: SetupStatus) {
+  const values = cloneSettings(status.values ?? {});
+  values.branding = { stackName: "Pizzastack", ...(values.branding ?? {}) };
+  values.trunkRecorder = {
+    configPath: "/etc/trunk-recorder/config.json",
+    talkgroupsPath: "/etc/trunk-recorder/talkgroups.csv",
+    logServiceName: "trunk-recorder",
+    healthWindowMinutes: 5,
+    ...(values.trunkRecorder ?? {})
+  };
+  values.transcription = {
+    provider: "none",
+    whisperModelFile: "",
+    voskModelPath: "",
+    openAiBaseUrl: "http://localhost:1234/v1",
+    openAiApiKey: "",
+    openAiModel: "",
+    analogSampleRate: 8000,
+    ...(values.transcription ?? {})
+  };
+  values.aiInsights = {
+    enabled: false,
+    openAiBaseUrl: "",
+    openAiApiKey: "",
+    openAiModel: "",
+    batchSize: 20,
+    maxPendingCalls: 1000,
+    timeoutMs: 600000,
+    maxRetries: 2,
+    ...(values.aiInsights ?? {})
+  };
+  values.alerts = {
+    emailEnabled: false,
+    emailProvider: "gmail",
+    emailUser: "",
+    emailPassword: "",
+    rules: [],
+    ...(values.alerts ?? {})
+  };
+  values.sftpImport = {
+    enabled: false,
+    host: "",
+    port: 22,
+    username: "",
+    authMode: "privateKey",
+    password: "",
+    privateKeyPath: "",
+    privateKeyPassphrase: "",
+    remoteRoot: "",
+    quickImportMaxHours: 48,
+    defaultBatchCallCap: 5000,
+    defaultBatchByteCap: 21474836480,
+    ...(values.sftpImport ?? {})
+  };
+  values.locations = { monitoredAreas: [], ...(values.locations ?? {}) };
+  if (!Array.isArray(values.locations.monitoredAreas) || values.locations.monitoredAreas.length === 0) {
+    values.locations.monitoredAreas = [
+      { areaId: "hamilton-county-tn", areaLabel: "Hamilton County, TN", systemShortName: "whiteoak-hamilton", aliases: ["whiteoak-hamilton", "whiteoakmt-hamilton", "hamilton"], north: 35.47, south: 34.98, west: -85.47, east: -84.98 },
+      { areaId: "bradley-county-tn", areaLabel: "Bradley County, TN", systemShortName: "bradley", aliases: ["bradley", "whiteoakmt-nbradley", "nbradley"], north: 35.33, south: 34.9, west: -85.1, east: -84.55 },
+      { areaId: "cleveland-tn", areaLabel: "Cleveland, TN", systemShortName: "cleveland", aliases: ["cleveland", "whiteoakmt-cleveland"], north: 35.24, south: 35.07, west: -84.96, east: -84.78 }
+    ];
+  }
+  return values;
+}
+
 function numberOrZero(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -1099,6 +2973,188 @@ function modelPath(rows: any[], id: string) {
 
 function modelIdForPath(rows: any[], engine: string, path: string) {
   return rows.find(row => row.engine === engine && row.path === path)?.id ?? rows.find(row => row.engine === engine)?.id ?? "none";
+}
+
+function buildCalibrationPlan(calibration: {
+  system: string;
+  controlChannelHz: string;
+  deviceSerial: string;
+  centerHz: string;
+  ppm: string;
+  baseErrorHz: string;
+  gain: string;
+  modulation: string;
+  rangeHz: string;
+  stepHz: string;
+  warmupSec: string;
+  durationSec: string;
+}) {
+  const rangeHz = Math.max(0, numberOrDefault(calibration.rangeHz, 1200));
+  const stepHz = Math.max(1, numberOrDefault(calibration.stepHz, 300));
+  const warmupSec = Math.max(0, numberOrDefault(calibration.warmupSec, 20));
+  const durationSec = Math.max(1, numberOrDefault(calibration.durationSec, 240));
+  const explicitBase = numericField(calibration.baseErrorHz);
+  const centerHz = numericField(calibration.centerHz);
+  const ppm = numericField(calibration.ppm);
+  let baseError: number | null = null;
+  let baseSource = "Enter base error directly, or provide GQRX center Hz and PPM.";
+
+  if (explicitBase !== null) {
+    baseError = Math.round(explicitBase);
+    baseSource = "Manual base error from GQRX/TR defaults.";
+  } else if (centerHz !== null && ppm !== null) {
+    baseError = Math.abs(Math.round(centerHz * ppm / 1_000_000));
+    baseSource = `Calculated from ${centerHz.toLocaleString()} Hz x ${ppm} PPM.`;
+  }
+
+  const candidates = baseError === null ? [] : buildErrorCandidates(baseError, rangeHz, stepHz);
+  const passCount = candidates.length;
+  const estimatedSeconds = passCount * (warmupSec + durationSec);
+  const candidateSummary = candidates.length
+    ? `${candidates[0]} to ${candidates[candidates.length - 1]} Hz, ${stepHz} Hz steps`
+    : "Not available yet";
+  const script = "/opt/pizzawave/scripts/tr_tune.sh";
+  const system = calibration.system.trim();
+  const control = calibration.controlChannelHz.trim();
+  const serial = calibration.deviceSerial.trim();
+  const gain = calibration.gain.trim();
+  const modulation = calibration.modulation || "qpsk";
+  const ppmCommand = centerHz !== null && ppm !== null
+    ? `sudo ${script} ppm-convert --center-hz ${Math.round(centerHz)} --ppm ${ppm} --tr-sign positive`
+    : "";
+  const errorSweepCommand = baseError !== null && system && control && serial
+    ? [
+      `sudo ${script} error-sweep`,
+      `--system ${system}`,
+      `--control-channel ${control}`,
+      `--device-serial ${serial}`,
+      `--base-error ${baseError}`,
+      `--range-hz ${rangeHz}`,
+      `--step-hz ${stepHz}`,
+      `--modulation ${modulation}`,
+      gain ? `--gain ${gain}` : "",
+      `--warmup-sec ${warmupSec}`,
+      `--duration-sec ${durationSec}`
+    ].filter(Boolean).join(" ")
+    : "";
+
+  return {
+    baseError,
+    baseSource,
+    candidates,
+    candidateSummary,
+    passCount,
+    estimatedSeconds,
+    warmupSec,
+    durationSec,
+    ppmCommand,
+    errorSweepCommand
+  };
+}
+
+function numericField(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function numberOrDefault(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildErrorCandidates(baseError: number, rangeHz: number, stepHz: number) {
+  const start = baseError - rangeHz;
+  const end = baseError + rangeHz;
+  const candidates: number[] = [];
+  for (let value = start; value <= end; value += stepHz)
+    candidates.push(Math.round(value));
+  if (candidates[candidates.length - 1] !== Math.round(end))
+    candidates.push(Math.round(end));
+  return candidates;
+}
+
+function formatElapsed(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  if (minutes < 60)
+    return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function buildGuidedSweepCommand(
+  systemShortName: string,
+  modulation: string,
+  source: { index: number; serial: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string },
+  input: { gain: string; errorHz: string; ppm: string },
+  controlFrequencyHz: number,
+  sweep: { rangeHz: string; stepHz: string; warmupSec: string; durationSec: string }
+) {
+  const error = numericField(input.errorHz);
+  const ppm = numericField(input.ppm);
+  const baseError = error !== null
+    ? Math.round(error)
+    : ppm !== null
+      ? Math.abs(Math.round(source.centerFrequency * ppm / 1_000_000))
+      : source.errorHz || 0;
+  const gain = input.gain.trim() || source.gain;
+  const serial = source.serial || String(source.index);
+  return [
+    "sudo /usr/lib/pizzawave/scripts/tr_tune.sh error-sweep",
+    `--system ${systemShortName}`,
+    `--control-channel ${controlFrequencyHz}`,
+    `--device-serial ${serial}`,
+    `--base-error ${baseError}`,
+    `--range-hz ${Math.max(0, numberOrDefault(sweep.rangeHz, 1200))}`,
+    `--step-hz ${Math.max(1, numberOrDefault(sweep.stepHz, 300))}`,
+    `--modulation ${modulation || "qpsk"}`,
+    gain ? `--gain ${gain}` : "",
+    `--warmup-sec ${Math.max(0, numberOrDefault(sweep.warmupSec, 20))}`,
+    `--duration-sec ${Math.max(1, numberOrDefault(sweep.durationSec, 240))}`
+  ].filter(Boolean).join(" ");
+}
+
+function buildGuidedSweepParameters(
+  systemShortName: string,
+  modulation: string,
+  source: { index: number; serial: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string },
+  input: { gain: string; errorHz: string; ppm: string },
+  controlFrequencyHz: number,
+  sweep: { rangeHz: string; stepHz: string; warmupSec: string; durationSec: string }
+) {
+  const error = numericField(input.errorHz);
+  const ppm = numericField(input.ppm);
+  const baseError = error !== null
+    ? Math.round(error)
+    : ppm !== null
+      ? Math.abs(Math.round(source.centerFrequency * ppm / 1_000_000))
+      : source.errorHz || 0;
+  return {
+    systemShortName,
+    modulation: modulation || "qpsk",
+    sourceIndex: source.index,
+    serial: source.serial || String(source.index),
+    controlChannelHz: controlFrequencyHz,
+    baseErrorHz: baseError,
+    rangeHz: Math.max(0, numberOrDefault(sweep.rangeHz, 1200)),
+    stepHz: Math.max(1, numberOrDefault(sweep.stepHz, 300)),
+    warmupSec: Math.max(0, numberOrDefault(sweep.warmupSec, 20)),
+    durationSec: Math.max(1, numberOrDefault(sweep.durationSec, 240)),
+    gain: input.gain.trim() || source.gain
+  };
+}
+
+function formatFrequencyList(values: number[]) {
+  if (!values.length) return "None";
+  const shown = values.slice(0, 4).map(formatHz).join(", ");
+  return values.length > 4 ? `${shown}, +${values.length - 4} more` : shown;
+}
+
+function formatFrequencyRange(lowHz: number, highHz: number) {
+  return lowHz === highHz ? formatHz(lowHz) : `${formatHz(lowHz)} - ${formatHz(highHz)}`;
 }
 
 function formatBytes(bytes: number) {
@@ -1201,18 +3257,131 @@ function SftpImport({ reload }: { reload: () => Promise<void> }) {
   </>;
 }
 
+function LocalImport({ reload }: { reload: () => Promise<void> }) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState("");
+  const [availability, setAvailability] = useState<any>(null);
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+
+  useEffect(() => { void loadAvailability(); }, []);
+
+  async function loadAvailability() {
+    setAvailabilityBusy(true);
+    try {
+      setAvailability(await api.request<any>("/api/v1/imports/local/availability"));
+    } catch (error) {
+      setAvailability({ available: false, message: `Availability check failed: ${error instanceof Error ? error.message : String(error)}` });
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  }
+
+  function fillAvailableRange(hours?: number) {
+    if (!availability?.earliestLocal || !availability?.latestLocal) return;
+    const latest = new Date(availability.latestLocal);
+    const earliest = hours ? new Date(Math.max(new Date(availability.earliestLocal).getTime(), latest.getTime() - hours * 3600_000)) : new Date(availability.earliestLocal);
+    setStart(toDateTimeInput(earliest));
+    setEnd(toDateTimeInput(latest));
+  }
+
+  function requestBody() {
+    if (!start || !end) throw new Error("Choose both start and end dates.");
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) throw new Error("Choose a valid date range.");
+    if (endDate <= startDate) throw new Error("End must be after start.");
+    return { startLocal: startDate.toISOString(), endLocal: endDate.toISOString() };
+  }
+
+  async function estimate() {
+    setBusy("estimate");
+    setMessage("Estimating local import...");
+    try {
+      const r = await api.request<any>("/api/v1/imports/local/estimate", { method: "POST", body: JSON.stringify(requestBody()) });
+      setMessage(r.message ?? `Found ${r.candidateCount ?? 0} candidate file(s).`);
+    } catch (error) {
+      setMessage(`Estimate failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function run(confirmLargeImport: boolean) {
+    setBusy(confirmLargeImport ? "prime" : "quick");
+    setMessage(confirmLargeImport ? "Queueing local prime import..." : "Queueing local quick import...");
+    try {
+      const r = await api.request<Job>("/api/v1/imports/local/import", { method: "POST", body: JSON.stringify({ ...requestBody(), confirmLargeImport }) });
+      setMessage(`Queued job ${r.id}`);
+      await reload();
+    } catch (error) {
+      setMessage(`Import failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return <>
+    <p className="muted">Use this when PizzaWave is installed on the same machine as an existing trunk-recorder setup. Quick imports are capped at 48h; larger imports require explicit prime confirmation.</p>
+    <div className="archive-availability">
+      <div>
+        <strong>Local captureDir</strong>
+        <p className={availability?.available ? "settings-message ok" : "settings-message error"}>{availabilityBusy ? "Checking local TR recordings..." : availability?.message ?? "Local archive availability has not been checked."}</p>
+        {availability?.captureDir && <p className="muted"><code>{availability.captureDir}</code></p>}
+        {availability?.available && <p className="muted">{availability.fileCount?.toLocaleString()} file(s), {formatBytes(availability.totalBytes ?? 0)}; {availability.scannedDirectories?.toLocaleString()} folder(s) scanned; {availability.skippedDirectories?.toLocaleString()} unreadable folder(s) skipped.</p>}
+      </div>
+      <div className="archive-actions">
+        <button disabled={availabilityBusy} onClick={() => void loadAvailability()}>{availabilityBusy ? "Checking..." : "Refresh"}</button>
+        <button disabled={!availability?.available} onClick={() => fillAvailableRange(48)}>Use latest 48h</button>
+        <button disabled={!availability?.available} onClick={() => fillAvailableRange()}>Use full range</button>
+      </div>
+    </div>
+    <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} />
+    <input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} />
+    <button disabled={!!busy || !availability?.available} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
+    <button disabled={!!busy || !availability?.available} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
+    <button disabled={!!busy || !availability?.available} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
+    <div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div>
+  </>;
+}
+
 function toDateTimeInput(date: Date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 16);
 }
 
+function parseTalkgroups(value: string) {
+  return value.split(/[,\s]+/).map(v => Number(v.trim())).filter(v => Number.isFinite(v) && v > 0);
+}
+
+function formatCompact(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  return value.toLocaleString();
+}
+
+function profileIncludes(profile: ProcessingProfile | undefined, item: string) {
+  if (!profile) return true;
+  if (item === "police") return profile.includePolice;
+  if (item === "fire") return profile.includeFire;
+  if (item === "ems") return profile.includeEMS;
+  if (item === "traffic") return profile.includeTraffic;
+  if (item === "other") return profile.includeOther;
+  return true;
+}
+
 function navIcon(item: Page) {
   if (item === "dashboard") return <Gauge size={15} />;
   if (item === "settings") return <Settings size={15} />;
-  if (item === "troubleshoot") return <Activity size={15} />;
+  if (item === "system") return <Activity size={15} />;
   return <Radio size={15} />;
 }
 
-function label(value: string) { return value === "ems" ? "EMS" : value[0].toUpperCase() + value.slice(1); }
+function label(value: string) {
+  if (value === "ems") return "EMS";
+  if (value === "system") return "System";
+  return value[0].toUpperCase() + value.slice(1).replaceAll("_", " ");
+}
 
 createRoot(document.getElementById("root")!).render(<App />);

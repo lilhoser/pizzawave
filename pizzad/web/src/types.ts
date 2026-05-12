@@ -21,10 +21,11 @@ export type Incident = {
   id: number;
   title: string;
   detail: string;
+  category: string;
   firstSeen: number;
   lastSeen: number;
   confidence: number;
-  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string }[];
+  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string; category: string }[];
 };
 export type CategoryInsight = {
   id: number;
@@ -34,7 +35,7 @@ export type CategoryInsight = {
   lastSeen: number;
   score: number;
   callCount: number;
-  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string }[];
+  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string; category: string }[];
 };
 export type TopTalkgroup = {
   label: string;
@@ -50,10 +51,31 @@ export type TopTalkgroup = {
   trendEndLabel: string;
 };
 export type HourCategory = { hour: number; category: string; count: number };
+export type LocationHeat = {
+  areaId: string;
+  areaLabel: string;
+  systemShortName: string;
+  locationText: string;
+  geocodeQuery: string;
+  geocodeDisplayName: string;
+  geocodeProvider: string;
+  geocodePrecision: string;
+  geocodeConfidence: number;
+  latitude: number;
+  longitude: number;
+  count: number;
+  intensity: number;
+  lastHeard: number;
+  category: string;
+  callIds: number[];
+  incidentTitles: string[];
+  sourceCalls: { callId: number; rawTimestamp: number; category: string; talkgroupName: string; transcript: string }[];
+};
 export type QualityHour = { hour: number; empty: number; failure: number; inaudible: number; short: number };
 export type Dashboard = {
   kpis: Kpi[];
   volumeByHourCategory: HourCategory[];
+  locationHeat: LocationHeat[];
   qualityByHour: QualityHour[];
   inaudibleBySystem: BarStat[];
   problemTalkgroups: BarStat[];
@@ -61,7 +83,9 @@ export type Dashboard = {
   topTalkgroups: TopTalkgroup[];
   alerts: AlertMatch[];
   incidents: Incident[];
+  tokenUsage: TokenUsageSummary;
 };
+export type StatusSummary = { calls: number; incidents: number; alerts: number; tokens: number };
 export type EngineCall = {
   id: number;
   startTime: number;
@@ -92,7 +116,15 @@ export type Job = {
   completed: number;
   failed: number;
   message: string;
+  createdAtUtc: string;
+  startedAtUtc?: string | null;
+  finishedAtUtc?: string | null;
 };
+export type JobLog = { id: number; jobId: number; timestampUtc: string; stream: string; text: string };
+export type SetupArtifact = { path: string; exists: boolean; notes: string };
+export type SetupArtifactReport = { hasBlockingArtifacts: boolean; artifacts: SetupArtifact[]; manualCommands: string[] };
+export type SetupSdrDevice = { index: number; serial: string; label: string; usbLine: string; warning: string };
+export type SetupSdrDetection = { devices: SetupSdrDevice[]; rawOutput: string; message: string };
 export type DiagnosticToolRow = {
   callId: number;
   variant: string;
@@ -117,9 +149,10 @@ export type DiagnosticToolResult = {
     available: boolean;
     detail: string;
   };
-  export type EngineHealth = {
+export type EngineHealth = {
   status: string;
   version: string;
+  stackName: string;
   databasePath: string;
   audioRoot: string;
   queueDepth: number;
@@ -147,7 +180,7 @@ export type TrHealth = {
 };
 export type TrHealthMetric = { metric: string; value: string; notes: string; isIssue: boolean };
 export type TrHealthSeries = { label: string; values: number[]; isBaseline: boolean };
-export type TrHealthChart = { title: string; yAxisLabel: string; valueFormat: string; labels: string[]; series: TrHealthSeries[] };
+export type TrHealthChart = { title: string; yAxisLabel: string; valueFormat: string; labels: string[]; series: TrHealthSeries[]; baselineNote: string };
 export type TrHealthSummary = {
   title: string;
   window: string;
@@ -203,3 +236,27 @@ export type TrTroubleshoot = {
   diagnostics: string;
   insightsText: string;
 };
+export type TokenUsageSummary = { requests: number; successes: number; failures: number; promptTokens: number; completionTokens: number; totalTokens: number; estimatedStandardCost: number };
+export type TokenUsageBucket = { label: string; totalTokens: number; promptTokens: number; completionTokens: number; requests: number };
+export type TokenUsageEntry = { id: number; timestampUtc: string; triggerActivity: string; requestKind: string; success: boolean; error: string; endpoint: string; requestModel: string; responseModel: string; finishReason: string; inputChars: number; payloadChars: number; promptTokens: number; completionTokens: number; totalTokens: number };
+export type TokenUsageReport = { ledger: string; summary: TokenUsageSummary; byDay: TokenUsageBucket[]; byTrigger: TokenUsageBucket[]; entries: TokenUsageEntry[] };
+export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeOther: boolean; allowedTalkgroups: number[]; createdAtUtc?: string; updatedAtUtc?: string };
+export type ProfileState = { activeProfileId: string; profiles: ProcessingProfile[] };
+export type SetupCheck = { id: string; label: string; required: boolean; ok: boolean; message: string };
+export type SetupStatus = {
+  completed: boolean;
+  currentStep: string;
+  checks: SetupCheck[];
+  detection: any;
+  values: any;
+};
+export type SetupValidationResult = { ok: boolean; message: string; detail?: any };
+export type SetupTalkgroupRow = { id: number; mode: string; alphaTag: string; description: string; tag: string; category: string; opsCategory: string; included: boolean; exclusionReason: string };
+export type SetupTalkgroupPreview = { rows: SetupTalkgroupRow[]; includedByCategory: Record<string, number>; includedCount: number; excludedCount: number; diagnostics: string };
+export type SetupTrConfigSystem = { systemName: string; shortName: string; siteName: string; frequenciesMhz: number[]; controlChannelsMhz: number[]; centerFrequency: number; assignedSerial: string; warning: string };
+export type SetupTrConfigSource = { label: string; serial: string; centerFrequency: number; sampleRate: number; coveredFrequenciesMhz: number[]; omittedFrequenciesMhz: number[] };
+export type SetupTrConfigDraft = { configJson: string; systems: SetupTrConfigSystem[]; sources: SetupTrConfigSource[]; warnings: string[]; diagnostics: string };
+export type SetupCalibrationRange = { lowHz: number; highHz: number; centerHz: number };
+export type SetupCalibrationSystemPlan = { shortName: string; modulation: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; requiredRanges: SetupCalibrationRange[]; requiredSdrCount: number; proposedSourceIndexes: number[]; warnings: string[] };
+export type SetupCalibrationSourcePlan = { index: number; serial: string; device: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string; coveredSystems: string[] };
+export type SetupCalibrationPlan = { systems: SetupCalibrationSystemPlan[]; sources: SetupCalibrationSourcePlan[]; warnings: string[]; diagnostics: string };

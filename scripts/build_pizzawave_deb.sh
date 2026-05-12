@@ -5,12 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="0.1.0"
 RID="linux-x64"
 OUTPUT_DIR="$ROOT_DIR/artifacts/packages"
-PATCH_TR_CONFIG="true"
+PUBLISH_DIR_OVERRIDE=""
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/build_pizzawave_deb.sh [--version VERSION] [--rid linux-x64|linux-arm64] [--output-dir PATH] [--no-tr-config-patch]
+  scripts/build_pizzawave_deb.sh [--version VERSION] [--rid linux-x64|linux-arm64] [--output-dir PATH] [--publish-dir PATH]
 
 Builds a self-contained PizzaWave Engine Debian package.
 
@@ -18,6 +18,7 @@ Examples:
   ./scripts/build_pizzawave_deb.sh
   ./scripts/build_pizzawave_deb.sh --rid linux-arm64
   ./scripts/build_pizzawave_deb.sh --version 0.2.0 --rid linux-x64
+  ./scripts/build_pizzawave_deb.sh --rid linux-arm64 --publish-dir ./artifacts/pizzad-linux-arm64
 USAGE
 }
 
@@ -35,9 +36,9 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIR="$2"
       shift 2
       ;;
-    --no-tr-config-patch)
-      PATCH_TR_CONFIG="false"
-      shift
+    --publish-dir)
+      PUBLISH_DIR_OVERRIDE="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -64,7 +65,7 @@ case "$RID" in
     ;;
 esac
 
-if ! command -v dotnet >/dev/null 2>&1; then
+if [[ -z "$PUBLISH_DIR_OVERRIDE" ]] && ! command -v dotnet >/dev/null 2>&1; then
   echo "dotnet SDK is required to build the package." >&2
   exit 1
 fi
@@ -74,19 +75,31 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
-PUBLISH_DIR="$ROOT_DIR/artifacts/pizzad-$RID"
+PUBLISH_DIR="${PUBLISH_DIR_OVERRIDE:-$ROOT_DIR/artifacts/pizzad-$RID}"
 PKG_ROOT="$ROOT_DIR/artifacts/debroot-pizzawave-$RID"
 PKG_NAME="pizzawave_${VERSION}_${DEB_ARCH}.deb"
 
-rm -rf "$PUBLISH_DIR" "$PKG_ROOT"
+if [[ -z "$PUBLISH_DIR_OVERRIDE" ]]; then
+  rm -rf "$PUBLISH_DIR"
+fi
+rm -rf "$PKG_ROOT"
 mkdir -p "$PUBLISH_DIR" "$PKG_ROOT" "$OUTPUT_DIR"
 
-dotnet publish "$ROOT_DIR/pizzad/pizzad.csproj" \
-  -c Release \
-  -r "$RID" \
-  --self-contained true \
-  -o "$PUBLISH_DIR" \
-  /p:PublishSingleFile=false
+if [[ -z "$PUBLISH_DIR_OVERRIDE" ]]; then
+  dotnet publish "$ROOT_DIR/pizzad/pizzad.csproj" \
+    -c Release \
+    -r "$RID" \
+    --self-contained true \
+    /p:SelfContained=true \
+    /p:RuntimeIdentifier="$RID" \
+    -o "$PUBLISH_DIR" \
+    /p:PublishSingleFile=false
+fi
+
+if [[ ! -f "$PUBLISH_DIR/libcoreclr.so" && ! -f "$PUBLISH_DIR/libcoreclr.dylib" && ! -f "$PUBLISH_DIR/coreclr.dll" ]]; then
+  echo "Self-contained publish verification failed: .NET runtime files were not found in $PUBLISH_DIR." >&2
+  exit 1
+fi
 
 install -d "$PKG_ROOT/DEBIAN"
 install -d "$PKG_ROOT/opt/pizzawave/pizzad"
@@ -103,8 +116,10 @@ install -m 0755 "$ROOT_DIR/scripts/pizzawave" "$PKG_ROOT/usr/bin/pizzawave"
 install -m 0755 "$ROOT_DIR/scripts/build_pizzawave_deb.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/build_pizzawave_deb.sh"
 install -m 0755 "$ROOT_DIR/scripts/setup_pizzawave_engine.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_pizzawave_engine.sh"
 install -m 0755 "$ROOT_DIR/scripts/setup-lmstudio.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup-lmstudio.sh"
+install -m 0755 "$ROOT_DIR/scripts/pizzawave_setup_admin.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh"
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_configure_callstream.py"
 install -m 0755 "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_trunk_recorder.sh"
+install -m 0755 "$ROOT_DIR/scripts/tr_tune.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/tr_tune.sh"
 install -m 0755 "$ROOT_DIR/scripts/prime_tr_health.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/prime_tr_health.py"
 
 cat > "$PKG_ROOT/lib/systemd/system/pizzad.service" <<'EOF'
@@ -133,8 +148,9 @@ EOF
 cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
 {
   "server": { "httpBind": "0.0.0.0", "httpPort": 8080 },
+  "branding": { "stackName": "Pizzastack" },
   "auth": {
-    "mode": "token",
+    "mode": "none",
     "readRequiresAuth": false,
     "writeRequiresAuth": false,
     "tokenFile": "/etc/pizzawave/pizzad.token"
@@ -163,7 +179,34 @@ cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
     "logServiceName": "trunk-recorder",
     "healthWindowMinutes": 5
   },
-  "sftpImport": { "enabled": false }
+  "locations": {
+    "monitoredAreas": [
+      {
+        "areaId": "hamilton-county-tn",
+        "areaLabel": "Hamilton County, TN",
+        "systemShortName": "whiteoak-hamilton",
+        "aliases": [ "whiteoak-hamilton", "hamilton" ]
+      },
+      {
+        "areaId": "bradley-county-tn",
+        "areaLabel": "Bradley County, TN",
+        "systemShortName": "bradley",
+        "aliases": [ "bradley" ]
+      },
+      {
+        "areaId": "cleveland-tn",
+        "areaLabel": "Cleveland, TN",
+        "systemShortName": "cleveland",
+        "aliases": [ "cleveland" ]
+      }
+    ]
+  },
+  "sftpImport": { "enabled": false },
+  "setup": {
+    "completed": false,
+    "wizardVersion": 1,
+    "currentStep": "stack"
+  }
 }
 JSON
 
@@ -218,15 +261,28 @@ if getent group trunk-recorder >/dev/null 2>&1; then
   usermod -aG trunk-recorder "\$SERVICE_USER" || true
 fi
 
-if [[ "$PATCH_TR_CONFIG" == "true" && -f /etc/trunk-recorder/config.json ]]; then
-  python3 /usr/lib/pizzawave/scripts/pizzawave_configure_callstream.py --config /etc/trunk-recorder/config.json || true
+if getent group trunk-recorder >/dev/null 2>&1 && [[ -d /etc/trunk-recorder ]]; then
+  chown root:trunk-recorder /etc/trunk-recorder || true
+  chmod 0750 /etc/trunk-recorder || true
+  for tr_file in /etc/trunk-recorder/config.json /etc/trunk-recorder/talkgroups.csv; do
+    if [[ -f "\$tr_file" ]]; then
+      chown root:trunk-recorder "\$tr_file" || true
+      chmod 0640 "\$tr_file" || true
+    fi
+  done
 fi
+
+cat > /etc/sudoers.d/pizzawave-setup <<'SUDOERS'
+pizzawave ALL=(root) NOPASSWD: /usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh *
+pizzawave ALL=(root) NOPASSWD: /usr/lib/pizzawave/scripts/tr_tune.sh *
+pizzawave ALL=(root) NOPASSWD: /bin/systemctl restart pizzad.service, /usr/bin/systemctl restart pizzad.service
+SUDOERS
+chmod 0440 /etc/sudoers.d/pizzawave-setup
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
   systemctl enable pizzad.service || true
-  systemctl restart pizzad.service || true
-  systemctl try-restart --no-block trunk-recorder.service || true
+  systemctl restart --no-block pizzad.service || true
 fi
 
 cat <<'MSG'
@@ -234,6 +290,9 @@ PizzaWave Engine installed.
 Web UI: http://<tr-server-ip>:8080
 Config: /etc/pizzawave/pizzad.json
 Token: /etc/pizzawave/pizzad.token
+Open the web UI to complete first-run setup. Existing trunk-recorder installs
+are detected and configured from the setup wizard; package install does not
+modify or restart trunk-recorder.
 MSG
 EOF
 

@@ -5,7 +5,7 @@
 ## Build
 
 ```bash
-dotnet publish ./pizzad/pizzad.csproj -c Release -o ./artifacts/pizzad
+dotnet publish ./pizzad/pizzad.csproj -c Release -r linux-x64 --self-contained true -p:SelfContained=true -p:PublishSingleFile=false -o ./artifacts/pizzad
 ```
 
 ## Visual Studio Local Run

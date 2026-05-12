@@ -187,7 +187,11 @@ namespace pizzalib
                 // processors for each call (which was causing high CPU on Linux).
                 // The processor will be reused for all transcriptions.
                 //
-                m_Processor = m_Factory.CreateBuilder()
+                var builder = m_Factory.CreateBuilder();
+                if (m_Settings.whisperThreads > 0)
+                    builder = builder.WithThreads(m_Settings.whisperThreads);
+
+                m_Processor = builder
                     // Auto language detection adds extra inference cost; default to English
                     // for scanner traffic to reduce sustained CPU on low-power ARM devices.
                     .WithLanguage("en")
@@ -236,7 +240,7 @@ namespace pizzalib
             m_Initialized = true;
             m_Settings.UpdateProgressLabelCallback?.Invoke("Whisper initialized.");
             Trace(TraceLoggerType.Whisper, TraceEventType.Information,
-                $"Whisper initialized. ModelPath='{m_ModelFile}', Language='en'");
+                $"Whisper initialized. ModelPath='{m_ModelFile}', Language='en', Threads={m_Settings.whisperThreads}");
             return true;
         }
 

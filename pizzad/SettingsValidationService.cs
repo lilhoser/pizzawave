@@ -12,6 +12,7 @@ public sealed class SettingsValidationService
 {
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
+    private static readonly SemaphoreSlim ModelDownloadLock = new(1, 1);
 
     private static readonly Dictionary<string, string> WhisperModels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -73,14 +74,41 @@ public sealed class SettingsValidationService
         Directory.CreateDirectory(WhisperModelDirectory());
         var path = WhisperModelPath(model);
         var tmp = $"{path}.download";
-        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-        await using (var input = await client.GetStreamAsync(url, ct))
-        await using (var output = File.Open(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+        if (File.Exists(path))
         {
-            await input.CopyToAsync(output, ct);
+            if (File.Exists(tmp))
+                File.Delete(tmp);
+            return new { ok = true, message = $"Whisper {model} is already downloaded.", path };
         }
-        File.Move(tmp, path, overwrite: true);
-        return new { ok = true, message = $"Downloaded Whisper {model}.", path };
+
+        if (!await ModelDownloadLock.WaitAsync(0, ct))
+            return new { ok = false, message = "Another model download is already running. Wait for it to finish before starting another." };
+
+        try
+        {
+            if (File.Exists(tmp))
+                File.Delete(tmp);
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+            await using (var input = await response.Content.ReadAsStreamAsync(ct))
+            await using (var output = File.Open(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            {
+                await input.CopyToAsync(output, ct);
+            }
+            File.Move(tmp, path, overwrite: true);
+            return new { ok = true, message = $"Downloaded Whisper {model}.", path };
+        }
+        catch
+        {
+            if (File.Exists(tmp))
+                File.Delete(tmp);
+            throw;
+        }
+        finally
+        {
+            ModelDownloadLock.Release();
+        }
     }
 
     public object DeleteWhisperModel(string model)
@@ -97,31 +125,49 @@ public sealed class SettingsValidationService
         return new { ok = true, message = $"Removed Whisper {model}.", path };
     }
 
+    public async Task<object> ListAiInsightModelsAsync(CancellationToken ct)
+    {
+        var baseUrl = InsightBaseUrl().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            return new { ok = false, message = "LM Link/OpenAI-compatible base URL is required.", models = Array.Empty<string>() };
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var apiKey = InsightApiKey();
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using var response = await client.GetAsync($"{baseUrl}/models", ct);
+        var text = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            return new { ok = false, message = $"HTTP {(int)response.StatusCode}: {Trim(text, 300)}", models = Array.Empty<string>() };
+        using var doc = JsonDocument.Parse(text);
+        var models = new List<string>();
+        if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var row in data.EnumerateArray())
+                if (row.TryGetProperty("id", out var id) && !string.IsNullOrWhiteSpace(id.GetString()))
+                    models.Add(id.GetString()!);
+        }
+        return new { ok = true, message = models.Count == 0 ? "Endpoint responded, but no models were listed." : $"Found {models.Count} model(s).", models };
+    }
+
     private async Task<object> TestTranscriptionAsync(CancellationToken ct)
     {
         var provider = (_config.Transcription.Provider ?? "none").Trim().ToLowerInvariant();
         if (provider == "none")
             return new { ok = true, message = "Transcription is disabled." };
 
-        var call = await FindRecentAudioCallAsync(ct);
-        if (call == null)
-            return new { ok = false, message = "No recent audio call was found for transcription testing." };
-
-        var audioPath = Path.GetFullPath(Path.Combine(_config.Storage.AudioRoot, call.AudioPath));
-        if (!File.Exists(audioPath))
-            return new { ok = false, message = $"Recent call audio file was not found: {audioPath}" };
-        var testAudioPath = await CreateTranscriptionTestAudioAsync(call, audioPath, ct);
-
-        var started = DateTime.UtcNow;
-        string text;
         if (provider == "whisper")
         {
             var path = ResolveWhisperPath();
             if (!File.Exists(path))
                 return new { ok = false, message = $"Whisper model not found: {path}" };
+            var call = await FindRecentAudioCallAsync(ct);
+            if (call == null)
+                return new { ok = true, message = $"Whisper is configured with {Path.GetFileName(path)}. No calls are available yet, so a live transcription sample was skipped." };
+            var testAudioPath = await PrepareTestAudioAsync(call, ct);
+            var started = DateTime.UtcNow;
             using var transcriber = new pizzalib.Whisper(LocalSettings("whisper"));
             await transcriber.Initialize();
-            text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
+            var text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
             return TranscriptionResult(call, text, started);
         }
         if (provider == "vosk")
@@ -129,14 +175,36 @@ public sealed class SettingsValidationService
             var path = _config.Transcription.VoskModelPath;
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
                 return new { ok = false, message = $"Vosk model directory not found: {path}" };
+            var call = await FindRecentAudioCallAsync(ct);
+            if (call == null)
+                return new { ok = true, message = $"Vosk is configured with {path}. No calls are available yet, so a live transcription sample was skipped." };
+            var testAudioPath = await PrepareTestAudioAsync(call, ct);
+            var started = DateTime.UtcNow;
             using var transcriber = new pizzalib.VoskTranscriber(LocalSettings("vosk"));
             await transcriber.Initialize();
-            text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
+            var text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
             return TranscriptionResult(call, text, started);
         }
         if (provider is "lmstudio" or "openai")
+        {
+            var call = await FindRecentAudioCallAsync(ct);
+            if (call == null)
+            {
+                var endpoint = await TestOpenAiEndpointAsync(_config.Transcription.OpenAiBaseUrl, _config.Transcription.OpenAiApiKey, string.IsNullOrWhiteSpace(_config.Transcription.OpenAiModel) ? "whisper-1" : _config.Transcription.OpenAiModel, audio: true, ct);
+                return endpoint;
+            }
+            var testAudioPath = await PrepareTestAudioAsync(call, ct);
             return await TestOpenAiTranscriptionAsync(call, testAudioPath, ct);
+        }
         return new { ok = false, message = $"Unknown transcription provider: {provider}" };
+    }
+
+    private async Task<string> PrepareTestAudioAsync(EngineCall call, CancellationToken ct)
+    {
+        var audioPath = Path.GetFullPath(Path.Combine(_config.Storage.AudioRoot, call.AudioPath));
+        if (!File.Exists(audioPath))
+            throw new FileNotFoundException($"Recent call audio file was not found: {audioPath}");
+        return await CreateTranscriptionTestAudioAsync(call, audioPath, ct);
     }
 
     private async Task<object> TestAiInsightsAsync(CancellationToken ct)
@@ -207,22 +275,46 @@ public sealed class SettingsValidationService
     private string WhisperModelPath(string model) => Path.Combine(WhisperModelDirectory(), $"ggml-{model}.bin");
     private string VoskModelDirectory() => Path.Combine(_config.Storage.AppDataRoot, "pizzawave", "model");
     private string VoskModelPath(string model) => Path.Combine(VoskModelDirectory(), model == "small-en-us" ? "vosk-model-small-en-us-0.15" : model);
-    private string ResolveWhisperPath() => string.IsNullOrWhiteSpace(_config.Transcription.WhisperModelFile) ? WhisperModelPath("base") : _config.Transcription.WhisperModelFile;
+    private string ResolveWhisperPath()
+    {
+        if (!string.IsNullOrWhiteSpace(_config.Transcription.WhisperModelFile))
+            return _config.Transcription.WhisperModelFile;
+
+        foreach (var model in new[] { "base", "small", "tiny", "medium" })
+        {
+            var path = WhisperModelPath(model);
+            if (File.Exists(path))
+                return path;
+        }
+
+        return WhisperModelPath("base");
+    }
     private string InsightBaseUrl() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) ? _config.Transcription.OpenAiBaseUrl : _config.AiInsights.OpenAiBaseUrl;
     private string InsightApiKey() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiApiKey) ? _config.Transcription.OpenAiApiKey : _config.AiInsights.OpenAiApiKey;
     private string InsightModel() => string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel) ? _config.Transcription.OpenAiModel : _config.AiInsights.OpenAiModel;
     private static string NormalizeRemoteRoot(string value) => string.IsNullOrWhiteSpace(value) ? "/" : value.Replace('\\', '/');
     private static string Trim(string text, int max) => string.IsNullOrEmpty(text) || text.Length <= max ? text : text[..max];
 
-    private static object ModelRow(string engine, string id, string label, string path, long bytes) => new
+    private static object ModelRow(string engine, string id, string label, string path, long bytes)
     {
-        id = $"{engine}-{id}",
-        engine,
-        label,
-        path,
-        installed = engine == "whisper" ? File.Exists(path) : Directory.Exists(path),
-        bytes
-    };
+        var downloading = engine == "whisper" && File.Exists($"{path}.download");
+        var installed = engine == "whisper" ? File.Exists(path) : Directory.Exists(path);
+        var displayBytes = installed
+            ? bytes
+            : downloading
+                ? new FileInfo($"{path}.download").Length
+                : 0;
+        return new
+        {
+            id = $"{engine}-{id}",
+            engine,
+            label,
+            path,
+            installed,
+            downloading,
+            bytes = displayBytes
+        };
+    }
 
     private async Task<object> DownloadVoskModelAsync(string model, CancellationToken ct)
     {
