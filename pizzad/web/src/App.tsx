@@ -43,6 +43,8 @@ function App() {
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
+  const refreshStatusRef = useRef<() => Promise<void>>(async () => { });
+  const refreshVisiblePageRef = useRef<() => Promise<void>>(async () => { });
 
   const fetchSettingsSections = useCallback(async () => {
     const [engine, transcription, aiInsights, sftp, tr, alerts] = await Promise.all([
@@ -108,38 +110,50 @@ function App() {
     }
   }
 
+  const refreshStatusData = useCallback(async () => {
+    const setup = await api.request<SetupStatus>("/api/v1/setup/status");
+    setSetupStatus(setup);
+    if (!setup.completed) {
+      const healthStatus = await api.request<EngineHealth>("/api/v1/health");
+      setEngineHealth(healthStatus);
+      setStatus("Setup");
+      return;
+    }
+
+    const [healthStatus, jobRows, summary, profiles] = await Promise.all([
+      api.request<EngineHealth>("/api/v1/health"),
+      api.request<Job[]>("/api/v1/jobs"),
+      api.request<StatusSummary>(`/api/v1/status?${rangeQuery(rangeHours)}`),
+      api.request<ProfileState>("/api/v1/profiles")
+    ]);
+    setEngineHealth(healthStatus);
+    setJobs(jobRows);
+    setStatusSummary(summary);
+    setProfileState(profiles);
+    setStatus("Live");
+  }, [rangeHours]);
+
+  const refreshVisiblePage = useCallback(async () => {
+    if (page === "dashboard") {
+      setDashboard(await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`));
+    } else if (categories.includes(page as any)) {
+      setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}`));
+    } else if (page === "system") {
+      setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
+    }
+  }, [page, rangeHours]);
+
   const load = useCallback(async () => {
     try {
-      const setup = await api.request<SetupStatus>("/api/v1/setup/status");
-      setSetupStatus(setup);
-      if (!setup.completed) {
-        const healthStatus = await api.request<EngineHealth>("/api/v1/health");
-        setEngineHealth(healthStatus);
-        setStatus("Setup");
-        return;
-      }
-      const [healthStatus, jobRows, summary, profiles] = await Promise.all([
-        api.request<EngineHealth>("/api/v1/health"),
-        api.request<Job[]>("/api/v1/jobs"),
-        api.request<StatusSummary>(`/api/v1/status?${rangeQuery(rangeHours)}`),
-        api.request<ProfileState>("/api/v1/profiles")
-      ]);
-      setEngineHealth(healthStatus);
-      setJobs(jobRows);
-      setStatusSummary(summary);
-      setProfileState(profiles);
-      if (page === "dashboard") {
-        setDashboard(await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`));
-      } else if (categories.includes(page as any)) {
-        setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}`));
-      } else if (page === "system") {
-        setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
-      }
-      setStatus("Live");
+      await refreshStatusData();
+      await refreshVisiblePage();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Error");
     }
-  }, [page, rangeHours]);
+  }, [refreshStatusData, refreshVisiblePage]);
+
+  useEffect(() => { refreshStatusRef.current = refreshStatusData; }, [refreshStatusData]);
+  useEffect(() => { refreshVisiblePageRef.current = refreshVisiblePage; }, [refreshVisiblePage]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
@@ -155,9 +169,44 @@ function App() {
 
   useEffect(() => {
     const events = new EventSource("/api/v1/events/stream");
-    events.addEventListener("connected", () => setStatus("Live"));
+    let statusTimer = 0;
+    let pageTimer = 0;
+    const scheduleStatus = (delayMs: number) => {
+      window.clearTimeout(statusTimer);
+      statusTimer = window.setTimeout(() => {
+        void refreshStatusRef.current().catch(error => setStatus(error instanceof Error ? error.message : "Error"));
+      }, delayMs);
+    };
+    const schedulePage = (delayMs: number) => {
+      window.clearTimeout(pageTimer);
+      pageTimer = window.setTimeout(() => {
+        void refreshVisiblePageRef.current().catch(error => setStatus(error instanceof Error ? error.message : "Error"));
+      }, delayMs);
+    };
+    const refreshCurrentView = () => {
+      scheduleStatus(500);
+      schedulePage(900);
+    };
+    const refreshCurrentViewSoon = () => {
+      scheduleStatus(900);
+      schedulePage(1500);
+    };
+    events.addEventListener("connected", () => {
+      setStatus("Live");
+      refreshCurrentView();
+    });
+    events.addEventListener("call_ingested", refreshCurrentViewSoon);
+    events.addEventListener("call_transcribed", refreshCurrentViewSoon);
+    events.addEventListener("alert_matched", refreshCurrentView);
+    events.addEventListener("summary_updated", refreshCurrentView);
+    events.addEventListener("job_updated", refreshCurrentView);
+    events.addEventListener("health_updated", refreshCurrentView);
     events.onerror = () => setStatus("Reconnecting");
-    return () => events.close();
+    return () => {
+      window.clearTimeout(statusTimer);
+      window.clearTimeout(pageTimer);
+      events.close();
+    };
   }, []);
 
   const nav = useMemo(() => ["dashboard", ...categories, "system", "settings"] as Page[], []);
@@ -216,7 +265,7 @@ function App() {
         </div>}
         <span className="pill" title="Live means the browser is connected to pizzad and receiving server-sent refresh events.">{status}</span>
         {ingestPaused && <span className="pill ingest-paused" title={`New live callstream payloads are being dropped. ${engineHealth?.ingest?.reason ?? ""}`}>Ingest paused</span>}
-        <span className="pill" title="Page data loads once and refreshes only when you press Refresh. SSE is kept only for connection status.">Manual refresh</span>
+        <span className="pill" title="REST loads the current view; SSE triggers live refreshes when calls, jobs, alerts, summaries, or health change.">REST+SSE</span>
       </header>
       {!inSetup && <aside className="nav">
         {visibleNav.map(item => (
