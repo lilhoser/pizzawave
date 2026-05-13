@@ -170,6 +170,7 @@ function App() {
   const transcribedPerMinute = engineHealth?.recentTranscribedPerMinute ?? 0;
   const queueRateSuffix = engineHealth ? ` (${transcribedPerMinute.toFixed(1)}/min)` : "";
   const queuePressureNote = queueBlocked ? "; imports/AI paused" : "";
+  const ingestPaused = Boolean(engineHealth?.ingest?.paused);
   const queueHealthText = queueHealth === "clear"
     ? `Queue OK ${queueDepth.toLocaleString()}${queueRateSuffix}`
     : queueHealth === "pressure"
@@ -214,6 +215,7 @@ function App() {
           <button className={categoryViewMode === "raw" ? "active" : ""} onClick={() => setCategoryViewMode("raw")}>Raw Calls</button>
         </div>}
         <span className="pill" title="Live means the browser is connected to pizzad and receiving server-sent refresh events.">{status}</span>
+        {ingestPaused && <span className="pill ingest-paused" title={`New live callstream payloads are being dropped. ${engineHealth?.ingest?.reason ?? ""}`}>Ingest paused</span>}
         <span className="pill" title="Page data loads once and refreshes only when you press Refresh. SSE is kept only for connection status.">Manual refresh</span>
       </header>
       {!inSetup && <aside className="nav">
@@ -773,6 +775,8 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
   const [insightBusy, setInsightBusy] = useState(false);
   const [restartBusy, setRestartBusy] = useState<"" | "pizzad" | "trunk-recorder">("");
   const [restartMessages, setRestartMessages] = useState<Record<string, string>>({});
+  const [ingestBusy, setIngestBusy] = useState(false);
+  const [ingestMessage, setIngestMessage] = useState("");
 
   useEffect(() => {
     if (topTab !== "pizzad") return;
@@ -818,6 +822,26 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
       setRestartBusy("");
     }
   }
+  async function setIngestPaused(pause: boolean, untilQueueClear = false) {
+    setIngestBusy(true);
+    setIngestMessage("");
+    try {
+      const result = await api.request<EngineHealth["ingest"]>("/api/v1/system/ingest", {
+        method: "POST",
+        body: JSON.stringify({
+          pause,
+          untilQueueClear,
+          reason: untilQueueClear ? "Paused from System until transcription queue clears." : "Paused from System."
+        })
+      });
+      setIngestMessage(result.paused ? "Live ingest is paused. New callstream payloads will be dropped." : "Live ingest resumed.");
+      await reload();
+    } catch (error) {
+      setIngestMessage(error instanceof Error ? error.message : "Failed to update ingest control.");
+    } finally {
+      setIngestBusy(false);
+    }
+  }
   return (
     <div className="trouble-page">
       <div className="trouble-tabs">
@@ -834,7 +858,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
           <button className={pizzadTab === "jobs" ? "active" : ""} onClick={() => setPizzadTab("jobs")}>Queue / Jobs</button>
           <button className={pizzadTab === "quality" ? "active" : ""} onClick={() => setPizzadTab("quality")}>Pizzad Quality</button>
         </div>
-        {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} restartBusy={restartBusy === "pizzad"} restartMessage={restartMessages.pizzad ?? ""} onRestart={() => restartService("pizzad")} />}
+        {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} restartBusy={restartBusy === "pizzad"} restartMessage={restartMessages.pizzad ?? ""} onRestart={() => restartService("pizzad")} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} />}
         {pizzadTab === "storage" && <PizzadStorageManager runtime={runtime} />}
         {pizzadTab === "imports" && <ImportsPanel reload={reload} engineHealth={engineHealth} />}
         {pizzadTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
@@ -877,9 +901,10 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
   );
 }
 
-function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart }: { runtime: any | null; restartBusy: boolean; restartMessage: string; onRestart: () => void }) {
+function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart, ingestBusy, ingestMessage, onSetIngestPaused }: { runtime: any | null; restartBusy: boolean; restartMessage: string; onRestart: () => void; ingestBusy: boolean; ingestMessage: string; onSetIngestPaused: (pause: boolean, untilQueueClear?: boolean) => Promise<void> }) {
   if (!runtime) return <div className="card">Loading service status...</div>;
   const services = [runtime.service?.pizzad, runtime.service?.trunkRecorder].filter(Boolean);
+  const ingest = runtime.queues?.ingest;
   return <div className="system-manager-grid">
     <div className="system-action-bar">
       <div>
@@ -889,11 +914,26 @@ function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart 
       <button className="danger-button" disabled={restartBusy} onClick={onRestart}>{restartBusy ? "Restarting..." : "Restart Pizzad"}</button>
       {restartMessage && <span className={restartMessage.includes("failed") || restartMessage.includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessage}</span>}
     </div>
+    <div className="system-action-bar">
+      <div>
+        <strong>Live Ingest</strong>
+        <small>{ingest?.paused ? `Paused: ${ingest.reason || "new live calls are being dropped"}` : "Accepting callstream payloads from trunk-recorder."}</small>
+      </div>
+      {ingest?.paused
+        ? <button disabled={ingestBusy} onClick={() => void onSetIngestPaused(false)}>{ingestBusy ? "Updating..." : "Resume Live Ingest"}</button>
+        : <>
+          <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, true)}>{ingestBusy ? "Updating..." : "Pause Until Queue Clear"}</button>
+          <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, false)}>Pause Live Ingest</button>
+        </>}
+      <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? `${Number(ingest.droppedCalls || 0).toLocaleString()} dropped while paused` : "Running"}</span>
+      {ingestMessage && <span className={ingestMessage.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{ingestMessage}</span>}
+    </div>
     <div className="audit-kpis">
       <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} subtext={runtime.service?.pizzad?.enabled || "systemd enabled state"} />
       <Kpi label="TR Service" value={runtime.service?.trunkRecorder?.active || "unknown"} subtext={runtime.service?.trunkRecorder?.unit || "configured trunk-recorder unit"} />
       <Kpi label="CPU Time" value={`${Number(runtime.process?.totalProcessorTimeSeconds || 0).toFixed(0)}s`} subtext={`${runtime.process?.threadCount ?? 0} thread(s)`} />
       <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
+      <Kpi label="Live Ingest" value={ingest?.paused ? "Paused" : "Running"} subtext={ingest?.paused ? `${Number(ingest.droppedCalls || 0).toLocaleString()} dropped; ${ingest.untilQueueClear ? "auto-resume at clear" : "manual resume"}` : "callstream accepted"} />
       <Kpi label="Queue Health" value={runtime.queues?.underPressure ? "Pressure" : runtime.queues?.transcriptionQueueDepth > 0 ? "Draining" : "OK"} subtext={`${(runtime.queues?.pendingTranscriptions ?? 0).toLocaleString()} pending, ${(runtime.queues?.priorityLiveQueueDepth ?? 0).toLocaleString()} priority`} />
       <Kpi label="Transcription Rate" value={`${Number(runtime.queues?.recentCallsTranscribed || 0).toFixed(0)} / ${Number(runtime.queues?.recentCallsIngested || 0).toFixed(0)}`} subtext={`${Number(runtime.queues?.recentTranscribedPerMinute || 0).toFixed(1)}/min done vs ${Number(runtime.queues?.recentIngestPerMinute || 0).toFixed(1)}/min in`} />
       <Kpi label="Transcription Latency" value={`${Number(runtime.queues?.averageTranscriptionSeconds || 0).toFixed(1)}s`} subtext={`${Number(runtime.queues?.averageAudioSeconds || 0).toFixed(1)}s audio avg; ${Number(runtime.queues?.averageTranscriptionRealtimeFactor || 0).toFixed(1)}x realtime`} />

@@ -301,8 +301,18 @@ public sealed record HealthDto(
     double AverageTranscriptionSeconds,
     double AverageAudioSeconds,
     double AverageTranscriptionRealtimeFactor,
+    IngestControlStatusDto Ingest,
     string? WorkBlockedReason,
     DateTime ServerTimeUtc);
+
+public sealed record IngestControlStatusDto(
+    bool Paused,
+    bool UntilQueueClear,
+    string Reason,
+    DateTime? PausedAtUtc,
+    long DroppedCalls);
+
+public sealed record IngestControlRequest(bool Pause, bool UntilQueueClear = false, string? Reason = null);
 
 public sealed record StatusSummaryDto(int Calls, int Incidents, int Alerts, long Tokens);
 

@@ -9,13 +9,15 @@ public sealed class CallstreamListener : BackgroundService
 {
     private readonly EngineConfig _config;
     private readonly EnginePipeline _pipeline;
+    private readonly IngestControlService _ingestControl;
     private readonly ILogger<CallstreamListener> _logger;
     private readonly SemaphoreSlim _clientSlots;
 
-    public CallstreamListener(EngineConfig config, EnginePipeline pipeline, ILogger<CallstreamListener> logger)
+    public CallstreamListener(EngineConfig config, EnginePipeline pipeline, IngestControlService ingestControl, ILogger<CallstreamListener> logger)
     {
         _config = config;
         _pipeline = pipeline;
+        _ingestControl = ingestControl;
         _logger = logger;
         _clientSlots = new SemaphoreSlim(Math.Max(1, _config.Ingest.MaxConcurrentClients));
     }
@@ -95,6 +97,12 @@ public sealed class CallstreamListener : BackgroundService
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 var ok = await raw.ProcessClientData(stream, cts);
                 if (!ok || ct.IsCancellationRequested)
+                {
+                    raw.Dispose();
+                    return;
+                }
+
+                if (_ingestControl.ShouldDropLiveCall(_pipeline.QueueDepth))
                 {
                     raw.Dispose();
                     return;

@@ -112,6 +112,12 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #ff8b7e;
 }
 
+.ingest-paused {
+  border-color: rgba(248, 113, 113, 0.8);
+  color: #fecaca;
+  background: #3a1d1d;
+}
+
 .import-blocker {
   margin-bottom: 12px;
 }

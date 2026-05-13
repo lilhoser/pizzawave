@@ -174,6 +174,13 @@ export type EngineHealth = {
   averageTranscriptionSeconds: number;
   averageAudioSeconds: number;
   averageTranscriptionRealtimeFactor: number;
+  ingest: {
+    paused: boolean;
+    untilQueueClear: boolean;
+    reason: string;
+    pausedAtUtc?: string | null;
+    droppedCalls: number;
+  };
   workBlockedReason?: string | null;
   serverTimeUtc: string;
 };

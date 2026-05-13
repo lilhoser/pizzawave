@@ -8,12 +8,14 @@ public sealed class SystemManagerService
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EnginePipeline _pipeline;
+    private readonly IngestControlService _ingestControl;
 
-    public SystemManagerService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline)
+    public SystemManagerService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline, IngestControlService ingestControl)
     {
         _config = config;
         _database = database;
         _pipeline = pipeline;
+        _ingestControl = ingestControl;
     }
 
     public async Task<object> BuildAsync(CancellationToken ct)
@@ -71,7 +73,8 @@ public sealed class SystemManagerService
                 recentTranscriptionSamples = transcriptionPerformance.Count,
                 averageTranscriptionSeconds = transcriptionPerformance.AverageWallSeconds,
                 averageAudioSeconds = transcriptionPerformance.AverageAudioSeconds,
-                averageTranscriptionRealtimeFactor = transcriptionPerformance.AverageRealtimeFactor
+                averageTranscriptionRealtimeFactor = transcriptionPerformance.AverageRealtimeFactor,
+                ingest = _ingestControl.GetStatus(_pipeline.QueueDepth)
             },
             storage = new
             {

@@ -25,6 +25,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton<EngineDatabase>();
 builder.Services.AddSingleton<EventStream>();
 builder.Services.AddSingleton<AuthService>();
+builder.Services.AddSingleton<IngestControlService>();
 builder.Services.AddSingleton<EngineAlertService>();
 builder.Services.AddSingleton<TalkgroupResolver>();
 builder.Services.AddHttpClient<GeocodingService>();
@@ -87,7 +88,7 @@ app.MapGet("/api/v1/auth-init", (AuthService authService) => Results.Ok(authServ
     .WithName("AuthInit")
     .WithOpenApi();
 
-app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, CancellationToken ct) =>
+app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, IngestControlService ingestControl, CancellationToken ct) =>
 {
     var pendingTranscriptions = await database.CountPendingTranscriptionCallsAsync(ct);
     const int throughputWindowMinutes = 10;
@@ -123,6 +124,7 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
         transcriptionPerformance.AverageWallSeconds,
         transcriptionPerformance.AverageAudioSeconds,
         transcriptionPerformance.AverageRealtimeFactor,
+        ingestControl.GetStatus(pipeline.QueueDepth),
         blockedReason,
         now));
 })
@@ -552,6 +554,17 @@ app.MapPost("/api/v1/system/services/{service}/restart", async (string service, 
     }
 })
 .WithName("SystemServiceRestart")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/ingest", (HttpContext context, IngestControlRequest request, AuthService authService, IngestControlService ingestControl, EnginePipeline pipeline) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    var status = request.Pause
+        ? ingestControl.Pause(request.UntilQueueClear, request.Reason, pipeline.QueueDepth)
+        : ingestControl.Resume("resumed by user", pipeline.QueueDepth);
+    return Results.Ok(status);
+})
+.WithName("SystemIngestControl")
 .WithOpenApi();
 
 app.MapGet("/api/v1/profiles", (HttpContext context, AuthService authService, EngineConfig cfg) =>
