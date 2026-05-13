@@ -542,6 +542,61 @@ app.MapGet("/api/v1/system/runtime", async (HttpContext context, AuthService aut
 .WithName("SystemRuntime")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authService, EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, IngestControlService ingestControl) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    const int throughputWindowMinutes = 10;
+    var now = DateTime.UtcNow;
+    var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
+    var pendingTranscriptions = await database.CountPendingTranscriptionCallsAsync(context.RequestAborted);
+    var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, context.RequestAborted);
+    var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), context.RequestAborted);
+    var performance = pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
+    var aiQueueLimit = cfg.AiInsights.MaxQueueDepthForManualSummary;
+    var aiBlockedReason = aiQueueLimit > 0 && pipeline.QueueDepth > aiQueueLimit
+        ? $"AI summary generation is paused while transcription queue depth is above the configured limit. Queue depth: {pipeline.QueueDepth:N0}; limit: {aiQueueLimit:N0}."
+        : null;
+    var importBlockedReason = pendingTranscriptions > 0
+        ? $"Imports are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
+        : null;
+    var pendingCalls = (await database.ListPendingTranscriptionCallsAsync(25, context.RequestAborted))
+        .Select(call => new QueuePendingCallDto(
+            call.Id,
+            call.StartTime,
+            call.SystemShortName,
+            call.Talkgroup,
+            call.TalkgroupName,
+            call.Category,
+            call.IsImported,
+            call.AudioPath))
+        .ToList();
+    return Results.Ok(new QueueSnapshotDto(
+        pipeline.QueueDepth,
+        pipeline.LiveQueueDepth,
+        pipeline.PriorityLiveQueueDepth,
+        pipeline.BacklogQueueDepth,
+        pipeline.IsUnderLivePressure,
+        pipeline.LivePressureQueueDepth,
+        pendingTranscriptions,
+        pipeline.LiveTranscriptionWorkerCount,
+        pipeline.WhisperThreadsPerWorker,
+        throughputWindowMinutes,
+        recentCalls,
+        recentTranscribed,
+        recentCalls / (double)throughputWindowMinutes,
+        recentTranscribed / (double)throughputWindowMinutes,
+        performance.Count,
+        performance.AverageWallSeconds,
+        performance.AverageAudioSeconds,
+        performance.AverageRealtimeFactor,
+        ingestControl.GetStatus(pipeline.QueueDepth),
+        aiBlockedReason,
+        importBlockedReason,
+        pendingCalls));
+})
+.WithName("SystemQueue")
+.WithOpenApi();
+
 app.MapPost("/api/v1/system/services/{service}/restart", async (string service, HttpContext context, AuthService authService, SetupJobService jobs) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

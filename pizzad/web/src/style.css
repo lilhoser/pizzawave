@@ -1115,6 +1115,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   display: grid;
   gap: 10px;
   margin-bottom: 0;
+  min-height: 420px;
 }
 .jobs-card-head {
   display: flex;
@@ -1133,11 +1134,21 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .jobs-table-wrap {
   width: 100%;
   overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid #30363d;
+  border-radius: 6px;
 }
 .jobs-table {
   width: 100%;
   min-width: 900px;
   table-layout: fixed;
+}
+.jobs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #20252a;
 }
 .jobs-table th:nth-child(1), .jobs-table td:nth-child(1) { width: 52px; }
 .jobs-table th:nth-child(2), .jobs-table td:nth-child(2) { width: 145px; }
@@ -1167,6 +1178,53 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .job-actions-cell button {
   min-width: 64px;
+}
+.queue-jobs-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.1fr) minmax(340px, 0.9fr);
+  gap: 10px;
+}
+.queue-card {
+  min-height: 260px;
+  overflow: auto;
+}
+.queue-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.queue-blockers {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pending-calls-table {
+  table-layout: fixed;
+}
+.pending-calls-table th:nth-child(1), .pending-calls-table td:nth-child(1) { width: 88px; }
+.pending-calls-table th:nth-child(2), .pending-calls-table td:nth-child(2) { width: 88px; }
+.pending-calls-table th:nth-child(4), .pending-calls-table td:nth-child(4) { width: 120px; }
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  border: 1px solid #46515c;
+}
+.pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: #aeb8c2;
+  font-size: 12px;
+}
+.pagination-row button {
+  min-width: 54px;
+}
+@media (max-width: 1050px) {
+  .queue-jobs-layout {
+    grid-template-columns: 1fr;
+  }
 }
 .geo-badge {
   width: auto;

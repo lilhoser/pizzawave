@@ -186,6 +186,39 @@ export type EngineHealth = {
   workBlockedReason?: string | null;
   serverTimeUtc: string;
 };
+export type QueueSnapshot = {
+  queueDepth: number;
+  liveQueueDepth: number;
+  priorityLiveQueueDepth: number;
+  backlogQueueDepth: number;
+  queueUnderPressure: boolean;
+  queuePressureThreshold: number;
+  pendingTranscriptions: number;
+  liveTranscriptionWorkers: number;
+  whisperThreadsPerWorker: number;
+  throughputWindowMinutes: number;
+  recentCallsIngested: number;
+  recentCallsTranscribed: number;
+  recentIngestPerMinute: number;
+  recentTranscribedPerMinute: number;
+  recentTranscriptionSamples: number;
+  averageTranscriptionSeconds: number;
+  averageAudioSeconds: number;
+  averageTranscriptionRealtimeFactor: number;
+  ingest: EngineHealth["ingest"];
+  aiWorkBlockedReason?: string | null;
+  importWorkBlockedReason?: string | null;
+  pendingCalls: {
+    callId: number;
+    startTime: number;
+    systemShortName: string;
+    talkgroup: number;
+    talkgroupName: string;
+    category: string;
+    isImported: boolean;
+    audioPath: string;
+  }[];
+};
 export type TrHealth = {
   id: number;
   windowStartUtc: string;

@@ -316,6 +316,40 @@ public sealed record IngestControlStatusDto(
 
 public sealed record IngestControlRequest(bool Pause, bool UntilQueueClear = false, string? Reason = null);
 
+public sealed record QueueSnapshotDto(
+    int QueueDepth,
+    int LiveQueueDepth,
+    int PriorityLiveQueueDepth,
+    int BacklogQueueDepth,
+    bool QueueUnderPressure,
+    int QueuePressureThreshold,
+    long PendingTranscriptions,
+    int LiveTranscriptionWorkers,
+    int WhisperThreadsPerWorker,
+    int ThroughputWindowMinutes,
+    long RecentCallsIngested,
+    long RecentCallsTranscribed,
+    double RecentIngestPerMinute,
+    double RecentTranscribedPerMinute,
+    int RecentTranscriptionSamples,
+    double AverageTranscriptionSeconds,
+    double AverageAudioSeconds,
+    double AverageTranscriptionRealtimeFactor,
+    IngestControlStatusDto Ingest,
+    string? AiWorkBlockedReason,
+    string? ImportWorkBlockedReason,
+    IReadOnlyList<QueuePendingCallDto> PendingCalls);
+
+public sealed record QueuePendingCallDto(
+    long CallId,
+    long StartTime,
+    string SystemShortName,
+    long Talkgroup,
+    string TalkgroupName,
+    string Category,
+    bool IsImported,
+    string AudioPath);
+
 public sealed record StatusSummaryDto(int Calls, int Incidents, int Alerts, long Tokens);
 
 public sealed record AuthInitDto(string Mode, bool ReadRequiresAuth, bool WriteRequiresAuth);

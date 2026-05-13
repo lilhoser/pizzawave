@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, TalkgroupOption, TokenUsageReport, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, TalkgroupOption, TokenUsageReport, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -913,7 +913,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
         {pizzadTab === "service" && <PizzadServiceManager runtime={runtime} restartBusy={restartBusy === "pizzad"} restartMessage={restartMessages.pizzad ?? ""} onRestart={() => restartService("pizzad")} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} />}
         {pizzadTab === "storage" && <PizzadStorageManager runtime={runtime} />}
         {pizzadTab === "imports" && <ImportsPanel reload={reload} engineHealth={engineHealth} />}
-        {pizzadTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
+        {pizzadTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} engineHealth={engineHealth} />}
         {pizzadTab === "quality" && <QualityAuditView data={data} />}
       </div>}
       {topTab === "tr" && <div className="trouble-panel">
@@ -1079,8 +1079,27 @@ function ImportsPanel({ reload, engineHealth }: { reload: () => Promise<void>; e
   </div>;
 }
 
-function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> }) {
+function JobsPanel({ jobs, reload, engineHealth }: { jobs: Job[]; reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
   const [message, setMessage] = useState("");
+  const [page, setPage] = useState(1);
+  const [queue, setQueue] = useState<QueueSnapshot | null>(null);
+  const [queueError, setQueueError] = useState("");
+  const pageSize = 12;
+  const totalPages = Math.max(1, Math.ceil(jobs.length / pageSize));
+  const pageSafe = Math.min(page, totalPages);
+  const pageJobs = jobs.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+
+  useEffect(() => {
+    let canceled = false;
+    api.request<QueueSnapshot>("/api/v1/system/queue")
+      .then(snapshot => { if (!canceled) { setQueue(snapshot); setQueueError(""); } })
+      .catch(error => { if (!canceled) setQueueError(error instanceof Error ? error.message : "Queue load failed"); });
+    return () => { canceled = true; };
+  }, [engineHealth?.serverTimeUtc, jobs.length]);
+
+  useEffect(() => {
+    setPage(current => Math.min(current, totalPages));
+  }, [totalPages]);
 
   async function control(id: number, action: string) {
     setMessage(`${label(action)} job ${id}...`);
@@ -1105,15 +1124,67 @@ function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> 
   }
 
   return <div className="trouble-panel jobs-panel">
+    <QueuePane queue={queue} engineHealth={engineHealth} error={queueError} />
     <div className="card jobs-card">
         <div className="jobs-card-head">
           <h3>Jobs</h3>
           <p>Background work created by imports, diagnostics, transcription experiments, and summary generation.</p>
+          <span className="muted">{jobs.length.toLocaleString()} total</span>
           {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "section-status error" : "section-status ok"}>{message}</span>}
         </div>
         <div className="jobs-table-wrap">
-          <JobsTable jobs={jobs} onControl={control} onDelete={deleteJob} />
+          <JobsTable jobs={pageJobs} onControl={control} onDelete={deleteJob} />
         </div>
+        <div className="pagination-row">
+          <button disabled={pageSafe <= 1} onClick={() => setPage(1)}>First</button>
+          <button disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>Prev</button>
+          <span>Page {pageSafe} of {totalPages}</span>
+          <button disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next</button>
+          <button disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)}>Last</button>
+        </div>
+    </div>
+  </div>;
+}
+
+function QueuePane({ queue, engineHealth, error }: { queue: QueueSnapshot | null; engineHealth: EngineHealth | null; error: string }) {
+  const q = queue;
+  const depth = q?.queueDepth ?? engineHealth?.queueDepth ?? 0;
+  const pending = q?.pendingTranscriptions ?? engineHealth?.pendingTranscriptions ?? 0;
+  const live = q?.liveQueueDepth ?? engineHealth?.liveQueueDepth ?? 0;
+  const priority = q?.priorityLiveQueueDepth ?? engineHealth?.priorityLiveQueueDepth ?? 0;
+  const backlog = q?.backlogQueueDepth ?? engineHealth?.backlogQueueDepth ?? 0;
+  const transcribed = q?.recentTranscribedPerMinute ?? engineHealth?.recentTranscribedPerMinute ?? 0;
+  const ingested = q?.recentIngestPerMinute ?? engineHealth?.recentIngestPerMinute ?? 0;
+  const queueState = depth <= 0 ? "OK" : q?.queueUnderPressure || engineHealth?.queueUnderPressure ? "Pressure" : transcribed >= ingested ? "Draining" : "Growing";
+  const etaMinutes = depth > 0 && transcribed > ingested ? depth / Math.max(0.1, transcribed - ingested) : 0;
+  const blockers = [q?.importWorkBlockedReason ?? engineHealth?.importWorkBlockedReason, q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason].filter(Boolean);
+  return <div className="queue-jobs-layout">
+    <div className="card queue-card">
+      <div className="jobs-card-head">
+        <h3>Transcription Queue</h3>
+        <span className={`job-status status-${queueState === "Pressure" || queueState === "Growing" ? "failed" : queueState === "Draining" ? "running" : "completed"}`}>{queueState}</span>
+        {error && <span className="section-status error">{error}</span>}
+      </div>
+      <div className="audit-kpis queue-kpis">
+        <Kpi label="Queued" value={depth.toLocaleString()} subtext={`${pending.toLocaleString()} pending in database`} />
+        <Kpi label="Composition" value={`${live.toLocaleString()} live`} subtext={`${priority.toLocaleString()} priority, ${backlog.toLocaleString()} backlog`} />
+        <Kpi label="Throughput" value={`${transcribed.toFixed(1)}/min`} subtext={`${ingested.toFixed(1)}/min in over ${q?.throughputWindowMinutes ?? engineHealth?.throughputWindowMinutes ?? 10}m`} />
+        <Kpi label="Latency" value={`${Number(q?.averageTranscriptionSeconds ?? engineHealth?.averageTranscriptionSeconds ?? 0).toFixed(1)}s`} subtext={`${Number(q?.averageAudioSeconds ?? engineHealth?.averageAudioSeconds ?? 0).toFixed(1)}s avg audio`} />
+        <Kpi label="Workers" value={`${q?.liveTranscriptionWorkers ?? engineHealth?.liveTranscriptionWorkers ?? 0} x ${q?.whisperThreadsPerWorker ?? engineHealth?.whisperThreadsPerWorker ?? 0}`} subtext="workers x threads" />
+        <Kpi label="ETA" value={etaMinutes > 0 ? formatDurationMinutes(etaMinutes) : depth > 0 ? "Unknown" : "Clear"} subtext={depth > 0 && transcribed <= ingested ? "Queue is not currently outrunning ingest" : "Based on recent net drain"} />
+      </div>
+      {blockers.length > 0 && <div className="queue-blockers">{blockers.map((text, i) => <div className="settings-message error" key={i}>{text}</div>)}</div>}
+      {q?.ingest?.paused && <div className="settings-message error">Live ingest is paused{q.ingest.untilQueueClear ? " until the queue clears" : ""}. Dropped while paused: {q.ingest.droppedCalls.toLocaleString()}.</div>}
+    </div>
+    <div className="card queue-card">
+      <h3>Pending Calls</h3>
+      <p className="muted">Oldest pending transcription records, shown in expected processing order.</p>
+      {q?.pendingCalls?.length ? <table className="table pending-calls-table"><thead><tr><th>Time</th><th>Category</th><th>Talkgroup</th><th>Source</th></tr></thead><tbody>{q.pendingCalls.map(call => <tr key={call.callId}>
+        <td>{new Date(call.startTime * 1000).toLocaleTimeString()}</td>
+        <td><span className={`category-chip category-${call.category}`}>{label(call.category)}</span></td>
+        <td>{call.talkgroupName || `TG ${call.talkgroup}`}{call.isImported && <span className="muted"> Imported</span>}</td>
+        <td>{call.systemShortName || "--"}</td>
+      </tr>)}</tbody></table> : <p className="muted">No pending transcription calls.</p>}
     </div>
   </div>;
 }
@@ -1155,6 +1226,12 @@ function formatJobDate(value?: string | null) {
   if (!value) return "--";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatDurationMinutes(minutes: number) {
+  if (minutes < 1) return "<1m";
+  if (minutes < 90) return `${Math.round(minutes)}m`;
+  return `${Math.floor(minutes / 60)}h ${Math.round(minutes % 60)}m`;
 }
 
 function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
