@@ -214,11 +214,14 @@ function App() {
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
   const activeJobCount = jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length;
   const queueDepth = engineHealth?.queueDepth ?? 0;
-  const queueBlocked = Boolean(engineHealth?.workBlockedReason);
+  const queueBlockedNotes = [engineHealth?.importWorkBlockedReason, engineHealth?.aiWorkBlockedReason].filter(Boolean);
   const queueHealth = queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
   const transcribedPerMinute = engineHealth?.recentTranscribedPerMinute ?? 0;
   const queueRateSuffix = engineHealth ? ` (${transcribedPerMinute.toFixed(1)}/min)` : "";
-  const queuePressureNote = queueBlocked ? "; imports/AI paused" : "";
+  const queuePressureNote = queueBlockedNotes.length ? `; ${[
+    engineHealth?.importWorkBlockedReason ? "imports paused" : "",
+    engineHealth?.aiWorkBlockedReason ? "AI paused" : ""
+  ].filter(Boolean).join(", ")}` : "";
   const ingestPaused = Boolean(engineHealth?.ingest?.paused);
   const queueHealthText = queueHealth === "clear"
     ? `Queue OK ${queueDepth.toLocaleString()}${queueRateSuffix}`
@@ -226,7 +229,7 @@ function App() {
       ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
       : `Queue draining ${queueDepth.toLocaleString()}${queueRateSuffix}`;
   const queueHealthTitle = engineHealth
-    ? `${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min) and ${engineHealth.recentCallsIngested.toLocaleString()} calls ingested (${engineHealth.recentIngestPerMinute.toFixed(1)}/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${engineHealth.workBlockedReason ?? ""}`.trim()
+    ? `${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min) and ${engineHealth.recentCallsIngested.toLocaleString()} calls ingested (${engineHealth.recentIngestPerMinute.toFixed(1)}/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${queueBlockedNotes.join(" ")}`.trim()
     : "Transcription queue is clear.";
 
   const inSetup = Boolean(setupStatus && !setupStatus.completed);
@@ -654,7 +657,7 @@ function Incidents({ rows, locationMap, onShowLocation }: { rows: Incident[]; lo
 
 function CategoryView({ data, mode, rangeHours, reload, engineHealth }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
   if (!data) return <div className="category-page">Loading...</div>;
-  const generationBlocked = Boolean(engineHealth?.workBlockedReason);
+  const generationBlocked = Boolean(engineHealth?.aiWorkBlockedReason);
   async function generate() {
     try {
       await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(Math.min(rangeHours, 24)), confirmLargeRange: false }) });
@@ -665,9 +668,9 @@ function CategoryView({ data, mode, rangeHours, reload, engineHealth }: { data: 
   }
   return <div className="category-split-page" data-category={data.category}>
     <section className="pane insights-pane category-pane">
-      {mode === "summaries" && <><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.workBlockedReason} /></>}
+      {mode === "summaries" && <><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.aiWorkBlockedReason} /></>}
       {mode === "raw" && <><h2>{label(data.category)} Raw Calls</h2><RawCallList groups={data.groups} /></>}
-      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.workBlockedReason} /></>}
+      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.aiWorkBlockedReason} /></>}
     </section>
     <section className="pane calls-pane category-pane">
       <h2>Calls by Talkgroup</h2>
@@ -1054,7 +1057,7 @@ function TokenBarChart({ title, rows }: { title: string; rows: { label: string; 
 }
 
 function ImportsPanel({ reload, engineHealth }: { reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
-  const blockedReason = engineHealth?.workBlockedReason ?? "";
+  const blockedReason = engineHealth?.importWorkBlockedReason ?? "";
   return <div className="trouble-panel imports-panel">
     {blockedReason && <div className="settings-message error import-blocker">{blockedReason}</div>}
     <div className="settings-flow">

@@ -97,9 +97,16 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
     var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, ct);
     var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
     var transcriptionPerformance = pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
-    var blockedReason = pendingTranscriptions > 0
-        ? $"Imports and AI summary generation are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
+    var importBlockedReason = pendingTranscriptions > 0
+        ? $"Imports are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
         : null;
+    var aiQueueLimit = cfg.AiInsights.MaxQueueDepthForManualSummary;
+    var aiBlockedReason = aiQueueLimit > 0 && pipeline.QueueDepth > aiQueueLimit
+        ? $"AI summary generation is paused while transcription queue depth is above the configured limit. Queue depth: {pipeline.QueueDepth:N0}; limit: {aiQueueLimit:N0}."
+        : null;
+    var blockedReason = string.Join(" ", new[] { importBlockedReason, aiBlockedReason }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    if (string.IsNullOrWhiteSpace(blockedReason))
+        blockedReason = null;
     return Results.Ok(new HealthDto(
         "ok",
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev",
@@ -125,6 +132,8 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
         transcriptionPerformance.AverageAudioSeconds,
         transcriptionPerformance.AverageRealtimeFactor,
         ingestControl.GetStatus(pipeline.QueueDepth),
+        aiBlockedReason,
+        importBlockedReason,
         blockedReason,
         now));
 })

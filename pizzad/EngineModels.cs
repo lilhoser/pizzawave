@@ -302,6 +302,8 @@ public sealed record HealthDto(
     double AverageAudioSeconds,
     double AverageTranscriptionRealtimeFactor,
     IngestControlStatusDto Ingest,
+    string? AiWorkBlockedReason,
+    string? ImportWorkBlockedReason,
     string? WorkBlockedReason,
     DateTime ServerTimeUtc);
 

@@ -181,6 +181,8 @@ export type EngineHealth = {
     pausedAtUtc?: string | null;
     droppedCalls: number;
   };
+  aiWorkBlockedReason?: string | null;
+  importWorkBlockedReason?: string | null;
   workBlockedReason?: string | null;
   serverTimeUtc: string;
 };
