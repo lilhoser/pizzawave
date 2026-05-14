@@ -1,219 +1,68 @@
 # Quick Reference
 
-Common commands, paths, ports, and other frequently-needed information for pizzawave.
+## Paths
 
-## Default Ports
+| Purpose | Path |
+| --- | --- |
+| Config | `/etc/pizzawave/pizzad.json` |
+| Token | `/etc/pizzawave/pizzad.token` |
+| Database | `/var/lib/pizzawave/pizzad.db` |
+| Audio | `/var/lib/pizzawave/audio` |
+| Import cache | `/var/lib/pizzawave/import-cache` |
+| Engine files | `/opt/pizzawave/pizzad` |
+| Service | `pizzad.service` |
 
-| Service | Port | Protocol | Description |
-|---------|------|----------|-------------|
-| callstream/pizzawave | 9123 | TCP | Audio streaming from trunk-recorder |
-
-## Configuration Paths
-
-| Platform | Settings File | Logs | Models | Captures |
-|----------|---------------|------|--------|----------|
-| Windows | `%APPDATA%\pizzawave\settings.json` | `%APPDATA%\pizzawave\Logs\` | `%APPDATA%\pizzawave\model\` | `%APPDATA%\pizzawave\` |
-| Linux | `~/.config/pizzawave/settings.json` | `~/.config/pizzawave/Logs/` | `~/.config/pizzawave/model/` | `~/.config/pizzawave/` |
-| macOS | `~/.config/pizzawave/settings.json` | `~/.config/pizzawave/model/` | `~/.config/pizzawave/model/` | `~/.config/pizzawave/` |
-| System Install | `/etc/pizzapi/appsettings.json` | `/var/log/pizzapi/` | `/var/lib/pizzapi/model/` | `/var/lib/pizzapi/` |
-
-## Common Commands
-
-### Trunk Recorder Health Collector
+## Service Commands
 
 ```bash
-# Timer/service status
-sudo systemctl status tr-health-collector.timer
-sudo systemctl status tr-health-collector.service
-
-# Last collector runs
-journalctl -u tr-health-collector.service -n 50 --no-pager
-
-# Collector output file
-ls -lh /var/lib/pizzapi/tr-health/summary_5m.csv
-tail -n 5 /var/lib/pizzapi/tr-health/summary_5m.csv
+sudo systemctl status pizzad --no-pager
+sudo systemctl restart pizzad
+journalctl -u pizzad -n 100 --no-pager
+journalctl -u pizzad -f
 ```
 
-### Service Management (Linux)
+## Health/API Checks
 
 ```bash
-# Start pizzapi service
-sudo systemctl start pizzapi
-
-# Stop pizzapi service
-sudo systemctl stop pizzapi
-
-# Restart pizzapi service
-sudo systemctl restart pizzapi
-
-# Enable auto-start on boot
-sudo systemctl enable pizzapi
-
-# View service status
-sudo systemctl status pizzapi
-
-# View live logs
-journalctl -u pizzapi -f
-
-# View last 50 log lines
-journalctl -u pizzapi -n 50
+curl -fsS http://127.0.0.1:8080/api/v1/health
+curl -fsS http://127.0.0.1:8080/api/v1/dashboard
+curl -fsS http://127.0.0.1:8080/api/v1/events/stream
 ```
 
-### trunk-recorder Service
+OpenAPI:
+
+```text
+http://<host>:8080/swagger
+```
+
+## SQLite Probes
 
 ```bash
-# Restart trunk-recorder
-sudo systemctl restart trunk-recorder
-
-# View live logs
-sudo journalctl -u trunk-recorder -f
-
-# Check service status
-sudo systemctl status trunk-recorder
+sqlite3 /var/lib/pizzawave/pizzad.db "select transcription_status, count(*) from calls group by transcription_status;"
+sqlite3 /var/lib/pizzawave/pizzad.db "select status, count(*) from jobs group by status;"
+sqlite3 /var/lib/pizzawave/pizzad.db "select count(*) from incidents;"
 ```
 
-### Network Diagnostics
+## Queue Checks
 
 ```bash
-# Check if port 9123 is listening
-netstat -tlnp | grep 9123
-# or
-sudo ss -tlnp | grep 9123
-
-# Test connectivity to pizzawave
-telnet <pizzawave-ip> 9123
-# or
-nc -zv <pizzawave-ip> 9123
-
-# Find local IP address
-ip addr show | grep inet
-
-# Check firewall rules (ufw)
-sudo ufw status
-sudo ufw allow 9123/tcp
+curl -fsS http://127.0.0.1:8080/api/v1/health
+sqlite3 /var/lib/pizzawave/pizzad.db "select count(*) from calls where transcription_status in ('pending','failed');"
 ```
 
-### Build Commands
+Use the web status bar and **System -> PizzaD -> Queue** for the normal view.
+
+## Build and Package
 
 ```bash
-# Restore dependencies
-dotnet restore pizzawave.sln
-
-# Build all projects (Debug)
-dotnet build pizzawave.sln
-
-# Build all projects (Release)
-dotnet build pizzawave.sln -c Release
-
-# Publish for Raspberry Pi
-dotnet publish pizzapi/pizzapi.csproj -c Release -r linux-arm64 --self-contained true -o ./publish
-
-# Publish for Linux x64
-dotnet publish pizzapi/pizzapi.csproj -c Release -r linux-x64 --self-contained true -o ./publish
-
-# Clean build artifacts
-dotnet clean pizzawave.sln
+dotnet build pizzawave.sln --configuration Release
+./scripts/pizzawave build-deb --rid linux-x64
+./scripts/pizzawave build-deb --rid linux-arm64
 ```
 
-### Package Installation (Linux)
+## Deploy Development Build
 
-```bash
-# Install .deb package
-sudo dpkg -i pizzapi_*.deb
-
-# Fix missing dependencies
-sudo apt-get install -f -y
-
-# Remove package
-sudo dpkg -r pizzapi
+```powershell
+.\scripts\deploy_pizzad_tar.ps1 -HostName lilhoser@192.168.1.173 -Rid linux-x64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@192.168.2.42 -SshKey $env:USERPROFILE\.ssh\pizzawave_rpi_ed25519 -Rid linux-arm64
 ```
-
-## CLI Caveat (`pizzacmd`)
-
-`pizzacmd` currently applies only the first recognized option in a command invocation.
-
-Avoid combining `--settings` and `--talkgroups` in one run; invoke separately.
-
-## Troubleshooting Data Paths
-
-| Item | Path |
-|---|---|
-| TR collector output (preferred source) | `/var/lib/pizzapi/tr-health/summary_5m.csv` |
-| TR diagnostics local cache (default) | `%APPDATA%\pizzawave\tr-diagnostics` (Windows) / `~/.config/pizzawave/tr-diagnostics` (Linux/macOS) |
-| TR persisted baseline history | `<trDiagnosticsLocalCachePath>/baseline_history_5m.csv` |
-| TR parse cache manifest (raw-log mode) | `<trDiagnosticsLocalCachePath>/parse_manifest.json` |
-
-## Talkgroups CSV Format
-
-Generate the talkgroups CSV manually:
-1. Visit the RadioReference talkgroups section for the system you are monitoring (example: https://www.radioreference.com/db/sid/4879).
-2. Copy the HTML table for the talkgroups you want.
-3. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
-4. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
-
-The CSV must include this header line:
-```csv
-Decimal,Mode,Alpha Tag,Description,Tag,Category
-1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
-2,D,FDISPATCH2,Fire Dispatch 2,Fire,Dispatch
-3,D,PDISPATCH,Police Dispatch,Police,Dispatch
-```
-
-| Column | Description |
-|--------|-------------|
-| `Decimal` | Talkgroup ID (decimal) |
-| `Mode` | D=Digital, A=Analog |
-| `Alpha Tag` | Short display name |
-| `Description` | Full description |
-| `Tag` | Category tag for filtering |
-| `Category` | Sub-category |
-
-## Minimum Required Settings
-
-```json
-{
-  "listenPort": 9123,
-  "TraceLevelApp": "Information",
-  "AutostartListener": true
-}
-```
-
-## Trace Levels
-
-| Level | Description |
-|-------|-------------|
-| `Verbose` | Maximum detail, high disk I/O |
-| `Debug` | Debug-level messages |
-| `Information` | Normal operational messages (recommended) |
-| `Warning` | Warnings only |
-| `Error` | Errors only |
-| `Critical` | Critical errors only |
-| `None` | No logging |
-
-## System Dependencies
-
-### Ubuntu/Debian (Minimum)
-```bash
-libicu-dev libssl3 zlib1g
-```
-
-### Ubuntu/Debian (with GUI)
-```bash
-libicu-dev libssl3 zlib1g libx11-6 libxext6 libxrender1 libxtst6 libxi6 libfontconfig1 libx11-xcb1 libxcb1 libxfixes3
-```
-
-## Useful Resources
-
-| Resource | URL |
-|----------|-----|
-| RadioReference | https://www.radioreference.com/ |
-| SDR Calculator | https://alertapi.alertpage.net/sdr/ |
-| trunk-recorder Docs | https://trunkrecorder.com/docs/ |
-| Whisper Models | https://huggingface.co/ggerganov/whisper.cpp |
-
-## See Also
-
-- [Quick Start Guide](quickstart.md) - 5-minute setup
-- [Deployment Guide](deployment.md) - Production deployment
-- [Building Guide](building.md) - Build from source
-- [Main README](README.md) - Project overview

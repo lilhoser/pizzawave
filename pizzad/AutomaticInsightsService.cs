@@ -25,7 +25,6 @@ public sealed class AutomaticInsightsService : BackgroundService
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
-    private readonly TalkgroupResolver _talkgroups;
     private readonly ILogger<AutomaticInsightsService> _logger;
     private readonly List<EngineCall> _pending = new();
     private readonly object _gate = new();
@@ -38,13 +37,11 @@ public sealed class AutomaticInsightsService : BackgroundService
         EngineConfig config,
         EngineDatabase database,
         EventStream events,
-        TalkgroupResolver talkgroups,
         ILogger<AutomaticInsightsService> logger)
     {
         _config = config;
         _database = database;
         _events = events;
-        _talkgroups = talkgroups;
         _logger = logger;
     }
 
@@ -52,7 +49,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     {
         if (!_config.Setup.Completed || !IsEnabled())
             return;
-        _queue.Enqueue(_talkgroups.Enrich(call));
+        _queue.Enqueue(call);
     }
 
     public int ConfiguredBatchSize => BatchSize();
@@ -71,7 +68,6 @@ public sealed class AutomaticInsightsService : BackgroundService
                         string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
                         !string.IsNullOrWhiteSpace(c.Transcription))
             .OrderBy(c => c.StartTime)
-            .Select(_talkgroups.Enrich)
             .ToList();
         if (calls.Count == 0)
             return 0;

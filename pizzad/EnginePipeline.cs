@@ -1,5 +1,3 @@
-using Newtonsoft.Json.Linq;
-using pizzalib;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Headers;
@@ -15,22 +13,26 @@ public sealed class EnginePipeline
     private readonly EngineAlertService _alerts;
     private readonly TalkgroupResolver _talkgroups;
     private readonly AutomaticInsightsService _insights;
+    private readonly CallAudioService _audio;
+    private readonly PoliceCodeService _policeCodes;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<TranscriptionQueueItem> _liveQueue = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _priorityLiveQueue = new();
+    private readonly ConcurrentQueue<TranscriptionQueueItem> _deferredLiveQueue = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _backlogQueue = new();
     private readonly SemaphoreSlim _liveSignal = new(0);
     private readonly SemaphoreSlim _backlogSignal = new(0);
-    private readonly Settings _pizzalibSettings;
     private readonly List<ITranscriber> _liveTranscribers = [];
     private readonly List<BacklogTranscriberSet> _backlogTranscribers = [];
+    private readonly List<ITranscriber> _backlogGenericTranscribers = [];
     private readonly ConcurrentQueue<TranscriptionPerformanceSample> _performanceSamples = new();
     private string _provider = "none";
     private DateTimeOffset _nextPressureLogAt = DateTimeOffset.MinValue;
 
     public int QueueDepth => LiveQueueDepth + _backlogQueue.Count;
-    public int LiveQueueDepth => _liveQueue.Count + _priorityLiveQueue.Count;
+    public int LiveQueueDepth => _liveQueue.Count + _priorityLiveQueue.Count + _deferredLiveQueue.Count;
     public int PriorityLiveQueueDepth => _priorityLiveQueue.Count;
+    public int DeferredLiveQueueDepth => _deferredLiveQueue.Count;
     public int BacklogQueueDepth => _backlogQueue.Count;
     public bool IsUnderLivePressure => LiveQueueDepth >= LivePressureQueueDepth;
     public int LivePressureQueueDepth => Math.Max(1, _config.Transcription.LivePressureQueueDepth);
@@ -44,6 +46,8 @@ public sealed class EnginePipeline
         EngineAlertService alerts,
         TalkgroupResolver talkgroups,
         AutomaticInsightsService insights,
+        CallAudioService audio,
+        PoliceCodeService policeCodes,
         ILogger<EnginePipeline> logger)
     {
         _config = config;
@@ -52,21 +56,25 @@ public sealed class EnginePipeline
         _alerts = alerts;
         _talkgroups = talkgroups;
         _insights = insights;
+        _audio = audio;
+        _policeCodes = policeCodes;
         _logger = logger;
-        _pizzalibSettings = BuildPizzalibSettings(config);
     }
 
     public async Task StartAsync(CancellationToken ct)
     {
         _provider = (_config.Transcription.Provider ?? "none").Trim().ToLowerInvariant();
-        if (_provider is "whisper" or "vosk")
+        if (_provider is "whisper" or "vosk" or "faster-whisper")
         {
-            var liveWorkers = _provider == "whisper" ? ResolveLiveWorkerCount(_config) : 1;
+            var liveWorkers = _provider is "whisper" or "faster-whisper" ? ResolveLiveWorkerCount(_config) : 1;
             for (var i = 1; i <= liveWorkers; i++)
             {
-                ITranscriber transcriber = _provider == "vosk"
-                    ? new VoskTranscriber(_pizzalibSettings)
-                    : new pizzalib.Whisper(_pizzalibSettings);
+                ITranscriber transcriber = _provider switch
+                {
+                    "vosk" => new VoskTranscriber(_config.Transcription.VoskModelPath, _logger),
+                    "faster-whisper" => new FasterWhisperTranscriber(_config, _logger),
+                    _ => CreateWhisperTranscriber()
+                };
                 await transcriber.Initialize();
                 _liveTranscribers.Add(transcriber);
             }
@@ -77,18 +85,18 @@ public sealed class EnginePipeline
                 var backlogWorkers = ResolveBacklogWorkerCount();
                 for (var i = 1; i <= backlogWorkers; i++)
                 {
-                    var fastSettings = BuildPizzalibSettings(_config, ResolveWhisperModelPath("base"));
-                    var fast = new pizzalib.Whisper(fastSettings);
+                    var fastModel = ResolveWhisperModelPath("base");
+                    var fast = CreateWhisperTranscriber(fastModel);
                     await fast.Initialize();
 
                     ITranscriber primary;
-                    if (string.Equals(fastSettings.whisperModelFile, _pizzalibSettings.whisperModelFile, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(fastModel, _config.Transcription.WhisperModelFile, StringComparison.OrdinalIgnoreCase))
                     {
                         primary = fast;
                     }
                     else
                     {
-                        primary = new pizzalib.Whisper(_pizzalibSettings);
+                        primary = CreateWhisperTranscriber();
                         await primary.Initialize();
                     }
 
@@ -96,8 +104,8 @@ public sealed class EnginePipeline
                         i,
                         fast,
                         primary,
-                        fastSettings.whisperModelFile ?? string.Empty,
-                        _pizzalibSettings.whisperModelFile ?? string.Empty));
+                        fastModel,
+                        _config.Transcription.WhisperModelFile ?? string.Empty));
                 }
 
                 _logger.LogInformation(
@@ -105,6 +113,21 @@ public sealed class EnginePipeline
                     _backlogTranscribers.Count,
                     _backlogTranscribers.FirstOrDefault()?.FastModel ?? string.Empty,
                     _backlogTranscribers.FirstOrDefault()?.PrimaryModel ?? string.Empty);
+            }
+            else if (_provider == "faster-whisper")
+            {
+                var backlogWorkers = ResolveBacklogWorkerCount();
+                for (var i = 1; i <= backlogWorkers; i++)
+                {
+                    var transcriber = new FasterWhisperTranscriber(_config, _logger);
+                    await transcriber.Initialize();
+                    _backlogGenericTranscribers.Add(transcriber);
+                }
+
+                _logger.LogInformation(
+                    "Backlog faster-whisper worker pool initialized: workers={WorkerCount}; model={Model}",
+                    _backlogGenericTranscribers.Count,
+                    _config.Transcription.FasterWhisperModel);
             }
         }
 
@@ -122,6 +145,11 @@ public sealed class EnginePipeline
             foreach (var transcribers in _backlogTranscribers)
                 _ = Task.Run(() => BacklogTranscriptionLoopAsync(transcribers, ct), ct);
         }
+        else if (_backlogGenericTranscribers.Count > 0)
+        {
+            foreach (var transcriber in _backlogGenericTranscribers)
+                _ = Task.Run(() => BacklogGenericTranscriptionLoopAsync(transcriber, ct), ct);
+        }
         else
         {
             _ = Task.Run(() => BacklogTranscriptionLoopAsync(null, ct), ct);
@@ -129,13 +157,12 @@ public sealed class EnginePipeline
         await RecoverPendingTranscriptionsAsync(ct);
     }
 
-    public async Task<long> IngestRawCallAsync(RawCallData raw, bool imported, CancellationToken ct)
+    public async Task<long> IngestRawCallAsync(CallstreamPayload payload, bool imported, CancellationToken ct)
     {
-        var metadata = raw.GetJsonObject();
-        var call = BuildPendingCall(metadata, raw.GetJsonString(), imported);
+        var call = BuildPendingCall(payload, imported);
         var callId = await _database.UpsertCallAsync(call, ct);
 
-        var audioPath = await PersistAudioAsync(raw, call, callId, ct);
+        var audioPath = await PersistAudioAsync(payload, call, callId, ct);
         call = call with { Id = callId, AudioPath = audioPath };
         await _database.UpsertCallAsync(call, ct);
 
@@ -145,18 +172,17 @@ public sealed class EnginePipeline
         {
             if (imported)
             {
-                raw.Dispose();
                 EnqueueTranscription(new TranscriptionQueueItem(callId, null, audioPath, imported, true, TranscriptionWorkKind.Backlog));
             }
             else
             {
-                EnqueueTranscription(new TranscriptionQueueItem(callId, raw, audioPath, imported, false, TranscriptionWorkKind.Live));
+                var kind = IsDeferredTalkgroup(call.Talkgroup) ? TranscriptionWorkKind.DeferredLive : TranscriptionWorkKind.Live;
+                EnqueueTranscription(new TranscriptionQueueItem(callId, payload, audioPath, imported, false, kind));
             }
             await _events.PublishAsync("job_updated", new { type = "transcription", queueDepth = QueueDepth }, ct);
         }
         else
         {
-            raw.Dispose();
             _logger.LogInformation("Stored call {CallId} without transcription queue because setup/transcription is not ready", callId);
         }
         return callId;
@@ -176,7 +202,8 @@ public sealed class EnginePipeline
             var backlog = call.IsImported ||
                           string.Equals(call.QualityReason, "retry_backlog", StringComparison.OrdinalIgnoreCase) ||
                           call.StartTime < now - 2 * 3600;
-            EnqueueTranscription(new TranscriptionQueueItem(call.Id, null, call.AudioPath, call.IsImported, backlog, backlog ? TranscriptionWorkKind.Backlog : TranscriptionWorkKind.Live));
+            var kind = backlog ? TranscriptionWorkKind.Backlog : IsDeferredTalkgroup(call.Talkgroup) ? TranscriptionWorkKind.DeferredLive : TranscriptionWorkKind.Live;
+            EnqueueTranscription(new TranscriptionQueueItem(call.Id, null, call.AudioPath, call.IsImported, backlog, kind));
             if (backlog)
                 backlogCount++;
             else
@@ -196,9 +223,13 @@ public sealed class EnginePipeline
 
     private void EnqueueTranscription(TranscriptionQueueItem item)
     {
-        if (item.Kind == TranscriptionWorkKind.Live)
+        if (item.Kind is TranscriptionWorkKind.Live or TranscriptionWorkKind.DeferredLive)
         {
-            if (_liveQueue.Count + _priorityLiveQueue.Count >= LivePressureQueueDepth)
+            if (item.Kind == TranscriptionWorkKind.DeferredLive)
+            {
+                _deferredLiveQueue.Enqueue(item);
+            }
+            else if (_liveQueue.Count + _priorityLiveQueue.Count >= LivePressureQueueDepth)
             {
                 _priorityLiveQueue.Enqueue(item);
                 if (DateTimeOffset.UtcNow >= _nextPressureLogAt)
@@ -228,10 +259,10 @@ public sealed class EnginePipeline
         while (!ct.IsCancellationRequested)
         {
             await _liveSignal.WaitAsync(ct);
-            if (!_priorityLiveQueue.TryDequeue(out var item) && !_liveQueue.TryDequeue(out item))
+            if (!_priorityLiveQueue.TryDequeue(out var item) && !_liveQueue.TryDequeue(out item) && !_deferredLiveQueue.TryDequeue(out item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: false, transcriber, backlogTranscribers: null, ct);
+            await ProcessTranscriptionItemAsync(item, backlog: false, liveTranscriber: transcriber, backlogTranscribers: null, genericBacklogTranscriber: null, ct);
         }
     }
 
@@ -243,17 +274,33 @@ public sealed class EnginePipeline
             if (!_backlogQueue.TryDequeue(out var item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, transcribers, ct);
+            await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, backlogTranscribers: transcribers, genericBacklogTranscriber: null, ct);
         }
     }
 
-    private async Task ProcessTranscriptionItemAsync(TranscriptionQueueItem item, bool backlog, ITranscriber? liveTranscriber, BacklogTranscriberSet? backlogTranscribers, CancellationToken ct)
+    private async Task BacklogGenericTranscriptionLoopAsync(ITranscriber transcriber, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await _backlogSignal.WaitAsync(ct);
+            if (!_backlogQueue.TryDequeue(out var item))
+                continue;
+
+            await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, backlogTranscribers: null, genericBacklogTranscriber: transcriber, ct);
+        }
+    }
+
+    private async Task ProcessTranscriptionItemAsync(TranscriptionQueueItem item, bool backlog, ITranscriber? liveTranscriber, BacklogTranscriberSet? backlogTranscribers, ITranscriber? genericBacklogTranscriber, CancellationToken ct)
     {
         try
         {
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
-            var transcription = backlog ? await TranscribeBacklogAsync(item, backlogTranscribers, ct) : await TranscribeAsync(item, liveTranscriber, ct);
+            var transcription = genericBacklogTranscriber != null
+                ? await TranscribeAsync(item, genericBacklogTranscriber, ct)
+                : backlog
+                    ? await TranscribeBacklogAsync(item, backlogTranscribers, ct)
+                    : await TranscribeAsync(item, liveTranscriber, ct);
             stopwatch.Stop();
             var call = await _database.GetCallAsync(item.CallId, ct);
             if (call == null)
@@ -265,6 +312,7 @@ public sealed class EnginePipeline
                 ? new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty)
                 : _alerts.Evaluate(call, transcription, item.Imported);
             await _database.UpdateCallTranscriptionAsync(item.CallId, transcription, quality.Status, quality.Reason, alert.IsMatch, ct);
+            await _database.ReplaceCallAnnotationsAsync(item.CallId, _policeCodes.Detect(transcription), ct);
             RecordTranscriptionPerformance(startedAt, stopwatch.Elapsed, Math.Max(0, call.StopTime - call.StartTime), backlog);
 
             if (!quality.IncludeInSummaries)
@@ -306,10 +354,6 @@ public sealed class EnginePipeline
             _logger.LogError(ex, "Transcription failed for call {CallId}", item.CallId);
             await _database.UpdateCallTranscriptionAsync(item.CallId, string.Empty, "failed", "transcription_error", false, ct);
         }
-        finally
-        {
-            item.Raw?.Dispose();
-        }
     }
 
     public TranscriptionPerformanceSnapshot GetTranscriptionPerformance(TimeSpan window)
@@ -349,9 +393,9 @@ public sealed class EnginePipeline
 
         var wav = item.Raw == null
             ? await ReadPersistedWavAsync(item.AudioPath, ct)
-            : await item.Raw.GetAudioStreamForWhisperAsync();
+            : await _audio.CreateTranscriptionWavAsync(item.Raw, item.CallId, ct);
 
-        if (_provider is "whisper" or "vosk")
+        if (_provider is "whisper" or "vosk" or "faster-whisper")
         {
             if (transcriber == null)
             {
@@ -362,7 +406,7 @@ public sealed class EnginePipeline
             try
             {
                 using var localWav = _provider == "whisper"
-                    ? await EnsureWhisperInputAsync(wav, item.CallId, ct)
+                    ? await _audio.Ensure16kMonoPcmAsync(wav, item.CallId, ct)
                     : wav;
                 return await transcriber.TranscribeCall(localWav);
             }
@@ -401,10 +445,10 @@ public sealed class EnginePipeline
     {
         var wav = item.Raw == null
             ? await ReadPersistedWavAsync(item.AudioPath, ct)
-            : await item.Raw.GetAudioStreamForWhisperAsync();
+            : await _audio.CreateTranscriptionWavAsync(item.Raw, item.CallId, ct);
         try
         {
-            using var localWav = await EnsureWhisperInputAsync(wav, item.CallId, ct);
+            using var localWav = await _audio.Ensure16kMonoPcmAsync(wav, item.CallId, ct);
             return await transcriber.TranscribeCall(localWav);
         }
         finally
@@ -443,177 +487,6 @@ public sealed class EnginePipeline
         return calls.Count;
     }
 
-    private async Task<MemoryStream> EnsureWhisperInputAsync(MemoryStream wav, long callId, CancellationToken ct)
-    {
-        wav.Position = 0;
-        var info = TryReadWavFormat(wav);
-        if (info is { SampleRate: 16000, Channels: 1 })
-        {
-            wav.Position = 0;
-            return wav;
-        }
-
-        if (TryNormalizePcm8kMonoTo16kMono(wav, info, out var normalized))
-        {
-            _logger.LogDebug("Normalized call {CallId} audio for Whisper in-process from 8 kHz mono PCM to 16 kHz mono", callId);
-            return normalized;
-        }
-
-        var tempDir = Path.Combine(_config.Storage.AppDataRoot, "transcription-normalize");
-        Directory.CreateDirectory(tempDir);
-        var input = Path.Combine(tempDir, $"call-{callId}-{Guid.NewGuid():N}-in.wav");
-        var output = Path.Combine(tempDir, $"call-{callId}-{Guid.NewGuid():N}-16k.wav");
-        try
-        {
-            wav.Position = 0;
-            await File.WriteAllBytesAsync(input, wav.ToArray(), ct);
-            await RunFfmpegAsync(input, output, ct);
-            var bytes = await File.ReadAllBytesAsync(output, ct);
-            _logger.LogDebug("Normalized call {CallId} audio for Whisper with ffmpeg from {SampleRate} Hz/{Channels} channel(s) to 16 kHz mono", callId, info?.SampleRate, info?.Channels);
-            return new MemoryStream(bytes);
-        }
-        finally
-        {
-            TryDelete(input);
-            TryDelete(output);
-        }
-    }
-
-    private static async Task RunFfmpegAsync(string inputPath, string outputPath, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo("ffmpeg")
-        {
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
-        };
-        foreach (var arg in new[] { "-y", "-hide_banner", "-loglevel", "error", "-i", inputPath, "-ar", "16000", "-ac", "1", outputPath })
-            psi.ArgumentList.Add(arg);
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Unable to start ffmpeg for Whisper audio normalization.");
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException("ffmpeg failed to normalize Whisper audio: " + await stderr);
-    }
-
-    private static WavFormat? TryReadWavFormat(MemoryStream wav)
-    {
-        try
-        {
-            var bytes = wav.ToArray();
-            if (bytes.Length < 44 ||
-                bytes[0] != (byte)'R' || bytes[1] != (byte)'I' || bytes[2] != (byte)'F' || bytes[3] != (byte)'F' ||
-                bytes[8] != (byte)'W' || bytes[9] != (byte)'A' || bytes[10] != (byte)'V' || bytes[11] != (byte)'E')
-                return null;
-
-            short audioFormat = 0;
-            short channels = 0;
-            var sampleRate = 0;
-            short bitsPerSample = 0;
-            var dataOffset = -1;
-            var dataSize = 0;
-            var offset = 12;
-            while (offset + 8 <= bytes.Length)
-            {
-                var chunkId = BitConverter.ToInt32(bytes, offset);
-                var chunkSize = BitConverter.ToInt32(bytes, offset + 4);
-                var chunkData = offset + 8;
-                if (chunkSize < 0 || chunkData + chunkSize > bytes.Length)
-                    break;
-
-                if (chunkId == 0x20746d66 && chunkSize >= 16)
-                {
-                    audioFormat = BitConverter.ToInt16(bytes, chunkData);
-                    channels = BitConverter.ToInt16(bytes, chunkData + 2);
-                    sampleRate = BitConverter.ToInt32(bytes, chunkData + 4);
-                    bitsPerSample = BitConverter.ToInt16(bytes, chunkData + 14);
-                }
-                else if (chunkId == 0x61746164)
-                {
-                    dataOffset = chunkData;
-                    dataSize = chunkSize;
-                }
-
-                offset = chunkData + chunkSize + (chunkSize % 2);
-            }
-
-            return new WavFormat(audioFormat, sampleRate, channels, bitsPerSample, dataOffset, dataSize);
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            wav.Position = 0;
-        }
-    }
-
-    private static bool TryNormalizePcm8kMonoTo16kMono(MemoryStream wav, WavFormat? info, out MemoryStream normalized)
-    {
-        normalized = null!;
-        if (info is not { AudioFormat: 1, SampleRate: 8000, Channels: 1, BitsPerSample: 16 } ||
-            info.DataOffset < 0 ||
-            info.DataSize <= 0)
-            return false;
-
-        var source = wav.ToArray();
-        if (info.DataOffset + info.DataSize > source.Length)
-            return false;
-
-        var sampleCount = info.DataSize / 2;
-        if (sampleCount <= 0)
-            return false;
-
-        var outputDataSize = sampleCount * 4;
-        var output = new byte[44 + outputDataSize];
-        WriteAscii(output, 0, "RIFF");
-        BitConverter.GetBytes(output.Length - 8).CopyTo(output, 4);
-        WriteAscii(output, 8, "WAVE");
-        WriteAscii(output, 12, "fmt ");
-        BitConverter.GetBytes(16).CopyTo(output, 16);
-        BitConverter.GetBytes((short)1).CopyTo(output, 20);
-        BitConverter.GetBytes((short)1).CopyTo(output, 22);
-        BitConverter.GetBytes(16000).CopyTo(output, 24);
-        BitConverter.GetBytes(32000).CopyTo(output, 28);
-        BitConverter.GetBytes((short)2).CopyTo(output, 32);
-        BitConverter.GetBytes((short)16).CopyTo(output, 34);
-        WriteAscii(output, 36, "data");
-        BitConverter.GetBytes(outputDataSize).CopyTo(output, 40);
-
-        var outOffset = 44;
-        var inOffset = info.DataOffset;
-        for (var i = 0; i < sampleCount; i++)
-        {
-            output[outOffset++] = source[inOffset];
-            output[outOffset++] = source[inOffset + 1];
-            output[outOffset++] = source[inOffset];
-            output[outOffset++] = source[inOffset + 1];
-            inOffset += 2;
-        }
-
-        normalized = new MemoryStream(output);
-        return true;
-    }
-
-    private static void WriteAscii(byte[] target, int offset, string value)
-    {
-        for (var i = 0; i < value.Length; i++)
-            target[offset + i] = (byte)value[i];
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-        catch
-        {
-        }
-    }
-
     private async Task<string> TranscribeOpenAiCompatibleAsync(MemoryStream wav, CancellationToken ct)
     {
         var baseUrl = (_config.Transcription.OpenAiBaseUrl ?? string.Empty).TrimEnd('/');
@@ -639,7 +512,7 @@ public sealed class EnginePipeline
         return json;
     }
 
-    private async Task<string> PersistAudioAsync(RawCallData raw, EngineCall call, long callId, CancellationToken ct)
+    private async Task<string> PersistAudioAsync(CallstreamPayload payload, EngineCall call, long callId, CancellationToken ct)
     {
         var date = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).UtcDateTime;
         var relativeDir = Path.Combine(date.Year.ToString("0000"), date.Month.ToString("00"), date.Day.ToString("00"));
@@ -648,20 +521,21 @@ public sealed class EnginePipeline
 
         var fileName = $"{call.StartTime}-{call.SystemShortName}-{call.Talkgroup}-{call.CallstreamCallId}-{callId}.wav";
         var absolutePath = Path.Combine(absoluteDir, SanitizeFileName(fileName));
-        using var wav = await raw.GetAudioStreamAsync(OutputFileFormat.Wav);
+        using var wav = _audio.CreateWavStream(payload.PcmS16Le, payload.SampleRate);
         await File.WriteAllBytesAsync(absolutePath, wav.ToArray(), ct);
         return Path.GetRelativePath(_config.Storage.AudioRoot, absolutePath).Replace('\\', '/');
     }
 
-    private EngineCall BuildPendingCall(JObject json, string rawJson, bool imported)
+    private EngineCall BuildPendingCall(CallstreamPayload payload, bool imported)
     {
-        var start = json.Value<long?>("StartTime") ?? 0;
-        var stop = json.Value<long?>("StopTime") ?? start;
-        var system = json.Value<string>("SystemShortName")?.Trim() ?? "unknown";
-        var talkgroup = json.Value<long?>("Talkgroup") ?? 0;
-        var callstreamCallId = json.Value<long?>("CallId") ?? 0;
-        var source = json.Value<int?>("Source") ?? -1;
-        var frequency = json.Value<double?>("Frequency") ?? 0;
+        var metadata = payload.Metadata;
+        var start = metadata.StartTime;
+        var stop = metadata.StopTime;
+        var system = metadata.SystemShortName;
+        var talkgroup = metadata.Talkgroup;
+        var callstreamCallId = metadata.CallId;
+        var source = metadata.Source;
+        var frequency = metadata.Frequency;
         var resolved = _talkgroups.Resolve(talkgroup);
         var unique = $"{system}|{talkgroup}|{start}|{stop}|{callstreamCallId}|{frequency}";
         return new EngineCall
@@ -678,7 +552,7 @@ public sealed class EnginePipeline
             Category = resolved.Category,
             TranscriptionStatus = "pending",
             IsImported = imported,
-            RawMetadataJson = rawJson
+            RawMetadataJson = payload.RawMetadataJson
         };
     }
 
@@ -689,22 +563,8 @@ public sealed class EnginePipeline
         return fileName;
     }
 
-    private static Settings BuildPizzalibSettings(EngineConfig config, string? whisperModelOverride = null)
-    {
-        var settings = new Settings
-        {
-            listenPort = config.Ingest.CallstreamPort,
-            analogSamplingRate = config.Transcription.AnalogSampleRate,
-            transcriptionEngine = config.Transcription.Provider is "vosk" ? "vosk" : "whisper",
-            whisperModelFile = string.IsNullOrWhiteSpace(whisperModelOverride) ? config.Transcription.WhisperModelFile : whisperModelOverride,
-            whisperThreads = config.Transcription.WhisperThreads,
-            voskModelPath = config.Transcription.VoskModelPath,
-            EmailProvider = config.Alerts.EmailProvider,
-            emailUser = config.Alerts.EmailUser,
-            emailPassword = config.Alerts.EmailPassword
-        };
-        return settings;
-    }
+    private WhisperTranscriber CreateWhisperTranscriber(string? modelPath = null) =>
+        new(string.IsNullOrWhiteSpace(modelPath) ? _config.Transcription.WhisperModelFile : modelPath, _config.Transcription.WhisperThreads, _logger);
 
     private string ResolveWhisperModelPath(string model)
     {
@@ -729,11 +589,13 @@ public sealed class EnginePipeline
         return Math.Clamp(configured <= 0 ? 1 : configured, 1, 4);
     }
 
-    private sealed record TranscriptionQueueItem(long CallId, RawCallData? Raw, string AudioPath, bool Imported, bool SuppressDownstream, TranscriptionWorkKind Kind);
+    private bool IsDeferredTalkgroup(long talkgroup) =>
+        _config.Transcription.DeferredTalkgroups.Any(tg => tg == talkgroup);
+
+    private sealed record TranscriptionQueueItem(long CallId, CallstreamPayload? Raw, string AudioPath, bool Imported, bool SuppressDownstream, TranscriptionWorkKind Kind);
     private sealed record BacklogTranscriberSet(int WorkerId, ITranscriber Fast, ITranscriber Primary, string FastModel, string PrimaryModel);
     private sealed record TranscriptionPerformanceSample(DateTimeOffset CompletedAt, double WallSeconds, double AudioSeconds, bool Backlog);
-    private enum TranscriptionWorkKind { Live, Backlog }
-    private sealed record WavFormat(short AudioFormat, int SampleRate, short Channels, short BitsPerSample, int DataOffset, int DataSize);
+    private enum TranscriptionWorkKind { Live, DeferredLive, Backlog }
 }
 
 public sealed record TranscriptionPerformanceSnapshot(

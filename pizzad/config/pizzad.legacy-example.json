@@ -57,6 +57,7 @@
   },
   "trunkRecorder": {
     "configPath": "/etc/trunk-recorder/config.json",
+    "talkgroupCatalogPath": "/var/lib/pizzawave/appdata/talkgroups.json",
     "talkgroupsPath": "/etc/trunk-recorder/talkgroups.csv",
     "logServiceName": "trunk-recorder",
     "healthWindowMinutes": 5

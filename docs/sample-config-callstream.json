@@ -69,7 +69,7 @@
         {
 	        "name":"callstream",
             "library":"libcallstream.so",
-            "address":"192.168.1.122",
+            "address":"127.0.0.1",
             "port":9123,
             "streams":[
                 {

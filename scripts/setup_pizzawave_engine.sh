@@ -14,7 +14,7 @@ LMSTUDIO_USER="${SUDO_USER:-${USER:-}}"
 LMSTUDIO_MODEL="qwen3.6-35b-a3b@q8_0"
 LMSTUDIO_SKIP_MODEL_LOAD="true"
 RETROFIT_EXISTING_TR="false"
-REMOVE_LEGACY_PIZZAPI="false"
+REMOVE_LEGACY_APPS="false"
 REQUIRE_WIZARD="false"
 BACKUP_ROOT="/var/backups/pizzawave"
 
@@ -22,7 +22,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   setup_pizzawave_engine.sh --publish-dir <path> [--with-lmstudio] [--lmstudio-user <user>] [--lmstudio-model <model>] [--preload-lmstudio-model]
-  setup_pizzawave_engine.sh --publish-dir <path> --retrofit-existing-tr --remove-legacy-pizzapi --require-wizard
+  setup_pizzawave_engine.sh --publish-dir <path> --retrofit-existing-tr --remove-legacy-apps --require-wizard
 
 Installs PizzaWave Engine (pizzad) as a systemd service.
 Build/publish first, for example:
@@ -35,7 +35,7 @@ By default LM Studio is installed in LM Link relay mode and no local LLM is
 downloaded or preloaded.
 
 RPI retrofit mode preserves the existing trunk-recorder config/talkgroups,
-removes old pizzapi/tr-health artifacts, and leaves TR itself installed.
+removes retired PizzaWave app/tr-health artifacts, and leaves TR itself installed.
 USAGE
 }
 
@@ -69,8 +69,8 @@ while [[ $# -gt 0 ]]; do
       RETROFIT_EXISTING_TR="true"
       shift
       ;;
-    --remove-legacy-pizzapi)
-      REMOVE_LEGACY_PIZZAPI="true"
+    --remove-legacy-apps)
+      REMOVE_LEGACY_APPS="true"
       shift
       ;;
     --require-wizard)
@@ -120,8 +120,8 @@ backup_existing_tr() {
   echo "$backup_dir"
 }
 
-remove_legacy_pizzapi() {
-  echo "Removing legacy pizzapi/tr-health artifacts. TR config and TR service are preserved."
+remove_legacy_apps() {
+  echo "Removing retired PizzaWave app/tr-health artifacts. TR config and TR service are preserved."
   systemctl stop pizzapi.service 2>/dev/null || true
   systemctl disable pizzapi.service 2>/dev/null || true
   systemctl stop tr-health-collector.timer 2>/dev/null || true
@@ -155,8 +155,8 @@ if [[ "$RETROFIT_EXISTING_TR" == "true" ]]; then
   echo "Existing TR config/talkgroups backed up to: $TR_BACKUP_DIR"
 fi
 
-if [[ "$REMOVE_LEGACY_PIZZAPI" == "true" ]]; then
-  remove_legacy_pizzapi
+if [[ "$REMOVE_LEGACY_APPS" == "true" ]]; then
+  remove_legacy_apps
 fi
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
@@ -167,7 +167,7 @@ mkdir -p "$INSTALL_ROOT" "$SCRIPT_ROOT" "$CONFIG_DIR" "$DATA_DIR/audio" "$DATA_D
 find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp -a "$PUBLISH_DIR"/. "$INSTALL_ROOT"/
 chmod 0755 "$INSTALL_ROOT/pizzad" || true
-for helper in setup_trunk_recorder.sh tr_tune.sh setup-lmstudio.sh pizzawave_setup_admin.sh; do
+for helper in setup_trunk_recorder.sh tr_tune.sh setup-lmstudio.sh setup-faster-whisper.sh pizzawave_setup_admin.sh; do
   if [[ -f "$SCRIPT_DIR/$helper" ]]; then
     cp "$SCRIPT_DIR/$helper" "$SCRIPT_ROOT/$helper"
     perl -pi -e 's/\r$//' "$SCRIPT_ROOT/$helper"
@@ -187,7 +187,7 @@ if [[ ! -f "$CONFIG_DIR/pizzad.json" ]]; then
   cat > "$CONFIG_DIR/pizzad.json" <<'JSON'
 {
   "server": { "httpBind": "0.0.0.0", "httpPort": 8080 },
-  "branding": { "stackName": "Pizzastack" },
+  "branding": { "stackName": "PizzaWave" },
   "auth": {
     "mode": "none",
     "readRequiresAuth": false,

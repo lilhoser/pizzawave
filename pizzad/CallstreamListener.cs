@@ -1,4 +1,3 @@
-using pizzalib;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -86,34 +85,21 @@ public sealed class CallstreamListener : BackgroundService
         using (client)
         using (var stream = client.GetStream())
         {
-            var settings = new pizzalib.Settings
-            {
-                analogSamplingRate = _config.Transcription.AnalogSampleRate,
-                listenPort = _config.Ingest.CallstreamPort
-            };
-            var raw = new RawCallData(settings);
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var ok = await raw.ProcessClientData(stream, cts);
-                if (!ok || ct.IsCancellationRequested)
-                {
-                    raw.Dispose();
+                var payload = await CallstreamPayload.ReadAsync(stream, _config.Transcription.AnalogSampleRate, cts.Token);
+                if (ct.IsCancellationRequested)
                     return;
-                }
 
                 if (_ingestControl.ShouldDropLiveCall(_pipeline.QueueDepth))
-                {
-                    raw.Dispose();
                     return;
-                }
 
-                await _pipeline.IngestRawCallAsync(raw, imported: false, ct);
+                await _pipeline.IngestRawCallAsync(payload, imported: false, ct);
             }
-            catch
+            catch (InvalidDataException ex)
             {
-                raw.Dispose();
-                throw;
+                _logger.LogWarning(ex, "Rejected malformed callstream payload from {Remote}", remote);
             }
         }
     }

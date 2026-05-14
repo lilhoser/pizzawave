@@ -53,7 +53,59 @@ public static class TranscriptionQualityClassifier
         if (words < 3)
             return new("poor_quality", "too_short", false);
 
+        if (LooksNumericOnly(withoutMarkers))
+            return new("poor_quality", "numeric_noise", false);
+
+        if (LooksRepetitive(withoutMarkers))
+            return new("poor_quality", "repetitive", false);
+
         return new("complete", "ok", true);
+    }
+
+    private static bool LooksNumericOnly(string text)
+    {
+        var tokens = WordPattern.Matches(text).Select(m => m.Value).ToList();
+        if (tokens.Count < 5)
+            return false;
+
+        return tokens.All(token => token.All(char.IsDigit));
+    }
+
+    private static bool LooksRepetitive(string text)
+    {
+        var tokens = WordPattern.Matches(text)
+            .Select(m => m.Value.ToLowerInvariant())
+            .ToList();
+        if (tokens.Count < 8)
+            return false;
+
+        var mostCommon = tokens.GroupBy(t => t).Max(g => g.Count());
+        if (mostCommon >= 10 && mostCommon >= tokens.Count * 0.4)
+            return true;
+
+        var run = 1;
+        for (var i = 1; i < tokens.Count; i++)
+        {
+            run = tokens[i] == tokens[i - 1] ? run + 1 : 1;
+            if (run >= 8)
+                return true;
+        }
+
+        for (var size = 2; size <= 4; size++)
+        {
+            var phraseRun = 1;
+            string? previous = null;
+            for (var i = 0; i <= tokens.Count - size; i += size)
+            {
+                var phrase = string.Join(' ', tokens.Skip(i).Take(size));
+                phraseRun = phrase == previous ? phraseRun + 1 : 1;
+                previous = phrase;
+                if (phraseRun >= 4)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     public static bool IsProblem(EngineCall call) =>

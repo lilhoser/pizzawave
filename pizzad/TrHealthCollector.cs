@@ -6,8 +6,11 @@ namespace pizzad;
 
 public sealed class TrHealthCollector : BackgroundService
 {
-    private static readonly Regex DecodeRateRegex = new(
-        @"(?:decode|decoded)[^0-9-]*(?<rate>-?\d+(?:\.\d+)?)\s*(?:/sec|per sec|hz)?",
+    private static readonly Regex CcSummaryDecodeRateRegex = new(
+        @"\[(?<scope>[^\]]+)\]\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<rate>-?\d+(?:\.\d+)?)\s+msg/sec",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex LowDecodeWarningRateRegex = new(
+        @"Control Channel Message Decode Rate:\s*(?<rate>-?\d+(?:\.\d+)?)\s*/sec",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex TuningErrorRegex = new(
         @"(?:tuning|tune)[^0-9-]*(?:error|err)[^0-9-]*(?<hz>-?\d+(?:\.\d+)?)\s*hz",
@@ -194,20 +197,31 @@ public sealed class TrHealthCollector : BackgroundService
 
     public static TrHealthSampleDto BuildSample(string scope, DateTime startUtc, DateTime endUtc, string log)
     {
-        var decodeLines = 0;
-        var decodeZero = 0;
-        var decodeRateTotal = 0.0;
+        var ccSummaryDecodeLines = 0;
+        var ccSummaryDecodeZero = 0;
+        var ccSummaryDecodeRateTotal = 0.0;
+        var lowDecodeWarningLines = 0;
+        var lowDecodeWarningZero = 0;
+        var lowDecodeWarningRateTotal = 0.0;
         var tuningErrSamples = 0;
         var tuningErrTotalAbsHz = 0.0;
         var tuningErrMaxAbsHz = 0.0;
         foreach (var line in log.Split('\n'))
         {
-            if (TryParseDecodeRate(line, out var rate))
+            if (TryParseCcSummaryDecodeRate(line, out var ccRate))
             {
-                decodeLines++;
-                decodeRateTotal += rate;
-                if (Math.Abs(rate) < 0.0001)
-                    decodeZero++;
+                ccSummaryDecodeLines++;
+                ccSummaryDecodeRateTotal += ccRate;
+                if (Math.Abs(ccRate) < 0.0001)
+                    ccSummaryDecodeZero++;
+            }
+
+            if (TryParseLowDecodeWarningRate(line, out var warningRate))
+            {
+                lowDecodeWarningLines++;
+                lowDecodeWarningRateTotal += warningRate;
+                if (Math.Abs(warningRate) < 0.0001)
+                    lowDecodeWarningZero++;
             }
 
             var tuningMatch = TuningErrorRegex.Match(line);
@@ -220,6 +234,9 @@ public sealed class TrHealthCollector : BackgroundService
             }
         }
 
+        var decodeLines = ccSummaryDecodeLines > 0 ? ccSummaryDecodeLines : lowDecodeWarningLines;
+        var decodeZero = ccSummaryDecodeLines > 0 ? ccSummaryDecodeZero : lowDecodeWarningZero;
+        var decodeRateTotal = ccSummaryDecodeLines > 0 ? ccSummaryDecodeRateTotal : lowDecodeWarningRateTotal;
         return new TrHealthSampleDto
         {
             WindowStartUtc = startUtc,
@@ -229,6 +246,12 @@ public sealed class TrHealthCollector : BackgroundService
             DecodeZero = decodeZero,
             DecodeZeroPct = decodeLines == 0 ? 0 : decodeZero * 100.0 / decodeLines,
             DecodeRateTotal = decodeRateTotal,
+            CcSummaryDecodeLines = ccSummaryDecodeLines,
+            CcSummaryDecodeZero = ccSummaryDecodeZero,
+            CcSummaryDecodeRateTotal = ccSummaryDecodeRateTotal,
+            LowDecodeWarningLines = lowDecodeWarningLines,
+            LowDecodeWarningZero = lowDecodeWarningZero,
+            LowDecodeWarningRateTotal = lowDecodeWarningRateTotal,
             Retunes = Count(log, "Retuning to Control Channel"),
             CallsStarted = Count(log, "Starting P25 Recorder"),
             CallsConcluded = Count(log, "Concluding Recorded Call"),
@@ -267,13 +290,26 @@ public sealed class TrHealthCollector : BackgroundService
     private static int Count(string haystack, string needle) =>
         Regex.Matches(haystack, Regex.Escape(needle), RegexOptions.IgnoreCase).Count;
 
-    private static bool TryParseDecodeRate(string line, out double rate)
+    private static bool TryParseCcSummaryDecodeRate(string line, out double rate)
     {
         rate = 0;
-        if (!line.Contains("decode", StringComparison.OrdinalIgnoreCase))
+        if (!line.Contains("msg/sec", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var match = DecodeRateRegex.Match(line);
+        var match = CcSummaryDecodeRateRegex.Match(line);
+        if (!match.Success)
+            return false;
+
+        return double.TryParse(match.Groups["rate"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate);
+    }
+
+    private static bool TryParseLowDecodeWarningRate(string line, out double rate)
+    {
+        rate = 0;
+        if (!line.Contains("Control Channel Message Decode Rate", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var match = LowDecodeWarningRateRegex.Match(line);
         if (!match.Success)
             return false;
 

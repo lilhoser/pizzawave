@@ -55,6 +55,18 @@ The script installer remains available for development:
 sudo ./scripts/setup_pizzawave_engine.sh --publish-dir ./artifacts/pizzad
 ```
 
+For emergency direct deploys during development, use a tar-based publish/deploy
+helper instead of ZIP archives. ZIP files created on Windows can preserve
+backslashes in native runtime paths and break Whisper runtime loading on Linux.
+
+```powershell
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@192.168.2.42 -SshKey $env:USERPROFILE\.ssh\pizzawave_rpi_ed25519 -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName lilhoser@192.168.1.173 -Rid linux-x64
+```
+
+The preferred normal deployment remains the `.deb` package. The tar helper is
+for fast development iteration only and still restarts `pizzad`.
+
 To install the optional LM Studio relay used by `aiInsights` and incident
 summarization:
 

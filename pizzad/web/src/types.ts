@@ -170,6 +170,11 @@ export type EngineHealth = {
   recentCallsTranscribed: number;
   recentIngestPerMinute: number;
   recentTranscribedPerMinute: number;
+  recentAudioSecondsIngested: number;
+  recentAudioSecondsTranscribed: number;
+  recentAudioSecondsIngestedPerMinute: number;
+  recentAudioSecondsTranscribedPerMinute: number;
+  pendingAudioSeconds: number;
   recentTranscriptionSamples: number;
   averageTranscriptionSeconds: number;
   averageAudioSeconds: number;
@@ -180,6 +185,7 @@ export type EngineHealth = {
     reason: string;
     pausedAtUtc?: string | null;
     droppedCalls: number;
+    droppedCallsThisPause: number;
   };
   aiWorkBlockedReason?: string | null;
   importWorkBlockedReason?: string | null;
@@ -201,6 +207,11 @@ export type QueueSnapshot = {
   recentCallsTranscribed: number;
   recentIngestPerMinute: number;
   recentTranscribedPerMinute: number;
+  recentAudioSecondsIngested: number;
+  recentAudioSecondsTranscribed: number;
+  recentAudioSecondsIngestedPerMinute: number;
+  recentAudioSecondsTranscribedPerMinute: number;
+  pendingAudioSeconds: number;
   recentTranscriptionSamples: number;
   averageTranscriptionSeconds: number;
   averageAudioSeconds: number;
@@ -218,6 +229,106 @@ export type QueueSnapshot = {
     isImported: boolean;
     audioPath: string;
   }[];
+  topAudioTalkgroups: QueueTalkgroupLoad[];
+};
+export type QueueTalkgroupLoad = {
+  systemShortName: string;
+  talkgroup: number;
+  talkgroupName: string;
+  category: string;
+  calls: number;
+  audioSeconds: number;
+  averageAudioSeconds: number;
+  pendingCalls: number;
+  pendingAudioSeconds: number;
+};
+export type SystemRecommendation = {
+  id: string;
+  section: string;
+  severity: "high" | "medium" | "low" | string;
+  title: string;
+  detail: string;
+  action: string;
+  target: { topTab: string; subTab: string; anchor: string };
+  actions: { kind: string; label: string; description: string; talkgroups?: number[] | null }[];
+  runbook?: {
+    title: string;
+    goal: string;
+    evidence: string[];
+    steps: { title: string; detail: string; target: { topTab: string; subTab: string; anchor: string } }[];
+    caveat: string;
+    diagnostics: {
+      label: string;
+      value: string;
+      status: string;
+      detail: string;
+    }[];
+    talkgroupCandidates: {
+      systemShortName: string;
+      talkgroup: number;
+      talkgroupName: string;
+      category: string;
+      calls: number;
+      audioSeconds: number;
+      averageAudioSeconds: number;
+      pendingCalls: number;
+      pendingAudioSeconds: number;
+      alreadyDeferred: boolean;
+      reason: string;
+    }[];
+  } | null;
+};
+export type SystemRecommendations = {
+  openCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  items: SystemRecommendation[];
+};
+export type TranscriptionBenchmarkRow = {
+  callId: number;
+  startTime: number;
+  stopTime: number;
+  audioSeconds: number;
+  systemShortName: string;
+  talkgroup: number;
+  talkgroupName: string;
+  category: string;
+  totalSeconds: number;
+  readSeconds: number;
+  normalizeSeconds: number;
+  whisperSeconds: number;
+  qualitySeconds: number;
+  scratchWriteSeconds: number;
+  textLength: number;
+  qualityReason: string;
+  includeInSummaries: boolean;
+  preview: string;
+  error?: string | null;
+};
+export type TranscriptionBenchmarkResult = {
+  startedAtUtc: string;
+  provider: string;
+  model: string;
+  whisperThreads: number;
+  sampleCount: number;
+  lookbackHours: number;
+  sampleSelectSeconds: number;
+  modelInitSeconds: number;
+  totalSeconds: number;
+  processCpuSeconds: number;
+  warmCallsPerMinute: number;
+  averageTotalSeconds: number;
+  averageAudioSeconds: number;
+  averageRealtimeFactor: number;
+  averageReadSeconds: number;
+  averageNormalizeSeconds: number;
+  averageWhisperSeconds: number;
+  averageQualitySeconds: number;
+  averageScratchWriteSeconds: number;
+  whisperSharePercent: number;
+  failureCount: number;
+  rows: TranscriptionBenchmarkRow[];
 };
 export type TrHealth = {
   id: number;
@@ -228,6 +339,16 @@ export type TrHealth = {
   decodeZero: number;
   decodeZeroPct: number;
   decodeRateTotal: number;
+  ccSummaryDecodeLines: number;
+  ccSummaryDecodeZero: number;
+  ccSummaryDecodeRateTotal: number;
+  ccSummaryAvgDecodeRate: number;
+  ccSummaryDecodeZeroPct: number;
+  lowDecodeWarningLines: number;
+  lowDecodeWarningZero: number;
+  lowDecodeWarningRateTotal: number;
+  lowDecodeWarningAvgRate: number;
+  lowDecodeWarningZeroPct: number;
   retunes: number;
   callsStarted: number;
   callsConcluded: number;
@@ -241,6 +362,29 @@ export type TrHealth = {
   tuningErrMaxAbsHz: number;
 };
 export type TrHealthMetric = { metric: string; value: string; notes: string; isIssue: boolean };
+export type TrSourceCoverage = {
+  index: number;
+  device: string;
+  centerMhz: number;
+  lowMhz: number;
+  highMhz: number;
+  digitalRecorders: number;
+  firstMatchCalls: number;
+  coverableCalls: number;
+  uniqueFrequencies: number;
+  notes: string;
+  isIssue: boolean;
+};
+export type TrSourcePlan = {
+  systemShortName: string;
+  lowMhz: number;
+  highMhz: number;
+  recommendedCenterMhz: number;
+  assignedSourceIndex?: number | null;
+  assignedDevice: string;
+  notes: string;
+  isIssue: boolean;
+};
 export type TrHealthSeries = { label: string; values: number[]; isBaseline: boolean };
 export type TrHealthChart = { title: string; yAxisLabel: string; valueFormat: string; labels: string[]; series: TrHealthSeries[]; baselineNote: string };
 export type TrHealthSummary = {
@@ -251,9 +395,23 @@ export type TrHealthSummary = {
   summaryText: string;
   metrics: TrHealthMetric[];
   systems: TrHealthMetric[];
+  sourceCoverage: TrSourceCoverage[];
+  sourcePlan: TrSourcePlan[];
   remedies: TrHealthMetric[];
   charts: TrHealthChart[];
   samples: TrHealth[];
+};
+export type TrRfAnalysis = {
+  system: string;
+  start: number;
+  end: number;
+  window: string;
+  hasEnoughPostChangeData: boolean;
+  summary: string;
+  metrics: TrHealthMetric[];
+  comparison: TrHealthMetric[];
+  retuneTargets: TrHealthMetric[];
+  recommendations: TrHealthMetric[];
 };
 export type QualityAuditGroup = {
   label: string;
@@ -305,6 +463,29 @@ export type TokenUsageReport = { ledger: string; summary: TokenUsageSummary; byD
 export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeOther: boolean; allowedTalkgroups: number[]; createdAtUtc?: string; updatedAtUtc?: string };
 export type ProfileState = { activeProfileId: string; profiles: ProcessingProfile[] };
 export type TalkgroupOption = { talkgroup: number; label: string; category: string };
+export type TalkgroupCatalogItem = {
+  id: number;
+  mode: string;
+  alphaTag: string;
+  description: string;
+  tag: string;
+  sourceCategory: string;
+  opsCategory: string;
+  enabled: boolean;
+  source: string;
+  notes: string;
+  updatedAtUtc?: string;
+};
+export type TalkgroupCatalogDocument = { schemaVersion: number; updatedAtUtc?: string; items: TalkgroupCatalogItem[] };
+export type TalkgroupCatalogResponse = {
+  catalogPath: string;
+  generatedCsvPath: string;
+  trRestartRecommended: boolean;
+  warning: string;
+  document: TalkgroupCatalogDocument;
+};
+export type TalkgroupCatalogSaveResult = { count: number; backupPath?: string | null; generatedCsvPath: string; generatedCsvBackupPath?: string | null; trRestartRecommended: boolean };
+export type TalkgroupTrCsvResult = { path: string; backupPath?: string | null; enabledCount: number };
 export type SetupCheck = { id: string; label: string; required: boolean; ok: boolean; message: string };
 export type SetupStatus = {
   completed: boolean;

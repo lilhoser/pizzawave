@@ -1,4 +1,3 @@
-using pizzalib;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -155,7 +154,7 @@ public sealed class LocalImportService
             Type = "local_import",
             Status = "queued",
             Total = estimate.CandidateCount,
-            Message = messageOverride ?? (span.TotalHours > QuickImportMaxHours ? "Large local pizzastack prime import queued." : "Quick local import queued."),
+            Message = messageOverride ?? (span.TotalHours > QuickImportMaxHours ? "Large local PizzaWave prime import queued." : "Quick local import queued."),
             CreatedAtUtc = DateTime.UtcNow
         };
         var jobId = await _database.AddJobAsync(job, ct);
@@ -245,26 +244,9 @@ public sealed class LocalImportService
 
                     await _database.UpsertBackfillItemAsync("local", candidate.Path, candidate.Path, string.Empty, ToUnix(candidate.TimestampLocal), candidate.Size, "importing", string.Empty, ct);
 
-                    var settings = new Settings
-                    {
-                        analogSamplingRate = _config.Transcription.AnalogSampleRate,
-                        listenPort = _config.Ingest.CallstreamPort
-                    };
-                    var raw = new RawCallData(settings);
-                    try
-                    {
-                        using var input = File.OpenRead(candidate.Path);
-                        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        if (await raw.ProcessClientData(input, linked))
-                            await _pipeline.IngestRawCallAsync(raw, imported: true, ct);
-                        else
-                            raw.Dispose();
-                    }
-                    catch
-                    {
-                        raw.Dispose();
-                        throw;
-                    }
+                    using var input = File.OpenRead(candidate.Path);
+                    var payload = await CallstreamPayload.ReadAsync(input, _config.Transcription.AnalogSampleRate, ct);
+                    await _pipeline.IngestRawCallAsync(payload, imported: true, ct);
 
                     completed++;
                     await _database.UpsertBackfillItemAsync("local", candidate.Path, candidate.Path, string.Empty, ToUnix(candidate.TimestampLocal), candidate.Size, "imported", string.Empty, ct);

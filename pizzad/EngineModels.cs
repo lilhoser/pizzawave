@@ -293,10 +293,16 @@ public sealed record HealthDto(
     int LiveTranscriptionWorkers,
     int WhisperThreadsPerWorker,
     int ThroughputWindowMinutes,
+    int DeferredLiveQueueDepth,
     long RecentCallsIngested,
     long RecentCallsTranscribed,
     double RecentIngestPerMinute,
     double RecentTranscribedPerMinute,
+    long RecentAudioSecondsIngested,
+    long RecentAudioSecondsTranscribed,
+    double RecentAudioSecondsIngestedPerMinute,
+    double RecentAudioSecondsTranscribedPerMinute,
+    long PendingAudioSeconds,
     int RecentTranscriptionSamples,
     double AverageTranscriptionSeconds,
     double AverageAudioSeconds,
@@ -312,7 +318,8 @@ public sealed record IngestControlStatusDto(
     bool UntilQueueClear,
     string Reason,
     DateTime? PausedAtUtc,
-    long DroppedCalls);
+    long DroppedCalls,
+    long DroppedCallsThisPause);
 
 public sealed record IngestControlRequest(bool Pause, bool UntilQueueClear = false, string? Reason = null);
 
@@ -327,10 +334,16 @@ public sealed record QueueSnapshotDto(
     int LiveTranscriptionWorkers,
     int WhisperThreadsPerWorker,
     int ThroughputWindowMinutes,
+    int DeferredLiveQueueDepth,
     long RecentCallsIngested,
     long RecentCallsTranscribed,
     double RecentIngestPerMinute,
     double RecentTranscribedPerMinute,
+    long RecentAudioSecondsIngested,
+    long RecentAudioSecondsTranscribed,
+    double RecentAudioSecondsIngestedPerMinute,
+    double RecentAudioSecondsTranscribedPerMinute,
+    long PendingAudioSeconds,
     int RecentTranscriptionSamples,
     double AverageTranscriptionSeconds,
     double AverageAudioSeconds,
@@ -338,7 +351,8 @@ public sealed record QueueSnapshotDto(
     IngestControlStatusDto Ingest,
     string? AiWorkBlockedReason,
     string? ImportWorkBlockedReason,
-    IReadOnlyList<QueuePendingCallDto> PendingCalls);
+    IReadOnlyList<QueuePendingCallDto> PendingCalls,
+    IReadOnlyList<QueueTalkgroupLoadDto> TopAudioTalkgroups);
 
 public sealed record QueuePendingCallDto(
     long CallId,
@@ -349,6 +363,17 @@ public sealed record QueuePendingCallDto(
     string Category,
     bool IsImported,
     string AudioPath);
+
+public sealed record QueueTalkgroupLoadDto(
+    string SystemShortName,
+    long Talkgroup,
+    string TalkgroupName,
+    string Category,
+    long Calls,
+    long AudioSeconds,
+    double AverageAudioSeconds,
+    long PendingCalls,
+    long PendingAudioSeconds);
 
 public sealed record StatusSummaryDto(int Calls, int Incidents, int Alerts, long Tokens);
 
@@ -365,6 +390,16 @@ public sealed record TrHealthSampleDto
     public double DecodeZeroPct { get; init; }
     public double DecodeRateTotal { get; init; }
     public double AvgDecodeRate => DecodeLines == 0 ? 0 : DecodeRateTotal / DecodeLines;
+    public int CcSummaryDecodeLines { get; init; }
+    public int CcSummaryDecodeZero { get; init; }
+    public double CcSummaryDecodeRateTotal { get; init; }
+    public double CcSummaryAvgDecodeRate => CcSummaryDecodeLines == 0 ? 0 : CcSummaryDecodeRateTotal / CcSummaryDecodeLines;
+    public double CcSummaryDecodeZeroPct => CcSummaryDecodeLines == 0 ? 0 : CcSummaryDecodeZero * 100.0 / CcSummaryDecodeLines;
+    public int LowDecodeWarningLines { get; init; }
+    public int LowDecodeWarningZero { get; init; }
+    public double LowDecodeWarningRateTotal { get; init; }
+    public double LowDecodeWarningAvgRate => LowDecodeWarningLines == 0 ? 0 : LowDecodeWarningRateTotal / LowDecodeWarningLines;
+    public double LowDecodeWarningZeroPct => LowDecodeWarningLines == 0 ? 0 : LowDecodeWarningZero * 100.0 / LowDecodeWarningLines;
     public int Retunes { get; init; }
     public int CallsStarted { get; init; }
     public int CallsConcluded { get; init; }
@@ -379,6 +414,29 @@ public sealed record TrHealthSampleDto
 }
 
 public sealed record TrHealthMetricDto(string Metric, string Value, string Notes, bool IsIssue);
+
+public sealed record TrSourceCoverageDto(
+    int Index,
+    string Device,
+    double CenterMhz,
+    double LowMhz,
+    double HighMhz,
+    int DigitalRecorders,
+    int FirstMatchCalls,
+    int CoverableCalls,
+    int UniqueFrequencies,
+    string Notes,
+    bool IsIssue);
+
+public sealed record TrSourcePlanDto(
+    string SystemShortName,
+    double LowMhz,
+    double HighMhz,
+    double RecommendedCenterMhz,
+    int? AssignedSourceIndex,
+    string AssignedDevice,
+    string Notes,
+    bool IsIssue);
 
 public sealed record TrHealthSeriesDto(string Label, IReadOnlyList<double> Values, bool IsBaseline = false);
 
@@ -399,6 +457,8 @@ public sealed record TrHealthSummaryDto
     public string SummaryText { get; init; } = string.Empty;
     public IReadOnlyList<TrHealthMetricDto> Metrics { get; init; } = [];
     public IReadOnlyList<TrHealthMetricDto> Systems { get; init; } = [];
+    public IReadOnlyList<TrSourceCoverageDto> SourceCoverage { get; init; } = [];
+    public IReadOnlyList<TrSourcePlanDto> SourcePlan { get; init; } = [];
     public IReadOnlyList<TrHealthMetricDto> Remedies { get; init; } = [];
     public IReadOnlyList<TrHealthChartDto> Charts { get; init; } = [];
     public IReadOnlyList<TrHealthSampleDto> Samples { get; init; } = [];
@@ -411,6 +471,18 @@ public sealed record TrTroubleshootDto(
     string LogOutput,
     string Diagnostics,
     string InsightsText);
+
+public sealed record TrRfAnalysisDto(
+    string System,
+    long Start,
+    long End,
+    string Window,
+    bool HasEnoughPostChangeData,
+    string Summary,
+    IReadOnlyList<TrHealthMetricDto> Metrics,
+    IReadOnlyList<TrHealthMetricDto> Comparison,
+    IReadOnlyList<TrHealthMetricDto> RetuneTargets,
+    IReadOnlyList<TrHealthMetricDto> Recommendations);
 
 public sealed record TokenUsageSummaryDto(
     int Requests = 0,

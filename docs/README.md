@@ -1,373 +1,94 @@
-
-# Introduction
-<img align="right" src="logo-med.png"> `pizzawave` is a set of cross-platform .NET applications and tools for processing audio data streamed by the [callstream plugin](https://github.com/lilhoser/callstream) of [trunk-recorder](https://github.com/robotastic/trunk-recorder). The audio data consists of calls recorded by trunk-recorder from conventional and trunked radio systems, such as local fire/rescue/EMS. `pizzawave` tooling transcribes these calls to text using [OpenAI's Whisper AI model](https://openai.com/research/whisper) as exposed through [whisper.net toolchain](https://github.com/sandrohanea/whisper.net). Among other features, the application allows you to monitor and set alerts for keywords of interest.
-
-The `pizzawave` Visual Studio solution consists of these tools:
-* **pizzapi** - Cross-platform Avalonia UI for Linux/macOS/Windows (**recommended UI**) ([README](pizzapi.md))
-* **pizzaui** - Windows-only .NET Forms UI (**deprecated; maintenance-only**) ([README](../pizzaui/README.md))
-* **pizzacmd** - Cross-platform .NET command line application ([README](../pizzacmd/README.md))
-* **pizzalib** - Cross-platform .NET library used by all applications ([README](../pizzalib/README.md))
-
-## Quick Start
-
-1. **Install .NET 9.0** - Download from [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/9.0)
-2. **Clone and build** - `git clone` this repo, then `dotnet build`
-3. **Configure** - Run the app once to generate default settings, then edit `settings.json`
-4. **Connect** - Configure trunk-recorder with callstream plugin to send audio to your pizzawave instance
-
-See [Quick Start Guide](quickstart.md) for detailed instructions.
-
-# Version Compatibility
-
-| Component | Tested Version | Minimum Supported | Notes |
-|-----------|----------------|-------------------|-------|
-| .NET SDK | 9.0 | 8.0 | Building from source |
-| trunk-recorder | v2.6+ | v2.4 | Callstream plugin compatibility |
-| callstream plugin | Latest | N/A | Built with trunk-recorder |
-| Whisper model | GGML v3 | GGML v3 | whisper.net dependency |
-| Raspberry Pi OS | Bookworm (12) | Bullseye (11) | For pizzapi deployment |
-| Ubuntu/Debian | 24.04 | 20.04 | Desktop/server deployments |
-
-# Security Considerations
-
-### Credential Storage
-
-**Warning**: The `settings.json` configuration file may contain sensitive credentials (email passwords, API keys, SFTP passwords). By default, these are stored in plaintext on disk.
-
-**Recommendations**:
-1. **Restrict file permissions** on your configuration file:
-   ```bash
-   chmod 600 ~/.config/pizzawave/settings.json
-   ```
-
-2. **Use app-specific passwords** for email accounts (especially Gmail) rather than your main account password. Enable 2FA on your email account first, then generate an app-specific password for pizzawave.
-
-3. **Treat `settings.json` as sensitive**. Current builds persist email credentials in `settings.json`; do not assume environment-variable overrides are available.
-
-4. **Encrypt your disk** if storing sensitive configuration on portable devices or systems with physical access risks.
-
-### Network Security
-
-- Audio streams and transcriptions are transmitted unencrypted over the network between trunk-recorder and pizzawave
-- For production deployments on untrusted networks, consider:
-  - Running both components on the same machine (localhost)
-  - Using VPN or SSH tunneling for remote access
-  - Implementing network-level encryption at the firewall/router level
-
-# Performance Benchmarks
-
-Expected performance characteristics on various hardware configurations:
-
-| Hardware | Transcription Latency | Memory Usage | CPU Usage | Notes |
-|----------|----------------------|--------------|-----------|-------|
-| Raspberry Pi 5 (8GB) | 3-8 seconds/call | ~800MB | 20-40% (1 core) | Baseline ARM deployment |
-| Raspberry Pi 4 (4GB) | 8-15 seconds/call | ~600MB | 40-60% (multiple cores) | Slower, may struggle with high call volume |
-| Intel i5-12400 | 1-3 seconds/call | ~500MB | 5-15% (1 core) | Desktop deployment |
-| AMD Ryzen 5 5600X | 1-2 seconds/call | ~500MB | 5-15% (1 core) | Desktop deployment |
-
-### Latency Factors
-
-Transcription latency depends on:
-- **Call duration**: Longer calls take longer to transcribe
-- **Audio quality**: Noisy or unclear audio may require more processing
-- **Model size**: Larger Whisper models (e.g., `large-v3`) are more accurate but slower
-- **Hardware**: CPU speed and RAM availability
-
-### Memory Optimization
-
-To reduce memory usage:
-1. Use smaller Whisper models (`base` or `small` instead of `large`)
-2. Reduce `TraceLevelApp` to `Warning` or `Error`
-3. Disable WAV file saving (`WavFileLocation`: "")
-4. Limit concurrent connections from trunk-recorder
-
-### CPU Optimization
-
-To reduce CPU usage:
-1. Use quantized Whisper models (e.g., `ggml-base-q5_k_m`)
-2. Enable audio filtering in callstream to reduce noise before transcription
-3. Process calls asynchronously (default behavior)
-
-# Requirements
-
-Regardless of whether you choose to use the UI, command line application, or roll your own application that uses the cross-platform library, you will need to observe these requirements:
-
-* A Linux system running trunk-recorder with the [callstream plugin](https://github.com/lilhoser/callstream) configured correctly
-* An operating system capable of running .NET 9.0 runtime (e.g, Win, Lin or Mac)
-    * The pizzawave tools currently target .NET 9.0, but if you are building from source, earlier versions should work as well.
-* The requirements as specified in the tool of choice:
-    * `pizzapi`: Cross-platform (Linux/macOS/Windows) | [README](pizzapi.md)
-    * `pizzaui`: Windows-only, deprecated (maintenance-only) | [README](../pizzaui/README.md)
-    * `pizzacmd`: All supported platforms | [README](../pizzacmd/README.md)
-    * `pizzalib`: All supported platforms | [README](../pizzalib/README.md)
-
-# Architecture
-
-<img align="center" src="pizzawave-architecture.png">
-
-As shown in the illustration, pizzawave uses a `server`-`client` model, where the server is typically `pizzapi` (recommended UI) or command line application (`pizzacmd`), and the client is one or more trunk-recorder systems. `pizzaui` remains available on Windows as a deprecated maintenance-only option. This design allows pizzawave to accept radio transmissions from multiple instances of trunk-recorder, which might be recording audio data from separate SDR device arrays monitoring broadcasts from different trunked radio systems.
-
-Pizzawave listens for audio data from trunk-recorder systems, translates the data into textual transcriptions using Whisper AI, and processes alert rules to notify you of interesting broadcasts.
-
-Note that it is possible (and even desirable) to run `pizzawave` on the same system running trunk-recorder. In this setup, you would of course need to use `pizzacmd` or `pizzapi` which are cross-platform.
-
-# Building from Source
-
-See [Building Guide](building.md) for detailed instructions for all platforms.
-
-## Quick Build Reference
-
-### Windows
-Use Visual Studio Community Edition (free) or `dotnet build` from command line.
-
-### Mac and Linux
-
-* [Install .NET 9.0](https://learn.microsoft.com/en-us/dotnet/core/install/)
-* Clone this repo
-* CD into repo source
-* Run `dotnet build --runtime <RID>` where [RID can be found here](https://learn.microsoft.com/en-us/dotnet/core/rid-catalog)
-
-Build output is organized in the `artifacts/` folder by project.
-
-### Developing on Linux/Mac
-
-Use VS Code with the C# extension. To debug, use a launch configuration such as:
-
-```
-{
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "type": "coreclr",
-            "request": "launch",
-            "preLaunchTask": "dotnet: build /home/<USER>/pizzawave/pizzacmd/pizzacmd.csproj",
-            "program": "/home/<USER>/pizzawave/artifacts/pizzacmd/bin/Debug/net9.0/pizzacmd",
-            "name": "Test pizzawave",
-            "args": ["--talkgroups=/home/<USER>/my_talkgroups.csv"]
-        }
-    ]
-}
-```
-
-# Configuration
-
-Pizzawave configuration lives in `<user profile>/pizzawave/settings.json`. Locations by platform:
-* **Windows**: `C:\Users\<user>\AppData\Roaming\pizzawave\settings.json`
-* **Linux**: `~/.config/pizzawave/settings.json`
-* **macOS**: `~/.config/pizzawave/settings.json`
-
-Please see the READMEs for each individual tool you are using for what settings options are available and how to use them in your setup. `pizzaui` and `pizzapi` include a graphical settings editor, but you can always create the file manually. If you run the UI or command line application without a settings file, the default one will be created in the location specified above.
-
-Canonical references:
-* [Settings Schema](settings-schema.md)
-* [Insights Behavior Matrix](insights-behavior-matrix.md)
-* [Operational Limits](operational-limits.md)
-* [Email SMTP Troubleshooting](email-smtp-troubleshooting.md)
-* [pizzapi Guide](pizzapi.md) - includes Trunk Recorder troubleshooting modes and baseline behavior
-
-## Talkgroup Mapping Lifecycle (Current)
-
-`pizzapi` now uses a mapping-first talkgroup workflow:
-
-1. In `Settings -> Talkgroups`, use `Import CSV` (existing RR/TR CSV) or `Build CSV` (crawl RadioReference SID URL and parse Talkgroups tables).
-2. Imported/built rows are staged in the mapping editor table.
-3. Click `Apply` to make mappings live.
-
-Authoritative mapping storage:
-- `talkgroup-mappings.json` in the pizzawave working directory.
-- `settings.json` `Talkgroups` is no longer the source of truth for UI talkgroup resolution.
-
-On `Build CSV` success:
-- `pizzapi` exports a Trunk Recorder-compatible CSV automatically:
-  - `talkgroups-tr-<sid>.csv`
-  - columns: `Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category`
-
-On `Apply`:
-- Live call manager is stopped, mapping snapshot is atomically replaced from staged rows, then live call manager is restarted.
-- Historical range views are refreshed in the background so range/insights lookup uses the same mapping snapshot.
-- There is no separate mapping draft file; only staged in-memory edits and persisted `talkgroup-mappings.json`.
-
-_Important_: Make sure your `trunk-recorder` system is configured to connect to the right IP address. In an exotic scenario where you're running `pizzacmd` from both a Windows host system and a WSL2 Ubuntu system, the host system and the virtual Ubuntu system will have different IP addresses! In this scenario, you might forget to set the correct IP address on the `trunk-recorder` system, and only one of these machines will receive audio data, while the other might be stuck on this:
-
-```
-StreamServer Verbose: 1 : 3/22/2024 3:39 PM: Listening on port 9123
-```
-
-# Deployment
-
-See [Deployment Guide](deployment.md) for detailed instructions on deploying to:
-* **WSL2** - Test on Windows using Windows Subsystem for Linux
-* **Raspberry Pi** - Deploy using .deb package for ARM64 devices
-* **Linux servers** - Run as a systemd service
-
-If you want automation, start with the `scripts` folder:
-* `pizzapi-upgrade.sh` - Automates installing/deploying the latest `pizzapi` UI `.deb` package
-* `setup_trunk_recorder.sh` - Automates building, installing, and configuring trunk-recorder
-* `tr_tune.sh` - Unified Trunk Recorder tuning workflow (control-channel sweep, error sweep, SDR bakeoff)
-* `tr_health_collect.sh` - Flat-file Trunk Recorder health collector used by Troubleshooting UI on Pi deployments
-
-See [scripts/README.md](../scripts/README.md) for complete usage and tuning workflow examples.
-
-## Quick Deploy Reference
-
-### Raspberry Pi (ARM64)
-```bash
-sudo dpkg -i pizzapi_*.deb
-sudo apt-get install -f  # Install dependencies
-```
-
-### WSL2 (x64)
-```bash
-sudo dpkg -i pizzapi_*.deb
-sudo apt-get install -f  # Install dependencies
-```
-
-# Running
-
-## Live captures
-
-To start live capture in current `pizzapi`/`pizzaui` builds, launch the app and switch to `Radio` if needed. With `AutostartListener=true` (default), the listener starts automatically and begins receiving callstream traffic. In `pizzapi`, Radio defaults to `24h`: startup primes the last 24 hours from capture history, then the in-memory 24h window rolls forward as new live calls arrive. Other Radio ranges are historical disk lookups.
-
-Whether you use `pizzaui`, `pizzacmd` or your own .NET application built on `pizzalib`, all calls streamed in real-time from a `callstream` server will be stored in a `capture`, which is a folder in the root working directory (`<user profile>\pizzawave\`). When you stop your live session with the `callstream` server, the `capture` is ended and a new capture will be created if you reconnect later. Older captures can be loaded in `pizzawave` tooling later by opening the `capture` folder directly.
-
-The `capture` folder consists of:
-
-* `calljournal.json`: Each line contains a JSON-serialized `TranscribedCall` structure. The audio data can be linked to this record via the `Location` field.
-* `<timestamp>.mp3`: call audio files
-
-The call journal can be deserialized into a list of `TranscribedCall` objects using `NewtonSoft.Json` as follows:
-
-```
-var lines = File.ReadAllLines("calljournal.json");
-var calls = new List<TranscribedCall>();
-foreach (var line in lines)
-{
-    var call = (TranscribedCall)JsonConvert.DeserializeObject(line, typeof(TranscribedCall))!;
-    calls.Add(call);
-}
-```
-
-## Offline captures
-
-The [callstream plugin](https://github.com/lilhoser/callstream) allows you to redirect call records to an SFTP server. These call records are stored on disk in a raw binary format identical to data streamed to a live capture. These are referred to as `offline captures` in pizzawave parlance. The `callstream` plugin uploads offline capture records to the SFTP server according to the following naming and organization convention:
-* YEAR
-    * MONTH
-       * DAY
-           * HOUR
-               * YEAR-MONTH-DAY.HOURMINUTESECOND.bin.bin
-
-In `pizzapi`, configure `Settings -> Archives` to browse these SFTP archives directly from the Radio UI. `Archive...` lists remote archive folders/files, can filter by date range, downloads the selected item to the separate archive cache, and then loads it as an `ARCHIVE` session.
-
-`pizzapi` keeps SFTP archive data separate from live/local history:
-* Normal live/local Radio views read from the `captures` folder.
-* SFTP archive downloads default to `offline/sftp-cache` under the pizzawave working directory.
-* Loading an archive does not copy data into `captures`.
-* Use `Return to Live + Local` to leave archive mode and restore the normal live/local pane of glass.
-
-Offline captures can also be loaded at any directory level by `pizzaui` or by the following code (`pizzalib` required):
-
-```
-var targets = Directory.GetFiles(offlineDir, "*.*", SearchOption.AllDirectories).ToList();
-foreach (var file in targets)
-{
-    using (var stream = new MemoryStream(File.ReadAllBytes(file)))
-    {
-        var wavStream = new WavStreamData(m_Settings);
-        var cancelSource = new CancellationTokenSource();
-        var result = await wavStream.ProcessClientData(stream, cancelSource);
-        if (result)
-        {
-            var call = new TranscribedCall();
-            call.UniqueId = Guid.NewGuid();
-
-            try
-            {
-                var jsonObject = wavStream.GetJsonObject();
-                call.StopTime = jsonObject["StopTime"]!.ToObject<long>();
-                call.StartTime = jsonObject["StartTime"]!.ToObject<long>();
-                call.CallId = jsonObject["CallId"]!.ToObject<long>();
-                call.Source = jsonObject["Source"]!.ToObject<int>();
-                call.Talkgroup = jsonObject["Talkgroup"]!.ToObject<long>();
-                call.PatchedTalkgroups = jsonObject["PatchedTalkgroups"]!.ToObject<List<long>>();
-                call.Frequency = jsonObject["Frequency"]!.ToObject<double>();
-                call.SystemShortName = jsonObject["SystemShortName"]!.ToObject<string>();
-            }
-            catch (Exception ex)
-            {
-                var err = $"Unable to parse JSON data: {ex.Message}";
-                throw new Exception(err);
-            }
-            
-            try
-            {
-                //
-                // Transcribe the wav audio
-                //
-                call.Transcription = await m_Whisper.TranscribeCall(wavStream.GetRawStream());
-                wavStream.RewindStream();
-            }
-            catch (Exception ex)
-            {
-                throw; // back up to worker thread
-            }
-        }
-    }
-}
-```
-
-Offline captures are slow to load, because many audio recordings are being transcribed at one time (whereas in live mode, calls are transcribed as they are received over the air). Legacy tooling may export loaded offline records into a live capture for easier retrieval later; current `pizzapi` SFTP archive sessions intentionally do not co-mingle downloaded archive data with live/local captures.
-
-## Alerts when loading captures
-
-Alerts are NOT processed when older captures are loaded, for both live and offline captures. You can see what alerts would match a loaded capture by navigating to `View`->`Show alert matches only`.
-
-# Other
-
-## Diagnostics
-
-All logs, model files, settings files, and alert data can be found in your operating system's user profile folder.
-* `alerts` - this folder contains WAV data for matched alerts
-* `Logs` - this folder contains all log files
-* `model` - this folder contains all auto-downloaded GGML model files
-
-If your logs are not detailed enough, adjust the `TraceLevelApp` parameter in `settings.json`.
-
-## What's up with the name?
-I dunno, I like pizza and Teenage Mutant Ninja Turtles, so it seemed to work.
-
-## My trunk-recorder/SDR setup
-
-For those that are new to SDRs (also check out this [Getting Started Guide](getting_started_with_sdrs.md)), I thought it might be helpful to show how I setup my SDR array:
-
-<img align="center" src="rtlsdr-setup.png">
-
-The discone antenna is mounted about 20 feet in the air above my workshop, using a 1.5" PVC mast and a sturdy set of stand-off mounts. I have a short 8-ft run of UHF cable that brings the signal indoors to a wall-mounted, inline amplifier, which then connects to a 25-ft run of UHF cable that splits the signal 6-ways to an SDR array. I did my best to match up the impedence among all these cables and adapters to 50-ohm. For a similar rig that favors transmission instead of Rx-only, 75-ohm would be better.
-
-Here is the parts list, all of which can be purchased on Amazon:
-* [Discone antenna](https://www.amazon.com/dp/B00QVPGKHU)
-* [Skywalker 12" stand-off brace mounts for mast](https://www.amazon.com/dp/B008USJ1CW)
-* [PL-259/UHF cable](https://www.amazon.com/dp/B08F74ZJ8B)
-* [RTL-SDR Blog LNA](https://www.amazon.com/dp/B07G14Q6XX)
-* [PL-259/UHF-F to F-type-M](https://www.amazon.com/dp/B0C36VGYKZ)
-* [PL-259/UHF-F to SMA-M](https://www.amazon.com/dp/B00CVQOOAI)
-* [DirecTV F-type 8-way splitter](https://www.amazon.com/gp/product/B0045DVIP4)
-* [F to SMA jumpers](https://www.amazon.com/gp/product/B09GVSHQJX)
-* Other adapters you might need: [SMA adapters](https://www.amazon.com/dp/B07FDHBS19)), [F-type to SMA adapters](https://www.amazon.com/dp/B0814BQHJN) and [these too](https://www.amazon.com/dp/B09KB9RM6Q)
-* [RTL-SDR v4 dongles](https://www.amazon.com/dp/B0CD745394)
-* [10-port USB hub](https://www.amazon.com/dp/B098KZMR4J) with sufficient port spacing for side-by-side RTL-SDR dongles!
-* [Monoprice USB extension cable](https://www.amazon.com/dp/B00AA0U08M)
-
-Also, here are some sample configurations to get you started:
-* [trunk-recorder with callstream and two SDRs](sample-config-callstream.json)
-* [trunk-recorder with callstream, openMhz and two SDRs](sample-config-openmhz.json) - requires an openmhz account and related API key
-
-See [Configuration Examples Explained](config-examples-explained.md) for a detailed walkthrough of these settings.
-
-## Resources
-
-* If you're struggling to setup trunk-recorder, I recommend [this extremely well-written intro guide](https://www.andrewmohawk.com/2020/06/12/trunked-radio-a-guide/).
-* Use [this tool](https://alertapi.alertpage.net/sdr/) to calculate some trunk-recorder configuration parameters like center frequency and to understand how many SDR dongles you will need to cover channels of interest
-* Other trunk-recorder related projects performing transcription:
-    * [trunk-transcribe](https://github.com/CrimeIsDown/trunk-transcribe)
-    * [trunk-recorder-stack](https://github.com/ge0metrix/trunk-recorder-stack)
-    * [tr-uploader](https://github.com/TheGreatCodeholio/icad_tr_uploader) and [icad_tone_detection_api](https://github.com/TheGreatCodeholio/icad_tone_detection_api)
+# PizzaWave Documentation
+
+PizzaWave is a radio-call monitoring stack built around a persistent Linux
+service named `pizzad`, trunk-recorder, the callstream plugin, a local
+SQLite/audio store, and a bundled web UI served by the engine.
+
+## Current Architecture
+
+`pizzad` runs on the same Linux host as trunk-recorder. It listens for
+callstream TCP payloads on localhost, stores call metadata in SQLite, stores
+audio under `/var/lib/pizzawave/audio`, transcribes calls, evaluates alert
+rules, generates AI summaries/incidents, collects trunk-recorder health, serves
+REST/SSE APIs, and hosts the React web UI.
+
+| Purpose | Path |
+| --- | --- |
+| Engine binary | `/opt/pizzawave/pizzad` |
+| Engine config | `/etc/pizzawave/pizzad.json` |
+| Engine database | `/var/lib/pizzawave/pizzad.db` |
+| Audio store | `/var/lib/pizzawave/audio` |
+| Import cache | `/var/lib/pizzawave/import-cache` |
+| Service | `pizzad.service` |
+| Web UI | `http://<host>:8080` |
+
+## Main Guides
+
+- [Quickstart](quickstart.md): install, first-run wizard, and basic validation.
+- [Deployment](deployment.md): package flow, service operations, and updates.
+- [Building](building.md): local development, self-contained packages, and deploy helpers.
+- [Settings Schema](settings-schema.md): current `pizzad.json` sections.
+- [Quick Reference](quick-reference.md): commands, paths, and API probes.
+- [Operational Limits](operational-limits.md): queue pressure, AI limits, imports, and hardware notes.
+- [Insights Behavior](insights-behavior-matrix.md): AI summaries, incidents, and alerts.
+- [Config Examples](config-examples-explained.md): trunk-recorder/callstream examples.
+- [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by the wizard.
+- [Email Troubleshooting](email-smtp-troubleshooting.md): SMTP alert setup.
+- [Current Status](current-status.md): active development handoff notes.
+- [Open TODO](open-todo.md): working backlog.
+
+## Runtime Flow
+
+1. trunk-recorder records radio calls and callstream sends completed call
+   payloads to `127.0.0.1:9123`.
+2. `pizzad` persists call metadata and audio before doing expensive work.
+3. The transcription queue processes calls using the configured engine.
+4. Quality classification marks empty, inaudible, short, noisy, or failed calls.
+5. Alert matching runs for live and imported calls. Imported calls store matches
+   but suppress live/email notification.
+6. AI summaries/incidents are generated within configured guardrails.
+7. The web UI receives live status through SSE and reads server-computed models
+   through REST APIs.
+
+## First-Run Setup
+
+After installing the package, open the web UI and complete the setup wizard. The
+wizard handles:
+
+- existing trunk-recorder detection and backup;
+- fresh trunk-recorder source-build flow when needed;
+- callstream patching;
+- talkgroup CSV import or creation;
+- monitored area mappings for geolocation;
+- transcription engine and model selection;
+- optional AI Insights through LM Link/OpenAI-compatible endpoints;
+- optional email alerts;
+- optional SFTP and local import configuration;
+- RTL-SDR calibration assistance.
+
+The wizard saves progress incrementally and enables full engine operation only
+after required gates are complete.
+
+## Public Interfaces
+
+`pizzad` exposes OpenAPI-documented REST endpoints under `/api/v1` and a live
+event stream at `/api/v1/events/stream`.
+
+Important endpoint groups:
+
+- `/api/v1/health`
+- `/api/v1/dashboard`
+- `/api/v1/categories/{category}`
+- `/api/v1/calls/{id}` and `/api/v1/calls/{id}/audio`
+- `/api/v1/alerts`
+- `/api/v1/incidents`
+- `/api/v1/system/*`
+- `/api/v1/settings/*`
+- `/api/v1/imports/*`
+- `/api/v1/events/stream`
+
+## Security Model
+
+The default target is private LAN, Tailscale, SSH tunnel, or a protected reverse
+proxy. The built-in token is simple admin protection, not a public-internet
+security boundary. The callstream ingest listener should remain localhost-only.

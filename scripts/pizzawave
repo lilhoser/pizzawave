@@ -22,6 +22,7 @@ Commands:
   install-engine --publish-dir PATH
   configure-callstream [--config /etc/trunk-recorder/config.json]
   setup-lmstudio [args...]            Install/configure LM Studio for insights
+  setup-faster-whisper                Install optional faster-whisper transcription runtime
   setup-trunk-recorder [args...]      Pass-through to setup_trunk_recorder.sh
   prime-tr-health [args...]           Import historical trunk-recorder health into pizzad SQLite
   install-stack [args...]             Source-build TR/callstream, then configure callstream
@@ -46,6 +47,9 @@ case "$cmd" in
     ;;
   setup-lmstudio)
     exec "$(script_path setup-lmstudio.sh)" "$@"
+    ;;
+  setup-faster-whisper)
+    exec "$(script_path setup-faster-whisper.sh)" "$@"
     ;;
   setup-trunk-recorder)
     exec "$(script_path setup_trunk_recorder.sh)" "$@"

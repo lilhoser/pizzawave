@@ -27,7 +27,10 @@ builder.Services.AddSingleton<EventStream>();
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<IngestControlService>();
 builder.Services.AddSingleton<EngineAlertService>();
+builder.Services.AddSingleton<TalkgroupCatalogService>();
 builder.Services.AddSingleton<TalkgroupResolver>();
+builder.Services.AddSingleton<CallAudioService>();
+builder.Services.AddSingleton<PoliceCodeService>();
 builder.Services.AddHttpClient<GeocodingService>();
 builder.Services.AddSingleton<AutomaticInsightsService>();
 builder.Services.AddSingleton<EnginePipeline>();
@@ -40,6 +43,8 @@ builder.Services.AddSingleton<TrHealthTroubleshootService>();
 builder.Services.AddSingleton<DiagnosticToolService>();
 builder.Services.AddSingleton<SettingsValidationService>();
 builder.Services.AddSingleton<SystemManagerService>();
+builder.Services.AddSingleton<TranscriptionBenchmarkService>();
+builder.Services.AddSingleton<SystemRecommendationService>();
 builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<SetupJobService>();
 builder.Services.AddHttpClient<SetupTalkgroupService>();
@@ -96,6 +101,9 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
     var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
     var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, ct);
     var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
+    var recentAudioIngested = await database.SumAudioSecondsStartedSinceAsync(recentStartUnix, ct);
+    var recentAudioTranscribed = await database.SumAudioSecondsTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
+    var pendingAudioSeconds = await database.SumPendingTranscriptionAudioSecondsAsync(ct);
     var transcriptionPerformance = pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
     var importBlockedReason = pendingTranscriptions > 0
         ? $"Imports are paused until the transcription queue drains. Pending transcriptions: {pendingTranscriptions:N0}."
@@ -123,10 +131,16 @@ app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, E
         pipeline.LiveTranscriptionWorkerCount,
         pipeline.WhisperThreadsPerWorker,
         throughputWindowMinutes,
+        pipeline.DeferredLiveQueueDepth,
         recentCalls,
         recentTranscribed,
         recentCalls / (double)throughputWindowMinutes,
         recentTranscribed / (double)throughputWindowMinutes,
+        recentAudioIngested,
+        recentAudioTranscribed,
+        recentAudioIngested / (double)throughputWindowMinutes,
+        recentAudioTranscribed / (double)throughputWindowMinutes,
+        pendingAudioSeconds,
         transcriptionPerformance.Count,
         transcriptionPerformance.AverageWallSeconds,
         transcriptionPerformance.AverageAudioSeconds,
@@ -427,6 +441,15 @@ app.MapGet("/api/v1/troubleshoot", async (HttpContext context, long? start, long
 .WithName("Troubleshoot")
 .WithOpenApi();
 
+app.MapGet("/api/v1/troubleshoot/rf-analysis", async (HttpContext context, string? system, long? start, long? end, AuthService authService, TrHealthTroubleshootService troubleshoot) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = new TimeRangeQuery(start, end).Resolve();
+    return Results.Ok(await troubleshoot.BuildRfAnalysisAsync(system, range.Start, range.End, context.RequestAborted));
+})
+.WithName("TrRfAnalysis")
+.WithOpenApi();
+
 app.MapPost("/api/v1/troubleshoot/insights", async (HttpContext context, TroubleshootInsightRequest request, AuthService authService, TrHealthTroubleshootService troubleshoot) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
@@ -542,6 +565,46 @@ app.MapGet("/api/v1/system/runtime", async (HttpContext context, AuthService aut
 .WithName("SystemRuntime")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/recommendations", async (HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await recommendations.BuildAsync(context.RequestAborted));
+})
+.WithName("SystemRecommendations")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/recommendations/{id}/state", async (string id, RecommendationStateRequest request, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        await recommendations.SetStateAsync(id, request.Action, context.RequestAborted);
+        return Results.Ok(await recommendations.BuildAsync(context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SystemRecommendationState")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/recommendations/{id}/apply", async (string id, RecommendationApplyRequest request, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var result = await recommendations.ApplyAsync(id, request.Action, request.Talkgroups, context.RequestAborted);
+        return Results.Ok(new { result.Applied, result.Message, recommendations = await recommendations.BuildAsync(context.RequestAborted) });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SystemRecommendationApply")
+.WithOpenApi();
+
 app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authService, EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, IngestControlService ingestControl) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
@@ -551,6 +614,9 @@ app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authS
     var pendingTranscriptions = await database.CountPendingTranscriptionCallsAsync(context.RequestAborted);
     var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, context.RequestAborted);
     var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), context.RequestAborted);
+    var recentAudioIngested = await database.SumAudioSecondsStartedSinceAsync(recentStartUnix, context.RequestAborted);
+    var recentAudioTranscribed = await database.SumAudioSecondsTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), context.RequestAborted);
+    var pendingAudioSeconds = await database.SumPendingTranscriptionAudioSecondsAsync(context.RequestAborted);
     var performance = pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
     var aiQueueLimit = cfg.AiInsights.MaxQueueDepthForManualSummary;
     var aiBlockedReason = aiQueueLimit > 0 && pipeline.QueueDepth > aiQueueLimit
@@ -570,6 +636,7 @@ app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authS
             call.IsImported,
             call.AudioPath))
         .ToList();
+    var topAudioTalkgroups = await database.ListTopAudioTalkgroupsAsync(recentStartUnix, 20, context.RequestAborted);
     return Results.Ok(new QueueSnapshotDto(
         pipeline.QueueDepth,
         pipeline.LiveQueueDepth,
@@ -581,10 +648,16 @@ app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authS
         pipeline.LiveTranscriptionWorkerCount,
         pipeline.WhisperThreadsPerWorker,
         throughputWindowMinutes,
+        pipeline.DeferredLiveQueueDepth,
         recentCalls,
         recentTranscribed,
         recentCalls / (double)throughputWindowMinutes,
         recentTranscribed / (double)throughputWindowMinutes,
+        recentAudioIngested,
+        recentAudioTranscribed,
+        recentAudioIngested / (double)throughputWindowMinutes,
+        recentAudioTranscribed / (double)throughputWindowMinutes,
+        pendingAudioSeconds,
         performance.Count,
         performance.AverageWallSeconds,
         performance.AverageAudioSeconds,
@@ -592,9 +665,25 @@ app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authS
         ingestControl.GetStatus(pipeline.QueueDepth),
         aiBlockedReason,
         importBlockedReason,
-        pendingCalls));
+        pendingCalls,
+        topAudioTalkgroups));
 })
 .WithName("SystemQueue")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/queue/transcription-benchmark", async (HttpContext context, TranscriptionBenchmarkRequest request, AuthService authService, TranscriptionBenchmarkService benchmark) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await benchmark.RunAsync(request.SampleCount, request.LookbackHours, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SystemQueueTranscriptionBenchmark")
 .WithOpenApi();
 
 app.MapPost("/api/v1/system/services/{service}/restart", async (string service, HttpContext context, AuthService authService, SetupJobService jobs) =>
@@ -667,6 +756,55 @@ app.MapGet("/api/v1/talkgroups", (HttpContext context, AuthService authService, 
     return Results.Ok(talkgroups.ListOptions());
 })
 .WithName("TalkgroupsList")
+.WithOpenApi();
+
+app.MapGet("/api/v1/talkgroups/catalog", (HttpContext context, AuthService authService, TalkgroupCatalogService catalog, EngineConfig cfg) =>
+{
+    if (!authService.IsReadAllowed(context))
+        return Results.Unauthorized();
+    var document = catalog.Load();
+    return Results.Ok(new
+    {
+        catalogPath = cfg.TrunkRecorder.TalkgroupCatalogPath,
+        generatedCsvPath = cfg.TrunkRecorder.TalkgroupsPath,
+        trRestartRecommended = false,
+        warning = "Talkgroup catalog changes affect new calls only. Existing calls keep their stored label and category.",
+        document
+    });
+})
+.WithName("TalkgroupCatalogRead")
+.WithOpenApi();
+
+app.MapPut("/api/v1/talkgroups/catalog", async (HttpContext context, TalkgroupCatalogDocument document, AuthService authService, TalkgroupCatalogService catalog) =>
+{
+    if (!authService.IsWriteAllowed(context))
+        return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.SaveAsync(document, generateTrCsv: true, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("TalkgroupCatalogReplace")
+.WithOpenApi();
+
+app.MapPost("/api/v1/talkgroups/catalog/generate-tr-csv", async (HttpContext context, AuthService authService, TalkgroupCatalogService catalog) =>
+{
+    if (!authService.IsWriteAllowed(context))
+        return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.GenerateTrCsvAsync(context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("TalkgroupCatalogGenerateTrCsv")
 .WithOpenApi();
 
 app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, SftpImportService sftpImports, LocalImportService localImports, SummaryService summaries) =>

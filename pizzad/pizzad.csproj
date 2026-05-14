@@ -11,14 +11,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\pizzalib\pizzalib.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <PackageReference Include="CsvHelper" Version="33.1.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
     <PackageReference Include="SSH.NET" Version="2024.2.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+    <PackageReference Include="VoskSharp" Version="0.0.2" />
+    <PackageReference Include="Whisper.net" Version="1.9.1-preview1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1-preview1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BuildProfile)' == 'Release_X64_CUDA' OR '$(BuildProfile)' == 'Debug_X64_CUDA'">
+    <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.1-preview1" />
+    <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.1-preview1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +33,10 @@
     </Content>
     <Content Update="web\**\*">
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+    <Content Include="scripts\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 

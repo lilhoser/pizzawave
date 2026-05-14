@@ -1,7 +1,6 @@
 using Renci.SshNet;
 using Renci.SshNet.Common;
 using Renci.SshNet.Sftp;
-using pizzalib;
 using System.Text.RegularExpressions;
 
 namespace pizzad;
@@ -161,7 +160,7 @@ public sealed class SftpImportService
             Status = "queued",
             Total = estimate.CandidateCount,
             Message = messageOverride ?? (span.TotalHours > _config.SftpImport.QuickImportMaxHours
-                ? "Large pizzastack prime import queued."
+                ? "Large PizzaWave prime import queued."
                 : "Quick SFTP import queued."),
             CreatedAtUtc = DateTime.UtcNow
         };
@@ -258,26 +257,9 @@ public sealed class SftpImportService
                         client.DownloadFile(candidate.RemotePath, output);
                     }
 
-                    var settings = new Settings
-                    {
-                        analogSamplingRate = _config.Transcription.AnalogSampleRate,
-                        listenPort = _config.Ingest.CallstreamPort
-                    };
-                    var raw = new RawCallData(settings);
-                    try
-                    {
-                        using var input = File.OpenRead(localPath);
-                        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        if (await raw.ProcessClientData(input, linked))
-                            await _pipeline.IngestRawCallAsync(raw, imported: true, ct);
-                        else
-                            raw.Dispose();
-                    }
-                    catch
-                    {
-                        raw.Dispose();
-                        throw;
-                    }
+                    using var input = File.OpenRead(localPath);
+                    var payload = await CallstreamPayload.ReadAsync(input, _config.Transcription.AnalogSampleRate, ct);
+                    await _pipeline.IngestRawCallAsync(payload, imported: true, ct);
 
                     completed++;
                     await _database.UpsertBackfillItemAsync("sftp", candidate.RemotePath, localPath, string.Empty, ToUnix(candidate.TimestampLocal), candidate.Size, "imported", string.Empty, ct);

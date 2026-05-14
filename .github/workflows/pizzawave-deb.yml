@@ -10,7 +10,7 @@ on:
   pull_request:
     paths:
       - 'pizzad/**'
-      - 'pizzalib/**'
+      - 'pizzad.Tests/**'
       - 'scripts/**'
       - '.github/workflows/pizzawave-deb.yml'
   push:
@@ -18,7 +18,7 @@ on:
       - main
     paths:
       - 'pizzad/**'
-      - 'pizzalib/**'
+      - 'pizzad.Tests/**'
       - 'scripts/**'
       - '.github/workflows/pizzawave-deb.yml'
 

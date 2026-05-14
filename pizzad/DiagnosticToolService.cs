@@ -1,4 +1,3 @@
-using pizzalib;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -246,13 +245,7 @@ public sealed class DiagnosticToolService
         var sw = Stopwatch.StartNew();
         try
         {
-            var settings = new Settings
-            {
-                TranscriptionEngine = "whisper",
-                WhisperModelFile = ResolveWhisperModelPath(modelPathOrLabel),
-                TranscriptionModelPreset = string.Empty
-            };
-            using var whisper = new pizzalib.Whisper(settings);
+            using var whisper = new WhisperTranscriber(ResolveWhisperModelPath(modelPathOrLabel), _config.Transcription.WhisperThreads, _logger);
             await whisper.Initialize();
             await using var file = File.OpenRead(audioPath);
             using var ms = new MemoryStream();
@@ -285,13 +278,7 @@ public sealed class DiagnosticToolService
         var sw = Stopwatch.StartNew();
         try
         {
-            var settings = new Settings
-            {
-                TranscriptionEngine = "whisper",
-                WhisperModelFile = model.Value,
-                TranscriptionModelPreset = string.Empty
-            };
-            using var whisper = new pizzalib.Whisper(settings);
+            using var whisper = new WhisperTranscriber(model.Value, _config.Transcription.WhisperThreads, _logger);
             await whisper.Initialize();
             await using var file = File.OpenRead(audioPath);
             using var ms = new MemoryStream();
@@ -313,12 +300,7 @@ public sealed class DiagnosticToolService
         var sw = Stopwatch.StartNew();
         try
         {
-            var settings = new Settings
-            {
-                TranscriptionEngine = "vosk",
-                VoskModelPath = model.Value
-            };
-            using var vosk = new pizzalib.VoskTranscriber(settings);
+            using var vosk = new VoskTranscriber(model.Value, _logger);
             await vosk.Initialize();
             await using var file = File.OpenRead(audioPath);
             using var ms = new MemoryStream();

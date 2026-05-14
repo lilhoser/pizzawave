@@ -16,13 +16,14 @@ public sealed class IngestControlService
     public string Reason { get; private set; } = string.Empty;
     public DateTime? PausedAtUtc { get; private set; }
     public long DroppedCalls { get; private set; }
+    public long DroppedCallsAtPause { get; private set; }
 
     public IngestControlStatusDto GetStatus(int queueDepth)
     {
         MaybeAutoResume(queueDepth);
         lock (_lock)
         {
-            return new IngestControlStatusDto(Paused, UntilQueueClear, Reason, PausedAtUtc, DroppedCalls);
+            return BuildStatus();
         }
     }
 
@@ -30,6 +31,8 @@ public sealed class IngestControlService
     {
         lock (_lock)
         {
+            if (!Paused)
+                DroppedCallsAtPause = DroppedCalls;
             Paused = true;
             UntilQueueClear = untilQueueClear;
             Reason = string.IsNullOrWhiteSpace(reason)
@@ -37,7 +40,7 @@ public sealed class IngestControlService
                 : reason.Trim();
             PausedAtUtc = DateTime.UtcNow;
             _logger.LogWarning("Live callstream ingest paused. untilQueueClear={UntilQueueClear}; queueDepth={QueueDepth}; reason={Reason}", UntilQueueClear, queueDepth, Reason);
-            return new IngestControlStatusDto(Paused, UntilQueueClear, Reason, PausedAtUtc, DroppedCalls);
+            return BuildStatus();
         }
     }
 
@@ -51,7 +54,8 @@ public sealed class IngestControlService
             UntilQueueClear = false;
             Reason = string.Empty;
             PausedAtUtc = null;
-            return new IngestControlStatusDto(Paused, UntilQueueClear, Reason, PausedAtUtc, DroppedCalls);
+            DroppedCallsAtPause = DroppedCalls;
+            return BuildStatus();
         }
     }
 
@@ -88,6 +92,13 @@ public sealed class IngestControlService
             UntilQueueClear = false;
             Reason = string.Empty;
             PausedAtUtc = null;
+            DroppedCallsAtPause = DroppedCalls;
         }
+    }
+
+    private IngestControlStatusDto BuildStatus()
+    {
+        var droppedThisPause = Paused ? Math.Max(0, DroppedCalls - DroppedCallsAtPause) : 0;
+        return new IngestControlStatusDto(Paused, UntilQueueClear, Reason, PausedAtUtc, DroppedCalls, droppedThisPause);
     }
 }

@@ -25,8 +25,8 @@ backup_existing_tr() {
   echo "$backup_dir"
 }
 
-remove_legacy_pizzapi() {
-  echo "Removing legacy pizzapi/tr-health artifacts. trunk-recorder is preserved."
+remove_legacy_apps() {
+  echo "Removing retired PizzaWave app/tr-health artifacts. trunk-recorder is preserved."
   systemctl stop pizzapi.service 2>/dev/null || true
   systemctl disable pizzapi.service 2>/dev/null || true
   systemctl stop tr-health-collector.timer 2>/dev/null || true
@@ -45,7 +45,7 @@ remove_legacy_pizzapi() {
   fi
   rm -rf /opt/pizzapi /etc/pizzapi /var/lib/pizzapi
   systemctl daemon-reload
-  echo "Legacy pizzapi/tr-health cleanup complete."
+  echo "Retired app/tr-health cleanup complete."
 }
 
 restart_tr() {
@@ -175,8 +175,8 @@ case "$ACTION" in
   backup-existing-tr)
     backup_existing_tr
     ;;
-  remove-legacy-pizzapi)
-    remove_legacy_pizzapi
+  remove-legacy-apps)
+    remove_legacy_apps
     ;;
   restart-tr)
     restart_tr "$@"
@@ -200,7 +200,7 @@ case "$ACTION" in
     install_sdr_tools
     ;;
   *)
-    echo "Usage: $0 {backup-existing-tr|remove-legacy-pizzapi|stop-tr|start-tr|stop-calibration|restart-tr|patch-callstream|restart-pizzad|install-sdr-tools}" >&2
+    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|stop-calibration|restart-tr|patch-callstream|restart-pizzad|install-sdr-tools}" >&2
     exit 2
     ;;
 esac

@@ -1,5 +1,4 @@
 using Renci.SshNet;
-using pizzalib;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
@@ -188,7 +187,7 @@ public sealed class SettingsValidationService
                 return new { ok = true, message = $"Whisper is configured with {Path.GetFileName(path)}. No calls are available yet, so a live transcription sample was skipped." };
             var testAudioPath = await PrepareTestAudioAsync(call, ct);
             var started = DateTime.UtcNow;
-            using var transcriber = new pizzalib.Whisper(LocalSettings("whisper"));
+            using var transcriber = new WhisperTranscriber(path, _config.Transcription.WhisperThreads, _logger);
             await transcriber.Initialize();
             var text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
             return TranscriptionResult(call, text, started);
@@ -203,7 +202,21 @@ public sealed class SettingsValidationService
                 return new { ok = true, message = $"Vosk is configured with {path}. No calls are available yet, so a live transcription sample was skipped." };
             var testAudioPath = await PrepareTestAudioAsync(call, ct);
             var started = DateTime.UtcNow;
-            using var transcriber = new pizzalib.VoskTranscriber(LocalSettings("vosk"));
+            using var transcriber = new VoskTranscriber(path, _logger);
+            await transcriber.Initialize();
+            var text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
+            return TranscriptionResult(call, text, started);
+        }
+        if (provider == "faster-whisper")
+        {
+            if (string.IsNullOrWhiteSpace(_config.Transcription.FasterWhisperPythonPath) || !File.Exists(_config.Transcription.FasterWhisperPythonPath))
+                return new { ok = false, message = $"faster-whisper Python runtime not found: {_config.Transcription.FasterWhisperPythonPath}" };
+            var call = await FindRecentAudioCallAsync(ct);
+            if (call == null)
+                return new { ok = true, message = $"faster-whisper is configured for model {_config.Transcription.FasterWhisperModel}. No calls are available yet, so a live transcription sample was skipped." };
+            var testAudioPath = await PrepareTestAudioAsync(call, ct);
+            var started = DateTime.UtcNow;
+            using var transcriber = new FasterWhisperTranscriber(_config, _logger);
             await transcriber.Initialize();
             var text = await transcriber.TranscribeCall(await LoadAudioAsync(testAudioPath, ct));
             return TranscriptionResult(call, text, started);
@@ -499,13 +512,6 @@ public sealed class SettingsValidationService
         if (process.ExitCode != 0)
             throw new InvalidOperationException(await process.StandardError.ReadToEndAsync(ct));
     }
-
-    private Settings LocalSettings(string engine) => new()
-    {
-        TranscriptionEngine = engine,
-        WhisperModelFile = ResolveWhisperPath(),
-        VoskModelPath = _config.Transcription.VoskModelPath
-    };
 
     private static async Task<MemoryStream> LoadAudioAsync(string path, CancellationToken ct)
     {

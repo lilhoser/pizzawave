@@ -107,10 +107,61 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task ReplaceCallAnnotationsAsync(long callId, IReadOnlyList<TranscriptAnnotation> annotations, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = (SqliteTransaction)tx;
+            delete.CommandText = "DELETE FROM call_annotations WHERE call_id=$call_id;";
+            Add(delete, "$call_id", callId);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var annotation in annotations)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = (SqliteTransaction)tx;
+            insert.CommandText = """
+                INSERT INTO call_annotations (
+                    call_id, kind, code, normalized_code, matched_text, meaning, confidence, source, details_json, created_at_utc)
+                VALUES (
+                    $call_id, $kind, $code, $normalized_code, $matched_text, $meaning, $confidence, $source, $details_json, $created_at_utc);
+                """;
+            Add(insert, "$call_id", callId);
+            Add(insert, "$kind", annotation.Kind);
+            Add(insert, "$code", annotation.Code);
+            Add(insert, "$normalized_code", annotation.NormalizedCode);
+            Add(insert, "$matched_text", annotation.MatchedText);
+            Add(insert, "$meaning", annotation.Meaning);
+            Add(insert, "$confidence", annotation.Confidence);
+            Add(insert, "$source", annotation.Source);
+            Add(insert, "$details_json", annotation.DetailsJson);
+            Add(insert, "$created_at_utc", DateTime.UtcNow.ToString("O"));
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<long> CountCallsStartedSinceAsync(long startUnix, CancellationToken ct)
     {
         await using var connection = OpenConnection();
         return await CountAsync(connection, "SELECT COUNT(*) FROM calls WHERE start_time >= $start;", startUnix, 0, ct);
+    }
+
+    public async Task<long> SumAudioSecondsStartedSinceAsync(long startUnix, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COALESCE(SUM(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0)
+            FROM calls
+            WHERE start_time >= $start;
+            """;
+        Add(command, "$start", startUnix);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct) ?? 0);
     }
 
     public async Task<long> CountTranscriptionCompletionsSinceAsync(DateTime utcStart, CancellationToken ct)
@@ -125,6 +176,124 @@ public sealed class EngineDatabase
             """;
         Add(command, "$start", utcStart.ToString("O"));
         return Convert.ToInt64(await command.ExecuteScalarAsync(ct) ?? 0);
+    }
+
+    public async Task<long> SumAudioSecondsTranscriptionCompletionsSinceAsync(DateTime utcStart, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COALESCE(SUM(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0)
+            FROM calls
+            WHERE updated_at_utc >= $start
+              AND transcription_status IN ('complete', 'poor_quality', 'failed');
+            """;
+        Add(command, "$start", utcStart.ToString("O"));
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct) ?? 0);
+    }
+
+    public async Task<long> SumPendingTranscriptionAudioSecondsAsync(CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COALESCE(SUM(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0)
+            FROM calls
+            WHERE transcription_status='pending'
+              AND length(trim(audio_path)) > 0;
+            """;
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct) ?? 0);
+    }
+
+    public async Task<List<QueueTalkgroupLoadDto>> ListTopAudioTalkgroupsAsync(long startUnix, int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                system_short_name,
+                talkgroup,
+                COALESCE(NULLIF(talkgroup_name, ''), 'TG ' || talkgroup) AS talkgroup_name,
+                COALESCE(NULLIF(category, ''), 'other') AS category,
+                COUNT(*) AS calls,
+                COALESCE(SUM(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0) AS audio_seconds,
+                COALESCE(AVG(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE NULL END), 0) AS average_audio_seconds,
+                COALESCE(SUM(CASE WHEN transcription_status='pending' THEN 1 ELSE 0 END), 0) AS pending_calls,
+                COALESCE(SUM(CASE WHEN transcription_status='pending' AND stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0) AS pending_audio_seconds
+            FROM calls
+            WHERE start_time >= $start
+            GROUP BY system_short_name, talkgroup, talkgroup_name, category
+            ORDER BY audio_seconds DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$start", startUnix);
+        Add(command, "$limit", Math.Clamp(limit, 1, 100));
+        var rows = new List<QueueTalkgroupLoadDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new QueueTalkgroupLoadDto(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetInt64(4),
+                reader.GetInt64(5),
+                reader.GetDouble(6),
+                reader.GetInt64(7),
+                reader.GetInt64(8)));
+        }
+        return rows;
+    }
+
+    public async Task<Dictionary<string, DateTime?>> ListRecommendationStatesAsync(CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT recommendation_id, snoozed_until_utc FROM recommendation_states;";
+        var rows = new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.GetString(0);
+                var value = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var snoozedUntil = string.IsNullOrWhiteSpace(value) ? (DateTime?)null : DateTime.Parse(value).ToUniversalTime();
+                rows[id] = snoozedUntil;
+            }
+        }
+        catch (SqliteException)
+        {
+            return rows;
+        }
+        return rows;
+    }
+
+    public async Task SaveRecommendationStateAsync(string recommendationId, DateTime? snoozedUntilUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO recommendation_states (recommendation_id, snoozed_until_utc, updated_at_utc)
+            VALUES ($id, $snoozed_until_utc, $updated_at_utc)
+            ON CONFLICT(recommendation_id) DO UPDATE SET
+                snoozed_until_utc=excluded.snoozed_until_utc,
+                updated_at_utc=excluded.updated_at_utc;
+            """;
+        Add(command, "$id", recommendationId);
+        Add(command, "$snoozed_until_utc", snoozedUntilUtc?.ToString("O") ?? string.Empty);
+        Add(command, "$updated_at_utc", DateTime.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task ClearRecommendationStateAsync(string recommendationId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM recommendation_states WHERE recommendation_id=$id;";
+        Add(command, "$id", recommendationId);
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task AddAlertMatchAsync(AlertMatchDto match, CancellationToken ct)
@@ -721,10 +890,14 @@ public sealed class EngineDatabase
         command.CommandText = """
             INSERT INTO tr_health_samples (
                 window_start_utc, window_end_utc, scope, decode_lines, decode_zero, decode_zero_pct,
+                cc_summary_decode_lines, cc_summary_decode_zero, cc_summary_decode_rate_total,
+                low_decode_warning_lines, low_decode_warning_zero, low_decode_warning_rate_total,
                 decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded, recorder_exhausted,
                 sample_stops, unable_source, tuning_err_samples, tuning_err_total_abs_hz, tuning_err_max_abs_hz)
             VALUES (
                 $window_start_utc, $window_end_utc, $scope, $decode_lines, $decode_zero, $decode_zero_pct,
+                $cc_summary_decode_lines, $cc_summary_decode_zero, $cc_summary_decode_rate_total,
+                $low_decode_warning_lines, $low_decode_warning_zero, $low_decode_warning_rate_total,
                 $decode_rate_total, $retunes, $calls_started, $calls_concluded, $update_not_grant, $no_tx_recorded, $recorder_exhausted,
                 $sample_stops, $unable_source, $tuning_err_samples, $tuning_err_total_abs_hz, $tuning_err_max_abs_hz);
             """;
@@ -734,6 +907,12 @@ public sealed class EngineDatabase
         Add(command, "$decode_lines", sample.DecodeLines);
         Add(command, "$decode_zero", sample.DecodeZero);
         Add(command, "$decode_zero_pct", sample.DecodeZeroPct);
+        Add(command, "$cc_summary_decode_lines", sample.CcSummaryDecodeLines);
+        Add(command, "$cc_summary_decode_zero", sample.CcSummaryDecodeZero);
+        Add(command, "$cc_summary_decode_rate_total", sample.CcSummaryDecodeRateTotal);
+        Add(command, "$low_decode_warning_lines", sample.LowDecodeWarningLines);
+        Add(command, "$low_decode_warning_zero", sample.LowDecodeWarningZero);
+        Add(command, "$low_decode_warning_rate_total", sample.LowDecodeWarningRateTotal);
         Add(command, "$decode_rate_total", sample.DecodeRateTotal);
         Add(command, "$retunes", sample.Retunes);
         Add(command, "$calls_started", sample.CallsStarted);
@@ -813,6 +992,12 @@ public sealed class EngineDatabase
                 DecodeZero = reader.GetInt32(reader.GetOrdinal("decode_zero")),
                 DecodeZeroPct = reader.GetDouble(reader.GetOrdinal("decode_zero_pct")),
                 DecodeRateTotal = reader.GetDouble(reader.GetOrdinal("decode_rate_total")),
+                CcSummaryDecodeLines = reader.GetInt32(reader.GetOrdinal("cc_summary_decode_lines")),
+                CcSummaryDecodeZero = reader.GetInt32(reader.GetOrdinal("cc_summary_decode_zero")),
+                CcSummaryDecodeRateTotal = reader.GetDouble(reader.GetOrdinal("cc_summary_decode_rate_total")),
+                LowDecodeWarningLines = reader.GetInt32(reader.GetOrdinal("low_decode_warning_lines")),
+                LowDecodeWarningZero = reader.GetInt32(reader.GetOrdinal("low_decode_warning_zero")),
+                LowDecodeWarningRateTotal = reader.GetDouble(reader.GetOrdinal("low_decode_warning_rate_total")),
                 Retunes = reader.GetInt32(reader.GetOrdinal("retunes")),
                 CallsStarted = reader.GetInt32(reader.GetOrdinal("calls_started")),
                 CallsConcluded = reader.GetInt32(reader.GetOrdinal("calls_concluded")),
@@ -1290,12 +1475,25 @@ public sealed class EngineDatabase
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "cc_summary_decode_lines", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "cc_summary_decode_zero", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "cc_summary_decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "low_decode_warning_lines", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "low_decode_warning_zero", "INTEGER NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "tr_health_samples", "low_decode_warning_rate_total", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "update_not_grant", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "no_tx_recorded", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "recorder_exhausted", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_samples", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_total_abs_hz", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "tuning_err_max_abs_hz", "REAL NOT NULL DEFAULT 0", ct);
+        await ExecuteNonQueryAsync(connection, """
+            CREATE TABLE IF NOT EXISTS recommendation_states (
+                recommendation_id TEXT PRIMARY KEY,
+                snoozed_until_utc TEXT NOT NULL DEFAULT '',
+                updated_at_utc TEXT NOT NULL
+            );
+            """, ct);
         await ExecuteNonQueryAsync(connection, """
             CREATE TABLE IF NOT EXISTS insight_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1348,6 +1546,7 @@ public sealed class EngineDatabase
             );
             CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id, id);
             """, ct);
+        await ExecuteNonQueryAsync(connection, CallAnnotationsSchemaSql, ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
         await NormalizeTrHealthScopesAsync(connection, ct);
         await RemoveDuplicateIncidentCallLinksAsync(connection, ct);
@@ -1431,6 +1630,12 @@ public sealed class EngineDatabase
                   AND decode_lines = 0
                   AND decode_zero = 0
                   AND decode_rate_total = 0
+                  AND cc_summary_decode_lines = 0
+                  AND cc_summary_decode_zero = 0
+                  AND cc_summary_decode_rate_total = 0
+                  AND low_decode_warning_lines = 0
+                  AND low_decode_warning_zero = 0
+                  AND low_decode_warning_rate_total = 0
                   AND retunes = 0
                   AND calls_started = 0
                   AND calls_concluded = 0
@@ -1564,6 +1769,23 @@ public sealed class EngineDatabase
         CREATE INDEX IF NOT EXISTS idx_calls_tg_start ON calls(talkgroup, start_time DESC);
         CREATE INDEX IF NOT EXISTS idx_calls_system_start ON calls(system_short_name, start_time DESC);
 
+        CREATE TABLE IF NOT EXISTS call_annotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
+            normalized_code TEXT NOT NULL DEFAULT '',
+            matched_text TEXT NOT NULL DEFAULT '',
+            meaning TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT '',
+            details_json TEXT NOT NULL DEFAULT '{}',
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(call_id) REFERENCES calls(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_call_annotations_call ON call_annotations(call_id, kind);
+
         CREATE TABLE IF NOT EXISTS alert_matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             call_id INTEGER NOT NULL,
@@ -1647,6 +1869,12 @@ public sealed class EngineDatabase
             decode_zero INTEGER NOT NULL DEFAULT 0,
             decode_zero_pct REAL NOT NULL DEFAULT 0,
             decode_rate_total REAL NOT NULL DEFAULT 0,
+            cc_summary_decode_lines INTEGER NOT NULL DEFAULT 0,
+            cc_summary_decode_zero INTEGER NOT NULL DEFAULT 0,
+            cc_summary_decode_rate_total REAL NOT NULL DEFAULT 0,
+            low_decode_warning_lines INTEGER NOT NULL DEFAULT 0,
+            low_decode_warning_zero INTEGER NOT NULL DEFAULT 0,
+            low_decode_warning_rate_total REAL NOT NULL DEFAULT 0,
             retunes INTEGER NOT NULL DEFAULT 0,
             calls_started INTEGER NOT NULL DEFAULT 0,
             calls_concluded INTEGER NOT NULL DEFAULT 0,
@@ -1730,5 +1958,24 @@ public sealed class EngineDatabase
 
         CREATE INDEX IF NOT EXISTS idx_backfill_status ON backfill_items(status, start_time);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_backfill_source_remote ON backfill_items(source, remote_path);
+        """;
+
+    private const string CallAnnotationsSchemaSql = """
+        CREATE TABLE IF NOT EXISTS call_annotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
+            normalized_code TEXT NOT NULL DEFAULT '',
+            matched_text TEXT NOT NULL DEFAULT '',
+            meaning TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT '',
+            details_json TEXT NOT NULL DEFAULT '{}',
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(call_id) REFERENCES calls(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_call_annotations_call ON call_annotations(call_id, kind);
         """;
 }

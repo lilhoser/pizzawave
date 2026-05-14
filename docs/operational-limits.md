@@ -1,29 +1,67 @@
 # Operational Limits
 
-Operational limits and protections in current builds.
+PizzaWave is designed to keep the radio pipeline durable first. Expensive work
+such as transcription, AI summaries, incident generation, and imports must be
+bounded so live call ingest does not become fragile.
 
-## Insights Pipeline
+## Queue Pressure
 
-| Limit | Value | Purpose |
-|---|---|---|
-| Unsummarized threshold | `50` calls | trigger summary generation |
-| Pending live call cap | `1000` calls | bound memory growth under load |
-| Adaptive batch size | `50/100/150/200` | catch up when queue depth rises |
-| Backoff on LM failures | up to `300s` | avoid repeated failing requests |
-| Prompt size cap | `120000` chars | bound LM request size |
-| Tile cap per category | `18` | prevent UI overload |
-| Daily digest per category | top `10` | bounded email digest size |
-| Summary retention | `30` days | bound disk usage |
+The status bar shows queue health. A healthy system should usually show a stable
+or draining transcription queue. On small ARM systems, short bursts are normal;
+continuous growth means the system is not keeping up.
 
-## UI and In-Memory Call List
+Useful indicators:
 
-| Limit | Key | Default |
-|---|---|---|
-| Auto cleanup enabled | `AutoCleanupCalls` | `true` |
-| Max calls retained | `MaxCallsToKeep` | `100` |
+- pending transcription count;
+- recent ingest rate;
+- recent transcription rate;
+- estimated drain direction;
+- dropped calls while ingest is paused.
 
-## Guidance
+The call count includes persisted calls, including calls that are pending,
+failed, or quality-pruned. It is not the same as “valid transcriptions”.
 
-- For high-volume systems, keep `AutoCleanupCalls=true`.
-- Keep `TraceLevelApp` at `Warning`/`Error` in always-on deployments unless debugging.
-- Ensure LM host capacity is sized for peak call rates if Insights is enabled.
+## Transcription Throughput
+
+Raspberry Pi-class hardware may not keep up with high daytime traffic using
+larger Whisper models. Prefer:
+
+- faster-whisper where supported;
+- tiny/base models for live catch-up;
+- larger fallback models only for failed or low-quality calls;
+- low concurrency on constrained devices;
+- pausing ingestion only as an explicit emergency action.
+
+## AI Guardrails
+
+AI summary and incident generation can be much more expensive than
+transcription. PizzaWave limits automatic backfill with `aiInsights`
+lookback/budget settings.
+
+Large historical imports should not trigger full-range AI summarization
+automatically. Generate summaries only for intentional ranges.
+
+## Import Limits
+
+SFTP and local imports can create large transcription backlogs. The UI should
+disable or warn on imports while queue pressure is high. Large imports should
+estimate work before running and support cancellation.
+
+## RF Health
+
+Poor decode quality, retunes, recorder exhaustion, or bad source coverage can
+increase call fragmentation and transcription failures. Use **System -> Trunk
+Recorder** and RF Analysis to compare:
+
+- control-channel decode rate;
+- decode-zero rate;
+- retunes;
+- no-transmission outcomes;
+- update-not-grant counts;
+- recorder/source coverage.
+
+## Storage
+
+Audio is stored indefinitely by default. Monitor `/var/lib/pizzawave/audio` and
+database size. Retention policies are a future operational feature; do not rely
+on automatic cleanup unless it is explicitly configured.

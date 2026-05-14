@@ -33,6 +33,8 @@ public sealed class SystemManagerService
         var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
         var recentCalls = await _database.CountCallsStartedSinceAsync(recentStartUnix, ct);
         var recentTranscribed = await _database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
+        var recentAudioIngested = await _database.SumAudioSecondsStartedSinceAsync(recentStartUnix, ct);
+        var recentAudioTranscribed = await _database.SumAudioSecondsTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
         var transcriptionPerformance = _pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
         var trUnitName = string.IsNullOrWhiteSpace(_config.TrunkRecorder.LogServiceName)
             ? "trunk-recorder"
@@ -66,10 +68,16 @@ public sealed class SystemManagerService
                 liveTranscriptionWorkers = _pipeline.LiveTranscriptionWorkerCount,
                 whisperThreadsPerWorker = _pipeline.WhisperThreadsPerWorker,
                 throughputWindowMinutes,
+                deferredLiveQueueDepth = _pipeline.DeferredLiveQueueDepth,
                 recentCallsIngested = recentCalls,
                 recentCallsTranscribed = recentTranscribed,
                 recentIngestPerMinute = recentCalls / (double)throughputWindowMinutes,
                 recentTranscribedPerMinute = recentTranscribed / (double)throughputWindowMinutes,
+                recentAudioSecondsIngested = recentAudioIngested,
+                recentAudioSecondsTranscribed = recentAudioTranscribed,
+                recentAudioSecondsIngestedPerMinute = recentAudioIngested / (double)throughputWindowMinutes,
+                recentAudioSecondsTranscribedPerMinute = recentAudioTranscribed / (double)throughputWindowMinutes,
+                pendingAudioSeconds = await _database.SumPendingTranscriptionAudioSecondsAsync(ct),
                 recentTranscriptionSamples = transcriptionPerformance.Count,
                 averageTranscriptionSeconds = transcriptionPerformance.AverageWallSeconds,
                 averageAudioSeconds = transcriptionPerformance.AverageAudioSeconds,

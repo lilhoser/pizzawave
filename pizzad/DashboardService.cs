@@ -25,21 +25,19 @@ public sealed class DashboardService
         "by the way", "the way", "the road", "county road", "street court"
     };
     private readonly EngineDatabase _database;
-    private readonly TalkgroupResolver _talkgroups;
     private readonly EngineConfig _config;
     private readonly GeocodingService _geocoding;
 
-    public DashboardService(EngineDatabase database, TalkgroupResolver talkgroups, EngineConfig config, GeocodingService geocoding)
+    public DashboardService(EngineDatabase database, EngineConfig config, GeocodingService geocoding)
     {
         _database = database;
-        _talkgroups = talkgroups;
         _config = config;
         _geocoding = geocoding;
     }
 
     public async Task<DashboardDto> BuildDashboardAsync(long start, long end, CancellationToken ct)
     {
-        var calls = ApplyProfile(Enrich(await _database.ListCallsAsync(start, end, null, ct)));
+        var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct));
         var alerts = (await _database.ListAlertMatchesAsync(start, end, ct)).Where(a => Allows(a.Category, a.Talkgroup)).ToList();
         var incidents = (await ListIncidentsAsync(start, end, ct)).Where(i => i.Calls.Any(c => calls.Any(call => call.Id == c.CallId))).ToList();
         var tokenUsage = await _database.GetTokenUsageAsync(start, end, ct);
@@ -88,7 +86,7 @@ public sealed class DashboardService
     public async Task<CategoryPageDto> BuildCategoryPageAsync(string category, string groupBy, long start, long end, CancellationToken ct)
     {
         category = NormalizeCategory(category);
-        var calls = ApplyProfile(Enrich(await _database.ListCallsAsync(start, end, null, ct)))
+        var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.Category, category, StringComparison.OrdinalIgnoreCase))
             .ToList();
         var insightEvents = await _database.ListInsightEventsAsync(start, end, ct);
@@ -129,9 +127,6 @@ public sealed class DashboardService
             _ => profile.IncludeOther
         };
     }
-
-    private List<EngineCall> Enrich(List<EngineCall> calls) =>
-        calls.Select(_talkgroups.Enrich).ToList();
 
     private static IReadOnlyList<CategoryInsightDto> BuildCategoryInsights(List<InsightEventRecordDto> insightEvents, List<EngineCall> categoryCalls)
     {
@@ -667,9 +662,15 @@ public sealed class DashboardService
             .Select(g =>
             {
                 var groupRows = g.ToList();
-                var decodeLines = groupRows.Sum(r => r.DecodeLines);
-                var decodeZero = groupRows.Sum(r => r.DecodeZero);
-                var decodeRateTotal = groupRows.Sum(r => r.DecodeRateTotal);
+                var decodeLines = groupRows.Sum(r => r.CcSummaryDecodeLines);
+                var decodeZero = groupRows.Sum(r => r.CcSummaryDecodeZero);
+                var decodeRateTotal = groupRows.Sum(r => r.CcSummaryDecodeRateTotal);
+                if (decodeLines == 0)
+                {
+                    decodeLines = groupRows.Sum(r => r.DecodeLines);
+                    decodeZero = groupRows.Sum(r => r.DecodeZero);
+                    decodeRateTotal = groupRows.Sum(r => r.DecodeRateTotal);
+                }
                 var calls = groupRows.Sum(r => r.CallsConcluded);
                 var pct = decodeLines == 0 ? 0 : decodeZero * 100.0 / decodeLines;
                 return new DecodeSystemStat(g.Key, decodeLines, decodeZero, decodeRateTotal, calls, pct);
@@ -685,8 +686,8 @@ public sealed class DashboardService
             : new KpiDto("TR Decode 0%", $"{global.Value.ZeroPercent:F1}%", $"Weighted by {global.Value.Weight:N0} concluded calls");
 
         var globalRateKpi = global == null
-            ? new KpiDto("TR Decode Rate", "N/A", "No TR decode samples in selected range")
-            : new KpiDto("TR Decode Rate", $"{global.Value.AvgRate:F2}/sec", $"Weighted by {global.Value.Weight:N0} concluded calls");
+            ? new KpiDto("TR CC Rate", "N/A", "No TR CC summary samples in selected range")
+            : new KpiDto("TR CC Rate", $"{global.Value.AvgRate:F2}/sec", $"Periodic Control Channel Decode Rates, weighted by {global.Value.Weight:N0} concluded calls");
 
         var worst = systems.OrderByDescending(s => s.DecodeZeroPercent).FirstOrDefault();
         var systemSummary = string.Join(", ", systems.Take(3).Select(s => $"{s.Label} {s.DecodeZeroPercent:F1}%/{s.Calls:N0} calls"));
@@ -710,10 +711,14 @@ public sealed class DashboardService
 
         var globalRows = fallbackRows.Where(r => string.Equals(r.Scope, "global", StringComparison.OrdinalIgnoreCase)).ToList();
         var rows = globalRows.Count > 0 ? globalRows : fallbackRows;
-        var lines = rows.Sum(r => r.DecodeLines);
+        var lines = rows.Sum(r => r.CcSummaryDecodeLines);
+        if (lines == 0)
+            lines = rows.Sum(r => r.DecodeLines);
         if (lines == 0)
             return null;
-        return (rows.Sum(r => r.DecodeZero) * 100.0 / lines, rows.Sum(r => r.DecodeRateTotal) / lines, lines);
+        var zero = rows.Sum(r => r.CcSummaryDecodeLines) > 0 ? rows.Sum(r => r.CcSummaryDecodeZero) : rows.Sum(r => r.DecodeZero);
+        var total = rows.Sum(r => r.CcSummaryDecodeLines) > 0 ? rows.Sum(r => r.CcSummaryDecodeRateTotal) : rows.Sum(r => r.DecodeRateTotal);
+        return (zero * 100.0 / lines, total / lines, lines);
     }
 
     private static bool IsDisplaySystemScope(string? scope)

@@ -4,7 +4,7 @@ set -euo pipefail
 WINDOW_MINUTES="${1:-5}"
 SERVICE_NAME="${TR_SERVICE_NAME:-trunk-recorder}"
 TR_CONFIG_PATH="${TR_CONFIG_PATH:-/etc/trunk-recorder/config.json}"
-OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzapi/tr-health}"
+OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzawave/tr-health}"
 SUMMARY_CSV="${OUT_DIR}/summary_5m.csv"
 
 mkdir -p "$OUT_DIR"

@@ -15,18 +15,19 @@ public sealed class TrHealthTroubleshootService
     private static readonly Regex TrScopeRegex = new(
         @"\]\s+\((?:info|error|warning|debug)\)\s+\[(?<scope>[^\]]+)\]",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RetuneTargetRegex = new(
+        @"\[(?<scope>[^\]]+)\]\s+Retuning to Control Channel:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly TrConfigService _trConfig;
-    private readonly TalkgroupResolver _talkgroups;
     private readonly ILogger<TrHealthTroubleshootService> _logger;
 
-    public TrHealthTroubleshootService(EngineConfig config, EngineDatabase database, TrConfigService trConfig, TalkgroupResolver talkgroups, ILogger<TrHealthTroubleshootService> logger)
+    public TrHealthTroubleshootService(EngineConfig config, EngineDatabase database, TrConfigService trConfig, ILogger<TrHealthTroubleshootService> logger)
     {
         _config = config;
         _database = database;
         _trConfig = trConfig;
-        _talkgroups = talkgroups;
         _logger = logger;
     }
 
@@ -46,9 +47,10 @@ public sealed class TrHealthTroubleshootService
             return rowStart >= start && rowEnd <= end;
         }).ToList();
 
+        var calls = await _database.ListCallsAsync(start, end, null, ct);
         var logOutput = TailLines(log, 300);
-        var health = BuildSummary(summaryRows, selectedRows, rows, bySystem, baseline);
-        var qualityAudit = BuildQualityAudit((await _database.ListCallsAsync(start, end, null, ct)).Select(_talkgroups.Enrich).ToList());
+        var health = BuildSummary(summaryRows, selectedRows, rows, calls, bySystem, baseline);
+        var qualityAudit = BuildQualityAudit(calls);
         var diagnostics = BuildDiagnostics(rows, summaryRows, selectedRows, baseline, bySystem, logOutput);
         return new TrTroubleshootDto(
             health,
@@ -57,6 +59,50 @@ public sealed class TrHealthTroubleshootService
             logOutput,
             diagnostics,
             "Click Generate Recommendation to send the current troubleshooting snapshot to the configured AI insights endpoint.");
+    }
+
+    public async Task<TrRfAnalysisDto> BuildRfAnalysisAsync(string? system, long start, long end, CancellationToken ct)
+    {
+        var allRows = await _database.ListHealthSamplesAsync(start, end, ct);
+        var systems = allRows
+            .Where(r => IsDisplaySystemScope(r.Scope))
+            .Select(r => r.Scope)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var selectedSystem = string.IsNullOrWhiteSpace(system)
+            ? systems.FirstOrDefault() ?? string.Empty
+            : system.Trim();
+        var rows = allRows
+            .Where(r => string.Equals(r.Scope, selectedSystem, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.WindowStartUtc)
+            .ToList();
+        var aggregate = Aggregate(rows);
+        var metrics = BuildRfMetricRows(aggregate);
+        var durationSeconds = Math.Max(1, end - start);
+        var priorStart = start - durationSeconds;
+        var priorRows = (await _database.ListHealthSamplesAsync(priorStart, start, ct))
+            .Where(r => string.Equals(r.Scope, selectedSystem, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var prior = Aggregate(priorRows);
+        var comparison = BuildRfComparisonRows(aggregate, prior);
+        var retuneTargets = await BuildRetuneTargetsAsync(selectedSystem, start, end, ct);
+        var recommendations = BuildRfRecommendations(aggregate, retuneTargets);
+        var hasEnoughPostChangeData = rows.Count >= 24 && (rows.Max(r => r.WindowEndUtc) - rows.Min(r => r.WindowStartUtc)).TotalHours >= 2;
+        var summary = rows.Count == 0
+            ? $"No stored TR health rows were found for {selectedSystem} in this window."
+            : $"{selectedSystem}: CC summary average {aggregate.CcSummaryAvgDecodeRate:F2} msg/sec, CC zero {aggregate.CcSummaryDecodeZeroPercent:F1}%, {aggregate.LowDecodeWarningLines:N0} low-decode warnings, {aggregate.Retunes:N0} retunes.";
+        return new TrRfAnalysisDto(
+            selectedSystem,
+            start,
+            end,
+            $"{DateTimeOffset.FromUnixTimeSeconds(start).LocalDateTime:g} - {DateTimeOffset.FromUnixTimeSeconds(end).LocalDateTime:g}",
+            hasEnoughPostChangeData,
+            summary,
+            metrics,
+            comparison,
+            retuneTargets,
+            recommendations);
     }
 
     public async Task<TroubleshootInsightResponse> GenerateInsightsAsync(long start, long end, bool bySystem, string baseline, CancellationToken ct)
@@ -207,7 +253,7 @@ public sealed class TrHealthTroubleshootService
     private static double Percent(int count, int total) =>
         total <= 0 ? 0 : count * 100.0 / total;
 
-    private TrHealthSummaryDto BuildSummary(List<TrHealthSampleDto> recentRows, List<TrHealthSampleDto> selectedRows, List<TrHealthSampleDto> baselineRows, bool bySystem, string baseline)
+    private TrHealthSummaryDto BuildSummary(List<TrHealthSampleDto> recentRows, List<TrHealthSampleDto> selectedRows, List<TrHealthSampleDto> baselineRows, List<EngineCall> selectedCalls, bool bySystem, string baseline)
     {
         if (recentRows.Count == 0)
         {
@@ -237,6 +283,8 @@ public sealed class TrHealthTroubleshootService
             SummaryText = BuildSummaryText(global, systemRows, last),
             Metrics = metrics,
             Systems = systemRows.Count == 0 ? [new TrHealthMetricDto("No system rows", "-", "No system-scoped log lines were parsed for this window.", false)] : systemRows,
+            SourceCoverage = BuildSourceCoverage(selectedCalls),
+            SourcePlan = BuildSourcePlan(selectedCalls),
             Remedies = remedies,
             Charts = BuildCharts(selectedRows, baselineRows, bySystem, baseline),
             Samples = selectedRows.OrderByDescending(r => r.WindowStartUtc).Take(500).ToList()
@@ -245,9 +293,10 @@ public sealed class TrHealthTroubleshootService
 
     private static List<TrHealthMetricDto> BuildMetricRows(TrHealthAggregate agg) =>
     [
-        new("Decode 0% rate", $"{agg.DecodeZeroPercent:F2}%", agg.DecodeWeightCalls > 0 ? $"Weighted by concluded-call volume across systems ({agg.DecodeWeightCalls:N0} calls)." : "Computed from decode sample lines; lower is better.", agg.DecodeZeroPercent >= 25.0),
-        new("Average decode rate", FormatDecodeRateWithConfidence(agg), "Computed from Control Channel Message Decode Rate lines.", HasSufficientDecodeSamples(agg) && agg.AvgDecodeRate <= 0.10),
-        new("Decode sample lines", agg.DecodeSampleLines.ToString("N0", CultureInfo.InvariantCulture), "Decode-rate confidence is low when this is small (shown as N/A).", agg.DecodeSampleLines < 20),
+        new("CC summary decode rate", FormatCcSummaryDecodeRateWithConfidence(agg), "Periodic trunk-recorder Control Channel Decode Rates value. This is the normal msg/sec metric discussed by TR users.", HasSufficientCcSummarySamples(agg) && agg.CcSummaryAvgDecodeRate < 10.0),
+        new("CC summary zero rate", $"{agg.CcSummaryDecodeZeroPercent:F2}%", "Percent of periodic Control Channel Decode Rates samples that were 0 msg/sec; lower is better.", HasSufficientCcSummarySamples(agg) && agg.CcSummaryDecodeZeroPercent >= 10.0),
+        new("Low-decode warnings", agg.LowDecodeWarningLines.ToString("N0", CultureInfo.InvariantCulture), "Count of Control Channel Message Decode Rate warning lines. These are symptoms that can trigger or accompany retunes, not the normal average CC rate.", agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2)),
+        new("Low-warning zero rate", $"{agg.LowDecodeWarningZeroPercent:F2}%", "Percent of low-decode warning lines reporting 0/sec.", agg.LowDecodeWarningLines >= 20 && agg.LowDecodeWarningZeroPercent >= 25.0),
         new("Control-channel retunes", agg.Retunes.ToString("N0", CultureInfo.InvariantCulture), "High counts can indicate weak/unstable control-channel reception or incorrect channel list.", agg.Retunes >= Math.Max(20, agg.Windows * 4)),
         new("Recorded calls concluded", agg.CallsConcluded.ToString("N0", CultureInfo.InvariantCulture), "Count of Concluding Recorded Call lines.", false),
         new("No transmissions recorded", agg.NoTxRecorded.ToString("N0", CultureInfo.InvariantCulture), "Calls where trunk-recorder reported no transmission audio was recorded.", agg.NoTxRecorded > 0),
@@ -267,13 +316,15 @@ public sealed class TrHealthTroubleshootService
             {
                 var agg = Aggregate(g.ToList());
                 var issue = agg.DecodeZeroPercent >= 25.0
+                    || (HasSufficientCcSummarySamples(agg) && (agg.CcSummaryAvgDecodeRate < 10.0 || agg.CcSummaryDecodeZeroPercent >= 10.0))
+                    || agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2)
                     || agg.SampleStops > 0
                     || agg.UnableSource > 0
                     || agg.NoTxRecorded > 0
                     || agg.RecorderExhausted > 0
                     || (agg.CallsConcluded >= 100 && HasSufficientDecodeSamples(agg) && agg.AvgDecodeRate <= 0.10)
                     || (agg.CallsConcluded >= 100 && agg.DecodeSampleLines < 20);
-                var notes = $"decodeSamples={agg.DecodeSampleLines:N0}, decode0={agg.DecodeZeroPercent:F2}%, avg={FormatDecodeRateWithConfidence(agg)}, retunes={agg.Retunes:N0}, calls={agg.CallsConcluded:N0}, noTx={agg.NoTxRecorded:N0}, recorderExhausted={agg.RecorderExhausted:N0}";
+                var notes = $"ccSummary={FormatCcSummaryDecodeRateWithConfidence(agg)} ({agg.CcSummaryDecodeSampleLines:N0} samples, zero={agg.CcSummaryDecodeZeroPercent:F2}%), lowWarnings={agg.LowDecodeWarningLines:N0} (zero={agg.LowDecodeWarningZeroPercent:F2}%), retunes={agg.Retunes:N0}, calls={agg.CallsConcluded:N0}, noTx={agg.NoTxRecorded:N0}, recorderExhausted={agg.RecorderExhausted:N0}";
                 return new TrHealthMetricDto(g.Key, issue ? "Issues detected" : "No obvious issues", notes, issue);
             })
             .ToList();
@@ -284,10 +335,12 @@ public sealed class TrHealthTroubleshootService
         var rows = new List<TrHealthMetricDto>();
         if (agg.SampleStops > 0)
             rows.Add(new("Sample-source stops", "-", "Check SDR USB stability, power, hub/cable quality, and whether the SDR process is being starved.", true));
-        if (agg.DecodeZeroPercent >= 40.0)
-            rows.Add(new("Decode rate frequently zero", "-", "Verify antenna/feedline, control-channel frequency list, gain/PPM calibration, and local RF noise.", true));
-        else if (agg.DecodeZeroPercent >= 25.0)
-            rows.Add(new("Decode rate intermittently zero", "-", "Watch signal quality and consider gain/PPM adjustment.", true));
+        if (HasSufficientCcSummarySamples(agg) && agg.CcSummaryAvgDecodeRate < 10.0)
+            rows.Add(new("Low CC summary decode rate", "-", "The periodic Control Channel Decode Rates average is low. Verify antenna/feedline, gain/PPM calibration, local RF noise, and whether this host can reliably hear the active control channel.", true));
+        if (HasSufficientCcSummarySamples(agg) && agg.CcSummaryDecodeZeroPercent >= 10.0)
+            rows.Add(new("CC summary decode hits zero", "-", "The normal control-channel summary occasionally reaches 0 msg/sec, which indicates real control-channel decode loss.", true));
+        if (agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2))
+            rows.Add(new("Frequent low-decode warnings", "-", "TR is repeatedly logging Control Channel Message Decode Rate warnings. Compare these with retune targets to identify weak learned alternates or RF dips.", true));
         if (agg.Retunes >= Math.Max(20, agg.Windows * 4))
             rows.Add(new("High retunes", "-", "Confirm configured control channels and site coverage; frequent retunes often mean weak/unstable control-channel decode.", true));
         if (agg.UnableSource > 0)
@@ -300,6 +353,332 @@ public sealed class TrHealthTroubleshootService
             rows.Add(new("No obvious remedies", "-", "The current summary did not cross the built-in thresholds.", false));
         return rows;
     }
+
+    private static IReadOnlyList<TrHealthMetricDto> BuildRfMetricRows(TrHealthAggregate agg) =>
+    [
+        new("CC summary decode rate", FormatCcSummaryDecodeRateWithConfidence(agg), "Periodic Control Channel Decode Rates msg/sec. This is the primary RF-health decode metric.", HasSufficientCcSummarySamples(agg) && agg.CcSummaryAvgDecodeRate < 10.0),
+        new("CC summary zero rate", $"{agg.CcSummaryDecodeZeroPercent:F2}%", $"{agg.CcSummaryDecodeZero:N0} zero sample(s) across {agg.CcSummaryDecodeSampleLines:N0} CC summary sample(s).", HasSufficientCcSummarySamples(agg) && agg.CcSummaryDecodeZeroPercent >= 10.0),
+        new("Low-decode warnings", agg.LowDecodeWarningLines.ToString("N0", CultureInfo.InvariantCulture), "Control Channel Message Decode Rate warning lines. These are retune/instability symptoms, not the normal CC average.", agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2)),
+        new("Low-warning zero rate", $"{agg.LowDecodeWarningZeroPercent:F2}%", $"{agg.LowDecodeWarningZero:N0} zero warning sample(s) across {agg.LowDecodeWarningLines:N0} warning line(s).", agg.LowDecodeWarningLines >= 20 && agg.LowDecodeWarningZeroPercent >= 25.0),
+        new("Retunes", agg.Retunes.ToString("N0", CultureInfo.InvariantCulture), "Control-channel retune events in the selected window.", agg.Retunes >= Math.Max(20, agg.Windows * 4)),
+        new("No transmissions", agg.NoTxRecorded.ToString("N0", CultureInfo.InvariantCulture), agg.CallsConcluded > 0 ? $"{agg.NoTxRecorded * 100.0 / agg.CallsConcluded:F2}% of concluded calls." : "No concluded calls in window.", agg.NoTxRecorded > 0),
+        new("Recorder exhausted", agg.RecorderExhausted.ToString("N0", CultureInfo.InvariantCulture), "Calls TR could not assign because no recorder was free.", agg.RecorderExhausted > 0),
+        new("Health rows", agg.Windows.ToString("N0", CultureInfo.InvariantCulture), "Stored 5-minute health buckets used in this analysis.", agg.Windows == 0)
+    ];
+
+    private static IReadOnlyList<TrHealthMetricDto> BuildRfComparisonRows(TrHealthAggregate current, TrHealthAggregate prior)
+    {
+        static string Delta(double current, double prior, string suffix = "") => prior == 0 && current == 0
+            ? $"0{suffix}"
+            : $"{current - prior:+0.##;-0.##;0}{suffix}";
+        static string DeltaInt(int current, int prior) => $"{current - prior:+#,##0;-#,##0;0}";
+        return
+        [
+            new("Compared with previous equal window", prior.Windows > 0 ? "Available" : "Unavailable", prior.Windows > 0 ? $"{prior.Windows:N0} prior health bucket(s)." : "No prior rows available for this system/window length.", false),
+            new("CC summary decode delta", Delta(current.CcSummaryAvgDecodeRate, prior.CcSummaryAvgDecodeRate, " msg/sec"), $"Current {current.CcSummaryAvgDecodeRate:F2}, previous {prior.CcSummaryAvgDecodeRate:F2}.", current.CcSummaryAvgDecodeRate < prior.CcSummaryAvgDecodeRate),
+            new("CC zero-rate delta", Delta(current.CcSummaryDecodeZeroPercent, prior.CcSummaryDecodeZeroPercent, "%"), $"Current {current.CcSummaryDecodeZeroPercent:F2}%, previous {prior.CcSummaryDecodeZeroPercent:F2}%.", current.CcSummaryDecodeZeroPercent > prior.CcSummaryDecodeZeroPercent),
+            new("Low-warning delta", DeltaInt(current.LowDecodeWarningLines, prior.LowDecodeWarningLines), $"Current {current.LowDecodeWarningLines:N0}, previous {prior.LowDecodeWarningLines:N0}.", current.LowDecodeWarningLines > prior.LowDecodeWarningLines),
+            new("Retune delta", DeltaInt(current.Retunes, prior.Retunes), $"Current {current.Retunes:N0}, previous {prior.Retunes:N0}.", current.Retunes > prior.Retunes),
+            new("No-transmission delta", DeltaInt(current.NoTxRecorded, prior.NoTxRecorded), $"Current {current.NoTxRecorded:N0}, previous {prior.NoTxRecorded:N0}.", current.NoTxRecorded > prior.NoTxRecorded)
+        ];
+    }
+
+    private static IReadOnlyList<TrHealthMetricDto> BuildRfRecommendations(TrHealthAggregate agg, IReadOnlyList<TrHealthMetricDto> retuneTargets)
+    {
+        var rows = new List<TrHealthMetricDto>();
+        if (!HasSufficientCcSummarySamples(agg))
+            rows.Add(new("Collect more data", "Wait", "This window has too few periodic CC summary samples for a confident RF conclusion.", false));
+        if (HasSufficientCcSummarySamples(agg) && agg.CcSummaryAvgDecodeRate < 10.0)
+            rows.Add(new("Investigate RF path", "Recommended", "CC summary decode rate is below 10 msg/sec. Recheck active CC lock, gain/error, antenna/feedline path, and local RF noise.", true));
+        if (agg.Retunes > 0 && retuneTargets.Count(r => r.IsIssue) > 1)
+            rows.Add(new("Inspect learned alternates", "Recommended", "Retunes are distributed across multiple target frequencies. If some alternates decode poorly, TR may be learning channels this RF path cannot reliably hear.", true));
+        if (agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2))
+            rows.Add(new("Correlate warnings to retunes", "Recommended", "Low-decode warning volume is high. Compare warning bursts with retune targets before changing gain again.", true));
+        if (agg.NoTxRecorded > 0)
+            rows.Add(new("Review no-transmission calls", "Optional", "No-transmission outcomes can follow poor control decode, UPDATE-not-GRANT behavior, or voice-path coverage problems.", true));
+        if (rows.Count == 0)
+            rows.Add(new("No obvious RF action", "OK", "This selected window does not cross the built-in RF-analysis thresholds.", false));
+        return rows;
+    }
+
+    private IReadOnlyList<TrSourceCoverageDto> BuildSourceCoverage(List<EngineCall> selectedCalls)
+    {
+        var sources = ReadSourceWindows();
+        if (sources.Count == 0)
+            return [];
+
+        var rows = sources.Select(source =>
+        {
+            var coverable = selectedCalls
+                .Where(call => Covers(source, call.Frequency))
+                .ToList();
+            var firstMatch = selectedCalls
+                .Where(call => sources.FirstOrDefault(sourceWindow => Covers(sourceWindow, call.Frequency))?.Index == source.Index)
+                .ToList();
+            var shadowed = coverable.Count > 0 && firstMatch.Count == 0;
+            var mostlyShadowed = coverable.Count >= 20 && firstMatch.Count < Math.Max(2, coverable.Count * 0.05);
+            var idle = selectedCalls.Count > 0 && coverable.Count == 0 && source.DigitalRecorders > 0;
+            var notes = shadowed
+                ? "Covered calls are already captured by an earlier source window; this SDR may be shadowed."
+                : mostlyShadowed
+                    ? "Most covered calls are captured by an earlier overlapping source; review source ordering and center/rate overlap."
+                : idle
+                    ? "No selected-range call frequencies fall inside this source window."
+                    : $"First-match frequencies: {firstMatch.Select(c => c.Frequency).Distinct().Count():N0}.";
+
+            return new TrSourceCoverageDto(
+                source.Index,
+                source.Device,
+                HzToMhz(source.CenterHz),
+                HzToMhz(source.LowHz),
+                HzToMhz(source.HighHz),
+                source.DigitalRecorders,
+                firstMatch.Count,
+                coverable.Count,
+                coverable.Select(c => c.Frequency).Distinct().Count(),
+                notes,
+                shadowed || mostlyShadowed || idle);
+        }).ToList();
+
+        var uncovered = selectedCalls
+            .Where(call => call.Frequency > 0 && !sources.Any(source => Covers(source, call.Frequency)))
+            .ToList();
+        if (uncovered.Count > 0)
+        {
+            rows.Add(new TrSourceCoverageDto(
+                -1,
+                "Uncovered selected-range calls",
+                0,
+                0,
+                0,
+                0,
+                0,
+                uncovered.Count,
+                uncovered.Select(c => c.Frequency).Distinct().Count(),
+                "These persisted calls have frequencies outside every configured source window. Check source center/rate coverage.",
+                true));
+        }
+
+        return rows;
+    }
+
+    private IReadOnlyList<TrSourcePlanDto> BuildSourcePlan(List<EngineCall> selectedCalls)
+    {
+        var sources = ReadSourceWindows();
+        var systems = ReadTrSystems();
+        if (sources.Count == 0 || systems.Count == 0)
+            return [];
+
+        var sampleRate = (int)Math.Max(100_000, sources.FirstOrDefault()?.RateHz ?? 2_400_000);
+        var rows = new List<TrSourcePlanDto>();
+        var usedSources = new HashSet<int>();
+        foreach (var system in systems.OrderBy(s => s.ShortName, StringComparer.OrdinalIgnoreCase))
+        {
+            var observed = selectedCalls
+                .Where(c => string.Equals(c.SystemShortName, system.ShortName, StringComparison.OrdinalIgnoreCase))
+                .Select(c => (long)Math.Round(c.Frequency))
+                .Where(f => f > 0);
+            var frequencies = system.ControlChannelsHz
+                .Concat(system.VoiceFrequenciesHz)
+                .Concat(observed)
+                .Distinct()
+                .Order()
+                .ToList();
+            foreach (var range in CalculateRequiredRanges(frequencies, sampleRate))
+            {
+                var full = sources
+                    .Where(source => source.LowHz <= range.LowHz && source.HighHz >= range.HighHz)
+                    .OrderBy(source => Math.Abs(source.CenterHz - range.CenterHz))
+                    .ThenBy(source => source.Index)
+                    .FirstOrDefault();
+                var best = full ?? BestSourceForRange(range, sources);
+                if (best != null)
+                    usedSources.Add(best.Index);
+                var notes = full != null
+                    ? "Covered by configured source window."
+                    : best != null
+                        ? "Only partially covered by configured source window; adjust center/rate or add another SDR."
+                        : "No configured source covers this desired site range.";
+                rows.Add(new TrSourcePlanDto(
+                    system.ShortName,
+                    HzToMhz(range.LowHz),
+                    HzToMhz(range.HighHz),
+                    HzToMhz(range.CenterHz),
+                    best?.Index,
+                    best?.Device ?? string.Empty,
+                    notes,
+                    full == null));
+            }
+        }
+
+        foreach (var spare in sources.Where(s => !usedSources.Contains(s.Index) && s.DigitalRecorders > 0).OrderBy(s => s.Index))
+        {
+            rows.Add(new TrSourcePlanDto(
+                "Spare SDR",
+                HzToMhz(spare.LowHz),
+                HzToMhz(spare.HighHz),
+                HzToMhz(spare.CenterHz),
+                spare.Index,
+                spare.Device,
+                "Not needed for the current desired site ranges. Keep as spare, retask to a missing range, or remove from active TR config if it is a known-bad RF path.",
+                false));
+        }
+
+        return rows;
+    }
+
+    private List<TrSourceWindow> ReadSourceWindows()
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("sources", out var sourceElement) || sourceElement.ValueKind != JsonValueKind.Array)
+                return [];
+            return sourceElement.EnumerateArray()
+                .Select((source, index) =>
+                {
+                    var center = ReadJsonNumber(source, "center");
+                    var rate = ReadJsonNumber(source, "rate");
+                    return new TrSourceWindow(
+                        index,
+                        source.TryGetProperty("device", out var device) ? device.GetString() ?? string.Empty : string.Empty,
+                        center,
+                        rate,
+                        (int)Math.Max(0, ReadJsonNumber(source, "digitalRecorders")),
+                        center - rate / 2.0,
+                        center + rate / 2.0);
+                })
+                .Where(s => s.CenterHz > 0 && s.RateHz > 0)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to read TR source windows from {Path}", path);
+            return [];
+        }
+    }
+
+    private List<TrDesiredSystem> ReadTrSystems()
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("systems", out var systemElement) || systemElement.ValueKind != JsonValueKind.Array)
+                return [];
+            return systemElement.EnumerateArray()
+                .Select(system =>
+                {
+                    var shortName = system.TryGetProperty("shortName", out var name) ? name.GetString() ?? "system" : "system";
+                    var controls = ReadFrequencyArray(system, "control_channels");
+                    var voice = ReadFrequencyArray(system, "channels").Concat(ReadFrequencyArray(system, "frequencies")).Distinct().Order().ToList();
+                    return new TrDesiredSystem(shortName, controls, voice);
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to read TR systems from {Path}", path);
+            return [];
+        }
+    }
+
+    private static bool Covers(TrSourceWindow source, double frequencyHz) =>
+        frequencyHz > 0 && frequencyHz >= source.LowHz && frequencyHz <= source.HighHz;
+
+    private static List<FrequencyRange> CalculateRequiredRanges(IReadOnlyList<long> frequencies, int sampleRate)
+    {
+        if (frequencies.Count == 0)
+            return [];
+        var usableWidth = Math.Max(100_000, (long)(sampleRate * 0.90));
+        var sorted = frequencies.Order().ToList();
+        var ranges = new List<FrequencyRange>();
+        var current = new List<long>();
+        foreach (var frequency in sorted)
+        {
+            if (current.Count == 0 || frequency - current[0] <= usableWidth)
+            {
+                current.Add(frequency);
+                continue;
+            }
+
+            ranges.Add(ToRange(current));
+            current = [frequency];
+        }
+
+        if (current.Count > 0)
+            ranges.Add(ToRange(current));
+        return ranges;
+    }
+
+    private static FrequencyRange ToRange(IReadOnlyList<long> values)
+    {
+        var low = values.Min();
+        var high = values.Max();
+        return new FrequencyRange(low, high, (low + high) / 2);
+    }
+
+    private static TrSourceWindow? BestSourceForRange(FrequencyRange range, IReadOnlyList<TrSourceWindow> sources)
+    {
+        return sources
+            .Select(source => new { Source = source, Score = SourceRangeScore(source, range) })
+            .OrderByDescending(row => row.Score)
+            .ThenBy(row => Math.Abs(row.Source.CenterHz - range.CenterHz))
+            .FirstOrDefault(row => row.Score > 0)?.Source;
+    }
+
+    private static double SourceRangeScore(TrSourceWindow source, FrequencyRange range)
+    {
+        var overlap = Math.Min(source.HighHz, range.HighHz) - Math.Max(source.LowHz, range.LowHz);
+        return Math.Max(0, overlap);
+    }
+
+    private static List<long> ReadFrequencyArray(JsonElement system, string property)
+    {
+        if (!system.TryGetProperty(property, out var values) || values.ValueKind != JsonValueKind.Array)
+            return [];
+        return values.EnumerateArray()
+            .Select(ReadFrequency)
+            .Where(v => v > 0)
+            .Distinct()
+            .Order()
+            .ToList();
+    }
+
+    private static long ReadFrequency(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            if (value.TryGetInt64(out var longValue))
+                return NormalizeFrequency(longValue);
+            if (value.TryGetDouble(out var doubleValue))
+                return NormalizeFrequency((long)Math.Round(doubleValue));
+        }
+        if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            return NormalizeFrequency((long)Math.Round(parsed));
+        return 0;
+    }
+
+    private static long NormalizeFrequency(long value) => value > 0 && value < 10_000 ? value * 1_000_000 : value;
+
+    private static double ReadJsonNumber(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value))
+            return 0;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetDouble(out var number) => number,
+            JsonValueKind.String when double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) => number,
+            _ => 0
+        };
+    }
+
+    private static double HzToMhz(double hz) => Math.Round(hz / 1_000_000.0, 6);
 
     private static IReadOnlyList<TrHealthChartDto> BuildCharts(List<TrHealthSampleDto> selectedRows, List<TrHealthSampleDto> baselineRows, bool bySystem, string baseline)
     {
@@ -321,8 +700,10 @@ public sealed class TrHealthTroubleshootService
         var baselineGlobal = baselineRows.Where(IsGlobal).ToList();
         return
         [
-            BuildChart("Decode 0% Rate", "Y axis: percent of decode samples at 0/sec; global rate is weighted by system call volume when system rows are available", "F1", hours, [("", HourlyForGlobalDisplay(rows, hours, a => a.DecodeZeroPercent))], baselineRows, baseline, a => a.DecodeZeroPercent, UseGlobalDisplayAggregate: true, BaselineIsRate: true),
-            BuildChart("Average Decode Rate", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, [("", Hourly(global, hours, a => a.AvgDecodeRate))], baselineGlobal, baseline, a => a.AvgDecodeRate, BaselineIsRate: true),
+            BuildChart("CC Summary Decode Rate", "Y axis: periodic Control Channel Decode Rates msg/sec", "F1", hours, [("", Hourly(global, hours, a => a.CcSummaryAvgDecodeRate))], baselineGlobal, baseline, a => a.CcSummaryAvgDecodeRate, BaselineIsRate: true),
+            BuildChart("CC Summary Zero Rate", "Y axis: percent of periodic CC summary samples at 0 msg/sec", "F1", hours, [("", Hourly(global, hours, a => a.CcSummaryDecodeZeroPercent))], baselineGlobal, baseline, a => a.CcSummaryDecodeZeroPercent, BaselineIsRate: true),
+            BuildChart("Low-Decode Warnings", "Y axis: Control Channel Message Decode Rate warning lines per hour", "N0", hours, [("", Hourly(global, hours, a => a.LowDecodeWarningLines))], baselineGlobal, baseline, a => a.LowDecodeWarningLines),
+            BuildChart("Low-Warning Zero Rate", "Y axis: percent of low-decode warning lines at 0/sec", "F1", hours, [("", Hourly(global, hours, a => a.LowDecodeWarningZeroPercent))], baselineGlobal, baseline, a => a.LowDecodeWarningZeroPercent, BaselineIsRate: true),
             BuildChart("Control-Channel Retunes", "Y axis: retune events per hour", "N0", hours, [("", Hourly(global, hours, a => a.Retunes))], baselineGlobal, baseline, a => a.Retunes),
             BuildChart("No Transmissions Recorded", "Y axis: calls with no recorded transmissions per hour", "N0", hours, [("", Hourly(global, hours, a => a.NoTxRecorded))], baselineGlobal, baseline, a => a.NoTxRecorded),
             BuildChart("Recorder Capacity Exhausted", "Y axis: calls dropped because no recorder was available per hour", "N0", hours, [("", Hourly(global, hours, a => a.RecorderExhausted))], baselineGlobal, baseline, a => a.RecorderExhausted),
@@ -347,8 +728,8 @@ public sealed class TrHealthTroubleshootService
 
         return
         [
-            BuildChart("Decode 0% Rate by System", "Y axis: percent of decode samples at 0/sec per hour", "F1", hours, Series(a => a.DecodeZeroPercent), baselineRows, baseline, a => a.DecodeZeroPercent, scopes, BaselineIsRate: true),
-            BuildChart("Average Decode Rate by System", "Y axis: average Control Channel Message Decode Rate per second", "F1", hours, Series(a => a.AvgDecodeRate), baselineRows, baseline, a => a.AvgDecodeRate, scopes, BaselineIsRate: true),
+            BuildChart("CC Summary Decode Rate by System", "Y axis: periodic Control Channel Decode Rates msg/sec", "F1", hours, Series(a => a.CcSummaryAvgDecodeRate), baselineRows, baseline, a => a.CcSummaryAvgDecodeRate, scopes, BaselineIsRate: true),
+            BuildChart("Low-Decode Warnings by System", "Y axis: Control Channel Message Decode Rate warning lines per hour", "N0", hours, Series(a => a.LowDecodeWarningLines), baselineRows, baseline, a => a.LowDecodeWarningLines, scopes),
             BuildChart("Retunes by System", "Y axis: retune events per hour", "N0", hours, Series(a => a.Retunes), baselineRows, baseline, a => a.Retunes, scopes),
             BuildChart("No Transmissions by System", "Y axis: calls with no recorded transmissions per hour", "N0", hours, Series(a => a.NoTxRecorded), baselineRows, baseline, a => a.NoTxRecorded, scopes),
             BuildChart("Recorder Capacity Exhausted by System", "Y axis: calls dropped because no recorder was available per hour", "N0", hours, Series(a => a.RecorderExhausted), baselineRows, baseline, a => a.RecorderExhausted, scopes),
@@ -481,11 +862,11 @@ public sealed class TrHealthTroubleshootService
         sb.AppendLine("Metric                         Value");
         sb.AppendLine("-----------------------------------------------");
         sb.AppendLine($"5-minute windows               {agg.Windows}");
-        sb.AppendLine($"Decode sample lines            {agg.DecodeSampleLines}");
-        sb.AppendLine($"Decode 0% rate                 {agg.DecodeZeroPercent:F2}%");
-        if (agg.DecodeWeightCalls > 0)
-            sb.AppendLine($"Decode weighting calls         {agg.DecodeWeightCalls}");
-        sb.AppendLine($"Average decode rate            {FormatDecodeRateWithConfidence(agg)}");
+        sb.AppendLine($"CC summary samples             {agg.CcSummaryDecodeSampleLines}");
+        sb.AppendLine($"CC summary decode rate         {FormatCcSummaryDecodeRateWithConfidence(agg)}");
+        sb.AppendLine($"CC summary zero rate           {agg.CcSummaryDecodeZeroPercent:F2}%");
+        sb.AppendLine($"Low-decode warning lines       {agg.LowDecodeWarningLines}");
+        sb.AppendLine($"Low-warning zero rate          {agg.LowDecodeWarningZeroPercent:F2}%");
         sb.AppendLine($"Control-channel retunes        {agg.Retunes}");
         sb.AppendLine($"Recorded calls concluded       {agg.CallsConcluded}");
         sb.AppendLine($"No transmissions recorded      {agg.NoTxRecorded}");
@@ -518,6 +899,76 @@ public sealed class TrHealthTroubleshootService
         var scopes = allRows.Select(r => r.Scope).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
         sb.AppendLine($"scopes: {string.Join(", ", scopes)}");
         return sb.ToString();
+    }
+
+    private async Task<IReadOnlyList<TrHealthMetricDto>> BuildRetuneTargetsAsync(string system, long start, long end, CancellationToken ct)
+    {
+        if (OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(system))
+            return [];
+
+        var window = TimeSpan.FromSeconds(Math.Max(1, end - start));
+        if (window > TimeSpan.FromDays(3))
+        {
+            return
+            [
+                new("Retune target detail", "Skipped", "Retune target frequency detail reads journald on demand and is limited to windows of 3 days or less.", false)
+            ];
+        }
+
+        var log = await ReadJournalRangeAsync(DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime, DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime, ct);
+        var targets = RetuneTargetRegex.Matches(log)
+            .Select(m => new
+            {
+                Scope = m.Groups["scope"].Value.Trim(),
+                Frequency = m.Groups["freq"].Value.Trim()
+            })
+            .Where(m => string.Equals(m.Scope, system, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(m => m.Frequency)
+            .Select(g => new TrHealthMetricDto(
+                $"{g.Key} MHz",
+                g.Count().ToString("N0", CultureInfo.InvariantCulture),
+                "Retunes to this control-channel target in the selected window.",
+                g.Count() > 0))
+            .OrderByDescending(r => int.TryParse(r.Value.Replace(",", string.Empty, StringComparison.Ordinal), out var count) ? count : 0)
+            .ToList();
+        return targets.Count == 0
+            ? [new TrHealthMetricDto("Retune targets", "None", "No retune target lines were found in journald for this system/window.", false)]
+            : targets;
+    }
+
+    private async Task<string> ReadJournalRangeAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo("journalctl")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        psi.ArgumentList.Add("-u");
+        psi.ArgumentList.Add(_config.TrunkRecorder.LogServiceName);
+        psi.ArgumentList.Add("--utc");
+        psi.ArgumentList.Add("--since");
+        psi.ArgumentList.Add(startUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC");
+        psi.ArgumentList.Add("--until");
+        psi.ArgumentList.Add(endUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC");
+        psi.ArgumentList.Add("--no-pager");
+
+        try
+        {
+            using var process = Process.Start(psi);
+            if (process == null)
+                return string.Empty;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            return output;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read TR journal range for RF analysis");
+            return string.Empty;
+        }
     }
 
     private static string BuildTroubleshootInsightPrompt(TrTroubleshootDto snapshot, long start, long end, bool bySystem, string baseline)
@@ -700,11 +1151,23 @@ public sealed class TrHealthTroubleshootService
     {
         var decodeLines = rows.Sum(r => r.DecodeLines);
         var decodeZero = rows.Sum(r => r.DecodeZero);
+        var ccSummaryDecodeLines = rows.Sum(r => r.CcSummaryDecodeLines);
+        var ccSummaryDecodeZero = rows.Sum(r => r.CcSummaryDecodeZero);
+        var ccSummaryDecodeRateTotal = rows.Sum(r => r.CcSummaryDecodeRateTotal);
+        var lowDecodeWarningLines = rows.Sum(r => r.LowDecodeWarningLines);
+        var lowDecodeWarningZero = rows.Sum(r => r.LowDecodeWarningZero);
+        var lowDecodeWarningRateTotal = rows.Sum(r => r.LowDecodeWarningRateTotal);
         return new TrHealthAggregate(
             rows.Count,
             decodeLines,
             decodeZero,
             rows.Sum(r => r.DecodeRateTotal),
+            ccSummaryDecodeLines,
+            ccSummaryDecodeZero,
+            ccSummaryDecodeRateTotal,
+            lowDecodeWarningLines,
+            lowDecodeWarningZero,
+            lowDecodeWarningRateTotal,
             rows.Sum(r => r.Retunes),
             rows.Sum(r => r.CallsConcluded),
             rows.Sum(r => r.UpdateNotGrant),
@@ -766,8 +1229,13 @@ public sealed class TrHealthTroubleshootService
 
     private static bool HasSufficientDecodeSamples(TrHealthAggregate agg) => agg.DecodeSampleLines >= 20;
 
+    private static bool HasSufficientCcSummarySamples(TrHealthAggregate agg) => agg.CcSummaryDecodeSampleLines >= 10;
+
     private static string FormatDecodeRateWithConfidence(TrHealthAggregate agg) =>
         HasSufficientDecodeSamples(agg) ? $"{agg.AvgDecodeRate:F2}/sec" : "N/A";
+
+    private static string FormatCcSummaryDecodeRateWithConfidence(TrHealthAggregate agg) =>
+        HasSufficientCcSummarySamples(agg) ? $"{agg.CcSummaryAvgDecodeRate:F2} msg/sec" : "N/A";
 
     private static int BaselineDays(string? baseline) => baseline?.Trim().ToLowerInvariant() switch
     {
@@ -781,6 +1249,12 @@ public sealed class TrHealthTroubleshootService
         int DecodeSampleLines,
         int DecodeZero,
         double DecodeRateTotal,
+        int CcSummaryDecodeSampleLines,
+        int CcSummaryDecodeZero,
+        double CcSummaryDecodeRateTotal,
+        int LowDecodeWarningLines,
+        int LowDecodeWarningZero,
+        double LowDecodeWarningRateTotal,
         int Retunes,
         int CallsConcluded,
         int UpdateNotGrant,
@@ -793,5 +1267,22 @@ public sealed class TrHealthTroubleshootService
     {
         public double DecodeZeroPercent => WeightedDecodeZeroPercent ?? (DecodeSampleLines == 0 ? 0 : DecodeZero * 100.0 / DecodeSampleLines);
         public double AvgDecodeRate => DecodeSampleLines == 0 ? 0 : DecodeRateTotal / DecodeSampleLines;
+        public double CcSummaryDecodeZeroPercent => CcSummaryDecodeSampleLines == 0 ? 0 : CcSummaryDecodeZero * 100.0 / CcSummaryDecodeSampleLines;
+        public double CcSummaryAvgDecodeRate => CcSummaryDecodeSampleLines == 0 ? 0 : CcSummaryDecodeRateTotal / CcSummaryDecodeSampleLines;
+        public double LowDecodeWarningZeroPercent => LowDecodeWarningLines == 0 ? 0 : LowDecodeWarningZero * 100.0 / LowDecodeWarningLines;
+        public double LowDecodeWarningAvgRate => LowDecodeWarningLines == 0 ? 0 : LowDecodeWarningRateTotal / LowDecodeWarningLines;
     }
+
+    private sealed record TrSourceWindow(
+        int Index,
+        string Device,
+        double CenterHz,
+        double RateHz,
+        int DigitalRecorders,
+        double LowHz,
+        double HighHz);
+
+    private sealed record TrDesiredSystem(string ShortName, IReadOnlyList<long> ControlChannelsHz, IReadOnlyList<long> VoiceFrequenciesHz);
+
+    private sealed record FrequencyRange(long LowHz, long HighHz, long CenterHz);
 }

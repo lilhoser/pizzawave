@@ -110,11 +110,12 @@ public sealed class SetupJobService
         var (type, message, total) = action switch
         {
             "backup-existing-tr" => ("setup_backup_existing_tr", "Backing up existing trunk-recorder config and service files.", 1),
-            "prepare-existing-tr" => ("setup_prepare_existing_tr", "Backing up TR and removing legacy pizzapi/tr-health artifacts.", 2),
-            "remove-legacy-pizzapi" => ("setup_remove_legacy_pizzapi", "Removing legacy pizzapi/tr-health artifacts while preserving trunk-recorder.", 1),
+            "prepare-existing-tr" => ("setup_prepare_existing_tr", "Backing up TR and removing retired app/tr-health artifacts.", 2),
+            "remove-legacy-apps" => ("setup_remove_legacy_apps", "Removing retired app/tr-health artifacts while preserving trunk-recorder.", 1),
             "restart-pizzad" => ("setup_restart_pizzad", "Restarting pizzad and verifying service health.", 2),
             "restart-tr" => ("system_restart_tr", "Restarting trunk-recorder service.", 1),
             "lmstudio-prime" => ("setup_lmstudio_prime", "Installing/checking LM Studio CLI and LM Link service support.", 3),
+            "faster-whisper-prime" => ("setup_faster_whisper_prime", "Installing/checking optional faster-whisper transcription support.", 3),
             "sdr-prime" => ("setup_sdr_prime", "Installing/checking RTL-SDR and GQRX tooling.", 5),
             "tr-stop-for-calibration" => ("setup_tr_stop_for_calibration", "Stopping trunk-recorder so GQRX can use the SDRs.", 1),
             "tr-calibration-cancel" => ("setup_tr_calibration_cancel", "Stopping active TR calibration processes.", 1),
@@ -164,8 +165,8 @@ public sealed class SetupJobService
                 case "prepare-existing-tr":
                     await RunPrepareExistingTrAsync(jobId, ct);
                     break;
-                case "remove-legacy-pizzapi":
-                    await RunRemoveLegacyPizzapiAsync(jobId, ct);
+                case "remove-legacy-apps":
+                    await RunRemoveLegacyAppsAsync(jobId, ct);
                     break;
                 case "restart-pizzad":
                     await RunRestartPizzadAsync(jobId, ct);
@@ -175,6 +176,9 @@ public sealed class SetupJobService
                     break;
                 case "lmstudio-prime":
                     await RunLmStudioPrimeAsync(jobId, ct);
+                    break;
+                case "faster-whisper-prime":
+                    await RunFasterWhisperPrimeAsync(jobId, ct);
                     break;
                 case "sdr-prime":
                     await RunSdrPrimeAsync(jobId, ct);
@@ -229,16 +233,16 @@ public sealed class SetupJobService
     private async Task RunPrepareExistingTrAsync(long jobId, CancellationToken ct)
     {
         await RunAdminHelperAsync(jobId, "backup-existing-tr", ct);
-        await _database.UpdateJobAsync(jobId, "running", 2, 1, 0, "Existing TR backup complete. Removing legacy pizzapi/tr-health artifacts.", false, false, ct);
-        await RunAdminHelperAsync(jobId, "remove-legacy-pizzapi", ct);
+        await _database.UpdateJobAsync(jobId, "running", 2, 1, 0, "Existing TR backup complete. Removing retired app/tr-health artifacts.", false, false, ct);
+        await RunAdminHelperAsync(jobId, "remove-legacy-apps", ct);
         await _database.UpdateJobAsync(jobId, "completed", 2, 2, 0, "Existing TR prepared for PizzaWave.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 
-    private async Task RunRemoveLegacyPizzapiAsync(long jobId, CancellationToken ct)
+    private async Task RunRemoveLegacyAppsAsync(long jobId, CancellationToken ct)
     {
-        await RunAdminHelperAsync(jobId, "remove-legacy-pizzapi", ct);
-        await _database.UpdateJobAsync(jobId, "completed", 1, 1, 0, "Legacy pizzapi/tr-health cleanup complete.", false, true, ct);
+        await RunAdminHelperAsync(jobId, "remove-legacy-apps", ct);
+        await _database.UpdateJobAsync(jobId, "completed", 1, 1, 0, "Retired app/tr-health cleanup complete.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 
@@ -365,6 +369,17 @@ public sealed class SetupJobService
         await LogAsync(jobId, "info", "Installing/checking LM Studio CLI and llmster support. No model download will be attempted.", ct);
         await RunCommandAsync(jobId, "sudo", $"{script} --skip-model-load", ct);
         await _database.UpdateJobAsync(jobId, "completed", 3, 3, 0, "LM Link support is installed. Run `lms login` as the target user if linking is not complete.", false, true, ct);
+        await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
+    }
+
+    private async Task RunFasterWhisperPrimeAsync(long jobId, CancellationToken ct)
+    {
+        var script = FindFasterWhisperScript();
+        if (string.IsNullOrWhiteSpace(script))
+            throw new FileNotFoundException("setup-faster-whisper.sh was not found in /usr/lib/pizzawave/scripts or the application directory.");
+        await LogAsync(jobId, "info", "Installing/checking optional faster-whisper transcription runtime in /opt/pizzawave/venv/faster-whisper.", ct);
+        await RunCommandAsync(jobId, "sudo", script, ct);
+        await _database.UpdateJobAsync(jobId, "completed", 3, 3, 0, "faster-whisper support is installed. Select faster-whisper in Transcription settings and restart pizzad.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 
@@ -529,6 +544,18 @@ public sealed class SetupJobService
             "/opt/pizzawave/scripts/setup-lmstudio.sh",
             Path.Combine(AppContext.BaseDirectory, "scripts", "setup-lmstudio.sh"),
             Path.Combine(AppContext.BaseDirectory, "setup-lmstudio.sh")
+        };
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static string? FindFasterWhisperScript()
+    {
+        var candidates = new[]
+        {
+            "/usr/lib/pizzawave/scripts/setup-faster-whisper.sh",
+            "/opt/pizzawave/scripts/setup-faster-whisper.sh",
+            Path.Combine(AppContext.BaseDirectory, "scripts", "setup-faster-whisper.sh"),
+            Path.Combine(AppContext.BaseDirectory, "setup-faster-whisper.sh")
         };
         return candidates.FirstOrDefault(File.Exists);
     }

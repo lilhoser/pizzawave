@@ -64,7 +64,7 @@ public sealed class EngineConfig
 
     private void ApplyDefaults()
     {
-        Branding.StackName = string.IsNullOrWhiteSpace(Branding.StackName) ? "Pizzastack" : Branding.StackName.Trim();
+        Branding.StackName = string.IsNullOrWhiteSpace(Branding.StackName) ? "PizzaWave" : Branding.StackName.Trim();
         Server.HttpBind = string.IsNullOrWhiteSpace(Server.HttpBind) ? "0.0.0.0" : Server.HttpBind.Trim();
         if (Server.HttpPort <= 0) Server.HttpPort = 8080;
         Storage.DatabasePath = ExpandPath(Storage.DatabasePath);
@@ -78,6 +78,13 @@ public sealed class EngineConfig
         Transcription.Provider = string.IsNullOrWhiteSpace(Transcription.Provider) ? "none" : Transcription.Provider.Trim();
         Transcription.WhisperModelFile ??= string.Empty;
         Transcription.VoskModelPath ??= string.Empty;
+        Transcription.FasterWhisperPythonPath = string.IsNullOrWhiteSpace(Transcription.FasterWhisperPythonPath) ? "/opt/pizzawave/venv/faster-whisper/bin/python" : Transcription.FasterWhisperPythonPath.Trim();
+        Transcription.FasterWhisperScriptPath = Transcription.FasterWhisperScriptPath?.Trim() ?? string.Empty;
+        Transcription.FasterWhisperModel = string.IsNullOrWhiteSpace(Transcription.FasterWhisperModel) ? "tiny" : Transcription.FasterWhisperModel.Trim();
+        Transcription.FasterWhisperDevice = string.IsNullOrWhiteSpace(Transcription.FasterWhisperDevice) ? "cpu" : Transcription.FasterWhisperDevice.Trim();
+        Transcription.FasterWhisperComputeType = string.IsNullOrWhiteSpace(Transcription.FasterWhisperComputeType) ? "int8" : Transcription.FasterWhisperComputeType.Trim();
+        if (Transcription.FasterWhisperWorkers <= 0) Transcription.FasterWhisperWorkers = 1;
+        Transcription.FasterWhisperWorkers = Math.Clamp(Transcription.FasterWhisperWorkers, 1, 4);
         Transcription.OpenAiBaseUrl = string.IsNullOrWhiteSpace(Transcription.OpenAiBaseUrl) ? "http://localhost:1234/v1" : Transcription.OpenAiBaseUrl.Trim();
         Transcription.OpenAiApiKey ??= string.Empty;
         Transcription.OpenAiModel ??= string.Empty;
@@ -85,6 +92,7 @@ public sealed class EngineConfig
         if (Transcription.LivePressureQueueDepth <= 0) Transcription.LivePressureQueueDepth = 200;
         if (Transcription.LiveTranscriptionWorkers <= 0) Transcription.LiveTranscriptionWorkers = 1;
         Transcription.LiveTranscriptionWorkers = Math.Clamp(Transcription.LiveTranscriptionWorkers, 1, 4);
+        Transcription.DeferredTalkgroups ??= new();
         if (Transcription.WhisperThreads <= 0)
         {
             Transcription.WhisperThreads = RuntimeInformation.ProcessArchitecture is Architecture.Arm64 or Architecture.Arm
@@ -225,7 +233,7 @@ public sealed class EngineConfig
 
 public sealed class BrandingConfig
 {
-    public string StackName { get; set; } = "Pizzastack";
+    public string StackName { get; set; } = "PizzaWave";
 }
 
 public sealed class ServerConfig
@@ -262,6 +270,13 @@ public sealed class TranscriptionConfig
     public string Provider { get; set; } = "none";
     public string WhisperModelFile { get; set; } = string.Empty;
     public string VoskModelPath { get; set; } = string.Empty;
+    public string FasterWhisperPythonPath { get; set; } = "/opt/pizzawave/venv/faster-whisper/bin/python";
+    public string FasterWhisperScriptPath { get; set; } = string.Empty;
+    public string FasterWhisperModel { get; set; } = "tiny";
+    public string FasterWhisperDevice { get; set; } = "cpu";
+    public string FasterWhisperComputeType { get; set; } = "int8";
+    public int FasterWhisperWorkers { get; set; } = 1;
+    public bool FasterWhisperVadFilter { get; set; }
     public string OpenAiBaseUrl { get; set; } = "http://localhost:1234/v1";
     public string OpenAiApiKey { get; set; } = string.Empty;
     public string OpenAiModel { get; set; } = string.Empty;
@@ -269,6 +284,7 @@ public sealed class TranscriptionConfig
     public int WhisperThreads { get; set; }
     public int LiveTranscriptionWorkers { get; set; } = 1;
     public int LivePressureQueueDepth { get; set; } = 200;
+    public List<long> DeferredTalkgroups { get; set; } = new();
 }
 
 public sealed class AiInsightsConfig
@@ -306,6 +322,7 @@ public sealed class SftpImportConfig
 public sealed class TrunkRecorderConfig
 {
     public string ConfigPath { get; set; } = "/etc/trunk-recorder/config.json";
+    public string TalkgroupCatalogPath { get; set; } = "/var/lib/pizzawave/appdata/talkgroups.json";
     public string TalkgroupsPath { get; set; } = "/etc/trunk-recorder/talkgroups.csv";
     public string LogServiceName { get; set; } = "trunk-recorder";
     public int HealthWindowMinutes { get; set; } = 5;

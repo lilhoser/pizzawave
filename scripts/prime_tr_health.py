@@ -18,7 +18,8 @@ CSV_HEADER = (
 
 TR_TS_RE = re.compile(r"\[(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]")
 TR_SCOPE_RE = re.compile(r"\]\s+\((?:info|error|warning|debug)\)\s+\[(?P<scope>[^\]]+)\]", re.I)
-DECODE_RE = re.compile(r"(?:decode|decoded)[^0-9-]*(?P<rate>-?\d+(?:\.\d+)?)\s*(?:/sec|per sec|hz)?", re.I)
+CC_SUMMARY_DECODE_RE = re.compile(r"\[(?P<scope>[^\]]+)\]\s+(?P<freq>\d+(?:\.\d+)?)\s+MHz\s+(?P<rate>-?\d+(?:\.\d+)?)\s+msg/sec", re.I)
+LOW_DECODE_WARNING_RE = re.compile(r"Control Channel Message Decode Rate:\s*(?P<rate>-?\d+(?:\.\d+)?)\s*/sec", re.I)
 TUNING_RE = re.compile(r"(?:tuning|tune)[^0-9-]*(?:error|err)[^0-9-]*(?P<hz>-?\d+(?:\.\d+)?)\s*hz", re.I)
 
 
@@ -27,7 +28,7 @@ def parse_args():
     parser.add_argument("--database", default="/var/lib/pizzawave/pizzad.db")
     parser.add_argument("--service", default="trunk-recorder")
     parser.add_argument("--days", type=int, default=30)
-    parser.add_argument("--csv", default="/var/lib/pizzapi/tr-health/summary_5m.csv")
+    parser.add_argument("--csv", default="/var/lib/pizzawave/tr-health/summary_5m.csv")
     parser.add_argument("--skip-csv", action="store_true")
     parser.add_argument("--skip-journal", action="store_true")
     parser.add_argument("--chunk-hours", type=int, default=6)
@@ -38,6 +39,12 @@ def parse_args():
 def ensure_schema(conn):
     columns = {
         "decode_rate_total": "REAL NOT NULL DEFAULT 0",
+        "cc_summary_decode_lines": "INTEGER NOT NULL DEFAULT 0",
+        "cc_summary_decode_zero": "INTEGER NOT NULL DEFAULT 0",
+        "cc_summary_decode_rate_total": "REAL NOT NULL DEFAULT 0",
+        "low_decode_warning_lines": "INTEGER NOT NULL DEFAULT 0",
+        "low_decode_warning_zero": "INTEGER NOT NULL DEFAULT 0",
+        "low_decode_warning_rate_total": "REAL NOT NULL DEFAULT 0",
         "update_not_grant": "INTEGER NOT NULL DEFAULT 0",
         "no_tx_recorded": "INTEGER NOT NULL DEFAULT 0",
         "recorder_exhausted": "INTEGER NOT NULL DEFAULT 0",
@@ -79,8 +86,10 @@ def is_system_scope(scope):
 
 
 def bucket_from_lines(scope, start, lines):
-    decode_lines = decode_zero = 0
-    decode_total = 0.0
+    cc_summary_lines = cc_summary_zero = 0
+    cc_summary_total = 0.0
+    low_warning_lines = low_warning_zero = 0
+    low_warning_total = 0.0
     tuning_samples = 0
     tuning_total = 0.0
     tuning_max = 0.0
@@ -88,13 +97,20 @@ def bucket_from_lines(scope, start, lines):
 
     for line in lines:
         lower = line.lower()
-        m = DECODE_RE.search(line)
+        m = CC_SUMMARY_DECODE_RE.search(line)
         if m:
             rate = float(m.group("rate"))
-            decode_lines += 1
-            decode_total += rate
+            cc_summary_lines += 1
+            cc_summary_total += rate
             if abs(rate) < 0.0001:
-                decode_zero += 1
+                cc_summary_zero += 1
+        m = LOW_DECODE_WARNING_RE.search(line)
+        if m:
+            rate = float(m.group("rate"))
+            low_warning_lines += 1
+            low_warning_total += rate
+            if abs(rate) < 0.0001:
+                low_warning_zero += 1
         tm = TUNING_RE.search(line)
         if tm:
             hz = abs(float(tm.group("hz")))
@@ -119,6 +135,9 @@ def bucket_from_lines(scope, start, lines):
         if "no source covering" in lower or ("unable" in lower and "source" in lower):
             unable_source += 1
 
+    decode_lines = cc_summary_lines if cc_summary_lines > 0 else low_warning_lines
+    decode_zero = cc_summary_zero if cc_summary_lines > 0 else low_warning_zero
+    decode_total = cc_summary_total if cc_summary_lines > 0 else low_warning_total
     return {
         "window_start_utc": start,
         "window_end_utc": start + dt.timedelta(minutes=5),
@@ -127,6 +146,12 @@ def bucket_from_lines(scope, start, lines):
         "decode_zero": decode_zero,
         "decode_zero_pct": 0 if decode_lines == 0 else decode_zero * 100.0 / decode_lines,
         "decode_rate_total": decode_total,
+        "cc_summary_decode_lines": cc_summary_lines,
+        "cc_summary_decode_zero": cc_summary_zero,
+        "cc_summary_decode_rate_total": cc_summary_total,
+        "low_decode_warning_lines": low_warning_lines,
+        "low_decode_warning_zero": low_warning_zero,
+        "low_decode_warning_rate_total": low_warning_total,
         "retunes": retunes,
         "calls_started": calls_started,
         "calls_concluded": calls_concluded,
@@ -204,6 +229,12 @@ def rows_from_csv(path):
                 "decode_zero": decode_zero,
                 "decode_zero_pct": 0 if decode_lines == 0 else decode_zero * 100.0 / decode_lines,
                 "decode_rate_total": avg_decode * decode_lines,
+                "cc_summary_decode_lines": 0,
+                "cc_summary_decode_zero": 0,
+                "cc_summary_decode_rate_total": 0,
+                "low_decode_warning_lines": decode_lines,
+                "low_decode_warning_zero": decode_zero,
+                "low_decode_warning_rate_total": avg_decode * decode_lines,
                 "retunes": int(float(r.get("retunes") or 0)),
                 "calls_started": int(float(r.get("calls_started") or 0)),
                 "calls_concluded": int(float(r.get("calls_concluded") or 0)),
@@ -224,9 +255,11 @@ def write_rows(conn, rows):
     sql_insert = """
         INSERT INTO tr_health_samples (
             window_start_utc, window_end_utc, scope, decode_lines, decode_zero, decode_zero_pct,
+            cc_summary_decode_lines, cc_summary_decode_zero, cc_summary_decode_rate_total,
+            low_decode_warning_lines, low_decode_warning_zero, low_decode_warning_rate_total,
             decode_rate_total, retunes, calls_started, calls_concluded, update_not_grant, no_tx_recorded, recorder_exhausted,
             sample_stops, unable_source, tuning_err_samples, tuning_err_total_abs_hz, tuning_err_max_abs_hz)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     with conn:
         for r in rows:
@@ -236,6 +269,8 @@ def write_rows(conn, rows):
             conn.execute(sql_delete, (start, end, scope))
             conn.execute(sql_insert, (
                 start, end, scope, r["decode_lines"], r["decode_zero"], r["decode_zero_pct"],
+                r["cc_summary_decode_lines"], r["cc_summary_decode_zero"], r["cc_summary_decode_rate_total"],
+                r["low_decode_warning_lines"], r["low_decode_warning_zero"], r["low_decode_warning_rate_total"],
                 r["decode_rate_total"], r["retunes"], r["calls_started"], r["calls_concluded"],
                 r["update_not_grant"], r["no_tx_recorded"], r["recorder_exhausted"], r["sample_stops"], r["unable_source"],
                 r["tuning_err_samples"], r["tuning_err_total_abs_hz"], r["tuning_err_max_abs_hz"],

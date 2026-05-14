@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, TalkgroupOption, TokenUsageReport, TopTalkgroup, TrHealthChart, TrHealthMetric, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TalkgroupOption, TalkgroupTrCsvResult, TokenUsageReport, TopTalkgroup, TranscriptionBenchmarkResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -40,6 +40,7 @@ function App() {
   const [profileState, setProfileState] = useState<ProfileState | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
+  const [recommendations, setRecommendations] = useState<SystemRecommendations | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -120,16 +121,18 @@ function App() {
       return;
     }
 
-    const [healthStatus, jobRows, summary, profiles] = await Promise.all([
+    const [healthStatus, jobRows, summary, profiles, recs] = await Promise.all([
       api.request<EngineHealth>("/api/v1/health"),
       api.request<Job[]>("/api/v1/jobs"),
       api.request<StatusSummary>(`/api/v1/status?${rangeQuery(rangeHours)}`),
-      api.request<ProfileState>("/api/v1/profiles")
+      api.request<ProfileState>("/api/v1/profiles"),
+      api.request<SystemRecommendations>("/api/v1/system/recommendations")
     ]);
     setEngineHealth(healthStatus);
     setJobs(jobRows);
     setStatusSummary(summary);
     setProfileState(profiles);
+    setRecommendations(recs);
     setStatus("Live");
   }, [rangeHours]);
 
@@ -216,8 +219,9 @@ function App() {
   const queueDepth = engineHealth?.queueDepth ?? 0;
   const queueBlockedNotes = [engineHealth?.importWorkBlockedReason, engineHealth?.aiWorkBlockedReason].filter(Boolean);
   const queueHealth = queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
-  const transcribedPerMinute = engineHealth?.recentTranscribedPerMinute ?? 0;
-  const queueRateSuffix = engineHealth ? ` (${transcribedPerMinute.toFixed(1)}/min)` : "";
+  const audioTranscribedPerMinute = engineHealth?.recentAudioSecondsTranscribedPerMinute ?? 0;
+  const audioIngestedPerMinute = engineHealth?.recentAudioSecondsIngestedPerMinute ?? 0;
+  const queueRateSuffix = engineHealth ? ` (${audioTranscribedPerMinute.toFixed(0)}s audio/min)` : "";
   const queuePressureNote = queueBlockedNotes.length ? `; ${[
     engineHealth?.importWorkBlockedReason ? "imports paused" : "",
     engineHealth?.aiWorkBlockedReason ? "AI paused" : ""
@@ -229,7 +233,7 @@ function App() {
       ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
       : `Queue draining ${queueDepth.toLocaleString()}${queueRateSuffix}`;
   const queueHealthTitle = engineHealth
-    ? `${engineHealth.recentCallsTranscribed.toLocaleString()} transcription completions (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min) and ${engineHealth.recentCallsIngested.toLocaleString()} calls ingested (${engineHealth.recentIngestPerMinute.toFixed(1)}/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${queueBlockedNotes.join(" ")}`.trim()
+    ? `${engineHealth.recentAudioSecondsTranscribed.toLocaleString()} audio seconds transcribed (${audioTranscribedPerMinute.toFixed(0)}s/min) and ${engineHealth.recentAudioSecondsIngested.toLocaleString()} audio seconds ingested (${audioIngestedPerMinute.toFixed(0)}s/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Calls: ${engineHealth.recentCallsTranscribed.toLocaleString()} done (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min), ${engineHealth.recentCallsIngested.toLocaleString()} in (${engineHealth.recentIngestPerMinute.toFixed(1)}/min). Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${queueBlockedNotes.join(" ")}`.trim()
     : "Transcription queue is clear.";
 
   const inSetup = Boolean(setupStatus && !setupStatus.completed);
@@ -239,7 +243,7 @@ function App() {
       <header className="topbar">
         <div className="brand">
           <img src="/logo-small.png" alt="" />
-          <span className="brand-text"><strong>PizzaWave</strong><small>{engineHealth?.stackName ?? "Pizzastack"}</small></span>
+          <span className="brand-text"><strong>PizzaWave</strong><small>{engineHealth?.stackName ?? "PizzaWave"}</small></span>
         </div>
         <select value={rangeHours} onChange={e => setRangeHours(Number(e.target.value))}>
           <option value={24}>24h</option>
@@ -274,6 +278,7 @@ function App() {
         {visibleNav.map(item => (
           <button className={item === page ? "active" : ""} onClick={() => setPage(item)} key={item}>
             {navIcon(item)} {label(item)}
+            {item === "system" && recommendations && recommendations.openCount > 0 && <span className={`nav-badge ${recommendations.highCount > 0 ? "high" : recommendations.mediumCount > 0 ? "medium" : "low"}`}>{recommendations.openCount}</span>}
           </button>
         ))}
       </aside>}
@@ -281,7 +286,7 @@ function App() {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} />}
-        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} />}
+        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} recommendations={recommendations} setRecommendations={setRecommendations} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} />}
       </main>
       {!inSetup && <footer className="statusbar">
@@ -814,10 +819,10 @@ function confidenceClass(score: number) {
   return "confidence-low";
 }
 
-function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
-  const [topTab, setTopTab] = useState<"pizzad" | "tr" | "tokens">("pizzad");
+function SystemView({ data, jobs, rangeHours, reload, engineHealth, recommendations, setRecommendations }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void }) {
+  const [topTab, setTopTab] = useState<"recommendations" | "pizzad" | "tr" | "tokens">("recommendations");
   const [pizzadTab, setPizzadTab] = useState<"service" | "storage" | "imports" | "jobs" | "quality">("service");
-  const [trTab, setTrTab] = useState<"summary" | "metrics" | "tools" | "logs" | "insights">("summary");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "rf" | "tools" | "logs" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
@@ -829,6 +834,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
   const [restartMessages, setRestartMessages] = useState<Record<string, string>>({});
   const [ingestBusy, setIngestBusy] = useState(false);
   const [ingestMessage, setIngestMessage] = useState("");
+  const [recommendationBusy, setRecommendationBusy] = useState(false);
 
   useEffect(() => {
     if (topTab !== "pizzad") return;
@@ -894,14 +900,59 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
       setIngestBusy(false);
     }
   }
+  async function refreshRecommendations() {
+    setRecommendationBusy(true);
+    try {
+      setRecommendations(await api.request<SystemRecommendations>("/api/v1/system/recommendations"));
+    } finally {
+      setRecommendationBusy(false);
+    }
+  }
+  function openRecommendationTarget(target: { topTab: string; subTab: string }) {
+    if (target.topTab === "pizzad" || target.topTab === "tr" || target.topTab === "tokens" || target.topTab === "recommendations")
+      setTopTab(target.topTab);
+    if (target.topTab === "pizzad" && ["service", "storage", "imports", "jobs", "quality"].includes(target.subTab))
+      setPizzadTab(target.subTab as any);
+    if (target.topTab === "tr" && ["summary", "metrics", "tools", "logs", "insights"].includes(target.subTab))
+      setTrTab(target.subTab as any);
+  }
+  async function setRecommendationState(id: string, action: "snooze" | "dismiss" | "clear") {
+    setRecommendationBusy(true);
+    try {
+      setRecommendations(await api.request<SystemRecommendations>(`/api/v1/system/recommendations/${encodeURIComponent(id)}/state`, {
+        method: "POST",
+        body: JSON.stringify({ action })
+      }));
+    } finally {
+      setRecommendationBusy(false);
+    }
+  }
+  async function applyRecommendation(id: string, action: string, talkgroups?: number[]) {
+    setRecommendationBusy(true);
+    try {
+      const response = await api.request<{ applied: boolean; message: string; recommendations: SystemRecommendations }>(`/api/v1/system/recommendations/${encodeURIComponent(id)}/apply`, {
+        method: "POST",
+        body: JSON.stringify({ action, talkgroups })
+      });
+      setRecommendations(response.recommendations);
+      setInsightText(response.message);
+      await reload();
+    } catch (error) {
+      setInsightText(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecommendationBusy(false);
+    }
+  }
   return (
     <div className="trouble-page">
       <div className="trouble-tabs">
+        <button className={topTab === "recommendations" ? "active" : ""} onClick={() => setTopTab("recommendations")}>Recommendations{recommendations && recommendations.openCount > 0 ? ` (${recommendations.openCount})` : ""}</button>
         <button className={topTab === "pizzad" ? "active" : ""} onClick={() => setTopTab("pizzad")}>Pizzad</button>
         <button className={topTab === "tr" ? "active" : ""} onClick={() => setTopTab("tr")}>Trunk Recorder</button>
         <button className={topTab === "tokens" ? "active" : ""} onClick={() => setTopTab("tokens")}>Token Usage</button>
         <button onClick={() => void reload()}>Refresh</button>
       </div>
+      {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy} message={insightText} onRefresh={refreshRecommendations} onOpen={openRecommendationTarget} onState={setRecommendationState} onApply={applyRecommendation} />}
       {topTab === "pizzad" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
           <button className={pizzadTab === "service" ? "active" : ""} onClick={() => setPizzadTab("service")}>Service Manager</button>
@@ -928,6 +979,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
+          <button className={trTab === "rf" ? "active" : ""} onClick={() => setTrTab("rf")}>RF Analysis</button>
           <button className={trTab === "tools" ? "active" : ""} onClick={() => setTrTab("tools")}>Tools</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
           <button className={trTab === "insights" ? "active" : ""} onClick={() => setTrTab("insights")}>Insights</button>
@@ -940,6 +992,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth }: { data: Tr
           </div>
           <div className="tr-chart-grid">{active.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
         </div>}
+        {trTab === "rf" && <RfAnalysisPanel data={data} rangeHours={rangeHours} />}
         {trTab === "tools" && <TroubleshootTools rangeHours={rangeHours} reload={reload} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
         {trTab === "insights" && <div className="card">
@@ -957,6 +1010,8 @@ function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart,
   if (!runtime) return <div className="card">Loading service status...</div>;
   const services = [runtime.service?.pizzad, runtime.service?.trunkRecorder].filter(Boolean);
   const ingest = runtime.queues?.ingest;
+  const droppedThisPause = Number(ingest?.droppedCallsThisPause ?? 0);
+  const droppedTotal = Number(ingest?.droppedCalls ?? 0);
   return <div className="system-manager-grid">
     <div className="system-action-bar">
       <div>
@@ -977,7 +1032,7 @@ function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart,
           <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, true)}>{ingestBusy ? "Updating..." : "Pause Until Queue Clear"}</button>
           <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, false)}>Pause Live Ingest</button>
         </>}
-      <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? `${Number(ingest.droppedCalls || 0).toLocaleString()} dropped while paused` : "Running"}</span>
+      <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? `${droppedThisPause.toLocaleString()} dropped this pause` : "Running"}</span>
       {ingestMessage && <span className={ingestMessage.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{ingestMessage}</span>}
     </div>
     <div className="audit-kpis">
@@ -985,7 +1040,7 @@ function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart,
       <Kpi label="TR Service" value={runtime.service?.trunkRecorder?.active || "unknown"} subtext={runtime.service?.trunkRecorder?.unit || "configured trunk-recorder unit"} />
       <Kpi label="CPU Time" value={`${Number(runtime.process?.totalProcessorTimeSeconds || 0).toFixed(0)}s`} subtext={`${runtime.process?.threadCount ?? 0} thread(s)`} />
       <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
-      <Kpi label="Live Ingest" value={ingest?.paused ? "Paused" : "Running"} subtext={ingest?.paused ? `${Number(ingest.droppedCalls || 0).toLocaleString()} dropped; ${ingest.untilQueueClear ? "auto-resume at clear" : "manual resume"}` : "callstream accepted"} />
+      <Kpi label="Live Ingest" value={ingest?.paused ? "Paused" : "Running"} subtext={ingest?.paused ? `${droppedThisPause.toLocaleString()} dropped this pause, ${droppedTotal.toLocaleString()} total; ${ingest.untilQueueClear ? "auto-resume at clear" : "manual resume"}` : "callstream accepted"} />
       <Kpi label="Queue Health" value={runtime.queues?.underPressure ? "Pressure" : runtime.queues?.transcriptionQueueDepth > 0 ? "Draining" : "OK"} subtext={`${(runtime.queues?.pendingTranscriptions ?? 0).toLocaleString()} pending, ${(runtime.queues?.priorityLiveQueueDepth ?? 0).toLocaleString()} priority`} />
       <Kpi label="Transcription Rate" value={`${Number(runtime.queues?.recentCallsTranscribed || 0).toFixed(0)} / ${Number(runtime.queues?.recentCallsIngested || 0).toFixed(0)}`} subtext={`${Number(runtime.queues?.recentTranscribedPerMinute || 0).toFixed(1)}/min done vs ${Number(runtime.queues?.recentIngestPerMinute || 0).toFixed(1)}/min in`} />
       <Kpi label="Transcription Latency" value={`${Number(runtime.queues?.averageTranscriptionSeconds || 0).toFixed(1)}s`} subtext={`${Number(runtime.queues?.averageAudioSeconds || 0).toFixed(1)}s audio avg; ${Number(runtime.queues?.averageTranscriptionRealtimeFactor || 0).toFixed(1)}x realtime`} />
@@ -1001,6 +1056,123 @@ function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart,
         <td>{svc.detail?.MainPID || "--"}</td>
         <td>{svc.detail?.ActiveEnterTimestamp || "--"}</td>
       </tr>)}</tbody></table>
+    </div>
+  </div>;
+}
+
+function RecommendationsPanel({ recommendations, busy, message, onRefresh, onOpen, onState, onApply }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onRefresh: () => Promise<void>; onOpen: (target: { topTab: string; subTab: string }) => void; onState: (id: string, action: "snooze" | "dismiss" | "clear") => Promise<void>; onApply: (id: string, action: string, talkgroups?: number[]) => Promise<void> }) {
+  const [activeRunbookId, setActiveRunbookId] = useState<string | null>(null);
+  if (!recommendations) return <div className="card">Loading recommendations...</div>;
+  const counts = `${recommendations.highCount} high, ${recommendations.mediumCount} medium, ${recommendations.lowCount} low`;
+  const activeRunbook = recommendations.items.find(item => item.id === activeRunbookId);
+  return <div className="trouble-panel recommendations-panel">
+    <div className="card recommendation-summary">
+      <div>
+        <h3>System Recommendations</h3>
+        <p className="muted">Deterministic recommendations from queue pressure, audio load, TR health, ingest state, imports, and AI gating.</p>
+      </div>
+      <Kpi label="Open" value={recommendations.openCount.toString()} subtext={counts} />
+      <button disabled={busy} onClick={() => void onRefresh()}>{busy ? "Refreshing..." : "Refresh Recommendations"}</button>
+    </div>
+    {message && <div className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    {activeRunbook?.runbook && <RunbookDetail item={activeRunbook} busy={busy} onClose={() => setActiveRunbookId(null)} onOpen={onOpen} onApply={onApply} onState={onState} />}
+    {!activeRunbook && recommendations.items.length === 0 ? <div className="card"><h3>No Open Recommendations</h3><p className="muted">No system-level issues or priority candidates were detected.</p></div> :
+      !activeRunbook &&
+      <div className="recommendation-list">
+        {recommendations.items.map(item => <div className={`card recommendation-card severity-${item.severity}`} key={item.id}>
+          <div className="recommendation-head">
+            <span className={`recommendation-severity ${item.severity}`}>{item.severity}</span>
+            <span className="muted">{label(item.section)}</span>
+          </div>
+          <h3>{item.title}</h3>
+          <p>{item.detail}</p>
+          <div className="recommendation-action">{item.action}</div>
+          {(item.runbook || item.actions?.some(action => action.kind !== "open")) && <div className="recommendation-buttons">
+            {item.runbook && <button disabled={busy} onClick={() => setActiveRunbookId(item.id)}>Troubleshoot Now</button>}
+            {item.actions.filter(action => action.kind !== "open").map(action => <button disabled={busy} key={action.kind} onClick={() => void onApply(item.id, action.kind)}>{action.label}</button>)}
+          </div>}
+          <div className="recommendation-buttons muted-actions">
+            <button disabled={busy} onClick={() => void onState(item.id, "snooze")}>Snooze 24h</button>
+            <button disabled={busy} onClick={() => void onState(item.id, "dismiss")}>Dismiss</button>
+          </div>
+        </div>)}
+      </div>}
+  </div>;
+}
+
+function RunbookDetail({ item, busy, onClose, onOpen, onApply, onState }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onClose: () => void; onOpen: (target: { topTab: string; subTab: string }) => void; onApply: (id: string, action: string, talkgroups?: number[]) => Promise<void>; onState: (id: string, action: "snooze" | "dismiss" | "clear") => Promise<void> }) {
+  const runbook = item.runbook;
+  const [selectedTalkgroups, setSelectedTalkgroups] = useState<number[]>([]);
+  useEffect(() => {
+    if (!runbook?.talkgroupCandidates?.length) return;
+    setSelectedTalkgroups(runbook.talkgroupCandidates.filter(tg => !tg.alreadyDeferred).map(tg => tg.talkgroup));
+  }, [item.id, runbook?.talkgroupCandidates]);
+  if (!runbook) return null;
+  const deferAction = item.actions?.find(action => action.kind === "apply-defer-talkgroups");
+  const toggleTalkgroup = (talkgroup: number, checked: boolean) => {
+    setSelectedTalkgroups(current => checked ? Array.from(new Set([...current, talkgroup])) : current.filter(tg => tg !== talkgroup));
+  };
+  return <div className={`card runbook-detail severity-${item.severity}`}>
+    <div className="recommendation-head">
+      <div>
+        <span className={`recommendation-severity ${item.severity}`}>{item.severity}</span>
+        <h3>{runbook.title}</h3>
+      </div>
+      <button onClick={onClose}>Back to Recommendations</button>
+    </div>
+    <p>{runbook.goal}</p>
+    {runbook.evidence.length > 0 && <div className="runbook-evidence">
+      <strong>Use this evidence</strong>
+      <ul>{runbook.evidence.map(row => <li key={row}>{row}</li>)}</ul>
+    </div>}
+    {runbook.diagnostics?.length > 0 && <div className="runbook-diagnostics">
+      <div className="recommendation-head">
+        <div>
+          <h3>Current System Snapshot</h3>
+          <p className="muted">These values are computed from the running engine, current config, and recent local database samples.</p>
+        </div>
+      </div>
+      <div className="diagnostic-grid">
+        {runbook.diagnostics.map(row => <div className={`diagnostic-tile ${row.status}`} key={`${row.label}-${row.value}`}>
+          <span>{row.label}</span>
+          <strong>{row.value}</strong>
+          <p>{row.detail}</p>
+        </div>)}
+      </div>
+    </div>}
+    {runbook.talkgroupCandidates?.length > 0 && <div className="runbook-workbench">
+      <div className="recommendation-head">
+        <div>
+          <h3>Talkgroup Priority Workbench</h3>
+          <p className="muted">Select the talkgroups to defer. Deferred TGs are still transcribed, but only after priority and normal live calls.</p>
+        </div>
+        {deferAction && <button disabled={busy || selectedTalkgroups.length === 0} onClick={() => void onApply(item.id, deferAction.kind, selectedTalkgroups)}>{busy ? "Applying..." : `Defer ${selectedTalkgroups.length} Selected`}</button>}
+      </div>
+      <table className="table runbook-tg-table">
+        <thead><tr><th>Defer</th><th>Talkgroup</th><th>Category</th><th>Recent Load</th><th>Pending</th><th>Reason</th></tr></thead>
+        <tbody>{runbook.talkgroupCandidates.map(row => <tr key={`${row.systemShortName}-${row.talkgroup}`}>
+          <td><input type="checkbox" checked={row.alreadyDeferred || selectedTalkgroups.includes(row.talkgroup)} disabled={row.alreadyDeferred || busy} onChange={e => toggleTalkgroup(row.talkgroup, e.target.checked)} /></td>
+          <td>{row.talkgroupName || `TG ${row.talkgroup}`}<br /><span className="muted">{row.systemShortName} / {row.talkgroup}{row.alreadyDeferred ? " / already deferred" : ""}</span></td>
+          <td><span className={`category-chip category-${row.category}`}>{label(row.category)}</span></td>
+          <td>{formatDurationMinutes(row.audioSeconds / 60)}<br /><span className="muted">{row.calls.toLocaleString()} calls, {row.averageAudioSeconds.toFixed(1)}s avg</span></td>
+          <td>{row.pendingCalls.toLocaleString()} calls<br /><span className="muted">{formatDurationMinutes(row.pendingAudioSeconds / 60)}</span></td>
+          <td>{row.reason}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>}
+    <div className="runbook-steps">
+      {runbook.steps.map((step, index) => <div className="runbook-step" key={`${step.title}-${index}`}>
+        <span className="runbook-step-index">{index + 1}</span>
+        <div>
+          <h4>{step.title}</h4>
+          <p>{step.detail}</p>
+        </div>
+      </div>)}
+    </div>
+    {runbook.caveat && <div className="settings-message">{runbook.caveat}</div>}
+    <div className="recommendation-buttons muted-actions">
+      <button disabled={busy} onClick={() => void onState(item.id, "snooze")}>Snooze 24h</button>
+      <button disabled={busy} onClick={() => void onState(item.id, "dismiss")}>Dismiss</button>
     </div>
   </div>;
 }
@@ -1084,6 +1256,9 @@ function JobsPanel({ jobs, reload, engineHealth }: { jobs: Job[]; reload: () => 
   const [page, setPage] = useState(1);
   const [queue, setQueue] = useState<QueueSnapshot | null>(null);
   const [queueError, setQueueError] = useState("");
+  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [benchmark, setBenchmark] = useState<TranscriptionBenchmarkResult | null>(null);
+  const [benchmarkMessage, setBenchmarkMessage] = useState("");
   const pageSize = 12;
   const totalPages = Math.max(1, Math.ceil(jobs.length / pageSize));
   const pageSafe = Math.min(page, totalPages);
@@ -1123,8 +1298,25 @@ function JobsPanel({ jobs, reload, engineHealth }: { jobs: Job[]; reload: () => 
     }
   }
 
+  async function runBenchmark(sampleCount: number) {
+    setBenchmarkBusy(true);
+    setBenchmarkMessage(`Running ${sampleCount}-call transcription pipeline benchmark...`);
+    try {
+      const result = await api.request<TranscriptionBenchmarkResult>("/api/v1/system/queue/transcription-benchmark", {
+        method: "POST",
+        body: JSON.stringify({ sampleCount, lookbackHours: rangeHoursForBenchmark() })
+      });
+      setBenchmark(result);
+      setBenchmarkMessage(`Benchmark complete: ${result.warmCallsPerMinute.toFixed(1)} warm calls/min, ${result.whisperSharePercent.toFixed(0)}% of measured time in Whisper.`);
+    } catch (error) {
+      setBenchmarkMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBenchmarkBusy(false);
+    }
+  }
+
   return <div className="trouble-panel jobs-panel">
-    <QueuePane queue={queue} engineHealth={engineHealth} error={queueError} />
+    <QueuePane queue={queue} engineHealth={engineHealth} error={queueError} benchmark={benchmark} benchmarkBusy={benchmarkBusy} benchmarkMessage={benchmarkMessage} onRunBenchmark={runBenchmark} />
     <div className="card jobs-card">
         <div className="jobs-card-head">
           <h3>Jobs</h3>
@@ -1146,7 +1338,11 @@ function JobsPanel({ jobs, reload, engineHealth }: { jobs: Job[]; reload: () => 
   </div>;
 }
 
-function QueuePane({ queue, engineHealth, error }: { queue: QueueSnapshot | null; engineHealth: EngineHealth | null; error: string }) {
+function rangeHoursForBenchmark() {
+  return 4;
+}
+
+function QueuePane({ queue, engineHealth, error, benchmark, benchmarkBusy, benchmarkMessage, onRunBenchmark }: { queue: QueueSnapshot | null; engineHealth: EngineHealth | null; error: string; benchmark: TranscriptionBenchmarkResult | null; benchmarkBusy: boolean; benchmarkMessage: string; onRunBenchmark: (sampleCount: number) => Promise<void> }) {
   const q = queue;
   const depth = q?.queueDepth ?? engineHealth?.queueDepth ?? 0;
   const pending = q?.pendingTranscriptions ?? engineHealth?.pendingTranscriptions ?? 0;
@@ -1155,8 +1351,11 @@ function QueuePane({ queue, engineHealth, error }: { queue: QueueSnapshot | null
   const backlog = q?.backlogQueueDepth ?? engineHealth?.backlogQueueDepth ?? 0;
   const transcribed = q?.recentTranscribedPerMinute ?? engineHealth?.recentTranscribedPerMinute ?? 0;
   const ingested = q?.recentIngestPerMinute ?? engineHealth?.recentIngestPerMinute ?? 0;
-  const queueState = depth <= 0 ? "OK" : q?.queueUnderPressure || engineHealth?.queueUnderPressure ? "Pressure" : transcribed >= ingested ? "Draining" : "Growing";
-  const etaMinutes = depth > 0 && transcribed > ingested ? depth / Math.max(0.1, transcribed - ingested) : 0;
+  const audioIn = q?.recentAudioSecondsIngestedPerMinute ?? engineHealth?.recentAudioSecondsIngestedPerMinute ?? 0;
+  const audioOut = q?.recentAudioSecondsTranscribedPerMinute ?? engineHealth?.recentAudioSecondsTranscribedPerMinute ?? 0;
+  const pendingAudioSeconds = q?.pendingAudioSeconds ?? engineHealth?.pendingAudioSeconds ?? 0;
+  const queueState = depth <= 0 ? "OK" : q?.queueUnderPressure || engineHealth?.queueUnderPressure ? "Pressure" : audioOut >= audioIn ? "Draining" : "Growing";
+  const etaMinutes = pendingAudioSeconds > 0 && audioOut > audioIn ? pendingAudioSeconds / Math.max(0.1, audioOut - audioIn) : 0;
   const blockers = [q?.importWorkBlockedReason ?? engineHealth?.importWorkBlockedReason, q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason].filter(Boolean);
   return <div className="queue-jobs-layout">
     <div className="card queue-card">
@@ -1167,14 +1366,28 @@ function QueuePane({ queue, engineHealth, error }: { queue: QueueSnapshot | null
       </div>
       <div className="audit-kpis queue-kpis">
         <Kpi label="Queued" value={depth.toLocaleString()} subtext={`${pending.toLocaleString()} pending in database`} />
+        <Kpi label="Pending Audio" value={formatDurationMinutes(pendingAudioSeconds / 60)} subtext={`${pendingAudioSeconds.toLocaleString()} audio seconds queued`} />
         <Kpi label="Composition" value={`${live.toLocaleString()} live`} subtext={`${priority.toLocaleString()} priority, ${backlog.toLocaleString()} backlog`} />
-        <Kpi label="Throughput" value={`${transcribed.toFixed(1)}/min`} subtext={`${ingested.toFixed(1)}/min in over ${q?.throughputWindowMinutes ?? engineHealth?.throughputWindowMinutes ?? 10}m`} />
+        <Kpi label="Audio Throughput" value={`${audioOut.toFixed(0)}s/min`} subtext={`${audioIn.toFixed(0)}s/min in over ${q?.throughputWindowMinutes ?? engineHealth?.throughputWindowMinutes ?? 10}m`} />
+        <Kpi label="Call Throughput" value={`${transcribed.toFixed(1)}/min`} subtext={`${ingested.toFixed(1)}/min in; useful but duration-blind`} />
         <Kpi label="Latency" value={`${Number(q?.averageTranscriptionSeconds ?? engineHealth?.averageTranscriptionSeconds ?? 0).toFixed(1)}s`} subtext={`${Number(q?.averageAudioSeconds ?? engineHealth?.averageAudioSeconds ?? 0).toFixed(1)}s avg audio`} />
         <Kpi label="Workers" value={`${q?.liveTranscriptionWorkers ?? engineHealth?.liveTranscriptionWorkers ?? 0} x ${q?.whisperThreadsPerWorker ?? engineHealth?.whisperThreadsPerWorker ?? 0}`} subtext="workers x threads" />
-        <Kpi label="ETA" value={etaMinutes > 0 ? formatDurationMinutes(etaMinutes) : depth > 0 ? "Unknown" : "Clear"} subtext={depth > 0 && transcribed <= ingested ? "Queue is not currently outrunning ingest" : "Based on recent net drain"} />
+        <Kpi label="ETA" value={etaMinutes > 0 ? formatDurationMinutes(etaMinutes) : depth > 0 ? "Unknown" : "Clear"} subtext={depth > 0 && audioOut <= audioIn ? "Audio queue is not currently outrunning ingest" : "Based on recent net audio drain"} />
       </div>
       {blockers.length > 0 && <div className="queue-blockers">{blockers.map((text, i) => <div className="settings-message error" key={i}>{text}</div>)}</div>}
-      {q?.ingest?.paused && <div className="settings-message error">Live ingest is paused{q.ingest.untilQueueClear ? " until the queue clears" : ""}. Dropped while paused: {q.ingest.droppedCalls.toLocaleString()}.</div>}
+      {q?.ingest?.paused && <div className="settings-message error">Live ingest is paused{q.ingest.untilQueueClear ? " until the queue clears" : ""}. Dropped this pause: {(q.ingest.droppedCallsThisPause ?? 0).toLocaleString()} ({q.ingest.droppedCalls.toLocaleString()} total since service start).</div>}
+    </div>
+    <div className="card queue-card">
+      <h3>Top Audio Talkgroups</h3>
+      <p className="muted">Chattiest talkgroups by total audio duration in the queue window. This is the best view for priority/defer decisions.</p>
+      {q?.topAudioTalkgroups?.length ? <table className="table pending-calls-table"><thead><tr><th>Talkgroup</th><th>Category</th><th>Calls</th><th>Audio</th><th>Avg</th><th>Pending</th></tr></thead><tbody>{q.topAudioTalkgroups.map(row => <tr key={`${row.systemShortName}-${row.talkgroup}`}>
+        <td>{row.talkgroupName || `TG ${row.talkgroup}`}<br /><span className="muted">{row.systemShortName} / {row.talkgroup}</span></td>
+        <td><span className={`category-chip category-${row.category}`}>{label(row.category)}</span></td>
+        <td>{row.calls.toLocaleString()}</td>
+        <td>{formatDurationMinutes(row.audioSeconds / 60)}</td>
+        <td>{row.averageAudioSeconds.toFixed(1)}s</td>
+        <td>{row.pendingCalls.toLocaleString()} / {formatDurationMinutes(row.pendingAudioSeconds / 60)}</td>
+      </tr>)}</tbody></table> : <p className="muted">No talkgroup load data.</p>}
     </div>
     <div className="card queue-card">
       <h3>Pending Calls</h3>
@@ -1186,6 +1399,47 @@ function QueuePane({ queue, engineHealth, error }: { queue: QueueSnapshot | null
         <td>{call.systemShortName || "--"}</td>
       </tr>)}</tbody></table> : <p className="muted">No pending transcription calls.</p>}
     </div>
+    <div className="card queue-card queue-benchmark-card">
+      <div className="jobs-card-head">
+        <h3>Pipeline Benchmark</h3>
+        <span className="muted">Read-only production sample</span>
+      </div>
+      <p className="muted">Runs recent completed calls through the local Whisper pipeline and times read, 16 kHz normalization, Whisper inference, quality scoring, and a scratch DB write. It does not update call records.</p>
+      <div className="setup-button-row">
+        <button disabled={benchmarkBusy} onClick={() => void onRunBenchmark(5)}>{benchmarkBusy ? "Running..." : "Run 5 Calls"}</button>
+        <button disabled={benchmarkBusy} onClick={() => void onRunBenchmark(10)}>Run 10 Calls</button>
+        <button disabled={benchmarkBusy} onClick={() => void onRunBenchmark(25)}>Run 25 Calls</button>
+      </div>
+      {benchmarkMessage && <div className={benchmarkMessage.toLowerCase().includes("fail") || benchmarkMessage.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{benchmarkMessage}</div>}
+      {benchmark && <BenchmarkResultView result={benchmark} />}
+    </div>
+  </div>;
+}
+
+function BenchmarkResultView({ result }: { result: TranscriptionBenchmarkResult }) {
+  return <div className="benchmark-result">
+    <div className="audit-kpis queue-kpis">
+      <Kpi label="Warm Rate" value={`${result.warmCallsPerMinute.toFixed(1)}/min`} subtext={`${result.sampleCount} calls, ${result.whisperThreads} thread(s)`} />
+      <Kpi label="Total Time" value={`${result.totalSeconds.toFixed(1)}s`} subtext={`${result.processCpuSeconds.toFixed(1)} CPU seconds`} />
+      <Kpi label="Average Call" value={`${result.averageTotalSeconds.toFixed(1)}s`} subtext={`${result.averageAudioSeconds.toFixed(1)}s audio; ${result.averageRealtimeFactor.toFixed(2)}x realtime`} />
+      <Kpi label="Whisper Share" value={`${result.whisperSharePercent.toFixed(0)}%`} subtext={`${result.averageWhisperSeconds.toFixed(2)}s avg inference`} />
+      <Kpi label="Overhead" value={`${(result.averageTotalSeconds - result.averageWhisperSeconds).toFixed(2)}s`} subtext={`read ${result.averageReadSeconds.toFixed(2)}, normalize ${result.averageNormalizeSeconds.toFixed(2)}, db ${result.averageScratchWriteSeconds.toFixed(2)}`} />
+      <Kpi label="Failures" value={result.failureCount.toString()} subtext={`model init ${result.modelInitSeconds.toFixed(2)}s`} />
+    </div>
+    <table className="table benchmark-table">
+      <thead><tr><th>Call</th><th>Audio</th><th>Total</th><th>Read</th><th>Normalize</th><th>Whisper</th><th>Quality</th><th>DB</th><th>Result</th></tr></thead>
+      <tbody>{result.rows.map(row => <tr key={row.callId}>
+        <td>{row.callId}<br /><span className="muted">{row.systemShortName}</span></td>
+        <td>{row.audioSeconds}s</td>
+        <td>{row.totalSeconds.toFixed(2)}s</td>
+        <td>{row.readSeconds.toFixed(2)}</td>
+        <td>{row.normalizeSeconds.toFixed(2)}</td>
+        <td>{row.whisperSeconds.toFixed(2)}</td>
+        <td>{row.qualitySeconds.toFixed(3)}</td>
+        <td>{row.scratchWriteSeconds.toFixed(3)}</td>
+        <td>{row.error ? <span className="section-status error">{row.error}</span> : <><span className={`confidence ${row.includeInSummaries ? "good" : "bad"}`}>{row.qualityReason}</span><p className="muted benchmark-preview">{row.preview}</p></>}</td>
+      </tr>)}</tbody>
+    </table>
   </div>;
 }
 
@@ -1251,8 +1505,95 @@ function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
     </div>
     <MetricTable title="Health Metrics" rows={data.health.metrics} />
     <MetricTable title="Systems" rows={data.health.systems} />
+    <SourcePlanTable rows={data.health.sourcePlan ?? []} />
+    <SourceCoverageTable rows={data.health.sourceCoverage ?? []} />
     <div className="remedy-list"><h3>Suggested Remedies</h3>{data.health.remedies.map(r => <div className={`remedy ${r.isIssue ? "issue" : ""}`} key={r.metric}><strong>{r.metric}</strong><p>{r.notes}</p></div>)}</div>
-    <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>Decode 0%</th><th>Avg decode</th><th>Retunes</th><th>No TX</th><th>Recorder exhausted</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.decodeZeroPct.toFixed(1)}%</td><td>{r.decodeLines ? (r.decodeRateTotal / r.decodeLines).toFixed(2) : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.recorderExhausted}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
+    <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>CC summary</th><th>CC zero</th><th>Low warnings</th><th>Warning zero</th><th>Retunes</th><th>No TX</th><th>Recorder exhausted</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.ccSummaryDecodeLines ? r.ccSummaryAvgDecodeRate.toFixed(2) : "N/A"}</td><td>{r.ccSummaryDecodeLines ? `${r.ccSummaryDecodeZeroPct.toFixed(1)}%` : "N/A"}</td><td>{r.lowDecodeWarningLines.toLocaleString()}</td><td>{r.lowDecodeWarningLines ? `${r.lowDecodeWarningZeroPct.toFixed(1)}%` : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.recorderExhausted}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
+  </div>;
+}
+
+function RfAnalysisPanel({ data, rangeHours }: { data: TrTroubleshoot; rangeHours: number }) {
+  const systems = Array.from(new Set((data.health.systems ?? []).map(row => row.metric).filter(Boolean)));
+  const [system, setSystem] = useState(systems[0] ?? "");
+  const [hours, setHours] = useState(String(Math.min(Math.max(rangeHours, 2), 72)));
+  const [analysis, setAnalysis] = useState<TrRfAnalysis | null>(null);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!system && systems[0]) setSystem(systems[0]);
+  }, [system, systems]);
+  async function run() {
+    if (!system) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const end = Math.floor(Date.now() / 1000);
+      const start = end - Math.max(1, Number(hours) || 24) * 3600;
+      const result = await api.request<TrRfAnalysis>(`/api/v1/troubleshoot/rf-analysis?system=${encodeURIComponent(system)}&start=${start}&end=${end}`);
+      setAnalysis(result);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div className="rf-analysis">
+    <div className="card">
+      <h3>RF Analysis</h3>
+      <p className="muted">Uses stored TR health rows for corrected CC summary decode metrics, plus bounded journald parsing for recent retune target detail.</p>
+      <div className="settings-grid">
+        <label>System <select value={system} onChange={e => setSystem(e.target.value)}>{systems.map(s => <option key={s}>{s}</option>)}</select></label>
+        <label>Window <select value={hours} onChange={e => setHours(e.target.value)}><option value="2">Last 2h</option><option value="6">Last 6h</option><option value="24">Last 24h</option><option value="72">Last 3d</option></select></label>
+      </div>
+      <div className="setup-button-row"><button disabled={busy || !system} onClick={() => void run()}>{busy ? "Analyzing..." : "Run Analysis"}</button></div>
+      {message && <p className="settings-message error">{message}</p>}
+      {analysis && <p className={analysis.hasEnoughPostChangeData ? "settings-message ok" : "settings-message"}>{analysis.summary}</p>}
+      {analysis && !analysis.hasEnoughPostChangeData && <p className="muted">Post-change RF analysis is more useful after at least a few hours of corrected health rows; for configuration changes, prefer 48-72h before drawing conclusions.</p>}
+    </div>
+    {analysis && <div className="system-manager-grid">
+      <MetricTable title="RF Metrics" rows={analysis.metrics} />
+      <MetricTable title="Previous Window Comparison" rows={analysis.comparison} />
+      <MetricTable title="Retune Targets" rows={analysis.retuneTargets} />
+      <MetricTable title="Recommended Next Checks" rows={analysis.recommendations} />
+    </div>}
+  </div>;
+}
+
+function SourcePlanTable({ rows }: { rows: NonNullable<TrTroubleshoot["health"]["sourcePlan"]> }) {
+  if (!rows.length) return null;
+  return <div className="card">
+    <h3>Suggested Source Plan</h3>
+    <p className="muted">Built from TR control channels, any configured voice frequencies, and observed call frequencies in the selected range. Ranges use the same 90% sample-rate windowing logic as the setup wizard.</p>
+    <table className="table">
+      <thead><tr><th>System</th><th>Desired range</th><th>Center</th><th>Assigned source</th><th>Notes</th></tr></thead>
+      <tbody>{rows.map((row, i) => <tr className={row.isIssue ? "issue-row" : ""} key={`${row.systemShortName}-${row.lowMhz}-${i}`}>
+        <td>{row.systemShortName}</td>
+        <td>{row.lowMhz.toFixed(3)}-{row.highMhz.toFixed(3)} MHz</td>
+        <td>{row.recommendedCenterMhz.toFixed(3)} MHz</td>
+        <td>{row.assignedSourceIndex == null ? "None" : `Source ${row.assignedSourceIndex}`}<br /><span className="muted">{row.assignedDevice}</span></td>
+        <td>{row.notes}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>;
+}
+
+function SourceCoverageTable({ rows }: { rows: NonNullable<TrTroubleshoot["health"]["sourceCoverage"]> }) {
+  if (!rows.length) return null;
+  return <div className="card">
+    <h3>SDR Source Coverage</h3>
+    <p className="muted">Calls are assigned to the first configured source window that covers their frequency. A source with coverable calls but no first-match calls is probably shadowed by an earlier overlapping source.</p>
+    <table className="table">
+      <thead><tr><th>Source</th><th>Window</th><th>Recorders</th><th>First-match calls</th><th>Coverable calls</th><th>Unique freqs</th><th>Notes</th></tr></thead>
+      <tbody>{rows.map(row => <tr className={row.isIssue ? "issue-row" : ""} key={row.index}>
+        <td>{row.index >= 0 ? `Source ${row.index}` : "Uncovered"}<br /><span className="muted">{row.device}</span></td>
+        <td>{row.index >= 0 ? `${row.lowMhz.toFixed(3)}-${row.highMhz.toFixed(3)} MHz` : "--"}<br />{row.index >= 0 && <span className="muted">center {row.centerMhz.toFixed(3)} MHz</span>}</td>
+        <td>{row.digitalRecorders}</td>
+        <td>{row.firstMatchCalls.toLocaleString()}</td>
+        <td>{row.coverableCalls.toLocaleString()}</td>
+        <td>{row.uniqueFrequencies.toLocaleString()}</td>
+        <td>{row.notes}</td>
+      </tr>)}</tbody>
+    </table>
   </div>;
 }
 
@@ -2314,7 +2655,7 @@ function SetupWizard({ status, reload }: { status: SetupStatus; reload: () => Pr
       </div>
       <div className="setup-step-panel">
         {currentStep.id === "stack" && <SetupSection title="Stack" description="Choose whether this machine already has a working trunk-recorder install or should be built fresh.">
-          <SettingInput label="Pizzastack name" description="Shown under the PizzaWave logo." value={branding.stackName} onChange={v => update(["branding", "stackName"], v)} />
+          <SettingInput label="PizzaWave name" description="Shown under the PizzaWave logo." value={branding.stackName} onChange={v => update(["branding", "stackName"], v)} />
           <div className="setup-choice-grid">
             <ChoiceCard active={trInstallMode === "reuseExistingTr"} title="Reuse existing TR" description="Best for an existing Raspberry Pi rig. PizzaWave will validate the config, patch callstream, and leave your working TR install in place." onClick={() => { setTrInstallMode("reuseExistingTr"); update(["setup", "installMode"], "reuseExistingTr"); }} />
             <ChoiceCard active={trInstallMode === "freshTr"} title="Fresh TR setup" description="Build trunk-recorder from source. Existing TR files are backed up automatically; blocking artifacts are listed before you proceed." onClick={() => { setTrInstallMode("freshTr"); update(["setup", "installMode"], "freshTr"); }} />
@@ -2356,7 +2697,7 @@ function SetupWizard({ status, reload }: { status: SetupStatus; reload: () => Pr
           <div className="setup-note">{trInstallMode === "freshTr" ? "Click Next to validate the TR config, patch callstream, remove captureDir so PizzaWave owns call persistence, and verify health access." : "Click Next to validate the TR config, patch callstream, and verify health access. Existing captureDir settings are preserved in reuse mode for local import compatibility."}</div>
         </SetupSection>}
 
-        {currentStep.id === "talkgroups" && <SetupSection title="Talkgroups" description="Talkgroup CSV is required. Import from RadioReference or paste the pizzapi-compatible CSV, then review rows before saving.">
+        {currentStep.id === "talkgroups" && <SetupSection title="Talkgroups" description="Talkgroup CSV is required. Import from RadioReference or paste a PizzaWave talkgroup CSV, then review rows before saving.">
           <SettingInput label="Talkgroups CSV path" description="Required before setup can complete." value={tr.talkgroupsPath} onChange={v => update(["trunkRecorder", "talkgroupsPath"], v)} />
           <SettingInput label="RadioReference SID" description="Example: 6355 from https://www.radioreference.com/db/sid/6355." value={talkgroupSid} onChange={setTalkgroupSid} />
           <SettingCheckbox label="Include encrypted/unknown/unwanted rows" description="Normally excluded by default. You can still include individual rows below." checked={includeExcludedTalkgroups} onChange={setIncludeExcludedTalkgroups} />
@@ -2368,10 +2709,16 @@ function SetupWizard({ status, reload }: { status: SetupStatus; reload: () => Pr
         </SetupSection>}
 
         {currentStep.id === "transcription" && <SetupSection title="Transcription" description="Required. Choose a transcription engine and run an actual sample transcription test.">
-          <SettingSelect label="Engine" description="Provider for turning calls into text." value={transcription.provider} options={["none", "whisper", "lmstudio", "openai"]} onChange={v => update(["transcription", "provider"], v)} />
+          <SettingSelect label="Engine" description="Provider for turning calls into text." value={transcription.provider} options={["none", "whisper", "faster-whisper", "lmstudio", "openai"]} onChange={v => update(["transcription", "provider"], v)} />
           {transcription.provider === "whisper" && <>
             <SettingSelect label="Whisper model" description="Base or medium are the recommended setup choices." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update(["transcription", "whisperModelFile"], modelPath(models, v))} />
             <ModelManager engine="whisper" rows={models} busy={modelBusy} selectedPath={transcription.whisperModelFile} onUse={path => update(["transcription", "whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
+          </>}
+          {transcription.provider === "faster-whisper" && <>
+            <SettingSelect label="Model" description="Tiny/int8 is the safest first choice on Raspberry Pi." value={transcription.fasterWhisperModel ?? "tiny"} options={["tiny", "base", "small", "medium"]} onChange={v => update(["transcription", "fasterWhisperModel"], v)} />
+            <SettingSelect label="Compute type" description="CPU quantization mode." value={transcription.fasterWhisperComputeType ?? "int8"} options={["int8", "int8_float16", "float32"]} onChange={v => update(["transcription", "fasterWhisperComputeType"], v)} />
+            <SettingInput label="Python runtime" description="Managed optional runtime path." value={transcription.fasterWhisperPythonPath ?? "/opt/pizzawave/venv/faster-whisper/bin/python"} onChange={v => update(["transcription", "fasterWhisperPythonPath"], v)} />
+            <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("faster-whisper-prime")}>{busy === "faster-whisper-prime" ? "Installing..." : "Install faster-whisper support"}</button>
           </>}
           {(transcription.provider === "lmstudio" || transcription.provider === "openai") && <>
             <SettingInput label="Base URL" description="OpenAI-compatible audio transcription endpoint." value={transcription.openAiBaseUrl} onChange={v => update(["transcription", "openAiBaseUrl"], v)} />
@@ -2878,6 +3225,20 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
     }
   }
 
+  async function installFasterWhisper() {
+    setModelBusy("faster-whisper");
+    setSectionStatus(current => ({ ...current, transcription: { kind: "info", text: "Installing faster-whisper support..." } }));
+    try {
+      const job = await api.request<Job>("/api/v1/setup/jobs", { method: "POST", body: JSON.stringify({ action: "faster-whisper-prime", confirmed: true }) });
+      setSectionStatus(current => ({ ...current, transcription: { kind: "info", text: `Started faster-whisper install job ${job.id}. Watch System > Pizzad > Queue / Jobs for logs.` } }));
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setSectionStatus(current => ({ ...current, transcription: { kind: "error", text } }));
+    } finally {
+      setModelBusy("");
+    }
+  }
+
   return <div className="settings-page">
     <div className="settings-header">
       <h2>Settings</h2>
@@ -2888,17 +3249,27 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
 
     <div className="settings-flow">
       <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} testing={testingSection === "transcription"} status={sectionStatus.transcription} onSave={() => save("transcription")} onTest={() => saveWithTest("transcription")}>
-        <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
+        <SettingSelect label="Engine" description="Choose the transcription backend for new calls." value={transcription.provider} options={["none", "whisper", "faster-whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
         {transcription.provider === "whisper" && <>
           <SettingSelect label="Whisper model" description="Select a managed model. Download missing models below." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update("transcription", ["whisperModelFile"], modelPath(models, v))} />
           <SettingInput label="Live workers" description="Number of calls transcribed at the same time. Requires pizzad restart. On Raspberry Pi, try 1 or 2; higher values can reduce overall stability." type="number" value={transcription.liveTranscriptionWorkers ?? 1} onChange={v => update("transcription", ["liveTranscriptionWorkers"], numberOrZero(v))} />
-          <SettingInput label="Threads per worker" description="CPU threads used by each Whisper worker. Requires pizzad restart. A good RPI experiment is 2x1 versus 1x2." type="number" value={transcription.whisperThreads ?? 2} onChange={v => update("transcription", ["whisperThreads"], numberOrZero(v))} />
+          <SettingInput label="Threads per worker" description="CPU threads used by each Whisper worker. Requires pizzad restart. Test worker/thread shape on the target host before increasing concurrency." type="number" value={transcription.whisperThreads ?? 2} onChange={v => update("transcription", ["whisperThreads"], numberOrZero(v))} />
           <SettingInput label="Queue pressure threshold" description="Live queue depth where newer live calls are prioritized over stale pending calls." type="number" value={transcription.livePressureQueueDepth ?? 200} onChange={v => update("transcription", ["livePressureQueueDepth"], numberOrZero(v))} />
           <ModelManager engine="whisper" rows={models} busy={modelBusy} selectedPath={transcription.whisperModelFile} onUse={path => update("transcription", ["whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
         </>}
         {transcription.provider === "vosk" && <>
           <SettingSelect label="Vosk model" description="Select a managed model. Download missing models below." value={modelIdForPath(models, "vosk", transcription.voskModelPath)} options={modelOptions(models, "vosk")} onChange={v => update("transcription", ["voskModelPath"], modelPath(models, v))} />
           <ModelManager engine="vosk" rows={models} busy={modelBusy} selectedPath={transcription.voskModelPath} onUse={path => update("transcription", ["voskModelPath"], path)} onDownload={downloadModel} onDelete={deleteModel} />
+        </>}
+        {transcription.provider === "faster-whisper" && <>
+          <SettingSelect label="Model" description="Hugging Face faster-whisper model name. Tiny/int8 is the RPI-safe default." value={transcription.fasterWhisperModel ?? "tiny"} options={["tiny", "base", "small", "medium"]} onChange={v => update("transcription", ["fasterWhisperModel"], v)} />
+          <SettingSelect label="Compute type" description="int8 is fastest/smallest on CPU; float32 is usually too slow for RPI." value={transcription.fasterWhisperComputeType ?? "int8"} options={["int8", "int8_float16", "float32"]} onChange={v => update("transcription", ["fasterWhisperComputeType"], v)} />
+          <SettingInput label="Python runtime" description="Managed venv path. Install support creates this automatically." value={transcription.fasterWhisperPythonPath ?? "/opt/pizzawave/venv/faster-whisper/bin/python"} onChange={v => update("transcription", ["fasterWhisperPythonPath"], v)} />
+          <SettingInput label="Live workers" description="Number of long-lived faster-whisper workers. Requires pizzad restart." type="number" value={transcription.liveTranscriptionWorkers ?? 1} onChange={v => update("transcription", ["liveTranscriptionWorkers"], numberOrZero(v))} />
+          <SettingInput label="CPU threads per worker" description="Passed to ctranslate2. Requires pizzad restart." type="number" value={transcription.whisperThreads ?? 2} onChange={v => update("transcription", ["whisperThreads"], numberOrZero(v))} />
+          <SettingInput label="Queue pressure threshold" description="Live queue depth where newer live calls are prioritized over stale pending calls." type="number" value={transcription.livePressureQueueDepth ?? 200} onChange={v => update("transcription", ["livePressureQueueDepth"], numberOrZero(v))} />
+          <SettingCheckbox label="VAD filter" description="Optional faster-whisper voice activity filter. Leave off until quality is validated." checked={!!transcription.fasterWhisperVadFilter} onChange={v => update("transcription", ["fasterWhisperVadFilter"], v)} />
+          <div className="setting-inline-actions"><button type="button" disabled={modelBusy === "faster-whisper"} onClick={() => void installFasterWhisper()}>{modelBusy === "faster-whisper" ? "Installing..." : "Install faster-whisper support"}</button><span className="muted">Installs the optional Python venv outside the base package.</span></div>
         </>}
         {(transcription.provider === "lmstudio" || transcription.provider === "openai") && <>
           <SettingInput label="Base URL" description="OpenAI-compatible audio transcription endpoint base URL." value={transcription.openAiBaseUrl} onChange={v => update("transcription", ["openAiBaseUrl"], v)} />
@@ -2918,7 +3289,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
         <SettingInput label="API key" description="Optional bearer token. LM Studio local/link setups may leave this blank." type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
         <SettingInput label="Timeout (ms)" description="Maximum wait for a single LLM request." type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
-        <SettingInput label="Max manual lookback (hours)" description="Largest recent range allowed for Generate summaries/incidents. Keep this low on RPI/LM Link systems." type="number" value={aiInsights.maxManualLookbackHours ?? 24} onChange={v => update("ai-insights", ["maxManualLookbackHours"], numberOrZero(v))} />
+        <SettingInput label="Max manual lookback (hours)" description="Largest recent range allowed for Generate summaries/incidents. Keep this low on constrained hosts or slower remote LLM setups." type="number" value={aiInsights.maxManualLookbackHours ?? 24} onChange={v => update("ai-insights", ["maxManualLookbackHours"], numberOrZero(v))} />
         <SettingInput label="Max manual calls" description="Hard stop before sending too many calls to the LLM in one generation job." type="number" value={aiInsights.maxManualSummaryCalls ?? 300} onChange={v => update("ai-insights", ["maxManualSummaryCalls"], numberOrZero(v))} />
         <SettingInput label="Max manual windows" description="Hard stop on the number of LLM summary windows produced by one generation job." type="number" value={aiInsights.maxManualSummaryWindows ?? 20} onChange={v => update("ai-insights", ["maxManualSummaryWindows"], numberOrZero(v))} />
         <SettingInput label="Max queue depth to run" description="Blocks manual generation while transcription/import backlog is above this value. Use 0 to disable this check." type="number" value={aiInsights.maxQueueDepthForManualSummary ?? 100} onChange={v => update("ai-insights", ["maxQueueDepthForManualSummary"], numberOrZero(v))} />
@@ -2933,6 +3304,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
       </SettingsCard>
 
       <ProfilesSettingsCard profileState={profileState} setProfileState={setProfileState} reload={reload} />
+      <TalkgroupCatalogSettingsCard />
 
       <div className="card settings-card">
         <div className="settings-card-meta">
@@ -2945,6 +3317,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
           <SettingValue label="Database path" value={engine.storage?.databasePath} />
           <SettingValue label="Audio root" value={engine.storage?.audioRoot} />
           <SettingValue label="TR config path" value={tr.configPath} />
+          <SettingValue label="Talkgroup catalog" value={tr.talkgroupCatalogPath} />
           <SettingValue label="Talkgroups CSV" value={tr.talkgroupsPath} />
           <SettingValue label="TR service name" value={tr.logServiceName} />
         </div>
@@ -2965,6 +3338,149 @@ function SettingsCard({ title, description, children, busy, testing, status, onS
       {status && <span className={`section-status ${status.kind}`}>{status.text}</span>}
     </div>
     <div className="settings-fields">{children}</div>
+  </div>;
+}
+
+function TalkgroupCatalogSettingsCard() {
+  const [response, setResponse] = useState<TalkgroupCatalogResponse | null>(null);
+  const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
+  const [filter, setFilter] = useState("");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [restartRecommended, setRestartRecommended] = useState(false);
+
+  useEffect(() => { void loadCatalog(); }, []);
+
+  async function loadCatalog() {
+    setBusy("load");
+    try {
+      const loaded = await api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog");
+      setResponse(loaded);
+      setDraft(cloneSettings(loaded.document));
+      setRestartRecommended(Boolean(loaded.trRestartRecommended));
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load talkgroup catalog.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function updateItem(id: number, patch: Partial<TalkgroupCatalogItem>) {
+    setDraft(current => current && ({ ...current, items: current.items.map(item => item.id === id ? { ...item, ...patch } : item) }));
+  }
+
+  function addItem() {
+    const nextId = Math.max(0, ...(draft?.items.map(i => i.id) ?? [0])) + 1;
+    const now = new Date().toISOString();
+    setDraft(current => ({
+      schemaVersion: current?.schemaVersion ?? 1,
+      updatedAtUtc: current?.updatedAtUtc ?? now,
+      items: [...(current?.items ?? []), { id: nextId, mode: "D", alphaTag: "", description: "", tag: "", sourceCategory: "", opsCategory: "other", enabled: true, source: "manual", notes: "", updatedAtUtc: now }]
+    }));
+  }
+
+  function deleteItem(id: number) {
+    setDraft(current => current && ({ ...current, items: current.items.filter(item => item.id !== id) }));
+    setRestartRecommended(true);
+  }
+
+  async function saveCatalog() {
+    if (!draft) return;
+    setBusy("save");
+    setMessage("Saving catalog and regenerating trunk-recorder CSV...");
+    try {
+      const saved = await api.request<TalkgroupCatalogSaveResult>("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(draft) });
+      setRestartRecommended(saved.trRestartRecommended);
+      setMessage(`Saved ${saved.count.toLocaleString()} talkgroups. Generated ${saved.generatedCsvPath}. Restart trunk-recorder before expecting ingest changes.`);
+      await loadCatalog();
+      setRestartRecommended(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Catalog save failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function generateCsv() {
+    setBusy("csv");
+    try {
+      const result = await api.request<TalkgroupTrCsvResult>("/api/v1/talkgroups/catalog/generate-tr-csv", { method: "POST" });
+      setRestartRecommended(true);
+      setMessage(`Generated ${result.path} with ${result.enabledCount.toLocaleString()} enabled talkgroups. Restart trunk-recorder to apply it.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "CSV generation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function restartTr() {
+    setBusy("restart");
+    try {
+      const job = await api.request<Job>("/api/v1/system/services/trunk-recorder/restart", { method: "POST" });
+      setRestartRecommended(false);
+      setMessage(`Started trunk-recorder restart job ${job.id}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Restart failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const needle = filter.trim().toLowerCase();
+  const rows = (draft?.items ?? [])
+    .filter(item => !needle ||
+      String(item.id).includes(needle) ||
+      item.alphaTag.toLowerCase().includes(needle) ||
+      item.description.toLowerCase().includes(needle) ||
+      item.tag.toLowerCase().includes(needle) ||
+      item.opsCategory.toLowerCase().includes(needle))
+    .sort((a, b) => a.id - b.id)
+    .slice(0, 500);
+  const enabledCount = draft?.items.filter(item => item.enabled).length ?? 0;
+
+  return <div className="card settings-card wide">
+    <div className="settings-card-meta">
+      <h3>Talkgroup Catalog</h3>
+      <p>Catalog changes affect future ingest only. Existing calls keep their stored talkgroup label and category.</p>
+      <div className="settings-card-actions">
+        <button disabled={Boolean(busy)} onClick={() => void loadCatalog()}>{busy === "load" ? "Loading..." : "Reload"}</button>
+        <button disabled={Boolean(busy) || !draft} onClick={addItem}>Add</button>
+        <button disabled={Boolean(busy) || !draft} onClick={() => void generateCsv()}>{busy === "csv" ? "Generating..." : "Generate CSV"}</button>
+        <button disabled={Boolean(busy) || !draft} onClick={() => void saveCatalog()}>{busy === "save" ? "Saving..." : "Save"}</button>
+        <button className="danger-button" disabled={Boolean(busy) || !restartRecommended} onClick={() => void restartTr()}>{busy === "restart" ? "Restarting..." : "Restart TR"}</button>
+      </div>
+      {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
+    </div>
+    <div className="settings-fields">
+      <div className="settings-grid">
+        <SettingValue label="Catalog JSON" value={response?.catalogPath} />
+        <SettingValue label="Generated TR CSV" value={response?.generatedCsvPath} />
+        <SettingValue label="Rows" value={`${draft?.items.length ?? 0} total / ${enabledCount} enabled`} />
+      </div>
+      {response?.warning && <p className="settings-message">{response.warning}</p>}
+      {restartRecommended && <p className="settings-message error">trunk-recorder restart recommended. Disabled and deleted talkgroups are excluded from the generated CSV and will no longer be ingested.</p>}
+      <input placeholder="Filter by ID, label, tag, or category" value={filter} onChange={e => setFilter(e.target.value)} />
+      <div className="talkgroup-catalog-table">
+        <table className="table compact-table">
+          <thead><tr><th>Enabled</th><th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Ops</th><th>Source</th><th>Notes</th><th></th></tr></thead>
+          <tbody>{rows.map((item, index) => <tr className={item.enabled ? "" : "excluded-row"} key={`${item.id}-${index}`}>
+            <td><input type="checkbox" checked={item.enabled} onChange={e => { updateItem(item.id, { enabled: e.target.checked }); setRestartRecommended(true); }} /></td>
+            <td><input type="number" value={item.id} onChange={e => updateItem(item.id, { id: numberOrZero(e.target.value) })} /></td>
+            <td><input value={item.mode} onChange={e => updateItem(item.id, { mode: e.target.value })} /></td>
+            <td><input value={item.alphaTag} onChange={e => updateItem(item.id, { alphaTag: e.target.value })} /></td>
+            <td><input value={item.description} onChange={e => updateItem(item.id, { description: e.target.value })} /></td>
+            <td><input value={item.tag} onChange={e => updateItem(item.id, { tag: e.target.value })} /></td>
+            <td><select value={item.opsCategory} onChange={e => updateItem(item.id, { opsCategory: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
+            <td>{item.source || "--"}</td>
+            <td><input value={item.notes} onChange={e => updateItem(item.id, { notes: e.target.value })} /></td>
+            <td><button className="danger-button" onClick={() => deleteItem(item.id)}>Delete</button></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      {(draft?.items.length ?? 0) > 500 && <div className="muted">Showing first 500 matching rows. Save still writes the full catalog.</div>}
+    </div>
   </div>;
 }
 
@@ -3151,6 +3667,13 @@ function withSettingsDefaults(value: Record<string, any>) {
     provider: "none",
     whisperModelFile: "",
     voskModelPath: "",
+    fasterWhisperPythonPath: "/opt/pizzawave/venv/faster-whisper/bin/python",
+    fasterWhisperScriptPath: "",
+    fasterWhisperModel: "tiny",
+    fasterWhisperDevice: "cpu",
+    fasterWhisperComputeType: "int8",
+    fasterWhisperWorkers: 1,
+    fasterWhisperVadFilter: false,
     openAiBaseUrl: "http://localhost:1234/v1",
     openAiApiKey: "",
     openAiModel: "",
@@ -3163,6 +3686,13 @@ function withSettingsDefaults(value: Record<string, any>) {
   sections.transcription.provider = sections.transcription.provider || "none";
   sections.transcription.whisperModelFile = sections.transcription.whisperModelFile ?? "";
   sections.transcription.voskModelPath = sections.transcription.voskModelPath ?? "";
+  sections.transcription.fasterWhisperPythonPath = sections.transcription.fasterWhisperPythonPath || "/opt/pizzawave/venv/faster-whisper/bin/python";
+  sections.transcription.fasterWhisperScriptPath = sections.transcription.fasterWhisperScriptPath ?? "";
+  sections.transcription.fasterWhisperModel = sections.transcription.fasterWhisperModel || "tiny";
+  sections.transcription.fasterWhisperDevice = sections.transcription.fasterWhisperDevice || "cpu";
+  sections.transcription.fasterWhisperComputeType = sections.transcription.fasterWhisperComputeType || "int8";
+  sections.transcription.fasterWhisperWorkers = sections.transcription.fasterWhisperWorkers || 1;
+  sections.transcription.fasterWhisperVadFilter = !!sections.transcription.fasterWhisperVadFilter;
   sections.transcription.openAiBaseUrl = sections.transcription.openAiBaseUrl || "http://localhost:1234/v1";
   sections.transcription.openAiApiKey = sections.transcription.openAiApiKey ?? "";
   sections.transcription.openAiModel = sections.transcription.openAiModel ?? "";
@@ -3198,6 +3728,7 @@ function withSettingsDefaults(value: Record<string, any>) {
   };
   sections.tr = {
     configPath: "/etc/trunk-recorder/config.json",
+    talkgroupCatalogPath: "/var/lib/pizzawave/appdata/talkgroups.json",
     talkgroupsPath: "/etc/trunk-recorder/talkgroups.csv",
     logServiceName: "trunk-recorder",
     healthWindowMinutes: 5,
@@ -3248,9 +3779,10 @@ function settingsFileFromSections(sections: Record<string, any>) {
 
 function setupDraftFromStatus(status: SetupStatus) {
   const values = cloneSettings(status.values ?? {});
-  values.branding = { stackName: "Pizzastack", ...(values.branding ?? {}) };
+  values.branding = { stackName: "PizzaWave", ...(values.branding ?? {}) };
   values.trunkRecorder = {
     configPath: "/etc/trunk-recorder/config.json",
+    talkgroupCatalogPath: "/var/lib/pizzawave/appdata/talkgroups.json",
     talkgroupsPath: "/etc/trunk-recorder/talkgroups.csv",
     logServiceName: "trunk-recorder",
     healthWindowMinutes: 5,
@@ -3260,6 +3792,13 @@ function setupDraftFromStatus(status: SetupStatus) {
     provider: "none",
     whisperModelFile: "",
     voskModelPath: "",
+    fasterWhisperPythonPath: "/opt/pizzawave/venv/faster-whisper/bin/python",
+    fasterWhisperScriptPath: "",
+    fasterWhisperModel: "tiny",
+    fasterWhisperDevice: "cpu",
+    fasterWhisperComputeType: "int8",
+    fasterWhisperWorkers: 1,
+    fasterWhisperVadFilter: false,
     openAiBaseUrl: "http://localhost:1234/v1",
     openAiApiKey: "",
     openAiModel: "",
@@ -3589,7 +4128,7 @@ function SftpImport({ reload, blockedReason }: { reload: () => Promise<void>; bl
   }
 
   return <>
-    <p className="muted">Quick imports are capped at 48h. Larger imports prime the pizzastack as throttled background jobs.</p>
+    <p className="muted">Quick imports are capped at 48h. Larger imports prime PizzaWave as throttled background jobs.</p>
     <div className="archive-availability">
       <div>
         <strong>Visible archive</strong>
@@ -3607,7 +4146,7 @@ function SftpImport({ reload, blockedReason }: { reload: () => Promise<void>; bl
     {blockedReason && <div className="settings-message error">{blockedReason}</div>}
     <button disabled={!!busy || Boolean(blockedReason)} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
     <button disabled={!!busy || Boolean(blockedReason)} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
-    <button disabled={!!busy || Boolean(blockedReason)} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
+    <button disabled={!!busy || Boolean(blockedReason)} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime PizzaWave"}</button>
     <div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div>
   </>;
 }
@@ -3697,7 +4236,7 @@ function LocalImport({ reload, blockedReason }: { reload: () => Promise<void>; b
     {blockedReason && <div className="settings-message error">{blockedReason}</div>}
     <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={estimate}>{busy === "estimate" ? "Estimating..." : "Estimate"}</button>
     <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={() => void run(false)}>{busy === "quick" ? "Queueing..." : "Quick Import"}</button>
-    <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime Pizzastack"}</button>
+    <button disabled={!!busy || !availability?.available || Boolean(blockedReason)} onClick={() => void run(true)}>{busy === "prime" ? "Queueing..." : "Prime PizzaWave"}</button>
     <div className={message.startsWith("Estimate failed") || message.startsWith("Import failed") ? "settings-message error" : "settings-message ok"}>{message}</div>
   </>;
 }

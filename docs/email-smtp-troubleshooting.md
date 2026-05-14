@@ -1,43 +1,46 @@
-# Email SMTP Troubleshooting
+# Email Alert Troubleshooting
 
-Troubleshooting alert/digest email delivery for Gmail and Yahoo app-password mode.
+Email alerts are optional. Live calls can trigger email notifications when alert
+rules match; imported/historical calls store matches but suppress live email.
 
 ## Required Settings
 
-- `emailProvider`: `gmail` or `yahoo`
-- `emailUser`: full email address
-- `emailPassword`: app password (not account password)
+In **Settings -> Alerts** configure:
 
-`pizzapi` Settings panel includes a **Test** button to validate delivery.
+- SMTP host and port;
+- username;
+- password or app password;
+- sender address;
+- recipient address;
+- TLS/SSL mode.
 
-## SMTP Endpoints (current code)
+Use the **Test** action before enabling alerts.
 
-| Provider | Host | Port | TLS |
-|---|---|---|---|
-| Gmail | `smtp.gmail.com` | `587` | STARTTLS |
-| Yahoo | `smtp.mail.yahoo.com` | `587` | STARTTLS |
+## Gmail Notes
 
-## Common Failure Patterns
+For Gmail, use an app password rather than your account password. The account
+must have two-factor authentication enabled before app passwords are available.
 
-| Symptom | Likely cause | Action |
-|---|---|---|
-| `Failure sending mail` | provider rejected auth | verify app password, not account password |
-| `SMTP status=GeneralFailure` | network or DNS issue | verify outbound access to SMTP host:587 |
-| `Authentication failed` | wrong provider selected | set `emailProvider` to match domain/provider |
-| timeout | firewall or provider throttling | allow egress 587, retry later |
+Typical settings:
 
-## Diagnostics
+| Field | Value |
+| --- | --- |
+| Host | `smtp.gmail.com` |
+| Port | `587` |
+| TLS | enabled |
 
-Current sender errors include:
-- provider
-- SMTP host/port
-- user
-- SMTP status code
-- inner exception message
+## Troubleshooting
 
-Use those fields first before changing code/config broadly.
+Check:
 
-## Security Notes
+```bash
+journalctl -u pizzad -n 100 --no-pager
+```
 
-- App passwords are sensitive secrets; protect `settings.json`.
-- Prefer dedicated mailbox for notifications where possible.
+Common failures:
+
+- wrong SMTP port or TLS mode;
+- account blocks app password use;
+- recipient rejected by provider;
+- network firewall blocks outbound SMTP;
+- imported calls are being tested instead of live calls.

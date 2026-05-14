@@ -116,6 +116,7 @@ install -m 0755 "$ROOT_DIR/scripts/pizzawave" "$PKG_ROOT/usr/bin/pizzawave"
 install -m 0755 "$ROOT_DIR/scripts/build_pizzawave_deb.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/build_pizzawave_deb.sh"
 install -m 0755 "$ROOT_DIR/scripts/setup_pizzawave_engine.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_pizzawave_engine.sh"
 install -m 0755 "$ROOT_DIR/scripts/setup-lmstudio.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup-lmstudio.sh"
+install -m 0755 "$ROOT_DIR/scripts/setup-faster-whisper.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup-faster-whisper.sh"
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_setup_admin.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh"
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_configure_callstream.py"
 install -m 0755 "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_trunk_recorder.sh"
@@ -148,7 +149,7 @@ EOF
 cat > "$PKG_ROOT/etc/pizzawave/pizzad.json" <<'JSON'
 {
   "server": { "httpBind": "0.0.0.0", "httpPort": 8080 },
-  "branding": { "stackName": "Pizzastack" },
+  "branding": { "stackName": "PizzaWave" },
   "auth": {
     "mode": "none",
     "readRequiresAuth": false,

@@ -52,7 +52,7 @@ PROFILE_FILE="${REAL_HOME}/.profile"
 TR_HEALTH_SCRIPT="/usr/local/bin/tr_health_collect.sh"
 TR_HEALTH_SERVICE="/etc/systemd/system/tr-health-collector.service"
 TR_HEALTH_TIMER="/etc/systemd/system/tr-health-collector.timer"
-TR_HEALTH_DIR="/var/lib/pizzapi/tr-health"
+TR_HEALTH_DIR="/var/lib/pizzawave/tr-health"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Functions
@@ -381,7 +381,7 @@ if [[ $DO_SERVICE -eq 1 ]]; then
 set -euo pipefail
 WINDOW_MINUTES="${1:-5}"
 SERVICE_NAME="${TR_SERVICE_NAME:-trunk-recorder}"
-OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzapi/tr-health}"
+OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzawave/tr-health}"
 SUMMARY_CSV="${OUT_DIR}/summary_5m.csv"
 mkdir -p "$OUT_DIR"
 end_iso="$(date '+%Y-%m-%d %H:%M:%S')"

@@ -1,4 +1,3 @@
-using pizzalib;
 using System.Net.Mail;
 using System.Text.RegularExpressions;
 
@@ -7,14 +6,16 @@ namespace pizzad;
 public sealed class EngineAlertService
 {
     private readonly EngineConfig _config;
+    private readonly PoliceCodeService _policeCodes;
     private readonly ILogger<EngineAlertService> _logger;
     private readonly object _lock = new();
     private readonly Dictionary<Guid, DateTime> _lastTriggered = new();
     private readonly Dictionary<Guid, int> _realtimeCounts = new();
 
-    public EngineAlertService(EngineConfig config, ILogger<EngineAlertService> logger)
+    public EngineAlertService(EngineConfig config, PoliceCodeService policeCodes, ILogger<EngineAlertService> logger)
     {
         _config = config;
+        _policeCodes = policeCodes;
         _logger = logger;
     }
 
@@ -56,7 +57,7 @@ public sealed class EngineAlertService
         return new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty);
     }
 
-    private static bool TryMatch(EngineAlertRule rule, string transcription, out string type, out string detail)
+    private bool TryMatch(EngineAlertRule rule, string transcription, out string type, out string detail)
     {
         type = string.Empty;
         detail = string.Empty;
@@ -65,12 +66,15 @@ public sealed class EngineAlertService
 
         if (string.Equals(rule.MatchType, "police_code", StringComparison.OrdinalIgnoreCase))
         {
-            foreach (var code in Split(rule.PoliceCodes))
+            var configured = Split(rule.PoliceCodes).Select(NormalizeConfiguredCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (configured.Count == 0)
+                return false;
+            foreach (var annotation in _policeCodes.Detect(transcription))
             {
-                if (Regex.IsMatch(transcription, $@"\b{Regex.Escape(code)}\b", RegexOptions.IgnoreCase))
+                if (configured.Contains(annotation.NormalizedCode))
                 {
                     type = "police_code";
-                    detail = code;
+                    detail = annotation.NormalizedCode;
                     return true;
                 }
             }
@@ -122,19 +126,12 @@ public sealed class EngineAlertService
 
     private void SendEmail(EngineAlertRule rule, EngineCall call, string transcription)
     {
-        var settings = new Settings
-        {
-            EmailProvider = _config.Alerts.EmailProvider,
-            emailUser = _config.Alerts.EmailUser,
-            emailPassword = _config.Alerts.EmailPassword
-        };
-
         var tg = string.IsNullOrWhiteSpace(call.TalkgroupName) ? $"TG {call.Talkgroup}" : call.TalkgroupName;
         foreach (var recipient in Split(rule.Email))
         {
             _ = new MailAddress(recipient);
-            EmailSender.SendHtml(
-                settings,
+            SmtpEmailSender.SendHtml(
+                _config.Alerts,
                 "pizzawave notifications",
                 recipient,
                 $"pizzawave alert: {rule.Name}",
@@ -146,4 +143,13 @@ public sealed class EngineAlertService
         (value ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(v => !string.IsNullOrWhiteSpace(v));
+
+    private static string NormalizeConfiguredCode(string code)
+    {
+        code = code.Trim().ToLowerInvariant();
+        var digits = Regex.Match(code, @"^10[-\s]?(\d{1,3})$");
+        if (digits.Success)
+            return $"10-{digits.Groups[1].Value.TrimStart('0')}";
+        return Regex.Replace(code, @"\s+", "-");
+    }
 }
