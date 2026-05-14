@@ -207,7 +207,7 @@ public sealed class DashboardService
             if (incidentCalls.Count == 0)
                 continue;
 
-            var text = $"{incident.Title}. {incident.Detail}";
+            var text = $"{incident.Title ?? string.Empty}. {incident.Detail ?? string.Empty}";
             var area = ResolveIncidentArea(incidentCalls, areaRows, text);
             if (area == null)
                 continue;
@@ -354,8 +354,11 @@ public sealed class DashboardService
                Regex.IsMatch(normalizedText, $@"\b{Regex.Escape(normalizedValue)}\b", RegexOptions.IgnoreCase);
     }
 
-    private static IEnumerable<string> ExtractLocations(string transcription)
+    private static IEnumerable<string> ExtractLocations(string? transcription)
     {
+        if (string.IsNullOrWhiteSpace(transcription))
+            yield break;
+
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var addressMatches = AddressStreetRegex.Matches(transcription).Cast<Match>()
             .Select(m => CleanLocationText(m.Value))
@@ -370,13 +373,16 @@ public sealed class DashboardService
                          .Where(street => !addressMatches.Any(address => address.Contains(street, StringComparison.OrdinalIgnoreCase)))))
         {
             var key = NormalizeLocationKey(text);
-            if (seen.Add(key))
+            if (!string.IsNullOrWhiteSpace(key) && seen.Add(key))
                 yield return text;
         }
     }
 
-    private static bool IsPlausibleLocation(string text)
+    private static bool IsPlausibleLocation(string? text)
     {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
         if (text.Length < 4 || LocationStopWords.Contains(text))
             return false;
 
@@ -407,8 +413,11 @@ public sealed class DashboardService
         return true;
     }
 
-    private static string CleanLocationText(string text)
+    private static string CleanLocationText(string? text)
     {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
         text = Regex.Replace(text.Trim(), @"\s+", " ");
         text = Regex.Replace(text, @"^[,.;:\-\s]+|[,.;:\-\s]+$", "");
         text = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text.ToLowerInvariant());
@@ -419,34 +428,45 @@ public sealed class DashboardService
         return text;
     }
 
-    private static string NormalizeLocationKey(string text)
+    private static string NormalizeLocationKey(string? text)
     {
-        text = text.ToLowerInvariant();
-        text = Regex.Replace(text, @"\b(street|st\.)\b", "st");
-        text = Regex.Replace(text, @"\b(road|rd\.)\b", "rd");
-        text = Regex.Replace(text, @"\b(avenue|ave\.)\b", "ave");
-        text = Regex.Replace(text, @"\b(drive|dr\.)\b", "dr");
-        text = Regex.Replace(text, @"\b(lane|ln\.)\b", "ln");
-        text = Regex.Replace(text, @"\b(boulevard|blvd\.)\b", "blvd");
-        text = Regex.Replace(text, @"\b(highway|hwy\.)\b", "hwy");
-        text = Regex.Replace(text, @"\b(route|rte\.)\b", "rte");
-        text = Regex.Replace(text, @"\b(north\s*east|northeast|ne)\b", "ne");
-        text = Regex.Replace(text, @"\b(north\s*west|northwest|nw)\b", "nw");
-        text = Regex.Replace(text, @"\b(south\s*east|southeast|se)\b", "se");
-        text = Regex.Replace(text, @"\b(south\s*west|southwest|sw)\b", "sw");
-        text = Regex.Replace(text, @"\b(north|n)\b", "n");
-        text = Regex.Replace(text, @"\b(south|s)\b", "s");
-        text = Regex.Replace(text, @"\b(east|e)\b", "e");
-        text = Regex.Replace(text, @"\b(west|w)\b", "w");
-        text = Regex.Replace(text, @"[^a-z0-9]+", " ").Trim();
-        return text;
+        var value = (text ?? string.Empty).Trim();
+        if (value.Length == 0)
+            return string.Empty;
+
+        try
+        {
+            value = value.ToLowerInvariant();
+            value = Regex.Replace(value, @"\b(street|st\.)\b", "st");
+            value = Regex.Replace(value, @"\b(road|rd\.)\b", "rd");
+            value = Regex.Replace(value, @"\b(avenue|ave\.)\b", "ave");
+            value = Regex.Replace(value, @"\b(drive|dr\.)\b", "dr");
+            value = Regex.Replace(value, @"\b(lane|ln\.)\b", "ln");
+            value = Regex.Replace(value, @"\b(boulevard|blvd\.)\b", "blvd");
+            value = Regex.Replace(value, @"\b(highway|hwy\.)\b", "hwy");
+            value = Regex.Replace(value, @"\b(route|rte\.)\b", "rte");
+            value = Regex.Replace(value, @"\b(north\s*east|northeast|ne)\b", "ne");
+            value = Regex.Replace(value, @"\b(north\s*west|northwest|nw)\b", "nw");
+            value = Regex.Replace(value, @"\b(south\s*east|southeast|se)\b", "se");
+            value = Regex.Replace(value, @"\b(south\s*west|southwest|sw)\b", "sw");
+            value = Regex.Replace(value, @"\b(north|n)\b", "n");
+            value = Regex.Replace(value, @"\b(south|s)\b", "s");
+            value = Regex.Replace(value, @"\b(east|e)\b", "e");
+            value = Regex.Replace(value, @"\b(west|w)\b", "w");
+            return Regex.Replace(value, @"[^a-z0-9]+", " ").Trim();
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static string CanonicalLocation(IEnumerable<string> values) =>
-        values.GroupBy(v => NormalizeLocationKey(v), StringComparer.OrdinalIgnoreCase)
+        values.Where(v => !string.IsNullOrWhiteSpace(v))
+            .GroupBy(v => NormalizeLocationKey(v), StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(g => g.Count())
             .ThenBy(g => g.First().Length)
-            .First().First();
+            .FirstOrDefault()?.First() ?? string.Empty;
 
     private static uint StableHash(string value)
     {
