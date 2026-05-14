@@ -12,11 +12,12 @@ run:
 
 ```powershell
 git status --short
+git log -1 --oneline
 dotnet sln C:\projects\pizzawave\pizzawave.sln list
 ```
 
-The active repo root should be `C:\projects\pizzawave`, not the now-removed
-`pizzapi` subfolder.
+The expected branch is `codex/pizzawave-engine-cleanbreak`. The checkpoint
+commit is `a03516f Remove pizzalib and own call processing in pizzad`.
 
 ## Active Architecture
 
@@ -69,12 +70,16 @@ Use `PizzaWave` for product/stack branding. Do not introduce `PizzaStack` or
 
 ## Verification Already Run
 
-The following should be re-run after the current catalog/pizzalib removal pass:
+The following passed after the cleanup, migration, deploy-helper fix, and final
+checkpoint:
 
 ```powershell
 npm run build --prefix C:\projects\pizzawave\pizzad\web
 dotnet test C:\projects\pizzawave\pizzawave.sln --configuration Release
 dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
+dotnet publish C:\projects\pizzawave\pizzad\pizzad.csproj --configuration Release --runtime linux-x64 --self-contained false -p:PIZZAD_SKIP_WEB_BUILD=true
+dotnet publish C:\projects\pizzawave\pizzad\pizzad.csproj --configuration Release --runtime linux-arm64 --self-contained false -p:PIZZAD_SKIP_WEB_BUILD=true
+dotnet build C:\projects\pizzawave\pizzad\pizzad.csproj --configuration RELEASE_X64_CUDA -p:BuildProfile=Release_X64_CUDA -p:PIZZAD_SKIP_WEB_BUILD=true
 ```
 
 The new lightweight test project currently covers talkgroup catalog behavior,
@@ -100,6 +105,13 @@ The one-time deployed DB migration was run on 2026-05-14 for omicrontheta and
 RPI after installing JSON catalogs generated from the deployed TR CSV files.
 Final live dry-runs reported zero remaining catalog/category/name changes on
 both stacks. The disposable migration script was removed after use.
+
+Backups remain on deployed hosts:
+
+- `/var/lib/pizzawave/pizzad.db.pre-call-category-migration.bak`
+
+The local `artifacts/migration-audit` folder was deleted so copied live DB
+snapshots are no longer present in the workspace.
 
 ## Deployed Systems
 
@@ -196,12 +208,12 @@ parallel deploy hit a shared `obj/project.assets.json` race.
 
 ## Worktree Caveat
 
-The repo is intentionally very dirty after the cleanup and prior engine work.
-Do not revert broad file sets. Treat uncommitted changes as user-owned unless
-you inspect them and can prove they are generated/stale.
+The cleanup checkpoint is committed. A clean `git status --short` is expected
+after pulling the pushed branch. If new local changes appear, treat them as
+new-session/user-owned work.
 
 After the new session starts, the likely next verification steps are:
 
 1. Re-run `git status --short`.
-2. Re-run the web build, solution tests, solution build, and linux-x64/linux-arm64 publish checks.
-3. Decide whether to stage/commit the cleanup as a large checkpoint.
+2. Confirm `a03516f` or a later pushed commit is checked out.
+3. Check deployed queue health, especially omicrontheta after deployment downtime.

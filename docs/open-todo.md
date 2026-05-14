@@ -3,6 +3,16 @@
 ## Immediate Handoff Tasks
 
 - Start the next Codex session rooted at `C:\projects\pizzawave`.
+- Pull/checkout branch `codex/pizzawave-engine-cleanbreak`.
+- Confirm latest checkpoint:
+
+```powershell
+git log -1 --oneline
+```
+
+Expected checkpoint: `a03516f Remove pizzalib and own call processing in pizzad`
+or a later handoff/status commit.
+
 - Confirm solution projects are only `pizzad` and `pizzad.Tests`.
 - Re-run:
 
@@ -12,7 +22,8 @@ dotnet test C:\projects\pizzawave\pizzawave.sln --configuration Release
 dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
 ```
 
-- Decide whether to stage/commit the hard cleanup checkpoint.
+- The hard cleanup checkpoint has already been committed. Do not redo the
+  migration unless a deployed stack was restored from a pre-migration backup.
 
 ## Near-Term Operational Follow-Ups
 
@@ -40,6 +51,10 @@ dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
 
 - Revisit faster-whisper quality/performance only if RPI queue pressure returns.
 
+- Watch omicrontheta transcription backlog after the 2026-05-14 deploy.
+  - The service was healthy after deploy, but queue depth rose during downtime.
+  - Let it drain before running large imports or manual AI backfills.
+
 ## Product/Code Follow-Ups
 
 - Clean up and simplify the web UI.
@@ -59,6 +74,12 @@ dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
     RPI after deploying the catalog-based ingest build.
   - Re-run the audit only if a stack is restored from an older backup or a TR
     catalog is replaced outside the PizzaWave settings flow.
+
+- Add an operator-facing catalog drift diagnostic.
+  - It should compare stored call category/name values against the current JSON
+    catalog and report potential changes without mutating the DB.
+  - This replaces the disposable migration script used during the 2026-05-14
+    migration.
 
 - Expand documentation as features stabilize.
   - Keep docs PizzaWave-first.
