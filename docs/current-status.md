@@ -17,7 +17,8 @@ dotnet sln C:\projects\pizzawave\pizzawave.sln list
 ```
 
 The expected branch is `codex/pizzawave-engine-cleanbreak`. The checkpoint
-commit is `a03516f Remove pizzalib and own call processing in pizzad`.
+commit is `c2c2a5e Move transcript post-processing off transcription workers`
+or a later handoff/status commit.
 
 ## Active Architecture
 
@@ -83,7 +84,15 @@ dotnet build C:\projects\pizzawave\pizzad\pizzad.csproj --configuration RELEASE_
 ```
 
 The new lightweight test project currently covers talkgroup catalog behavior,
-strict callstream payload parsing, and police-code detection.
+strict callstream payload parsing, police-code detection, and transcript
+location helper null handling.
+
+The latest post-transcription/dashboard cleanup checkpoint also passed:
+
+```powershell
+dotnet build C:\projects\pizzawave\pizzawave.sln
+dotnet test C:\projects\pizzawave\pizzawave.sln --no-build
+```
 
 ## Talkgroup Catalog
 
@@ -138,6 +147,16 @@ snapshots are no longer present in the workspace.
 - Current transcription provider: `faster-whisper`
 - Model: `tiny`, `int8`, CPU, one worker
 - PizzaWave URL: `http://192.168.2.42:8080`
+- Latest deployed commit: `c2c2a5e Move transcript post-processing off
+  transcription workers`
+- RPI direct deploy completed 2026-05-14 at about 13:48 EDT using the available
+  local key `pizzapi_rpi_test_ed25519`.
+- Post-deploy checks:
+  - `pizzad.service` active;
+  - `/api/v1/health` returned `status: ok`;
+  - five `/api/v1/dashboard` checks returned HTTP 200 in roughly 0.12-0.61s;
+  - no post-restart `fail`, `error`, `exception`, or `500` log entries were
+    found.
 
 ## Recent Major Engine Changes
 
@@ -152,6 +171,18 @@ Observed result:
 - RPI could keep up with live traffic in current testing.
 - Quality audit found some repeated-token and numeric hallucinations, so quality
   reasons `repetitive` and `numeric_noise` were added.
+
+### Post-Transcription Work Split
+
+Police-code detection, transcript location extraction, stored call-location
+writes, and geocoding now run in `TranscriptPostProcessingService`, a separate
+hosted background queue. The transcription workers now write the transcript
+result and enqueue post-processing instead of awaiting annotation/location work.
+
+Dashboard location heat no longer extracts locations or performs live geocoding
+while serving `/api/v1/dashboard`. It reads stored `call_locations` joined to
+cached geocodes. This removes the previous dashboard load-time regex/geocoding
+path that was causing slow dashboard responses and intermittent 500s on RPI.
 
 ### TR RF Health Split
 
@@ -215,5 +246,6 @@ new-session/user-owned work.
 After the new session starts, the likely next verification steps are:
 
 1. Re-run `git status --short`.
-2. Confirm `a03516f` or a later pushed commit is checked out.
-3. Check deployed queue health, especially omicrontheta after deployment downtime.
+2. Confirm `c2c2a5e` or a later pushed commit is checked out.
+3. Check RPI dashboard and queue health after the post-transcription split.
+4. Check deployed queue health, especially omicrontheta after deployment downtime.

@@ -10,7 +10,7 @@
 git log -1 --oneline
 ```
 
-Expected checkpoint: `a03516f Remove pizzalib and own call processing in pizzad`
+Expected checkpoint: `c2c2a5e Move transcript post-processing off transcription workers`
 or a later handoff/status commit.
 
 - Confirm solution projects are only `pizzad` and `pizzad.Tests`.
@@ -41,6 +41,13 @@ dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
   - queue depth;
   - recent audio seconds ingested/transcribed;
   - calls/min.
+
+- Watch RPI dashboard health after the 2026-05-14 post-transcription split.
+  - `/api/v1/dashboard` was returning 200 in about 0.12-0.61s immediately after
+    deploy.
+  - Confirm the Live pill no longer reports intermittent 500s during sustained
+    ingest/transcription load.
+  - Check logs for `Transcript post-processing failed` warnings.
 
 - Continue monitoring omicrontheta Hamilton retune/decode behavior after recent
   gain/config changes.
@@ -80,6 +87,18 @@ dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
     catalog and report potential changes without mutating the DB.
   - This replaces the disposable migration script used during the 2026-05-14
     migration.
+
+- Add an explicit one-time backfill path for stored transcript locations.
+  - New calls now write `call_locations` during transcript post-processing.
+  - Historical calls do not have `call_locations` unless they are reprocessed.
+  - This should be an operator-triggered job or disposable script, not startup
+    work.
+
+- Consider separating geocoding into an even lower-priority queue if RPI load
+  shows the current post-processing worker still competes with transcription.
+  - The current implementation is already off the transcription worker path.
+  - A dedicated geocode queue would make network geocode latency independently
+    throttleable.
 
 - Expand documentation as features stabilize.
   - Keep docs PizzaWave-first.
