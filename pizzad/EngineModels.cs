@@ -94,6 +94,28 @@ public sealed record LocationHeatCallDto(
     string Transcript,
     string AudioUrl);
 
+public sealed record CallLocationDashboardRow(
+    long CallId,
+    long StartTime,
+    string SystemShortName,
+    long Talkgroup,
+    string TalkgroupName,
+    string Category,
+    string Transcription,
+    string AreaId,
+    string AreaLabel,
+    string AreaSystemShortName,
+    string LocationText,
+    string NormalizedKey,
+    string Source,
+    string GeocodeQuery,
+    string GeocodeDisplayName,
+    string GeocodeProvider,
+    string GeocodePrecision,
+    double GeocodeConfidence,
+    double Latitude,
+    double Longitude);
+
 public sealed record GeocodeCacheDto
 {
     public string CacheKey { get; init; } = string.Empty;

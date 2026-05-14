@@ -14,7 +14,7 @@ public sealed class EnginePipeline
     private readonly TalkgroupResolver _talkgroups;
     private readonly AutomaticInsightsService _insights;
     private readonly CallAudioService _audio;
-    private readonly PoliceCodeService _policeCodes;
+    private readonly TranscriptPostProcessingService _postProcessing;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<TranscriptionQueueItem> _liveQueue = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _priorityLiveQueue = new();
@@ -47,7 +47,7 @@ public sealed class EnginePipeline
         TalkgroupResolver talkgroups,
         AutomaticInsightsService insights,
         CallAudioService audio,
-        PoliceCodeService policeCodes,
+        TranscriptPostProcessingService postProcessing,
         ILogger<EnginePipeline> logger)
     {
         _config = config;
@@ -57,7 +57,7 @@ public sealed class EnginePipeline
         _talkgroups = talkgroups;
         _insights = insights;
         _audio = audio;
-        _policeCodes = policeCodes;
+        _postProcessing = postProcessing;
         _logger = logger;
     }
 
@@ -311,8 +311,15 @@ public sealed class EnginePipeline
             var alert = suppressDownstream
                 ? new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty)
                 : _alerts.Evaluate(call, transcription, item.Imported);
+            var updatedCall = call with
+            {
+                Transcription = transcription,
+                TranscriptionStatus = quality.Status,
+                QualityReason = quality.Reason,
+                IsAlertMatch = alert.IsMatch
+            };
             await _database.UpdateCallTranscriptionAsync(item.CallId, transcription, quality.Status, quality.Reason, alert.IsMatch, ct);
-            await _database.ReplaceCallAnnotationsAsync(item.CallId, _policeCodes.Detect(transcription), ct);
+            _postProcessing.Enqueue(updatedCall);
             RecordTranscriptionPerformance(startedAt, stopwatch.Elapsed, Math.Max(0, call.StopTime - call.StartTime), backlog);
 
             if (!quality.IncludeInSummaries)
@@ -335,13 +342,6 @@ public sealed class EnginePipeline
             await _events.PublishAsync("call_transcribed", new { callId = item.CallId, imported = item.Imported, backlog }, ct);
             if (!suppressDownstream && quality.IncludeInSummaries)
             {
-                var updatedCall = call with
-                {
-                    Transcription = transcription,
-                    TranscriptionStatus = quality.Status,
-                    QualityReason = quality.Reason,
-                    IsAlertMatch = alert.IsMatch
-                };
                 _insights.Enqueue(updatedCall);
             }
         }

@@ -145,6 +145,43 @@ public sealed class EngineDatabase
         await tx.CommitAsync(ct);
     }
 
+    public async Task ReplaceCallLocationsAsync(long callId, IReadOnlyList<CallLocationRecord> locations, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = (SqliteTransaction)tx;
+            delete.CommandText = "DELETE FROM call_locations WHERE call_id=$call_id;";
+            Add(delete, "$call_id", callId);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var location in locations)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = (SqliteTransaction)tx;
+            insert.CommandText = """
+                INSERT INTO call_locations (
+                    call_id, area_id, area_label, system_short_name, location_text, normalized_key, geocode_cache_key, source, created_at_utc)
+                VALUES (
+                    $call_id, $area_id, $area_label, $system_short_name, $location_text, $normalized_key, $geocode_cache_key, $source, $created_at_utc);
+                """;
+            Add(insert, "$call_id", callId);
+            Add(insert, "$area_id", location.AreaId);
+            Add(insert, "$area_label", location.AreaLabel);
+            Add(insert, "$system_short_name", location.SystemShortName);
+            Add(insert, "$location_text", location.LocationText);
+            Add(insert, "$normalized_key", location.NormalizedKey);
+            Add(insert, "$geocode_cache_key", location.GeocodeCacheKey);
+            Add(insert, "$source", location.Source);
+            Add(insert, "$created_at_utc", DateTime.UtcNow.ToString("O"));
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<long> CountCallsStartedSinceAsync(long startUnix, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -403,6 +440,69 @@ public sealed class EngineDatabase
         Add(command, "$created_at_utc", row.CreatedAtUtc == default ? now : row.CreatedAtUtc.ToString("O"));
         Add(command, "$updated_at_utc", now);
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<CallLocationDashboardRow>> ListCallLocationsAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                c.id AS call_id,
+                c.start_time,
+                COALESCE(c.system_short_name, '') AS system_short_name,
+                c.talkgroup,
+                COALESCE(NULLIF(c.talkgroup_name, ''), 'TG ' || c.talkgroup) AS talkgroup_name,
+                COALESCE(NULLIF(c.category, ''), 'other') AS category,
+                COALESCE(c.transcription, '') AS transcription,
+                l.area_id,
+                l.area_label,
+                l.system_short_name AS area_system_short_name,
+                l.location_text,
+                l.normalized_key,
+                l.source,
+                COALESCE(g.query, '') AS geocode_query,
+                COALESCE(g.display_name, '') AS geocode_display_name,
+                COALESCE(g.provider, '') AS geocode_provider,
+                COALESCE(g.precision, '') AS geocode_precision,
+                COALESCE(g.confidence, 0) AS geocode_confidence,
+                COALESCE(g.latitude, 0) AS latitude,
+                COALESCE(g.longitude, 0) AS longitude
+            FROM call_locations l
+            JOIN calls c ON c.id = l.call_id
+            LEFT JOIN geocode_cache g ON g.cache_key = l.geocode_cache_key
+            WHERE c.start_time BETWEEN $start AND $end
+            ORDER BY c.start_time DESC;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        var rows = new List<CallLocationDashboardRow>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new CallLocationDashboardRow(
+                reader.GetInt64(reader.GetOrdinal("call_id")),
+                reader.GetInt64(reader.GetOrdinal("start_time")),
+                reader.GetString(reader.GetOrdinal("system_short_name")),
+                reader.GetInt64(reader.GetOrdinal("talkgroup")),
+                reader.GetString(reader.GetOrdinal("talkgroup_name")),
+                reader.GetString(reader.GetOrdinal("category")),
+                reader.GetString(reader.GetOrdinal("transcription")),
+                reader.GetString(reader.GetOrdinal("area_id")),
+                reader.GetString(reader.GetOrdinal("area_label")),
+                reader.GetString(reader.GetOrdinal("area_system_short_name")),
+                reader.GetString(reader.GetOrdinal("location_text")),
+                reader.GetString(reader.GetOrdinal("normalized_key")),
+                reader.GetString(reader.GetOrdinal("source")),
+                reader.GetString(reader.GetOrdinal("geocode_query")),
+                reader.GetString(reader.GetOrdinal("geocode_display_name")),
+                reader.GetString(reader.GetOrdinal("geocode_provider")),
+                reader.GetString(reader.GetOrdinal("geocode_precision")),
+                reader.GetDouble(reader.GetOrdinal("geocode_confidence")),
+                reader.GetDouble(reader.GetOrdinal("latitude")),
+                reader.GetDouble(reader.GetOrdinal("longitude"))));
+        }
+        return rows;
     }
 
     public async Task<EngineCall?> GetCallAsync(long id, CancellationToken ct)
@@ -1547,6 +1647,7 @@ public sealed class EngineDatabase
             CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id, id);
             """, ct);
         await ExecuteNonQueryAsync(connection, CallAnnotationsSchemaSql, ct);
+        await ExecuteNonQueryAsync(connection, CallLocationsSchemaSql, ct);
         await BackfillTranscriptionQualityAsync(connection, ct);
         await NormalizeTrHealthScopesAsync(connection, ct);
         await RemoveDuplicateIncidentCallLinksAsync(connection, ct);
@@ -1816,6 +1917,24 @@ public sealed class EngineDatabase
 
         CREATE INDEX IF NOT EXISTS idx_geocode_cache_area ON geocode_cache(area_id, location_text);
 
+        CREATE TABLE IF NOT EXISTS call_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id INTEGER NOT NULL,
+            area_id TEXT NOT NULL,
+            area_label TEXT NOT NULL,
+            system_short_name TEXT NOT NULL,
+            location_text TEXT NOT NULL,
+            normalized_key TEXT NOT NULL,
+            geocode_cache_key TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'transcription',
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(call_id) REFERENCES calls(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_call_locations_call ON call_locations(call_id);
+        CREATE INDEX IF NOT EXISTS idx_call_locations_area_key ON call_locations(area_id, normalized_key);
+        CREATE INDEX IF NOT EXISTS idx_call_locations_geocode ON call_locations(geocode_cache_key);
+
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -1977,5 +2096,25 @@ public sealed class EngineDatabase
         );
 
         CREATE INDEX IF NOT EXISTS idx_call_annotations_call ON call_annotations(call_id, kind);
+        """;
+
+    private const string CallLocationsSchemaSql = """
+        CREATE TABLE IF NOT EXISTS call_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id INTEGER NOT NULL,
+            area_id TEXT NOT NULL,
+            area_label TEXT NOT NULL,
+            system_short_name TEXT NOT NULL,
+            location_text TEXT NOT NULL,
+            normalized_key TEXT NOT NULL,
+            geocode_cache_key TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'transcription',
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(call_id) REFERENCES calls(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_call_locations_call ON call_locations(call_id);
+        CREATE INDEX IF NOT EXISTS idx_call_locations_area_key ON call_locations(area_id, normalized_key);
+        CREATE INDEX IF NOT EXISTS idx_call_locations_geocode ON call_locations(geocode_cache_key);
         """;
 }

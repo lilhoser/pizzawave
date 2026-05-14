@@ -182,7 +182,7 @@ public sealed class GeocodingService
             "boulevard" or "blvd" or "highway" or "hwy" or "pike" or "place" or "pl" or "court" or "ct" or
             "way" or "circle" or "cir" or "terrace" or "ter" or "trail" or "trl" or "parkway" or "pkwy";
 
-    private static string CacheKey(string areaId, string locationText)
+    public static string CacheKey(string areaId, string locationText)
     {
         var raw = $"{areaId.Trim().ToLowerInvariant()}|{locationText.Trim().ToLowerInvariant()}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
