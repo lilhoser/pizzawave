@@ -407,10 +407,11 @@ function Legend({ items }: { items: string[][] }) {
 function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[]; focusedKey?: string | null; onFocusKey?: (key: string | null) => void }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
+  const defaultZoom = useMemo(() => defaultMapZoom(rows), [rows]);
   const areaKey = useMemo(() => Array.from(new Set(rows.map(row => row.areaId))).sort().join("|"), [rows]);
   const lastAreaKey = useRef(areaKey);
   const [mapSize, setMapSize] = useState({ width: 760, height: 520 });
-  const [zoom, setZoom] = useState(9);
+  const [zoom, setZoom] = useState(defaultZoom);
   const [center, setCenter] = useState(defaultCenter);
   const [selected, setSelected] = useState<LocationHeat | null>(null);
   useEffect(() => {
@@ -426,7 +427,7 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
     if (areaKey === lastAreaKey.current) return;
     lastAreaKey.current = areaKey;
     setCenter(defaultMapCenter(rows));
-    setZoom(9);
+    setZoom(defaultMapZoom(rows));
     setSelected(null);
   }, [areaKey, rows]);
   useEffect(() => {
@@ -536,6 +537,21 @@ function defaultMapCenter(rows: LocationHeat[]): GeoPoint {
     lat: points.reduce((sum, row) => sum + row.latitude, 0) / points.length,
     lon: points.reduce((sum, row) => sum + row.longitude, 0) / points.length
   };
+}
+
+function defaultMapZoom(rows: LocationHeat[]) {
+  const points = rows.filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
+  if (points.length < 2)
+    return 12;
+  const latSpan = Math.max(...points.map(row => row.latitude)) - Math.min(...points.map(row => row.latitude));
+  const lonSpan = Math.max(...points.map(row => row.longitude)) - Math.min(...points.map(row => row.longitude));
+  const span = Math.max(latSpan, lonSpan);
+  if (span <= 0.15) return 13;
+  if (span <= 0.45) return 12;
+  if (span <= 1.1) return 11;
+  if (span <= 3) return 10;
+  if (span <= 8) return 8;
+  return 5;
 }
 
 function buildMapViewport(zoom: number, centerPoint: GeoPoint, size: { width: number; height: number }): MapViewport {
