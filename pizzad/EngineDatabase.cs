@@ -1451,7 +1451,7 @@ public sealed class EngineDatabase
             WHERE last_seen >= $start AND first_seen <= $end
               AND (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = incidents.id) >= 2
             ORDER BY last_seen DESC
-            LIMIT 200;
+            LIMIT 1000;
             """;
         Add(command, "$start", start);
         Add(command, "$end", end);
