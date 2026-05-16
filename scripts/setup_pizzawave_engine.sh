@@ -219,26 +219,7 @@ if [[ ! -f "$CONFIG_DIR/pizzad.json" ]]; then
     "healthWindowMinutes": 5
   },
   "locations": {
-    "monitoredAreas": [
-      {
-        "areaId": "hamilton-county-tn",
-        "areaLabel": "Hamilton County, TN",
-        "systemShortName": "whiteoak-hamilton",
-        "aliases": [ "whiteoak-hamilton", "hamilton" ]
-      },
-      {
-        "areaId": "bradley-county-tn",
-        "areaLabel": "Bradley County, TN",
-        "systemShortName": "bradley",
-        "aliases": [ "bradley" ]
-      },
-      {
-        "areaId": "cleveland-tn",
-        "areaLabel": "Cleveland, TN",
-        "systemShortName": "cleveland",
-        "aliases": [ "cleveland" ]
-      }
-    ]
+    "monitoredAreas": []
   },
   "setup": {
     "completed": false,

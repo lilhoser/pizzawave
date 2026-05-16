@@ -61,7 +61,7 @@ public sealed class GeocodingService
                 await Task.Delay(TimeSpan.FromSeconds(1.1) - elapsed, ct);
 
             var url = "https://nominatim.openstreetmap.org/search" +
-                      $"?format=jsonv2&limit=1&countrycodes=us&addressdetails=1&bounded=1" +
+                      $"?format=jsonv2&limit=1&addressdetails=1&bounded=1" +
                       $"&viewbox={area.West.ToString(CultureInfo.InvariantCulture)},{area.North.ToString(CultureInfo.InvariantCulture)},{area.East.ToString(CultureInfo.InvariantCulture)},{area.South.ToString(CultureInfo.InvariantCulture)}" +
                       $"&q={Uri.EscapeDataString(query)}";
             _lastNominatimRequestUtc = DateTime.UtcNow;
@@ -75,7 +75,7 @@ public sealed class GeocodingService
                 return (await CacheNegativeAsync(cacheKey, query, locationText, area, ct), false);
             }
 
-            if (!WithinBounds(lat, lon, area) && !IsKnownNearbyPlace(locationText))
+            if (!WithinBounds(lat, lon, area))
             {
                 _logger.LogInformation("Rejected geocode match outside bounds for '{Query}': {DisplayName}", query, best.DisplayName);
                 return (await CacheNegativeAsync(cacheKey, query, locationText, area, ct), false);
@@ -141,13 +141,10 @@ public sealed class GeocodingService
 
     private static string BuildQuery(string locationText, MonitoredAreaConfig area)
     {
-        if (locationText.Contains("fort oglethorpe", StringComparison.OrdinalIgnoreCase))
-            return $"{locationText}, Georgia, USA";
-        return $"{locationText}, {area.AreaLabel}, Tennessee, USA";
+        return string.IsNullOrWhiteSpace(area.AreaLabel)
+            ? locationText
+            : $"{locationText}, {area.AreaLabel}";
     }
-
-    private static bool IsKnownNearbyPlace(string locationText) =>
-        locationText.Contains("fort oglethorpe", StringComparison.OrdinalIgnoreCase);
 
     private static bool LooksRelevant(string locationText, string displayName)
     {
@@ -165,8 +162,8 @@ public sealed class GeocodingService
             query.StartsWith("state route "))
             return numericTokens.Count > 0 && numericTokens.All(t => display.Contains(t, StringComparison.Ordinal));
 
-        var streetTokens = queryTokens.Where(t => !t.All(char.IsDigit) && !IsStreetSuffix(t)).ToList();
-        return streetTokens.Count == 0 || streetTokens.Any(t => display.Contains(t, StringComparison.Ordinal));
+        var streetTokens = queryTokens.Where(t => !t.All(char.IsDigit) && !IsStreetSuffix(t) && !IsDirection(t)).ToList();
+        return streetTokens.Count > 0 && streetTokens.Any(t => display.Contains(t, StringComparison.Ordinal));
     }
 
     private static string Normalize(string value)
@@ -181,6 +178,11 @@ public sealed class GeocodingService
         token is "street" or "st" or "road" or "rd" or "avenue" or "ave" or "drive" or "dr" or "lane" or "ln" or
             "boulevard" or "blvd" or "highway" or "hwy" or "pike" or "place" or "pl" or "court" or "ct" or
             "way" or "circle" or "cir" or "terrace" or "ter" or "trail" or "trl" or "parkway" or "pkwy";
+
+    private static bool IsDirection(string token) =>
+        token is "n" or "s" or "e" or "w" or "ne" or "nw" or "se" or "sw" or
+            "north" or "south" or "east" or "west" or "northeast" or "northwest" or
+            "southeast" or "southwest";
 
     public static string CacheKey(string areaId, string locationText)
     {

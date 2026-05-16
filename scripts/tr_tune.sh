@@ -59,9 +59,9 @@ Mode: device-bakeoff
 
 Examples:
   sudo ./tr_tune.sh ppm-convert --center-hz 855571875 --ppm -5 --tr-sign positive
-  sudo ./tr_tune.sh error-sweep --system whiteoakmt-hamilton --control-channel 855212500 --device-serial 00000005 --base-error 4278
-  sudo ./tr_tune.sh cc-sweep --system whiteoakmt-hamilton --cc-modes eachcc --mods qpsk --gains 24,28,32,36
-  sudo ./tr_tune.sh device-bakeoff --system whiteoakmt-hamilton --control-channel 855212500 --template-serial 00000005 --candidates 00000005:4278,00000006:5146
+  sudo ./tr_tune.sh error-sweep --system my-system --control-channel 855212500 --device-serial 00000005 --base-error 4278
+  sudo ./tr_tune.sh cc-sweep --system my-system --cc-modes eachcc --mods qpsk --gains 24,28,32,36
+  sudo ./tr_tune.sh device-bakeoff --system my-system --control-channel 855212500 --template-serial 00000005 --candidates 00000005:4278,00000006:5146
 EOF
 }
 

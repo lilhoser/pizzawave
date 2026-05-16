@@ -38,10 +38,10 @@ Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category
         {
             Id = 1001,
             AlphaTag = "HC SO DISP",
-            Description = "Hamilton County Sheriff Dispatch"
+            Description = "County Sheriff Dispatch"
         };
 
-        Assert.Equal("HC SO DISP - Hamilton County Sheriff Dispatch", TalkgroupCatalogService.BuildLabel(row));
+        Assert.Equal("HC SO DISP - County Sheriff Dispatch", TalkgroupCatalogService.BuildLabel(row));
     }
 
     [Fact]

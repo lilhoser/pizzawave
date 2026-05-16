@@ -144,42 +144,6 @@ public sealed class EngineConfig
             profile.AllowedTalkgroups ??= new();
         }
         Locations.MonitoredAreas ??= new();
-        if (Locations.MonitoredAreas.Count == 0)
-        {
-            Locations.MonitoredAreas.Add(new MonitoredAreaConfig
-            {
-                AreaId = "hamilton-county-tn",
-                AreaLabel = "Hamilton County, TN",
-                SystemShortName = "whiteoak-hamilton",
-                North = 35.47,
-                South = 34.98,
-                West = -85.47,
-                East = -84.98,
-                Aliases = ["whiteoak-hamilton", "whiteoakmt-hamilton", "hamilton"]
-            });
-            Locations.MonitoredAreas.Add(new MonitoredAreaConfig
-            {
-                AreaId = "bradley-county-tn",
-                AreaLabel = "Bradley County, TN",
-                SystemShortName = "bradley",
-                North = 35.33,
-                South = 34.90,
-                West = -85.10,
-                East = -84.55,
-                Aliases = ["bradley", "whiteoakmt-nbradley", "nbradley"]
-            });
-            Locations.MonitoredAreas.Add(new MonitoredAreaConfig
-            {
-                AreaId = "cleveland-tn",
-                AreaLabel = "Cleveland, TN",
-                SystemShortName = "cleveland",
-                North = 35.24,
-                South = 35.07,
-                West = -84.96,
-                East = -84.78,
-                Aliases = ["cleveland", "whiteoakmt-cleveland"]
-            });
-        }
         foreach (var area in Locations.MonitoredAreas)
         {
             area.AreaId = string.IsNullOrWhiteSpace(area.AreaId) ? Slug(area.AreaLabel) : area.AreaId.Trim();
@@ -188,8 +152,6 @@ public sealed class EngineConfig
             area.Aliases ??= new();
             if (area.Aliases.Count == 0)
                 area.Aliases.Add(area.SystemShortName);
-            if (area.North == 0 && area.South == 0 && area.West == 0 && area.East == 0)
-                ApplyDefaultBounds(area);
         }
         Setup.CurrentStep = string.IsNullOrWhiteSpace(Setup.CurrentStep) ? "stack" : Setup.CurrentStep.Trim();
     }
@@ -215,19 +177,6 @@ public sealed class EngineConfig
         value = string.IsNullOrWhiteSpace(value) ? "area" : value.Trim().ToLowerInvariant();
         var chars = value.Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray();
         return string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-    }
-
-    private static void ApplyDefaultBounds(MonitoredAreaConfig area)
-    {
-        if (area.AreaId.Equals("hamilton-county-tn", StringComparison.OrdinalIgnoreCase) ||
-            area.SystemShortName.Contains("hamilton", StringComparison.OrdinalIgnoreCase))
-            (area.North, area.South, area.West, area.East) = (35.47, 34.98, -85.47, -84.98);
-        else if (area.AreaId.Equals("cleveland-tn", StringComparison.OrdinalIgnoreCase) ||
-                 area.SystemShortName.Contains("cleveland", StringComparison.OrdinalIgnoreCase))
-            (area.North, area.South, area.West, area.East) = (35.24, 35.07, -84.96, -84.78);
-        else if (area.AreaId.Equals("bradley-county-tn", StringComparison.OrdinalIgnoreCase) ||
-                 area.SystemShortName.Contains("bradley", StringComparison.OrdinalIgnoreCase))
-            (area.North, area.South, area.West, area.East) = (35.33, 34.90, -85.10, -84.55);
     }
 }
 

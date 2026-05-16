@@ -356,7 +356,6 @@ public sealed class SetupService
     private static string NormalizeSystemName(string value)
     {
         value = (value ?? string.Empty).Trim().ToLowerInvariant();
-        value = value.Replace("whiteoakmt", "whiteoak", StringComparison.OrdinalIgnoreCase);
         return new string(value.Where(char.IsLetterOrDigit).ToArray());
     }
 

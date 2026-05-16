@@ -9,16 +9,7 @@ public sealed class TranscriptLocationService
     private static readonly Regex AddressStreetRegex = new(@"\b\d{1,5}\s+(?:[a-z0-9]+\.?\s+){0,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)" + DirectionalSuffixPattern + @"\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex StreetRegex = new(@"\b(?:[a-z]+\.?\s+){1,4}(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)" + DirectionalSuffixPattern + @"\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HighwayRegex = new(@"\b(?:i[-\s]?\d{1,3}|interstate\s+\d{1,3}|us\s+\d{1,3}|hwy\s+\d{1,3}|highway\s+\d{1,3}|sr\s+\d{1,3}|state\s+route\s+\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex LocalPlaceRegex = new(@"\b(?:fort\s+oglethorpe|east\s+ridge|lookout\s+mountain|soddy[-\s]+daisy|signal\s+mountain|ooltewah|collegedale|hixson|cleveland|chattanooga)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex LocationSuffixRegex = new(@"\b(street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|highway|hwy|pike|place|pl|court|ct|way|circle|cir|terrace|ter|trail|trl|parkway|pkwy)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly HashSet<string> LocalHighwayKeys = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "i 75", "interstate 75", "i 24", "interstate 24",
-        "us 11", "us 27", "us 41", "us 64", "us 74",
-        "hwy 11", "highway 11", "hwy 27", "highway 27", "hwy 41", "highway 41", "hwy 64", "highway 64", "hwy 74", "highway 74",
-        "sr 2", "state route 2", "sr 58", "state route 58", "sr 60", "state route 60", "sr 153", "state route 153",
-        "sr 308", "state route 308", "sr 312", "state route 312", "sr 317", "state route 317"
-    };
     private static readonly HashSet<string> LocationStopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "radio traffic", "main channel", "control channel", "dispatch road", "signal road", "unknown road",
@@ -91,7 +82,6 @@ public sealed class TranscriptLocationService
             .ToList();
         foreach (var text in addressMatches
                      .Concat(HighwayRegex.Matches(transcription).Cast<Match>().Select(m => CleanLocationText(m.Value)).Where(IsPlausibleLocation))
-                     .Concat(LocalPlaceRegex.Matches(transcription).Cast<Match>().Select(m => CleanLocationText(m.Value)).Where(IsPlausibleLocation))
                      .Concat(StreetRegex.Matches(transcription).Cast<Match>()
                          .Select(m => CleanLocationText(m.Value))
                          .Where(IsPlausibleLocation)
@@ -123,16 +113,14 @@ public sealed class TranscriptLocationService
         if (key.StartsWith("i ") || key.StartsWith("interstate ") || key.StartsWith("us ") ||
             key.StartsWith("hwy ") || key.StartsWith("highway ") || key.StartsWith("sr ") ||
             key.StartsWith("state route "))
-            return LocalHighwayKeys.Contains(key);
-        if (LocalPlaceRegex.IsMatch(text))
-            return true;
+            return key.Any(char.IsDigit);
 
         if (!LocationSuffixRegex.IsMatch(text))
             return false;
         if (key.StartsWith("linux ", StringComparison.OrdinalIgnoreCase) ||
             key.StartsWith("emergency file ", StringComparison.OrdinalIgnoreCase))
             return false;
-        if (key is "st" or "street" or "rd" or "road" or "ave" or "avenue" or "dr" or "drive" or "ln" or "lane" or "way" or "ct" or "court")
+        if (IsBareStreetType(key))
             return false;
 
         return true;
@@ -185,6 +173,26 @@ public sealed class TranscriptLocationService
             return string.Empty;
         }
     }
+
+    private static bool IsBareStreetType(string key)
+    {
+        var tokens = key.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 0)
+            return true;
+
+        return tokens.All(token => IsStreetSuffixToken(token) || IsDirectionToken(token));
+    }
+
+    private static bool IsStreetSuffixToken(string token) =>
+        token is "st" or "street" or "rd" or "road" or "ave" or "avenue" or "dr" or "drive" or
+            "ln" or "lane" or "blvd" or "boulevard" or "hwy" or "highway" or "pike" or
+            "pl" or "place" or "ct" or "court" or "way" or "cir" or "circle" or
+            "ter" or "terrace" or "trl" or "trail" or "pkwy" or "parkway";
+
+    private static bool IsDirectionToken(string token) =>
+        token is "n" or "s" or "e" or "w" or "ne" or "nw" or "se" or "sw" or
+            "north" or "south" or "east" or "west" or "northeast" or "northwest" or
+            "southeast" or "southwest";
 }
 
 public sealed record CallLocationRecord(

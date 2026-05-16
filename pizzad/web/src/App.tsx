@@ -468,14 +468,6 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
         draggable={false}
         key={`${tile.z}-${tile.x}-${tile.y}`}
       />)}
-      {Object.entries(monitoredAreaBounds).map(([areaId, bounds]) => {
-        const box = projectBounds(bounds, viewport);
-        const label = rows.find(row => row.areaId === areaId)?.areaLabel;
-        if (!label) return null;
-        return <div className="map-area-box" style={{ left: box.left, top: box.top, width: box.width, height: box.height }} key={areaId}>
-          <span>{label}</span>
-        </div>;
-      })}
       {points.map(({ row, point }) => {
         const size = 22 + row.intensity * 36;
         return <button
@@ -533,26 +525,17 @@ function locationSourceText(row: LocationHeat) {
   return row.locationText.trim().toLocaleLowerCase() !== locationDisplayName(row).trim().toLocaleLowerCase();
 }
 
-type GeoBounds = { north: number; south: number; west: number; east: number };
 type GeoPoint = { lat: number; lon: number };
 type MapViewport = { zoom: number; width: number; height: number; centerWorldX: number; centerWorldY: number };
-const monitoredAreaBounds: Record<string, GeoBounds> = {
-  "hamilton-county-tn": { north: 35.47, south: 34.98, west: -85.47, east: -84.98 },
-  "bradley-county-tn": { north: 35.33, south: 34.90, west: -85.10, east: -84.55 },
-  "cleveland-tn": { north: 35.24, south: 35.07, west: -84.96, east: -84.78 }
-};
 
 function defaultMapCenter(rows: LocationHeat[]): GeoPoint {
-  const bounds = rows
-    .map(row => monitoredAreaBounds[row.areaId])
-    .filter(Boolean);
-  if (!bounds.length)
-    return { lat: 35.18, lon: -85.02 };
-  const north = Math.max(...bounds.map(b => b.north), 35.47);
-  const south = Math.min(...bounds.map(b => b.south), 34.90);
-  const west = Math.min(...bounds.map(b => b.west), -85.47);
-  const east = Math.max(...bounds.map(b => b.east), -84.55);
-  return { lat: (north + south) / 2, lon: (west + east) / 2 };
+  const points = rows.filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
+  if (!points.length)
+    return { lat: 0, lon: 0 };
+  return {
+    lat: points.reduce((sum, row) => sum + row.latitude, 0) / points.length,
+    lon: points.reduce((sum, row) => sum + row.longitude, 0) / points.length
+  };
 }
 
 function buildMapViewport(zoom: number, centerPoint: GeoPoint, size: { width: number; height: number }): MapViewport {
@@ -597,16 +580,6 @@ function approximateHeatLatLon(row: LocationHeat): GeoPoint {
 
 function latLonToWorldPoint(point: GeoPoint, zoom: number) {
   return latLonToWorld(point.lat, point.lon, zoom);
-}
-
-function projectBounds(bounds: GeoBounds, viewport: MapViewport) {
-  const nw = latLonToWorld(bounds.north, bounds.west, viewport.zoom);
-  const se = latLonToWorld(bounds.south, bounds.east, viewport.zoom);
-  const left = (nw.x - viewport.centerWorldX + viewport.width / 2) / viewport.width * 100;
-  const top = (nw.y - viewport.centerWorldY + viewport.height / 2) / viewport.height * 100;
-  const right = (se.x - viewport.centerWorldX + viewport.width / 2) / viewport.width * 100;
-  const bottom = (se.y - viewport.centerWorldY + viewport.height / 2) / viewport.height * 100;
-  return { left: `${left}%`, top: `${top}%`, width: `${right - left}%`, height: `${bottom - top}%` };
 }
 
 function latLonToWorld(lat: number, lon: number, zoom: number) {
@@ -3694,13 +3667,7 @@ function setupDraftFromStatus(status: SetupStatus) {
     ...(values.sftpImport ?? {})
   };
   values.locations = { monitoredAreas: [], ...(values.locations ?? {}) };
-  if (!Array.isArray(values.locations.monitoredAreas) || values.locations.monitoredAreas.length === 0) {
-    values.locations.monitoredAreas = [
-      { areaId: "hamilton-county-tn", areaLabel: "Hamilton County, TN", systemShortName: "whiteoak-hamilton", aliases: ["whiteoak-hamilton", "whiteoakmt-hamilton", "hamilton"], north: 35.47, south: 34.98, west: -85.47, east: -84.98 },
-      { areaId: "bradley-county-tn", areaLabel: "Bradley County, TN", systemShortName: "bradley", aliases: ["bradley", "whiteoakmt-nbradley", "nbradley"], north: 35.33, south: 34.9, west: -85.1, east: -84.55 },
-      { areaId: "cleveland-tn", areaLabel: "Cleveland, TN", systemShortName: "cleveland", aliases: ["cleveland", "whiteoakmt-cleveland"], north: 35.24, south: 35.07, west: -84.96, east: -84.78 }
-    ];
-  }
+  if (!Array.isArray(values.locations.monitoredAreas)) values.locations.monitoredAreas = [];
   return values;
 }
 

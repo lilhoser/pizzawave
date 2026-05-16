@@ -13,7 +13,7 @@
     "audioStreaming": true,
     "systems": [
         {
-            "shortName": "whiteoakmt",
+            "shortName": "example-p25",
             "type": "p25",
             "talkgroupsFile": "/etc/trunk-recorder/talkgroups.csv",
             "control_channels": [
@@ -74,7 +74,7 @@
             "streams":[
                 {
                     "TGID":0,
-                    "shortName":"whiteoakmt"
+                    "shortName":"example-p25"
                 }
             ],
 			"audio_filtering": {

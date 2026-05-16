@@ -12,10 +12,10 @@
     "uploadServer" : "https://api.openmhz.com",
     "systems": [
         {
-            "shortName": "whiteoakmt",
+            "shortName": "example-p25",
 	        "apiKey": "<enter your API key here>",
             "type": "p25",
-            "talkgroupsFile": "chatt_talkgroups.csv",
+            "talkgroupsFile": "talkgroups.csv",
             "control_channels": [
                 855212500,
                 856237500,
@@ -74,7 +74,7 @@
             "streams":[
                 {
                     "TGID":0,
-                    "shortName":"whiteoakmt"
+                    "shortName":"example-p25"
                 }
             ]
         }
