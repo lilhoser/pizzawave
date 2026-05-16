@@ -561,10 +561,18 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   gap: 5px;
   margin-top: 9px;
   font-size: 12px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.location-heat-list-count {
+  color: #9faab5;
+  font-size: 11px;
+  padding: 0 0 3px;
 }
 .location-heat-list button {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   border-top: 1px solid #30363d;
@@ -574,8 +582,18 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   text-align: left;
   cursor: pointer;
 }
+.location-heat-list strong {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
 .location-heat-list span {
   color: #9faab5;
+}
+.location-source-text {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .location-incident-badge {
   justify-self: end;

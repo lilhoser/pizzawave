@@ -481,7 +481,7 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
         return <button
           className={`heat-dot map-heat-dot category-${row.category || "other"} ${selected && locationKey(selected) === locationKey(row) ? "active" : ""}`}
           style={{ left: `${point.x}%`, top: `${point.y}%`, width: size, height: size }}
-          title={`${row.locationText}: ${row.count} call${row.count === 1 ? "" : "s"}; latest ${new Date(row.lastHeard * 1000).toLocaleString()}; calls ${row.callIds.join(", ")}`}
+          title={`${locationDisplayName(row)}: ${row.count} call${row.count === 1 ? "" : "s"}; latest ${new Date(row.lastHeard * 1000).toLocaleString()}; calls ${row.callIds.join(", ")}`}
           onClick={() => focusLocation(row)}
           key={`${row.areaId}-${row.locationText}`}
         >
@@ -492,7 +492,8 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
     </div>
     {selected && <div className="map-popup side-panel">
       <button className="map-popup-close" aria-label="Close location details" onClick={() => { setSelected(null); onFocusKey?.(null); }}>x</button>
-        <strong>{selected.locationText}</strong>
+        <strong>{locationDisplayName(selected)}</strong>
+        {locationSourceText(selected) && <span className="muted">Heard as: {selected.locationText}</span>}
         <span>{selected.areaLabel} / {label(selected.category)}</span>
         <span>{selected.count} call{selected.count === 1 ? "" : "s"}; latest {relativeTime(selected.lastHeard)}</span>
         <span className="map-geocode">Matched: {selected.geocodeDisplayName}</span>
@@ -512,14 +513,24 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
     </div>}
     </div>
     <div className="location-heat-list">
-      {rows.slice(0, 8).map(row => <button type="button" onClick={() => focusLocation(row)} key={`${row.areaId}-${row.locationText}-list`}>
-        <strong>{row.locationText}</strong>
+      <span className="location-heat-list-count">{rows.length} geolocated address{rows.length === 1 ? "" : "es"}</span>
+      {rows.map(row => <button type="button" onClick={() => focusLocation(row)} key={`${row.areaId}-${row.locationText}-list`}>
+        <strong>{locationDisplayName(row)}</strong>
+        {locationSourceText(row) && <span className="location-source-text">Heard as: {row.locationText}</span>}
         <span>{relativeTime(row.lastHeard)}</span>
         <span>{row.count} call{row.count === 1 ? "" : "s"}</span>
         {row.incidentLinks?.length > 0 && <span className="location-incident-badge">Incident</span>}
       </button>)}
     </div>
   </div>;
+}
+
+function locationDisplayName(row: LocationHeat) {
+  return row.geocodeDisplayName?.trim() || row.geocodeQuery?.trim() || row.locationText;
+}
+
+function locationSourceText(row: LocationHeat) {
+  return row.locationText.trim().toLocaleLowerCase() !== locationDisplayName(row).trim().toLocaleLowerCase();
 }
 
 type GeoBounds = { north: number; south: number; west: number; east: number };
