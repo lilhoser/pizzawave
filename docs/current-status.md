@@ -84,9 +84,11 @@ dotnet build C:\projects\pizzawave\pizzad\pizzad.csproj --configuration RELEASE_
 
 The new lightweight test project currently covers talkgroup catalog behavior,
 strict callstream payload parsing, police-code detection, and transcript
-location helper null handling.
+location helper null handling plus generic location extraction guards for vague
+road-type fragments.
 
-The latest incident/verifier/dashboard-map checkpoint also passed:
+The latest incident/verifier/dashboard-map/geography-portability checkpoints
+also passed:
 
 ```powershell
 dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release --no-restore
@@ -153,7 +155,8 @@ snapshots are no longer present in the workspace.
 - Model: `tiny`, `int8`, CPU, one worker
 - PizzaWave URL: `http://192.168.2.42:8080`
 - Latest deployed code includes the 2026-05-16 incident/verifier/dashboard-map
-  checkpoint from `codex/pizzawave-engine-cleanbreak`.
+  checkpoint, local-geography cleanup, and map selection usability updates from
+  `codex/pizzawave-engine-cleanbreak`.
 - RPI direct deploy completed again on 2026-05-16 using the available local key
   `pizzapi_rpi_test_ed25519`.
 - Post-deploy checks:
@@ -223,6 +226,36 @@ The map now:
   still displaying only a compact call sample in the popup;
 - uses cached geocodes extracted from incident title/detail as a display
   fallback when call-level extraction missed a location.
+- starts at a closer zoom based on the returned point spread instead of a fixed
+  broad local zoom;
+- makes the selected map dot pale yellow, larger, and pulsing;
+- uses a wider selected-location panel with larger, less cramped source-call
+  evidence cards.
+
+The incident query ceiling was raised from 200 to 1000 after an apparent
+"capped at 50" investigation. The live 50 count was coincidental, but the fixed
+ceiling was a future risk.
+
+The geography/geocoding path was made product-generic:
+
+- removed hard-coded Chattanooga-area place extraction and local highway
+  allowlists from runtime location extraction;
+- removed hard-coded `Tennessee`, `Georgia`, and `countrycodes=us` from
+  Nominatim queries;
+- removed default Hamilton/Bradley/Cleveland monitored areas from runtime and
+  installer templates;
+- removed hard-coded frontend map bounds and now centers the map from actual
+  geocoded points;
+- removed stale vague road-type geocode artifacts from deployed DBs:
+  omicrontheta deleted 28 `call_locations` and 24 `geocode_cache` rows; RPI
+  deleted 50 `call_locations` and 29 `geocode_cache` rows.
+
+The `Boulevard -> Murphy USA, Signal Mountain Boulevard...` map row was caused
+by deterministic extraction allowing the bare word `Boulevard`, followed by
+Nominatim returning a plausible-looking but unjustified match. That row is now
+gone. Separate incident title/detail overreach still exists when the LLM infers
+too much from terse vehicle/plate/unit traffic; handle that in incident
+quality/verifier work, not geocoding.
 
 Do not perform live geocoding inside `/api/v1/dashboard`. A trial fallback that
 called Nominatim synchronously made dashboard requests take roughly 70-80s. The
@@ -230,12 +263,18 @@ deployed fallback is cached-only and keeps dashboard latency normal. Remaining
 unmapped incidents with clear street/address text need a background incident
 geocoding/retry path, not synchronous dashboard geocoding.
 
-Current post-deploy API spot check:
+Current post-deploy API spot check from the 2026-05-16 18:28 heartbeat:
 
-- omicrontheta dashboard: 20 unique incidents, 120 map rows, 7 map-linked
-  incident IDs, about 0.1s dashboard latency;
-- RPI dashboard: 13 unique incidents, 120 map rows, 5 map-linked incident IDs,
-  about 0.5s dashboard latency.
+- omicrontheta dashboard: 52 unique incidents, 120 map rows, 19 map-linked
+  rows; queue depth 0 and pending transcriptions 0;
+- RPI dashboard: 73 unique incidents, 120 map rows, 28 map-linked rows; queue
+  depth 11, pending transcriptions 12 / 160s audio, and transcribing faster
+  than ingest.
+
+Both rigs served the latest map-usability bundle after deploy:
+
+- `assets/index-bQZ1jR4f.js`
+- `assets/index-B26rCV-w.css`
 
 ### API And Experiment Cleanup
 

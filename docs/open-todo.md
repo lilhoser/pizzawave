@@ -177,8 +177,22 @@ dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
     added/dropped/retained counts, verifier failures, and related `lm_usage`
     finish reasons. High truncated counts mean the verifier may still miss
     relevant source calls even when it repairs some LLM attribution mistakes.
+    - Latest 2026-05-16 18:28 heartbeat: queues were healthy and AI was
+      unblocked, but truncation remained high. OT had 420 verifier runs in the
+      prior 3h, avg reviewed 40.8, avg truncated 32.7, max truncated 259, 887
+      added, 147 dropped, avg retained 6.1, plus 48 incident-extraction
+      truncations and 5 verifier truncations. RPI had 430 verifier runs, avg
+      reviewed 47.6, avg truncated 77.7, max truncated 347, 1010 added, 16
+      dropped, avg retained 4.9, plus 19 incident-extraction truncations and 1
+      verifier truncation. Next engineering target should be prompt/output
+      pressure, not queue capacity.
   - Check that incidents can span categories/talkgroups within a site, but do
     not merge unrelated county/site traffic.
+  - Tighten incident title/detail conservatism. Recent examples still show LLM
+    overreach from terse vehicle/plate/unit traffic, such as inferring stronger
+    event labels than the evidence supports. Add prompt/validation rules that
+    prefer neutral titles/details when calls only contain codes, plates, unit
+    status, or partial location fragments.
   - Improve incident geocoding coverage. The dashboard now preserves all
     incident-linked geocoded call buckets and can use cached geocodes extracted
     from incident title/detail, but many incidents with clear addresses still do
@@ -197,6 +211,21 @@ dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release
     7 days. The backfill should rebuild incidents from stored calls/transcripts
     with explicit operator limits, prompt-size guardrails, and no rig-side
     transcription experiments.
+
+- Monitor generic geocoding/location extraction after removing local geography
+  assumptions.
+  - Runtime no longer hard-codes Chattanooga-area places, local highway
+    allowlists, `Tennessee`/`Georgia`, `countrycodes=us`, default
+    Hamilton/Bradley/Cleveland areas, or fixed frontend map bounds.
+  - Continue checking dashboard map rows for vague "heard as" values such as
+    bare road suffixes/directions and for geocoder matches that are not
+    justified by the transcript phrase.
+  - Add a proper configured-area/bounds API to the dashboard if the operator
+    still needs visible monitored-area boxes on the map; do not reintroduce
+    hard-coded bounds in the frontend.
+  - Consider a one-time broader cleanup/reprocess job for historical
+    `call_locations` if old stale place-name rows continue to appear after the
+    initial vague-location cleanup.
 
 - Clean up and simplify the web UI.
   - The UI has accumulated experimental controls, diagnostics, and nice-to-have
