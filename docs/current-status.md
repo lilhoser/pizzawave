@@ -1,6 +1,6 @@
 # PizzaWave Current Status
 
-Last updated: 2026-05-14
+Last updated: 2026-05-16
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.
@@ -17,8 +17,7 @@ dotnet sln C:\projects\pizzawave\pizzawave.sln list
 ```
 
 The expected branch is `codex/pizzawave-engine-cleanbreak`. The checkpoint
-commit is `c2c2a5e Move transcript post-processing off transcription workers`
-or a later handoff/status commit.
+commit is the latest pushed handoff/status commit on that branch.
 
 ## Active Architecture
 
@@ -87,12 +86,18 @@ The new lightweight test project currently covers talkgroup catalog behavior,
 strict callstream payload parsing, police-code detection, and transcript
 location helper null handling.
 
-The latest post-transcription/dashboard cleanup checkpoint also passed:
+The latest incident/verifier/dashboard-map checkpoint also passed:
 
 ```powershell
-dotnet build C:\projects\pizzawave\pizzawave.sln
-dotnet test C:\projects\pizzawave\pizzawave.sln --no-build
+dotnet build C:\projects\pizzawave\pizzawave.sln --configuration Release --no-restore
+dotnet test C:\projects\pizzawave\pizzawave.sln --configuration Release --no-restore --no-build
+npm run build
 ```
+
+For local Windows builds, set `MSBuildEnableWorkloadResolver=false` if the
+installed workload manifests are broken. The web build was run from
+`C:\projects\pizzawave\pizzad\web` using the Visual Studio bundled `npm.cmd`
+because `npm` was not on the default PATH.
 
 ## Talkgroup Catalog
 
@@ -147,18 +152,98 @@ snapshots are no longer present in the workspace.
 - Current transcription provider: `faster-whisper`
 - Model: `tiny`, `int8`, CPU, one worker
 - PizzaWave URL: `http://192.168.2.42:8080`
-- Latest deployed commit: `c2c2a5e Move transcript post-processing off
-  transcription workers`
-- RPI direct deploy completed 2026-05-14 at about 13:48 EDT using the available
-  local key `pizzapi_rpi_test_ed25519`.
+- Latest deployed code includes the 2026-05-16 incident/verifier/dashboard-map
+  checkpoint from `codex/pizzawave-engine-cleanbreak`.
+- RPI direct deploy completed again on 2026-05-16 using the available local key
+  `pizzapi_rpi_test_ed25519`.
 - Post-deploy checks:
   - `pizzad.service` active;
   - `/api/v1/health` returned `status: ok`;
-  - five `/api/v1/dashboard` checks returned HTTP 200 in roughly 0.12-0.61s;
+  - `/api/v1/dashboard` returned HTTP 200 in roughly 0.5s after the cached-only
+    map fallback deploy;
   - no post-restart `fail`, `error`, `exception`, or `500` log entries were
     found.
 
 ## Recent Major Engine Changes
+
+### V1 LLM-Managed Incidents
+
+Live incident generation now uses an incremental site-local LLM incident-state
+pass instead of promoting category AI summaries into incidents. The service
+sends active incident state plus new/carryover candidate calls on a 5-minute
+cadence, stores stable incident keys/status, and concludes stale managed
+incidents after the rolling state window.
+
+Important behavior:
+
+- incidents may span categories/talkgroups within the same site;
+- category is only a label, not a grouping qualifier;
+- deterministic validation still requires at least two source calls and concrete
+  shared anchors before writing/updating an incident;
+- old incidents were purged on omicrontheta and RPI when this paradigm was
+  deployed;
+- a future controlled backfill, potentially up to 7 days, remains on the TODO
+  list if the new approach holds up.
+
+### Evidence Verifier
+
+A second LLM pass now verifies incident evidence attribution after the incident
+extractor proposes title/detail/call IDs. For each incident it reviews selected
+and nearby calls, classifies them as `supporting`, `related_context`,
+`unrelated`, or `contradicts`, and deterministic code adds/drops/retains call
+links before final validation.
+
+Telemetry:
+
+- token usage for verifier calls is recorded in `lm_usage`;
+- verifier behavior/lossiness is recorded in `evidence_verifier_runs`;
+- watch reviewed/model-reviewed calls, truncated calls, added/dropped/retained
+  calls, failures, and LM finish reasons.
+
+Post-deploy observations on 2026-05-16:
+
+- omicrontheta verifier calls were succeeding after compacting the response
+  schema; earlier `max_tokens=1800` truncations stopped after the fix;
+- RPI AI resumed after the transcription queue drained below the AI gate;
+- verifier lossiness is still real under Hamilton volume, with many nearby calls
+  omitted by prompt/call-count guardrails.
+
+### Dashboard Incidents And Map
+
+The dashboard incident explorer is not intentionally capped at 10. It shows
+unique incidents for the selected range/profile. Category pages show incidents
+that touch that category, so one incident can appear on multiple category pages.
+
+The map now:
+
+- shows only geolocated incident-linked locations, not every geolocated raw
+  call;
+- preserves up to 120 location groups instead of 30;
+- uses all call IDs in a geocoded location bucket for incident matching while
+  still displaying only a compact call sample in the popup;
+- uses cached geocodes extracted from incident title/detail as a display
+  fallback when call-level extraction missed a location.
+
+Do not perform live geocoding inside `/api/v1/dashboard`. A trial fallback that
+called Nominatim synchronously made dashboard requests take roughly 70-80s. The
+deployed fallback is cached-only and keeps dashboard latency normal. Remaining
+unmapped incidents with clear street/address text need a background incident
+geocoding/retry path, not synchronous dashboard geocoding.
+
+Current post-deploy API spot check:
+
+- omicrontheta dashboard: 20 unique incidents, 120 map rows, 7 map-linked
+  incident IDs, about 0.1s dashboard latency;
+- RPI dashboard: 13 unique incidents, 120 map rows, 5 map-linked incident IDs,
+  about 0.5s dashboard latency.
+
+### API And Experiment Cleanup
+
+The rig-side transcription experiment API/UI and diagnostic result persistence
+were removed. Model bakeoffs should run off-rig against copied audio samples so
+production queues and rig CPU are not affected. The category-page AI summaries
+view was removed from the UI; category pages now focus on incidents and raw
+calls while AI summaries are treated as internal/interstitial data.
 
 ### faster-whisper on RPI
 
@@ -235,17 +320,20 @@ C:\projects\pizzawave\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@192.168.2.4
 ```
 
 Do not run x64 and arm64 deploys in parallel from the same workspace. A previous
-parallel deploy hit a shared `obj/project.assets.json` race.
+parallel deploy hit a shared `obj/project.assets.json` race. If a `dotnet
+publish --no-restore -r <rid>` fails with `NETSDK1047` for the other runtime,
+rerun that publish once without `--no-restore` so the assets file includes that
+RID.
 
 ## Worktree Caveat
 
-The cleanup checkpoint is committed. A clean `git status --short` is expected
-after pulling the pushed branch. If new local changes appear, treat them as
-new-session/user-owned work.
+The cleanup and incident/verifier/dashboard-map checkpoints are committed. A
+clean `git status --short` is expected after pulling the pushed branch. If new
+local changes appear, treat them as new-session/user-owned work.
 
 After the new session starts, the likely next verification steps are:
 
 1. Re-run `git status --short`.
-2. Confirm `c2c2a5e` or a later pushed commit is checked out.
-3. Check RPI dashboard and queue health after the post-transcription split.
-4. Check deployed queue health, especially omicrontheta after deployment downtime.
+2. Confirm the latest pushed handoff/status commit is checked out.
+3. Check RPI dashboard and queue health after the incident/verifier deploy.
+4. Continue monitoring verifier lossiness and incident geocoding coverage.

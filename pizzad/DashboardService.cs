@@ -6,11 +6,16 @@ public sealed class DashboardService
 {
     private readonly EngineDatabase _database;
     private readonly EngineConfig _config;
+    private readonly GeocodingService _geocoding;
 
-    public DashboardService(EngineDatabase database, EngineConfig config)
+    public DashboardService(
+        EngineDatabase database,
+        EngineConfig config,
+        GeocodingService geocoding)
     {
         _database = database;
         _config = config;
+        _geocoding = geocoding;
     }
 
     public async Task<DashboardDto> BuildDashboardAsync(long start, long end, CancellationToken ct)
@@ -67,12 +72,10 @@ public sealed class DashboardService
         var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.Category, category, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var insightEvents = await _database.ListInsightEventsAsync(start, end, ct);
-        var insights = BuildCategoryInsights(insightEvents, calls);
         var incidents = BuildCategoryIncidents(await ListIncidentsAsync(start, end, ct), calls);
         if (string.Equals(groupBy, "none", StringComparison.OrdinalIgnoreCase))
         {
-            return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)], insights, incidents);
+            return new CategoryPageDto(category, "none", [new CategoryGroupDto("All calls", calls)], [], incidents);
         }
 
         var groups = calls
@@ -81,7 +84,7 @@ public sealed class DashboardService
             .Select(g => new CategoryGroupDto(g.Key, g.OrderByDescending(c => c.StartTime).ToList()))
             .ToList();
 
-        return new CategoryPageDto(category, "talkgroup", groups, insights, incidents);
+        return new CategoryPageDto(category, "talkgroup", groups, [], incidents);
     }
 
     public Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
@@ -104,31 +107,6 @@ public sealed class DashboardService
             "traffic" => profile.IncludeTraffic,
             _ => profile.IncludeOther
         };
-    }
-
-    private static IReadOnlyList<CategoryInsightDto> BuildCategoryInsights(List<InsightEventRecordDto> insightEvents, List<EngineCall> categoryCalls)
-    {
-        var categoryCallIds = categoryCalls.Select(c => c.Id).ToHashSet();
-        return insightEvents
-            .Select(i => new
-            {
-                Insight = i,
-                Calls = i.Calls.Where(c => categoryCallIds.Contains(c.CallId)).ToList()
-            })
-            .Where(x => x.Calls.Count == 1 && x.Insight.Calls.Count == 1)
-            .OrderByDescending(x => x.Insight.LastSeen)
-            .ThenByDescending(x => x.Insight.Confidence)
-            .Select(x => new CategoryInsightDto(
-                x.Insight.Id,
-                x.Insight.Title,
-                x.Insight.Detail,
-                x.Insight.FirstSeen,
-                x.Insight.LastSeen,
-                x.Insight.Confidence,
-                x.Calls.Count,
-                x.Calls))
-            .Take(100)
-            .ToList();
     }
 
     private static IReadOnlyList<IncidentDto> BuildCategoryIncidents(List<IncidentDto> incidents, List<EngineCall> categoryCalls)
@@ -163,12 +141,15 @@ public sealed class DashboardService
         if (rows.Count == 0)
             return [];
 
+        var incidentCallIds = incidents.SelectMany(i => i.Calls.Select(c => c.CallId)).ToHashSet();
+        const int maxMapGroups = 120;
         var grouped = rows
             .GroupBy(r => $"{r.AreaId}|{r.NormalizedKey}", StringComparer.OrdinalIgnoreCase)
             .Select(g =>
             {
                 var rows = g.ToList();
                 var first = rows[0];
+                var allCallIds = rows.Select(r => r.CallId).Distinct().ToList();
                 var category = rows.GroupBy(r => NormalizeCategory(r.Category))
                     .OrderByDescending(r => r.Count())
                     .ThenBy(r => r.Key, StringComparer.OrdinalIgnoreCase)
@@ -188,7 +169,8 @@ public sealed class DashboardService
                     rows.Select(r => r.CallId).Distinct().Count(),
                     rows.Max(r => r.StartTime),
                     category,
-                    rows.Select(r => r.CallId).Distinct().OrderByDescending(id => id).Take(8).ToList(),
+                    allCallIds,
+                    allCallIds.OrderByDescending(id => id).Take(8).ToList(),
                     rows
                         .GroupBy(r => r.CallId)
                         .Select(r => r.First())
@@ -204,21 +186,27 @@ public sealed class DashboardService
                         .ToList());
             })
             .Where(r => r.Count > 0)
-            .OrderByDescending(r => r.Count)
+            .ToList();
+        await AddIncidentFallbackLocationGroupsAsync(grouped, incidents, ct);
+
+        grouped = grouped
+            .DistinctBy(r => $"{r.AreaId}|{TranscriptLocationService.NormalizeLocationKey(r.Location)}", StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(r => r.LinkCallIds.Any(incidentCallIds.Contains))
+            .ThenByDescending(r => r.Count)
             .ThenByDescending(r => r.LastHeard)
-            .Take(30)
+            .Take(maxMapGroups)
             .ToList();
 
         var max = Math.Max(1, grouped.Select(g => g.Count).DefaultIfEmpty(0).Max());
         return grouped.Select(group =>
         {
-            var callIds = group.CallIds.ToHashSet();
+            var callIds = group.LinkCallIds.ToHashSet();
             var incidentLinks = incidents
                 .Where(i => i.Calls.Any(c => callIds.Contains(c.CallId)))
                 .OrderByDescending(i => i.LastSeen)
                 .Select(i => new LocationHeatIncidentDto(i.Id, string.IsNullOrWhiteSpace(i.Title) ? "Radio incident" : i.Title))
                 .DistinctBy(i => i.IncidentId)
-                .Take(4)
+                .Take(8)
                 .ToList();
             var incidentTitles = incidentLinks.Select(i => i.Title).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             return new LocationHeatDto(
@@ -237,11 +225,71 @@ public sealed class DashboardService
                 group.Count / (double)max,
                 group.LastHeard,
                 group.Category,
-                group.CallIds,
+                group.DisplayCallIds,
                 incidentTitles,
                 incidentLinks,
                 group.SourceCalls);
         }).ToList();
+    }
+
+    private async Task AddIncidentFallbackLocationGroupsAsync(List<LocationGroup> groups, List<IncidentDto> incidents, CancellationToken ct)
+    {
+        var alreadyLinked = groups
+            .SelectMany(group => incidents
+                .Where(incident => incident.Calls.Any(call => group.LinkCallIds.Contains(call.CallId)))
+                .Select(incident => incident.Id))
+            .ToHashSet();
+
+        foreach (var incident in incidents.Where(i => !alreadyLinked.Contains(i.Id)).Take(80))
+        {
+            var system = incident.Calls
+                .Select(c => c.SystemShortName)
+                .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? string.Empty;
+            var area = TranscriptLocationService.ResolveArea(system, _config.Locations.MonitoredAreas);
+            if (area == null)
+                continue;
+
+            var text = $"{incident.Title}. {incident.Detail}";
+            foreach (var location in TranscriptLocationService.ExtractLocations(text).Take(2))
+            {
+                var geocode = await _geocoding.GetCachedAsync(location, area, ct);
+                if (geocode == null || string.Equals(geocode.Provider, "none", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var callIds = incident.Calls.Select(c => c.CallId).Distinct().ToList();
+                var sourceCalls = incident.Calls
+                    .OrderByDescending(c => c.RawTimestamp)
+                    .Take(5)
+                    .Select(c => new LocationHeatCallDto(
+                        c.CallId,
+                        c.RawTimestamp,
+                        NormalizeCategory(c.Category),
+                        string.IsNullOrWhiteSpace(c.TalkgroupName) ? "TG" : c.TalkgroupName,
+                        PreviewTranscript(c.Transcript),
+                        c.AudioUrl))
+                    .ToList();
+
+                groups.Add(new LocationGroup(
+                    area.AreaId,
+                    area.AreaLabel,
+                    area.SystemShortName,
+                    location,
+                    geocode.Query,
+                    geocode.DisplayName,
+                    geocode.Provider,
+                    geocode.Precision,
+                    geocode.Confidence,
+                    geocode.Latitude,
+                    geocode.Longitude,
+                    Math.Max(1, callIds.Count),
+                    incident.LastSeen,
+                    NormalizeCategory(incident.Category),
+                    callIds,
+                    callIds.OrderByDescending(id => id).Take(8).ToList(),
+                    sourceCalls));
+                break;
+            }
+        }
     }
 
     private static IReadOnlyList<QualityHourDto> BuildQuality(List<EngineCall> calls) =>
@@ -538,6 +586,7 @@ public sealed class DashboardService
         int Count,
         long LastHeard,
         string Category,
-        List<long> CallIds,
+        List<long> LinkCallIds,
+        List<long> DisplayCallIds,
         List<LocationHeatCallDto> SourceCalls);
 }

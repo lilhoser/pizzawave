@@ -2,12 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Activity, Bell, Gauge, Radio, Settings, ShieldAlert } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
-import type { AlertMatch, BarStat, CategoryInsight, CategoryPage, Dashboard, DiagnosticModel, DiagnosticToolResult, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TalkgroupOption, TalkgroupTrCsvResult, TokenUsageReport, TopTalkgroup, TranscriptionBenchmarkResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupValidationResult, StatusSummary, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TalkgroupOption, TalkgroupTrCsvResult, TokenUsageReport, TopTalkgroup, TranscriptionBenchmarkResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 type Page = "dashboard" | "system" | "settings" | typeof categories[number];
-type CategoryViewMode = "incidents" | "summaries" | "raw";
+type CategoryViewMode = "incidents" | "raw";
 type DashboardTab = "around" | "stats" | "alerts";
 const categoryColors: Record<string, string> = {
   police: "#5aa7ff",
@@ -29,7 +29,7 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
   const [categoryViewMode, setCategoryViewMode] = useState<CategoryViewMode>(() => {
     const saved = localStorage.getItem("pizzawave-category-view");
-    return saved === "summaries" || saved === "raw" ? saved : "incidents";
+    return saved === "raw" ? saved : "incidents";
   });
   const [status, setStatus] = useState("Starting");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -267,7 +267,6 @@ function App() {
         </>}
         {categories.includes(page as any) && <div className="segmented" aria-label="Category view mode">
           <button className={categoryViewMode === "incidents" ? "active" : ""} onClick={() => setCategoryViewMode("incidents")}>Incidents</button>
-          <button className={categoryViewMode === "summaries" ? "active" : ""} onClick={() => setCategoryViewMode("summaries")}>AI Summaries</button>
           <button className={categoryViewMode === "raw" ? "active" : ""} onClick={() => setCategoryViewMode("raw")}>Raw Calls</button>
         </div>}
         <span className="pill" title="Live means the browser is connected to pizzad and receiving server-sent refresh events.">{status}</span>
@@ -285,7 +284,7 @@ function App() {
       <main className={`main ${inSetup ? "setup-main" : ""}`}>
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} />}
-        {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} />}
+        {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} mode={categoryViewMode} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} recommendations={recommendations} setRecommendations={setRecommendations} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} />}
       </main>
@@ -309,6 +308,7 @@ function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; r
   const hiddenKpis = new Set(["alert rate", "token usage", "incidents", "top problem system", "tr decode 0%", "tr worst decode", "busiest hour", "unique talkgroups"]);
   const visibleKpis = data.kpis.filter(k => !hiddenKpis.has(k.label.trim().toLowerCase()));
   const incidentLocationMap = buildIncidentLocationMap(data.locationHeat);
+  const incidentLocationRows = data.locationHeat.filter(row => row.incidentLinks?.length > 0);
   return (
     <div className="dashboard-shell">
       <div className="dashboard-tabs">
@@ -318,7 +318,7 @@ function DashboardView({ data, rangeHours, reload }: { data: Dashboard | null; r
       </div>
       {tab === "around" && <div className="dashboard dashboard-around">
         <section className="pane dashboard-map-pane">
-          <div className="section"><h3>Geolocated Calls Heat Map</h3><LocationHeatMap rows={data.locationHeat} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} /></div>
+          <div className="section"><h3>Geolocated Incident Map</h3><LocationHeatMap rows={incidentLocationRows} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} /></div>
         </section>
         <section className="pane dashboard-incidents-pane">
           <div className="section"><h2><ShieldAlert size={16} /> Incident Explorer</h2><Incidents rows={data.incidents} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} /></div>
@@ -437,7 +437,7 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
 
   if (!rows.length) {
     return <div className="card location-heat-card">
-      <p className="muted">No street or address references detected in the selected range.</p>
+      <p className="muted">No geolocated incidents detected in the selected range.</p>
     </div>;
   }
   const viewport = buildMapViewport(zoom, center, mapSize);
@@ -457,9 +457,9 @@ function LocationHeatMap({ rows, focusedKey, onFocusKey }: { rows: LocationHeat[
   }
 
   return <div className="card location-heat-card">
-    <div className="location-heat-note">Calls are plotted from geocoded transcript location references within the monitored system area. Popup details show the matched geocoder result and source calls.</div>
+    <div className="location-heat-note">Incidents are plotted from geocoded source-call location references within the monitored system area. Popup details show the matched geocoder result and source calls.</div>
     <div className={`location-map-shell ${selected ? "has-selection" : ""}`}>
-    <div className="location-map" ref={mapRef} role="img" aria-label="Geolocated calls heat map" onWheel={handleWheel}>
+    <div className="location-map" ref={mapRef} role="img" aria-label="Geolocated incident map" onWheel={handleWheel}>
       <div className="map-zoom-controls"><button onClick={() => setZoom(current => Math.min(14, current + 1))} aria-label="Zoom in">+</button><button onClick={() => setZoom(current => Math.max(8, current - 1))} aria-label="Zoom out">-</button><span>{zoom}</span></div>
       {tiles.map(tile => <img
         src={`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`}
@@ -643,7 +643,7 @@ function Incidents({ rows, locationMap, onShowLocation }: { rows: Incident[]; lo
   const sortedRows = sortIncidents(rows);
   return <div className="incident-explorer">
     <div className="incident-toolbar">
-      <strong>Active Incidents</strong>
+      <strong>Recent Incidents <span className="muted">{sortedRows.length}</span></strong>
       <button onClick={() => setExpanded(v => !v)}>{expanded ? "Collapse All" : "Expand All"}</button>
     </div>
     {sortedRows.map(i => {
@@ -660,22 +660,12 @@ function Incidents({ rows, locationMap, onShowLocation }: { rows: Incident[]; lo
   </div>;
 }
 
-function CategoryView({ data, mode, rangeHours, reload, engineHealth }: { data: CategoryPage | null; mode: CategoryViewMode; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null }) {
+function CategoryView({ data, mode }: { data: CategoryPage | null; mode: CategoryViewMode }) {
   if (!data) return <div className="category-page">Loading...</div>;
-  const generationBlocked = Boolean(engineHealth?.aiWorkBlockedReason);
-  async function generate() {
-    try {
-      await api.request("/api/v1/incidents/generate", { method: "POST", body: JSON.stringify({ ...rangeBody(Math.min(rangeHours, 24)), confirmLargeRange: false }) });
-      await reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Summary generation failed");
-    }
-  }
   return <div className="category-split-page" data-category={data.category}>
     <section className="pane insights-pane category-pane">
-      {mode === "summaries" && <><h2>{label(data.category)} AI Summaries</h2><CategoryInsights rows={data.insights} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.aiWorkBlockedReason} /></>}
       {mode === "raw" && <><h2>{label(data.category)} Raw Calls</h2><RawCallList groups={data.groups} /></>}
-      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} onGenerate={generate} generationBlocked={generationBlocked} blockedReason={engineHealth?.aiWorkBlockedReason} /></>}
+      {mode === "incidents" && <><h2>{label(data.category)} Incidents</h2><CategoryIncidents rows={data.incidents} category={data.category} /></>}
     </section>
     <section className="pane calls-pane category-pane">
       <h2>Calls by Talkgroup</h2>
@@ -684,13 +674,8 @@ function CategoryView({ data, mode, rangeHours, reload, engineHealth }: { data: 
   </div>;
 }
 
-function CategoryInsights({ rows, category, onGenerate, generationBlocked, blockedReason }: { rows: CategoryInsight[]; category: string; onGenerate: () => Promise<void>; generationBlocked: boolean; blockedReason?: string | null }) {
-  if (!rows.length) return <div className="card"><p className="muted">No single-call AI summaries available for this category and time range.</p>{generationBlocked && <p className="settings-message error">{blockedReason}</p>}<button disabled={generationBlocked} onClick={() => void onGenerate()}>Generate summaries now</button></div>;
-  return <>{rows.map(item => <article className={`insight-tile category-${category}`} key={item.id}><div className="insight-head"><span>{item.title}</span><strong className={`confidence ${confidenceClass(item.score)}`}>{Math.round(item.score * 100)}%</strong></div><div className="insight-time">{new Date((item.calls[0]?.rawTimestamp ?? item.firstSeen) * 1000).toLocaleString()}</div><p>{item.detail}</p>{item.calls.length > 0 && <details className="source-shelf"><summary>Transcript and audio</summary><div className="call-actions">{item.calls.map(c => <IncidentSourceCall call={c} key={c.callId} />)}</div></details>}</article>)}</>;
-}
-
-function CategoryIncidents({ rows, category, onGenerate, generationBlocked, blockedReason }: { rows: Incident[]; category: string; onGenerate: () => Promise<void>; generationBlocked: boolean; blockedReason?: string | null }) {
-  if (!rows.length) return <div className="card"><p className="muted">No incidents available for this category and time range.</p>{generationBlocked && <p className="settings-message error">{blockedReason}</p>}<button disabled={generationBlocked} onClick={() => void onGenerate()}>Generate incidents now</button></div>;
+function CategoryIncidents({ rows, category }: { rows: Incident[]; category: string }) {
+  if (!rows.length) return <div className="card"><p className="muted">No incidents available for this category and time range.</p></div>;
   const sortedRows = sortIncidents(rows);
   return <div className="incident-explorer category-incident-list">
     {sortedRows.map(i => <details className={`incident-card category-${category}`} key={i.id}>
@@ -722,6 +707,7 @@ function IncidentSummary({ incident, linkedLocation, onShowLocation }: { inciden
     <span className="incident-title">{incident.title}</span>
     <span className="incident-summary-meta">
       {linkedLocation && <button type="button" className="geo-badge" title={`Show ${linkedLocation.locationText} on map`} onClick={event => { event.preventDefault(); event.stopPropagation(); onShowLocation?.(locationKey(linkedLocation)); }}>Map</button>}
+      {incident.status && incident.status !== "active" && <span className="pill">{label(incident.status)}</span>}
       <span className="incident-time">{relativeIncidentTime(incident)}</span>
       <span className="muted">{incident.calls.length} calls</span>
       <strong className={`confidence confidence-circle ${confidenceClass(incident.confidence)}`}>{Math.round(incident.confidence * 100)}</strong>
@@ -822,7 +808,7 @@ function confidenceClass(score: number) {
 function SystemView({ data, jobs, rangeHours, reload, engineHealth, recommendations, setRecommendations }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void }) {
   const [topTab, setTopTab] = useState<"recommendations" | "pizzad" | "tr" | "tokens">("recommendations");
   const [pizzadTab, setPizzadTab] = useState<"service" | "storage" | "imports" | "jobs" | "quality">("service");
-  const [trTab, setTrTab] = useState<"summary" | "metrics" | "rf" | "tools" | "logs" | "insights">("summary");
+  const [trTab, setTrTab] = useState<"summary" | "metrics" | "rf" | "logs" | "insights">("summary");
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
   const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
@@ -980,7 +966,6 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, recommendati
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Health Summary</button>
           <button className={trTab === "metrics" ? "active" : ""} onClick={() => setTrTab("metrics")}>Metrics</button>
           <button className={trTab === "rf" ? "active" : ""} onClick={() => setTrTab("rf")}>RF Analysis</button>
-          <button className={trTab === "tools" ? "active" : ""} onClick={() => setTrTab("tools")}>Tools</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Log Output</button>
           <button className={trTab === "insights" ? "active" : ""} onClick={() => setTrTab("insights")}>Insights</button>
         </div>
@@ -993,7 +978,6 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, recommendati
           <div className="tr-chart-grid">{active.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
         </div>}
         {trTab === "rf" && <RfAnalysisPanel data={data} rangeHours={rangeHours} />}
-        {trTab === "tools" && <TroubleshootTools rangeHours={rangeHours} reload={reload} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
         {trTab === "insights" && <div className="card">
           <button disabled={insightBusy} onClick={() => void generateTroubleshootInsights()}>{insightBusy ? "Generating..." : "Generate Recommendation"}</button>
@@ -1666,147 +1650,6 @@ function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
     <p>{sample.transcription || "No transcript available."}</p>
     <audio controls preload="metadata" src={sample.audioUrl} />
   </details>;
-}
-
-function TroubleshootTools({ rangeHours, reload }: { rangeHours: number; reload: () => Promise<void> }) {
-  const [diagnosticModels, setDiagnosticModels] = useState<DiagnosticModel[]>([]);
-  const [selectedModels, setSelectedModels] = useState<Record<string, boolean>>({});
-  const [customModels, setCustomModels] = useState<Array<{ engine: string; label: string; baseUrl: string; model: string; apiKey: string }>>([]);
-  const [customDraft, setCustomDraft] = useState({ engine: "lmlink", label: "", baseUrl: "http://localhost:1234/v1", model: "", apiKey: "" });
-  const [jobId, setJobId] = useState<number | null>(null);
-  const [result, setResult] = useState<DiagnosticToolResult | null>(null);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => { void loadModels(); }, []);
-
-  async function loadModels() {
-    try {
-      const rows = await api.request<DiagnosticModel[]>("/api/v1/troubleshoot/tools/transcription-models");
-      setDiagnosticModels(rows);
-      setSelectedModels(current => {
-        const next = { ...current };
-        for (const row of rows) {
-          if (next[row.id] === undefined) next[row.id] = row.engine !== "openai";
-        }
-        return next;
-      });
-    } catch (error) {
-      setMessage(`Model discovery failed: ${error instanceof Error ? error.message : String(error)}`);
-      setDiagnosticModels([]);
-    }
-  }
-
-  async function start() {
-    setResult(null);
-    setBusy(true);
-    setMessage("Queueing transcription experiment...");
-    try {
-      const models = diagnosticModels.filter(model => selectedModels[model.id]).map(model => model.id);
-      const enabledCustom = customModels.filter(model => model.model.trim() && model.baseUrl.trim());
-      const job = await api.request<Job>("/api/v1/troubleshoot/tools/transcription-experiment", { method: "POST", body: JSON.stringify({ ...rangeBody(rangeHours), sampleCount: 50, models, customModels: enabledCustom }) });
-      setJobId(job.id);
-      setMessage(`Queued job ${job.id}. It will sample up to 50 recent calls, run ${models.length + enabledCustom.length} selected model(s), and try baseline plus cleanup audio variants.`);
-      await reload();
-    } catch (error) {
-      setMessage(`Experiment failed to start: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function loadResult(id = jobId) {
-    if (!id) return;
-    const rows = await api.request<DiagnosticToolResult>(`/api/v1/troubleshoot/tools/results/${id}`);
-    setResult(rows);
-    setMessage(`Loaded ${rows.rows.length} result rows for job ${id}.`);
-  }
-
-  function addCustomModel() {
-    if (!customDraft.model.trim() || !customDraft.baseUrl.trim()) {
-      setMessage("Custom model requires a base URL and model name.");
-      return;
-    }
-    setCustomModels(rows => [...rows, { ...customDraft, label: customDraft.label.trim() || `${customDraft.engine === "lmlink" ? "LM Link" : "OpenAI"} ${customDraft.model.trim()}` }]);
-    setCustomDraft(current => ({ ...current, label: "", model: "", apiKey: "" }));
-  }
-
-  async function clearResults() {
-    setBusy(true);
-    try {
-      const response = await api.request<{ deleted: number }>("/api/v1/troubleshoot/tools/results", { method: "DELETE" });
-      setResult(null);
-      setJobId(null);
-      setMessage(`Cleared ${response.deleted} completed diagnostic experiment job(s).`);
-      await reload();
-    } catch (error) {
-      setMessage(`Clear failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const selectedCount = diagnosticModels.filter(model => selectedModels[model.id]).length + customModels.length;
-
-  return <div className="tools-page">
-    <div className="card">
-      <h3>Transcription Experiment</h3>
-      <p className="muted">Samples up to 50 recent calls from the selected global range. Selected models run against baseline audio plus cleanup variants. Results never update stored transcripts.</p>
-      <div className="model-selector">
-        <h4>Discovered models</h4>
-        {diagnosticModels.length ? diagnosticModels.map(model => <label className="model-choice" key={model.id}>
-          <input type="checkbox" checked={!!selectedModels[model.id]} onChange={e => setSelectedModels(current => ({ ...current, [model.id]: e.target.checked }))} />
-          <span><strong>{model.label}</strong><small>{model.engine} - {model.detail}</small></span>
-        </label>) : <span className="muted">No downloaded local models or configured LM/OpenAI transcription model discovered.</span>}
-      </div>
-      <div className="custom-model-editor">
-        <h4>Add LM Link / OpenAI-compatible model</h4>
-        <select value={customDraft.engine} onChange={e => setCustomDraft(current => ({ ...current, engine: e.target.value }))}>
-          <option value="lmlink">LM Link</option>
-          <option value="openai">OpenAI-compatible</option>
-        </select>
-        <input placeholder="Base URL" value={customDraft.baseUrl} onChange={e => setCustomDraft(current => ({ ...current, baseUrl: e.target.value }))} />
-        <input placeholder="Model name" value={customDraft.model} onChange={e => setCustomDraft(current => ({ ...current, model: e.target.value }))} />
-        <input placeholder="Label (optional)" value={customDraft.label} onChange={e => setCustomDraft(current => ({ ...current, label: e.target.value }))} />
-        <input placeholder="Token/API key (optional)" type="password" value={customDraft.apiKey} onChange={e => setCustomDraft(current => ({ ...current, apiKey: e.target.value }))} />
-        <button onClick={addCustomModel}>Add Model</button>
-      </div>
-      {customModels.length > 0 && <div className="model-chip-list">
-        {customModels.map((model, index) => <span className="model-chip" key={`${model.engine}-${model.baseUrl}-${model.model}-${index}`}>
-          <strong>{model.label}</strong><small>{model.engine} - {model.model}</small>
-          <button onClick={() => setCustomModels(rows => rows.filter((_, i) => i !== index))}>Remove</button>
-        </span>)}
-      </div>
-      }
-      <div>
-        <button disabled={busy || selectedCount === 0} onClick={() => void start()}>{busy ? "Queueing..." : "Run 50-Call Transcription Experiment"}</button>
-        <button onClick={() => void loadModels()}>Refresh Models</button>
-        <button disabled={busy} onClick={() => void clearResults()}>Clear Experiment Results</button>
-      </div>
-      <div className="muted">{message}</div>
-      <div>
-        <input type="number" placeholder="Job ID" value={jobId ?? ""} onChange={e => setJobId(Number(e.target.value) || null)} />
-        <button onClick={() => void loadResult()}>Load Result</button>
-      </div>
-    </div>
-    {result && <DiagnosticResultView result={result} />}
-  </div>;
-}
-
-function DiagnosticResultView({ result }: { result: DiagnosticToolResult }) {
-  return <div className="card diagnostic-results">
-    <h3>{label(result.tool)} Results</h3>
-    <table className="table"><thead><tr><th>Call</th><th>Variant</th><th>Model</th><th>Status</th><th>Score</th><th>Time</th><th>Transcript</th><th>Audio</th></tr></thead><tbody>{result.rows.map((row, index) => <tr key={`${row.callId}-${row.variant}-${row.model}-${index}`} className={row.score > 0 ? "useful-row" : ""}>
-      <td>{row.callId}</td>
-      <td>{row.variant}</td>
-      <td>{row.model}</td>
-      <td>{row.status}</td>
-      <td>{row.score}</td>
-      <td>{(row.durationMs / 1000).toFixed(1)}s</td>
-      <td>{row.transcript || row.notes}</td>
-      <td>{row.audioUrl ? <audio controls preload="metadata" src={row.audioUrl} /> : <span className="muted">n/a</span>}</td>
-    </tr>)}</tbody></table>
-  </div>;
 }
 
 function MetricTable({ title, rows }: { title: string; rows: TrHealthMetric[] }) {

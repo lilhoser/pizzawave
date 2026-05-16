@@ -183,9 +183,11 @@ public sealed record CategoryPageDto(
 public sealed record IncidentDto
 {
     public long Id { get; init; }
+    public string IncidentKey { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
     public string Detail { get; init; } = string.Empty;
     public string Category { get; init; } = "other";
+    public string Status { get; init; } = "active";
     public long FirstSeen { get; init; }
     public long LastSeen { get; init; }
     public double Confidence { get; init; }
@@ -534,6 +536,22 @@ public sealed record TokenUsageEntryDto(
     int CompletionTokens,
     int TotalTokens);
 
+public sealed record EvidenceVerifierRunDto(
+    long Id,
+    DateTime TimestampUtc,
+    string SystemShortName,
+    string IncidentKey,
+    string Title,
+    int SelectedCalls,
+    int ReviewedCalls,
+    int ModelReviewedCalls,
+    int TruncatedCalls,
+    int AddedCalls,
+    int DroppedCalls,
+    int RetainedCalls,
+    bool Success,
+    string Error);
+
 public sealed record TokenUsageReportDto(
     string Ledger,
     TokenUsageSummaryDto Summary,
@@ -657,45 +675,6 @@ public sealed record TroubleshootInsightResponse(string Text);
 public sealed record RetryTranscriptionErrorsRequest(int Limit = 100);
 
 public sealed record SaveSettingsRequest(JsonElement Values);
-
-public sealed record DiagnosticToolRequest(
-    IReadOnlyList<long>? CallIds,
-    long? Start,
-    long? End,
-    int? SampleCount,
-    IReadOnlyList<string>? Models,
-    IReadOnlyList<DiagnosticCustomModelRequest>? CustomModels);
-
-public sealed record DiagnosticCustomModelRequest(
-    string Engine,
-    string Label,
-    string BaseUrl,
-    string Model,
-    string ApiKey);
-
-public sealed record DiagnosticModelDto(
-    string Id,
-    string Label,
-    string Engine,
-    bool Available,
-    string Detail);
-
-public sealed record DiagnosticToolResultDto(
-    long JobId,
-    string Tool,
-    DateTime CreatedAtUtc,
-    IReadOnlyList<DiagnosticToolRowDto> Rows);
-
-public sealed record DiagnosticToolRowDto(
-    long CallId,
-    string Variant,
-    string Model,
-    string Status,
-    int Score,
-    double DurationMs,
-    string Transcript,
-    string AudioUrl,
-    string Notes);
 
 public sealed class EngineSectionUpdate
 {

@@ -19,9 +19,11 @@ export type AlertMatch = {
 };
 export type Incident = {
   id: number;
+  incidentKey: string;
   title: string;
   detail: string;
   category: string;
+  status: string;
   firstSeen: number;
   lastSeen: number;
   confidence: number;
@@ -126,30 +128,6 @@ export type SetupArtifact = { path: string; exists: boolean; notes: string };
 export type SetupArtifactReport = { hasBlockingArtifacts: boolean; artifacts: SetupArtifact[]; manualCommands: string[] };
 export type SetupSdrDevice = { index: number; serial: string; label: string; usbLine: string; warning: string };
 export type SetupSdrDetection = { devices: SetupSdrDevice[]; rawOutput: string; message: string };
-export type DiagnosticToolRow = {
-  callId: number;
-  variant: string;
-  model: string;
-  status: string;
-  score: number;
-  durationMs: number;
-  transcript: string;
-  audioUrl: string;
-  notes: string;
-};
-export type DiagnosticToolResult = {
-    jobId: number;
-    tool: string;
-    createdAtUtc: string;
-    rows: DiagnosticToolRow[];
-  };
-  export type DiagnosticModel = {
-    id: string;
-    label: string;
-    engine: string;
-    available: boolean;
-    detail: string;
-  };
 export type EngineHealth = {
   status: string;
   version: string;

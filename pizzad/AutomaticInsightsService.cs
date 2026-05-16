@@ -14,12 +14,20 @@ public sealed class AutomaticInsightsService : BackgroundService
     private const int CompactPromptCharLimit = 12_000;
     private const int NormalTranscriptCharLimit = 500;
     private const int CompactTranscriptCharLimit = 220;
+    private const int IncidentPromptCharLimit = 24_000;
+    private const int IncidentTranscriptCharLimit = 320;
+    private const int IncidentTitleCharLimit = 90;
+    private const int IncidentDetailCharLimit = 260;
+    private const int IncidentMaxCandidateCalls = 120;
+    private const int IncidentMaxOutputTokens = 2_800;
+    private const int EvidenceVerifierPromptCharLimit = 20_000;
+    private const int EvidenceVerifierTranscriptCharLimit = 260;
+    private const int EvidenceVerifierMaxNearbyCalls = 45;
+    private const int EvidenceVerifierMaxCalls = 60;
+    private const int EvidenceVerifierMaxOutputTokens = 2_400;
     private const int NormalMaxOutputTokens = 2_000;
     private const int CompactMaxOutputTokens = 1_200;
     private const int CompactMaxEvents = 4;
-    private const double IncidentCallEventThreshold = 0.24;
-    private const double IncidentCorroborationPairThreshold = 0.12;
-    private const double IncidentPairThreshold = 0.34;
     private static readonly TimeSpan MaxIncidentSpan = TimeSpan.FromMinutes(60);
     private readonly ConcurrentQueue<EngineCall> _queue = new();
     private readonly EngineConfig _config;
@@ -30,6 +38,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private readonly object _gate = new();
     private string? _priorSummary;
     private DateTimeOffset _nextAttemptAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _nextIncidentRunAt = DateTimeOffset.MinValue;
     private DateTimeOffset _nextQueueGateLogAt = DateTimeOffset.MinValue;
     private int _failureStreak;
 
@@ -77,11 +86,10 @@ public sealed class AutomaticInsightsService : BackgroundService
         var result = await SummarizeWindowAsync(calls, start, end, InsightPromptMode.CompactManual, ct);
         var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
         await PersistInsightEventsAsync(windowId, result, calls, ct);
-        var incidents = await PersistIncidentsAsync(result, calls, ct);
         _priorSummary = result.SummaryText;
-        await _events.PublishAsync("summary_updated", new { windowId, start, end, incidents }, ct);
-        _logger.LogInformation("Manual insights generated window {WindowId} with {Incidents} incidents from {Calls} calls", windowId, incidents, calls.Count);
-        return incidents;
+        await _events.PublishAsync("summary_updated", new { windowId, start, end, incidents = 0 }, ct);
+        _logger.LogInformation("Manual insights generated window {WindowId} with insight events only from {Calls} calls", windowId, calls.Count);
+        return 0;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -145,29 +153,36 @@ public sealed class AutomaticInsightsService : BackgroundService
             }
         }
 
+        if (DateTimeOffset.UtcNow < _nextIncidentRunAt)
+            return;
+
         List<EngineCall> batch;
         lock (_gate)
         {
-            if (_pending.Count < BatchSize())
+            if (_pending.Count == 0)
                 return;
 
-            var take = Math.Min(ComputeAdaptiveBatchSize(_pending.Count), _pending.Count);
-            batch = _pending.Take(take).ToList();
+            batch = _pending.ToList();
         }
 
         if (batch.Count == 0)
             return;
 
-        var start = batch.Min(c => c.StartTime);
-        var end = batch.Max(c => Math.Max(c.StartTime, c.StopTime));
+        var start = DateTimeOffset.UtcNow.Add(MaxIncidentSpan.Negate()).ToUnixTimeSeconds();
+        var end = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         try
         {
-            var result = await SummarizeWindowAsync(batch, start, end, InsightPromptMode.NormalLive, ct);
-            var windowId = await _database.AddInsightWindowAsync(start, end, result.SummaryText, ct);
-            await PersistInsightEventsAsync(windowId, result, batch, ct);
-            var incidents = await PersistIncidentsAsync(result, batch, ct);
+            var incidents = 0;
+            var stale = await _database.ConcludeStaleManagedIncidentsAsync(start, ct);
+            foreach (var system in batch.Select(c => c.SystemShortName).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var newCallIds = batch
+                    .Where(c => string.Equals(c.SystemShortName, system, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.Id)
+                    .ToHashSet();
+                incidents += await ExtractIncidentsForSystemAsync(system, start, end, newCallIds, ct);
+            }
 
-            _priorSummary = result.SummaryText;
             lock (_gate)
             {
                 var ids = batch.Select(c => c.Id).ToHashSet();
@@ -175,75 +190,532 @@ public sealed class AutomaticInsightsService : BackgroundService
             }
             _failureStreak = 0;
             _nextAttemptAt = DateTimeOffset.UtcNow;
-            await _events.PublishAsync("summary_updated", new { windowId, start, end, incidents }, ct);
-            _logger.LogInformation("Automatic insights generated window {WindowId} with {Incidents} incidents from {Calls} calls", windowId, incidents, batch.Count);
+            _nextIncidentRunAt = DateTimeOffset.UtcNow.AddMinutes(5);
+            await _events.PublishAsync("summary_updated", new { windowId = 0, start, end, incidents }, ct);
+            _logger.LogInformation("Automatic incident extraction updated {Incidents} incident(s), concluded {StaleIncidents} stale incident(s), from {Calls} new call(s)", incidents, stale, batch.Count);
         }
         catch (Exception ex)
         {
             _failureStreak++;
             var cooldownSeconds = Math.Min(300, 5 * (1 << Math.Min(_failureStreak, 5)));
             _nextAttemptAt = DateTimeOffset.UtcNow.AddSeconds(cooldownSeconds);
+            _nextIncidentRunAt = DateTimeOffset.UtcNow.AddSeconds(cooldownSeconds);
             RotateFailedBatch(batch);
-            _logger.LogWarning(ex, "Automatic insights failed for {Count} calls; backing off {Seconds}s", batch.Count, cooldownSeconds);
+            _logger.LogWarning(ex, "Automatic incident extraction failed for {Count} calls; backing off {Seconds}s", batch.Count, cooldownSeconds);
         }
     }
 
-    private async Task<int> PersistIncidentsAsync(InsightResult result, List<EngineCall> batch, CancellationToken ct)
+    private async Task<int> ExtractIncidentsForSystemAsync(string systemShortName, long start, long end, HashSet<long> newCallIds, CancellationToken ct)
     {
-        var incidents = 0;
-        var claimedCallIds = new HashSet<long>();
-        foreach (var ev in result.Events.Where(IsActionableEvent))
+        var recent = (await _database.ListCallsAsync(start, end, null, ct))
+            .Where(c => string.Equals(c.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase))
+            .Where(IsIncidentEligibleCall)
+            .OrderBy(c => c.StartTime)
+            .ToList();
+        if (recent.Count == 0)
+            return 0;
+
+        var activeIncidents = (await _database.ListIncidentsAsync(start, end, ct))
+            .Where(i => !string.Equals(i.Status, "concluded", StringComparison.OrdinalIgnoreCase))
+            .Where(i => i.Calls.Any(c => string.Equals(c.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var activeCallIds = activeIncidents.SelectMany(i => i.Calls.Select(c => c.CallId)).ToHashSet();
+        var configuredCandidateLimit = _config.AiInsights.MaxManualSummaryCalls <= 0 ? IncidentMaxCandidateCalls : _config.AiInsights.MaxManualSummaryCalls;
+        var candidateLimit = Math.Clamp(configuredCandidateLimit, 20, IncidentMaxCandidateCalls);
+        var newCandidateCalls = recent
+            .Where(c => newCallIds.Contains(c.Id))
+            .Where(c => !activeCallIds.Contains(c.Id))
+            .OrderBy(c => c.StartTime)
+            .Take(candidateLimit)
+            .ToList();
+        var selectedIds = newCandidateCalls.Select(c => c.Id).ToHashSet();
+        var carryoverLimit = Math.Max(0, candidateLimit - newCandidateCalls.Count);
+        var carryoverCalls = recent
+            .Where(c => !selectedIds.Contains(c.Id))
+            .Where(c => !activeCallIds.Contains(c.Id))
+            .OrderByDescending(c => c.StartTime)
+            .Take(carryoverLimit)
+            .OrderBy(c => c.StartTime)
+            .ToList();
+        var candidateCalls = carryoverCalls
+            .Concat(newCandidateCalls)
+            .DistinctBy(c => c.Id)
+            .OrderBy(c => c.StartTime)
+            .ToList();
+        if (candidateCalls.Count == 0 && activeIncidents.Count == 0)
+            return 0;
+
+        _logger.LogInformation(
+            "Prepared incident extraction candidates for {System}: {NewCandidates} new, {CarryoverCandidates} carryover, {CandidateCalls} total, {RecentEligibleCalls} eligible calls in rolling state window, {ActiveIncidents} active incident(s)",
+            systemShortName,
+            newCandidateCalls.Count,
+            carryoverCalls.Count,
+            candidateCalls.Count,
+            recent.Count,
+            activeIncidents.Count);
+
+        var result = await ExtractIncidentStateAsync(systemShortName, activeIncidents, candidateCalls, start, end, ct);
+        return await PersistIncidentStateAsync(systemShortName, result, activeIncidents, recent, ct);
+    }
+
+    private async Task<IncidentExtractionResult> ExtractIncidentStateAsync(string systemShortName, List<IncidentDto> activeIncidents, List<EngineCall> candidateCalls, long start, long end, CancellationToken ct)
+    {
+        var baseUrl = InsightBaseUrl().TrimEnd('/');
+        var endpoint = $"{baseUrl}/chat/completions";
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, _config.AiInsights.TimeoutMs)) };
+        var apiKey = InsightApiKey();
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        var prompt = BuildIncidentExtractionPrompt(systemShortName, activeIncidents, candidateCalls, start, end);
+        var body = new
         {
-            var calls = ResolveEventCalls(ev, batch)
-                .Where(c => !claimedCallIds.Contains(c.Id))
-                .ToList();
-            if (calls.Count < 2)
+            model = InsightModel(),
+            temperature = 0.1,
+            max_tokens = IncidentMaxOutputTokens,
+            response_format = IncidentExtractionResponseFormat(),
+            messages = new[]
             {
-                _logger.LogInformation(
-                    "Skipped AI event '{Title}' because it linked {CallCount} unclaimed call(s); incidents require at least 2 related calls.",
-                    ev.Title,
-                    calls.Count);
-                continue;
+                new
+                {
+                    role = "system",
+                    content = "You maintain an incremental incident state from public safety radio transcripts. Output JSON only. Incidents are site-local real-world events supported by concrete transcript evidence. Do not group by category; a single incident may span police, fire, EMS, traffic, utilities, or other talkgroups. Do not create incidents for routine acknowledgements, generic status/admin traffic, or weak topical buckets."
+                },
+                new { role = "user", content = prompt }
             }
+        };
 
-            var validation = IncidentCandidateValidator.Validate(ev.Title, ev.Detail, calls.Select(ToIncidentCandidateCall).ToList());
-            if (!validation.IsValid)
+        var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
+        _logger.LogInformation("Calling incident extraction endpoint {Endpoint} with model {Model} for {System} ({ActiveIncidents} active, {CandidateCalls} candidate calls, {PayloadChars} chars)", endpoint, InsightModel(), systemShortName, activeIncidents.Count, candidateCalls.Count, payload.Length);
+        Exception? last = null;
+        for (var attempt = 0; attempt <= Math.Max(0, _config.AiInsights.MaxRetries); attempt++)
+        {
+            try
             {
-                _logger.LogInformation(
-                    "Rejected AI incident candidate '{Title}' with {CallCount} call(s): {Reason}. Calls={CallIds}",
-                    ev.Title,
-                    calls.Count,
-                    validation.Reason,
-                    string.Join(",", calls.Select(c => c.Id)));
-                continue;
+                using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+                using var response = await client.PostAsync(endpoint, content, ct);
+                var text = await response.Content.ReadAsStringAsync(ct);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Incident extraction request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
+                var usage = ExtractUsage(text);
+                if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+                {
+                    var message = $"LM incident extraction response was truncated at max_tokens={IncidentMaxOutputTokens}.";
+                    await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, message, ct);
+                    throw new InsightResponseTruncatedException(message);
+                }
+
+                var parsed = ParseIncidentExtractionResponse(text);
+                await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ct);
+                return parsed;
             }
-            var validatedCallIds = validation.Calls.Select(c => c.CallId).ToHashSet();
-            calls = calls.Where(c => validatedCallIds.Contains(c.Id)).ToList();
-
-            var incidentId = await _database.AddIncidentAsync(new IncidentDto
+            catch (InsightResponseTruncatedException)
             {
-                Title = string.IsNullOrWhiteSpace(ev.Title) ? "Radio incident" : ev.Title.Trim(),
-                Detail = string.IsNullOrWhiteSpace(ev.Detail) ? result.SummaryText : ev.Detail.Trim(),
-                FirstSeen = calls.Min(c => c.StartTime),
-                LastSeen = calls.Max(c => c.StartTime),
-                Confidence = Math.Clamp(ev.Confidence, 0, 1),
-                Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
-            }, ct);
-            if (incidentId <= 0)
-            {
-                _logger.LogInformation(
-                    "Skipped AI incident candidate '{Title}' because one or more calls are already linked to an existing incident. Calls={CallIds}",
-                    ev.Title,
-                    string.Join(",", calls.Select(c => c.Id)));
-                continue;
+                throw;
             }
-
-            foreach (var call in calls)
-                claimedCallIds.Add(call.Id);
-            incidents++;
+            catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
+            {
+                last = ex;
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await Task.Delay(500, ct);
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                break;
+            }
         }
 
-        return incidents;
+        throw new InvalidOperationException(last?.Message ?? "Incident extraction request failed.", last);
+    }
+
+    private async Task<int> PersistIncidentStateAsync(string systemShortName, IncidentExtractionResult result, List<IncidentDto> activeIncidents, List<EngineCall> recentCalls, CancellationToken ct)
+    {
+        var byToken = new Dictionary<string, EngineCall>(StringComparer.OrdinalIgnoreCase);
+        foreach (var call in recentCalls)
+        {
+            byToken[CallToken(call.Id)] = call;
+            byToken[call.Id.ToString(CultureInfo.InvariantCulture)] = call;
+            byToken[call.Id.ToString("X12", CultureInfo.InvariantCulture)] = call;
+        }
+
+        var existingByKey = activeIncidents
+            .Where(i => !string.IsNullOrWhiteSpace(i.IncidentKey))
+            .ToDictionary(i => i.IncidentKey, StringComparer.OrdinalIgnoreCase);
+        var updated = 0;
+        var claimed = new HashSet<long>();
+        foreach (var item in result.Incidents.Take(40))
+        {
+            var callIds = item.CallIds
+                .Select(id => byToken.TryGetValue(id.Trim(), out var call) ? call : null)
+                .Where(c => c != null)
+                .DistinctBy(c => c!.Id)
+                .Cast<EngineCall>()
+                .Where(c => !claimed.Contains(c.Id))
+                .ToList();
+            if (callIds.Count < 2)
+                continue;
+
+            var status = string.Equals(item.Status, "concluded", StringComparison.OrdinalIgnoreCase) ? "concluded" : "active";
+            var key = ResolveIncidentKey(systemShortName, item, callIds, existingByKey);
+            var title = TrimIncidentText(item.Title ?? string.Empty, IncidentTitleCharLimit);
+            var detail = TrimIncidentText(item.Detail ?? string.Empty, IncidentDetailCharLimit);
+            if (existingByKey.TryGetValue(key, out var existingIncident))
+            {
+                var existingCalls = existingIncident.Calls
+                    .Select(c => byToken.TryGetValue(CallToken(c.CallId), out var call) ? call : null)
+                    .Where(c => c != null)
+                    .Cast<EngineCall>()
+                    .ToList();
+                callIds = callIds
+                    .Concat(existingCalls)
+                    .DistinctBy(c => c.Id)
+                    .Where(c => !claimed.Contains(c.Id))
+                    .OrderBy(c => c.StartTime)
+                    .ToList();
+            }
+
+            if (!IsIncidentNarrativeAcceptable(title, detail, callIds))
+            {
+                _logger.LogInformation(
+                    "Rejected incident state item '{Title}' for {System}: detail is too long or transcript-like. DetailLength={DetailLength}; Calls={CallIds}",
+                    item.Title,
+                    systemShortName,
+                    item.Detail?.Length ?? 0,
+                    string.Join(",", callIds.Select(c => c.Id)));
+                continue;
+            }
+
+            callIds = await VerifyIncidentEvidenceAsync(systemShortName, title, detail, key, callIds, existingIncident, recentCalls, claimed, ct);
+            if (callIds.Count < 2)
+            {
+                _logger.LogInformation("Rejected incident state item '{Title}' for {System}: evidence verifier retained fewer than 2 call(s)", title, systemShortName);
+                continue;
+            }
+
+            var validation = IncidentCandidateValidator.Validate(title, detail, callIds.Select(ToIncidentCandidateCall).ToList());
+            if (!validation.IsValid)
+            {
+                _logger.LogInformation("Rejected incident state item '{Title}' for {System}: {Reason}. Calls={CallIds}", title, systemShortName, validation.Reason, string.Join(",", callIds.Select(c => c.Id)));
+                continue;
+            }
+
+            var retained = validation.Calls.Select(c => c.CallId).ToHashSet();
+            callIds = callIds.Where(c => retained.Contains(c.Id)).ToList();
+            var id = await _database.UpsertManagedIncidentAsync(new IncidentDto
+            {
+                IncidentKey = key,
+                Title = string.IsNullOrWhiteSpace(title) ? "Radio incident" : title,
+                Detail = string.IsNullOrWhiteSpace(detail) ? "Multiple related calls describe the same incident." : detail,
+                Category = NormalizeCategory(item.Category, callIds),
+                Status = status,
+                FirstSeen = callIds.Min(c => c.StartTime),
+                LastSeen = callIds.Max(c => c.StartTime),
+                Confidence = Math.Clamp(item.Confidence, 0, 1),
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName)).ToList()
+            }, ct);
+            if (id <= 0)
+                continue;
+
+            foreach (var call in callIds)
+                claimed.Add(call.Id);
+            updated++;
+        }
+
+        return updated;
+    }
+
+    private async Task<List<EngineCall>> VerifyIncidentEvidenceAsync(
+        string systemShortName,
+        string title,
+        string detail,
+        string incidentKey,
+        List<EngineCall> selectedCalls,
+        IncidentDto? existingIncident,
+        List<EngineCall> recentCalls,
+        HashSet<long> claimed,
+        CancellationToken ct)
+    {
+        var selectedIds = selectedCalls.Select(c => c.Id).ToHashSet();
+        var existingIds = existingIncident?.Calls.Select(c => c.CallId).ToHashSet() ?? [];
+        var first = selectedCalls.Min(c => c.StartTime);
+        var last = selectedCalls.Max(c => c.StartTime);
+        var reviewStart = first - 600;
+        var reviewEnd = last + 600;
+        var midpoint = first + Math.Max(0, last - first) / 2;
+        var nearby = recentCalls
+            .Where(c => c.StartTime >= reviewStart && c.StartTime <= reviewEnd)
+            .Where(c => !selectedIds.Contains(c.Id))
+            .Where(c => !claimed.Contains(c.Id))
+            .OrderBy(c => Math.Abs(c.StartTime - midpoint))
+            .ThenBy(c => c.StartTime)
+            .ToList();
+        var truncatedNearby = Math.Max(0, nearby.Count - EvidenceVerifierMaxNearbyCalls);
+        nearby = nearby.Take(EvidenceVerifierMaxNearbyCalls).OrderBy(c => c.StartTime).ToList();
+        var reviewCalls = selectedCalls
+            .Concat(nearby)
+            .DistinctBy(c => c.Id)
+            .OrderBy(c => c.StartTime)
+            .Take(EvidenceVerifierMaxCalls)
+            .ToList();
+        var truncatedTotal = selectedCalls.Count + nearby.Count - reviewCalls.Count;
+        var truncatedCalls = truncatedNearby + Math.Max(0, truncatedTotal);
+
+        if (reviewCalls.Count == selectedCalls.Count && truncatedNearby == 0)
+            return selectedCalls;
+
+        EvidenceVerificationResult result;
+        try
+        {
+            result = await VerifyEvidenceWithModelAsync(systemShortName, title, detail, incidentKey, selectedIds, existingIds, reviewCalls, truncatedCalls, ct);
+        }
+        catch (Exception ex)
+        {
+            await _database.AddEvidenceVerifierRunAsync(new EvidenceVerifierRunDto(
+                0,
+                DateTime.UtcNow,
+                systemShortName,
+                incidentKey,
+                title,
+                selectedCalls.Count,
+                reviewCalls.Count,
+                reviewCalls.Count,
+                truncatedCalls,
+                0,
+                0,
+                0,
+                false,
+                ex.Message), CancellationToken.None);
+            _logger.LogWarning(ex, "Evidence verifier failed for incident '{Title}' on {System}; keeping extractor-selected call set", title, systemShortName);
+            return selectedCalls;
+        }
+
+        var decisions = result.Calls
+            .Where(c => !string.IsNullOrWhiteSpace(c.CallId))
+            .GroupBy(c => c.CallId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.Confidence).First(), StringComparer.OrdinalIgnoreCase);
+        var selectedById = selectedCalls.ToDictionary(c => c.Id);
+        var reviewByToken = reviewCalls.ToDictionary(c => CallToken(c.Id), StringComparer.OrdinalIgnoreCase);
+        var retained = new List<EngineCall>();
+        var added = new List<long>();
+        var dropped = new List<long>();
+
+        foreach (var call in selectedCalls)
+        {
+            var token = CallToken(call.Id);
+            decisions.TryGetValue(token, out var decision);
+            var label = NormalizeEvidenceLabel(decision?.Label);
+            var confidence = decision?.Confidence ?? 0;
+            var isExisting = existingIds.Contains(call.Id);
+            if (isExisting && !(label == "contradicts" && confidence >= 0.85))
+            {
+                retained.Add(call);
+                continue;
+            }
+
+            if (label is "" or "supporting" or "related_context" || confidence < 0.80)
+            {
+                retained.Add(call);
+                continue;
+            }
+
+            dropped.Add(call.Id);
+        }
+
+        foreach (var call in reviewCalls)
+        {
+            if (selectedById.ContainsKey(call.Id))
+                continue;
+            if (!decisions.TryGetValue(CallToken(call.Id), out var decision))
+                continue;
+            var label = NormalizeEvidenceLabel(decision.Label);
+            var confidence = decision.Confidence;
+            if (label == "supporting" && confidence >= 0.62)
+            {
+                retained.Add(call);
+                added.Add(call.Id);
+            }
+            else if (label == "related_context" && confidence >= 0.82)
+            {
+                retained.Add(call);
+                added.Add(call.Id);
+            }
+        }
+
+        retained = retained.DistinctBy(c => c.Id).OrderBy(c => c.StartTime).ToList();
+        await _database.AddEvidenceVerifierRunAsync(new EvidenceVerifierRunDto(
+            0,
+            DateTime.UtcNow,
+            systemShortName,
+            incidentKey,
+            title,
+            selectedCalls.Count,
+            reviewCalls.Count,
+            result.ReviewedCalls,
+            truncatedCalls + result.PromptOmittedCalls,
+            added.Count,
+            dropped.Count,
+            retained.Count,
+            true,
+            string.Empty), ct);
+        _logger.LogInformation(
+            "Evidence verifier reconciled incident '{Title}' on {System}: selected={SelectedCalls}, reviewed={ReviewedCalls}, added={AddedCalls}, dropped={DroppedCalls}, retained={RetainedCalls}, truncated={TruncatedCalls}",
+            title,
+            systemShortName,
+            selectedCalls.Count,
+            reviewCalls.Count,
+            added.Count == 0 ? "-" : string.Join(",", added),
+            dropped.Count == 0 ? "-" : string.Join(",", dropped),
+            retained.Count,
+            truncatedCalls + result.PromptOmittedCalls);
+        return retained;
+    }
+
+    private async Task<EvidenceVerificationResult> VerifyEvidenceWithModelAsync(
+        string systemShortName,
+        string title,
+        string detail,
+        string incidentKey,
+        HashSet<long> selectedIds,
+        HashSet<long> existingIds,
+        List<EngineCall> reviewCalls,
+        int truncatedCalls,
+        CancellationToken ct)
+    {
+        var baseUrl = InsightBaseUrl().TrimEnd('/');
+        var endpoint = $"{baseUrl}/chat/completions";
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, _config.AiInsights.TimeoutMs)) };
+        var apiKey = InsightApiKey();
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        var prompt = BuildEvidenceVerificationPrompt(systemShortName, title, detail, incidentKey, selectedIds, existingIds, reviewCalls, truncatedCalls);
+        var body = new
+        {
+            model = InsightModel(),
+            temperature = 0,
+            max_tokens = EvidenceVerifierMaxOutputTokens,
+            response_format = EvidenceVerificationResponseFormat(),
+            messages = new[]
+            {
+                new
+                {
+                    role = "system",
+                    content = "You verify evidence for one public-safety radio incident. Classify each call independently. Output compact JSON only. Favor retaining concrete dispatch, location, continuation, and outcome calls, even across talkgroups/categories, when they support the same site-local real-world event."
+                },
+                new { role = "user", content = prompt.Text }
+            }
+        };
+
+        var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
+        _logger.LogInformation("Calling evidence verifier endpoint {Endpoint} with model {Model} for {System} incident '{Title}' ({ReviewCalls} call(s), {PayloadChars} chars, {TruncatedCalls} truncated)", endpoint, InsightModel(), systemShortName, title, prompt.IncludedCalls, payload.Length, truncatedCalls + prompt.OmittedCalls);
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync(endpoint, content, ct);
+        var text = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, $"Evidence verifier HTTP {(int)response.StatusCode}: {Trim(text, 500)}", ct);
+            throw new InvalidOperationException($"Evidence verifier request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
+        }
+
+        var usage = ExtractUsage(text);
+        if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            var message = $"LM evidence verifier response was truncated at max_tokens={EvidenceVerifierMaxOutputTokens}.";
+            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, message, ct);
+            throw new InsightResponseTruncatedException(message);
+        }
+
+        var parsed = ParseEvidenceVerificationResponse(text);
+        await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, true, string.Empty, ct);
+        return parsed with { ReviewedCalls = prompt.IncludedCalls, PromptOmittedCalls = prompt.OmittedCalls };
+    }
+
+    private EvidenceVerificationPrompt BuildEvidenceVerificationPrompt(
+        string systemShortName,
+        string title,
+        string detail,
+        string incidentKey,
+        HashSet<long> selectedIds,
+        HashSet<long> existingIds,
+        List<EngineCall> reviewCalls,
+        int truncatedCalls)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("/no_think");
+        sb.AppendLine("Return only JSON in message.content.");
+        sb.AppendLine($"Site/system boundary: {systemShortName}.");
+        sb.AppendLine($"Incident id: {incidentKey}");
+        sb.AppendLine($"Incident title: {title}");
+        sb.AppendLine($"Incident detail: {detail}");
+        sb.AppendLine("Classify every call below as one of: supporting, related_context, unrelated, contradicts.");
+        sb.AppendLine("supporting means the call directly reports, dispatches, locates, continues, or gives outcome/status for this same incident. related_context means useful nearby context but not direct evidence. unrelated means a different event/routine traffic. contradicts means it says the incident did not happen or belongs elsewhere.");
+        sb.AppendLine("Do not drop initial dispatch/location calls. Do not require the same category or talkgroup. Use call ids exactly as given.");
+        sb.AppendLine("Return every included call with only call_id, label, and confidence. Do not include explanations.");
+        if (truncatedCalls > 0)
+            sb.AppendLine($"Context note: {truncatedCalls} nearby call(s) were omitted by guardrails before this verifier prompt.");
+        sb.AppendLine();
+        sb.AppendLine("Calls:");
+        var used = sb.Length;
+        var included = 0;
+        foreach (var call in reviewCalls.OrderBy(c => c.StartTime))
+        {
+            var flags = new List<string>();
+            if (selectedIds.Contains(call.Id)) flags.Add("extractor_selected");
+            if (existingIds.Contains(call.Id)) flags.Add("existing_incident_evidence");
+            if (flags.Count == 0) flags.Add("nearby_candidate");
+            var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
+            var line = $"- [id:{CallToken(call.Id)}] [{local:HH:mm:ss}] flags={string.Join("|", flags)} | {call.SystemShortName} | {Label(call)} | category={call.Category}: {Trim(call.Transcription, EvidenceVerifierTranscriptCharLimit)}";
+            if (used + line.Length + Environment.NewLine.Length > EvidenceVerifierPromptCharLimit)
+                break;
+            sb.AppendLine(line);
+            used += line.Length + Environment.NewLine.Length;
+            included++;
+        }
+        var omitted = Math.Max(0, reviewCalls.Count - included);
+        sb.AppendLine($"Included {included}/{reviewCalls.Count} calls under verifier prompt budget {EvidenceVerifierPromptCharLimit:N0} chars.");
+        return new EvidenceVerificationPrompt(sb.ToString(), included, omitted);
+    }
+
+    private string BuildIncidentExtractionPrompt(string systemShortName, List<IncidentDto> activeIncidents, List<EngineCall> candidateCalls, long start, long end)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("/no_think");
+        sb.AppendLine("Return only the final JSON object in message.content. Do not place the answer in reasoning_content.");
+        sb.AppendLine($"Site/system boundary: {systemShortName}. Do not merge across sites unless an input call explicitly says this is the same cross-site response.");
+        sb.AppendLine($"State window: {DateTimeOffset.FromUnixTimeSeconds(start).ToLocalTime()} to {DateTimeOffset.FromUnixTimeSeconds(end).ToLocalTime()}.");
+        sb.AppendLine("Task: update the incident state using active incidents plus candidate calls. Assign useful related calls to an existing incident or a new incident. Leave routine/unrelated calls unassigned or held.");
+        sb.AppendLine("Rules: do not use category as a grouping qualifier; require a concrete shared anchor such as address, road, landmark, patient/person, vehicle/plate, unit handoff, or explicit same-call reference; every incident must include all source_call_ids it should retain; every call_id must be copied exactly from input.");
+        sb.AppendLine($"Narrative rule: title <= {IncidentTitleCharLimit} characters. detail <= {IncidentDetailCharLimit} characters and must be a concise operator summary, not a transcript. Do not concatenate call transcripts, quote radio dialogue, preserve filler, or include speaker turns. Summarize only the event, location/anchor, responders/status, and known outcome.");
+        sb.AppendLine("Status: use active for developing/ongoing incidents and concluded when the event appears complete or stale. Do not return concluded incidents that have no supporting calls in this state window.");
+        sb.AppendLine("Categories are labels only: choose one from police, fire, ems, traffic, public_works, utilities, other after deciding the incident.");
+        sb.AppendLine();
+        sb.AppendLine("Active incidents:");
+        foreach (var incident in activeIncidents.OrderBy(i => i.LastSeen).Take(25))
+        {
+            var key = string.IsNullOrWhiteSpace(incident.IncidentKey) ? $"legacy-{incident.Id}" : incident.IncidentKey;
+            sb.AppendLine($"- [incident_id:{key}] status={incident.Status}; last={DateTimeOffset.FromUnixTimeSeconds(incident.LastSeen).ToLocalTime():HH:mm}; title={Trim(incident.Title, 120)}; detail={Trim(incident.Detail, 220)}; source_call_ids=[{string.Join(",", incident.Calls.Select(c => CallToken(c.CallId)))}]");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Candidate calls:");
+        var used = sb.Length;
+        var included = 0;
+        foreach (var call in candidateCalls.OrderBy(c => c.StartTime))
+        {
+            var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
+            var text = Trim(call.Transcription, IncidentTranscriptCharLimit);
+            var line = $"- [id:{CallToken(call.Id)}] [{local:HH:mm:ss}] {call.SystemShortName} | {Label(call)} | category={call.Category}: {text}";
+            if (used + line.Length + Environment.NewLine.Length > IncidentPromptCharLimit)
+                break;
+            sb.AppendLine(line);
+            used += line.Length + Environment.NewLine.Length;
+            included++;
+        }
+
+        sb.AppendLine($"Included {included}/{candidateCalls.Count} candidate calls under prompt budget {IncidentPromptCharLimit:N0} chars.");
+        return sb.ToString();
     }
 
     private async Task PersistInsightEventsAsync(long windowId, InsightResult result, List<EngineCall> batch, CancellationToken ct)
@@ -508,6 +980,88 @@ public sealed class AutomaticInsightsService : BackgroundService
         return new InsightResult(summary, events);
     }
 
+    private static IncidentExtractionResult ParseIncidentExtractionResponse(string text)
+    {
+        using var root = JsonDocument.Parse(text);
+        var content = text;
+        if (root.RootElement.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array &&
+            choices.GetArrayLength() > 0 &&
+            choices[0].TryGetProperty("message", out var message) &&
+            message.TryGetProperty("content", out var contentElement))
+        {
+            content = contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString() ?? string.Empty
+                : contentElement.GetRawText();
+            if (string.IsNullOrWhiteSpace(content) &&
+                message.TryGetProperty("reasoning_content", out var reasoningElement) &&
+                reasoningElement.ValueKind == JsonValueKind.String)
+                content = reasoningElement.GetString() ?? string.Empty;
+        }
+
+        content = StripCodeFence(content);
+        content = ExtractJsonObject(content);
+        using var doc = JsonDocument.Parse(content);
+        var incidents = new List<IncidentStateItem>();
+        if (doc.RootElement.TryGetProperty("incidents", out var array) && array.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in array.EnumerateArray().Take(80))
+            {
+                var ids = new List<string>();
+                if (item.TryGetProperty("call_ids", out var callIds) && callIds.ValueKind == JsonValueKind.Array)
+                    ids.AddRange(callIds.EnumerateArray().Select(v => v.GetString()).Where(v => !string.IsNullOrWhiteSpace(v))!);
+
+                incidents.Add(new IncidentStateItem(
+                    GetString(item, "incident_id"),
+                    GetString(item, "status"),
+                    GetString(item, "title"),
+                    GetString(item, "detail"),
+                    GetString(item, "category"),
+                    item.TryGetProperty("confidence", out var confidence) && confidence.TryGetDouble(out var score) ? score : 0,
+                    ids,
+                    ReadEvidence(item)));
+            }
+        }
+        return new IncidentExtractionResult(incidents);
+    }
+
+    private static EvidenceVerificationResult ParseEvidenceVerificationResponse(string text)
+    {
+        using var root = JsonDocument.Parse(text);
+        var content = text;
+        if (root.RootElement.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array &&
+            choices.GetArrayLength() > 0 &&
+            choices[0].TryGetProperty("message", out var message) &&
+            message.TryGetProperty("content", out var contentElement))
+        {
+            content = contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString() ?? string.Empty
+                : contentElement.GetRawText();
+            if (string.IsNullOrWhiteSpace(content) &&
+                message.TryGetProperty("reasoning_content", out var reasoningElement) &&
+                reasoningElement.ValueKind == JsonValueKind.String)
+                content = reasoningElement.GetString() ?? string.Empty;
+        }
+
+        content = StripCodeFence(content);
+        content = ExtractJsonObject(content);
+        using var doc = JsonDocument.Parse(content);
+        var calls = new List<EvidenceVerificationCall>();
+        if (doc.RootElement.TryGetProperty("calls", out var array) && array.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in array.EnumerateArray().Take(EvidenceVerifierMaxCalls))
+            {
+                calls.Add(new EvidenceVerificationCall(
+                    GetString(item, "call_id"),
+                    GetString(item, "label"),
+                    item.TryGetProperty("confidence", out var confidence) && confidence.TryGetDouble(out var score) ? score : 0,
+                    GetString(item, "reason")));
+            }
+        }
+        return new EvidenceVerificationResult(calls, 0, 0);
+    }
+
     private List<EngineCall> ResolveEventCalls(InsightEvent ev, List<EngineCall> batch)
     {
         var byToken = new Dictionary<string, EngineCall>(StringComparer.OrdinalIgnoreCase);
@@ -541,20 +1095,6 @@ public sealed class AutomaticInsightsService : BackgroundService
         return resolved;
     }
 
-    private static bool IsActionableEvent(InsightEvent ev)
-    {
-        var title = NormalizeEventText(ev.Title);
-        var detail = NormalizeEventText(ev.Detail);
-        var combined = $"{title} {detail}".Trim();
-        if (string.IsNullOrWhiteSpace(combined))
-            return false;
-
-        if (ev.CallIds.Count < 2)
-            return false;
-
-        return IncidentCandidateValidator.IsActionableText(title, detail, ev.CallIds.Count);
-    }
-
     private static bool IsNotableInsightEvent(InsightEvent ev)
     {
         var title = NormalizeEventText(ev.Title);
@@ -568,6 +1108,57 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private static string NormalizeEventText(string value) =>
         Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
+
+    private static string NormalizeEvidenceLabel(string? label)
+    {
+        var normalized = Regex.Replace((label ?? string.Empty).Trim().ToLowerInvariant(), @"[^a-z_]+", "_").Trim('_');
+        return normalized switch
+        {
+            "support" or "supported" or "direct_support" or "directly_supporting" => "supporting",
+            "context" or "related" or "related_contextual" => "related_context",
+            "unrelated_call" or "not_related" => "unrelated",
+            "contradictory" or "contradiction" => "contradicts",
+            _ => normalized
+        };
+    }
+
+    private static bool IsIncidentEligibleCall(EngineCall call)
+    {
+        if (!string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var text = call.Transcription?.Trim() ?? string.Empty;
+        return !call.IsImported && text.Length >= 12;
+    }
+
+    private static string ResolveIncidentKey(string systemShortName, IncidentStateItem item, List<EngineCall> calls, Dictionary<string, IncidentDto> existingByKey)
+    {
+        var supplied = (item.IncidentId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(supplied) && existingByKey.ContainsKey(supplied))
+            return supplied;
+        if (!string.IsNullOrWhiteSpace(supplied) && !supplied.StartsWith("new", StringComparison.OrdinalIgnoreCase))
+            return supplied;
+        var slug = Regex.Replace((item.Title ?? "incident").ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        if (slug.Length > 40)
+            slug = slug[..40].Trim('-');
+        if (string.IsNullOrWhiteSpace(slug))
+            slug = "incident";
+        return $"llm:{systemShortName}:{calls.Min(c => c.Id)}:{slug}";
+    }
+
+    private static string NormalizeCategory(string category, List<EngineCall> calls)
+    {
+        var normalized = (category ?? string.Empty).Trim().ToLowerInvariant();
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "police", "fire", "ems", "traffic", "public_works", "utilities", "other" };
+        if (allowed.Contains(normalized))
+            return normalized;
+        return calls.GroupBy(c => string.IsNullOrWhiteSpace(c.Category) ? "other" : c.Category)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Key)
+            .FirstOrDefault() ?? "other";
+    }
 
     private bool IsEnabled() =>
         _config.Setup.Completed &&
@@ -614,6 +1205,62 @@ public sealed class AutomaticInsightsService : BackgroundService
     private static string Trim(string value, int max) => string.IsNullOrWhiteSpace(value)
         ? string.Empty
         : value.Length <= max ? value : value[..max];
+
+    private static string TrimIncidentText(string value, int max)
+    {
+        var text = Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
+        if (text.Length <= max)
+            return text;
+
+        var sentenceEnd = text.LastIndexOfAny(['.', '!', '?'], Math.Min(text.Length - 1, max - 1));
+        if (sentenceEnd >= Math.Max(80, max / 2))
+            return text[..(sentenceEnd + 1)].Trim();
+
+        return text[..max].Trim().TrimEnd(',', ';', ':') + ".";
+    }
+
+    private static bool IsIncidentNarrativeAcceptable(string title, string detail, List<EngineCall> calls)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(detail))
+            return false;
+        if (title.Length > IncidentTitleCharLimit || detail.Length > IncidentDetailCharLimit)
+            return false;
+
+        var normalized = NormalizeEventText(detail).ToLowerInvariant();
+        if (normalized.Contains(">>") ||
+            normalized.Contains("[beeping]") ||
+            normalized.Contains("you're welcome") ||
+            normalized.Contains("thank you") ||
+            normalized.Contains(" i copy") ||
+            normalized.Contains(" copy ") ||
+            normalized.Contains(" i'm ") ||
+            normalized.Contains(" we've ") ||
+            normalized.Contains(" we'll "))
+            return false;
+
+        var detailTokens = MeaningfulTokens(normalized).ToList();
+        if (detailTokens.Count < 5)
+            return false;
+
+        var transcript = NormalizeEventText(string.Join(' ', calls.Select(c => c.Transcription))).ToLowerInvariant();
+        var transcriptTokens = MeaningfulTokens(transcript).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (transcriptTokens.Count == 0)
+            return false;
+
+        var overlap = detailTokens.Count(token => transcriptTokens.Contains(token)) / (double)detailTokens.Count;
+        return overlap < 0.86 || detailTokens.Count <= 18;
+    }
+
+    private static IEnumerable<string> MeaningfulTokens(string text)
+    {
+        foreach (Match match in Regex.Matches(text, @"[a-z0-9]{3,}"))
+        {
+            var token = match.Value;
+            if (token is "the" or "and" or "for" or "that" or "this" or "with" or "you" or "your" or "are" or "was" or "were" or "have" or "has" or "had" or "they" or "them" or "from" or "will" or "all" or "out" or "now")
+                continue;
+            yield return token;
+        }
+    }
 
     private static string GetString(JsonElement item, string name) =>
         item.TryGetProperty(name, out var value) ? value.GetString() ?? string.Empty : string.Empty;
@@ -707,8 +1354,110 @@ public sealed class AutomaticInsightsService : BackgroundService
         }
     };
 
+    private static object IncidentExtractionResponseFormat() => new
+    {
+        type = "json_schema",
+        json_schema = new
+        {
+            name = "pizzawave_incident_state",
+            strict = false,
+            schema = new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    incidents = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                incident_id = new { type = "string" },
+                                status = new { type = "string", @enum = new[] { "active", "concluded" } },
+                                title = new { type = "string", maxLength = IncidentTitleCharLimit },
+                                detail = new { type = "string", maxLength = IncidentDetailCharLimit },
+                                category = new { type = "string" },
+                                confidence = new { type = "number" },
+                                call_ids = new
+                                {
+                                    type = "array",
+                                    items = new { type = "string" },
+                                    minItems = 2
+                                },
+                                call_evidence = new
+                                {
+                                    type = "array",
+                                    items = new
+                                    {
+                                        type = "object",
+                                        additionalProperties = false,
+                                        properties = new
+                                        {
+                                            call_id = new { type = "string" },
+                                            evidence = new { type = "string" }
+                                        },
+                                        required = new[] { "call_id", "evidence" }
+                                    }
+                                }
+                            },
+                            required = new[] { "incident_id", "status", "title", "detail", "category", "confidence", "call_ids" }
+                        }
+                    }
+                },
+                required = new[] { "incidents" }
+            }
+        }
+    };
+
+    private static object EvidenceVerificationResponseFormat() => new
+    {
+        type = "json_schema",
+        json_schema = new
+        {
+            name = "pizzawave_evidence_verification",
+            strict = false,
+            schema = new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    calls = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                call_id = new { type = "string" },
+                                label = new { type = "string", @enum = new[] { "supporting", "related_context", "unrelated", "contradicts" } },
+                                confidence = new { type = "number" }
+                            },
+                            required = new[] { "call_id", "label", "confidence" }
+                        }
+                    }
+                },
+                required = new[] { "calls" }
+            }
+        }
+    };
+
     private sealed record InsightResult(string SummaryText, List<InsightEvent> Events);
     private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds, List<CallEvidence> CallEvidence);
+    private sealed record IncidentExtractionResult(List<IncidentStateItem> Incidents);
+    private sealed record IncidentStateItem(string IncidentId, string Status, string Title, string Detail, string Category, double Confidence, List<string> CallIds, List<CallEvidence> CallEvidence);
+    private sealed record EvidenceVerificationPrompt(string Text, int IncludedCalls, int OmittedCalls)
+    {
+        public override string ToString() => Text;
+    }
+    private sealed record EvidenceVerificationResult(List<EvidenceVerificationCall> Calls, int ReviewedCalls, int PromptOmittedCalls);
+    private sealed record EvidenceVerificationCall(string CallId, string Label, double Confidence, string Reason);
     private sealed record CallEvidence(string CallId, string Evidence);
     private enum InsightPromptMode { NormalLive, CompactManual }
     private sealed record PromptBudget(int PromptCharLimit, int TranscriptCharLimit, int MaxOutputTokens, int MaxEvents = 0)

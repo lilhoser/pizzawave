@@ -379,6 +379,34 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task AddEvidenceVerifierRunAsync(EvidenceVerifierRunDto entry, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO evidence_verifier_runs (
+                timestamp_utc, system_short_name, incident_key, title, selected_calls, reviewed_calls,
+                model_reviewed_calls, truncated_calls, added_calls, dropped_calls, retained_calls, success, error)
+            VALUES (
+                $timestamp_utc, $system_short_name, $incident_key, $title, $selected_calls, $reviewed_calls,
+                $model_reviewed_calls, $truncated_calls, $added_calls, $dropped_calls, $retained_calls, $success, $error);
+            """;
+        Add(command, "$timestamp_utc", entry.TimestampUtc.ToString("O"));
+        Add(command, "$system_short_name", entry.SystemShortName);
+        Add(command, "$incident_key", entry.IncidentKey);
+        Add(command, "$title", entry.Title);
+        Add(command, "$selected_calls", entry.SelectedCalls);
+        Add(command, "$reviewed_calls", entry.ReviewedCalls);
+        Add(command, "$model_reviewed_calls", entry.ModelReviewedCalls);
+        Add(command, "$truncated_calls", entry.TruncatedCalls);
+        Add(command, "$added_calls", entry.AddedCalls);
+        Add(command, "$dropped_calls", entry.DroppedCalls);
+        Add(command, "$retained_calls", entry.RetainedCalls);
+        Add(command, "$success", entry.Success ? 1 : 0);
+        Add(command, "$error", entry.Error);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<GeocodeCacheDto?> GetGeocodeCacheAsync(string cacheKey, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -888,69 +916,6 @@ public sealed class EngineDatabase
         return await command.ExecuteNonQueryAsync(ct) > 0;
     }
 
-    public async Task<int> DeleteJobsByTypePrefixAsync(string typePrefix, CancellationToken ct)
-    {
-        await using var connection = OpenConnection();
-        await using (var deleteResults = connection.CreateCommand())
-        {
-            deleteResults.CommandText = """
-                DELETE FROM diagnostic_results
-                WHERE job_id IN (
-                    SELECT id FROM jobs
-                    WHERE type LIKE $type_prefix
-                      AND status NOT IN ('running', 'queued', 'paused')
-                );
-                """;
-            Add(deleteResults, "$type_prefix", $"{typePrefix}%");
-            await deleteResults.ExecuteNonQueryAsync(ct);
-        }
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            DELETE FROM jobs
-            WHERE type LIKE $type_prefix
-              AND status NOT IN ('running', 'queued', 'paused');
-            """;
-        Add(command, "$type_prefix", $"{typePrefix}%");
-        return await command.ExecuteNonQueryAsync(ct);
-    }
-
-    public async Task SaveDiagnosticResultAsync(DiagnosticToolResultDto result, CancellationToken ct)
-    {
-        await using var connection = OpenConnection();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO diagnostic_results (job_id, tool, result_json, created_at_utc)
-            VALUES ($job_id, $tool, $result_json, $created_at_utc)
-            ON CONFLICT(job_id) DO UPDATE SET
-                tool=excluded.tool,
-                result_json=excluded.result_json,
-                created_at_utc=excluded.created_at_utc;
-            """;
-        Add(command, "$job_id", result.JobId);
-        Add(command, "$tool", result.Tool);
-        Add(command, "$result_json", JsonSerializer.Serialize(result.Rows, EngineConfig.JsonOptions()));
-        Add(command, "$created_at_utc", result.CreatedAtUtc.ToString("O"));
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    public async Task<DiagnosticToolResultDto?> GetDiagnosticResultAsync(long jobId, CancellationToken ct)
-    {
-        await using var connection = OpenConnection();
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT job_id, tool, result_json, created_at_utc FROM diagnostic_results WHERE job_id=$job_id;";
-        Add(command, "$job_id", jobId);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            return null;
-
-        return new DiagnosticToolResultDto(
-            reader.GetInt64(0),
-            reader.GetString(1),
-            DateTime.Parse(reader.GetString(3)),
-            JsonSerializer.Deserialize<List<DiagnosticToolRowDto>>(reader.GetString(2), EngineConfig.JsonOptions()) ?? []);
-    }
-
     public async Task InsertHealthSampleAsync(TrHealthSampleDto sample, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -1121,16 +1086,21 @@ public sealed class EngineDatabase
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)tx;
         command.CommandText = """
-            INSERT INTO incidents (title, detail, first_seen, last_seen, incident_score, source_summary_ids, created_at_utc)
-            VALUES ($title, $detail, $first_seen, $last_seen, $incident_score, '[]', $created_at_utc);
+            INSERT INTO incidents (incident_key, title, detail, category, status, first_seen, last_seen, incident_score, source_summary_ids, created_at_utc, updated_at_utc)
+            VALUES ($incident_key, $title, $detail, $category, $status, $first_seen, $last_seen, $incident_score, '[]', $created_at_utc, $updated_at_utc);
             SELECT last_insert_rowid();
             """;
+        Add(command, "$incident_key", string.IsNullOrWhiteSpace(incident.IncidentKey) ? DBNull.Value : incident.IncidentKey);
         Add(command, "$title", incident.Title);
         Add(command, "$detail", incident.Detail);
+        Add(command, "$category", string.IsNullOrWhiteSpace(incident.Category) ? "other" : incident.Category);
+        Add(command, "$status", string.IsNullOrWhiteSpace(incident.Status) ? "active" : incident.Status);
         Add(command, "$first_seen", incident.FirstSeen);
         Add(command, "$last_seen", incident.LastSeen);
         Add(command, "$incident_score", incident.Confidence);
-        Add(command, "$created_at_utc", DateTime.UtcNow.ToString("O"));
+        var now = DateTime.UtcNow.ToString("O");
+        Add(command, "$created_at_utc", now);
+        Add(command, "$updated_at_utc", now);
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
 
         var callIds = incident.Calls.Select(c => c.CallId).Distinct().ToList();
@@ -1165,6 +1135,130 @@ public sealed class EngineDatabase
 
         await tx.CommitAsync(ct);
         return id;
+    }
+
+    public async Task<long> UpsertManagedIncidentAsync(IncidentDto incident, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(incident.IncidentKey))
+            throw new ArgumentException("Managed incidents require an incident key.", nameof(incident));
+
+        var callIds = incident.Calls.Select(c => c.CallId).Distinct().ToList();
+        if (callIds.Count < 2)
+            return 0;
+
+        await using var connection = OpenConnection();
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        var now = DateTime.UtcNow.ToString("O");
+
+        long id;
+        await using (var lookup = connection.CreateCommand())
+        {
+            lookup.Transaction = (SqliteTransaction)tx;
+            lookup.CommandText = "SELECT id FROM incidents WHERE incident_key=$incident_key;";
+            Add(lookup, "$incident_key", incident.IncidentKey);
+            var existing = await lookup.ExecuteScalarAsync(ct);
+            id = existing == null ? 0 : Convert.ToInt64(existing);
+        }
+
+        if (id == 0)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = (SqliteTransaction)tx;
+            insert.CommandText = """
+                INSERT INTO incidents (incident_key, title, detail, category, status, first_seen, last_seen, incident_score, source_summary_ids, created_at_utc, updated_at_utc)
+                VALUES ($incident_key, $title, $detail, $category, $status, $first_seen, $last_seen, $incident_score, '[]', $created_at_utc, $updated_at_utc);
+                SELECT last_insert_rowid();
+                """;
+            AddIncidentParameters(insert, incident, now);
+            id = Convert.ToInt64(await insert.ExecuteScalarAsync(ct));
+        }
+        else
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = (SqliteTransaction)tx;
+            update.CommandText = """
+                UPDATE incidents
+                SET title=$title,
+                    detail=$detail,
+                    category=$category,
+                    status=$status,
+                    first_seen=$first_seen,
+                    last_seen=$last_seen,
+                    incident_score=$incident_score,
+                    updated_at_utc=$updated_at_utc
+                WHERE id=$id;
+                """;
+            AddIncidentParameters(update, incident, now);
+            Add(update, "$id", id);
+            await update.ExecuteNonQueryAsync(ct);
+
+            await using var deleteLinks = connection.CreateCommand();
+            deleteLinks.Transaction = (SqliteTransaction)tx;
+            deleteLinks.CommandText = "DELETE FROM incident_calls WHERE incident_id=$id;";
+            Add(deleteLinks, "$id", id);
+            await deleteLinks.ExecuteNonQueryAsync(ct);
+        }
+
+        var linked = 0;
+        foreach (var callId in callIds)
+        {
+            await using var existingLink = connection.CreateCommand();
+            existingLink.Transaction = (SqliteTransaction)tx;
+            existingLink.CommandText = "SELECT incident_id FROM incident_calls WHERE call_id=$call_id AND incident_id<>$incident_id LIMIT 1;";
+            Add(existingLink, "$call_id", callId);
+            Add(existingLink, "$incident_id", id);
+            if (await existingLink.ExecuteScalarAsync(ct) != null)
+                continue;
+
+            await using var link = connection.CreateCommand();
+            link.Transaction = (SqliteTransaction)tx;
+            link.CommandText = "INSERT OR IGNORE INTO incident_calls (incident_id, call_id) VALUES ($incident_id, $call_id);";
+            Add(link, "$incident_id", id);
+            Add(link, "$call_id", callId);
+            linked += await link.ExecuteNonQueryAsync(ct);
+        }
+
+        if (linked < 2)
+        {
+            await tx.RollbackAsync(ct);
+            return 0;
+        }
+
+        await tx.CommitAsync(ct);
+        return id;
+    }
+
+    public async Task<int> ConcludeStaleManagedIncidentsAsync(long cutoffLastSeen, CancellationToken ct)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE incidents
+            SET status='concluded',
+                updated_at_utc=$updated_at_utc
+            WHERE status <> 'concluded'
+              AND incident_key IS NOT NULL
+              AND incident_key <> ''
+              AND last_seen < $cutoff_last_seen;
+            """;
+        Add(command, "$updated_at_utc", DateTime.UtcNow.ToString("O"));
+        Add(command, "$cutoff_last_seen", cutoffLastSeen);
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static void AddIncidentParameters(SqliteCommand command, IncidentDto incident, string now)
+    {
+        Add(command, "$incident_key", incident.IncidentKey);
+        Add(command, "$title", incident.Title);
+        Add(command, "$detail", incident.Detail);
+        Add(command, "$category", string.IsNullOrWhiteSpace(incident.Category) ? "other" : incident.Category);
+        Add(command, "$status", string.IsNullOrWhiteSpace(incident.Status) ? "active" : incident.Status);
+        Add(command, "$first_seen", incident.FirstSeen);
+        Add(command, "$last_seen", incident.LastSeen);
+        Add(command, "$incident_score", incident.Confidence);
+        Add(command, "$created_at_utc", now);
+        Add(command, "$updated_at_utc", now);
     }
 
     public async Task<int> RebuildIncidentsFromInsightEventsAsync(long start, long end, CancellationToken ct)
@@ -1352,7 +1446,7 @@ public sealed class EngineDatabase
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, title, detail, first_seen, last_seen, incident_score
+            SELECT id, COALESCE(incident_key, ''), title, detail, COALESCE(category, 'other'), COALESCE(status, 'active'), first_seen, last_seen, incident_score
             FROM incidents
             WHERE last_seen >= $start AND first_seen <= $end
               AND (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = incidents.id) >= 2
@@ -1369,17 +1463,20 @@ public sealed class EngineDatabase
             incidents.Add(new IncidentDto
             {
                 Id = incidentId,
-                Title = reader.GetString(1),
-                Detail = reader.GetString(2),
-                FirstSeen = reader.GetInt64(3),
-                LastSeen = reader.GetInt64(4),
-                Confidence = reader.GetDouble(5),
+                IncidentKey = reader.GetString(1),
+                Title = reader.GetString(2),
+                Detail = reader.GetString(3),
+                Category = reader.GetString(4),
+                Status = reader.GetString(5),
+                FirstSeen = reader.GetInt64(6),
+                LastSeen = reader.GetInt64(7),
+                Confidence = reader.GetDouble(8),
                 Calls = await ListIncidentCallsAsync(connection, incidentId, ct)
             });
         }
         return incidents
             .Where(i => i.Calls.Count >= 2)
-            .Select(i => i with { Category = DominantIncidentCategory(i.Calls) })
+            .Select(i => i with { Category = string.IsNullOrWhiteSpace(i.Category) || i.Category == "other" ? DominantIncidentCategory(i.Calls) : i.Category })
             .ToList();
     }
 
@@ -1573,6 +1670,10 @@ public sealed class EngineDatabase
     private async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
     {
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "incidents", "incident_key", "TEXT", ct);
+        await AddColumnIfMissingAsync(connection, "incidents", "category", "TEXT NOT NULL DEFAULT 'other'", ct);
+        await AddColumnIfMissingAsync(connection, "incidents", "status", "TEXT NOT NULL DEFAULT 'active'", ct);
+        await AddColumnIfMissingAsync(connection, "incidents", "updated_at_utc", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "cc_summary_decode_lines", "INTEGER NOT NULL DEFAULT 0", ct);
@@ -1594,6 +1695,7 @@ public sealed class EngineDatabase
                 updated_at_utc TEXT NOT NULL
             );
             """, ct);
+        await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_key ON incidents(incident_key) WHERE incident_key IS NOT NULL AND incident_key <> '';", ct);
         await ExecuteNonQueryAsync(connection, """
             CREATE TABLE IF NOT EXISTS insight_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1609,14 +1711,6 @@ public sealed class EngineDatabase
             );
 
             CREATE INDEX IF NOT EXISTS idx_insight_events_time ON insight_events(last_seen DESC, confidence DESC);
-            CREATE TABLE IF NOT EXISTS diagnostic_results (
-                job_id INTEGER PRIMARY KEY,
-                tool TEXT NOT NULL,
-                result_json TEXT NOT NULL,
-                created_at_utc TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            );
-
             CREATE TABLE IF NOT EXISTS lm_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp_utc TEXT NOT NULL,
@@ -1635,6 +1729,24 @@ public sealed class EngineDatabase
                 total_tokens INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
+
+            CREATE TABLE IF NOT EXISTS evidence_verifier_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp_utc TEXT NOT NULL,
+                system_short_name TEXT NOT NULL DEFAULT '',
+                incident_key TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                selected_calls INTEGER NOT NULL DEFAULT 0,
+                reviewed_calls INTEGER NOT NULL DEFAULT 0,
+                model_reviewed_calls INTEGER NOT NULL DEFAULT 0,
+                truncated_calls INTEGER NOT NULL DEFAULT 0,
+                added_calls INTEGER NOT NULL DEFAULT 0,
+                dropped_calls INTEGER NOT NULL DEFAULT 0,
+                retained_calls INTEGER NOT NULL DEFAULT 0,
+                success INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_evidence_verifier_runs_time ON evidence_verifier_runs(timestamp_utc DESC);
 
             CREATE TABLE IF NOT EXISTS job_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1937,13 +2049,17 @@ public sealed class EngineDatabase
 
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_key TEXT,
             title TEXT NOT NULL,
             detail TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            status TEXT NOT NULL DEFAULT 'active',
             first_seen INTEGER NOT NULL,
             last_seen INTEGER NOT NULL,
             incident_score REAL NOT NULL DEFAULT 0,
             source_summary_ids TEXT NOT NULL DEFAULT '[]',
-            created_at_utc TEXT NOT NULL
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS insight_windows (
@@ -2034,14 +2150,6 @@ public sealed class EngineDatabase
 
         CREATE INDEX IF NOT EXISTS idx_job_logs_job ON job_logs(job_id, id);
 
-        CREATE TABLE IF NOT EXISTS diagnostic_results (
-            job_id INTEGER PRIMARY KEY,
-            tool TEXT NOT NULL,
-            result_json TEXT NOT NULL,
-            created_at_utc TEXT NOT NULL,
-            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
-        );
-
         CREATE TABLE IF NOT EXISTS lm_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp_utc TEXT NOT NULL,
@@ -2060,6 +2168,24 @@ public sealed class EngineDatabase
             total_tokens INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS evidence_verifier_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL,
+            system_short_name TEXT NOT NULL DEFAULT '',
+            incident_key TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            selected_calls INTEGER NOT NULL DEFAULT 0,
+            reviewed_calls INTEGER NOT NULL DEFAULT 0,
+            model_reviewed_calls INTEGER NOT NULL DEFAULT 0,
+            truncated_calls INTEGER NOT NULL DEFAULT 0,
+            added_calls INTEGER NOT NULL DEFAULT 0,
+            dropped_calls INTEGER NOT NULL DEFAULT 0,
+            retained_calls INTEGER NOT NULL DEFAULT 0,
+            success INTEGER NOT NULL DEFAULT 0,
+            error TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_evidence_verifier_runs_time ON evidence_verifier_runs(timestamp_utc DESC);
 
         CREATE TABLE IF NOT EXISTS backfill_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
