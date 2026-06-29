@@ -700,6 +700,21 @@ app.MapGet("/api/v1/system/runtime", async (HttpContext context, AuthService aut
 .WithName("SystemRuntime")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/services/{service}/logs", async (HttpContext context, string service, int? lines, AuthService authService, SystemManagerService system) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await system.GetServiceLogsAsync(service, lines ?? 150, context.RequestAborted));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+.WithName("SystemServiceLogs")
+.WithOpenApi();
+
 app.MapGet("/api/v1/system/rf-surveys", async (HttpContext context, AuthService authService, RfSurveyService surveys) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

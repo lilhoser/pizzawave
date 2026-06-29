@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
 namespace pizzad;
@@ -119,6 +120,83 @@ public sealed class SystemManagerService
             tables = tableCounts
         };
     }
+
+    public async Task<IReadOnlyList<ServiceLogRowDto>> GetServiceLogsAsync(string service, int lines, CancellationToken ct)
+    {
+        var unit = ResolveServiceUnit(service);
+        var boundedLines = Math.Clamp(lines <= 0 ? 150 : lines, 20, 500);
+        var result = await CaptureAsync("journalctl", ["-u", unit, "-n", boundedLines.ToString(), "--no-pager", "-o", "json"], ct);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException(result.Stdout.Trim().Length == 0 ? $"journalctl failed for {unit}." : result.Stdout.Trim());
+
+        var rows = new List<ServiceLogRowDto>();
+        foreach (var line in result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!line.StartsWith('{'))
+                continue;
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                var timestampUtc = JournalTimestampUtc(ReadString(root, "__REALTIME_TIMESTAMP"));
+                var priority = PriorityLabel(ReadString(root, "PRIORITY"));
+                rows.Add(new ServiceLogRowDto(
+                    timestampUtc,
+                    FirstNonEmpty(ReadString(root, "_SYSTEMD_UNIT"), unit),
+                    priority,
+                    FirstNonEmpty(ReadString(root, "SYSLOG_IDENTIFIER"), ReadString(root, "_COMM")),
+                    ReadString(root, "_PID"),
+                    ReadString(root, "MESSAGE")));
+            }
+            catch
+            {
+                rows.Add(new ServiceLogRowDto(DateTime.UtcNow, unit, "unknown", "journalctl", "", line));
+            }
+        }
+        return rows;
+    }
+
+    private string ResolveServiceUnit(string service)
+    {
+        var name = (service ?? string.Empty).Trim().ToLowerInvariant();
+        var unit = name switch
+        {
+            "pizzad" or "pizzad.service" => "pizzad.service",
+            "tr" or "trunk-recorder" or "trunk-recorder.service" => _config.TrunkRecorder.LogServiceName,
+            "qdrant" or "qdrant.service" => _config.Embeddings.QdrantServiceName,
+            _ => throw new ArgumentException("Unknown service.", nameof(service))
+        };
+        if (string.IsNullOrWhiteSpace(unit))
+            unit = name.StartsWith("tr") ? "trunk-recorder" : name.StartsWith("qdrant") ? "qdrant" : "pizzad";
+        unit = unit.Trim();
+        return unit.EndsWith(".service", StringComparison.OrdinalIgnoreCase) ? unit : $"{unit}.service";
+    }
+
+    private static string ReadString(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) ? value.ToString() : string.Empty;
+
+    private static DateTime JournalTimestampUtc(string microsText)
+    {
+        if (!long.TryParse(microsText, out var micros))
+            return DateTime.UtcNow;
+        return DateTimeOffset.FromUnixTimeMilliseconds(micros / 1000).UtcDateTime;
+    }
+
+    private static string PriorityLabel(string priority) => priority switch
+    {
+        "0" => "emerg",
+        "1" => "alert",
+        "2" => "crit",
+        "3" => "error",
+        "4" => "warning",
+        "5" => "notice",
+        "6" => "info",
+        "7" => "debug",
+        _ => "unknown"
+    };
+
+    private static string FirstNonEmpty(params string[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 
     private async Task<Dictionary<string, long>> TableCountsAsync(CancellationToken ct)
     {

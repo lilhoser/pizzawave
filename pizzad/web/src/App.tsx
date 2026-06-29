@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, ServiceLogRow, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -2914,12 +2914,11 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
           {!sessions.length && <tr><td colSpan={7}>No radio setup workspaces yet.</td></tr>}
           {sessions.map(row => {
             const canApply = canApplyRfSurveyWorkspace(row);
-            const coveredSites = row.coveredSites?.length ? row.coveredSites : row.systemShortName ? [row.systemShortName] : [];
             const rowBusy = busy.endsWith(`-${row.id}`);
             return <tr key={row.id}>
               <td>{new Date(row.updatedAtUtc).toLocaleDateString()}<br /><span className="muted">{new Date(row.updatedAtUtc).toLocaleTimeString()}</span></td>
               <td><strong>{row.siteLabel || row.systemShortName || row.id}</strong><br /><span className="muted">{row.sdrSummary}</span></td>
-              <td>{coveredSites.length ? <div className="rf-site-list">{coveredSites.map(site => <span key={site}>{site}</span>)}</div> : "--"}</td>
+              <td className="rf-covered-sites">{coveredSitesText(row)}</td>
               <td>{label(row.status)}</td>
               <td>{label(row.verdict)}<br /><span className="muted">{label(row.stability)}</span></td>
               <td>{row.rfPathSummary || row.bestControlChannel || "--"}</td>
@@ -2945,6 +2944,11 @@ function canApplyRfSurveyWorkspace(row: RfSurveySession) {
     row.verdict === "pass_candidate" ||
     row.verdict === "applied" ||
     row.stability === "stable_candidate");
+}
+
+function coveredSitesText(row: RfSurveySession) {
+  const sites = row.coveredSites?.length ? row.coveredSites : row.systemShortName ? [row.systemShortName] : [];
+  return sites.length ? sites.join(", ") : "--";
 }
 
 function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupCalibrationPlan | null, rrSites: SetupTrConfigSites | null, existing: RfSurveySystem[]): RfSurveySystem[] {
@@ -4923,7 +4927,9 @@ function uniqueSortedFrequencies(values: number[]) {
 }
 
 function isValidTrSourcePlannerSampleRate(sampleRateHz: number) {
-  return Number.isFinite(sampleRateHz) && sampleRateHz > 0;
+  if (!Number.isFinite(sampleRateHz) || sampleRateHz <= 0)
+    return false;
+  return Math.round(sampleRateHz) % 24_000 === 0;
 }
 
 function formatMhzInput(sampleRateHz: number) {
@@ -4936,9 +4942,13 @@ function validateRfSweepSampleRate(sampleRateHz: number) {
   return "";
 }
 
-function validateSourcePlannerSampleRate(sampleRateHz: number, _supportedRates: number[]) {
+function validateSourcePlannerSampleRate(sampleRateHz: number, supportedRates: number[]) {
   if (!Number.isFinite(sampleRateHz) || sampleRateHz <= 0)
     return { ok: false, message: "Enter a sample rate in MHz." };
+  if (!isValidTrSourcePlannerSampleRate(sampleRateHz))
+    return { ok: false, message: "TR requires a sample rate that is a multiple of 24,000 Hz." };
+  if (supportedRates.length > 0 && !supportedRates.includes(Math.round(sampleRateHz)))
+    return { ok: false, message: `Select a supported TR sample rate: ${supportedRates.map(formatMhzInput).join(", ")} MHz.` };
   return { ok: true, message: "" };
 }
 
@@ -4958,7 +4968,10 @@ function sourcePlannerSupportedSampleRates(profile: RfSurveyProfile, experiments
         (source.serial && String(row.serial || "").trim() === source.serial) ||
         (source.device && String(row.deviceArgs || "").trim() === source.device));
       const options: number[] = Array.isArray(device?.sampleRateOptions) ? device.sampleRateOptions.map(Number).filter(isValidTrSourcePlannerSampleRate) : [];
-      return options.length > 0 ? options : [];
+      if (options.length > 0)
+        return options;
+      const sourceType = `${source.sdrType || ""} ${source.device || ""}`.toLowerCase();
+      return sourceType.includes("airspy") ? [3_000_000, 6_000_000] : [];
     })
     .filter(options => options.length > 0);
   if (rateSets.length === 0)
@@ -6641,7 +6654,7 @@ function RfSurveyConsolePanel({ surveys, reload }: { surveys: RfSurveyList | nul
           <tbody>{sessions.map(row => <tr key={row.id}>
             <td>{new Date(row.updatedAtUtc).toLocaleString()}</td>
             <td><strong>{row.siteLabel || row.systemShortName || row.id}</strong><br /><span className="muted">{row.sdrSummary}</span></td>
-            <td>{row.coveredSites?.length ? <div className="rf-site-list">{row.coveredSites.map(site => <span key={site}>{site}</span>)}</div> : row.systemShortName || "--"}</td>
+            <td className="rf-covered-sites">{coveredSitesText(row)}</td>
             <td>{label(row.verdict)}<br /><span className="muted">{label(row.stability)}</span></td>
             <td>{row.rfPathSummary}</td>
             <td><button onClick={() => void openSurvey(row.id)}>Open</button></td>
@@ -6848,7 +6861,26 @@ function CpuPanel({ snapshot, reload }: { snapshot: SystemCpuSnapshot | null; re
   </div>;
 }
 
-function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestart, onStopTr }: { runtime: any | null; data: TrTroubleshoot; restartBusy: "" | "pizzad" | "trunk-recorder" | "qdrant"; restartMessages: Record<string, string>; onRestart: (service: "pizzad" | "trunk-recorder" | "qdrant") => void; onStopTr: () => void }) {
+type ManagedServiceKey = "pizzad" | "trunk-recorder" | "qdrant";
+
+function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestart, onStopTr }: { runtime: any | null; data: TrTroubleshoot; restartBusy: "" | ManagedServiceKey; restartMessages: Record<string, string>; onRestart: (service: ManagedServiceKey) => void; onStopTr: () => void }) {
+  const [logTarget, setLogTarget] = useState<ManagedServiceKey | "">("");
+  const [serviceLogs, setServiceLogs] = useState<ServiceLogRow[]>([]);
+  const [serviceLogBusy, setServiceLogBusy] = useState(false);
+  const [serviceLogError, setServiceLogError] = useState("");
+  async function openServiceLogs(service: ManagedServiceKey) {
+    setLogTarget(service);
+    setServiceLogBusy(true);
+    setServiceLogError("");
+    try {
+      setServiceLogs(await api.request<ServiceLogRow[]>(`/api/v1/system/services/${service}/logs?lines=180`));
+    } catch (error) {
+      setServiceLogs([]);
+      setServiceLogError(error instanceof Error ? error.message : "Service logs failed to load.");
+    } finally {
+      setServiceLogBusy(false);
+    }
+  }
   if (!runtime) return <div className="card">Loading service status...</div>;
   const embeddings = runtime.queues?.embeddings;
   const trIntentionallyStopped = runtime.liveTrActivity?.status === "stopped";
@@ -6875,13 +6907,42 @@ function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestar
       </div>)}
     </div>
     <div className="audit-kpis">
-      <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} status={runtime.service?.pizzad?.ok ? "ok" : "error"} subtext={`${formatBytes(runtime.process?.workingSetBytes || 0)} RSS, ${runtime.process?.threadCount ?? 0} thread(s)`} />
-      <Kpi label="Trunk Recorder" value={runtime.service?.trunkRecorder?.active || "unknown"} status={trIntentionallyStopped ? "warning" : runtime.service?.trunkRecorder?.ok ? "ok" : "error"} subtext={trIntentionallyStopped ? "Stopped by operator" : healthIssues > 0 ? `${healthIssues} RF/resource issue row(s)` : "RF/resource health OK"} />
-      <Kpi label="Qdrant" value={runtime.service?.qdrant?.active || "unknown"} status={runtime.service?.qdrant?.ok && embeddings?.qdrantOk ? "ok" : embeddings?.enabled ? "error" : "neutral"} subtext={embeddings?.collection || "collection"} />
+      <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} status={runtime.service?.pizzad?.ok ? "ok" : "error"} subtext={`${formatBytes(runtime.process?.workingSetBytes || 0)} RSS, ${runtime.process?.threadCount ?? 0} thread(s)`} onClick={() => void openServiceLogs("pizzad")} />
+      <Kpi label="Trunk Recorder" value={runtime.service?.trunkRecorder?.active || "unknown"} status={trIntentionallyStopped ? "warning" : runtime.service?.trunkRecorder?.ok ? "ok" : "error"} subtext={trIntentionallyStopped ? "Stopped by operator" : healthIssues > 0 ? `${healthIssues} RF/resource issue row(s)` : "RF/resource health OK"} onClick={() => void openServiceLogs("trunk-recorder")} />
+      <Kpi label="Qdrant" value={runtime.service?.qdrant?.active || "unknown"} status={runtime.service?.qdrant?.ok && embeddings?.qdrantOk ? "ok" : embeddings?.enabled ? "error" : "neutral"} subtext={embeddings?.collection || "collection"} onClick={() => void openServiceLogs("qdrant")} />
       <Kpi label="Embeddings" value={embeddings?.enabled ? label(embeddings.status || "unknown") : "Disabled"} status={!embeddings?.enabled ? "neutral" : embeddings.status === "ok" ? "ok" : "warning"} subtext={`${embeddings?.queueDepth ?? 0} queued, ${(embeddings?.pendingCalls ?? 0).toLocaleString()} pending, ${(embeddings?.failedCalls ?? 0).toLocaleString()} failed`} />
       <Kpi label="Vector Latency" value={`${Number(embeddings?.lastSearchMs || 0).toFixed(0)}ms`} status="ok" subtext={`upsert ${Number(embeddings?.lastUpsertMs || 0).toFixed(0)}ms, dim ${embeddings?.vectorSize || "--"}`} />
       <Kpi label="Storage" value={formatBytes(Number(runtime.storage?.databaseBytes || 0) + Number(runtime.storage?.qdrantBytes || 0))} status="ok" subtext="database + Qdrant" />
     </div>
+    {logTarget && <div className="card service-log-card">
+      <div className="setup-job-head">
+        <div>
+          <h3>{label(logTarget)} Logs</h3>
+          <p className="muted">{serviceLogs.length.toLocaleString()} recent row(s)</p>
+        </div>
+        <div className="setup-button-row">
+          <button disabled={serviceLogBusy} onClick={() => void openServiceLogs(logTarget)}>{serviceLogBusy ? "Loading..." : "Refresh"}</button>
+          <button onClick={() => { setLogTarget(""); setServiceLogs([]); setServiceLogError(""); }}>Close</button>
+        </div>
+      </div>
+      {serviceLogError && <p className="settings-message error">{serviceLogError}</p>}
+      <div className="jobs-table-wrap">
+        <table className="jobs-table service-log-table">
+          <thead><tr><th>Time</th><th>Priority</th><th>Process</th><th>PID</th><th>Message</th></tr></thead>
+          <tbody>
+            {serviceLogBusy && serviceLogs.length === 0 && <tr><td colSpan={5}>Loading logs...</td></tr>}
+            {!serviceLogBusy && serviceLogs.length === 0 && !serviceLogError && <tr><td colSpan={5}>No journal rows returned.</td></tr>}
+            {serviceLogs.map((row, index) => <tr key={`${row.timestampUtc}-${index}`}>
+              <td>{new Date(row.timestampUtc).toLocaleString()}</td>
+              <td><span className={`job-status ${row.priority === "error" || row.priority === "crit" ? "status-failed" : row.priority === "warning" ? "status-paused" : "status-completed"}`}>{row.priority || "unknown"}</span></td>
+              <td>{row.process || row.unit || "--"}</td>
+              <td>{row.pid || "--"}</td>
+              <td className="service-log-message">{row.message || "--"}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>}
     {embeddings?.lastError && <div className="card"><h3>Embedding Pipeline</h3><p className="settings-message error">{embeddings.lastError}</p></div>}
     <div className="card">
       <h3>Service Details</h3>

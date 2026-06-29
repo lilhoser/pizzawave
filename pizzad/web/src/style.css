@@ -1695,6 +1695,19 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   vertical-align: top;
   overflow-wrap: anywhere;
 }
+.service-log-card {
+  grid-column: 1 / -1;
+}
+.service-log-table th:nth-child(1), .service-log-table td:nth-child(1) { width: 180px; }
+.service-log-table th:nth-child(2), .service-log-table td:nth-child(2) { width: 95px; }
+.service-log-table th:nth-child(3), .service-log-table td:nth-child(3) { width: 150px; }
+.service-log-table th:nth-child(4), .service-log-table td:nth-child(4) { width: 70px; }
+.service-log-table th:nth-child(5), .service-log-table td:nth-child(5) { width: auto; }
+.service-log-message {
+  min-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .job-times {
   color: #9faab5;
   min-width: 170px;
@@ -2459,24 +2472,11 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   vertical-align: top;
   padding: 8px;
 }
-.rf-site-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-width: 360px;
+.rf-covered-sites {
+  max-width: 420px;
   white-space: normal;
-}
-.rf-site-list span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 2px 7px;
-  border: 1px solid rgba(133, 149, 166, 0.28);
-  border-radius: 6px;
-  background: rgba(23, 29, 36, 0.86);
+  line-height: 1.35;
   color: #d6e1ec;
-  font-size: 12px;
-  line-height: 1.2;
 }
 .rf-wizard-progress button {
   display: inline-flex;

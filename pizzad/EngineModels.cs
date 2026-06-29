@@ -1034,6 +1034,14 @@ public sealed record RfSurveyListDto(
     IReadOnlyList<RfSurveySessionDto> Sessions,
     string ArtifactRoot);
 
+public sealed record ServiceLogRowDto(
+    DateTime TimestampUtc,
+    string Unit,
+    string Priority,
+    string Process,
+    string Pid,
+    string Message);
+
 public sealed record RfSurveySessionDto
 {
     public string Id { get; init; } = string.Empty;

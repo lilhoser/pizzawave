@@ -183,7 +183,8 @@ public sealed class RfSurveyMultiSystemTests
                     { "center": 854743750, "rate": 10000000, "error": 0, "gain": 15, "device": "airspy=637862DC2E457DD7" }
                   ],
                   "systems": [
-                    { "shortName": "chattanooga-simulcast-hamilton-t", "control_channels": [855212500] }
+                    { "shortName": "chattanooga-simulcast-hamilton-t", "control_channels": [855212500] },
+                    { "shortName": "cleveland-bradley-tn", "control_channels": [855987500] }
                   ]
                 }
                 """);
@@ -277,11 +278,11 @@ public sealed class RfSurveyMultiSystemTests
             Assert.Equal("completed", listed.Status);
             Assert.Equal("applied", listed.Verdict);
             Assert.Equal("stable_candidate", listed.Stability);
-            Assert.Equal(["chattanooga-simulcast-hamilton-t"], listed.CoveredSites);
+            Assert.Equal(["chattanooga-simulcast-hamilton-t", "cleveland-bradley-tn"], listed.CoveredSites);
             Assert.Contains("Applied 1 SDR source window", listed.SourcePlanSummary);
             Assert.NotNull(detail);
             Assert.Equal("completed", detail!.Session.Status);
-            Assert.Equal(["chattanooga-simulcast-hamilton-t"], detail.Session.CoveredSites);
+            Assert.Equal(["chattanooga-simulcast-hamilton-t", "cleveland-bradley-tn"], detail.Session.CoveredSites);
             Assert.Equal(3, detail.Experiments.Count);
             Assert.DoesNotContain(detail.NextExperiments, experiment => experiment.Type == "stability_verdict");
         }
@@ -504,6 +505,74 @@ public sealed class RfSurveyMultiSystemTests
             Assert.Single(storedPrep!.Tools);
             Assert.Equal("p25", storedPrep.Tools[0].Id);
             Assert.True(File.Exists(Path.Combine(emptySession.ArtifactPath, "tool-prep.json")));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BuildConfigDraft_UsesTrSafeAirspySampleRate()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-airspy-tr-rate-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var artifactPath = Path.Combine(root, "rf-airspy-rate");
+            Directory.CreateDirectory(artifactPath);
+            var trConfigPath = Path.Combine(root, "tr-config.json");
+            File.WriteAllText(trConfigPath, """
+                {
+                  "sources": [
+                    { "center": 856412500, "rate": 10000000, "error": 0, "gain": 15, "device": "airspy=637862DC2E457DD7" }
+                  ],
+                  "systems": [
+                    { "shortName": "chattanooga-simulcast-hamilton-t", "control_channels": [855212500], "channels": [856462500] }
+                  ]
+                }
+                """);
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var profile = new RfSurveyProfileDto
+            {
+                SiteLabel = "Chattanooga",
+                SystemShortName = "chattanooga-simulcast-hamilton-t",
+                SystemShortNames = ["chattanooga-simulcast-hamilton-t"],
+                SourcePlanSystemShortNames = ["chattanooga-simulcast-hamilton-t"],
+                Systems = [new("chattanooga-simulcast-hamilton-t", "Chattanooga", [855212500], [856462500])],
+                ControlChannelsHz = [855212500],
+                VoiceFrequenciesHz = [856462500],
+                Sources = [new(0, "airspy=637862DC2E457DD7", "637862DC2E457DD7", "Airspy", 856412500, 10000000, 0, "15")],
+                SelectedSourceIndexes = [0]
+            };
+            var session = new RfSurveySessionDto
+            {
+                Id = "rf-airspy-rate",
+                Status = "draft",
+                SiteLabel = profile.SiteLabel,
+                SystemShortName = profile.SystemShortName,
+                ArtifactPath = artifactPath
+            };
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, true, true, true, true, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var draft = await service.BuildConfigDraftAsync("rf-airspy-rate", CancellationToken.None);
+            using var document = JsonDocument.Parse(draft.ConfigJson);
+            var source = document.RootElement.GetProperty("sources")[0];
+
+            Assert.Equal(6000000, source.GetProperty("rate").GetInt32());
         }
         finally
         {

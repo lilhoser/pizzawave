@@ -70,7 +70,8 @@ public sealed class RfSurveyService
                 ? NormalizeAppliedSourcePlanSession(session)
                 : await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
             recovered = await RecoverCompletedSessionFromArtifactsAsync(recovered, ct);
-            sessions.Add(profile == null ? recovered : recovered with { CoveredSites = CoveredSitesForProfile(RebuildProfileFacts(profile)) });
+            var coveredSites = await CoveredSitesForSessionAsync(recovered, profile == null ? null : RebuildProfileFacts(profile), ct);
+            sessions.Add(recovered with { CoveredSites = coveredSites });
         }
         return new RfSurveyListDto(sessions, ArtifactRoot);
     }
@@ -234,6 +235,70 @@ public sealed class RfSurveyService
         catch
         {
             return string.Empty;
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> CoveredSitesForSessionAsync(RfSurveySessionDto session, RfSurveyProfileDto? profile, CancellationToken ct)
+    {
+        var fromAppliedConfig = await CoveredSitesFromAppliedConfigAsync(session.ArtifactPath, ct);
+        if (fromAppliedConfig.Count > 0)
+            return fromAppliedConfig;
+
+        var fromDraft = await CoveredSitesFromConfigPathAsync(Path.Combine(session.ArtifactPath, "config-draft.json"), ct);
+        if (fromDraft.Count > 0)
+            return fromDraft;
+
+        if (profile != null)
+            return CoveredSitesForProfile(profile);
+        return string.IsNullOrWhiteSpace(session.SystemShortName) ? [] : [session.SystemShortName];
+    }
+
+    private static async Task<IReadOnlyList<string>> CoveredSitesFromAppliedConfigAsync(string artifactPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(artifactPath))
+            return [];
+        var pointerPath = Path.Combine(artifactPath, "tr-config-source-apply.json");
+        if (!File.Exists(pointerPath))
+            return [];
+        try
+        {
+            var pointer = JsonNode.Parse(await File.ReadAllTextAsync(pointerPath, ct)) as JsonObject;
+            var candidatePath = pointer?["candidatePath"]?.GetValue<string>() ?? string.Empty;
+            return await CoveredSitesFromConfigPathAsync(candidatePath, ct);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static async Task<IReadOnlyList<string>> CoveredSitesFromConfigPathAsync(string path, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return [];
+        try
+        {
+            var root = JsonNode.Parse(await File.ReadAllTextAsync(path, ct)) as JsonObject;
+            var systems = root?["systems"] as JsonArray;
+            if (systems == null)
+                return [];
+            var sites = new List<string>();
+            foreach (var node in systems.OfType<JsonObject>())
+            {
+                var label = FirstNonEmpty(
+                    node["siteLabel"]?.GetValue<string>(),
+                    node["siteName"]?.GetValue<string>(),
+                    node["shortName"]?.GetValue<string>(),
+                    node["name"]?.GetValue<string>());
+                if (!string.IsNullOrWhiteSpace(label) &&
+                    sites.All(existing => !string.Equals(existing, label, StringComparison.OrdinalIgnoreCase)))
+                    sites.Add(label);
+            }
+            return sites;
+        }
+        catch
+        {
+            return [];
         }
     }
 
@@ -505,7 +570,7 @@ public sealed class RfSurveyService
         recoveredSession = await RecoverCompletedSessionFromArtifactsAsync(recoveredSession, ct);
         var toolPrepState = await EnsureReusableToolPrepAsync(recoveredSession, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
         var refreshed = await RefreshProfileFactsAsync(recoveredSession, profile, row.Value.ProfileJson, toolPrepState.Json, invalidateExperiments: false, ct, preserveUpdatedAt: true);
-        var session = NormalizeAppliedSourcePlanSession(refreshed.Session) with { CoveredSites = CoveredSitesForProfile(refreshed.Profile) };
+        var session = NormalizeAppliedSourcePlanSession(refreshed.Session) with { CoveredSites = await CoveredSitesForSessionAsync(refreshed.Session, refreshed.Profile, ct) };
         profile = refreshed.Profile;
         var toolPrep = toolPrepState.Prep;
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
@@ -930,7 +995,12 @@ public sealed class RfSurveyService
             warnings.Add("No site frequencies were available; source centers were left unchanged.");
 
         var defaultRate = selected
-            .Select(index => profile.Sources.FirstOrDefault(source => source.Index == index)?.SampleRate ?? ReadInt(draftSources, index, "rate"))
+            .Select(index =>
+            {
+                var source = profile.Sources.FirstOrDefault(row => row.Index == index);
+                var requested = source?.SampleRate ?? ReadInt(draftSources, index, "rate");
+                return TrRuntimeSampleRate(profile, source, requested);
+            })
             .Where(rate => rate > 0)
             .DefaultIfEmpty(2_400_000)
             .Max();
@@ -3416,7 +3486,12 @@ public sealed class RfSurveyService
     {
         if (requestedSampleRate <= 0 || !IsAirspySource(source))
             return requestedSampleRate;
-        return AirspyRuntimeSampleRate(requestedSampleRate, AirspySampleRateOptionsForSource(profile, source));
+        var options = AirspySampleRateOptionsForSource(profile, source)
+            .Where(IsValidTrSampleRate)
+            .ToList();
+        if (options.Count == 0)
+            options = [3_000_000, 6_000_000];
+        return AirspyRuntimeSampleRate(requestedSampleRate, options);
     }
 
     private static IReadOnlyList<int> AirspySampleRateOptionsForSource(RfSurveyProfileDto profile, RfSurveySourceDto? source)
@@ -5360,7 +5435,7 @@ public sealed class RfSurveyService
     }
 
     private static bool IsValidTrSampleRate(int sampleRate) =>
-        sampleRate > 0;
+        sampleRate > 0 && sampleRate % 24_000 == 0;
 
     private static RfSurveyProfileDto ProfileWithSampleRateOverride(RfSurveyProfileDto profile, int sampleRate)
     {
