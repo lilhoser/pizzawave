@@ -254,7 +254,8 @@ public sealed class RfSurveyService
         string currentProfileJson,
         string toolPrepJson,
         bool invalidateExperiments,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool preserveUpdatedAt = false)
     {
         var rebuilt = RebuildProfileFacts(current);
         if (SameProfileRadioFacts(current, rebuilt))
@@ -265,7 +266,7 @@ public sealed class RfSurveyService
             SiteLabel = rebuilt.SiteLabel,
             SystemShortName = rebuilt.SystemShortName,
             SdrSummary = SummarizeSdrs(rebuilt.Sources.Where(source => rebuilt.SelectedSourceIndexes.Count == 0 || rebuilt.SelectedSourceIndexes.Contains(source.Index)).ToList()),
-            UpdatedAtUtc = DateTime.UtcNow
+            UpdatedAtUtc = preserveUpdatedAt ? session.UpdatedAtUtc : DateTime.UtcNow
         };
         var profileJson = JsonSerializer.Serialize(rebuilt, EngineConfig.JsonOptions());
         if (invalidateExperiments)
@@ -374,7 +375,7 @@ public sealed class RfSurveyService
         var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson) ?? new RfSurveyProfileDto();
         var recoveredSession = await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
         var toolPrepState = await EnsureReusableToolPrepAsync(recoveredSession, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
-        var refreshed = await RefreshProfileFactsAsync(recoveredSession, profile, row.Value.ProfileJson, toolPrepState.Json, invalidateExperiments: false, ct);
+        var refreshed = await RefreshProfileFactsAsync(recoveredSession, profile, row.Value.ProfileJson, toolPrepState.Json, invalidateExperiments: false, ct, preserveUpdatedAt: true);
         var session = NormalizeAppliedSourcePlanSession(refreshed.Session);
         profile = refreshed.Profile;
         var toolPrep = toolPrepState.Prep;
@@ -602,7 +603,7 @@ public sealed class RfSurveyService
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
         var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
-        var refreshed = await RefreshProfileFactsAsync(row.Session, profile, row.ProfileJson, row.ToolPrepJson, invalidateExperiments: false, ct);
+        var refreshed = await RefreshProfileFactsAsync(row.Session, profile, row.ProfileJson, row.ToolPrepJson, invalidateExperiments: false, ct, preserveUpdatedAt: true);
         profile = refreshed.Profile;
         return BuildP25ProbePreview(profile, row.Session.ArtifactPath, controlChannelHz, durationSeconds);
     }

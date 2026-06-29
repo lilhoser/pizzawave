@@ -98,6 +98,76 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public async Task GetAsync_RefreshesProfileFactsWithoutTouchingUpdatedAt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-open-no-touch-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var artifactPath = Path.Combine(root, "rf-open");
+            Directory.CreateDirectory(artifactPath);
+            var trConfigPath = Path.Combine(root, "tr-config.json");
+            File.WriteAllText(trConfigPath, """
+                {
+                  "sources": [
+                    { "center": 772000000, "rate": 3000000, "error": 0, "gain": 15, "device": "airspy=26A464DC28793293" }
+                  ],
+                  "systems": [
+                    { "shortName": "raymond", "control_channels": [773031250], "voice_frequencies": [773531250] }
+                  ]
+                }
+                """);
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var originalUpdatedAt = DateTime.UtcNow.AddDays(-2);
+            var profile = new RfSurveyProfileDto
+            {
+                SiteLabel = "raymond",
+                SystemShortName = "raymond",
+                SystemShortNames = ["raymond"],
+                Systems = [new("raymond", "Raymond", [851000000], [])],
+                ControlChannelsHz = [851000000],
+                Sources = [],
+                SelectedSourceIndexes = []
+            };
+            var session = new RfSurveySessionDto
+            {
+                Id = "rf-open",
+                Status = "draft",
+                SiteLabel = "raymond",
+                SystemShortName = "raymond",
+                ArtifactPath = artifactPath,
+                UpdatedAtUtc = originalUpdatedAt
+            };
+            var prep = new RfSurveyToolPrepDto(DateTime.UtcNow, true, true, true, true, [new("p25", "P25", "p25", true, true, "ready", "rx.py", "P25", "Installed.")], []);
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(prep, EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var detail = await service.GetAsync("rf-open", CancellationToken.None);
+            var stored = await database.GetRfSurveySessionAsync("rf-open", CancellationToken.None);
+
+            Assert.NotNull(detail);
+            Assert.Equal([773031250], detail!.Profile.ControlChannelsHz);
+            Assert.Equal(originalUpdatedAt, stored!.Value.Session.UpdatedAtUtc.ToUniversalTime());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task UpdateDraft_AppliedPlanIgnoresEmptySelectedSourceAutosave()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-applied-autosave-{Guid.NewGuid():N}");

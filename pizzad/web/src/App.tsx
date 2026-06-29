@@ -2230,6 +2230,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   const [operationJob, setOperationJob] = useState<Job | null>(null);
   const [operationJobLogs, setOperationJobLogs] = useState<JobLog[]>([]);
   const autosaveSignatureRef = useRef("");
+  const autosaveArmedRef = useRef(false);
   const restoredWorkspaceRef = useRef(false);
   const operationLogLastId = useRef(0);
   const rrSitesAutoLoadKeyRef = useRef("");
@@ -2311,6 +2312,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     });
     setDetail(next);
     autosaveSignatureRef.current = JSON.stringify({ id: detail.session.id, ...body });
+    autosaveArmedRef.current = true;
     return next;
   }
 
@@ -2339,6 +2341,11 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     const body = buildCurrentRadioSetupDraftBody();
     if (!body) return;
     const signature = JSON.stringify({ id: detail.session.id, ...body });
+    if (!autosaveArmedRef.current) {
+      autosaveSignatureRef.current = signature;
+      autosaveArmedRef.current = true;
+      return;
+    }
     if (signature === autosaveSignatureRef.current) return;
     const timer = window.setTimeout(() => {
       autosaveSignatureRef.current = signature;
@@ -2430,6 +2437,8 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
 
   async function openSurvey(id: string, openWizard = true, targetStep?: number, configSubPage?: ConfigDraftSubpage) {
     const next = await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(id)}`);
+    autosaveArmedRef.current = false;
+    autosaveSignatureRef.current = "";
     setDetail(next);
     localStorage.setItem("pizzawave-radio-setup-workspace", next.session.id);
     localStorage.setItem("pizzawave-radio-setup-wizard-open", openWizard ? "1" : "0");
@@ -2451,20 +2460,6 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     setSourcePlanSystems(nextSourcePlanSystems);
     setSourcePlanMode(nextSourcePlanMode);
     setSurveySiteLabel(next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName);
-    autosaveSignatureRef.current = JSON.stringify({
-      id: next.session.id,
-      systemShortName: nextSystems[0] ?? next.profile.systemShortName,
-      systemShortNames: nextSystems,
-      sourcePlanSystemShortNames: nextSourcePlanSystems,
-      sourcePlanMode: nextSourcePlanMode,
-      siteLabel: next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName,
-      rfPath: restoredPath,
-      selectedSourceIndexes: next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index),
-      sdrSources: next.profile.sourceOverride ? next.profile.sources : undefined,
-      currentStep: Math.max(0, Math.min(4, next.profile.currentStep || 0)),
-      measurementMode: (next.profile.measurementMode as any) || "guided",
-      probeDurationSeconds: next.profile.probeDurationSeconds || 45
-    });
     setWizardOpen(openWizard);
     const savedStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-v2-${next.session.id}`));
     const legacyStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-${next.session.id}`));
@@ -2580,6 +2575,8 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
         body: JSON.stringify({ siteLabel: "Radio Setup", mode: measurementMode, rfPath: initialPath, selectedSourceIndexes: [], currentStep: 0, measurementMode, probeDurationSeconds: Number(duration) || 45, systemShortNames: [] })
       });
       setDetail(created);
+      autosaveArmedRef.current = false;
+      autosaveSignatureRef.current = "";
       localStorage.setItem("pizzawave-radio-setup-workspace", created.session.id);
       localStorage.setItem("pizzawave-radio-setup-wizard-open", "1");
       localStorage.setItem(`pizzawave-radio-setup-step-v2-${created.session.id}`, "0");
@@ -3215,7 +3212,16 @@ function RfSurveyWizard({
     detail.session.status === "source_plan_applied" ||
     detail.session.status === "completed" ||
     callQualityPlan?.enabled === true);
-  const rfPathValidationComplete = validationSweepStatus === "passed" || powerScan?.status === "passed" && p25?.status === "passed" && ccQuality?.status === "passed";
+  const sessionStable = detail.session.status === "completed" ||
+    detail.session.stability === "stable_candidate" ||
+    detail.session.verdict === "pass_candidate";
+  const rfPathValidationComplete = sessionStable ||
+    sourcePlanApplied ||
+    validationSweepStatus === "passed" ||
+    powerScan?.status === "passed" && p25?.status === "passed" && ccQuality?.status === "passed";
+  const callQualityResetActive = Boolean(callQualityRunStartedAtUtc && busy === "call_quality");
+  const callQualityComplete = !callQualityResetActive && (sessionStable ||
+    measurementDone(displayVoice?.status) && measurementDone(displayTranscription?.status) && measurementDone(displayStability?.status));
   const openConfigDraftReview = () => {
     localStorage.setItem(`pizzawave-radio-setup-config-subpage-${detail.session.id}`, "review");
     setStep(3);
@@ -3225,7 +3231,7 @@ function RfSurveyWizard({
     Boolean(detail.profile.systemShortName && detail.profile.controlChannelsHz.length > 0),
     rfPathValidationComplete,
     sourcePlanApplied,
-    voice?.status === "passed" && transcription?.status === "passed" && stability?.status === "passed"
+    callQualityComplete
   ];
   const currentStep = steps[step] ?? steps[0];
   return <div className="rf-wizard-page">
@@ -3276,7 +3282,7 @@ function RfSurveyWizard({
         {step === 1 && <ScopeStep detail={detail} scopePlan={scopePlan} radioReferenceSid={radioReferenceSid} setRadioReferenceSid={setRadioReferenceSid} radioReferenceSites={radioReferenceSites} surveySystem={surveySystem} surveySystems={surveySystems} setSurveySystem={setSurveySystem} setSurveySystems={setSurveySystems} surveySiteLabel={surveySiteLabel} setSurveySiteLabel={setSurveySiteLabel} onTouched={() => setSdrScopeTouched(true)} scopeHasDependentResults={scopeHasDependentResults} onLoadRadioReferenceSites={onLoadRadioReferenceSites} busy={busy} />}
         {step === 2 && <RfPathRefinementStep path={path} setPath={setPath} onRfPathTouched={() => setRfPathTouched(true)} onLoadPreviousRfPath={onLoadPreviousRfPath} busy={busy} ccQuality={ccQuality} staleCcQuality={staleCcQuality} ccQualityRuns={ccQualityRuns} inventory={inventory} powerScan={powerScan} validationSweep={validationSweep} stalePowerScan={stalePowerScan} p25={p25} staleP25={staleP25} sweep={sweep} staleSweep={staleSweep} nextExperiments={detail.nextExperiments ?? []} surveyId={detail.session.id} systemShortName={detail.profile.systemShortName} systems={detail.profile.systems ?? []} sources={sdrSources ?? detail.profile.sources} setSdrSources={setSdrSources} onSdrTouched={() => setSdrScopeTouched(true)} controlChannels={detail.profile.controlChannelsHz} activeControlChannelHz={activeControlChannelHz} setActiveControlChannelHz={setActiveControlChannelHz} duration={duration} setDuration={setDuration} selectedSources={selectedSources} onStopAndInventory={onStopAndInventory} onRunP25={onRunP25} onRunExperiment={onRunExperiment} onReload={onReload} onShowDetails={onShowDetails} onOpenRunLog={onOpenRunLog} />}
         {step === 3 && <ConfigDraftStep reload={onReload} detail={detail} selectedSources={selectedSources} setSelectedSources={setSelectedSources} sourcePlanSystems={sourcePlanSystems} setSourcePlanSystems={setSourcePlanSystems} sourcePlanMode={sourcePlanMode} setSourcePlanMode={setSourcePlanMode} sdrSources={sdrSources} setSdrSources={setSdrSources} onSdrTouched={() => setSdrScopeTouched(true)} onApplyStateChange={onConfigApplyStateChange} onApplied={async () => { await onRefreshDetail(); setStep(4); }} />}
-        {step === 4 && <CallQualityStep busy={busy} voice={displayVoice} transcription={displayTranscription} stability={displayStability} sourcePlanApplied={sourcePlanApplied} sourcePlanSummary={detail.session.sourcePlanSummary} callQualityEnabled={callQualityPlan?.enabled === true} callQualityBlockingIssue={callQualityPlan?.blockingIssue || ""} resetActive={Boolean(callQualityRunStartedAtUtc && busy === "call_quality")} onOpenConfigDraftReview={openConfigDraftReview} onApplyConfigDraft={onApplyConfigDraft} onRun={onRunCallQuality} />}
+        {step === 4 && <CallQualityStep busy={busy} voice={displayVoice} transcription={displayTranscription} stability={displayStability} completeOverride={callQualityComplete} sourcePlanApplied={sourcePlanApplied} sourcePlanSummary={detail.session.sourcePlanSummary} callQualityEnabled={callQualityPlan?.enabled === true} callQualityBlockingIssue={callQualityPlan?.blockingIssue || ""} resetActive={callQualityResetActive} onOpenConfigDraftReview={openConfigDraftReview} onApplyConfigDraft={onApplyConfigDraft} onRun={onRunCallQuality} />}
       </section>
     </div>
     {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
@@ -4606,6 +4612,7 @@ function CallQualityStep({
   voice,
   transcription,
   stability,
+  completeOverride,
   sourcePlanApplied,
   sourcePlanSummary,
   callQualityEnabled,
@@ -4619,6 +4626,7 @@ function CallQualityStep({
   voice?: RfSurveyExperiment;
   transcription?: RfSurveyExperiment;
   stability?: RfSurveyExperiment;
+  completeOverride?: boolean;
   sourcePlanApplied: boolean;
   sourcePlanSummary: string;
   callQualityEnabled: boolean;
@@ -4633,7 +4641,7 @@ function CallQualityStep({
     { title: "Transcription Quality", estimate: "up to 2 minutes", result: transcription },
     { title: "Stability Window", estimate: "uses capture window", result: stability }
   ];
-  const complete = measurementDone(stability?.status);
+  const complete = completeOverride === true || measurementDone(stability?.status);
   const running = busy === "call_quality";
   const ready = sourcePlanApplied || callQualityEnabled;
   const blocker = "Apply the current Config Draft source plan to live trunk-recorder before running Call Quality.";
