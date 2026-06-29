@@ -547,6 +547,7 @@ public sealed record IngestControlStatusDto(
 public sealed record IngestControlRequest(bool Pause, bool UntilQueueClear = false, string? Reason = null);
 
 public sealed record QueueSnapshotDto(
+    DateTime ServerTimeUtc,
     int QueueDepth,
     int LiveQueueDepth,
     int PriorityLiveQueueDepth,

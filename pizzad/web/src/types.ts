@@ -230,6 +230,7 @@ export type EmbeddingPipelineHealth = {
   lastError: string;
 };
 export type QueueSnapshot = {
+  serverTimeUtc: string;
   queueDepth: number;
   liveQueueDepth: number;
   priorityLiveQueueDepth: number;

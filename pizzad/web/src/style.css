@@ -1794,6 +1794,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .queue-issue-table th:nth-child(2),
 .queue-issue-table td:nth-child(2) {
+  width: 145px;
+}
+.queue-issue-table th:nth-child(3),
+.queue-issue-table td:nth-child(3) {
   width: 150px;
 }
 .queue-issue-table td {

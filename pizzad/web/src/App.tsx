@@ -2276,6 +2276,44 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     appendRunLog(`Started job ${job.id}: ${job.message}`, "info");
     await refreshOperationJob(job.id, true);
   }
+
+  function buildCurrentRadioSetupDraftBody() {
+    if (!detail) return null;
+    const selectedSystemNames = surveySystems.length ? surveySystems : surveySystem ? [surveySystem] : [];
+    const systemDefinitions = buildSurveySystemDefinitions(selectedSystemNames, scopePlan, radioReferenceSites, detail.profile.systems ?? []);
+    const appliedSelectedSources = detail.profile.selectedSourceIndexes?.length
+      ? detail.profile.selectedSourceIndexes
+      : detail.profile.sources.map(source => source.index);
+    const autosaveSelectedSources = selectedSources.length ? selectedSources : appliedSelectedSources;
+    return {
+      systemShortName: selectedSystemNames[0] ?? surveySystem,
+      systemShortNames: selectedSystemNames,
+      sourcePlanSystemShortNames: sourcePlanSystems.length ? sourcePlanSystems : selectedSystemNames,
+      sourcePlanMode,
+      systemDefinitions,
+      siteLabel: surveySiteLabel,
+      rfPath: path,
+      selectedSourceIndexes: autosaveSelectedSources,
+      sdrSources: sdrSources ?? undefined,
+      currentStep: step,
+      measurementMode,
+      probeDurationSeconds: Number(duration) || 45
+    };
+  }
+
+  async function saveCurrentRadioSetupDraft() {
+    if (!detail) return null;
+    const body = buildCurrentRadioSetupDraftBody();
+    if (!body) return null;
+    const next = await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/draft`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+    setDetail(next);
+    autosaveSignatureRef.current = JSON.stringify({ id: detail.session.id, ...body });
+    return next;
+  }
+
   useEffect(() => {
     if (!detail) return;
     localStorage.setItem(`pizzawave-radio-setup-step-v2-${detail.session.id}`, String(step));
@@ -2298,26 +2336,8 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   }, [wizardOpen, step, radioReferenceSid, radioReferenceSites?.sites.length, busy]);
   useEffect(() => {
     if (!wizardOpen || !detail || configApplyInFlight) return;
-    const selectedSystemNames = surveySystems.length ? surveySystems : surveySystem ? [surveySystem] : [];
-    const systemDefinitions = buildSurveySystemDefinitions(selectedSystemNames, scopePlan, radioReferenceSites, detail.profile.systems ?? []);
-    const appliedSelectedSources = detail.profile.selectedSourceIndexes?.length
-      ? detail.profile.selectedSourceIndexes
-      : detail.profile.sources.map(source => source.index);
-    const autosaveSelectedSources = selectedSources.length ? selectedSources : appliedSelectedSources;
-    const body = {
-      systemShortName: selectedSystemNames[0] ?? surveySystem,
-      systemShortNames: selectedSystemNames,
-      sourcePlanSystemShortNames: sourcePlanSystems.length ? sourcePlanSystems : selectedSystemNames,
-      sourcePlanMode,
-      systemDefinitions,
-      siteLabel: surveySiteLabel,
-      rfPath: path,
-      selectedSourceIndexes: autosaveSelectedSources,
-      sdrSources: sdrSources ?? undefined,
-      currentStep: step,
-      measurementMode,
-      probeDurationSeconds: Number(duration) || 45
-    };
+    const body = buildCurrentRadioSetupDraftBody();
+    if (!body) return;
     const signature = JSON.stringify({ id: detail.session.id, ...body });
     if (signature === autosaveSignatureRef.current) return;
     const timer = window.setTimeout(() => {
@@ -2484,6 +2504,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     setMessage("");
     appendRunLog("Applying current Config Draft to live trunk-recorder...");
     try {
+      await saveCurrentRadioSetupDraft();
       const draft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/config-draft`);
       const result = await api.request<RfSurveyTrActionResult>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
         method: "POST",
@@ -4698,6 +4719,7 @@ function ConfigDraftStep({
   async function applySourceDraft(configText: string) {
     onApplyStateChange(true);
     try {
+      await saveSourcePlanBeforeReview();
       await api.request<RfSurveyTrActionResult>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
         method: "POST",
         body: JSON.stringify({ configJson: configText, restartTr: true, preserveRfValidationEvidence: true })
@@ -7621,32 +7643,33 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
   const ingest = q?.ingest ?? engineHealth?.ingest;
   const ingestStatus = liveTrActivity?.stale || ingest?.paused ? "error" : recentCallsIngested > 0 ? "ok" : "neutral";
   const ingestSubtext = `${recentCallsIngested.toLocaleString()} call${recentCallsIngested === 1 ? "" : "s"} / ${recentAudioSecondsIngested.toLocaleString()} audio seconds over ${throughputWindowMinutes}m`;
+  const observedAtUtc = q?.serverTimeUtc ?? engineHealth?.serverTimeUtc ?? new Date().toISOString();
   const blockerRows: QueueIssueRow[] = [
     q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason
-      ? { severity: "Blocker", source: "AI work", message: q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason ?? "", status: "error", details: ["status", "ai"] }
+      ? { severity: "Blocker", source: "AI work", message: q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason ?? "", status: "error", observedAtUtc, details: ["status", "ai"] }
       : null,
     aiCompletionIssue
-      ? { severity: "Blocker", source: "AI completions", message: aiCompletionIssue, status: "error", details: ["status", "ai"] }
+      ? { severity: "Blocker", source: "AI completions", message: aiCompletionIssue, status: "error", observedAtUtc: aiCompletionHealth?.latestFailureUtc ?? observedAtUtc, details: ["status", "ai"] }
       : null,
     embeddingIssue
-      ? { severity: "Blocker", source: "Embedding link", message: embeddingIssue, status: "error", details: ["status", "embedding"] }
+      ? { severity: "Blocker", source: "Embedding link", message: embeddingIssue, status: "error", observedAtUtc, details: ["status", "embedding"] }
       : null
   ].filter((row): row is QueueIssueRow => Boolean(row));
   const warningRows: QueueIssueRow[] = [
     q?.queueUnderPressure || engineHealth?.queueUnderPressure
-      ? { severity: "Warning", source: "Queue depth", message: `Queue depth is above the pressure threshold of ${(q?.queuePressureThreshold ?? engineHealth?.queuePressureThreshold ?? 0).toLocaleString()}.`, status: "warning", details: ["status", "queued", "composition"] }
+      ? { severity: "Warning", source: "Queue depth", message: `Queue depth is above the pressure threshold of ${(q?.queuePressureThreshold ?? engineHealth?.queuePressureThreshold ?? 0).toLocaleString()}.`, status: "warning", observedAtUtc, details: ["status", "queued", "composition"] }
       : null,
     depth > 0 && audioOut < audioIn
-      ? { severity: "Warning", source: "Throughput", message: "Recent audio ingest is faster than transcription throughput.", status: "warning", details: ["status", "throughput"] }
+      ? { severity: "Warning", source: "Throughput", message: "Recent audio ingest is faster than transcription throughput.", status: "warning", observedAtUtc, details: ["status", "throughput"] }
       : null,
     ingest?.paused
-      ? { severity: "Warning", source: "Live ingest", message: `Live ingest is paused${ingest.untilQueueClear ? " until the queue clears" : ""}.`, status: "warning", details: ["status", "queued"] }
+      ? { severity: "Warning", source: "Live ingest", message: `Live ingest is paused${ingest.untilQueueClear ? " until the queue clears" : ""}.`, status: "warning", observedAtUtc: ingest.pausedAtUtc ?? observedAtUtc, details: ["status", "queued"] }
       : null,
     liveTrActivity?.stale
-      ? { severity: "Warning", source: "Live TR activity", message: liveTrActivity.message, status: "warning", details: ["status"] }
+      ? { severity: "Warning", source: "Live TR activity", message: liveTrActivity.message, status: "warning", observedAtUtc: liveTrActivity.lastActivityUtc ?? liveTrActivity.lastTrHealthUtc ?? observedAtUtc, details: ["status"] }
       : null,
     aiCompletionHealth?.status === "ok" && aiCompletionHealth.failures > 0
-      ? { severity: "Warning", source: "AI completions", message: aiCompletionHealth.message, status: "warning", details: ["status", "ai"] }
+      ? { severity: "Warning", source: "AI completions", message: aiCompletionHealth.message, status: "warning", observedAtUtc: aiCompletionHealth.latestFailureUtc ?? observedAtUtc, details: ["status", "ai"] }
       : null,
     embeddingHealth?.enabled && (activeEmbeddingFailureCount > 0 || embeddingFailureRecent)
       ? {
@@ -7705,6 +7728,17 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
         <Kpi label="Workers" value={`${q?.liveTranscriptionWorkers ?? engineHealth?.liveTranscriptionWorkers ?? 0} x ${q?.whisperThreadsPerWorker ?? engineHealth?.whisperThreadsPerWorker ?? 0}`} subtext="workers x threads" onClick={() => showDetail("workers")} />
         <Kpi label="ETA" value={etaMinutes > 0 ? formatDurationMinutes(etaMinutes) : depth > 0 ? "Unknown" : "Clear"} subtext={depth > 0 && audioOut <= audioIn ? "Audio queue is not currently outrunning ingest" : "Based on recent net audio drain"} onClick={() => showDetail("throughput")} />
       </div>
+      <div className="system-action-bar queue-ingest-actions">
+        <strong>Live Ingest</strong>
+        {ingest?.paused
+          ? <button disabled={ingestBusy} onClick={() => void onSetIngestPaused(false)}>{ingestBusy ? "Updating..." : "Resume Live Ingest"}</button>
+          : <>
+            <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, true)}>{ingestBusy ? "Updating..." : "Pause Until Queue Clear"}</button>
+            <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, false)}>Pause Live Ingest</button>
+          </>}
+        <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? "Paused" : "Running"}</span>
+        {ingestMessage && <span className={ingestMessage.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{ingestMessage}</span>}
+      </div>
       <div className="queue-detail-panel">
         <div className="queue-detail-head">
           <strong>{queueDetailTitle(detail)}</strong>
@@ -7720,17 +7754,6 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
         </div>
       </div>
       <QueueIssueTable rows={relatedIssueRows} detail={detail} page={issuePage} setPage={setIssuePage} />
-      <div className="system-action-bar">
-        <strong>Live Ingest</strong>
-        {ingest?.paused
-          ? <button disabled={ingestBusy} onClick={() => void onSetIngestPaused(false)}>{ingestBusy ? "Updating..." : "Resume Live Ingest"}</button>
-          : <>
-            <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, true)}>{ingestBusy ? "Updating..." : "Pause Until Queue Clear"}</button>
-            <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, false)}>Pause Live Ingest</button>
-          </>}
-        <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? "Paused" : "Running"}</span>
-        {ingestMessage && <span className={ingestMessage.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{ingestMessage}</span>}
-      </div>
       {ingest?.paused && <div className="settings-message error">Live ingest is paused{ingest.untilQueueClear ? " until the queue clears" : ""}. Dropped this pause: {(ingest.droppedCallsThisPause ?? 0).toLocaleString()} ({ingest.droppedCalls.toLocaleString()} total since service start).</div>}
     </div>
   </div>;
@@ -7738,7 +7761,7 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
 
 type QueueDetailKey = "status" | "queued" | "composition" | "throughput" | "ai" | "embedding" | "workers";
 type QueueDetailRow = { label: string; value: string; status?: "ok" | "warning" | "error" };
-type QueueIssueRow = { severity: "Blocker" | "Warning"; source: string; message: string; status: "warning" | "error"; details: QueueDetailKey[] };
+type QueueIssueRow = { severity: "Blocker" | "Warning"; source: string; message: string; status: "warning" | "error"; observedAtUtc: string; details: QueueDetailKey[] };
 
 function QueueIssueTable({ rows, detail, page, setPage }: { rows: QueueIssueRow[]; detail: QueueDetailKey; page: number; setPage: (page: number) => void }) {
   const pageSize = 5;
@@ -7763,16 +7786,17 @@ function QueueIssueTable({ rows, detail, page, setPage }: { rows: QueueIssueRow[
     </div>}
     <table className="table queue-issue-table">
       <thead>
-        <tr><th>Severity</th><th>Source</th><th>Current condition</th></tr>
+        <tr><th>Severity</th><th>Time</th><th>Source</th><th>Current condition</th></tr>
       </thead>
       <tbody>
         {visibleRows.length
           ? visibleRows.map((row, i) => <tr className={`queue-issue-${row.status}`} key={`${row.source}-${startRow + i}`}>
             <td><span className={`section-status ${row.status}`}>{row.severity}</span></td>
+            <td>{formatJobDate(row.observedAtUtc)}</td>
             <td>{row.source}</td>
             <td>{row.message}</td>
           </tr>)
-          : <tr className="queue-issue-ok"><td><span className="section-status ok">Normal</span></td><td>{queueDetailTitle(detail)}</td><td>No active warnings or blockers for this view.</td></tr>}
+          : <tr className="queue-issue-ok"><td><span className="section-status ok">Normal</span></td><td>--</td><td>{queueDetailTitle(detail)}</td><td>No active warnings or blockers for this view.</td></tr>}
       </tbody>
     </table>
   </div>;

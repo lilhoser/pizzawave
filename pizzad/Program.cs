@@ -1640,6 +1640,7 @@ app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authS
         .ToList();
     var topAudioTalkgroups = await database.ListTopAudioTalkgroupsAsync(recentStartUnix, 20, context.RequestAborted);
     return Results.Ok(new QueueSnapshotDto(
+        now,
         pipeline.QueueDepth,
         pipeline.LiveQueueDepth,
         pipeline.PriorityLiveQueueDepth,
