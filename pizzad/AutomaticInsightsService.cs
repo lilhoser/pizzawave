@@ -327,8 +327,10 @@ public sealed class AutomaticInsightsService : BackgroundService
         CancellationToken ct,
         bool recordTruncationUsage = true)
     {
-        var result = await ExtractIncidentStateAsync(systemShortName, activeIncidents, ragCandidates, start, end, ct, recordTruncationUsage: recordTruncationUsage);
-        return await PersistIncidentStateAsync(systemShortName, result, activeIncidents, recent, ragCandidates, locationRows, ct);
+        var extraction = await ExtractIncidentStateAsync(systemShortName, activeIncidents, ragCandidates, start, end, ct, recordTruncationUsage: recordTruncationUsage);
+        var updated = await PersistIncidentStateAsync(systemShortName, extraction.Result, activeIncidents, recent, ragCandidates, locationRows, ct);
+        await ApplyIncidentV3LiveUpdateCurrentAsync(systemShortName, extraction.IncidentV3Execution, activeIncidents, ragCandidates, ct);
+        return updated;
     }
 
     private async Task<int> ExtractAndPersistIncidentStateInChunksAsync(
@@ -429,11 +431,13 @@ public sealed class AutomaticInsightsService : BackgroundService
         long end,
         CancellationToken ct)
     {
-        var result = await ExtractIncidentStateAsync(systemShortName, activeIncidents, ragCandidates, start, end, ct, recoveredFallback: true, recordTruncationUsage: false);
-        return await PersistIncidentStateAsync(systemShortName, result, activeIncidents, recent, ragCandidates, locationRows, ct);
+        var extraction = await ExtractIncidentStateAsync(systemShortName, activeIncidents, ragCandidates, start, end, ct, recoveredFallback: true, recordTruncationUsage: false);
+        var updated = await PersistIncidentStateAsync(systemShortName, extraction.Result, activeIncidents, recent, ragCandidates, locationRows, ct);
+        await ApplyIncidentV3LiveUpdateCurrentAsync(systemShortName, extraction.IncidentV3Execution, activeIncidents, ragCandidates, ct);
+        return updated;
     }
 
-    private async Task<IncidentExtractionResult> ExtractIncidentStateAsync(string systemShortName, List<IncidentDto> activeIncidents, IReadOnlyList<IncidentRagCandidate> candidateCalls, long start, long end, CancellationToken ct, bool recoveredFallback = false, bool recordTruncationUsage = true)
+    private async Task<IncidentExtractionRunResult> ExtractIncidentStateAsync(string systemShortName, List<IncidentDto> activeIncidents, IReadOnlyList<IncidentRagCandidate> candidateCalls, long start, long end, CancellationToken ct, bool recoveredFallback = false, bool recordTruncationUsage = true)
     {
         var baseUrl = InsightBaseUrl().TrimEnd('/');
         var endpoint = $"{baseUrl}/chat/completions";
@@ -483,9 +487,9 @@ public sealed class AutomaticInsightsService : BackgroundService
 
                 var parsed = ParseIncidentExtractionResponse(text);
                 await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, true, recoveredFallback ? "recovered_after_truncation_split" : string.Empty, ct);
-                await RunIncidentV3FrameShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, ct);
+                var incidentV3Execution = RunIncidentV3FrameShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed);
                 await RunIncidentV2ShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, endpoint, ct);
-                return parsed;
+                return new IncidentExtractionRunResult(parsed, incidentV3Execution);
             }
             catch (InsightResponseTruncatedException)
             {
@@ -513,15 +517,14 @@ public sealed class AutomaticInsightsService : BackgroundService
         throw new InvalidOperationException(last?.Message ?? "Incident extraction request failed.", last);
     }
 
-    private async Task RunIncidentV3FrameShadowAsync(
+    private IncidentPlanExecutionResultV3? RunIncidentV3FrameShadowAsync(
         string systemShortName,
         IReadOnlyList<IncidentDto> activeIncidents,
         IReadOnlyList<IncidentRagCandidate> candidateCalls,
-        IncidentExtractionResult currentResult,
-        CancellationToken ct)
+        IncidentExtractionResult currentResult)
     {
         if (!_config.AiInsights.IncidentV3FrameShadowEnabled || candidateCalls.Count == 0)
-            return;
+            return null;
 
         try
         {
@@ -555,8 +558,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 _logger.LogInformation(
                     "Incident v3 incident plan shadow for {System}: planCount=0; updateCurrentCount=0; createNewCount=0; detachCreateCount=0; holdPendingCount=0; holdAmbiguousCount=0; dropAmbiguousCount=0; suppressStaleCount=0; duplicateFinalCallCount=0; plans=[]",
                     systemShortName);
-                await LogIncidentV3ExecutionShadowAsync(systemShortName, [], activeIncidents, candidateCalls, ct);
-                return;
+                return BuildAndLogIncidentV3ExecutionShadowAsync(systemShortName, []);
             }
 
             var promotionDecisions = _incidentFrameBuilderV3.BuildPromotionDecisions(frames);
@@ -616,20 +618,18 @@ public sealed class AutomaticInsightsService : BackgroundService
                     .GroupBy(callId => callId)
                     .Count(group => group.Count() > 1),
                 JsonSerializer.Serialize(incidentPlans, EngineConfig.JsonOptions()));
-            await LogIncidentV3ExecutionShadowAsync(systemShortName, incidentPlans, activeIncidents, candidateCalls, ct);
+            return BuildAndLogIncidentV3ExecutionShadowAsync(systemShortName, incidentPlans);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Incident v3 frame shadow failed for {System}", systemShortName);
+            return null;
         }
     }
 
-    private async Task LogIncidentV3ExecutionShadowAsync(
+    private IncidentPlanExecutionResultV3 BuildAndLogIncidentV3ExecutionShadowAsync(
         string systemShortName,
-        IReadOnlyList<IncidentPlanDecisionV3> incidentPlans,
-        IReadOnlyList<IncidentDto> activeIncidents,
-        IReadOnlyList<IncidentRagCandidate> candidateCalls,
-        CancellationToken ct)
+        IReadOnlyList<IncidentPlanDecisionV3> incidentPlans)
     {
         var execution = _incidentPlanExecutorV3.BuildExecutionPlan(
             incidentPlans,
@@ -648,8 +648,17 @@ public sealed class AutomaticInsightsService : BackgroundService
             execution.BlockedOperationCount,
             string.Join(",", execution.BlockReasons),
             JsonSerializer.Serialize(execution.Operations, EngineConfig.JsonOptions()));
+        return execution;
+    }
 
-        if (!execution.CanMutate)
+    private async Task ApplyIncidentV3LiveUpdateCurrentAsync(
+        string systemShortName,
+        IncidentPlanExecutionResultV3? execution,
+        IReadOnlyList<IncidentDto> activeIncidents,
+        IReadOnlyList<IncidentRagCandidate> candidateCalls,
+        CancellationToken ct)
+    {
+        if (execution is null || !execution.CanMutate)
             return;
 
         var applied = await ExecuteIncidentV3LiveUpdateCurrentAsync(systemShortName, execution, activeIncidents, candidateCalls, ct);
@@ -686,6 +695,16 @@ public sealed class AutomaticInsightsService : BackgroundService
                 !activeById.TryGetValue(activeIncidentId, out var activeIncident) ||
                 string.IsNullOrWhiteSpace(activeIncident.IncidentKey))
             {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    null,
+                    operation.CallIds,
+                    [],
+                    false,
+                    "rejected:target incident did not resolve to an active managed incident",
+                    candidateCallsById,
+                    ct);
                 _logger.LogWarning(
                     "Incident v3 live update_current skipped for {System}: target incident '{TargetIncidentId}' did not resolve to an active managed incident.",
                     systemShortName,
@@ -708,6 +727,16 @@ public sealed class AutomaticInsightsService : BackgroundService
 
             if (calls.Count != operation.CallIds.Distinct().Count())
             {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    calls.Select(call => call.Id).ToList(),
+                    false,
+                    "rejected:plan call ids were not fully resolvable",
+                    candidateCallsById,
+                    ct);
                 _logger.LogWarning(
                     "Incident v3 live update_current skipped for {System}: plan call ids were not fully resolvable. target={TargetIncidentId}; planned={PlannedCallIds}; resolved={ResolvedCallIds}",
                     systemShortName,
@@ -731,6 +760,16 @@ public sealed class AutomaticInsightsService : BackgroundService
             var id = await _database.UpsertManagedIncidentAsync(incident, ct);
             if (id <= 0)
             {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    calls.Select(call => call.Id).ToList(),
+                    false,
+                    "rejected:database upsert returned no row",
+                    candidateCallsById,
+                    ct);
                 _logger.LogWarning(
                     "Incident v3 live update_current skipped for {System}: database upsert returned no row. target={TargetIncidentId}; calls={CallIds}",
                     systemShortName,
@@ -739,10 +778,71 @@ public sealed class AutomaticInsightsService : BackgroundService
                 continue;
             }
 
+            await AuditIncidentV3LiveUpdateCurrentAsync(
+                systemShortName,
+                operation,
+                activeIncident,
+                operation.CallIds,
+                calls.Select(call => call.Id).ToList(),
+                true,
+                "accepted:v3 live update_current applied after legacy persistence",
+                candidateCallsById,
+                ct);
             applied++;
         }
 
         return applied;
+    }
+
+    private async Task AuditIncidentV3LiveUpdateCurrentAsync(
+        string systemShortName,
+        IncidentPlanExecutionOperationV3 operation,
+        IncidentDto? activeIncident,
+        IReadOnlyList<long> plannedCallIds,
+        IReadOnlyList<long> resolvedCallIds,
+        bool accepted,
+        string reason,
+        IReadOnlyDictionary<long, EngineCall> candidateCallsById,
+        CancellationToken ct)
+    {
+        var callIds = plannedCallIds.Distinct().Order().ToList();
+        var metadata = new
+        {
+            source = "incident_v3_plan_executor",
+            targetIncidentId = operation.TargetIncidentId,
+            targetIncidentKey = activeIncident?.IncidentKey ?? string.Empty,
+            targetIncidentTitle = activeIncident?.Title ?? string.Empty,
+            title = operation.Title,
+            frameTitle = operation.FrameTitle,
+            category = operation.Category,
+            locationLabel = operation.LocationLabel,
+            planReason = operation.Reason,
+            plannedCallIds = callIds,
+            resolvedCallIds = resolvedCallIds.Distinct().Order().ToList(),
+            calls = callIds.Select(callId =>
+            {
+                var hasCandidate = candidateCallsById.TryGetValue(callId, out var call);
+                return new
+                {
+                    callId,
+                    source = hasCandidate ? "v3_candidate" : "active_incident_existing",
+                    systemShortName = hasCandidate ? call!.SystemShortName : string.Empty,
+                    category = hasCandidate ? call!.Category : string.Empty,
+                    talkgroupName = hasCandidate ? call!.TalkgroupName : string.Empty
+                };
+            }).ToList()
+        };
+        await _database.AddIncidentOperationAuditAsync(new IncidentOperationAuditDto(
+            0,
+            DateTime.UtcNow,
+            systemShortName,
+            activeIncident?.IncidentKey ?? operation.TargetIncidentId,
+            "v3_update_current",
+            accepted,
+            reason,
+            0,
+            JsonSerializer.Serialize(callIds),
+            JsonSerializer.Serialize(metadata, EngineConfig.JsonOptions())), ct);
     }
 
     private static bool TryParseActiveIncidentTarget(string? value, out long incidentId)
@@ -5608,6 +5708,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private sealed record InsightResult(string SummaryText, List<InsightEvent> Events);
     private sealed record InsightEvent(string Title, string Detail, string Category, string Timestamp, double Confidence, List<string> CallIds, List<CallEvidence> CallEvidence);
     private sealed record IncidentExtractionResult(List<IncidentStateItem> Incidents);
+    private sealed record IncidentExtractionRunResult(IncidentExtractionResult Result, IncidentPlanExecutionResultV3? IncidentV3Execution);
     private sealed class IncidentExtractionFallbackState
     {
         public int ConsecutiveTerminalTimeoutSkips { get; set; }
