@@ -92,7 +92,10 @@ public sealed class DashboardService
         var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct));
         var alerts = (await _database.ListAlertMatchesAsync(start, end, ct)).Where(a => Allows(a.Category, a.Talkgroup)).ToList();
         var allowedCallIds = calls.Select(c => c.Id).ToHashSet();
-        var incidents = (await ListIncidentsAsync(start, end, ct)).Where(i => i.Calls.Any(c => allowedCallIds.Contains(c.CallId))).ToList();
+        var incidents = (await ListIncidentsAsync(start, end, ct))
+            .Where(i => i.Calls.Any(c => allowedCallIds.Contains(c.CallId)))
+            .Select(TrimDashboardIncident)
+            .ToList();
         var tokenUsage = await _database.GetTokenUsageAsync(start, end, ct);
         var total = calls.Count;
         var alertRate = total == 0 ? 0 : alerts.Select(a => a.CallId).Distinct().Count() * 100.0 / total;
@@ -552,6 +555,13 @@ public sealed class DashboardService
         transcription = Regex.Replace(transcription ?? string.Empty, @"\s+", " ").Trim();
         return transcription.Length <= 180 ? transcription : transcription[..180] + "...";
     }
+
+    private static IncidentDto TrimDashboardIncident(IncidentDto incident) => incident with
+    {
+        Calls = incident.Calls
+            .Select(call => call with { Transcript = PreviewTranscript(call.Transcript) })
+            .ToList()
+    };
 
     private static string FormatEndpoint(long unix) =>
         DateTimeOffset.FromUnixTimeSeconds(unix).ToLocalTime().ToString("M/d HH:mm", CultureInfo.CurrentCulture);

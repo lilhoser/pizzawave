@@ -280,7 +280,10 @@ function App() {
 
   const load = useCallback(async () => {
     try {
-      await Promise.all([refreshStatusData(), refreshVisiblePage()]);
+      await refreshStatusData();
+      void refreshVisiblePage().catch(error => {
+        setStatus(error instanceof Error ? error.message : "Dashboard refresh failed");
+      });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Error");
     }
