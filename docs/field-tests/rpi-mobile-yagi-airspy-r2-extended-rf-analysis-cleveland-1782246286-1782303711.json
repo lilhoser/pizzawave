@@ -1,0 +1,136 @@
+﻿{
+    "system":  "cleveland-bradley-tn",
+    "start":  1782246286,
+    "end":  1782303711,
+    "window":  "6/23/2026 4:24 PM - 6/24/2026 8:21 AM",
+    "hasEnoughPostChangeData":  true,
+    "summary":  "cleveland-bradley-tn: CC summary average 39.93 msg/sec, CC zero 0.0%, 19,000 CC message-rate samples, 0 retunes.",
+    "metrics":  [
+                    {
+                        "metric":  "CC summary decode rate",
+                        "value":  "39.93 msg/sec",
+                        "notes":  "Periodic Control Channel Decode Rates msg/sec. This is the primary RF-health decode metric.",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "CC summary zero rate",
+                        "value":  "0.00%",
+                        "notes":  "0 zero sample(s) across 283 CC summary sample(s).",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "CC message-rate samples",
+                        "value":  "19,000",
+                        "notes":  "Per-frequency Control Channel Message Decode Rate samples. These are retune/instability symptoms when the rate is repeatedly low or zero.",
+                        "isIssue":  true
+                    },
+                    {
+                        "metric":  "Message-rate zero rate",
+                        "value":  "0.00%",
+                        "notes":  "0 zero sample(s) across 19,000 per-frequency message-rate sample(s).",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "Retunes",
+                        "value":  "0",
+                        "notes":  "Control-channel retune events in the selected window.",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "No transmissions",
+                        "value":  "14",
+                        "notes":  "1.06% of concluded calls.",
+                        "isIssue":  true
+                    },
+                    {
+                        "metric":  "Recorder exhausted",
+                        "value":  "491",
+                        "notes":  "Calls TR could not assign because no recorder was free.",
+                        "isIssue":  true
+                    },
+                    {
+                        "metric":  "TR CPU max",
+                        "value":  "N/A",
+                        "notes":  "Maximum sampled trunk-recorder CPU percent. 100% is one fully saturated core.",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "TR RSS max",
+                        "value":  "N/A",
+                        "notes":  "Maximum resident memory used by trunk-recorder.",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "Host temp max",
+                        "value":  "N/A",
+                        "notes":  "Maximum sampled host thermal-zone temperature.",
+                        "isIssue":  false
+                    },
+                    {
+                        "metric":  "Health rows",
+                        "value":  "190",
+                        "notes":  "Stored 5-minute health buckets used in this analysis.",
+                        "isIssue":  false
+                    }
+                ],
+    "comparison":  [
+                       {
+                           "metric":  "Compared with previous equal window",
+                           "value":  "Available",
+                           "notes":  "145 prior health bucket(s).",
+                           "isIssue":  false
+                       },
+                       {
+                           "metric":  "CC summary decode delta",
+                           "value":  "+21.42 msg/sec",
+                           "notes":  "Current 39.93, previous 18.51.",
+                           "isIssue":  false
+                       },
+                       {
+                           "metric":  "CC zero-rate delta",
+                           "value":  "-20.59%",
+                           "notes":  "Current 0.00%, previous 20.59%.",
+                           "isIssue":  false
+                       },
+                       {
+                           "metric":  "Low-warning delta",
+                           "value":  "+4,894",
+                           "notes":  "Current 19,000, previous 14,106.",
+                           "isIssue":  true
+                       },
+                       {
+                           "metric":  "Retune delta",
+                           "value":  "-3,343",
+                           "notes":  "Current 0, previous 3,343.",
+                           "isIssue":  false
+                       },
+                       {
+                           "metric":  "No-transmission delta",
+                           "value":  "-168",
+                           "notes":  "Current 14, previous 182.",
+                           "isIssue":  false
+                       }
+                   ],
+    "retuneTargets":  [
+                          {
+                              "metric":  "Retune targets",
+                              "value":  "None",
+                              "notes":  "No retune target lines were found in journald for this system/window.",
+                              "isIssue":  false
+                          }
+                      ],
+    "recommendations":  [
+                            {
+                                "metric":  "Correlate message-rate samples to retunes",
+                                "value":  "Recommended",
+                                "notes":  "Zero or low message-rate sample volume is high. Compare sample bursts with retune targets before changing gain again.",
+                                "isIssue":  true
+                            },
+                            {
+                                "metric":  "Review no-transmission calls",
+                                "value":  "Optional",
+                                "notes":  "No-transmission outcomes can follow poor control decode, UPDATE-not-GRANT behavior, or voice-path coverage problems.",
+                                "isIssue":  true
+                            }
+                        ]
+}

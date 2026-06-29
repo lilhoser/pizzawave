@@ -1,0 +1,1641 @@
+﻿{
+    "health":  {
+                   "title":  "TR health summary: issues detected",
+                   "window":  "Window: last 24h (health summary uses last 24h only)",
+                   "lastWindow":  "Last parsed bucket: 2026-06-23 16:50:00",
+                   "source":  "Source: pizzad SQLite health samples from journald service \u0027trunk-recorder\u0027",
+                   "summaryText":  "Metric                         Value\n-----------------------------------------------\n5-minute windows               511\nCC summary samples             725\nCC summary decode rate         31.39 msg/sec\nCC summary zero rate           6.48%\nCC message-rate samples        49912\nMessage-rate zero rate         6.55%\nControl-channel retunes        3746\nRecorded calls concluded       8279\nNo transmissions recorded      622\nRecorder capacity exhausted    1183\nSample-source stops            0\nNo source covering frequency   11884\nlast window end: 2026-06-23 16:50:00\n\nSystems:\nchattanooga-simulcast-hamilton-t: Issues detected (ccSummary=37.38 msg/sec (346 samples, zero=1.16%), lowWarnings=23,802 (zero=0.66%), retunes=330, calls=5,666, noTx=250, recorderExhausted=895)\ncleveland-bradley-tn: Issues detected (ccSummary=26.14 msg/sec (345 samples, zero=12.17%), lowWarnings=23,753 (zero=13.04%), retunes=3,401, calls=2,243, noTx=240, recorderExhausted=286)\nnorth-bradley-bradley-tn: Issues detected (ccSummary=23.62 msg/sec (34 samples, zero=2.94%), lowWarnings=2,357 (zero=0.59%), retunes=15, calls=370, noTx=132, recorderExhausted=2)\n",
+                   "metrics":  [
+                                   {
+                                       "metric":  "CC summary decode rate",
+                                       "value":  "31.39 msg/sec",
+                                       "notes":  "Periodic trunk-recorder Control Channel Decode Rates value. This is the normal msg/sec metric discussed by TR users.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "CC summary zero rate",
+                                       "value":  "6.48%",
+                                       "notes":  "Percent of periodic Control Channel Decode Rates samples that were 0 msg/sec; lower is better.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "CC message-rate samples",
+                                       "value":  "49,912",
+                                       "notes":  "Count of per-frequency Control Channel Message Decode Rate samples. These are short-interval source samples, not warning log lines.",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "Message-rate zero rate",
+                                       "value":  "6.55%",
+                                       "notes":  "Percent of per-frequency Control Channel Message Decode Rate samples reporting 0/sec.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "Control-channel retunes",
+                                       "value":  "3,746",
+                                       "notes":  "High counts can indicate weak/unstable control-channel reception or incorrect channel list.",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "Recorded calls concluded",
+                                       "value":  "8,279",
+                                       "notes":  "Count of Concluding Recorded Call lines.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "No transmissions recorded",
+                                       "value":  "622",
+                                       "notes":  "Calls where trunk-recorder reported no transmission audio was recorded.",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "Recorder capacity exhausted",
+                                       "value":  "1,183",
+                                       "notes":  "Calls dropped because all configured recorders for the needed source/system were busy.",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "TR CPU max",
+                                       "value":  "N/A",
+                                       "notes":  "Maximum sampled trunk-recorder CPU percent in this health window. 100% is one fully saturated core.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "TR RSS max",
+                                       "value":  "N/A",
+                                       "notes":  "Maximum resident memory used by trunk-recorder. This is real memory, unlike virtual address size.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "TR threads max",
+                                       "value":  "N/A",
+                                       "notes":  "Maximum sampled trunk-recorder thread count.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "Host temp max",
+                                       "value":  "N/A",
+                                       "notes":  "Maximum sampled host thermal-zone temperature.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "Host throttle flags",
+                                       "value":  "N/A",
+                                       "notes":  "Raspberry Pi vcgencmd throttling flags when available.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "Sample-source stops",
+                                       "value":  "0",
+                                       "notes":  "Nonzero means trunk-recorder reported a source stopped receiving samples.",
+                                       "isIssue":  false
+                                   },
+                                   {
+                                       "metric":  "No source covering frequency",
+                                       "value":  "11,884",
+                                       "notes":  "Usually points to source min/max coverage or SDR count/configuration.",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "5-minute windows parsed",
+                                       "value":  "511",
+                                       "notes":  "Number of summary buckets generated from logs.",
+                                       "isIssue":  false
+                                   }
+                               ],
+                   "systems":  [
+                                   {
+                                       "metric":  "chattanooga-simulcast-hamilton-t",
+                                       "value":  "Issues detected",
+                                       "notes":  "ccSummary=37.38 msg/sec (346 samples, zero=1.16%), lowWarnings=23,802 (zero=0.66%), retunes=330, calls=5,666, noTx=250, recorderExhausted=895",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "cleveland-bradley-tn",
+                                       "value":  "Issues detected",
+                                       "notes":  "ccSummary=26.14 msg/sec (345 samples, zero=12.17%), lowWarnings=23,753 (zero=13.04%), retunes=3,401, calls=2,243, noTx=240, recorderExhausted=286",
+                                       "isIssue":  true
+                                   },
+                                   {
+                                       "metric":  "north-bradley-bradley-tn",
+                                       "value":  "Issues detected",
+                                       "notes":  "ccSummary=23.62 msg/sec (34 samples, zero=2.94%), lowWarnings=2,357 (zero=0.59%), retunes=15, calls=370, noTx=132, recorderExhausted=2",
+                                       "isIssue":  true
+                                   }
+                               ],
+                   "sourceCoverage":  [
+                                          {
+                                              "index":  0,
+                                              "device":  "airspy=637862DC2E457DD7",
+                                              "centerMhz":  854.74375,
+                                              "lowMhz":  849.74375,
+                                              "highMhz":  859.74375,
+                                              "digitalRecorders":  4,
+                                              "firstMatchCalls":  200,
+                                              "coverableCalls":  200,
+                                              "uniqueFrequencies":  15,
+                                              "notes":  "First-match frequencies: 15.",
+                                              "isIssue":  false
+                                          }
+                                      ],
+                   "sourcePlan":  [
+                                      {
+                                          "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                          "lowMhz":  854.3875,
+                                          "highMhz":  858.4375,
+                                          "recommendedCenterMhz":  856.4125,
+                                          "assignedSourceIndex":  0,
+                                          "assignedDevice":  "airspy=637862DC2E457DD7",
+                                          "notes":  "Covered by configured source window.",
+                                          "isIssue":  false
+                                      },
+                                      {
+                                          "systemShortName":  "cleveland-bradley-tn",
+                                          "lowMhz":  851.05,
+                                          "highMhz":  853.2,
+                                          "recommendedCenterMhz":  852.125,
+                                          "assignedSourceIndex":  0,
+                                          "assignedDevice":  "airspy=637862DC2E457DD7",
+                                          "notes":  "Covered by configured source window.",
+                                          "isIssue":  false
+                                      }
+                                  ],
+                   "remedies":  [
+                                    {
+                                        "metric":  "Frequent zero message-rate samples",
+                                        "value":  "-",
+                                        "notes":  "TR is repeatedly logging per-frequency Control Channel Message Decode Rate samples near or at zero. Compare these with retune targets to identify weak learned alternates or RF dips.",
+                                        "isIssue":  true
+                                    },
+                                    {
+                                        "metric":  "High retunes",
+                                        "value":  "-",
+                                        "notes":  "Confirm configured control channels and site coverage; frequent retunes often mean weak/unstable control-channel decode.",
+                                        "isIssue":  true
+                                    },
+                                    {
+                                        "metric":  "No source covering frequency",
+                                        "value":  "-",
+                                        "notes":  "Check source min/max ranges and whether enough SDRs cover all voice channels.",
+                                        "isIssue":  true
+                                    },
+                                    {
+                                        "metric":  "No transmissions recorded",
+                                        "value":  "-",
+                                        "notes":  "This can follow UPDATE-not-GRANT events or poor decode where trunk-recorder starts a call but captures no usable transmission audio.",
+                                        "isIssue":  true
+                                    },
+                                    {
+                                        "metric":  "Recorder capacity exhausted",
+                                        "value":  "-",
+                                        "notes":  "Increase digitalRecorders or SDR coverage for busy systems; trunk-recorder reported calls it could not assign because no recorder was free.",
+                                        "isIssue":  true
+                                    }
+                                ],
+                   "charts":  [
+                                  {
+                                      "title":  "CC Summary Decode Rate by System",
+                                      "yAxisLabel":  "Y axis: periodic Control Channel Decode Rates msg/sec",
+                                      "valueFormat":  "F1",
+                                      "labels":  [
+                                                     "06-23 16:00"
+                                                 ],
+                                      "series":  [
+                                                     {
+                                                         "label":  "chattanooga-simulcast-hamilton-t",
+                                                         "values":  [
+                                                                        39.714285714285715
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "cleveland-bradley-tn",
+                                                         "values":  [
+                                                                        37.142857142857146
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "7d baseline",
+                                                         "values":  [
+                                                                        38.27777777777778
+                                                                    ],
+                                                         "isBaseline":  true
+                                                     }
+                                                 ],
+                                      "baselineNote":  "Baseline: 7d, 3.2d available from 665 health buckets. Partial history; requested 7d."
+                                  },
+                                  {
+                                      "title":  "CC Message-Rate Samples by System",
+                                      "yAxisLabel":  "Y axis: per-frequency Control Channel Message Decode Rate samples per hour",
+                                      "valueFormat":  "N0",
+                                      "labels":  [
+                                                     "06-23 16:00"
+                                                 ],
+                                      "series":  [
+                                                     {
+                                                         "label":  "chattanooga-simulcast-hamilton-t",
+                                                         "values":  [
+                                                                        500
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "cleveland-bradley-tn",
+                                                         "values":  [
+                                                                        500
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "7d baseline",
+                                                         "values":  [
+                                                                        803
+                                                                    ],
+                                                         "isBaseline":  true
+                                                     }
+                                                 ],
+                                      "baselineNote":  "Baseline: 7d, 3.2d available from 665 health buckets. Partial history; requested 7d."
+                                  },
+                                  {
+                                      "title":  "Retunes by System",
+                                      "yAxisLabel":  "Y axis: retune events per hour",
+                                      "valueFormat":  "N0",
+                                      "labels":  [
+                                                     "06-23 16:00"
+                                                 ],
+                                      "series":  [
+                                                     {
+                                                         "label":  "chattanooga-simulcast-hamilton-t",
+                                                         "values":  [
+                                                                        0
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "cleveland-bradley-tn",
+                                                         "values":  [
+                                                                        0
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "7d baseline",
+                                                         "values":  [
+                                                                        2.6666666666666665
+                                                                    ],
+                                                         "isBaseline":  true
+                                                     }
+                                                 ],
+                                      "baselineNote":  "Baseline: 7d, 3.2d available from 665 health buckets. Partial history; requested 7d."
+                                  },
+                                  {
+                                      "title":  "No Transmissions by System",
+                                      "yAxisLabel":  "Y axis: calls with no recorded transmissions per hour",
+                                      "valueFormat":  "N0",
+                                      "labels":  [
+                                                     "06-23 16:00"
+                                                 ],
+                                      "series":  [
+                                                     {
+                                                         "label":  "chattanooga-simulcast-hamilton-t",
+                                                         "values":  [
+                                                                        4
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "cleveland-bradley-tn",
+                                                         "values":  [
+                                                                        0
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "7d baseline",
+                                                         "values":  [
+                                                                        4
+                                                                    ],
+                                                         "isBaseline":  true
+                                                     }
+                                                 ],
+                                      "baselineNote":  "Baseline: 7d, 3.2d available from 665 health buckets. Partial history; requested 7d."
+                                  },
+                                  {
+                                      "title":  "Recorder Capacity Exhausted by System",
+                                      "yAxisLabel":  "Y axis: calls dropped because no recorder was available per hour",
+                                      "valueFormat":  "N0",
+                                      "labels":  [
+                                                     "06-23 16:00"
+                                                 ],
+                                      "series":  [
+                                                     {
+                                                         "label":  "chattanooga-simulcast-hamilton-t",
+                                                         "values":  [
+                                                                        295
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "cleveland-bradley-tn",
+                                                         "values":  [
+                                                                        55
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "7d baseline",
+                                                         "values":  [
+                                                                        233.66666666666666
+                                                                    ],
+                                                         "isBaseline":  true
+                                                     }
+                                                 ],
+                                      "baselineNote":  "Baseline: 7d, 3.2d available from 665 health buckets. Partial history; requested 7d."
+                                  },
+                                  {
+                                      "title":  "Sample Source Stops by System",
+                                      "yAxisLabel":  "Y axis: source stopped receiving samples events per hour",
+                                      "valueFormat":  "N0",
+                                      "labels":  [
+                                                     "06-23 16:00"
+                                                 ],
+                                      "series":  [
+                                                     {
+                                                         "label":  "chattanooga-simulcast-hamilton-t",
+                                                         "values":  [
+                                                                        0
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "cleveland-bradley-tn",
+                                                         "values":  [
+                                                                        0
+                                                                    ],
+                                                         "isBaseline":  false
+                                                     },
+                                                     {
+                                                         "label":  "7d baseline",
+                                                         "values":  [
+                                                                        0
+                                                                    ],
+                                                         "isBaseline":  true
+                                                     }
+                                                 ],
+                                      "baselineNote":  "Baseline: 7d, 3.2d available from 665 health buckets. Partial history; requested 7d."
+                                  }
+                              ],
+                   "samples":  [
+                                   {
+                                       "id":  2405,
+                                       "windowStartUtc":  "2026-06-23T16:45:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:50:00-04:00",
+                                       "scope":  "chattanooga-simulcast-hamilton-t",
+                                       "decodeLines":  1,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  40,
+                                       "avgDecodeRate":  40,
+                                       "ccSummaryDecodeLines":  1,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  40,
+                                       "ccSummaryAvgDecodeRate":  40,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3894,
+                                       "lowDecodeWarningAvgRate":  38.94,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  63,
+                                       "callsConcluded":  63,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  2,
+                                       "recorderExhausted":  49,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  63,
+                                       "tuningErrTotalAbsHz":  11284,
+                                       "tuningErrMaxAbsHz":  997,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2406,
+                                       "windowStartUtc":  "2026-06-23T16:45:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:50:00-04:00",
+                                       "scope":  "cleveland-bradley-tn",
+                                       "decodeLines":  1,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  41,
+                                       "avgDecodeRate":  41,
+                                       "ccSummaryDecodeLines":  1,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  41,
+                                       "ccSummaryAvgDecodeRate":  41,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3850,
+                                       "lowDecodeWarningAvgRate":  38.5,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  4,
+                                       "callsConcluded":  4,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  5,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  4,
+                                       "tuningErrTotalAbsHz":  468,
+                                       "tuningErrMaxAbsHz":  176,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2404,
+                                       "windowStartUtc":  "2026-06-23T16:45:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:50:00-04:00",
+                                       "scope":  "global",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  81,
+                                       "avgDecodeRate":  40.5,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  81,
+                                       "ccSummaryAvgDecodeRate":  40.5,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  200,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  7744,
+                                       "lowDecodeWarningAvgRate":  38.72,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  67,
+                                       "callsConcluded":  67,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  2,
+                                       "recorderExhausted":  54,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  67,
+                                       "tuningErrTotalAbsHz":  11752,
+                                       "tuningErrMaxAbsHz":  997,
+                                       "trCpuPercent":  164,
+                                       "trRssMb":  210.78125,
+                                       "trVszMb":  3663.484375,
+                                       "trThreadCount":  177,
+                                       "hostTempC":  65.55,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  8.61,
+                                       "hostLoad5":  7.29,
+                                       "hostLoad15":  6.56
+                                   },
+                                   {
+                                       "id":  2402,
+                                       "windowStartUtc":  "2026-06-23T16:40:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:45:00-04:00",
+                                       "scope":  "chattanooga-simulcast-hamilton-t",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  80,
+                                       "avgDecodeRate":  40,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  80,
+                                       "ccSummaryAvgDecodeRate":  40,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3906,
+                                       "lowDecodeWarningAvgRate":  39.06,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  54,
+                                       "callsConcluded":  55,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  2,
+                                       "recorderExhausted":  61,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  55,
+                                       "tuningErrTotalAbsHz":  9857,
+                                       "tuningErrMaxAbsHz":  996,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2403,
+                                       "windowStartUtc":  "2026-06-23T16:40:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:45:00-04:00",
+                                       "scope":  "cleveland-bradley-tn",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  75,
+                                       "avgDecodeRate":  37.5,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  75,
+                                       "ccSummaryAvgDecodeRate":  37.5,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3926,
+                                       "lowDecodeWarningAvgRate":  39.26,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  11,
+                                       "callsConcluded":  10,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  11,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  10,
+                                       "tuningErrTotalAbsHz":  1186,
+                                       "tuningErrMaxAbsHz":  164,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2401,
+                                       "windowStartUtc":  "2026-06-23T16:40:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:45:00-04:00",
+                                       "scope":  "global",
+                                       "decodeLines":  4,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  155,
+                                       "avgDecodeRate":  38.75,
+                                       "ccSummaryDecodeLines":  4,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  155,
+                                       "ccSummaryAvgDecodeRate":  38.75,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  200,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  7832,
+                                       "lowDecodeWarningAvgRate":  39.16,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  65,
+                                       "callsConcluded":  65,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  2,
+                                       "recorderExhausted":  72,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  65,
+                                       "tuningErrTotalAbsHz":  11043,
+                                       "tuningErrMaxAbsHz":  996,
+                                       "trCpuPercent":  165,
+                                       "trRssMb":  208.109375,
+                                       "trVszMb":  3663.484375,
+                                       "trThreadCount":  178,
+                                       "hostTempC":  65,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  5.13,
+                                       "hostLoad5":  5.97,
+                                       "hostLoad15":  6.01
+                                   },
+                                   {
+                                       "id":  2399,
+                                       "windowStartUtc":  "2026-06-23T16:35:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:40:00-04:00",
+                                       "scope":  "chattanooga-simulcast-hamilton-t",
+                                       "decodeLines":  1,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  41,
+                                       "avgDecodeRate":  41,
+                                       "ccSummaryDecodeLines":  1,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  41,
+                                       "ccSummaryAvgDecodeRate":  41,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3914,
+                                       "lowDecodeWarningAvgRate":  39.14,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  56,
+                                       "callsConcluded":  55,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  55,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  55,
+                                       "tuningErrTotalAbsHz":  11661,
+                                       "tuningErrMaxAbsHz":  1212,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2400,
+                                       "windowStartUtc":  "2026-06-23T16:35:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:40:00-04:00",
+                                       "scope":  "cleveland-bradley-tn",
+                                       "decodeLines":  1,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  33,
+                                       "avgDecodeRate":  33,
+                                       "ccSummaryDecodeLines":  1,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  33,
+                                       "ccSummaryAvgDecodeRate":  33,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3682,
+                                       "lowDecodeWarningAvgRate":  36.82,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  13,
+                                       "callsConcluded":  14,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  6,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  14,
+                                       "tuningErrTotalAbsHz":  1534,
+                                       "tuningErrMaxAbsHz":  212,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2398,
+                                       "windowStartUtc":  "2026-06-23T16:35:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:40:00-04:00",
+                                       "scope":  "global",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  74,
+                                       "avgDecodeRate":  37,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  74,
+                                       "ccSummaryAvgDecodeRate":  37,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  200,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  7596,
+                                       "lowDecodeWarningAvgRate":  37.98,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  69,
+                                       "callsConcluded":  69,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  61,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  69,
+                                       "tuningErrTotalAbsHz":  13195,
+                                       "tuningErrMaxAbsHz":  1212,
+                                       "trCpuPercent":  164,
+                                       "trRssMb":  207.0625,
+                                       "trVszMb":  3663.34375,
+                                       "trThreadCount":  177,
+                                       "hostTempC":  64.45,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  7,
+                                       "hostLoad5":  6.25,
+                                       "hostLoad15":  6.07
+                                   },
+                                   {
+                                       "id":  2396,
+                                       "windowStartUtc":  "2026-06-23T16:30:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:35:00-04:00",
+                                       "scope":  "chattanooga-simulcast-hamilton-t",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  79,
+                                       "avgDecodeRate":  39.5,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  79,
+                                       "ccSummaryAvgDecodeRate":  39.5,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3914,
+                                       "lowDecodeWarningAvgRate":  39.14,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  58,
+                                       "callsConcluded":  58,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  59,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  58,
+                                       "tuningErrTotalAbsHz":  8712,
+                                       "tuningErrMaxAbsHz":  963,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2397,
+                                       "windowStartUtc":  "2026-06-23T16:30:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:35:00-04:00",
+                                       "scope":  "cleveland-bradley-tn",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  72,
+                                       "avgDecodeRate":  36,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  72,
+                                       "ccSummaryAvgDecodeRate":  36,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3846,
+                                       "lowDecodeWarningAvgRate":  38.46,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  18,
+                                       "callsConcluded":  17,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  21,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  17,
+                                       "tuningErrTotalAbsHz":  2301,
+                                       "tuningErrMaxAbsHz":  213,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2395,
+                                       "windowStartUtc":  "2026-06-23T16:30:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:35:00-04:00",
+                                       "scope":  "global",
+                                       "decodeLines":  4,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  151,
+                                       "avgDecodeRate":  37.75,
+                                       "ccSummaryDecodeLines":  4,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  151,
+                                       "ccSummaryAvgDecodeRate":  37.75,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  200,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  7760,
+                                       "lowDecodeWarningAvgRate":  38.8,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  76,
+                                       "callsConcluded":  75,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  80,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  75,
+                                       "tuningErrTotalAbsHz":  11013,
+                                       "tuningErrMaxAbsHz":  963,
+                                       "trCpuPercent":  163,
+                                       "trRssMb":  204.25,
+                                       "trVszMb":  3663.203125,
+                                       "trThreadCount":  177,
+                                       "hostTempC":  66.65,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  5.74,
+                                       "hostLoad5":  6.23,
+                                       "hostLoad15":  6.09
+                                   },
+                                   {
+                                       "id":  2393,
+                                       "windowStartUtc":  "2026-06-23T16:25:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:30:00-04:00",
+                                       "scope":  "chattanooga-simulcast-hamilton-t",
+                                       "decodeLines":  1,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  38,
+                                       "avgDecodeRate":  38,
+                                       "ccSummaryDecodeLines":  1,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  38,
+                                       "ccSummaryAvgDecodeRate":  38,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3921,
+                                       "lowDecodeWarningAvgRate":  39.21,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  59,
+                                       "callsConcluded":  59,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  71,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  59,
+                                       "tuningErrTotalAbsHz":  11212,
+                                       "tuningErrMaxAbsHz":  861,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2394,
+                                       "windowStartUtc":  "2026-06-23T16:25:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:30:00-04:00",
+                                       "scope":  "cleveland-bradley-tn",
+                                       "decodeLines":  1,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  39,
+                                       "avgDecodeRate":  39,
+                                       "ccSummaryDecodeLines":  1,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  39,
+                                       "ccSummaryAvgDecodeRate":  39,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  100,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  3928,
+                                       "lowDecodeWarningAvgRate":  39.28,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  13,
+                                       "callsConcluded":  13,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  12,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  13,
+                                       "tuningErrTotalAbsHz":  1699,
+                                       "tuningErrMaxAbsHz":  200,
+                                       "trCpuPercent":  0,
+                                       "trRssMb":  0,
+                                       "trVszMb":  0,
+                                       "trThreadCount":  0,
+                                       "hostTempC":  0,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  0,
+                                       "hostLoad5":  0,
+                                       "hostLoad15":  0
+                                   },
+                                   {
+                                       "id":  2392,
+                                       "windowStartUtc":  "2026-06-23T16:25:00-04:00",
+                                       "windowEndUtc":  "2026-06-23T16:30:00-04:00",
+                                       "scope":  "global",
+                                       "decodeLines":  2,
+                                       "decodeZero":  0,
+                                       "decodeZeroPct":  0,
+                                       "decodeRateTotal":  77,
+                                       "avgDecodeRate":  38.5,
+                                       "ccSummaryDecodeLines":  2,
+                                       "ccSummaryDecodeZero":  0,
+                                       "ccSummaryDecodeRateTotal":  77,
+                                       "ccSummaryAvgDecodeRate":  38.5,
+                                       "ccSummaryDecodeZeroPct":  0,
+                                       "lowDecodeWarningLines":  200,
+                                       "lowDecodeWarningZero":  0,
+                                       "lowDecodeWarningRateTotal":  7849,
+                                       "lowDecodeWarningAvgRate":  39.245,
+                                       "lowDecodeWarningZeroPct":  0,
+                                       "retunes":  0,
+                                       "callsStarted":  72,
+                                       "callsConcluded":  72,
+                                       "updateNotGrant":  0,
+                                       "noTxRecorded":  0,
+                                       "recorderExhausted":  83,
+                                       "sampleStops":  0,
+                                       "unableSource":  0,
+                                       "tuningErrSamples":  72,
+                                       "tuningErrTotalAbsHz":  12911,
+                                       "tuningErrMaxAbsHz":  861,
+                                       "trCpuPercent":  164,
+                                       "trRssMb":  200.625,
+                                       "trVszMb":  3663.203125,
+                                       "trThreadCount":  177,
+                                       "hostTempC":  65,
+                                       "hostThrottledFlags":  "",
+                                       "hostLoad1":  6.06,
+                                       "hostLoad5":  6.8,
+                                       "hostLoad15":  6.13
+                                   }
+                               ]
+               },
+    "qualityAudit":  {
+                         "totalCalls":  200,
+                         "problemCalls":  33,
+                         "inaudibleCalls":  0,
+                         "problemPercent":  16.5,
+                         "inaudiblePercent":  0,
+                         "byReason":  [
+                                          {
+                                              "label":  "repetitive",
+                                              "totalCalls":  28,
+                                              "problemCalls":  28,
+                                              "inaudibleCalls":  0,
+                                              "problemPercent":  84.84848484848484,
+                                              "inaudiblePercent":  0
+                                          },
+                                          {
+                                              "label":  "numeric_noise",
+                                              "totalCalls":  4,
+                                              "problemCalls":  4,
+                                              "inaudibleCalls":  0,
+                                              "problemPercent":  12.121212121212121,
+                                              "inaudiblePercent":  0
+                                          },
+                                          {
+                                              "label":  "empty",
+                                              "totalCalls":  1,
+                                              "problemCalls":  1,
+                                              "inaudibleCalls":  0,
+                                              "problemPercent":  3.0303030303030303,
+                                              "inaudiblePercent":  0
+                                          }
+                                      ],
+                         "bySystem":  [
+                                          {
+                                              "label":  "chattanooga-simulcast-hamilton-t",
+                                              "totalCalls":  164,
+                                              "problemCalls":  27,
+                                              "inaudibleCalls":  0,
+                                              "problemPercent":  16.463414634146343,
+                                              "inaudiblePercent":  0
+                                          },
+                                          {
+                                              "label":  "cleveland-bradley-tn",
+                                              "totalCalls":  36,
+                                              "problemCalls":  6,
+                                              "inaudibleCalls":  0,
+                                              "problemPercent":  16.666666666666668,
+                                              "inaudiblePercent":  0
+                                          }
+                                      ],
+                         "byTalkgroup":  [
+                                             {
+                                                 "label":  "HC CPD C - Police: Charlie Dispatch (1051)",
+                                                 "totalCalls":  6,
+                                                 "problemCalls":  4,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  66.66666666666667,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "WCFR-DISP - Fire/EMS: Dispatch (Countywide) (13509)",
+                                                 "totalCalls":  7,
+                                                 "problemCalls":  3,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  42.857142857142854,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "WCSO-PRIORITY - Sheriff: Priority (13502)",
+                                                 "totalCalls":  9,
+                                                 "problemCalls":  3,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  33.333333333333336,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "WLKR CITY PD - Cities Police: Dispatch (13505)",
+                                                 "totalCalls":  3,
+                                                 "problemCalls":  2,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  66.66666666666667,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "THP-D2-Disp1 - Dispatch 1 (47004)",
+                                                 "totalCalls":  7,
+                                                 "problemCalls":  2,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  28.571428571428573,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "CCFR-PRIORTY - County Fire/Rescue: Priority (1515)",
+                                                 "totalCalls":  2,
+                                                 "problemCalls":  2,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  100,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "Cleveland Fire - Cleveland Fire: Dispatch (5526)",
+                                                 "totalCalls":  3,
+                                                 "problemCalls":  2,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  66.66666666666667,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "Bradley SheriffA - Sheriff: Dispatch A (5521)",
+                                                 "totalCalls":  6,
+                                                 "problemCalls":  1,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  16.666666666666668,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "HC CPD A - Police: Adam Dispatch (1027)",
+                                                 "totalCalls":  8,
+                                                 "problemCalls":  1,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  12.5,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "HCSO-INFO - Sheriff: Info (1491)",
+                                                 "totalCalls":  6,
+                                                 "problemCalls":  1,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  16.666666666666668,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "Bradley EMS DIsp - EMS: Dispatch (Countywide) (5508)",
+                                                 "totalCalls":  9,
+                                                 "problemCalls":  1,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  11.11111111111111,
+                                                 "inaudiblePercent":  0
+                                             },
+                                             {
+                                                 "label":  "HC CPD CAR - Police: Car-to-Car (1035)",
+                                                 "totalCalls":  1,
+                                                 "problemCalls":  1,
+                                                 "inaudibleCalls":  0,
+                                                 "problemPercent":  100,
+                                                 "inaudiblePercent":  0
+                                             }
+                                         ],
+                         "byHour":  [
+                                        {
+                                            "hour":  16,
+                                            "totalCalls":  200,
+                                            "problemCalls":  33,
+                                            "inaudibleCalls":  0
+                                        }
+                                    ],
+                         "samples":  [
+                                         {
+                                             "callId":  25603,
+                                             "startTime":  1782248073,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13502,
+                                             "talkgroupName":  "WCSO-PRIORITY - Sheriff: Priority",
+                                             "category":  "police",
+                                             "durationSeconds":  20,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry. I\u0027m sorry.",
+                                             "audioUrl":  "/api/v1/calls/25603/audio"
+                                         },
+                                         {
+                                             "callId":  25599,
+                                             "startTime":  1782248056,
+                                             "systemShortName":  "cleveland-bradley-tn",
+                                             "source":  1,
+                                             "talkgroup":  5521,
+                                             "talkgroupName":  "Bradley SheriffA - Sheriff: Dispatch A",
+                                             "category":  "police",
+                                             "durationSeconds":  21,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "I\u0027m not going to leave and give me anything. I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be fine, I\u0027ll be",
+                                             "audioUrl":  "/api/v1/calls/25599/audio"
+                                         },
+                                         {
+                                             "callId":  25601,
+                                             "startTime":  1782248055,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1027,
+                                             "talkgroupName":  "HC CPD A - Police: Adam Dispatch",
+                                             "category":  "police",
+                                             "durationSeconds":  26,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "Last unit. 3-7. Good. 2-4. Give me a call, please. 3-4. You got it? 4. Go with the number. 7-4. The number is 4-2-3. 4-1-3. 4-9. 3-9. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4. 3-4.",
+                                             "audioUrl":  "/api/v1/calls/25601/audio"
+                                         },
+                                         {
+                                             "callId":  25595,
+                                             "startTime":  1782248033,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13505,
+                                             "talkgroupName":  "WLKR CITY PD - Cities Police: Dispatch",
+                                             "category":  "police",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "numeric_noise",
+                                             "transcription":  "20, 24, 22, 30, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40",
+                                             "audioUrl":  "/api/v1/calls/25595/audio"
+                                         },
+                                         {
+                                             "callId":  25579,
+                                             "startTime":  1782247982,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1035,
+                                             "talkgroupName":  "HC CPD CAR - Police: Car-to-Car",
+                                             "category":  "police",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "All right, all right, all right, all right.",
+                                             "audioUrl":  "/api/v1/calls/25579/audio"
+                                         },
+                                         {
+                                             "callId":  25569,
+                                             "startTime":  1782247930,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1051,
+                                             "talkgroupName":  "HC CPD C - Police: Charlie Dispatch",
+                                             "category":  "police",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "She\u0027s really sick. Copy a suspicious vehicle. Go ahead. 2000 Hems from place 1, 2000 Hems from place 1, between Franks Road and Exit Recall.",
+                                             "audioUrl":  "/api/v1/calls/25569/audio"
+                                         },
+                                         {
+                                             "callId":  25575,
+                                             "startTime":  1782247899,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13509,
+                                             "talkgroupName":  "WCFR-DISP - Fire/EMS: Dispatch (Countywide)",
+                                             "category":  "fire",
+                                             "durationSeconds":  65,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "172 Johnson Road have a female hanging inside, 172 Johnson Road have a female hanging inside, I\u0027m just trying to cut it out at this time. 1672 Johnson Road, how about 1652? 13th Clair is on. 13th Clair responding, 1652. Central squad 6. Squad 6 responding, 1672 Johnson Road from headquarters.",
+                                             "audioUrl":  "/api/v1/calls/25575/audio"
+                                         },
+                                         {
+                                             "callId":  25523,
+                                             "startTime":  1782247731,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  47151,
+                                             "talkgroupName":  "DOT HELP R2 - Region 2 Dispatch-Chattanooga",
+                                             "category":  "traffic",
+                                             "durationSeconds":  20,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "They got another truck coming out with the spare. I\u0027ll be back in for right now. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute. I\u0027ll be back in a minute.",
+                                             "audioUrl":  "/api/v1/calls/25523/audio"
+                                         },
+                                         {
+                                             "callId":  25521,
+                                             "startTime":  1782247695,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1209,
+                                             "talkgroupName":  "MEM HIXON - EMS Encode: Memorial Hixon Hospital (Hamilton County)",
+                                             "category":  "ems",
+                                             "durationSeconds":  34,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "He\u0027s got some swelling noted to the right ankle, pain intended to the left wrist, vital signs able, GCS to 15, got him to have about three spots. We\u0027ll give you further unraveling on the shipping questions orders. pain and tender to the left wrist, vital signs stable, GCS to 15, got into about 30 seconds. We\u0027ll give you further unravel on the shipping questions orders.",
+                                             "audioUrl":  "/api/v1/calls/25521/audio"
+                                         },
+                                         {
+                                             "callId":  25515,
+                                             "startTime":  1782247675,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13502,
+                                             "talkgroupName":  "WCSO-PRIORITY - Sheriff: Priority",
+                                             "category":  "police",
+                                             "durationSeconds":  7,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "numeric_noise",
+                                             "transcription":  "0-5-6-9-4-4-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6-6",
+                                             "audioUrl":  "/api/v1/calls/25515/audio"
+                                         },
+                                         {
+                                             "callId":  25517,
+                                             "startTime":  1782247668,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1435,
+                                             "talkgroupName":  "HC TCVFD OPS - Tri Community Fire: Tac",
+                                             "category":  "fire",
+                                             "durationSeconds":  18,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "1, respond to an unresponsive patient, 1-0-6-7-2-5-6-4-8-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6-5-6",
+                                             "audioUrl":  "/api/v1/calls/25517/audio"
+                                         },
+                                         {
+                                             "callId":  25509,
+                                             "startTime":  1782247649,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1515,
+                                             "talkgroupName":  "CCFR-PRIORTY - County Fire/Rescue: Priority",
+                                             "category":  "fire",
+                                             "durationSeconds":  14,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "You can choose the Westatelon command. Westatelon roll command. Command terminated. It is set by the service. Receive command term. Receive command term. Receive command term.",
+                                             "audioUrl":  "/api/v1/calls/25509/audio"
+                                         },
+                                         {
+                                             "callId":  25489,
+                                             "startTime":  1782247528,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13502,
+                                             "talkgroupName":  "WCSO-PRIORITY - Sheriff: Priority",
+                                             "category":  "police",
+                                             "durationSeconds":  10,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "96. 97. Party we were looking for was there. It might have been some of us. It\u0027s just the station for... It\u0027s just the station for...",
+                                             "audioUrl":  "/api/v1/calls/25489/audio"
+                                         },
+                                         {
+                                             "callId":  25487,
+                                             "startTime":  1782247517,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  47160,
+                                             "talkgroupName":  "DOT2 Chat Tac-2 - Region 2 Tac-2 - Chattanooga",
+                                             "category":  "other",
+                                             "durationSeconds":  13,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "It is a very good time to meet you. I\u0027ll be back in a few minutes. I\u0027ll talk to you back in a few minutes.",
+                                             "audioUrl":  "/api/v1/calls/25487/audio"
+                                         },
+                                         {
+                                             "callId":  25473,
+                                             "startTime":  1782247473,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1051,
+                                             "talkgroupName":  "HC CPD C - Police: Charlie Dispatch",
+                                             "category":  "police",
+                                             "durationSeconds":  9,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "You can open it up. I ain\u0027t it\u0027s resunormal on main. I ain\u0027t it\u0027s resunormal.",
+                                             "audioUrl":  "/api/v1/calls/25473/audio"
+                                         },
+                                         {
+                                             "callId":  25477,
+                                             "startTime":  1782247468,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1491,
+                                             "talkgroupName":  "HCSO-INFO - Sheriff: Info",
+                                             "category":  "police",
+                                             "durationSeconds":  22,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "2 out of 12. Sorry, I\u0027m going to need to tell you to the intersection of Burger Camp Highway and Cummings Road for two vehicles first. We\u0027re going to be White Lexus GX460 with front-end It\u0027s going to be 10-2-3, back to Tango Victor, 7-9-4-7, and then 7-8-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-2-",
+                                             "audioUrl":  "/api/v1/calls/25477/audio"
+                                         },
+                                         {
+                                             "callId":  25469,
+                                             "startTime":  1782247443,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1051,
+                                             "talkgroupName":  "HC CPD C - Police: Charlie Dispatch",
+                                             "category":  "police",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "2-7, copy and accept negative injuries. I\u0027ll get it\u0027s clear there for 2-2. I\u0027ll get it\u0027s clear there.",
+                                             "audioUrl":  "/api/v1/calls/25469/audio"
+                                         },
+                                         {
+                                             "callId":  25453,
+                                             "startTime":  1782247375,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1075,
+                                             "talkgroupName":  "HC CFD FG1 - Fireground 1",
+                                             "category":  "fire",
+                                             "durationSeconds":  9,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "8-3 dispatch, go ahead and cancel squad 1 and battalion 1.5, squad 20, come on in please. I\u0027m clear, squad 1 and battalion 1, I\u0027ll show you available.",
+                                             "audioUrl":  "/api/v1/calls/25453/audio"
+                                         },
+                                         {
+                                             "callId":  25451,
+                                             "startTime":  1782247346,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13509,
+                                             "talkgroupName":  "WCFR-DISP - Fire/EMS: Dispatch (Countywide)",
+                                             "category":  "fire",
+                                             "durationSeconds":  36,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "I don\u0027t know what to get out of the radio traffic, we\u0027re back in service, I am there. I\u0027m at 11, in service, thank you, thank you, thank you, thank you, thank you, thank you, thank you, thank you.",
+                                             "audioUrl":  "/api/v1/calls/25451/audio"
+                                         },
+                                         {
+                                             "callId":  25441,
+                                             "startTime":  1782247333,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1051,
+                                             "talkgroupName":  "HC CPD C - Police: Charlie Dispatch",
+                                             "category":  "police",
+                                             "durationSeconds":  6,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "numeric_noise",
+                                             "transcription":  "7, 8, 9, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9",
+                                             "audioUrl":  "/api/v1/calls/25441/audio"
+                                         },
+                                         {
+                                             "callId":  25439,
+                                             "startTime":  1782247330,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13509,
+                                             "talkgroupName":  "WCFR-DISP - Fire/EMS: Dispatch (Countywide)",
+                                             "category":  "fire",
+                                             "durationSeconds":  5,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "empty",
+                                             "transcription":  "",
+                                             "audioUrl":  "/api/v1/calls/25439/audio"
+                                         },
+                                         {
+                                             "callId":  25423,
+                                             "startTime":  1782247261,
+                                             "systemShortName":  "cleveland-bradley-tn",
+                                             "source":  1,
+                                             "talkgroup":  5508,
+                                             "talkgroupName":  "Bradley EMS DIsp - EMS: Dispatch (Countywide)",
+                                             "category":  "ems",
+                                             "durationSeconds":  13,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "Five, ten, we\u0027re starting. Go ahead ten. Ten, starting mileage, seven, six, point five, seven, six, point five. I copy.",
+                                             "audioUrl":  "/api/v1/calls/25423/audio"
+                                         },
+                                         {
+                                             "callId":  25383,
+                                             "startTime":  1782247095,
+                                             "systemShortName":  "cleveland-bradley-tn",
+                                             "source":  1,
+                                             "talkgroup":  5526,
+                                             "talkgroupName":  "Cleveland Fire - Cleveland Fire: Dispatch",
+                                             "category":  "fire",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "Inch cap of three is off the show. Inch cap of three is 20 straight fire plan. They have a minor two car, NVC or N-Type. So, inch cap of three can cancel.",
+                                             "audioUrl":  "/api/v1/calls/25383/audio"
+                                         },
+                                         {
+                                             "callId":  25379,
+                                             "startTime":  1782247076,
+                                             "systemShortName":  "cleveland-bradley-tn",
+                                             "source":  1,
+                                             "talkgroup":  47004,
+                                             "talkgroupName":  "THP-D2-Disp1 - Dispatch 1",
+                                             "category":  "police",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "numeric_noise",
+                                             "transcription":  "22-0-1 22-0-1 10-7",
+                                             "audioUrl":  "/api/v1/calls/25379/audio"
+                                         },
+                                         {
+                                             "callId":  25327,
+                                             "startTime":  1782246834,
+                                             "systemShortName":  "cleveland-bradley-tn",
+                                             "source":  1,
+                                             "talkgroup":  5526,
+                                             "talkgroupName":  "Cleveland Fire - Cleveland Fire: Dispatch",
+                                             "category":  "fire",
+                                             "durationSeconds":  19,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "Black copy, Ulta, 20th Street North East. Ulta is our road north-east, 20th Street North East. Two vehicle, MVA, one patient complying of back pain. Another patient complying of rib cage pain.",
+                                             "audioUrl":  "/api/v1/calls/25327/audio"
+                                         },
+                                         {
+                                             "callId":  25321,
+                                             "startTime":  1782246809,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1515,
+                                             "talkgroupName":  "CCFR-PRIORTY - County Fire/Rescue: Priority",
+                                             "category":  "fire",
+                                             "durationSeconds":  11,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "On scene. On scene. On scene. On scene. On scene. On scene. On scene. On scene.",
+                                             "audioUrl":  "/api/v1/calls/25321/audio"
+                                         },
+                                         {
+                                             "callId":  25317,
+                                             "startTime":  1782246792,
+                                             "systemShortName":  "cleveland-bradley-tn",
+                                             "source":  1,
+                                             "talkgroup":  47004,
+                                             "talkgroupName":  "THP-D2-Disp1 - Dispatch 1",
+                                             "category":  "police",
+                                             "durationSeconds":  19,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "20-30-37. Go ahead. 10-50 on that. Spanish-speaking officer. 10-4. Get me it down here with me. 10-4. 10-4. 10-4. 10-4. 10-4. 10-4. 10-4.",
+                                             "audioUrl":  "/api/v1/calls/25317/audio"
+                                         },
+                                         {
+                                             "callId":  25307,
+                                             "startTime":  1782246739,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13009,
+                                             "talkgroupName":  "Dade Firegrnd 15 - Fireground-15",
+                                             "category":  "fire",
+                                             "durationSeconds":  10,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "Go ahead. Okay. Now we can\u0027t do it. We can already let them know. They\u0027re just going to advise you. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay. Okay.",
+                                             "audioUrl":  "/api/v1/calls/25307/audio"
+                                         },
+                                         {
+                                             "callId":  25303,
+                                             "startTime":  1782246715,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  13511,
+                                             "talkgroupName":  "WCFR-FG13 - Fireground 13 (Countywide)",
+                                             "category":  "fire",
+                                             "durationSeconds":  18,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "That\u0027s our third one. Oh yeah, that\u0027s our third one. I\u0027m going to pick it up on Kaden. Thanks Kaden. I\u0027m going to try to pick the one right now. Command is clear.",
+                                             "audioUrl":  "/api/v1/calls/25303/audio"
+                                         },
+                                         {
+                                             "callId":  25257,
+                                             "startTime":  1782246514,
+                                             "systemShortName":  "chattanooga-simulcast-hamilton-t",
+                                             "source":  0,
+                                             "talkgroup":  1111,
+                                             "talkgroupName":  "Chat Wastewater - Chattanooga Wastewater Department",
+                                             "category":  "other",
+                                             "durationSeconds":  8,
+                                             "transcriptionStatus":  "poor_quality",
+                                             "qualityReason":  "repetitive",
+                                             "transcription":  "Do you want me to go to another station, or am I closing up here, or you want me to hang around?",
+                                             "audioUrl":  "/api/v1/calls/25257/audio"
+                                         }
+                                     ]
+                     },
+    "config":  {
+                   "ok":  true,
+                   "path":  "/etc/trunk-recorder/config.json",
+                   "captureDir":  "",
+                   "logDir":  "/var/log/trunk-recorder",
+                   "systems":  [
+                                   {
+                                       "shortName":  "chattanooga-simulcast-hamilton-t",
+                                       "type":  "p25",
+                                       "talkgroupsFile":  "/etc/trunk-recorder/talkgroups.csv"
+                                   },
+                                   {
+                                       "shortName":  "cleveland-bradley-tn",
+                                       "type":  "p25",
+                                       "talkgroupsFile":  "/etc/trunk-recorder/talkgroups.csv"
+                                   }
+                               ],
+                   "callstreamConfigured":  true,
+                   "callstreamTarget":  "127.0.0.1:9123",
+                   "sourceCoverage":  {
+                                          "ok":  true,
+                                          "blockers":  [
+
+                                                       ],
+                                          "sources":  [
+                                                          {
+                                                              "index":  0,
+                                                              "device":  "airspy=637862DC2E457DD7",
+                                                              "driver":  "osmosdr",
+                                                              "centerHz":  854743750,
+                                                              "sampleRate":  10000000,
+                                                              "lowHz":  850056250,
+                                                              "highHz":  859431250
+                                                          }
+                                                      ],
+                                          "systems":  [
+                                                          {
+                                                              "shortName":  "chattanooga-simulcast-hamilton-t",
+                                                              "controlChannelsHz":  [
+                                                                                        855212500
+                                                                                    ]
+                                                          },
+                                                          {
+                                                              "shortName":  "cleveland-bradley-tn",
+                                                              "controlChannelsHz":  [
+                                                                                        851050000
+                                                                                    ]
+                                                          }
+                                                      ]
+                                      },
+                   "error":  ""
+               },
+    "logOutput":  "Jun 23 16:53:37 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:37.012706] (info)   [chattanooga-simulcast-hamilton-t]        1166C        TG:       1325 (              HCSO-JAIL)        Freq: 857.937500 MHz        - Transmission src: 37301 pos:  0.00 length:  1.08\nJun 23 16:53:37 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:37.012773] (info)   [chattanooga-simulcast-hamilton-t]        1166C        TG:       1325 (              HCSO-JAIL)        Freq: 857.937500 MHz        - Transmission src: -1 pos:  1.08 length:  0.04\nJun 23 16:53:37 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:37.012849] (info)   [chattanooga-simulcast-hamilton-t]        1166C        TG:       1325 (              HCSO-JAIL)        Freq: 857.937500 MHz        Call length: 1.12 is less than min duration: 5\nJun 23 16:53:37 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:37.321554] (info)   [chattanooga-simulcast-hamilton-t]        1170C        TG:       1425 (         EMC Valet Park)        Freq: 858.237500 MHz        Starting P25 Recorder Num [1]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:37 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:37.790191] (info)   [chattanooga-simulcast-hamilton-t]        1171C        TG:      13502 (          WCSO-PRIORITY)        Freq: 855.987500 MHz        Starting P25 Recorder Num [3]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:38 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:38.017262] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:53:38 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:38.017515] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 37/sec, count:  111\nJun 23 16:53:40 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:40.045611] (error)   [chattanooga-simulcast-hamilton-t]        1172C        TG:       1223 (              HCSO-EAST)        Freq: 857.937500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:53:41 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:41.020665] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:53:41 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:41.020987] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 34/sec, count:  102\nJun 23 16:53:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:43.995305] (error)   [chattanooga-simulcast-hamilton-t]        1173C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.437500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.005604] (info)   [chattanooga-simulcast-hamilton-t]        1148C        TG:       1213 (           PARKRDG EAST)        Freq: 856.087500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.29499        Call Elapsed: 49\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.005776] (info)   [chattanooga-simulcast-hamilton-t]        1148C        TG:       1213 (           PARKRDG EAST)        Freq: 856.087500 MHz        Stopping P25 Recorder Num [2]        TDMA: false        Slot: 0        TuningErr: +869 Hz\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.005861] (info)   [chattanooga-simulcast-hamilton-t]        1148C        TG:       1213 (           PARKRDG EAST)        Freq: 856.087500 MHz        - Transmission src: 2750028 pos:  0.00 length:  2.88 errors: 260 spikes: 26\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.005921] (info)   [chattanooga-simulcast-hamilton-t]        1148C        TG:       1213 (           PARKRDG EAST)        Freq: 856.087500 MHz        - Transmission src: 39642 pos:  2.88 length:  1.44 errors: 179 spikes: 15\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.005972] (info)   [chattanooga-simulcast-hamilton-t]        1148C        TG:       1213 (           PARKRDG EAST)        Freq: 856.087500 MHz        - Transmission src: 2750028 pos:  4.32 length: 25.02 errors: 2404 spikes: 215\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.006024] (info)   [chattanooga-simulcast-hamilton-t]        1148C        TG:       1213 (           PARKRDG EAST)        Freq: 856.087500 MHz        - Transmission src: 39642 pos: 29.34 length:  3.24 errors: 83 spikes: 11\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.016873] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.017147] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 38/sec, count:  114\nJun 23 16:53:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:44.210070] (info)   libcallstream: sent call data (521564 bytes) to client 127.0.0.1\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.011627] (info)   [chattanooga-simulcast-hamilton-t]        1171C        TG:      13502 (          WCSO-PRIORITY)        Freq: 855.987500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.27899        Call Elapsed: 10\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.012999] (info)   [chattanooga-simulcast-hamilton-t]        1171C        TG:      13502 (          WCSO-PRIORITY)        Freq: 855.987500 MHz        Stopping P25 Recorder Num [3]        TDMA: false        Slot: 0        TuningErr: +90 Hz\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.013661] (info)   [chattanooga-simulcast-hamilton-t]        1171C        TG:      13502 (          WCSO-PRIORITY)        Freq: 855.987500 MHz        - Transmission src: 2820004 pos:  0.00 length:  3.60 errors: 45 spikes: 3\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.014682] (info)   [chattanooga-simulcast-hamilton-t]        1171C        TG:      13502 (          WCSO-PRIORITY)        Freq: 855.987500 MHz        Call length: 3.6 is less than min duration: 5\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.025075] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.025435] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 41/sec, count:  123\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.026821] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        Starting P25 Recorder Num [2]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:47.742217] (info)   [chattanooga-simulcast-hamilton-t]        1175C        TG:      13505 (           WLKR CITY PD)        Freq: 855.987500 MHz        Starting P25 Recorder Num [3]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:48.006124] (info)   [chattanooga-simulcast-hamilton-t]        1168C        TG:       5508 (       Bradley EMS DIsp)        Freq: 857.487500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.71066        Call Elapsed: 15\nJun 23 16:53:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:48.006297] (info)   [chattanooga-simulcast-hamilton-t]        1168C        TG:       5508 (       Bradley EMS DIsp)        Freq: 857.487500 MHz        Stopping P25 Recorder Num [0]        TDMA: false        Slot: 0        TuningErr: +85 Hz\nJun 23 16:53:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:48.006423] (info)   [chattanooga-simulcast-hamilton-t]        1168C        TG:       5508 (       Bradley EMS DIsp)        Freq: 857.487500 MHz        - Transmission src: 2031471 pos:  0.00 length:  1.08\nJun 23 16:53:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:48.006517] (info)   [chattanooga-simulcast-hamilton-t]        1168C        TG:       5508 (       Bradley EMS DIsp)        Freq: 857.487500 MHz        - Transmission src: 2031467 pos:  1.08 length:  2.52 errors: 4 spikes: 1\nJun 23 16:53:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:48.006591] (info)   [chattanooga-simulcast-hamilton-t]        1168C        TG:       5508 (       Bradley EMS DIsp)        Freq: 857.487500 MHz        - Transmission src: 2031467 pos:  3.60 length:  1.62 errors: 69 spikes: 8\nJun 23 16:53:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:48.210575] (info)   libcallstream: sent call data (83788 bytes) to client 127.0.0.1\nJun 23 16:53:50 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:50.022718] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:53:50 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:50.022882] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:53:50 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:50.771369] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        Starting P25 Recorder Num [0]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.006251] (info)   [chattanooga-simulcast-hamilton-t]        1170C        TG:       1425 (         EMC Valet Park)        Freq: 858.237500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.37531        Call Elapsed: 16\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.006472] (info)   [chattanooga-simulcast-hamilton-t]        1170C        TG:       1425 (         EMC Valet Park)        Freq: 858.237500 MHz        Stopping P25 Recorder Num [1]        TDMA: false        Slot: 0        TuningErr: +55 Hz\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.006558] (info)   [chattanooga-simulcast-hamilton-t]        1170C        TG:       1425 (         EMC Valet Park)        Freq: 858.237500 MHz        - Transmission src: 2012768 pos:  0.00 length:  8.28 errors: 1090 spikes: 107\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.017108] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.017932] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 39/sec, count:  117\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.216973] (info)   libcallstream: sent call data (132714 bytes) to client 127.0.0.1\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.305644] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        Starting P25 Recorder Num [1]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:53.522370] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        Unit ID set via Control Channel, ext: 2020784        current: -1         samples: 0\nJun 23 16:53:54 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:54.077773] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        Unit ID set via Control Channel, ext: 2800016        current: -1         samples: 0\nJun 23 16:53:55 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:55.007449] (info)   [chattanooga-simulcast-hamilton-t]        1175C        TG:      13505 (           WLKR CITY PD)        Freq: 855.987500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.10111        Call Elapsed: 8\nJun 23 16:53:55 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:55.007729] (info)   [chattanooga-simulcast-hamilton-t]        1175C        TG:      13505 (           WLKR CITY PD)        Freq: 855.987500 MHz        Stopping P25 Recorder Num [3]        TDMA: false        Slot: 0        TuningErr: -1000 Hz\nJun 23 16:53:55 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:55.007895] (info)   [chattanooga-simulcast-hamilton-t]        1175C        TG:      13505 (           WLKR CITY PD)        Freq: 855.987500 MHz        - Transmission src: 2820688 pos:  0.00 length:  1.80 errors: 124 spikes: 15\nJun 23 16:53:55 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:55.009273] (info)   [chattanooga-simulcast-hamilton-t]        1175C        TG:      13505 (           WLKR CITY PD)        Freq: 855.987500 MHz        Call length: 1.8 is less than min duration: 5\nJun 23 16:53:55 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:55.234512] (info)   [cleveland-bradley-tn]        1178C        TG:       5521 (       Bradley SheriffA)        Freq: 852.250000 MHz        Starting P25 Recorder Num [3]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:53:55 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:55.324397] (info)   [chattanooga-simulcast-hamilton-t]        1179C        TG:       5521 (       Bradley SheriffA)        Freq: 857.437500 MHz        Duplicate Grant - Not recording: 1179C BEE00/2-10 - Original call: 1178C BEE00/2-49\nJun 23 16:53:56 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:56.022985] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:53:56 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:56.023168] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:53:56 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:56.155973] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        Unit ID set via Control Channel, ext: 2750028        current: -1         samples: 0\nJun 23 16:53:57 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:57.206804] (error)   [chattanooga-simulcast-hamilton-t]        1180C        TG:       1425 (         EMC Valet Park)        Freq: 857.937500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:53:57 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:57.434690] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        Unit ID set via Control Channel, ext: 2010031        current: -1         samples: 0\nJun 23 16:53:58 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:58.785338] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        Unit ID set via Control Channel, ext: 2820688        current: -1         samples: 0\nJun 23 16:53:59 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:59.021358] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:53:59 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:59.021504] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 37/sec, count:  111\nJun 23 16:53:59 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:53:59.978421] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        Unit ID set via Control Channel, ext: 2800016        current: -1         samples: 0\nJun 23 16:54:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:00.518440] (info)   [chattanooga-simulcast-hamilton-t]        1181C        TG:       5521 (       Bradley SheriffA)        Freq: 858.237500 MHz        Duplicate Grant - Not recording: 1181C BEE00/2-10 - Original call: 1178C BEE00/2-49\nJun 23 16:54:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:00.665700] (error)   [cleveland-bradley-tn]        1182C        TG:       5521 (       Bradley SheriffA)        Freq: 853.200000 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.008520] (info)   [cleveland-bradley-tn]        1178C        TG:       5521 (       Bradley SheriffA)        Freq: 852.250000 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.00032        Call Elapsed: 7\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.008787] (info)   [cleveland-bradley-tn]        1178C        TG:       5521 (       Bradley SheriffA)        Freq: 852.250000 MHz        Stopping P25 Recorder Num [3]        TDMA: false        Slot: 0        TuningErr: +128 Hz\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.008891] (info)   [cleveland-bradley-tn]        1178C        TG:       5521 (       Bradley SheriffA)        Freq: 852.250000 MHz        - Transmission src: 2031599 pos:  0.00 length:  1.44 errors: 20 spikes: 4\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.009004] (info)   [cleveland-bradley-tn]        1178C        TG:       5521 (       Bradley SheriffA)        Freq: 852.250000 MHz        Call length: 1.44 is less than min duration: 5\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.019286] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.019803] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 32/sec, count:  96\nJun 23 16:54:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:02.030254] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        Unit ID set via Control Channel, ext: 2820006        current: -1         samples: 0\nJun 23 16:54:04 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:04.920556] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        Starting P25 Recorder Num [3]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:05 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:05.022115] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:54:05 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:05.022277] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 39/sec, count:  117\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.005195] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.29153        Call Elapsed: 16\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.005363] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        Stopping P25 Recorder Num [0]        TDMA: false        Slot: 0        TuningErr: +0 Hz\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.005466] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        - Transmission src: 2010031 pos:  0.00 length:  1.44 errors: 208 spikes: 18\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.006065] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        - Transmission src: 2020784 pos:  1.44 length:  0.90 errors: 14 spikes: 2\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.006159] (info)   [chattanooga-simulcast-hamilton-t]        1176C        TG:       1491 (              HCSO-INFO)        Freq: 857.487500 MHz        - Transmission src: 2010031 pos:  2.34 length:  3.42 errors: 424 spikes: 40\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.176776] (info)   libcallstream: sent call data (92434 bytes) to client 127.0.0.1\nJun 23 16:54:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:06.650708] (info)   [chattanooga-simulcast-hamilton-t]        1184C        TG:       2119 (       EM Life Force T1)        Freq: 855.987500 MHz        Starting P25 Recorder Num [0]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.004696] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.98356        Call Elapsed: 20\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.004882] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        Stopping P25 Recorder Num [2]        TDMA: false        Slot: 0        TuningErr: +33 Hz\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.006735] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        - Transmission src: 2750028 pos:  0.00 length:  1.98 errors: 82 spikes: 10\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.007195] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        - Transmission src: 2750028 pos:  1.98 length:  2.16 errors: 232 spikes: 31\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.007289] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        - Transmission src: 2800016 pos:  4.14 length:  0.90 errors: 190 spikes: 14\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.007497] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        - Transmission src: 2750028 pos:  5.04 length:  1.98 errors: 245 spikes: 21\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.007648] (info)   [chattanooga-simulcast-hamilton-t]        1174C        TG:       1529 (                  CCEMS)        Freq: 857.712500 MHz        - Transmission src: 2800016 pos:  7.02 length:  1.62 errors: 45 spikes: 3\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.406489] (info)   libcallstream: sent call data (138516 bytes) to client 127.0.0.1\nJun 23 16:54:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:07.718732] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        Unit ID set via Control Channel, ext: 2010031        current: -1         samples: 0\nJun 23 16:54:08 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:08.020468] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:08 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:08.020810] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:08 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:08.224660] (info)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        Starting P25 Recorder Num [2]        TDMA: true        Slot: 1        QPSK: true\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.008669] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.22664        Call Elapsed: 17\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.009328] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        Stopping P25 Recorder Num [1]        TDMA: false        Slot: 0        TuningErr: +155 Hz\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.009556] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        - Transmission src: 2820006 pos:  0.00 length:  3.24 errors: 2 spikes: 1\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.009720] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        - Transmission src: 2820688 pos:  3.24 length:  2.34\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.010596] (info)   [chattanooga-simulcast-hamilton-t]        1177C        TG:      13505 (           WLKR CITY PD)        Freq: 854.912500 MHz        - Transmission src: 2820006 pos:  5.58 length:  2.34 errors: 90 spikes: 6\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.248083] (info)   libcallstream: sent call data (126981 bytes) to client 127.0.0.1\nJun 23 16:54:10 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:10.490983] (info)   [chattanooga-simulcast-hamilton-t]        1186C        TG:       1027 (               HC CPD A)        Freq: 857.712500 MHz        Starting P25 Recorder Num [1]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:11 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:11.015364] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  117\nJun 23 16:54:11 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:11.015562] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:12 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:12.143513] (error)   [cleveland-bradley-tn]        1187C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:12 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:12.225589] (error)   [chattanooga-simulcast-hamilton-t]        1188C        TG:      47004 (           THP-D2-Disp1)        Freq: 857.487500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:12 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:12.732430] (error)   [chattanooga-simulcast-hamilton-t]        1189C        TG:       2119 (       EM Life Force T1)        Freq: 854.912500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.011454] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.83928        Call Elapsed: 10\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.011613] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        Stopping P25 Recorder Num [3]        TDMA: false        Slot: 0        TuningErr: +91 Hz\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.011723] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        - Transmission src: 2020784 pos:  0.00 length:  1.62\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.011792] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        - Transmission src: 2010031 pos:  1.62 length:  1.08 errors: 45 spikes: 3\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.011880] (info)   [chattanooga-simulcast-hamilton-t]        1183C        TG:       1491 (              HCSO-INFO)        Freq: 854.387500 MHz        Call length: 2.7 is less than min duration: 5\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.012193] (info)   [chattanooga-simulcast-hamilton-t]        1184C        TG:       2119 (       EM Life Force T1)        Freq: 855.987500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.29806        Call Elapsed: 8\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.012295] (info)   [chattanooga-simulcast-hamilton-t]        1184C        TG:       2119 (       EM Life Force T1)        Freq: 855.987500 MHz        Stopping P25 Recorder Num [0]        TDMA: false        Slot: 0        TuningErr: +87 Hz\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.012409] (info)   [chattanooga-simulcast-hamilton-t]        1184C        TG:       2119 (       EM Life Force T1)        Freq: 855.987500 MHz        - Transmission src: 39621 pos:  0.00 length:  1.62\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.012582] (info)   [chattanooga-simulcast-hamilton-t]        1184C        TG:       2119 (       EM Life Force T1)        Freq: 855.987500 MHz        Call length: 1.62 is less than min duration: 5\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.022962] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.023769] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.023929] (info)   Active Calls: 8\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024031] (info)   [chattanooga-simulcast-hamilton-t]        1180C        TG:       1425 (         EMC Valet Park)        Freq: 857.937500 MHz        Elapsed:   17 State: Monitoring: NO RECORDER AVAILABLE\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024129] (info)   [chattanooga-simulcast-hamilton-t]        1181C        TG:       5521 (       Bradley SheriffA)        Freq: 858.237500 MHz        Elapsed:   14 State: Monitoring: DUPLICATE\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024207] (info)   [cleveland-bradley-tn]        1182C        TG:       5521 (       Bradley SheriffA)        Freq: 853.200000 MHz        Elapsed:   14 State: Monitoring: NO RECORDER AVAILABLE\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024278] (info)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        Elapsed:    6 State: Recording\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024346] (info)           [  2 ] State: Recording\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024438] (info)   [chattanooga-simulcast-hamilton-t]        1186C        TG:       1027 (               HC CPD A)        Freq: 857.712500 MHz        Elapsed:    4 State: Recording\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024587] (info)           [  1 ] State: Idle\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024705] (info)   [cleveland-bradley-tn]        1187C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        Elapsed:    2 State: Monitoring: NO RECORDER AVAILABLE\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024818] (info)   [chattanooga-simulcast-hamilton-t]        1188C        TG:      47004 (           THP-D2-Disp1)        Freq: 857.487500 MHz        Elapsed:    2 State: Monitoring: NO RECORDER AVAILABLE\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.024902] (info)   [chattanooga-simulcast-hamilton-t]        1189C        TG:       2119 (       EM Life Force T1)        Freq: 854.912500 MHz        Elapsed:    2 State: Monitoring: NO RECORDER AVAILABLE\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.025428] (info)   Active Patches:\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.027177] (info)   [ chattanooga-simulcast-hamilton-t ] 1 active talkgroup patches:\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.027725] (info)   Active Patch of TGIDs -  1491\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.027948] (info)   [ cleveland-bradley-tn ] 0 active talkgroup patches:\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.028118] (info)   Control Channel Decode Rates:\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.028280] (info)   [chattanooga-simulcast-hamilton-t]        855.212500 MHz        40 msg/sec\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.028705] (info)   [cleveland-bradley-tn]        851.050000 MHz        40 msg/sec\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.029261] (info)   Recorders:\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.029532] (info)   [ Source 0: 854.743750 MHz ] airspy=637862DC2E457DD7\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.029882] (info)           [  0 ] P25        State: Available\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.030187] (info)           [  1 ] P25        State: Idle\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.030467] (info)           [  2 ] P25        State: Recording\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.030654] (info)           [  3 ] P25        State: Available\nJun 23 16:54:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:14.910247] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Starting P25 Recorder Num [0]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:15 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:15.943628] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        Starting P25 Recorder Num [3]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:16 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:16.035081] (info)   [chattanooga-simulcast-hamilton-t]        1192C        TG:       5521 (       Bradley SheriffA)        Freq: 855.987500 MHz        Duplicate Grant - Not recording: 1192C BEE00/2-10 - Original call: 1191C BEE00/2-49\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.007186] (info)   [chattanooga-simulcast-hamilton-t]        1186C        TG:       1027 (               HC CPD A)        Freq: 857.712500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.17596        Call Elapsed: 7\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.007372] (info)   [chattanooga-simulcast-hamilton-t]        1186C        TG:       1027 (               HC CPD A)        Freq: 857.712500 MHz        Stopping P25 Recorder Num [1]        TDMA: false        Slot: 0        TuningErr: +37 Hz\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.007484] (info)   [chattanooga-simulcast-hamilton-t]        1186C        TG:       1027 (               HC CPD A)        Freq: 857.712500 MHz        - Transmission src: 2020824 pos:  0.00 length:  0.54 errors: 51 spikes: 5\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.007589] (info)   [chattanooga-simulcast-hamilton-t]        1186C        TG:       1027 (               HC CPD A)        Freq: 857.712500 MHz        Call length: 0.54 is less than min duration: 5\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.017932] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.018225] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.079136] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2020824        current: -1         samples: 0\nJun 23 16:54:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:17.837739] (error)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        Unit ID externally set from GRANT: 37364         caching, doesn\u0027t match current: 39977         samples: 58880         state: Recording\nJun 23 16:54:18 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:18.890716] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2010024        current: -1         samples: 0\nJun 23 16:54:19 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:19.467626] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Starting P25 Recorder Num [1]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:20.015985] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:20.016682] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:20.523432] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2020824        current: -1         samples: 0\nJun 23 16:54:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:20.969089] (error)   [cleveland-bradley-tn]        1194C        TG:       5528 (       Cleveland Police)        Freq: 853.200000 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:21 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:21.060557] (error)   [chattanooga-simulcast-hamilton-t]        1195C        TG:       5528 (       Cleveland Police)        Freq: 858.237500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:22 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:22.115375] (error)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        Unit ID externally set from GRANT: 39977         caching, doesn\u0027t match current: 37364         samples: 83520         state: Recording\nJun 23 16:54:22 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:22.246885] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        Unit ID set via Control Channel, ext: 2031599        current: -1         samples: 0\nJun 23 16:54:22 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:22.934970] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Unit ID set via Control Channel, ext: 2820004        current: -1         samples: 0\nJun 23 16:54:23 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:23.018414] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:54:23 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:23.019606] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:24 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:24.059649] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2010024        current: -1         samples: 0\nJun 23 16:54:24 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:24.970775] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Unit ID set via Control Channel, ext: 2820600        current: -1         samples: 0\nJun 23 16:54:26 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:26.016315] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 37/sec, count:  111\nJun 23 16:54:26 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:26.016510] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:26 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:26.818739] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Unit ID set via Control Channel, ext: 2820004        current: -1         samples: 0\nJun 23 16:54:27 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:27.074064] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2020962        current: -1         samples: 0\nJun 23 16:54:27 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:27.868423] (error)   [cleveland-bradley-tn]        1196C        TG:      47004 (           THP-D2-Disp1)        Freq: 853.200000 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:27 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:27.969845] (error)   [chattanooga-simulcast-hamilton-t]        1197C        TG:      47004 (           THP-D2-Disp1)        Freq: 857.712500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:29 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:29.018406] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:29 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:29.018557] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:30 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:30.011338] (info)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.00867        Call Elapsed: 22\nJun 23 16:54:30 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:30.011521] (info)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        Stopping P25 Recorder Num [2]        TDMA: true        Slot: 1        TuningErr: +46 Hz\nJun 23 16:54:30 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:30.011628] (info)   [chattanooga-simulcast-hamilton-t]        1185C        TG:       1325 (              HCSO-JAIL)        Freq: 857.487500 MHz        - Transmission src: 39977 pos:  0.00 length: 12.32\nJun 23 16:54:30 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:30.218442] (info)   libcallstream: sent call data (197330 bytes) to client 127.0.0.1\nJun 23 16:54:30 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:30.723171] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2020824        current: -1         samples: 0\nJun 23 16:54:31 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:31.019903] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        Unit ID set via Control Channel, ext: 2030817        current: -1         samples: 0\nJun 23 16:54:32 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:32.020579] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:54:32 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:32.020950] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:32 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:32.832043] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Starting P25 Recorder Num [2]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.012929] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.43015        Call Elapsed: 14\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.013109] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Stopping P25 Recorder Num [1]        TDMA: false        Slot: 0        TuningErr: +101 Hz\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.013251] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        - Transmission src: 2820600 pos:  0.00 length:  1.44\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.013328] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        - Transmission src: 2820004 pos:  1.44 length:  0.90 errors: 90 spikes: 6\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.013390] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        - Transmission src: 2820600 pos:  2.34 length:  1.08\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.013463] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        - Transmission src: 2820004 pos:  3.42 length:  1.44\nJun 23 16:54:33 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:33.013555] (info)   [chattanooga-simulcast-hamilton-t]        1193C        TG:      13502 (          WCSO-PRIORITY)        Freq: 854.387500 MHz        Call length: 4.86 is less than min duration: 5\nJun 23 16:54:35 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:35.021866] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:35 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:35.022027] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:35 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:35.624960] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Unit ID set via Control Channel, ext: 2820004        current: -1         samples: 0\nJun 23 16:54:35 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:35.902313] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        Unit ID set via Control Channel, ext: 2031599        current: -1         samples: 0\nJun 23 16:54:38 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:38.015726] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:54:38 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:38.015942] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:38 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:38.086827] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Unit ID set via Control Channel, ext: 2820589        current: -1         samples: 0\nJun 23 16:54:40 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:40.114238] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2020962        current: -1         samples: 0\nJun 23 16:54:40 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:40.644297] (info)   [cleveland-bradley-tn]        1199C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        Starting P25 Recorder Num [1]        TDMA: true        Slot: 0        QPSK: true\nJun 23 16:54:40 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:40.696114] (info)   [chattanooga-simulcast-hamilton-t]        1200C        TG:      47004 (           THP-D2-Disp1)        Freq: 857.437500 MHz        Duplicate Grant - Not recording: 1200C BEE00/2-10 - Original call: 1199C BEE00/2-49\nJun 23 16:54:41 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:41.022130] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:41 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:41.022295] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:41 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:41.309838] (error)   [chattanooga-simulcast-hamilton-t]        1201C        TG:       2071 (              FOPD MAIN)        Freq: 854.912500 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:41 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:41.524074] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Unit ID set via Control Channel, ext: 2820004        current: -1         samples: 0\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.011624] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.66594        Call Elapsed: 28\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.011884] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        Stopping P25 Recorder Num [3]        TDMA: false        Slot: 0        TuningErr: +103 Hz\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.012041] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        - Transmission src: 2030817 pos:  0.00 length:  5.22 errors: 2 spikes: 0\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.012113] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        - Transmission src: 2031599 pos:  5.22 length:  8.10\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.012166] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        - Transmission src: 2030817 pos: 13.32 length:  3.78\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.012217] (info)   [cleveland-bradley-tn]        1191C        TG:       5521 (       Bradley SheriffA)        Freq: 851.937500 MHz        - Transmission src: 2031599 pos: 17.10 length:  1.08\nJun 23 16:54:43 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:43.207090] (info)   libcallstream: sent call data (291124 bytes) to client 127.0.0.1\nJun 23 16:54:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:44.024920] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:44 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:44.025494] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:45 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:45.225159] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        Starting P25 Recorder Num [3]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:54:45 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:45.437807] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Unit ID set via Control Channel, ext: 2820676        current: -1         samples: 0\nJun 23 16:54:46 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:46.338389] (error)   [cleveland-bradley-tn]        1203C        TG:      47004 (           THP-D2-Disp1)        Freq: 853.200000 MHz        Not recording talkgroup. Priority is 1 but only 0 recorders are available.\nJun 23 16:54:46 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:46.410155] (info)   [chattanooga-simulcast-hamilton-t]        1204C        TG:      47004 (           THP-D2-Disp1)        Freq: 854.387500 MHz        Duplicate Grant - Not recording: 1204C BEE00/2-10 - Original call: 1199C BEE00/2-49\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013009] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.53811        Call Elapsed: 33\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013155] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        Stopping P25 Recorder Num [0]        TDMA: false        Slot: 0        TuningErr: +31 Hz\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013245] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2010024 pos:  0.00 length:  0.72 errors: 11 spikes: 2\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013302] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2020824 pos:  0.72 length:  0.90 errors: 14 spikes: 4\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013353] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2010024 pos:  1.62 length:  0.54 errors: 90 spikes: 6\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013403] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2020824 pos:  2.16 length:  2.16 errors: 26 spikes: 9\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013452] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2010024 pos:  4.32 length:  1.08 errors: 52 spikes: 7\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013501] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2020962 pos:  5.40 length:  1.62\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013551] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2020824 pos:  7.02 length:  6.48 errors: 511 spikes: 53\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.013602] (info)   [chattanooga-simulcast-hamilton-t]        1190C        TG:       1027 (               HC CPD A)        Freq: 856.087500 MHz        - Transmission src: 2020962 pos: 13.50 length:  0.72 errors: 131 spikes: 11\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.024238] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.024811] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.204081] (info)   libcallstream: sent call data (227858 bytes) to client 127.0.0.1\nJun 23 16:54:47 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:47.244607] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Unit ID set via Control Channel, ext: 2820004        current: -1         samples: 0\nJun 23 16:54:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:48.007325] (info)   [cleveland-bradley-tn]        1199C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.82312        Call Elapsed: 8\nJun 23 16:54:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:48.009835] (info)   [cleveland-bradley-tn]        1199C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        Stopping P25 Recorder Num [1]        TDMA: true        Slot: 0        TuningErr: +47 Hz\nJun 23 16:54:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:48.012817] (info)   [cleveland-bradley-tn]        1199C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        - Transmission src: 4024223 pos:  0.00 length:  2.24\nJun 23 16:54:48 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:48.013242] (info)   [cleveland-bradley-tn]        1199C        TG:      47004 (           THP-D2-Disp1)        Freq: 852.250000 MHz        Call length: 2.24 is less than min duration: 5\nJun 23 16:54:50 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:50.019602] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:50 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:50.019776] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:53.017709] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:53 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:53.017864] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:54 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:54.352624] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        Unit ID set via Control Channel, ext: 2820820        current: -1         samples: 0\nJun 23 16:54:56 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:56.022828] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 41/sec, count:  123\nJun 23 16:54:56 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:56.022986] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:59 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:59.021601] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:54:59 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:59.021777] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:54:59 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:54:59.599848] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        Unit ID set via Control Channel, ext: 2012083        current: -1         samples: 0\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.005187] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.37733        Call Elapsed: 28\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.005529] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        Stopping P25 Recorder Num [2]        TDMA: false        Slot: 0        TuningErr: +22 Hz\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.005973] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: 2820589 pos:  0.00 length:  1.08 errors: 105 spikes: 11\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.006431] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: 2820004 pos:  1.08 length:  0.18 errors: 119 spikes: 9\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.006595] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: -1 pos:  1.26 length:  0.54 errors: 53 spikes: 6\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.006693] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: 2820589 pos:  1.80 length:  1.98 errors: 36 spikes: 8\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.006779] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: 2820004 pos:  3.78 length:  1.80 errors: 22 spikes: 3\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.006863] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: 2820676 pos:  5.58 length:  1.08 errors: 126 spikes: 9\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.006949] (info)   [chattanooga-simulcast-hamilton-t]        1198C        TG:      13502 (          WCSO-PRIORITY)        Freq: 857.937500 MHz        - Transmission src: 2820004 pos:  6.66 length:  5.58 errors: 962 spikes: 80\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.060592] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        Starting P25 Recorder Num [0]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:55:00 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:00.197298] (info)   libcallstream: sent call data (196131 bytes) to client 127.0.0.1\nJun 23 16:55:01 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:01.165704] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        Starting P25 Recorder Num [1]        TDMA: false        Slot: 0        QPSK: true\nJun 23 16:55:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:02.018715] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:55:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:02.018980] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 28/sec, count:  84\nJun 23 16:55:02 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:02.987208] (info)   [chattanooga-simulcast-hamilton-t]        1207C        TG:       1325 (              HCSO-JAIL)        Freq: 857.437500 MHz        Starting P25 Recorder Num [2]        TDMA: true        Slot: 0        QPSK: true\nJun 23 16:55:03 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:03.713598] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        Unit ID set via Control Channel, ext: 2010027        current: -1         samples: 0\nJun 23 16:55:05 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:05.018448] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:55:05 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:05.018629] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 23/sec, count:  70\nJun 23 16:55:05 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:05.742583] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        Unit ID set via Control Channel, ext: 39945        current: -1         samples: 0\nJun 23 16:55:06 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:06.440020] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2820004        current: -1         samples: 0\nJun 23 16:55:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:07.009087] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:5.55252        Call Elapsed: 22\nJun 23 16:55:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:07.009300] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        Stopping P25 Recorder Num [3]        TDMA: false        Slot: 0        TuningErr: +183 Hz\nJun 23 16:55:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:07.009511] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        - Transmission src: 2820002 pos:  0.00 length:  7.38 errors: 578 spikes: 58\nJun 23 16:55:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:07.009594] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        - Transmission src: 2820820 pos:  7.38 length:  3.06 errors: 149 spikes: 24\nJun 23 16:55:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:07.009648] (info)   [chattanooga-simulcast-hamilton-t]        1202C        TG:      13509 (              WCFR-DISP)        Freq: 857.487500 MHz        - Transmission src: 2012083 pos: 10.44 length:  1.44 errors: 70 spikes: 9\nJun 23 16:55:07 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:07.193163] (info)   libcallstream: sent call data (190345 bytes) to client 127.0.0.1\nJun 23 16:55:08 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:08.012307] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:55:08 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:08.012716] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 30/sec, count:  90\nJun 23 16:55:11 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:11.012119] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 40/sec, count:  122\nJun 23 16:55:11 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:11.012282] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 41/sec, count:  123\nJun 23 16:55:11 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:11.318568] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        Unit ID set via Control Channel, ext: 2010027        current: -1         samples: 0\nJun 23 16:55:13 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:13.410829] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        Unit ID set via Control Channel, ext: 2820676        current: -1         samples: 0\nJun 23 16:55:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:14.006518] (info)   [chattanooga-simulcast-hamilton-t]        1207C        TG:       1325 (              HCSO-JAIL)        Freq: 857.437500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.73191        Call Elapsed: 12\nJun 23 16:55:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:14.006672] (info)   [chattanooga-simulcast-hamilton-t]        1207C        TG:       1325 (              HCSO-JAIL)        Freq: 857.437500 MHz        Stopping P25 Recorder Num [2]        TDMA: true        Slot: 0        TuningErr: +50 Hz\nJun 23 16:55:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:14.006764] (info)   [chattanooga-simulcast-hamilton-t]        1207C        TG:       1325 (              HCSO-JAIL)        Freq: 857.437500 MHz        - Transmission src: 38833 pos:  0.00 length:  3.72\nJun 23 16:55:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:14.006844] (info)   [chattanooga-simulcast-hamilton-t]        1207C        TG:       1325 (              HCSO-JAIL)        Freq: 857.437500 MHz        Call length: 3.72 is less than min duration: 5\nJun 23 16:55:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:14.017096] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:55:14 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:14.017285] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 39/sec, count:  117\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.008172] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.90631        Call Elapsed: 17\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.008315] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        Stopping P25 Recorder Num [0]        TDMA: false        Slot: 0        TuningErr: -713 Hz\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.008404] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        - Transmission src: 39945 pos:  0.00 length:  1.62 errors: 6 spikes: 2\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.008460] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        - Transmission src: 2010027 pos:  1.62 length:  0.90 errors: 56 spikes: 7\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.008540] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        - Transmission src: 39945 pos:  2.52 length:  3.42 errors: 137 spikes: 16\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.008592] (info)   [chattanooga-simulcast-hamilton-t]        1205C        TG:       1191 (              HC ERPD-1)        Freq: 855.987500 MHz        - Transmission src: 2010027 pos:  5.94 length:  0.54 errors: 92 spikes: 6\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.018919] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 39/sec, count:  119\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.020828] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 40/sec, count:  120\nJun 23 16:55:17 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:17.199880] (info)   libcallstream: sent call data (103958 bytes) to client 127.0.0.1\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.001395] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        Concluding Recorded Call - Last Update: 4s        Recorder last write:4.76243        Call Elapsed: 19\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.001573] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        Stopping P25 Recorder Num [1]        TDMA: false        Slot: 0        TuningErr: +94 Hz\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.001714] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        - Transmission src: 2820676 pos:  0.00 length:  4.14 errors: 318 spikes: 28\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.001791] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        - Transmission src: 2820004 pos:  4.14 length:  2.16 errors: 163 spikes: 16\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.001847] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        - Transmission src: 2820004 pos:  6.30 length:  2.88 errors: 421 spikes: 33\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.001918] (info)   [chattanooga-simulcast-hamilton-t]        1206C        TG:      13502 (          WCSO-PRIORITY)        Freq: 856.087500 MHz        - Transmission src: 2820676 pos:  9.18 length:  1.44 errors: 98 spikes: 12\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.012190] (info)   [chattanooga-simulcast-hamilton-t]        freq: 855.212500 MHz        Control Channel Message Decode Rate: 38/sec, count:  116\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.012583] (info)   [cleveland-bradley-tn]        freq: 851.050000 MHz        Control Channel Message Decode Rate: 41/sec, count:  123\nJun 23 16:55:20 sdr1861 trunk-recorder[2792823]: [2026-06-23 16:55:20.164627] (info)   libcallstream: sent call data (170169 bytes) to client 127.0.0.1\n",
+    "diagnostics":  "service: trunk-recorder\nconfig: /etc/trunk-recorder/config.json\nhealth cadence: 5 minute(s)\nstored rows loaded: 2,296\nlast-24h rows: 798\nselected-range rows: 15\nbaseline: 7d\nmetrics mode: by system\nrecent log chars returned: 77,465\nscopes: chattanooga-simulcast-hamilton-t, cleveland-bradley-tn, global, north-bradley-bradley-tn\n",
+    "insightsText":  "Click Generate Recommendation to send the current troubleshooting snapshot to the configured AI insights endpoint."
+}

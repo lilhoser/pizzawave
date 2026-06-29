@@ -1,417 +1,141 @@
-# Quick Start Guide
+# Quickstart
 
-Get pizzawave up and running in 5 minutes. This guide covers the most common setup: running `pizzapi` or `pizzacmd` on Linux to receive audio from trunk-recorder.
+This guide assumes a Linux host that will run trunk-recorder and `pizzad` on the
+same machine. Ubuntu 24.04 LTS is the primary target; Raspberry Pi OS/Debian
+ARM64 is the second target.
 
-## Prerequisites Checklist
+## Install
 
-Before starting, ensure you have:
-
-- [ ] A trunk-recorder system with callstream plugin configured
-- [ ] A Linux system (or WSL2) to run pizzawave
-- [ ] System dependencies installed (see below)
-- [ ] .NET 9.0 runtime installed
-- [ ] Network connectivity between trunk-recorder and pizzawave
-
-## System Dependencies
-
-Install required system packages before proceeding. These are needed for Whisper AI and other components:
-
-### Ubuntu/Debian
+Use the generated `.deb` package whenever possible:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y libicu-dev libssl3 zlib1g
+sudo apt install ./pizzawave_0.1.0_amd64.deb
 ```
 
-### For pizzapi (GUI) on Linux with X11
-
-If running `pizzapi` with a display, you also need X11 libraries:
+For Raspberry Pi OS/Debian ARM64:
 
 ```bash
-sudo apt-get install -y libx11-6 libxext6 libxrender1 libxtst6 libxi6
+sudo apt install ./pizzawave_0.1.0_arm64.deb
 ```
 
-### WSL2
+The package installs the engine under `/opt/pizzawave/pizzad`, creates the
+`pizzawave` user, creates `/etc/pizzawave/pizzad.json` if missing, enables
+`pizzad.service`, and serves the web UI on port `8080`.
 
-WSL2 requires additional configuration for GUI applications:
+## Open the Wizard
+
+Open:
+
+```text
+http://<pizzawave-host>:8080
+```
+
+If setup has not been completed, the web UI enters the first-run wizard.
+
+Required wizard gates:
+
+1. Stack choice: reuse an existing trunk-recorder installation or build a fresh one.
+2. Trunk-recorder config and callstream patching.
+3. Talkgroup CSV import or creation.
+4. Transcription engine and model.
+5. Monitored area mappings for geolocation.
+6. Final validation and enablement.
+
+Optional wizard gates:
+
+- AI Insights through LM Link or another OpenAI-compatible endpoint.
+- Vector DB / Qdrant embeddings for incident matching.
+- Email alerts.
+- SFTP archive import.
+- Local import from an existing trunk-recorder recordings directory.
+- RTL-SDR calibration.
+
+## Validate the Service
 
 ```bash
-# Install VcXsrv or X410 on Windows host, then:
-export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
+systemctl status pizzad --no-pager
+curl -fsS http://127.0.0.1:8080/api/v1/health
 ```
 
-## Step 1: Install .NET 9.0
+Expected health response includes `status`, `databasePath`, `audioRoot`,
+`queueDepth`, and `serverTimeUtc`.
 
-### Ubuntu/Debian
+## Validate Call Ingest
+
+In the web UI:
+
+1. Open **System**.
+2. Check the status bar for calls and queue state.
+3. Open a category page such as **Police** or **Fire**.
+4. Confirm live calls appear, including pending/untranscribed calls.
+
+At the shell:
 
 ```bash
-wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb
-rm packages-microsoft-prod.deb
-sudo apt-get update
-sudo apt-get install -y dotnet-sdk-9.0
+journalctl -u pizzad -f
 ```
 
-### WSL2 (Debian/Ubuntu)
+You should see live call ingest and queue activity when trunk-recorder completes
+calls.
 
-Same as Ubuntu/Debian above.
+## Validate Transcription
 
-### Verify Installation
+Open **Settings -> Transcription** and test the selected engine. For local
+Whisper models, PizzaWave manages model download/use/remove operations. For
+faster-whisper, confirm the sidecar dependencies are installed by the package or
+setup helper.
+
+On small ARM systems, use queue pressure rather than a single call/minute number
+to judge health. If the queue grows during live traffic, switch to a faster
+model, pause ingestion temporarily, or investigate RF/call volume.
+
+## Validate AI Insights
+
+Open **Settings -> AI Insights**:
+
+1. Enable AI Insights.
+2. Choose the execution intent: `local`, `remote`, or `lmlink`.
+3. Configure the chat `/v1` endpoint. For a rig that should use a GPU server
+   such as Paxan, point the base URL at that remote host, not localhost.
+4. Use the LM Studio model ID from the picker, such as
+   `qwen/qwen3.6-35b-a3b@q8_0`, not a loaded runtime alias/moniker.
+5. Fetch available models.
+6. Select a model.
+7. Test the connection.
+
+For Qwen thinking models, confirm the endpoint returns final JSON in
+`message.content`, not `reasoning_content`. With LM Studio and some Unsloth
+Qwen GGUFs, this may require adding this as the first line of the model's
+Template Jinja:
+
+```jinja
+{%- set enable_thinking = false %}
+```
+
+## Validate Embeddings / Qdrant
+
+Open **Settings -> Embeddings**:
+
+1. Enable embeddings.
+2. Choose the execution intent. `local` means embedding inference runs on this
+   rig; `remote`/`lmlink` means another OpenAI-compatible endpoint generates
+   vectors.
+3. Configure the embedding `/v1` endpoint and model.
+4. Keep Qdrant local unless there is a specific operational reason to move it.
+5. Test the connection.
+
+If LM Studio JIT loading is disabled, the setup helper installs a systemd hook
+that preloads the configured embedding model only when embeddings are enabled,
+`executionMode` is `local`, and the embedding endpoint is localhost:1234.
+
+Large historical imports do not automatically generate summaries/incidents.
+
+## Common Service Commands
 
 ```bash
-dotnet --version
-# Should show: 9.0.x
+sudo systemctl restart pizzad
+sudo systemctl status pizzad --no-pager
+journalctl -u pizzad -n 100 --no-pager
 ```
 
-## Step 2: Get Pizzawave
-
-### Option A: Download Release (Recommended)
-
-```bash
-# Download latest release
-cd ~
-wget https://github.com/lilhoser/pizzawave/releases/latest/download/pizzapi_linux-x64.zip
-
-# Extract
-unzip pizzapi_linux-x64.zip
-cd pizzapi
-```
-
-### Option B: Build from Source
-
-```bash
-git clone https://github.com/lilhoser/pizzawave.git
-cd pizzawave
-dotnet publish pizzapi/pizzapi.csproj -c Release -r linux-x64 --self-contained true -o ~/pizzapi
-cd ~/pizzapi
-```
-
-## Step 3: First Run
-
-```bash
-# Run pizzapi (will create default config)
-./pizzapi
-```
-
-On first run, pizzawave creates a configuration file at:
-- `~/.config/pizzawave/settings.json`
-
-Press `Ctrl+C` to stop after verifying it starts.
-
-## Step 4: Configure
-
-Edit the configuration file:
-
-```bash
-nano ~/.config/pizzawave/settings.json
-```
-
-### Minimum Required Settings
-
-```json
-{
-  "TraceLevelApp": "Information",
-  "listenPort": 9123,
-  "AutostartListener": true
-}
-```
-
-### Optional: Add Talkgroups
-
-Create a talkgroups CSV file. The header line must be:
-`Decimal,Mode,Alpha Tag,Description,Tag,Category`
-
-One way to generate it manually:
-1. Visit the RadioReference talkgroups section for the system you are monitoring (example: https://www.radioreference.com/db/sid/4879).
-2. Copy the HTML table for the talkgroups you want.
-3. Convert that HTML table to CSV using a tool like convertcsv.com or an AI interface.
-4. Remove any invalid/extra columns in Excel, Google Sheets, or a similar tool.
-
-```bash
-nano ~/talkgroups.csv
-```
-
-```csv
-Decimal,Mode,Alpha Tag,Description,Tag,Category
-1,D,FDISPATCH,Fire Dispatch,Fire,Dispatch
-2,D,FDISPATCH2,Fire Dispatch 2,Fire,Dispatch
-3,D,PDISPATCH,Police Dispatch,Police,Dispatch
-```
-
-Update settings to reference it:
-
-```json
-{
-  "talkgroups": [
-    {"Id": 1, "Mode": "D", "AlphaTag": "FDISPATCH", "Description": "Fire Dispatch", "Tag": "Fire", "Category": "Dispatch"},
-    {"Id": 2, "Mode": "D", "AlphaTag": "FDISPATCH2", "Description": "Fire Dispatch 2", "Tag": "Fire", "Category": "Dispatch"},
-    {"Id": 3, "Mode": "D", "AlphaTag": "PDISPATCH", "Description": "Police Dispatch", "Tag": "Police", "Category": "Dispatch"}
-  ]
-}
-```
-
-## Step 5: Configure trunk-recorder
-
-On your trunk-recorder system, edit the configuration to add the callstream plugin:
-
-```json
-{
-  "plugins": [
-    {
-      "name": "callstream",
-      "library": "libcallstream.so",
-      "address": "<pizzawave-ip-address>",
-      "port": 9123,
-      "streams": [
-        {
-          "TGID": 0,
-          "shortName": "your_system_name"
-        }
-      ]
-    }
-  ]
-}
-```
-
-Replace `<pizzawave-ip-address>` with the IP address of the system running pizzawave.
-
-Restart trunk-recorder:
-
-```bash
-sudo systemctl restart trunk-recorder
-```
-
-## Step 5.1: Connection Troubleshooting
-
-If trunk-recorder cannot connect to pizzawave, check the following:
-
-### Callstream Plugin Not Found
-
-```bash
-# On trunk-recorder system, verify plugin is compiled and in place
-ls -la /usr/local/lib/libcallstream.so
-
-# Check trunk-recorder logs for plugin loading errors
-sudo journalctl -u trunk-recorder -f | grep -i callstream
-```
-
-If the plugin is missing, rebuild trunk-recorder with the callstream plugin:
-```bash
-cd ~/trunk-build
-cmake ../trunk-recorder
-make -j$(nproc)
-sudo make install
-sudo ldconfig
-```
-
-### Port 9123 Already in Use
-
-```bash
-# Check what's using port 9123
-sudo lsof -i :9123
-# or
-sudo netstat -tlnp | grep 9123
-```
-
-If another process is using the port, either stop it or change pizzawave's listen port in `settings.json`:
-```json
-{"listenPort": 9124}
-```
-
-### Wrong or Changing IP Address
-
-```bash
-# On pizzawave system, verify IP address
-ip addr show | grep inet
-
-# For a static IP, configure in your network settings
-# Or use hostname if on same network:
-hostname
-```
-
-If your IP changes frequently, consider:
-1. Setting a static IP for the pizzawave system
-2. Using a hostname instead of IP (if on same local network)
-3. Setting up DNS or /etc/hosts entries
-
-### Firewall Blocking Connection
-
-```bash
-# On pizzawave system, allow port 9123
-sudo ufw allow 9123/tcp
-
-# Check firewall status
-sudo ufw status
-```
-
-### Verify trunk-recorder Configuration
-
-Ensure your trunk-recorder config has the correct settings:
-```json
-{
-  "audioStreaming": true,
-  "plugins": [{
-    "name": "callstream",
-    "address": "<pizzawave-ip>",  // Must match pizzawave system IP
-    "port": 9123
-  }]
-}
-```
-
-## Step 6: Verify Connection
-
-### On pizzawave system:
-
-```bash
-# Check if listening on port 9123
-netstat -tlnp | grep 9123
-
-# Should show: tcp 0.0.0.0:9123 LISTEN
-```
-
-### On trunk-recorder system:
-
-```bash
-# Test connectivity
-telnet <pizzawave-ip> 9123
-
-# Should connect successfully
-```
-
-## Step 7: Start Listening
-
-```bash
-# Run pizzapi
-cd ~/pizzapi
-./pizzapi
-```
-
-You should see output like:
-
-```
-StreamServer Verbose: Listening on port 9123
-Waiting for connections from trunk-recorder...
-```
-
-When a call comes in:
-
-```
-Call received from talkgroup 1 (FDISPATCH)
-Transcribing...
-[Transcription appears here]
-```
-
-## What's Next?
-
-### Set Up Alerts
-
-Create alert rules to get notified for keywords:
-
-```json
-{
-  "Alerts": [
-    {
-      "Id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "Name": "Fire Alert",
-      "Keywords": "fire,structure fire,working fire",
-      "Email": "your-email@gmail.com",
-      "Frequency": 0,
-      "Talkgroups": [1, 2],
-      "CaptureWAV": true,
-      "Enabled": true
-    }
-  ]
-}
-```
-
-### Run as a Service
-
-Create systemd service:
-
-```bash
-sudo nano /etc/systemd/system/pizzapi.service
-```
-
-```ini
-[Unit]
-Description=PizzaWave API
-After=network.target
-
-[Service]
-Type=exec
-ExecStart=/home/username/pizzapi/pizzapi
-WorkingDirectory=/home/username/pizzapi
-Restart=always
-User=username
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable pizzapi
-sudo systemctl start pizzapi
-```
-
-### Explore the UI
-
-If using `pizzapi` with a display:
-
-```bash
-./pizzapi
-```
-
-Navigate the UI:
-- **Radio** - Live calls and call ranges
-- **Settings** - Configure listener, model, email, and Insights
-- **Alerts** - Manage alert rules
-- **View** - Display options and export actions
-
-## Troubleshooting
-
-### No Calls Appearing
-
-1. Verify trunk-recorder is sending data:
-   ```bash
-   # On trunk-recorder system
-   tail -f /path/to/trunk-recorder/logs
-   ```
-
-2. Check firewall:
-   ```bash
-   sudo ufw allow 9123/tcp
-   ```
-
-3. Verify IP address in trunk-recorder config matches pizzawave host
-
-### Transcription Not Working
-
-1. Check Whisper model downloaded:
-   ```bash
-   ls -la ~/.local/share/pizzawave/model/
-   ```
-
-2. Increase logging:
-   ```json
-   {"TraceLevelApp": "Verbose"}
-   ```
-
-### High Memory Usage
-
-1. Reduce logging level:
-   ```json
-   {"TraceLevelApp": "Warning"}
-   ```
-
-2. Disable WAV saving if enabled:
-   ```json
-   {"WavFileLocation": ""}
-   ```
-
-## Resources
-
-* [Full Documentation](README.md) - Complete documentation
-* [Deployment Guide](deployment.md) - Production deployment
-* [Building Guide](building.md) - Build from source
-* [Configuration Examples](config-examples-explained.md) - Settings reference
+Use the web UI restart buttons for normal operation when available.

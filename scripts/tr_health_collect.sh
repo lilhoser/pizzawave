@@ -4,7 +4,7 @@ set -euo pipefail
 WINDOW_MINUTES="${1:-5}"
 SERVICE_NAME="${TR_SERVICE_NAME:-trunk-recorder}"
 TR_CONFIG_PATH="${TR_CONFIG_PATH:-/etc/trunk-recorder/config.json}"
-OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzapi/tr-health}"
+OUT_DIR="${TR_HEALTH_DIR:-/var/lib/pizzawave/tr-health}"
 SUMMARY_CSV="${OUT_DIR}/summary_5m.csv"
 
 mkdir -p "$OUT_DIR"
@@ -98,7 +98,7 @@ if command -v jq >/dev/null 2>&1 && [[ -f "$TR_CONFIG_PATH" ]]; then
       | .key as $idx
       | .value as $s
       | ($s.device // "") as $dev
-      | ((try ($dev | capture("rtl=(?<serial>[^,]+)") | .serial) catch ("idx" + ($idx|tostring))) ) as $serial
+      | ((try ($dev | capture("(?<kind>rtl|airspy)[=:](?<serial>[^,]+)") | "\(.kind)=\(.serial)") catch ("idx" + ($idx|tostring))) ) as $serial
       | ($s.center // 0) as $center
       | ($s.rate // 0) as $rate
       | ($center - ($rate/2)) as $lo

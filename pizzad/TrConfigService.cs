@@ -1,0 +1,481 @@
+using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace pizzad;
+
+public sealed class TrConfigService
+{
+    private readonly EngineConfig _config;
+    private readonly ILogger<TrConfigService> _logger;
+
+    public TrConfigService(EngineConfig config, ILogger<TrConfigService> logger)
+    {
+        _config = config;
+        _logger = logger;
+    }
+
+    public async Task<TrConfigEditorDto> GetEditorAsync(CancellationToken ct)
+    {
+        var livePath = _config.TrunkRecorder.ConfigPath;
+        var liveJson = File.Exists(livePath) ? await File.ReadAllTextAsync(livePath, ct) : string.Empty;
+        var draftPath = EditorDraftPath();
+        var hasDraft = File.Exists(draftPath);
+        var configJson = hasDraft ? await File.ReadAllTextAsync(draftPath, ct) : liveJson;
+        return BuildEditorDto(livePath, draftPath, configJson, liveJson, hasDraft);
+    }
+
+    public async Task<TrConfigEditorDto> SaveEditorDraftAsync(TrConfigEditorSaveRequest request, CancellationToken ct)
+    {
+        var draftPath = EditorDraftPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(draftPath) ?? ".");
+        await File.WriteAllTextAsync(draftPath, NormalizeText(request.ConfigJson ?? string.Empty), ct);
+        return await GetEditorAsync(ct);
+    }
+
+    public Task ClearEditorDraftAsync(CancellationToken ct)
+    {
+        var path = EditorDraftPath();
+        if (File.Exists(path))
+            File.Delete(path);
+        return Task.CompletedTask;
+    }
+
+    public IReadOnlyList<TrConfigBackupDto> ListConfigBackups()
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path))
+            return [];
+        var directory = Path.GetDirectoryName(path);
+        var name = Path.GetFileName(path);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            return [];
+        return Directory.EnumerateFiles(directory, $"{name}.bak-*")
+            .Select(file => new FileInfo(file))
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .Select(file => new TrConfigBackupDto(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc))
+            .ToList();
+    }
+
+    public async Task<TrConfigRestoreResultDto> RestoreConfigBackupAsync(TrConfigRestoreRequest request, CancellationToken ct)
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path))
+            return new TrConfigRestoreResultDto(false, "TR config path is not configured.", request.BackupPath, "", "");
+        if (string.IsNullOrWhiteSpace(request.BackupPath) || !File.Exists(request.BackupPath))
+            return new TrConfigRestoreResultDto(false, "Selected TR config backup was not found.", request.BackupPath, "", "");
+
+        var fullConfigPath = Path.GetFullPath(path);
+        var configDirectory = Path.GetDirectoryName(fullConfigPath) ?? ".";
+        var fullBackupPath = Path.GetFullPath(request.BackupPath);
+        if (!fullBackupPath.StartsWith(configDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+            !Path.GetFileName(fullBackupPath).StartsWith(Path.GetFileName(fullConfigPath) + ".bak-", StringComparison.OrdinalIgnoreCase))
+            return new TrConfigRestoreResultDto(false, "Selected file is not a recognized TR config backup.", request.BackupPath, "", "");
+
+        var helper = FindAdminHelper();
+        string restoreBackup;
+        if (string.IsNullOrWhiteSpace(helper))
+        {
+            Directory.CreateDirectory(configDirectory);
+            restoreBackup = string.Empty;
+            if (File.Exists(fullConfigPath))
+            {
+                restoreBackup = $"{fullConfigPath}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Copy(fullConfigPath, restoreBackup, overwrite: false);
+            }
+            File.Copy(fullBackupPath, fullConfigPath, overwrite: true);
+        }
+        else
+        {
+            var result = await RunAdminHelperAsync(helper, "install-tr-file", fullBackupPath, fullConfigPath, string.Empty, string.Empty, string.Empty, ct);
+            if (result.ExitCode != 0)
+                return new TrConfigRestoreResultDto(false, "TR config restore failed: " + result.Output.Trim(), fullBackupPath, "", result.Output);
+            restoreBackup = result.Output.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+        }
+
+        var serviceOutput = request.RestartTr ? await RestartTrAsync(ct) : "Restart TR when you are ready for the restored config to take effect.";
+        return new TrConfigRestoreResultDto(true, $"Restored TR config backup {Path.GetFileName(fullBackupPath)}.", fullBackupPath, restoreBackup, serviceOutput);
+    }
+
+    public async Task<string> GetEditorConfigForApplyAsync(string? configJson, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(configJson))
+            return configJson;
+        var draftPath = EditorDraftPath();
+        if (File.Exists(draftPath))
+            return await File.ReadAllTextAsync(draftPath, ct);
+        var livePath = _config.TrunkRecorder.ConfigPath;
+        return File.Exists(livePath) ? await File.ReadAllTextAsync(livePath, ct) : string.Empty;
+    }
+
+    public object Validate()
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return new { ok = false, path, error = "trunk-recorder config file not found." };
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var root = doc.RootElement;
+            var captureDir = root.TryGetProperty("captureDir", out var cap) ? cap.GetString() ?? string.Empty : string.Empty;
+            var logDir = root.TryGetProperty("logDir", out var log) ? log.GetString() ?? string.Empty : string.Empty;
+            var systems = root.TryGetProperty("systems", out var sys) && sys.ValueKind == JsonValueKind.Array
+                ? sys.EnumerateArray().Select(s => new
+                {
+                    shortName = s.TryGetProperty("shortName", out var sn) ? sn.GetString() : null,
+                    type = s.TryGetProperty("type", out var type) ? type.GetString() : null,
+                    talkgroupsFile = s.TryGetProperty("talkgroupsFile", out var tg) ? tg.GetString() : null
+                }).ToList()
+                : [];
+
+            var callstreamConfigured = false;
+            if (root.TryGetProperty("plugins", out var plugins) && plugins.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var plugin in plugins.EnumerateArray())
+                {
+                    if (plugin.TryGetProperty("name", out var name) &&
+                        string.Equals(name.GetString(), "callstream", StringComparison.OrdinalIgnoreCase))
+                    {
+                        callstreamConfigured = true;
+                        break;
+                    }
+                }
+            }
+
+            var coverage = TrConfigSourceCoverageValidator.Validate(root.GetRawText());
+            return new
+            {
+                ok = coverage.Ok,
+                path,
+                captureDir,
+                logDir,
+                systems,
+                callstreamConfigured,
+                callstreamTarget = $"{_config.Ingest.CallstreamBind}:{_config.Ingest.CallstreamPort}",
+                sourceCoverage = coverage,
+                error = coverage.Ok ? "" : "TR source coverage failed: " + string.Join(" ", coverage.Blockers)
+            };
+        }
+        catch (Exception ex)
+        {
+            return new { ok = false, path, error = ex.Message };
+        }
+    }
+
+    public async Task<SetupValidationResult> PatchCallstreamAsync(SetupTrConfigPatchRequest request, CancellationToken ct)
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return new SetupValidationResult(false, "TR config file was not found.", new { path });
+
+        JsonNode root;
+        try
+        {
+            root = JsonNode.Parse(await File.ReadAllTextAsync(path, ct)) ?? throw new JsonException("empty JSON document");
+        }
+        catch (Exception ex)
+        {
+            return new SetupValidationResult(false, "TR config could not be parsed: " + ex.Message, new { path });
+        }
+
+        if (root is not JsonObject obj)
+            return new SetupValidationResult(false, "TR config root must be a JSON object.", new { path });
+
+        var plugins = obj["plugins"] as JsonArray;
+        if (plugins == null)
+        {
+            plugins = [];
+            obj["plugins"] = plugins;
+        }
+
+        JsonObject? callstream = null;
+        for (var i = 0; i < plugins.Count; i++)
+        {
+            if (plugins[i] is JsonObject plugin &&
+                string.Equals(plugin["name"]?.GetValue<string>(), "callstream", StringComparison.OrdinalIgnoreCase))
+            {
+                callstream = plugin;
+                break;
+            }
+        }
+
+        if (callstream == null)
+        {
+            callstream = [];
+            plugins.Add(callstream);
+        }
+
+        callstream["name"] = "callstream";
+        callstream["library"] = callstream["library"]?.GetValue<string>() ?? "libcallstream.so";
+        callstream["host"] = _config.Ingest.CallstreamBind;
+        callstream["port"] = _config.Ingest.CallstreamPort;
+        if (request.DisableCaptureDir)
+            obj.Remove("captureDir");
+
+        var helper = FindAdminHelper();
+        string backup;
+        string restartMessage;
+        if (string.IsNullOrWhiteSpace(helper))
+        {
+            backup = $"{path}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+            File.Copy(path, backup, overwrite: false);
+            await File.WriteAllTextAsync(path, NormalizeJson(obj), ct);
+            restartMessage = request.RestartTr ? await RestartTrAsync(ct) : "Restart TR when you are ready for the change to take effect.";
+        }
+        else
+        {
+            var result = await RunAdminHelperAsync(
+                helper,
+                "patch-callstream",
+                path,
+                _config.Ingest.CallstreamBind,
+                _config.Ingest.CallstreamPort.ToString(),
+                request.DisableCaptureDir ? "1" : "0",
+                request.RestartTr ? TrUnitName() : string.Empty,
+                ct);
+            if (result.ExitCode != 0)
+                return new SetupValidationResult(false, "Callstream patch failed: " + result.Output.Trim(), new { path });
+            backup = result.Output.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+            restartMessage = request.RestartTr ? $"Restarted {TrUnitName()}." : "Restart TR when you are ready for the change to take effect.";
+        }
+        _config.Setup.CallstreamValidated = true;
+        await SaveConfigAsync(ct);
+        _logger.LogInformation("Patched callstream in TR config {Path}; backup {Backup}", path, backup);
+
+        var captureMessage = request.DisableCaptureDir ? " Removed captureDir so callstream/PizzaWave owns persistence." : string.Empty;
+        var message = $"Patched callstream config.{captureMessage} {restartMessage}";
+        return new SetupValidationResult(true, message, new { path, backup, target = $"{_config.Ingest.CallstreamBind}:{_config.Ingest.CallstreamPort}", captureDirDisabled = request.DisableCaptureDir, restarted = request.RestartTr });
+    }
+
+    private TrConfigEditorDto BuildEditorDto(string livePath, string draftPath, string configJson, string liveJson, bool hasDraft)
+    {
+        var summary = EmptySummary();
+        var parseOk = false;
+        var parseMessage = string.Empty;
+        try
+        {
+            var root = JsonNode.Parse(string.IsNullOrWhiteSpace(configJson) ? "{}" : configJson) as JsonObject
+                ?? throw new JsonException("TR config root must be a JSON object.");
+            summary = Summarize(root);
+            parseOk = true;
+            parseMessage = "Valid JSON.";
+        }
+        catch (Exception ex)
+        {
+            parseMessage = ex.Message;
+        }
+
+        return new TrConfigEditorDto(livePath, draftPath, configJson, liveJson, hasDraft, parseOk, parseMessage, summary);
+    }
+
+    private string EditorDraftPath() =>
+        Path.Combine(_config.Storage.AppDataRoot, "tr-config-editor-draft.json");
+
+    private static TrConfigEditorSummaryDto EmptySummary() => new([], [], []);
+
+    private static TrConfigEditorSummaryDto Summarize(JsonObject root)
+    {
+        var systems = new List<TrConfigEditorSystemDto>();
+        if (root["systems"] is JsonArray systemArray)
+        {
+            foreach (var node in systemArray.OfType<JsonObject>())
+            {
+                systems.Add(new TrConfigEditorSystemDto(
+                    ReadString(node, "shortName"),
+                    ReadString(node, "type"),
+                    ReadString(node, "modulation"),
+                    ReadLongArray(node, "control_channels"),
+                    ReadLongArray(node, "channels"),
+                    ReadString(node, "talkgroupsFile")));
+            }
+        }
+
+        var sources = new List<TrConfigEditorSourceDto>();
+        if (root["sources"] is JsonArray sourceArray)
+        {
+            var index = 0;
+            foreach (var node in sourceArray.OfType<JsonObject>())
+            {
+                sources.Add(new TrConfigEditorSourceDto(
+                    index++,
+                    ReadString(node, "device"),
+                    ReadString(node, "digitalRecorders"),
+                    ReadLong(node, "center"),
+                    (int)ReadLong(node, "rate"),
+                    (int)ReadLong(node, "error"),
+                    ReadRawScalar(node, "gain")));
+            }
+        }
+
+        var warnings = new List<string>();
+        if (systems.Count == 0)
+            warnings.Add("No systems are defined.");
+        if (sources.Count == 0)
+            warnings.Add("No SDR sources are defined.");
+        foreach (var system in systems.Where(s => s.ControlChannelsHz.Count == 0))
+            warnings.Add($"{system.ShortName}: no control_channels are defined.");
+
+        return new TrConfigEditorSummaryDto(systems, sources, warnings);
+    }
+
+    private static string ReadString(JsonObject obj, string name) =>
+        obj.TryGetPropertyValue(name, out var node) && node is JsonValue value && value.TryGetValue<string>(out var text)
+            ? text
+            : string.Empty;
+
+    private static string ReadRawScalar(JsonObject obj, string name)
+    {
+        if (!obj.TryGetPropertyValue(name, out var node) || node == null)
+            return string.Empty;
+        if (node is JsonValue value && value.TryGetValue<string>(out var text))
+            return text;
+        return node.ToJsonString();
+    }
+
+    private static long ReadLong(JsonObject obj, string name)
+    {
+        if (!obj.TryGetPropertyValue(name, out var node) || node == null)
+            return 0;
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<long>(out var longValue))
+                return longValue;
+            if (value.TryGetValue<double>(out var doubleValue))
+                return (long)Math.Round(doubleValue);
+            if (value.TryGetValue<string>(out var text) && long.TryParse(text, out var parsed))
+                return parsed;
+        }
+        return 0;
+    }
+
+    private static IReadOnlyList<long> ReadLongArray(JsonObject obj, string name)
+    {
+        if (!obj.TryGetPropertyValue(name, out var node) || node is not JsonArray array)
+            return [];
+        return array.Select(item =>
+            item is JsonValue value && value.TryGetValue<long>(out var longValue)
+                ? longValue
+                : item is JsonValue stringValue && stringValue.TryGetValue<string>(out var text) && long.TryParse(text, out var parsed)
+                    ? parsed
+                    : 0)
+            .Where(value => value > 0)
+            .ToList();
+    }
+
+    private static string NormalizeJson(JsonNode node) =>
+        node.ToJsonString(EngineConfig.JsonOptions()).Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd() + "\n";
+
+    private static string NormalizeText(string text) =>
+        text.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd() + "\n";
+
+    private async Task<string> RestartTrAsync(CancellationToken ct)
+    {
+        var unit = TrUnitName();
+        try
+        {
+            var helper = FindAdminHelper();
+            var psi = string.IsNullOrWhiteSpace(helper)
+                ? new ProcessStartInfo("systemctl")
+                : new ProcessStartInfo("sudo");
+            if (string.IsNullOrWhiteSpace(helper))
+            {
+                psi.ArgumentList.Add("restart");
+                psi.ArgumentList.Add(unit);
+            }
+            else
+            {
+                psi.ArgumentList.Add(helper);
+                psi.ArgumentList.Add("restart-tr");
+                psi.ArgumentList.Add(unit);
+            }
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process == null)
+                return $"Unable to start systemctl for {unit}; restart TR manually.";
+            var stderr = process.StandardError.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            if (process.ExitCode == 0)
+                return $"Restarted {unit}.";
+            return $"systemctl restart {unit} failed: {await stderr}";
+        }
+        catch (Exception ex)
+        {
+            return $"systemctl restart {unit} failed: {ex.Message}";
+        }
+    }
+
+    private string TrUnitName()
+    {
+        var service = string.IsNullOrWhiteSpace(_config.TrunkRecorder.LogServiceName)
+            ? "trunk-recorder"
+            : _config.TrunkRecorder.LogServiceName.Trim();
+        return service.EndsWith(".service", StringComparison.OrdinalIgnoreCase)
+            ? service
+            : service + ".service";
+    }
+
+    private static string? FindAdminHelper()
+    {
+        var candidates = new[]
+        {
+            "/usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh",
+            "/opt/pizzawave/scripts/pizzawave_setup_admin.sh",
+            Path.Combine(AppContext.BaseDirectory, "scripts", "pizzawave_setup_admin.sh"),
+            Path.Combine(AppContext.BaseDirectory, "pizzawave_setup_admin.sh")
+        };
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private async Task SaveConfigAsync(CancellationToken ct)
+    {
+        if (OperatingSystem.IsWindows() || !_config.ConfigPath.StartsWith("/etc/", StringComparison.Ordinal))
+        {
+            _config.Save();
+            return;
+        }
+
+        var stagingRoot = Path.Combine(_config.Storage.AppDataRoot, "protected-config");
+        Directory.CreateDirectory(stagingRoot);
+        var candidatePath = Path.Combine(stagingRoot, $"pizzad-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(candidatePath, JsonSerializer.Serialize(_config, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
+        try
+        {
+            var helper = FindAdminHelper() ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected config writes are unavailable.");
+            var result = await RunAdminHelperAsync(helper, "install-pizzad-config", candidatePath, _config.ConfigPath, string.Empty, string.Empty, string.Empty, ct);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Protected config helper failed with exit code {result.ExitCode}: {result.Output.Trim()}");
+        }
+        finally
+        {
+            try { File.Delete(candidatePath); } catch { }
+        }
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunAdminHelperAsync(string helper, string action, string path, string host, string port, string disableCaptureDir, string unit, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo("sudo")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        psi.ArgumentList.Add(helper);
+        psi.ArgumentList.Add(action);
+        psi.ArgumentList.Add(path);
+        psi.ArgumentList.Add(host);
+        psi.ArgumentList.Add(port);
+        psi.ArgumentList.Add(disableCaptureDir);
+        if (!string.IsNullOrWhiteSpace(unit))
+            psi.ArgumentList.Add(unit);
+        using var process = Process.Start(psi);
+        if (process == null)
+            return (-1, "Unable to start sudo helper.");
+        var stdout = process.StandardOutput.ReadToEndAsync(ct);
+        var stderr = process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        return (process.ExitCode, (await stdout) + (await stderr));
+    }
+}

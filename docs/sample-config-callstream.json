@@ -2,19 +2,18 @@
     "ver": 2,
     "defaultMode": "digital",
     "logFile": true,
-	"captureDir": "/var/lib/trunk-recorder/recordings",
     "logDir": "/var/log/trunk-recorder",
     "tempDir": "/var/lib/trunk-recorder/tmp",
     "frequencyFormat": "mhz",
     "callTimeout": 3,
-    "controlWarnRate": 10,
+    "controlWarnRate": -1,
     "statusAsString": true,
     "broadcastSignals": true,
     "logLevel": "info",
     "audioStreaming": true,
     "systems": [
         {
-            "shortName": "whiteoakmt",
+            "shortName": "example-p25",
             "type": "p25",
             "talkgroupsFile": "/etc/trunk-recorder/talkgroups.csv",
             "control_channels": [
@@ -70,12 +69,12 @@
         {
 	        "name":"callstream",
             "library":"libcallstream.so",
-            "address":"192.168.1.122",
+            "address":"127.0.0.1",
             "port":9123,
             "streams":[
                 {
                     "TGID":0,
-                    "shortName":"whiteoakmt"
+                    "shortName":"example-p25"
                 }
             ],
 			"audio_filtering": {

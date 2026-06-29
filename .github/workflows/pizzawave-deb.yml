@@ -1,0 +1,74 @@
+name: Build PizzaWave Engine Deb
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Debian package version
+        required: false
+        default: 0.1.0
+  pull_request:
+    paths:
+      - 'pizzad/**'
+      - 'pizzad.Tests/**'
+      - 'scripts/**'
+      - '.github/workflows/pizzawave-deb.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'pizzad/**'
+      - 'pizzad.Tests/**'
+      - 'scripts/**'
+      - '.github/workflows/pizzawave-deb.yml'
+
+env:
+  DOTNET_VERSION: '9.0.x'
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            artifact: pizzawave-deb-amd64
+          - rid: linux-arm64
+            artifact: pizzawave-deb-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pizzad/web/package-lock.json
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="0.1.0-ci.${{ github.run_number }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build .deb
+        shell: bash
+        run: |
+          bash ./scripts/pizzawave build-deb \
+            --version "${{ steps.version.outputs.version }}" \
+            --rid "${{ matrix.rid }}"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/packages/*.deb
+          retention-days: 30

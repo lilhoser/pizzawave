@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "pizzaui": {
-      "commandName": "Project",
-      "projectPath": "../pizzaui.csproj"
-    }
-  }
-}

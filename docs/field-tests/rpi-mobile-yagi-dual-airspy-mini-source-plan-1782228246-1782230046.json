@@ -1,0 +1,126 @@
+﻿{
+    "systems":  [
+                    {
+                        "shortName":  "chattanooga-simulcast-hamilton-t",
+                        "modulation":  "qpsk",
+                        "controlChannelsHz":  [
+                                                  855212500
+                                              ],
+                        "voiceFrequenciesHz":  [
+                                                   854387500,
+                                                   854912500,
+                                                   855187500,
+                                                   855987500,
+                                                   856087500,
+                                                   856237500,
+                                                   856762500,
+                                                   857237500,
+                                                   857437500,
+                                                   857487500,
+                                                   857712500,
+                                                   857937500,
+                                                   858237500,
+                                                   858437500
+                                               ],
+                        "requiredRanges":  [
+                                               {
+                                                   "lowHz":  854387500,
+                                                   "highHz":  858437500,
+                                                   "centerHz":  856412500
+                                               }
+                                           ],
+                        "requiredSdrCount":  1,
+                        "proposedSourceIndexes":  [
+                                                      1
+                                                  ],
+                        "warnings":  [
+                                         "TR config has no voice channel list for this system; calibration is using 14 observed call frequencies from PizzaWave history."
+                                     ]
+                    },
+                    {
+                        "shortName":  "cleveland-bradley-tn",
+                        "modulation":  "qpsk",
+                        "controlChannelsHz":  [
+                                                  851050000
+                                              ],
+                        "voiceFrequenciesHz":  [
+                                                   851300000,
+                                                   851562500,
+                                                   851937500,
+                                                   852250000,
+                                                   853200000
+                                               ],
+                        "requiredRanges":  [
+                                               {
+                                                   "lowHz":  851050000,
+                                                   "highHz":  853200000,
+                                                   "centerHz":  852125000
+                                               }
+                                           ],
+                        "requiredSdrCount":  1,
+                        "proposedSourceIndexes":  [
+                                                      1
+                                                  ],
+                        "warnings":  [
+                                         "TR config has no voice channel list for this system; calibration is using 5 observed call frequencies from PizzaWave history."
+                                     ]
+                    },
+                    {
+                        "shortName":  "north-bradley-bradley-tn",
+                        "modulation":  "qpsk",
+                        "controlChannelsHz":  [
+                                                  769606250
+                                              ],
+                        "voiceFrequenciesHz":  [
+                                                   770218750,
+                                                   771431250,
+                                                   771981250
+                                               ],
+                        "requiredRanges":  [
+                                               {
+                                                   "lowHz":  769606250,
+                                                   "highHz":  771981250,
+                                                   "centerHz":  770793750
+                                               }
+                                           ],
+                        "requiredSdrCount":  1,
+                        "proposedSourceIndexes":  [
+                                                      0
+                                                  ],
+                        "warnings":  [
+                                         "TR config has no voice channel list for this system; calibration is using 3 observed call frequencies from PizzaWave history."
+                                     ]
+                    }
+                ],
+    "sources":  [
+                    {
+                        "index":  0,
+                        "serial":  "637862DC2E3A19D7",
+                        "device":  "airspy=637862DC2E3A19D7",
+                        "centerFrequency":  769606250,
+                        "sampleRate":  6000000,
+                        "errorHz":  0,
+                        "gain":  "15",
+                        "coveredSystems":  [
+                                               "north-bradley-bradley-tn"
+                                           ]
+                    },
+                    {
+                        "index":  1,
+                        "serial":  "637862DC2F5C0CD7",
+                        "device":  "airspy=637862DC2F5C0CD7",
+                        "centerFrequency":  853131250,
+                        "sampleRate":  6000000,
+                        "errorHz":  0,
+                        "gain":  "15",
+                        "coveredSystems":  [
+                                               "chattanooga-simulcast-hamilton-t",
+                                               "cleveland-bradley-tn"
+                                           ]
+                    }
+                ],
+    "warnings":  [
+
+                 ],
+    "diagnostics":  "Built calibration plan for 3 system(s) and 2 configured SDR source(s)."
+}

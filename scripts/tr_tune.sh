@@ -37,6 +37,7 @@ Mode: error-sweep
   --system NAME           required
   --control-channel HZ    required
   --device-serial SERIAL  required
+  --template-serial SER   optional source row to clone center/rate from
   --base-error HZ         required
   --range-hz N            default 1200
   --step-hz N             default 300
@@ -59,9 +60,10 @@ Mode: device-bakeoff
 
 Examples:
   sudo ./tr_tune.sh ppm-convert --center-hz 855571875 --ppm -5 --tr-sign positive
-  sudo ./tr_tune.sh error-sweep --system whiteoakmt-hamilton --control-channel 855212500 --device-serial 00000005 --base-error 4278
-  sudo ./tr_tune.sh cc-sweep --system whiteoakmt-hamilton --cc-modes eachcc --mods qpsk --gains 24,28,32,36
-  sudo ./tr_tune.sh device-bakeoff --system whiteoakmt-hamilton --control-channel 855212500 --template-serial 00000005 --candidates 00000005:4278,00000006:5146
+  sudo ./tr_tune.sh error-sweep --system my-system --control-channel 855212500 --device-serial 00000005 --base-error 4278
+  sudo ./tr_tune.sh error-sweep --system my-system --control-channel 855212500 --template-serial 00000005 --device-serial 00000006 --base-error 0
+  sudo ./tr_tune.sh cc-sweep --system my-system --cc-modes eachcc --mods qpsk --gains 24,28,32,36
+  sudo ./tr_tune.sh device-bakeoff --system my-system --control-channel 855212500 --template-serial 00000005 --candidates 00000005:4278,00000006:5146
 EOF
 }
 
@@ -105,8 +107,15 @@ metric_extract() {
   local total_decode decode0 retunes calls_started calls_concluded update_not_grant no_tx_recorded
   local decode_nonzero decode0_pct avg_decode_rate max_decode_rate
 
-  total_decode="$(grep -c "Control Channel Message Decode Rate" "$sys_log" || true)"
-  decode0="$(grep -c "Control Channel Message Decode Rate: 0/sec" "$sys_log" || true)"
+  local rates_file
+  rates_file="$(mktemp)"
+  grep "Control Channel Message Decode Rate" "$sys_log" \
+    | sed -E 's/.*Decode Rate: ([0-9]+)\/sec.*/\1/' >> "$rates_file" || true
+  grep -E "\[$sys\][[:space:]]+[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+-?[0-9]+(\.[0-9]+)?[[:space:]]+msg/sec" "$sys_log" \
+    | sed -E 's/.*MHz[[:space:]]+(-?[0-9]+(\.[0-9]+)?)[[:space:]]+msg\/sec.*/\1/' >> "$rates_file" || true
+
+  total_decode="$(grep -c . "$rates_file" || true)"
+  decode0="$(awk '{ if (($1+0) == 0) z+=1 } END { print z+0 }' "$rates_file")"
   retunes="$(grep -c "Retuning to Control Channel" "$sys_log" || true)"
   calls_started="$(grep -c "Starting P25 Recorder" "$sys_log" || true)"
   calls_concluded="$(grep -c "Concluding Recorded Call" "$sys_log" || true)"
@@ -121,16 +130,12 @@ metric_extract() {
   if [[ "$total_decode" -gt 0 ]]; then
     decode_nonzero=$((total_decode - decode0))
     decode0_pct="$(awk -v z="$decode0" -v t="$total_decode" 'BEGIN { printf "%.2f", (z*100.0)/t }')"
-    local rates_file
-    rates_file="$(mktemp)"
-    grep "Control Channel Message Decode Rate" "$sys_log" \
-      | sed -E 's/.*Decode Rate: ([0-9]+)\/sec.*/\1/' > "$rates_file" || true
     if [[ -s "$rates_file" ]]; then
       avg_decode_rate="$(awk '{s+=$1; n+=1} END { if (n>0) printf "%.2f", s/n; else print "0.00" }' "$rates_file")"
       max_decode_rate="$(sort -n "$rates_file" | tail -n1)"
     fi
-    rm -f "$rates_file"
   fi
+  rm -f "$rates_file"
 
   echo "$total_decode,$decode0,$decode_nonzero,$decode0_pct,$avg_decode_rate,$max_decode_rate,$retunes,$calls_started,$calls_concluded,$update_not_grant,$no_tx_recorded"
 }
@@ -244,6 +249,7 @@ if [[ "$MODE" == "error-sweep" ]]; then
   SYSTEM_NAME=""
   CONTROL_CHANNEL=""
   DEVICE_SERIAL=""
+  TEMPLATE_SERIAL=""
   BASE_ERROR=""
   RANGE_HZ=1200
   STEP_HZ=300
@@ -254,6 +260,7 @@ if [[ "$MODE" == "error-sweep" ]]; then
       --system) SYSTEM_NAME="$2"; shift 2 ;;
       --control-channel) CONTROL_CHANNEL="$2"; shift 2 ;;
       --device-serial) DEVICE_SERIAL="$2"; shift 2 ;;
+      --template-serial) TEMPLATE_SERIAL="$2"; shift 2 ;;
       --base-error) BASE_ERROR="$2"; shift 2 ;;
       --range-hz) RANGE_HZ="$2"; shift 2 ;;
       --step-hz) STEP_HZ="$2"; shift 2 ;;
@@ -268,25 +275,32 @@ if [[ "$MODE" == "error-sweep" ]]; then
 
   jq -e --arg sys "$SYSTEM_NAME" '.systems[] | select(.shortName == $sys)' "$BASELINE_CFG" >/dev/null || { echo "System not found: $SYSTEM_NAME" >&2; exit 1; }
   jq -e --arg s "rtl=${DEVICE_SERIAL}" '.sources[] | select(.device | contains($s))' "$BASELINE_CFG" >/dev/null || { echo "Source serial not found: $DEVICE_SERIAL" >&2; exit 1; }
+  if [[ -n "$TEMPLATE_SERIAL" ]]; then
+    jq -e --arg s "rtl=${TEMPLATE_SERIAL}" '.sources[] | select(.device | contains($s))' "$BASELINE_CFG" >/dev/null || { echo "Template serial not found: $TEMPLATE_SERIAL" >&2; exit 1; }
+  fi
 
   SUMMARY="$OUTPUT_DIR/summary.csv"
   echo "system,cc,serial,mod,error_hz,start,end,total_decode,decode0,decode_nonzero,decode0_pct,avg_decode_rate,max_decode_rate,retunes,calls_started,calls_concluded,update_not_grant,no_tx_recorded" > "$SUMMARY"
 
   for err in $(seq $((BASE_ERROR - RANGE_HZ)) "$STEP_HZ" $((BASE_ERROR + RANGE_HZ))); do
     if [[ -n "$GAIN_OVERRIDE" ]]; then
-      jq --arg sys "$SYSTEM_NAME" --argjson cc "$CONTROL_CHANNEL" --arg mod "$MODULATION" --arg ser "$DEVICE_SERIAL" --argjson e "$err" --argjson g "$GAIN_OVERRIDE" '
+      jq --arg sys "$SYSTEM_NAME" --argjson cc "$CONTROL_CHANNEL" --arg mod "$MODULATION" --arg ser "$DEVICE_SERIAL" --arg tser "$TEMPLATE_SERIAL" --argjson e "$err" --argjson g "$GAIN_OVERRIDE" '
         .controlRetuneLimit = 0
+        | .controlWarnRate = -1
         | .systems = [ .systems[] | select(.shortName == $sys) ]
         | .systems[0].control_channels = [ $cc ]
         | .systems[0].modulation = $mod
+        | if ($tser != "") then .sources = [ .sources[] | select(.device | contains("rtl=" + $tser)) ] | .sources[0].device = ("rtl=" + $ser + ",bias=1,buflen=65536") else . end
         | .sources |= map(if (.device | contains("rtl=" + $ser)) then .error=$e | .gain=$g else . end)
       ' "$BASELINE_CFG" > "$TMP_CFG"
     else
-      jq --arg sys "$SYSTEM_NAME" --argjson cc "$CONTROL_CHANNEL" --arg mod "$MODULATION" --arg ser "$DEVICE_SERIAL" --argjson e "$err" '
+      jq --arg sys "$SYSTEM_NAME" --argjson cc "$CONTROL_CHANNEL" --arg mod "$MODULATION" --arg ser "$DEVICE_SERIAL" --arg tser "$TEMPLATE_SERIAL" --argjson e "$err" '
         .controlRetuneLimit = 0
+        | .controlWarnRate = -1
         | .systems = [ .systems[] | select(.shortName == $sys) ]
         | .systems[0].control_channels = [ $cc ]
         | .systems[0].modulation = $mod
+        | if ($tser != "") then .sources = [ .sources[] | select(.device | contains("rtl=" + $tser)) ] | .sources[0].device = ("rtl=" + $ser + ",bias=1,buflen=65536") else . end
         | .sources |= map(if (.device | contains("rtl=" + $ser)) then .error=$e else . end)
       ' "$BASELINE_CFG" > "$TMP_CFG"
     fi
@@ -304,8 +318,8 @@ if [[ "$MODE" == "error-sweep" ]]; then
   awk -F, '
     NR==1 {next}
     {
-      decode0=$11+0; avgd=$12+0; concl=$16+0
-      score=(1000.0-decode0)*1000000 + avgd*1000 + concl
+      samples=$8+0; decode0=$11+0; avgd=$12+0; concl=$16+0
+      score=(samples > 0 ? (1000.0-decode0)*1000000 + avgd*1000 + concl : -1000000 + concl)
       if (!best || score > bestScore) { best=1; bestScore=score; bestLine=$0 }
     }
     END { if (best) print bestLine; else print "NO_ROWS" }
@@ -357,6 +371,7 @@ if [[ "$MODE" == "cc-sweep" ]]; then
           if [[ "$ccmode" == "fullcc" ]]; then
             jq --arg sys "$SYSTEM_NAME" --arg mod "$mod" --argjson g "$gain" '
               .controlRetuneLimit = 0
+              | .controlWarnRate = -1
               | .systems = [ .systems[] | select(.shortName == $sys) ]
               | .systems[0].modulation = $mod
               | .sources |= map(.gain=$g)
@@ -364,6 +379,7 @@ if [[ "$MODE" == "cc-sweep" ]]; then
           else
             jq --arg sys "$SYSTEM_NAME" --arg mod "$mod" --argjson g "$gain" --argjson cc "$ccv" '
               .controlRetuneLimit = 0
+              | .controlWarnRate = -1
               | .systems = [ .systems[] | select(.shortName == $sys) ]
               | .systems[0].modulation = $mod
               | .systems[0].control_channels = [ $cc ]
@@ -389,8 +405,8 @@ if [[ "$MODE" == "cc-sweep" ]]; then
     $3!="eachcc" { next }
     {
       key=$1","$2","$5
-      decode0=$11+0; avgd=$12+0; concl=$16+0
-      score=(1000.0-decode0)*1000000 + avgd*1000 + concl
+      samples=$8+0; decode0=$11+0; avgd=$12+0; concl=$16+0
+      score=(samples > 0 ? (1000.0-decode0)*1000000 + avgd*1000 + concl : -1000000 + concl)
       if (!(key in best) || score > s[key]) { s[key]=score; best[key]=$0 }
     }
     END {
@@ -441,6 +457,7 @@ if [[ "$MODE" == "device-bakeoff" ]]; then
     if [[ -n "$maybe_gain" ]]; then
       jq --arg sys "$SYSTEM_NAME" --argjson cc "$CONTROL_CHANNEL" --arg mod "$MODULATION" --arg tser "$TEMPLATE_SERIAL" --arg ser "$ser" --argjson e "$err" --argjson g "$maybe_gain" '
         .controlRetuneLimit = 0
+        | .controlWarnRate = -1
         | .systems = [ .systems[] | select(.shortName == $sys) ]
         | .systems[0].control_channels = [ $cc ]
         | .systems[0].modulation = $mod
@@ -452,6 +469,7 @@ if [[ "$MODE" == "device-bakeoff" ]]; then
     else
       jq --arg sys "$SYSTEM_NAME" --argjson cc "$CONTROL_CHANNEL" --arg mod "$MODULATION" --arg tser "$TEMPLATE_SERIAL" --arg ser "$ser" --argjson e "$err" '
         .controlRetuneLimit = 0
+        | .controlWarnRate = -1
         | .systems = [ .systems[] | select(.shortName == $sys) ]
         | .systems[0].control_channels = [ $cc ]
         | .systems[0].modulation = $mod
@@ -475,8 +493,8 @@ if [[ "$MODE" == "device-bakeoff" ]]; then
   awk -F, '
     NR==1 {next}
     {
-      decode0=$13+0; avgd=$14+0; concl=$18+0
-      score=(1000.0-decode0)*1000000 + avgd*1000 + concl
+      samples=$10+0; decode0=$13+0; avgd=$14+0; concl=$18+0
+      score=(samples > 0 ? (1000.0-decode0)*1000000 + avgd*1000 + concl : -1000000 + concl)
       if (!best || score > bestScore) { best=1; bestScore=score; bestLine=$0 }
     }
     END { if (best) print bestLine; else print "NO_ROWS" }

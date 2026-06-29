@@ -1,0 +1,28 @@
+name: Feature Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * *'
+
+env:
+  DOTNET_VERSION: '9.0.x'
+
+jobs:
+  feature-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore pizzawave.sln
+
+      - name: Build
+        run: dotnet build pizzawave.sln --configuration Release --no-restore -p:PIZZAD_SKIP_WEB_BUILD=true
+
+      - name: Run medium feature tests
+        run: dotnet test pizzad.Tests/pizzad.Tests.csproj --configuration Release --no-build --filter "Category=Feature"

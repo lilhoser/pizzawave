@@ -1,0 +1,49 @@
+name: BVT
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  DOTNET_VERSION: '9.0.x'
+
+jobs:
+  bvt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pizzad/web/package-lock.json
+
+      - name: Restore .NET
+        run: dotnet restore pizzawave.sln
+
+      - name: Build web
+        run: |
+          npm ci --prefix pizzad/web
+          npm run build --prefix pizzad/web
+
+      - name: Build .NET
+        run: dotnet build pizzawave.sln --configuration Release --no-restore -p:PIZZAD_SKIP_WEB_BUILD=true
+
+      - name: Unit BVT
+        run: dotnet test pizzad.Tests/pizzad.Tests.csproj --configuration Release --no-build --filter "Category!=Feature"
+
+      - name: Publish linux-x64
+        run: dotnet publish pizzad/pizzad.csproj --configuration Release --runtime linux-x64 --self-contained false -p:PIZZAD_SKIP_WEB_BUILD=true
+
+      - name: Publish linux-arm64
+        run: dotnet publish pizzad/pizzad.csproj --configuration Release --runtime linux-arm64 --self-contained false -p:PIZZAD_SKIP_WEB_BUILD=true
+
+      - name: CUDA configuration compile check
+        run: dotnet build pizzad/pizzad.csproj --configuration RELEASE_X64_CUDA -p:BuildProfile=Release_X64_CUDA -p:PIZZAD_SKIP_WEB_BUILD=true

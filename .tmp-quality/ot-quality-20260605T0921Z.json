@@ -1,0 +1,1361 @@
+﻿{
+    "generatedUtc":  "2026-06-05T09:22:47.9828717Z",
+    "heartbeatUtc":  "2026-06-05T09:21:32.7950000Z",
+    "lastWindowUtc":  "2026-06-05T01:21:32.0000000Z to 2026-06-05T09:21:32.0000000Z",
+    "previousWindowUtc":  "2026-06-04T17:21:32.0000000Z to 2026-06-05T01:21:32.0000000Z",
+    "previous":  {
+                     "window":  "previous_8h",
+                     "calls":  4179,
+                     "short":  174,
+                     "incidents":  38,
+                     "creates":  60,
+                     "updates":  92,
+                     "rejects":  156,
+                     "incPer1k":  9.09,
+                     "aiReq":  285,
+                     "aiFail":  8,
+                     "aiLength":  8,
+                     "verifierRuns":  142,
+                     "avgReviewed":  4.92,
+                     "maxTrunc":  2,
+                     "added":  71,
+                     "dropped":  27,
+                     "retainedMismatch":  99
+                 },
+    "latest":  {
+                   "window":  "last_8h",
+                   "calls":  2343,
+                   "short":  89,
+                   "incidents":  28,
+                   "creates":  30,
+                   "updates":  78,
+                   "rejects":  161,
+                   "incPer1k":  11.95,
+                   "aiReq":  230,
+                   "aiFail":  10,
+                   "aiLength":  10,
+                   "verifierRuns":  87,
+                   "avgReviewed":  4.62,
+                   "maxTrunc":  1,
+                   "added":  41,
+                   "dropped":  20,
+                   "retainedMismatch":  48
+               },
+    "queue":  {
+                  "queueDepth":  0,
+                  "pendingTranscriptions":  1,
+                  "pendingAudioSeconds":  13,
+                  "recentIngestPerMinute":  2.6,
+                  "recentTranscribedPerMinute":  2.5,
+                  "recentAudioSecondsIngestedPerMinute":  34.9,
+                  "recentAudioSecondsTranscribedPerMinute":  33.6,
+                  "averageTranscriptionRealtimeFactor":  0.088
+              },
+    "services":  {
+                     "pizzad":  "active",
+                     "trunkRecorder":  "active",
+                     "qdrant":  "active",
+                     "embeddingsStatus":  "ok",
+                     "embeddingEndpointOk":  true,
+                     "qdrantOk":  true,
+                     "embeddingQueueDepth":  0,
+                     "failedEmbeddings":  0,
+                     "pendingEmbeddings":  0,
+                     "embeddingLastError":  ""
+                 },
+    "callsByCategory":  [
+                            {
+                                "category":  "police",
+                                "calls":  1854,
+                                "audioSeconds":  26528
+                            },
+                            {
+                                "category":  "ems",
+                                "calls":  217,
+                                "audioSeconds":  3830
+                            },
+                            {
+                                "category":  "fire",
+                                "calls":  192,
+                                "audioSeconds":  2805
+                            },
+                            {
+                                "category":  "other",
+                                "calls":  68,
+                                "audioSeconds":  1319
+                            },
+                            {
+                                "category":  "traffic",
+                                "calls":  12,
+                                "audioSeconds":  158
+                            }
+                        ],
+    "transcriptQuality":  [
+                              {
+                                  "status":  "complete",
+                                  "qualityReason":  "ok",
+                                  "calls":  2177
+                              },
+                              {
+                                  "status":  "poor_quality",
+                                  "qualityReason":  "repetitive",
+                                  "calls":  126
+                              },
+                              {
+                                  "status":  "poor_quality",
+                                  "qualityReason":  "too_short",
+                                  "calls":  15
+                              },
+                              {
+                                  "status":  "poor_quality",
+                                  "qualityReason":  "empty",
+                                  "calls":  13
+                              },
+                              {
+                                  "status":  "poor_quality",
+                                  "qualityReason":  "numeric_noise",
+                                  "calls":  10
+                              },
+                              {
+                                  "status":  "poor_quality",
+                                  "qualityReason":  "marker_only",
+                                  "calls":  2
+                              }
+                          ],
+    "topRejects":  [
+                       {
+                           "reason":  "rejected:only 1 call(s) match the incident title/detail",
+                           "count":  38,
+                           "averageScore":  0.5341638365126775
+                       },
+                       {
+                           "reason":  "rejected:single-call incident lacks a strong emergency/event signal",
+                           "count":  32,
+                           "averageScore":  0.49678068729513886
+                       },
+                       {
+                           "reason":  "rejected:incident title/detail introduces unsupported emergency/event signal",
+                           "count":  18,
+                           "averageScore":  0.5259135709133744
+                       },
+                       {
+                           "reason":  "rejected:only 1 call supports the incident title/detail anchor",
+                           "count":  18,
+                           "averageScore":  0.585984778359318
+                       },
+                       {
+                           "reason":  "rejected:only 0 call(s) match the incident title/detail",
+                           "count":  11,
+                           "averageScore":  0.5246808644787878
+                       },
+                       {
+                           "reason":  "rejected:routine status/compliance rollup lacks a shared concrete event anchor",
+                           "count":  10,
+                           "averageScore":  0.596505501412963
+                       },
+                       {
+                           "reason":  "rejected:two-call incident pair similarity 0.14 is below 0.20",
+                           "count":  5,
+                           "averageScore":  0.6014676361555555
+                       },
+                       {
+                           "reason":  "rejected:standalone transport/hospital handoff lacks a parent emergency/event anchor",
+                           "count":  4,
+                           "averageScore":  0.5786635219944445
+                       },
+                       {
+                           "reason":  "rejected:medical_transport_context lacks parent emergency/event evidence",
+                           "count":  4,
+                           "averageScore":  0.5437123370148148
+                       },
+                       {
+                           "reason":  "rejected:two-call incident pair similarity 0.20 is below 0.20",
+                           "count":  4,
+                           "averageScore":  0.6118664798
+                       },
+                       {
+                           "reason":  "rejected:generic routine/status title is not an incident",
+                           "count":  3,
+                           "averageScore":  0.5325101781296296
+                       },
+                       {
+                           "reason":  "rejected:single-call incident source is noisy or routine",
+                           "count":  3,
+                           "averageScore":  0.24524804325925922
+                       }
+                   ],
+    "topAccepted":  [
+                        {
+                            "reason":  "accepted:update incident",
+                            "count":  78,
+                            "averageScore":  0.049628676877350425
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "count":  36,
+                            "averageScore":  0.10801592794444444
+                        },
+                        {
+                            "reason":  "accepted:create incident",
+                            "count":  30,
+                            "averageScore":  0.47193475309950617
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 3 call(s), final ownership retained 1",
+                            "count":  13,
+                            "averageScore":  0.14834884248888885
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 4 call(s), final ownership retained 1",
+                            "count":  11,
+                            "averageScore":  0.05801872351515151
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 3 call(s), final ownership retained 2",
+                            "count":  6,
+                            "averageScore":  0.19731453857407408
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 5 call(s), final ownership retained 1",
+                            "count":  5,
+                            "averageScore":  0
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 6 call(s), final ownership retained 1",
+                            "count":  4,
+                            "averageScore":  0.15748495355555556
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 9 call(s), final ownership retained 1",
+                            "count":  4,
+                            "averageScore":  0
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 5 call(s), final ownership retained 3",
+                            "count":  4,
+                            "averageScore":  0.15634355624166668
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 4 call(s), final ownership retained 2",
+                            "count":  2,
+                            "averageScore":  0.44127822861111116
+                        },
+                        {
+                            "reason":  "accepted:verifier retained 4 call(s), final ownership retained 3",
+                            "count":  2,
+                            "averageScore":  0.6197046332888889
+                        }
+                    ],
+    "recentIncidents":  [
+                            {
+                                "id":  2836,
+                                "title":  "Smoke detector alarm at 629 Paw Paw Trail",
+                                "category":  "fire",
+                                "score":  0.9,
+                                "firstSeen":  1780650293,
+                                "lastSeen":  1780650293
+                            },
+                            {
+                                "id":  2835,
+                                "title":  "Medical assist at 1 Washington St",
+                                "category":  "ems",
+                                "score":  0.9,
+                                "firstSeen":  1780650220,
+                                "lastSeen":  1780650270
+                            },
+                            {
+                                "id":  2834,
+                                "title":  "Fire alarm at 4739 Sussex Lane",
+                                "category":  "fire",
+                                "score":  0.95,
+                                "firstSeen":  1780650183,
+                                "lastSeen":  1780650183
+                            },
+                            {
+                                "id":  2831,
+                                "title":  "Gas leak at 8042 Rosemarie Way",
+                                "category":  "fire",
+                                "score":  0.95,
+                                "firstSeen":  1780649412,
+                                "lastSeen":  1780649412
+                            },
+                            {
+                                "id":  2833,
+                                "title":  "Trespass Investigation at Residence",
+                                "category":  "police",
+                                "score":  0.9,
+                                "firstSeen":  1780644172,
+                                "lastSeen":  1780645534
+                            },
+                            {
+                                "id":  2832,
+                                "title":  "Carbon Monoxide Alarm at 519 Picture Ridge Dr",
+                                "category":  "fire",
+                                "score":  0.8,
+                                "firstSeen":  1780643962,
+                                "lastSeen":  1780643962
+                            },
+                            {
+                                "id":  2829,
+                                "title":  "Arrest of 23yo male for wrist pain near Carter St",
+                                "category":  "other",
+                                "score":  0.75,
+                                "firstSeen":  1780637864,
+                                "lastSeen":  1780638181
+                            },
+                            {
+                                "id":  2828,
+                                "title":  "Pursuit on Broadway and Main St, suspect in black truck",
+                                "category":  "other",
+                                "score":  0.85,
+                                "firstSeen":  1780637801,
+                                "lastSeen":  1780637801
+                            },
+                            {
+                                "id":  2827,
+                                "title":  "MVC with fire and injuries at 6441 Bonnie Oaks Dr",
+                                "category":  "ems",
+                                "score":  0.95,
+                                "firstSeen":  1780635891,
+                                "lastSeen":  1780635891
+                            },
+                            {
+                                "id":  2830,
+                                "title":  "Fall victim at 7488 Back Valley Rd",
+                                "category":  "police",
+                                "score":  0.9,
+                                "firstSeen":  1780635231,
+                                "lastSeen":  1780635231
+                            },
+                            {
+                                "id":  2826,
+                                "title":  "Pursuit on E Main St and S Library St",
+                                "category":  "other",
+                                "score":  0.95,
+                                "firstSeen":  1780632348,
+                                "lastSeen":  1780632348
+                            },
+                            {
+                                "id":  2789,
+                                "title":  "Possible Structure Fire at Bakerby Drive",
+                                "category":  "fire",
+                                "score":  0.95,
+                                "firstSeen":  1780631878,
+                                "lastSeen":  1780631878
+                            },
+                            {
+                                "id":  2758,
+                                "title":  "Medical Assist at 205 Millard Road",
+                                "category":  "fire",
+                                "score":  0.9,
+                                "firstSeen":  1780631437,
+                                "lastSeen":  1780631437
+                            },
+                            {
+                                "id":  2757,
+                                "title":  "Gunshots Reported Near Kirkland Ave / Wheeler Homes",
+                                "category":  "police",
+                                "score":  0.8,
+                                "firstSeen":  1780630796,
+                                "lastSeen":  1780630881
+                            },
+                            {
+                                "id":  2825,
+                                "title":  "Fire Investigation at 207 Wilhoit Dr SW",
+                                "category":  "fire",
+                                "score":  0.85,
+                                "firstSeen":  1780629361,
+                                "lastSeen":  1780629361
+                            },
+                            {
+                                "id":  2795,
+                                "title":  "Residential fire at 1905 Huff Place",
+                                "category":  "fire",
+                                "score":  0.9,
+                                "firstSeen":  1780626129,
+                                "lastSeen":  1780626129
+                            },
+                            {
+                                "id":  2770,
+                                "title":  "Inhalation injury at 5234 Donlan Ln, abandoned apt",
+                                "category":  "fire",
+                                "score":  0.85,
+                                "firstSeen":  1780624734,
+                                "lastSeen":  1780624811
+                            },
+                            {
+                                "id":  2794,
+                                "title":  "Burglary in progress at 56 Lee Highway",
+                                "category":  "police",
+                                "score":  0.9,
+                                "firstSeen":  1780624786,
+                                "lastSeen":  1780624786
+                            },
+                            {
+                                "id":  2823,
+                                "title":  "Vehicle accident hitting tree at NE and Beer Ridge Trail",
+                                "category":  "police",
+                                "score":  0.95,
+                                "firstSeen":  1780624473,
+                                "lastSeen":  1780624473
+                            },
+                            {
+                                "id":  2824,
+                                "title":  "Suspicious person at Buchanan Circle and Dalton Pike SE",
+                                "category":  "police",
+                                "score":  0.85,
+                                "firstSeen":  1780623659,
+                                "lastSeen":  1780623917
+                            }
+                        ],
+    "auditSample":  [
+                        {
+                            "id":  17661,
+                            "timestampUtc":  "2026-06-05T09:18:36.4560019Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:create incident",
+                            "score":  0.6297157511111111,
+                            "callIds":  [
+                                            551433
+                                        ]
+                        },
+                        {
+                            "id":  17660,
+                            "timestampUtc":  "2026-06-05T09:18:36.4468252Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "score":  0.6297157511111111,
+                            "callIds":  [
+                                            551433
+                                        ]
+                        },
+                        {
+                            "id":  17659,
+                            "timestampUtc":  "2026-06-05T09:18:25.6458474Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0,
+                            "callIds":  [
+                                            551413
+                                        ]
+                        },
+                        {
+                            "id":  17658,
+                            "timestampUtc":  "2026-06-05T09:18:25.6365469Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 4 call(s), final ownership retained 1",
+                            "score":  0,
+                            "callIds":  [
+                                            551413
+                                        ]
+                        },
+                        {
+                            "id":  17657,
+                            "timestampUtc":  "2026-06-05T09:18:25.5339988Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17656,
+                            "timestampUtc":  "2026-06-05T09:18:25.5236557Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17655,
+                            "timestampUtc":  "2026-06-05T09:11:38.8946289Z",
+                            "systemShortName":  "whiteoakmt-cleveland",
+                            "operation":  "reject_incident",
+                            "accepted":  false,
+                            "reason":  "rejected:generic routine/status title is not an incident",
+                            "score":  0.46420891200000003,
+                            "callIds":  [
+                                            551421,
+                                            551437
+                                        ]
+                        },
+                        {
+                            "id":  17654,
+                            "timestampUtc":  "2026-06-05T09:11:27.2835957Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:create incident",
+                            "score":  0.3125707760740741,
+                            "callIds":  [
+                                            551423,
+                                            551427,
+                                            551429
+                                        ]
+                        },
+                        {
+                            "id":  17653,
+                            "timestampUtc":  "2026-06-05T09:11:08.0509645Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0,
+                            "callIds":  [
+                                            551413
+                                        ]
+                        },
+                        {
+                            "id":  17652,
+                            "timestampUtc":  "2026-06-05T09:11:08.0416219Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 4 call(s), final ownership retained 1",
+                            "score":  0,
+                            "callIds":  [
+                                            551413
+                                        ]
+                        },
+                        {
+                            "id":  17651,
+                            "timestampUtc":  "2026-06-05T09:11:07.934235Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17650,
+                            "timestampUtc":  "2026-06-05T09:11:07.9239394Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17649,
+                            "timestampUtc":  "2026-06-05T09:05:36.0321553Z",
+                            "systemShortName":  "whiteoakmt-cleveland",
+                            "operation":  "reject_incident",
+                            "accepted":  false,
+                            "reason":  "rejected:standalone transport/hospital handoff lacks a parent emergency/event anchor",
+                            "score":  0.4996005117777778,
+                            "callIds":  [
+                                            551335
+                                        ]
+                        },
+                        {
+                            "id":  17648,
+                            "timestampUtc":  "2026-06-05T09:05:24.8187476Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "reject_incident",
+                            "accepted":  false,
+                            "reason":  "rejected:single-call incident lacks a strong emergency/event signal",
+                            "score":  0.15,
+                            "callIds":  [
+                                            551389
+                                        ]
+                        },
+                        {
+                            "id":  17647,
+                            "timestampUtc":  "2026-06-05T09:05:14.5672556Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0.6382059586666666,
+                            "callIds":  [
+                                            551413
+                                        ]
+                        },
+                        {
+                            "id":  17646,
+                            "timestampUtc":  "2026-06-05T09:05:14.5563715Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 4 call(s), final ownership retained 1",
+                            "score":  0.6382059586666666,
+                            "callIds":  [
+                                            551413
+                                        ]
+                        },
+                        {
+                            "id":  17645,
+                            "timestampUtc":  "2026-06-05T09:05:14.4523241Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17644,
+                            "timestampUtc":  "2026-06-05T09:05:14.4403379Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17643,
+                            "timestampUtc":  "2026-06-05T08:59:42.7103794Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:create incident",
+                            "score":  0.6128890063333333,
+                            "callIds":  [
+                                            551361,
+                                            551377
+                                        ]
+                        },
+                        {
+                            "id":  17642,
+                            "timestampUtc":  "2026-06-05T08:59:42.6057079Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:update incident",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17641,
+                            "timestampUtc":  "2026-06-05T08:59:42.5949055Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "score":  0,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17640,
+                            "timestampUtc":  "2026-06-05T08:54:20.3117483Z",
+                            "systemShortName":  "whiteoakmt-cleveland",
+                            "operation":  "reject_incident",
+                            "accepted":  false,
+                            "reason":  "rejected:incident title/detail introduces unsupported emergency/event signal",
+                            "score":  0.49508453303703703,
+                            "callIds":  [
+                                            551241,
+                                            551251,
+                                            551257
+                                        ]
+                        },
+                        {
+                            "id":  17639,
+                            "timestampUtc":  "2026-06-05T08:53:49.2518265Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:create incident",
+                            "score":  0.15,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17638,
+                            "timestampUtc":  "2026-06-05T08:53:49.2411949Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "upsert_incident",
+                            "accepted":  true,
+                            "reason":  "accepted:verifier retained 2 call(s), final ownership retained 1",
+                            "score":  0.15,
+                            "callIds":  [
+                                            551333
+                                        ]
+                        },
+                        {
+                            "id":  17637,
+                            "timestampUtc":  "2026-06-05T08:42:15.9281977Z",
+                            "systemShortName":  "whiteoakmt-hamilton",
+                            "operation":  "reject_incident",
+                            "accepted":  false,
+                            "reason":  "rejected:only 1 call supports the incident title/detail anchor",
+                            "score":  0.6051858095555556,
+                            "callIds":  [
+                                            551025,
+                                            551031,
+                                            551059,
+                                            551067
+                                        ]
+                        }
+                    ],
+    "trSamples":  380,
+    "db":  {
+               "lm_models":  {
+                                 "value":  [
+                                               {
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "finish_reason":  "stop",
+                                                   "count":  220
+                                               },
+                                               {
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "finish_reason":  "length",
+                                                   "count":  10
+                                               }
+                                           ],
+                                 "Count":  2
+                             },
+               "lm_errors":  {
+                                 "value":  [
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T09:17:54.4632810Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  1514,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  3314,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T08:48:35.1496045Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  1979,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  3779,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T08:19:42.2890354Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  1291,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  3091,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T06:12:52.8710757Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  1622,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  3422,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T04:59:57.0523926Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  2332,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  4132,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T03:25:49.5765890Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  2624,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  4424,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T03:19:07.5950965Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  3103,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  4903,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T03:17:45.5277825Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  2066,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  3866,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T03:05:06.9569644Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  1703,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  3503,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               },
+                                               {
+                                                   "timestamp_utc":  "2026-06-05T02:32:30.9098768Z",
+                                                   "trigger_activity":  "automatic insights",
+                                                   "success":  0,
+                                                   "finish_reason":  "length",
+                                                   "request_model":  "qwen/qwen3.6-35b-a3b@q8_0",
+                                                   "response_model":  "paxan-qwen3.6-35b-a3b@q8_0",
+                                                   "prompt_tokens":  3527,
+                                                   "completion_tokens":  1800,
+                                                   "total_tokens":  5327,
+                                                   "error":  "LM incident extraction response was truncated at max_tokens=1800."
+                                               }
+                                           ],
+                                 "Count":  10
+                             },
+               "single_call_incidents":  {
+                                             "value":  [
+                                                           {
+                                                               "id":  2836,
+                                                               "title":  "Smoke detector alarm at 629 Paw Paw Trail",
+                                                               "category":  "fire",
+                                                               "score":  0.900000000000000022,
+                                                               "calls":  1,
+                                                               "last_seen":  1780650293
+                                                           },
+                                                           {
+                                                               "id":  2834,
+                                                               "title":  "Fire alarm at 4739 Sussex Lane",
+                                                               "category":  "fire",
+                                                               "score":  0.949999999999999955,
+                                                               "calls":  1,
+                                                               "last_seen":  1780650183
+                                                           },
+                                                           {
+                                                               "id":  2831,
+                                                               "title":  "Gas leak at 8042 Rosemarie Way",
+                                                               "category":  "fire",
+                                                               "score":  0.949999999999999955,
+                                                               "calls":  1,
+                                                               "last_seen":  1780649412
+                                                           },
+                                                           {
+                                                               "id":  2832,
+                                                               "title":  "Carbon Monoxide Alarm at 519 Picture Ridge Dr",
+                                                               "category":  "fire",
+                                                               "score":  0.800000000000000044,
+                                                               "calls":  1,
+                                                               "last_seen":  1780643962
+                                                           },
+                                                           {
+                                                               "id":  2828,
+                                                               "title":  "Pursuit on Broadway and Main St, suspect in black truck",
+                                                               "category":  "other",
+                                                               "score":  0.849999999999999977,
+                                                               "calls":  1,
+                                                               "last_seen":  1780637801
+                                                           },
+                                                           {
+                                                               "id":  2827,
+                                                               "title":  "MVC with fire and injuries at 6441 Bonnie Oaks Dr",
+                                                               "category":  "ems",
+                                                               "score":  0.949999999999999955,
+                                                               "calls":  1,
+                                                               "last_seen":  1780635891
+                                                           },
+                                                           {
+                                                               "id":  2830,
+                                                               "title":  "Fall victim at 7488 Back Valley Rd",
+                                                               "category":  "police",
+                                                               "score":  0.900000000000000022,
+                                                               "calls":  1,
+                                                               "last_seen":  1780635231
+                                                           },
+                                                           {
+                                                               "id":  2826,
+                                                               "title":  "Pursuit on E Main St and S Library St",
+                                                               "category":  "other",
+                                                               "score":  0.949999999999999955,
+                                                               "calls":  1,
+                                                               "last_seen":  1780632348
+                                                           },
+                                                           {
+                                                               "id":  2789,
+                                                               "title":  "Possible Structure Fire at Bakerby Drive",
+                                                               "category":  "fire",
+                                                               "score":  0.949999999999999955,
+                                                               "calls":  1,
+                                                               "last_seen":  1780631878
+                                                           },
+                                                           {
+                                                               "id":  2758,
+                                                               "title":  "Medical Assist at 205 Millard Road",
+                                                               "category":  "fire",
+                                                               "score":  0.900000000000000022,
+                                                               "calls":  1,
+                                                               "last_seen":  1780631437
+                                                           },
+                                                           {
+                                                               "id":  2825,
+                                                               "title":  "Fire Investigation at 207 Wilhoit Dr SW",
+                                                               "category":  "fire",
+                                                               "score":  0.849999999999999977,
+                                                               "calls":  1,
+                                                               "last_seen":  1780629361
+                                                           },
+                                                           {
+                                                               "id":  2795,
+                                                               "title":  "Residential fire at 1905 Huff Place",
+                                                               "category":  "fire",
+                                                               "score":  0.900000000000000022,
+                                                               "calls":  1,
+                                                               "last_seen":  1780626129
+                                                           },
+                                                           {
+                                                               "id":  2794,
+                                                               "title":  "Burglary in progress at 56 Lee Highway",
+                                                               "category":  "police",
+                                                               "score":  0.900000000000000022,
+                                                               "calls":  1,
+                                                               "last_seen":  1780624786
+                                                           },
+                                                           {
+                                                               "id":  2823,
+                                                               "title":  "Vehicle accident hitting tree at NE and Beer Ridge Trail",
+                                                               "category":  "police",
+                                                               "score":  0.949999999999999955,
+                                                               "calls":  1,
+                                                               "last_seen":  1780624473
+                                                           },
+                                                           {
+                                                               "id":  2797,
+                                                               "title":  "Medical assist, 6942 Love Ln",
+                                                               "category":  "fire",
+                                                               "score":  0.849999999999999977,
+                                                               "calls":  1,
+                                                               "last_seen":  1780623536
+                                                           },
+                                                           {
+                                                               "id":  2796,
+                                                               "title":  "MVC with injuries, South Hwy 341 at Bakern-Hearn",
+                                                               "category":  "fire",
+                                                               "score":  0.849999999999999977,
+                                                               "calls":  1,
+                                                               "last_seen":  1780623485
+                                                           },
+                                                           {
+                                                               "id":  2793,
+                                                               "title":  "MVC at Shullover Rd, no vehicle seen yet",
+                                                               "category":  "police",
+                                                               "score":  0.800000000000000044,
+                                                               "calls":  1,
+                                                               "last_seen":  1780623468
+                                                           },
+                                                           {
+                                                               "id":  2769,
+                                                               "title":  "MVC at Shelfer and Gumruil Rd, no injuries reported",
+                                                               "category":  "police",
+                                                               "score":  0.849999999999999977,
+                                                               "calls":  1,
+                                                               "last_seen":  1780623408
+                                                           },
+                                                           {
+                                                               "id":  2821,
+                                                               "title":  "MVC with possible injury at Your Team and Julie St",
+                                                               "category":  "ems",
+                                                               "score":  0.900000000000000022,
+                                                               "calls":  1,
+                                                               "last_seen":  1780622736
+                                                           }
+                                                       ],
+                                             "Count":  19
+                                         },
+               "incident_call_counts":  {
+                                            "value":  [
+                                                          {
+                                                              "call_count":  1,
+                                                              "incidents":  19
+                                                          },
+                                                          {
+                                                              "call_count":  2,
+                                                              "incidents":  7
+                                                          },
+                                                          {
+                                                              "call_count":  3,
+                                                              "incidents":  2
+                                                          }
+                                                      ],
+                                            "Count":  3
+                                        },
+               "category_mismatch_candidates":  {
+                                                    "value":  [
+                                                                  {
+                                                                      "id":  2835,
+                                                                      "title":  "Medical assist at 1 Washington St",
+                                                                      "category":  "ems",
+                                                                      "call_categories":  "police,fire",
+                                                                      "calls":  3,
+                                                                      "last_seen":  1780650270
+                                                                  },
+                                                                  {
+                                                                      "id":  2834,
+                                                                      "title":  "Fire alarm at 4739 Sussex Lane",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780650183
+                                                                  },
+                                                                  {
+                                                                      "id":  2827,
+                                                                      "title":  "MVC with fire and injuries at 6441 Bonnie Oaks Dr",
+                                                                      "category":  "ems",
+                                                                      "call_categories":  "ems",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780635891
+                                                                  },
+                                                                  {
+                                                                      "id":  2789,
+                                                                      "title":  "Possible Structure Fire at Bakerby Drive",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780631878
+                                                                  },
+                                                                  {
+                                                                      "id":  2758,
+                                                                      "title":  "Medical Assist at 205 Millard Road",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780631437
+                                                                  },
+                                                                  {
+                                                                      "id":  2757,
+                                                                      "title":  "Gunshots Reported Near Kirkland Ave / Wheeler Homes",
+                                                                      "category":  "police",
+                                                                      "call_categories":  "police",
+                                                                      "calls":  2,
+                                                                      "last_seen":  1780630881
+                                                                  },
+                                                                  {
+                                                                      "id":  2825,
+                                                                      "title":  "Fire Investigation at 207 Wilhoit Dr SW",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780629361
+                                                                  },
+                                                                  {
+                                                                      "id":  2795,
+                                                                      "title":  "Residential fire at 1905 Huff Place",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780626129
+                                                                  },
+                                                                  {
+                                                                      "id":  2823,
+                                                                      "title":  "Vehicle accident hitting tree at NE and Beer Ridge Trail",
+                                                                      "category":  "police",
+                                                                      "call_categories":  "police",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780624473
+                                                                  },
+                                                                  {
+                                                                      "id":  2797,
+                                                                      "title":  "Medical assist, 6942 Love Ln",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780623536
+                                                                  },
+                                                                  {
+                                                                      "id":  2796,
+                                                                      "title":  "MVC with injuries, South Hwy 341 at Bakern-Hearn",
+                                                                      "category":  "fire",
+                                                                      "call_categories":  "fire",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780623485
+                                                                  },
+                                                                  {
+                                                                      "id":  2793,
+                                                                      "title":  "MVC at Shullover Rd, no vehicle seen yet",
+                                                                      "category":  "police",
+                                                                      "call_categories":  "police",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780623468
+                                                                  },
+                                                                  {
+                                                                      "id":  2769,
+                                                                      "title":  "MVC at Shelfer and Gumruil Rd, no injuries reported",
+                                                                      "category":  "police",
+                                                                      "call_categories":  "police",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780623408
+                                                                  },
+                                                                  {
+                                                                      "id":  2822,
+                                                                      "title":  "MVC with injuries at Munstreet and Dooley St",
+                                                                      "category":  "traffic",
+                                                                      "call_categories":  "police,fire",
+                                                                      "calls":  3,
+                                                                      "last_seen":  1780622943
+                                                                  },
+                                                                  {
+                                                                      "id":  2821,
+                                                                      "title":  "MVC with possible injury at Your Team and Julie St",
+                                                                      "category":  "ems",
+                                                                      "call_categories":  "ems",
+                                                                      "calls":  1,
+                                                                      "last_seen":  1780622736
+                                                                  }
+                                                              ],
+                                                    "Count":  15
+                                                },
+               "representative_calls":  {
+                                            "value":  [
+                                                          {
+                                                              "incident_id":  2835,
+                                                              "title":  "Medical assist at 1 Washington St",
+                                                              "incident_category":  "ems",
+                                                              "call_id":  551423,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "WLKR CITY PD - Cities Police: Dispatch",
+                                                              "transcript":  "Good. 6-Hero 1 Washington Street lift driver that vows and he has a passenger that should not wake up and not if he is breathing was very intoxicated when he picked him up. Sleep jerky. We do have EMS and 5-Hero 1 as wel"
+                                                          },
+                                                          {
+                                                              "incident_id":  2835,
+                                                              "title":  "Medical assist at 1 Washington St",
+                                                              "incident_category":  "ems",
+                                                              "call_id":  551429,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "WCFR-DISP - Fire/EMS: Dispatch (Countywide)",
+                                                              "transcript":  "11 Rolls-Royce Fire Department, 01 Washington Street, 01 Washington Street, them in the parking lot. Have a male subject that\u0027s a passenger for a little drive. He\u0027s unable to get him away. Can only be breathing. That wil"
+                                                          },
+                                                          {
+                                                              "incident_id":  2835,
+                                                              "title":  "Medical assist at 1 Washington St",
+                                                              "incident_category":  "ems",
+                                                              "call_id":  551427,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "WLKR CITY PD - Cities Police: Dispatch",
+                                                              "transcript":  "213, be advised to find him on Washington Street. Side, Jake Walker, lift driver was how he came to figure out where he was."
+                                                          },
+                                                          {
+                                                              "incident_id":  2834,
+                                                              "title":  "Fire alarm at 4739 Sussex Lane",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  551413,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC TCVFD OPS - Tri Community Fire: Tac",
+                                                              "transcript":  "Pull 43 in route, 4739 Sussex Lane, 479 Sussex Lane between..."
+                                                          },
+                                                          {
+                                                              "incident_id":  2827,
+                                                              "title":  "MVC with fire and injuries at 6441 Bonnie Oaks Dr",
+                                                              "incident_category":  "ems",
+                                                              "call_id":  549793,
+                                                              "call_category":  "ems",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC EMS-MAIN - EMS: Main",
+                                                              "transcript":  "Medics 17, responding to 6441 Bonnie Oaks Drive, 6441 Bonnie Oaks Drive, playing basswood driving, Boris Drive."
+                                                          },
+                                                          {
+                                                              "incident_id":  2789,
+                                                              "title":  "Possible Structure Fire at Bakerby Drive",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  548967,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC-FIRE MAIN - Fire: Dispatch - Main (County)",
+                                                              "transcript":  "Highway 58 fire, 10-13-0 Baker Boy Drive, 0-1-3-0 Baker Boy Drive for possible resident fire staging quarters until 1604, Indian 51, Kenneth Voss."
+                                                          },
+                                                          {
+                                                              "incident_id":  2758,
+                                                              "title":  "Medical Assist at 205 Millard Road",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  548871,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC-FGND5 - Fireground 5 (County)",
+                                                              "transcript":  "2R5, first thing, 25 Millard Road, 205 Millard Road, off Bice Road, on E-Thread Trail Road. We on a 55-year-old male that we hasn\u0027t eaten in all 40 days. But I have chest pain, and his body is also going to be a conditio"
+                                                          },
+                                                          {
+                                                              "incident_id":  2757,
+                                                              "title":  "Gunshots Reported Near Kirkland Ave / Wheeler Homes",
+                                                              "incident_category":  "police",
+                                                              "call_id":  548775,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC CPD A - Police: Adam Dispatch",
+                                                              "transcript":  "They say, SES or from Emma Wheeler. Is that what they used? We\u0027re talking about possibly Southwest from the Kirkland Avenue address, and I-12 said possibly towards Emma Wheeler."
+                                                          },
+                                                          {
+                                                              "incident_id":  2757,
+                                                              "title":  "Gunshots Reported Near Kirkland Ave / Wheeler Homes",
+                                                              "incident_category":  "police",
+                                                              "call_id":  548787,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HCSO-WEST - Sheriff: Dispatch-West",
+                                                              "transcript":  "Any units down at Eastlake area? Tiny unit through here in Gunshots. Best from Kirkland Avenue. Possibly coming from in the Wheeler Homes at 4,900 Edinburgh. You need to check it out. Nothing located at this current time"
+                                                          },
+                                                          {
+                                                              "incident_id":  2825,
+                                                              "title":  "Fire Investigation at 207 Wilhoit Dr SW",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  548511,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-cleveland",
+                                                              "talkgroup_name":  "Brad Fire Main - Fire/Rescue: Main (Countywide)",
+                                                              "transcript":  "The area of 207 Wilhoit Drive southwest, colors are rising, she\u0027ll smell a strong toxic smell outside that is burning her eyes and nose. I\u0027m clear on exactly where it\u0027s coming from. She\u0027s got some problems near the dump "
+                                                          },
+                                                          {
+                                                              "incident_id":  2795,
+                                                              "title":  "Residential fire at 1905 Huff Place",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  547783,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC CFD FG1 - Fireground 1",
+                                                              "transcript":  "Ladder 5, engine F squad 1, engine 1, ladder 1, battalion 3, battalion 2, battalion 1, and responding residential fire 1905, Huff Huff 1905 Huff Place, east 19th and east 21st Street across streets. Viaduct was smoking, "
+                                                          },
+                                                          {
+                                                              "incident_id":  2797,
+                                                              "title":  "Medical assist, 6942 Love Ln",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  547151,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC-FIRE MAIN - Fire: Dispatch - Main (County)",
+                                                              "transcript":  "So, we\u0027re going to respond out to 6942 Love Lane, 6942 Love Lane, Cross and Stirling and Beach and Lane, 63-year-old female with the Donaldine just with it home with the feeding tube is now at the location. We\u0027re respond"
+                                                          },
+                                                          {
+                                                              "incident_id":  2796,
+                                                              "title":  "MVC with injuries, South Hwy 341 at Bakern-Hearn",
+                                                              "incident_category":  "fire",
+                                                              "call_id":  547137,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "WCFR-DISP - Fire/EMS: Dispatch (Countywide)",
+                                                              "transcript":  "Medical 12, South Highway 341, Bakern-Hearn, South 1 at Bakern-Hearn. Have law enforcement out with a 4-year-old child that was on the side of the road. They\u0027re requesting you not emergency for a vitals check. 341 at Bak"
+                                                          },
+                                                          {
+                                                              "incident_id":  2793,
+                                                              "title":  "MVC at Shullover Rd, no vehicle seen yet",
+                                                              "incident_category":  "police",
+                                                              "call_id":  547129,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC CPD C - Police: Charlie Dispatch",
+                                                              "transcript":  "Two seven. Good. I\u0027m at Shullover Road in Dunbarrow. I\u0027m not seeing an accident. Do we have any vehicle description? Not yet. Staying by, I\u0027ll try to get you one."
+                                                          },
+                                                          {
+                                                              "incident_id":  2769,
+                                                              "title":  "MVC at Shelfer and Gumruil Rd, no injuries reported",
+                                                              "incident_category":  "police",
+                                                              "call_id":  547099,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-hamilton",
+                                                              "talkgroup_name":  "HC CPD C - Police: Charlie Dispatch",
+                                                              "transcript":  "Intersection of Shelfer Road and Gumruil Road, Shelfering Gumbarrel stating that there are no injuries, but he\u0027s also not on scene. Saying that his wife was involved in a car accident in this area wouldn\u0027t give us his ph"
+                                                          },
+                                                          {
+                                                              "incident_id":  2822,
+                                                              "title":  "MVC with injuries at Munstreet and Dooley St",
+                                                              "incident_category":  "traffic",
+                                                              "call_id":  546927,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-cleveland",
+                                                              "talkgroup_name":  "Cleveland Police - Cleveland Police: Dispatch",
+                                                              "transcript":  "I\u0027m not a cop. Not a cop. 3370, 3365, that\u0027d be a cop. There you go for the bus. It\u0027s gonna be an ABI with the injuries in Munstreet at Dooley Street. 1048, you\u0027ll be in route with us."
+                                                          },
+                                                          {
+                                                              "incident_id":  2822,
+                                                              "title":  "MVC with injuries at Munstreet and Dooley St",
+                                                              "incident_category":  "traffic",
+                                                              "call_id":  546939,
+                                                              "call_category":  "fire",
+                                                              "system_short_name":  "whiteoakmt-cleveland",
+                                                              "talkgroup_name":  "Cleveland Fire - Cleveland Fire: Dispatch",
+                                                              "transcript":  "Rescue on NCCN, accident with injuries, and then Stree, Dooley Street, Southeast."
+                                                          },
+                                                          {
+                                                              "incident_id":  2822,
+                                                              "title":  "MVC with injuries at Munstreet and Dooley St",
+                                                              "incident_category":  "traffic",
+                                                              "call_id":  546983,
+                                                              "call_category":  "police",
+                                                              "system_short_name":  "whiteoakmt-cleveland",
+                                                              "talkgroup_name":  "Cleveland Police - Cleveland Police: Dispatch",
+                                                              "transcript":  "75 it\u0027s gonna be a red SUV in a silver core that on collision to doubt a child saying something hurt in a female complaint of leg pain is with. You get clarification on it but EMS is already 97. Yes we do have an EMS you"
+                                                          },
+                                                          {
+                                                              "incident_id":  2821,
+                                                              "title":  "MVC with possible injury at Your Team and Julie St",
+                                                              "incident_category":  "ems",
+                                                              "call_id":  546905,
+                                                              "call_category":  "ems",
+                                                              "system_short_name":  "whiteoakmt-cleveland",
+                                                              "talkgroup_name":  "Bradley EMS DIsp - EMS: Dispatch (Countywide)",
+                                                              "transcript":  "Oh, and I think there is an MBC with Possible Injury, your team and Julie Street."
+                                                          }
+                                                      ],
+                                            "Count":  19
+                                        }
+           }
+}

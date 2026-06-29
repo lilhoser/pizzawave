@@ -1,0 +1,62 @@
+{
+  "server": {
+    "httpBind": "127.0.0.1",
+    "httpPort": 18080
+  },
+  "auth": {
+    "mode": "open",
+    "readRequiresAuth": false,
+    "writeRequiresAuth": false,
+    "tokenFile": "../artifacts/pizzad-local.token"
+  },
+  "storage": {
+    "databasePath": "../artifacts/pizzad-local.db",
+    "audioRoot": "../artifacts/pizzad-local-audio",
+    "importCacheRoot": "../artifacts/pizzad-local-import-cache",
+    "appDataRoot": "../artifacts/pizzad-local-appdata"
+  },
+  "ingest": {
+    "callstreamBind": "127.0.0.1",
+    "callstreamPort": 19123,
+    "maxConcurrentClients": 4
+  },
+  "transcription": {
+    "provider": "none",
+    "analogSampleRate": 8000,
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "whisperThreads": 2,
+    "liveTranscriptionWorkers": 1,
+    "livePressureQueueDepth": 200
+  },
+  "aiInsights": {
+    "enabled": false,
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "openAiModel": "",
+    "batchSize": 20,
+    "maxPendingCalls": 1000,
+    "timeoutMs": 600000,
+    "maxRetries": 2,
+    "maxManualLookbackHours": 24,
+    "maxManualSummaryCalls": 300,
+    "maxManualSummaryWindows": 20,
+    "maxQueueDepthForManualSummary": 100
+  },
+  "sftpImport": {
+    "enabled": false,
+    "quickImportMaxHours": 48,
+    "defaultBatchCallCap": 5000,
+    "defaultBatchByteCap": 21474836480
+  },
+  "trunkRecorder": {
+    "configPath": "/etc/trunk-recorder/config.json",
+    "talkgroupCatalogPath": "../artifacts/pizzad-local-appdata/talkgroups.json",
+    "talkgroupsPath": "/etc/trunk-recorder/talkgroups.csv",
+    "logServiceName": "trunk-recorder",
+    "healthWindowMinutes": 5
+  },
+  "alerts": {
+    "emailEnabled": false,
+    "emailProvider": "gmail",
+    "rules": []
+  }
+}

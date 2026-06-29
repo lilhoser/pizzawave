@@ -1,0 +1,483 @@
+{
+  "label_set": "incident-v2-shadow-labels-20260619",
+  "source_report": "artifacts/incident-replay-corpus/incident-shadow-report-20260619T044445Z.json",
+  "notes": [
+    "Seed labels from manual transcript review of changed v1/v2 replay outcomes.",
+    "Labels are intentionally conservative. needs_review cases are excluded from score gates.",
+    "Expected outcomes describe what v2 should do after the next prompt/server iteration, not what v1 did."
+  ],
+  "cases": [
+    {
+      "audit_id": 30112,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Domestic dispute with arguing and threatened hands-on conduct; v1 rejected due low pair similarity."
+    },
+    {
+      "audit_id": 30064,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Residential alarm at 101 Foster Lane NE is a concrete dispatch."
+    },
+    {
+      "audit_id": 30051,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Suicidal-subject call at 30 North Market Street is a concrete police/EMS concern."
+    },
+    {
+      "audit_id": 30044,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Standalone EMS assist on Bellingham Drive has no parent emergency evidence; it should attach to an existing parent incident when one exists, otherwise be dropped."
+    },
+    {
+      "audit_id": 30039,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Duplicate audit row for standalone EMS assist on Bellingham Drive; no source-backed parent emergency is present, so it should not create a standalone incident."
+    },
+    {
+      "audit_id": 30038,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Vehicle burglary at 3115 Dodson Avenue was rejected by v1 solely due unknown model incident ID."
+    },
+    {
+      "audit_id": 30037,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Highway 27 windshield damage from object thrown by truck is a concrete property/traffic incident."
+    },
+    {
+      "audit_id": 30036,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Tree down with highway department traffic-control assistance is a concrete road hazard."
+    },
+    {
+      "audit_id": 30035,
+      "expected_outcome": "accept",
+      "label": "v2_improvement",
+      "rationale": "Same Highway 27 windshield damage call as row 30037; v1 verifier retained no event-member calls."
+    },
+    {
+      "audit_id": 30034,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Walder Road traffic appears to be a low-detail lift-assist / medical-assist dispatch and should not create a standalone incident without a source-backed parent emergency."
+    },
+    {
+      "audit_id": 30110,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Traffic-stop/tag/status cluster at 3333 St. Elmo has no source-backed primary incident."
+    },
+    {
+      "audit_id": 30109,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Traffic-stop/tag/status cluster at 3333 St. Elmo has no source-backed primary incident."
+    },
+    {
+      "audit_id": 30106,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Traffic-stop/tag/status cluster at 3333 St. Elmo has no source-backed primary incident."
+    },
+    {
+      "audit_id": 30105,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Traffic-stop/tag/status cluster at 3333 St. Elmo has no source-backed primary incident."
+    },
+    {
+      "audit_id": 30100,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Mixed traffic-stop/tag/status rows at 3333 St. Elmo should not create an incident."
+    },
+    {
+      "audit_id": 30096,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Mixed traffic-stop/tag/status rows at 3333 St. Elmo should not create an incident."
+    },
+    {
+      "audit_id": 30084,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Traffic-stop/tag/status cluster at 3333 St. Elmo has no source-backed primary incident."
+    },
+    {
+      "audit_id": 30081,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Roadway clear/code status chatter is not a standalone incident."
+    },
+    {
+      "audit_id": 30080,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Subject/warrant/date-of-birth check is routine law-enforcement status without a primary incident."
+    },
+    {
+      "audit_id": 30079,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Subject/warrant/date-of-birth check is routine law-enforcement status without a primary incident."
+    },
+    {
+      "audit_id": 30077,
+      "expected_outcome": "reject",
+      "label": "v2_improvement",
+      "rationale": "Large 3333 St. Elmo traffic-stop/tag cluster is routine status, not a public-safety incident."
+    },
+    {
+      "audit_id": 30073,
+      "expected_outcome": "accept",
+      "label": "v2_regression",
+      "rationale": "MVC with injuries at South Seminole Drive and Brainerd Road is a concrete good incident."
+    },
+    {
+      "audit_id": 30052,
+      "expected_outcome": "accept",
+      "label": "v2_regression",
+      "rationale": "Traffic accident at Lee Highway and Hampton Park Drive with children to be checked is concrete."
+    },
+    {
+      "audit_id": 30076,
+      "expected_outcome": "accept",
+      "expected_call_ids": [802437, 802497, 802511, 802823],
+      "label": "v2_regression",
+      "rationale": "V2 dropped the initial unconscious-patient dispatch from a related overdose chain."
+    },
+    {
+      "audit_id": 30075,
+      "expected_outcome": "accept",
+      "expected_call_ids": [802437, 802497, 802511, 802823],
+      "label": "v2_regression",
+      "rationale": "V2 dropped the initial unconscious-patient dispatch from a related overdose chain."
+    },
+    {
+      "audit_id": 30069,
+      "expected_outcome": "accept",
+      "expected_call_ids": [802437, 802497, 802511, 802823],
+      "label": "v2_regression",
+      "rationale": "V2 dropped the initial unconscious-patient dispatch from a related overdose chain."
+    },
+    {
+      "audit_id": 30063,
+      "expected_outcome": "accept",
+      "expected_call_ids": [802437, 802497, 802511],
+      "label": "v2_regression",
+      "rationale": "V2 dropped the initial unconscious-patient dispatch from a related overdose chain."
+    },
+    {
+      "audit_id": 30589,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812887, 813049],
+      "label": "fresh_false_join",
+      "rationale": "Candidate set mixes a possible stolen firearm at 2275 Spring Place Road with a carbon-monoxide alarm at 2561 Sweetway Circle; v2 should prune the alarm and retain the stolen-firearm calls."
+    },
+    {
+      "audit_id": 30586,
+      "expected_outcome": "accept",
+      "expected_call_ids": [813053, 813061],
+      "label": "fresh_preserve_positive",
+      "rationale": "Aggressive dogs running at large are repeatedly tied to 3910 University Drive."
+    },
+    {
+      "audit_id": 30582,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812997],
+      "label": "fresh_preserve_positive",
+      "rationale": "Carbon-monoxide detector/audible alarm at 2561 Sweetway Circle is a concrete fire incident."
+    },
+    {
+      "audit_id": 30569,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812887, 813049],
+      "label": "fresh_preserve_positive",
+      "rationale": "Both calls support the same possible stolen-firearm event, with the later call supplying the serial/reference number."
+    },
+    {
+      "audit_id": 30567,
+      "expected_outcome": "accept",
+      "expected_call_ids": [813139],
+      "label": "fresh_preserve_positive",
+      "rationale": "Package stolen at 1410 William Street is a concrete theft report."
+    },
+    {
+      "audit_id": 30557,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812887],
+      "label": "fresh_preserve_positive",
+      "rationale": "Possible stolen firearm at 2275 Spring Place Road is a concrete police incident."
+    },
+    {
+      "audit_id": 30554,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812731, 812739],
+      "label": "fresh_false_reject",
+      "rationale": "Both calls describe the same 911 hangup at 1110 Market Street and should be retained together."
+    },
+    {
+      "audit_id": 30552,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Supervisor / hospital-transfer style traffic lacks a source-backed parent emergency and should not create a standalone incident."
+    },
+    {
+      "audit_id": 30551,
+      "expected_outcome": "reject",
+      "label": "fresh_clean_reject",
+      "rationale": "GI lab power / operational chatter lacks a source-backed public-safety incident."
+    },
+    {
+      "audit_id": 30549,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812121, 812141],
+      "label": "fresh_preserve_positive",
+      "rationale": "Heart problems with chest pain at Howard Circle is a concrete medical incident."
+    },
+    {
+      "audit_id": 30547,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811963, 811999, 812001],
+      "label": "fresh_preserve_positive",
+      "rationale": "Automatic fire alarm at 2309 Hickory Valley Road is a concrete fire incident with related response/cancel traffic."
+    },
+    {
+      "audit_id": 30545,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812457],
+      "label": "fresh_preserve_positive",
+      "rationale": "Audible general fire alarm at Staples on Keith Street is a concrete fire incident."
+    },
+    {
+      "audit_id": 30537,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811621, 811623, 811647],
+      "label": "fresh_preserve_positive",
+      "rationale": "Accident with injuries at Detour Road and Dayton Pike is supported across dispatch and response calls."
+    },
+    {
+      "audit_id": 30534,
+      "expected_outcome": "accept",
+      "expected_call_ids": [812299],
+      "label": "fresh_false_reject",
+      "rationale": "Audible burglary alarm with an address is a concrete alarm incident despite noisy transcription."
+    },
+    {
+      "audit_id": 30533,
+      "expected_outcome": "reject",
+      "label": "fresh_clean_reject",
+      "rationale": "Plate / way-station traffic lacks a standalone public-safety incident."
+    },
+    {
+      "audit_id": 30528,
+      "expected_outcome": "reject",
+      "label": "fresh_false_join",
+      "rationale": "Candidate set mixes the 2309 Hickory Valley fire alarm with a separate commercial fire alarm at 406 Broad Street."
+    },
+    {
+      "audit_id": 30527,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811475, 811493, 811499],
+      "label": "fresh_false_join",
+      "rationale": "Candidate set mixes a possible stroke at 3429 Lightfoot Mill Road with an unrelated unresponsive male behind East 21st Street pickleball courts; v2 should prune the unrelated East 21st Street call and retain the Lightfoot Mill stroke calls."
+    },
+    {
+      "audit_id": 30505,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Meet-up / ETA traffic about a stolen vehicle lacks enough parent incident evidence to create a standalone incident."
+    },
+    {
+      "audit_id": 30503,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811475, 811479, 811493, 811499],
+      "label": "fresh_false_reject",
+      "rationale": "All retained calls describe the same Lightfoot Mill Road possible stroke / unconscious patient incident."
+    },
+    {
+      "audit_id": 30501,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811475, 811493, 811499],
+      "label": "fresh_preserve_positive",
+      "rationale": "Possible stroke / unresponsive patient at 3429 Lightfoot Mill Road is a concrete medical incident."
+    },
+    {
+      "audit_id": 30492,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811349, 811355],
+      "label": "fresh_false_reject",
+      "rationale": "MVA with minor injuries at Mouse Creek Road and Creek Bend Circle is a concrete traffic incident."
+    },
+    {
+      "audit_id": 30490,
+      "expected_outcome": "accept",
+      "expected_call_ids": [811273],
+      "label": "fresh_preserve_positive",
+      "rationale": "Multiple-vehicle crash at Old Georgetown Road / St. Elmo Road is a concrete traffic incident."
+    },
+    {
+      "audit_id": 30432,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Facility-to-facility non-emergency transfer / hospital report traffic should not create a standalone incident."
+    },
+    {
+      "audit_id": 30431,
+      "expected_outcome": "accept",
+      "expected_call_ids": [810085, 810121],
+      "label": "fresh_preserve_positive",
+      "rationale": "One-vehicle accident near I-24 eastbound mile marker 3 is a concrete traffic incident."
+    },
+    {
+      "audit_id": 30430,
+      "expected_outcome": "reject",
+      "label": "transport_or_assist_policy",
+      "rationale": "Non-emergency transport / hospital handoff cluster lacks a shared parent emergency event."
+    },
+    {
+      "audit_id": 30429,
+      "expected_outcome": "accept",
+      "expected_call_ids": [810003, 810027, 810041, 810043, 810045, 810051, 810059, 810063],
+      "label": "fresh_preserve_positive",
+      "rationale": "Commercial structure fire / machine fire at 310 Industrial Drive is supported by dispatch and command traffic."
+    },
+    {
+      "audit_id": 30425,
+      "expected_outcome": "accept",
+      "expected_call_ids": [810293, 810357, 810369, 810377],
+      "label": "fresh_false_reject",
+      "rationale": "Calls describe the same suicidal armed subject / black vehicle event originating around 4749 Rex Lane."
+    },
+    {
+      "audit_id": 30423,
+      "expected_outcome": "accept",
+      "expected_call_ids": [810293, 810357, 810369],
+      "label": "fresh_false_reject",
+      "rationale": "Calls describe the same suicidal armed subject / black vehicle event and should not be rejected solely because one update lacks the full address."
+    },
+    {
+      "audit_id": 30419,
+      "expected_outcome": "accept",
+      "expected_call_ids": [810289, 810293, 810301],
+      "label": "fresh_false_reject",
+      "rationale": "Rex Lane / Rexway calls are dispatch and area updates for the same suicidal-subject incident."
+    },
+    {
+      "audit_id": 30414,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809899],
+      "label": "fresh_preserve_positive",
+      "rationale": "Chest pain at Marlon Avenue is a concrete medical incident."
+    },
+    {
+      "audit_id": 30413,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809895],
+      "label": "fresh_preserve_positive",
+      "rationale": "Possible heart attack at Barnhouse Road is a concrete medical incident."
+    },
+    {
+      "audit_id": 30398,
+      "expected_outcome": "accept",
+      "expected_call_ids": [810003, 810027],
+      "label": "fresh_preserve_positive",
+      "rationale": "Industrial Drive alarm upgraded to structure fire after a motor was reported on fire."
+    },
+    {
+      "audit_id": 30391,
+      "expected_outcome": "reject",
+      "label": "fresh_clean_reject",
+      "rationale": "Music complaint / refusal to provide information lacks a strong emergency event signal."
+    },
+    {
+      "audit_id": 30390,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809783],
+      "label": "fresh_false_join",
+      "rationale": "Candidate pair mixes a difficulty-breathing call with unrelated clinic / stop traffic; v2 should prune the clinic/stop traffic and retain the breathing-difficulty call."
+    },
+    {
+      "audit_id": 30387,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809727],
+      "label": "fresh_false_join",
+      "rationale": "Candidate pair mixes a prior fight follow-up with a separate alarm / owner-en-route call; v2 should prune the fight follow-up and retain the alarm call."
+    },
+    {
+      "audit_id": 30385,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809473],
+      "label": "fresh_preserve_positive",
+      "rationale": "Wellbeing check for a subject with a dead GPS ankle monitor is a concrete police/public-safety incident."
+    },
+    {
+      "audit_id": 30382,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809307, 809343, 809463],
+      "label": "fresh_preserve_positive",
+      "rationale": "Shots-fired call and THP follow-up traffic refer to the same Rossville Avenue incident."
+    },
+    {
+      "audit_id": 30379,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809483],
+      "label": "fresh_false_join",
+      "rationale": "Candidate pair mixes an identity/check traffic item with an unrelated vehicle/mailbox property-damage report; v2 should prune the identity check and retain the property-damage call."
+    },
+    {
+      "audit_id": 30370,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809181, 809187],
+      "label": "fresh_preserve_positive",
+      "rationale": "Chest pain dispatch and EMS response at Miles Road are the same concrete medical incident."
+    },
+    {
+      "audit_id": 30366,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809335, 809337],
+      "label": "fresh_preserve_positive",
+      "rationale": "DOA call at Center View Lane is a concrete emergency response."
+    },
+    {
+      "audit_id": 30365,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809265, 809269, 809275],
+      "label": "fresh_preserve_positive",
+      "rationale": "Probable DOA / refused CPR and related location/response updates are the same emergency incident."
+    },
+    {
+      "audit_id": 30357,
+      "expected_outcome": "accept",
+      "expected_call_ids": [809307, 809343],
+      "label": "fresh_preserve_positive",
+      "rationale": "Shots-fired dispatch and THP-area follow-up are the same police incident."
+    },
+    {
+      "audit_id": 30351,
+      "expected_outcome": "accept",
+      "expected_call_ids": [808637, 808645, 809057],
+      "label": "fresh_preserve_positive",
+      "rationale": "Potential stabbing at 334 Market Street and suspect/vehicle update are the same incident."
+    },
+    {
+      "audit_id": 30343,
+      "expected_outcome": "accept",
+      "expected_call_ids": [808637, 808645, 808715, 809057],
+      "label": "fresh_preserve_positive",
+      "rationale": "Stabbing call, armed suspect/vehicle update, and later assignment check are part of the same incident."
+    },
+    {
+      "audit_id": 30340,
+      "expected_outcome": "reject",
+      "label": "fresh_clean_reject",
+      "rationale": "Traffic stop with plate information is routine enforcement/status traffic, not a standalone incident."
+    }
+  ]
+}

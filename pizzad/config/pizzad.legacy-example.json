@@ -1,0 +1,85 @@
+{
+  "server": {
+    "httpBind": "0.0.0.0",
+    "httpPort": 8080
+  },
+  "auth": {
+    "mode": "token",
+    "readRequiresAuth": false,
+    "writeRequiresAuth": false,
+    "tokenFile": "/etc/pizzawave/pizzad.token"
+  },
+  "storage": {
+    "databasePath": "/var/lib/pizzawave/pizzad.db",
+    "audioRoot": "/var/lib/pizzawave/audio",
+    "importCacheRoot": "/var/lib/pizzawave/import-cache",
+    "appDataRoot": "/var/lib/pizzawave/appdata"
+  },
+  "ingest": {
+    "callstreamBind": "127.0.0.1",
+    "callstreamPort": 9123,
+    "maxConcurrentClients": 4
+  },
+  "transcription": {
+    "provider": "whisper",
+    "analogSampleRate": 8000,
+    "whisperThreads": 2,
+    "liveTranscriptionWorkers": 1,
+    "livePressureQueueDepth": 200
+  },
+  "aiInsights": {
+    "enabled": true,
+    "openAiBaseUrl": "http://localhost:1234/v1",
+    "openAiApiKey": "",
+    "openAiModel": "qwen3.6-35b-a3b@q8_0",
+    "batchSize": 20,
+    "maxPendingCalls": 1000,
+    "timeoutMs": 600000,
+    "maxRetries": 2,
+    "maxManualLookbackHours": 24,
+    "maxManualSummaryCalls": 300,
+    "maxManualSummaryWindows": 20,
+    "maxQueueDepthForManualSummary": 100
+  },
+  "sftpImport": {
+    "enabled": true,
+    "host": "192.168.1.183",
+    "port": 22,
+    "username": "pizzawave",
+    "authMode": "password",
+    "password": "",
+    "privateKeyPath": "",
+    "privateKeyPassphrase": "",
+    "remoteRoot": "pizzawave",
+    "quickImportMaxHours": 48,
+    "defaultBatchCallCap": 5000,
+    "defaultBatchByteCap": 21474836480
+  },
+  "trunkRecorder": {
+    "configPath": "/etc/trunk-recorder/config.json",
+    "talkgroupCatalogPath": "/var/lib/pizzawave/appdata/talkgroups.json",
+    "talkgroupsPath": "/etc/trunk-recorder/talkgroups.csv",
+    "logServiceName": "trunk-recorder",
+    "healthWindowMinutes": 5
+  },
+  "alerts": {
+    "emailEnabled": true,
+    "emailProvider": "gmail",
+    "emailUser": "you@example.com",
+    "emailPassword": "",
+    "rules": [
+      {
+        "id": "95e90081-38bd-4fa9-b17e-9445ef725eac",
+        "name": "mahan",
+        "enabled": true,
+        "matchType": "keyword",
+        "keywords": "mahan, mahan gap, may ham, harrison pike",
+        "policeCodes": "",
+        "email": "you@example.com",
+        "frequency": "realtime",
+        "autoplay": false,
+        "talkgroups": []
+      }
+    ]
+  }
+}
