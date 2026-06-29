@@ -1,11 +1,15 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
 namespace pizzad;
 
 public sealed class SystemManagerService
 {
+    private static readonly Regex AnsiEscapeRegex = new(@"\x1B\[[0-?]*[ -/]*[@-~]", RegexOptions.Compiled);
+
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EnginePipeline _pipeline;
@@ -146,7 +150,7 @@ public sealed class SystemManagerService
                     priority,
                     FirstNonEmpty(ReadString(root, "SYSLOG_IDENTIFIER"), ReadString(root, "_COMM")),
                     ReadString(root, "_PID"),
-                    ReadString(root, "MESSAGE")));
+                    CleanJournalMessage(ReadString(root, "MESSAGE"))));
             }
             catch
             {
@@ -172,8 +176,35 @@ public sealed class SystemManagerService
         return unit.EndsWith(".service", StringComparison.OrdinalIgnoreCase) ? unit : $"{unit}.service";
     }
 
-    private static string ReadString(JsonElement root, string name) =>
-        root.TryGetProperty(name, out var value) ? value.ToString() : string.Empty;
+    private static string ReadString(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value))
+            return string.Empty;
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? string.Empty,
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+            JsonValueKind.Array => DecodeJournalBytes(value),
+            _ => value.ToString()
+        };
+    }
+
+    private static string DecodeJournalBytes(JsonElement value)
+    {
+        var bytes = new List<byte>();
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Number || !item.TryGetInt32(out var number))
+                return value.ToString();
+            if (number is < byte.MinValue or > byte.MaxValue)
+                return value.ToString();
+            bytes.Add((byte)number);
+        }
+        return bytes.Count == 0 ? string.Empty : Encoding.UTF8.GetString(bytes.ToArray());
+    }
+
+    private static string CleanJournalMessage(string message) =>
+        string.IsNullOrEmpty(message) ? string.Empty : AnsiEscapeRegex.Replace(message, string.Empty);
 
     private static DateTime JournalTimestampUtc(string microsText)
     {

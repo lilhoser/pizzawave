@@ -995,12 +995,7 @@ public sealed class RfSurveyService
             warnings.Add("No site frequencies were available; source centers were left unchanged.");
 
         var defaultRate = selected
-            .Select(index =>
-            {
-                var source = profile.Sources.FirstOrDefault(row => row.Index == index);
-                var requested = source?.SampleRate ?? ReadInt(draftSources, index, "rate");
-                return TrRuntimeSampleRate(profile, source, requested);
-            })
+            .Select(index => profile.Sources.FirstOrDefault(source => source.Index == index)?.SampleRate ?? ReadInt(draftSources, index, "rate"))
             .Where(rate => rate > 0)
             .DefaultIfEmpty(2_400_000)
             .Max();
@@ -3486,12 +3481,7 @@ public sealed class RfSurveyService
     {
         if (requestedSampleRate <= 0 || !IsAirspySource(source))
             return requestedSampleRate;
-        var options = AirspySampleRateOptionsForSource(profile, source)
-            .Where(IsValidTrSampleRate)
-            .ToList();
-        if (options.Count == 0)
-            options = [3_000_000, 6_000_000];
-        return AirspyRuntimeSampleRate(requestedSampleRate, options);
+        return AirspyRuntimeSampleRate(requestedSampleRate, AirspySampleRateOptionsForSource(profile, source));
     }
 
     private static IReadOnlyList<int> AirspySampleRateOptionsForSource(RfSurveyProfileDto profile, RfSurveySourceDto? source)
@@ -5435,7 +5425,7 @@ public sealed class RfSurveyService
     }
 
     private static bool IsValidTrSampleRate(int sampleRate) =>
-        sampleRate > 0 && sampleRate % 24_000 == 0;
+        sampleRate > 0;
 
     private static RfSurveyProfileDto ProfileWithSampleRateOverride(RfSurveyProfileDto profile, int sampleRate)
     {

@@ -4927,9 +4927,7 @@ function uniqueSortedFrequencies(values: number[]) {
 }
 
 function isValidTrSourcePlannerSampleRate(sampleRateHz: number) {
-  if (!Number.isFinite(sampleRateHz) || sampleRateHz <= 0)
-    return false;
-  return Math.round(sampleRateHz) % 24_000 === 0;
+  return Number.isFinite(sampleRateHz) && sampleRateHz > 0;
 }
 
 function formatMhzInput(sampleRateHz: number) {
@@ -4942,13 +4940,9 @@ function validateRfSweepSampleRate(sampleRateHz: number) {
   return "";
 }
 
-function validateSourcePlannerSampleRate(sampleRateHz: number, supportedRates: number[]) {
+function validateSourcePlannerSampleRate(sampleRateHz: number, _supportedRates: number[]) {
   if (!Number.isFinite(sampleRateHz) || sampleRateHz <= 0)
     return { ok: false, message: "Enter a sample rate in MHz." };
-  if (!isValidTrSourcePlannerSampleRate(sampleRateHz))
-    return { ok: false, message: "TR requires a sample rate that is a multiple of 24,000 Hz." };
-  if (supportedRates.length > 0 && !supportedRates.includes(Math.round(sampleRateHz)))
-    return { ok: false, message: `Select a supported TR sample rate: ${supportedRates.map(formatMhzInput).join(", ")} MHz.` };
   return { ok: true, message: "" };
 }
 
@@ -4968,10 +4962,7 @@ function sourcePlannerSupportedSampleRates(profile: RfSurveyProfile, experiments
         (source.serial && String(row.serial || "").trim() === source.serial) ||
         (source.device && String(row.deviceArgs || "").trim() === source.device));
       const options: number[] = Array.isArray(device?.sampleRateOptions) ? device.sampleRateOptions.map(Number).filter(isValidTrSourcePlannerSampleRate) : [];
-      if (options.length > 0)
-        return options;
-      const sourceType = `${source.sdrType || ""} ${source.device || ""}`.toLowerCase();
-      return sourceType.includes("airspy") ? [3_000_000, 6_000_000] : [];
+      return options.length > 0 ? options : [];
     })
     .filter(options => options.length > 0);
   if (rateSets.length === 0)
