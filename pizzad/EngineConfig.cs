@@ -155,6 +155,8 @@ public sealed class EngineConfig
         AiInsights.IncidentV3FrameCandidateLimit = Math.Clamp(AiInsights.IncidentV3FrameCandidateLimit, 6, 40);
         if (!AiInsights.IncidentV3PlanExecutorDryRun && !AiInsights.IncidentV3PlanExecutorEnabled)
             AiInsights.IncidentV3PlanExecutorDryRun = true;
+        if (!AiInsights.IncidentV3PlanExecutorAllowLiveUpdateCurrent)
+            AiInsights.IncidentV3PlanExecutorDryRun = true;
         if (AiInsights.IncidentNewVectorQueryLimit <= 0) AiInsights.IncidentNewVectorQueryLimit = 8;
         AiInsights.IncidentNewVectorQueryLimit = Math.Clamp(AiInsights.IncidentNewVectorQueryLimit, 0, 20);
         if (AiInsights.IncidentActiveVectorQueryLimit <= 0) AiInsights.IncidentActiveVectorQueryLimit = 6;
@@ -343,6 +345,7 @@ public sealed class AiInsightsConfig
     public int IncidentV3FrameCandidateLimit { get; set; } = 18;
     public bool IncidentV3PlanExecutorEnabled { get; set; }
     public bool IncidentV3PlanExecutorDryRun { get; set; } = true;
+    public bool IncidentV3PlanExecutorAllowLiveUpdateCurrent { get; set; }
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

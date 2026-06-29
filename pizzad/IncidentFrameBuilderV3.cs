@@ -328,6 +328,15 @@ public sealed class IncidentFrameBuilderV3
             .Distinct()
             .Order()
             .ToList();
+        var updateIneligibilityReason = string.Equals(action, "update_current", StringComparison.OrdinalIgnoreCase)
+            ? UpdateCurrentIneligibilityReason(frame, resolverCallIds)
+            : string.Empty;
+        if (string.Equals(action, "update_current", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(updateIneligibilityReason))
+        {
+            action = "hold_pending";
+            planDroppedBecause = updateIneligibilityReason;
+        }
         var callIds = PlanCallIds(action, resolverCallIds, frame, resolverClaimedCallIds);
         var currentCoverageCallIds = callIds
             .Except(resolverCallIds)
@@ -414,6 +423,23 @@ public sealed class IncidentFrameBuilderV3
         if (frame.HasConflictingMemberLocations)
             return "conflicting_member_locations";
         return IsCreateEligibleUnmatchedFrame(frame) ? string.Empty : "weak_create_evidence";
+    }
+
+    private static string UpdateCurrentIneligibilityReason(IncidentFrameV3? frame, IReadOnlyList<long> resolverCallIds)
+    {
+        if (frame is null)
+            return "weak_current_update_evidence";
+        if (frame.HasConflictingMemberLocations)
+            return "conflicting_member_locations";
+        if (HasFrameCurrentLocationConflict(frame))
+            return "current_location_conflict";
+
+        var newResolverCallIds = resolverCallIds
+            .Where(callId => !frame.MatchedCurrentCallIds.Contains(callId))
+            .ToList();
+        return newResolverCallIds.Count == 1 && resolverCallIds.Count == 1
+            ? "single_call_current_update_unproven"
+            : string.Empty;
     }
 
     private static bool IsStrongCreatePlanAnchor(string anchor)

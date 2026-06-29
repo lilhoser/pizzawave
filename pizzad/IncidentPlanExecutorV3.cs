@@ -2,7 +2,8 @@ namespace pizzad;
 
 public sealed record IncidentPlanExecutionOptionsV3(
     bool Enabled,
-    bool DryRun);
+    bool DryRun,
+    bool AllowLiveUpdateCurrent = false);
 
 public sealed record IncidentPlanExecutionOperationV3(
     string PlanAction,
@@ -85,7 +86,7 @@ public sealed class IncidentPlanExecutorV3
         if (options.Enabled)
         {
             operations = operations
-                .Select(operation => ApplyLiveWriteGuards(operation))
+                .Select(operation => ApplyLiveWriteGuards(operation, options))
                 .ToList();
         }
 
@@ -152,7 +153,9 @@ public sealed class IncidentPlanExecutorV3
             plan.Reason);
     }
 
-    private static IncidentPlanExecutionOperationV3 ApplyLiveWriteGuards(IncidentPlanExecutionOperationV3 operation)
+    private static IncidentPlanExecutionOperationV3 ApplyLiveWriteGuards(
+        IncidentPlanExecutionOperationV3 operation,
+        IncidentPlanExecutionOptionsV3 options)
     {
         if (!operation.WouldMutate)
             return operation;
@@ -161,6 +164,11 @@ public sealed class IncidentPlanExecutorV3
         var blockedBecause = operation.BlockedBecause;
         if (!PhaseOneLiveWriteActions.Contains(action))
             blockedBecause = AppendReason(blockedBecause, $"live_{action}_not_implemented");
+        if (string.Equals(action, "update_current", StringComparison.OrdinalIgnoreCase) &&
+            !options.AllowLiveUpdateCurrent)
+        {
+            blockedBecause = AppendReason(blockedBecause, "live_update_current_not_approved");
+        }
         if (string.Equals(action, "update_current", StringComparison.OrdinalIgnoreCase) &&
             !IsActiveIncidentTarget(operation.TargetIncidentId))
         {

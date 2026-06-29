@@ -576,7 +576,8 @@ public sealed class IncidentFrameBuilderV3Tests
         Assert.Equal("active:4568", frame.MatchedCurrentIncidentId);
         Assert.All(resolverDecisions, decision => Assert.Equal("active:4568", decision.WouldAttachCurrentIncidentId));
         Assert.Equal("active:4568", plan.TargetIncidentId);
-        Assert.Equal("update_current", plan.Action);
+        Assert.Equal("hold_pending", plan.Action);
+        Assert.Contains("planDroppedBecause=single_call_current_update_unproven", plan.Reason);
     }
 
     [Fact]
@@ -621,7 +622,8 @@ public sealed class IncidentFrameBuilderV3Tests
 
         Assert.Equal("active:4569", frame.MatchedCurrentIncidentId);
         Assert.Equal("active:4569", plan.TargetIncidentId);
-        Assert.Equal("update_current", plan.Action);
+        Assert.Equal("hold_pending", plan.Action);
+        Assert.Contains("planDroppedBecause=single_call_current_update_unproven", plan.Reason);
     }
 
     [Fact]
@@ -666,7 +668,8 @@ public sealed class IncidentFrameBuilderV3Tests
 
         Assert.Equal("active:4570", frame.MatchedCurrentIncidentId);
         Assert.Equal("active:4570", plan.TargetIncidentId);
-        Assert.Equal("update_current", plan.Action);
+        Assert.Equal("hold_pending", plan.Action);
+        Assert.Contains("planDroppedBecause=single_call_current_update_unproven", plan.Reason);
     }
 
     [Fact]
@@ -968,6 +971,44 @@ public sealed class IncidentFrameBuilderV3Tests
         Assert.Equal("hold_pending", conflictingPlan.Action);
         Assert.Equal([170, 171], conflictingPlan.CallIds);
         Assert.Contains("planDroppedBecause=conflicting_member_locations", conflictingPlan.Reason);
+    }
+
+    [Fact]
+    public void BuildIncidentPlanDecisions_HoldsCurrentUpdateWithConflictingMemberLocations()
+    {
+        var builder = new IncidentFrameBuilderV3();
+        var conflictingFrame = new IncidentFrameV3(
+            "conflicting-current-frame",
+            "current:active-430:mvc-highway-153",
+            "current_matched",
+            "mature",
+            "Traffic crash near Alton Park Blvd",
+            "traffic",
+            "alton park blvd",
+            [108947, 109013, 109291],
+            [],
+            ["address:5120 highway 153", "location:alton park blvd"],
+            "active:430",
+            "MVC with possible entrapment at 5120 Highway 153",
+            "active",
+            "test")
+        {
+            MatchedCurrentCallIds = [108935, 108941, 108943, 108945],
+            HasConflictingMemberLocations = true
+        };
+        var resolverDecisions = new[]
+        {
+            ResolverDecision(108947, "attach_current", conflictingFrame.FrameId, wouldAttachCurrentIncidentId: "active:430"),
+            ResolverDecision(109013, "attach_current", conflictingFrame.FrameId, wouldAttachCurrentIncidentId: "active:430"),
+            ResolverDecision(109291, "attach_current", conflictingFrame.FrameId, wouldAttachCurrentIncidentId: "active:430")
+        };
+
+        var plan = Assert.Single(builder.BuildIncidentPlanDecisions([conflictingFrame], resolverDecisions));
+
+        Assert.Equal("hold_pending", plan.Action);
+        Assert.Equal("active:430", plan.TargetIncidentId);
+        Assert.Equal([108947, 109013, 109291], plan.CallIds);
+        Assert.Contains("planDroppedBecause=conflicting_member_locations", plan.Reason);
     }
 
     [Fact]

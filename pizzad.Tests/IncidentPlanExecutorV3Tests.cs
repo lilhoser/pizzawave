@@ -52,7 +52,7 @@ public sealed class IncidentPlanExecutorV3Tests
         Assert.Equal("dry_run", result.Mode);
         Assert.False(result.CanMutate);
         Assert.Equal(1, result.BlockedOperationCount);
-        Assert.Contains("unsupported_target_incident_id", result.BlockReasons);
+        Assert.Contains(result.BlockReasons, reason => reason.Contains("unsupported_target_incident_id", StringComparison.OrdinalIgnoreCase));
         Assert.True(Assert.Single(result.Operations).Blocked);
     }
 
@@ -84,7 +84,7 @@ public sealed class IncidentPlanExecutorV3Tests
                 Plan("update_current", [401, 402], targetIncidentId: "active:42", title: "Traffic crash at Main St"),
                 Plan("hold_pending", [403], title: "Chest pain")
             ],
-            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false));
+            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false, AllowLiveUpdateCurrent: true));
 
         Assert.Equal("live_update_current", result.Mode);
         Assert.True(result.CanMutate);
@@ -107,7 +107,7 @@ public sealed class IncidentPlanExecutorV3Tests
                 Plan("update_current", [451, 452], targetIncidentId: "active:42", title: "Traffic crash at Main St"),
                 Plan("create_new", [453], title: "Chest pain at 100 Main St")
             ],
-            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false));
+            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false, AllowLiveUpdateCurrent: true));
 
         Assert.Equal("live_update_current_partial", result.Mode);
         Assert.True(result.CanMutate);
@@ -134,12 +134,26 @@ public sealed class IncidentPlanExecutorV3Tests
         var executor = new IncidentPlanExecutorV3();
         var result = executor.BuildExecutionPlan(
             [Plan("update_current", [501], targetIncidentId: targetIncidentId, title: "Traffic crash at Main St")],
-            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false));
+            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false, AllowLiveUpdateCurrent: true));
 
         Assert.Equal("blocked", result.Mode);
         Assert.False(result.CanMutate);
         Assert.Contains(result.BlockReasons, reason => reason.Contains("unsupported_target_incident_id", StringComparison.OrdinalIgnoreCase) ||
                                                        reason.Contains("missing_target_incident_id", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildExecutionPlan_BlocksLiveUpdateCurrentWithoutExplicitApproval()
+    {
+        var executor = new IncidentPlanExecutorV3();
+        var result = executor.BuildExecutionPlan(
+            [Plan("update_current", [551, 552], targetIncidentId: "active:42", title: "Traffic crash at Main St")],
+            new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false));
+
+        Assert.Equal("blocked", result.Mode);
+        Assert.False(result.CanMutate);
+        Assert.Contains("live_update_current_not_approved", result.BlockReasons);
+        Assert.True(Assert.Single(result.Operations).Blocked);
     }
 
     [Fact]

@@ -635,7 +635,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             incidentPlans,
             new IncidentPlanExecutionOptionsV3(
                 _config.AiInsights.IncidentV3PlanExecutorEnabled,
-                _config.AiInsights.IncidentV3PlanExecutorDryRun));
+                _config.AiInsights.IncidentV3PlanExecutorDryRun,
+                _config.AiInsights.IncidentV3PlanExecutorAllowLiveUpdateCurrent));
         _logger.LogInformation(
             "Incident v3 plan executor shadow for {System}: mode={Mode}; enabled={Enabled}; dryRun={DryRun}; canMutate={CanMutate}; operationCount={OperationCount}; mutatingOperationCount={MutatingOperationCount}; blockedOperationCount={BlockedOperationCount}; blockReasons={BlockReasons}; operations={Operations}",
             systemShortName,
