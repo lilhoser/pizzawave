@@ -1876,6 +1876,81 @@ public sealed class IncidentFrameBuilderV3Tests
     }
 
     [Fact]
+    public void BuildIncidentPlanDecisions_HoldsCurrentUpdateWithNewHospitalHandoffMember()
+    {
+        var builder = new IncidentFrameBuilderV3();
+        var currentFrame = new IncidentFrameV3(
+            "current-handoff-frame",
+            "current:active-436:stroke-dayton-pike",
+            "current_matched",
+            "mature",
+            "Stroke call at 21 Dayton Pike Apt B",
+            "ems",
+            "dayton pike",
+            [701, 702, 703],
+            [],
+            ["address:21 dayton pike"],
+            "active:436",
+            "Stroke call at 21 Dayton Pike Apt B",
+            "active",
+            "test")
+        {
+            MatchedCurrentCallIds = [701, 702],
+            HospitalHandoffOrTransportCallIds = [703],
+            HasHospitalHandoffOrTransportMember = true
+        };
+        var resolverDecisions = new[]
+        {
+            ResolverDecision(703, "attach_current", currentFrame.FrameId, wouldAttachCurrentIncidentId: "active:436")
+        };
+
+        var plan = Assert.Single(builder.BuildIncidentPlanDecisions([currentFrame], resolverDecisions));
+
+        Assert.Equal("hold_pending", plan.Action);
+        Assert.Equal("active:436", plan.TargetIncidentId);
+        Assert.Equal([703], plan.CallIds);
+        Assert.Contains("planDroppedBecause=new_hospital_handoff_or_transport_member", plan.Reason);
+    }
+
+    [Fact]
+    public void BuildIncidentPlanDecisions_AllowsCurrentUpdateWhenHospitalHandoffIsAlreadyCurrent()
+    {
+        var builder = new IncidentFrameBuilderV3();
+        var currentFrame = new IncidentFrameV3(
+            "current-existing-handoff-frame",
+            "current:active-437:stroke-main-st",
+            "current_matched",
+            "mature",
+            "Stroke call at 100 Main St",
+            "ems",
+            "100 main st",
+            [801, 802, 803, 804],
+            [],
+            ["address:100 main st"],
+            "active:437",
+            "Stroke call at 100 Main St",
+            "active",
+            "test")
+        {
+            MatchedCurrentCallIds = [801, 802],
+            HospitalHandoffOrTransportCallIds = [802],
+            HasHospitalHandoffOrTransportMember = true
+        };
+        var resolverDecisions = new[]
+        {
+            ResolverDecision(803, "attach_current", currentFrame.FrameId, wouldAttachCurrentIncidentId: "active:437"),
+            ResolverDecision(804, "attach_current", currentFrame.FrameId, wouldAttachCurrentIncidentId: "active:437")
+        };
+
+        var plan = Assert.Single(builder.BuildIncidentPlanDecisions([currentFrame], resolverDecisions));
+
+        Assert.Equal("update_current", plan.Action);
+        Assert.Equal("active:437", plan.TargetIncidentId);
+        Assert.Equal([801, 802, 803, 804], plan.CallIds);
+        Assert.DoesNotContain("new_hospital_handoff_or_transport_member", plan.Reason);
+    }
+
+    [Fact]
     public void BuildIncidentPlanDecisions_HoldsGenericDetachCreateTitles()
     {
         var builder = new IncidentFrameBuilderV3();

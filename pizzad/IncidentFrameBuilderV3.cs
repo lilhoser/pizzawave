@@ -40,6 +40,7 @@ public sealed record IncidentFrameV3(
     public double LocationLongitude { get; init; }
     public string MatchedCurrentCategory { get; init; } = string.Empty;
     public IReadOnlyList<long> MatchedCurrentCallIds { get; init; } = [];
+    public IReadOnlyList<long> HospitalHandoffOrTransportCallIds { get; init; } = [];
     public bool HasHospitalHandoffOrTransportMember { get; init; }
     public bool HasConflictingMemberLocations { get; init; }
 }
@@ -437,6 +438,9 @@ public sealed class IncidentFrameBuilderV3
         var newResolverCallIds = resolverCallIds
             .Where(callId => !frame.MatchedCurrentCallIds.Contains(callId))
             .ToList();
+        if (newResolverCallIds.Any(frame.HospitalHandoffOrTransportCallIds.Contains))
+            return "new_hospital_handoff_or_transport_member";
+
         return newResolverCallIds.Count == 1 && resolverCallIds.Count == 1
             ? "single_call_current_update_unproven"
             : string.Empty;
@@ -970,6 +974,12 @@ public sealed class IncidentFrameBuilderV3
             LocationLatitude = locationEvidence?.LocationLatitude ?? 0,
             LocationLongitude = locationEvidence?.LocationLongitude ?? 0,
             MatchedCurrentCallIds = match.CallIds.Order().ToList(),
+            HospitalHandoffOrTransportCallIds = members
+                .Where(IsHospitalHandoffOrTransportRow)
+                .Select(row => row.Call.Id)
+                .Distinct()
+                .Order()
+                .ToList(),
             HasHospitalHandoffOrTransportMember = members.Any(IsHospitalHandoffOrTransportRow),
             HasConflictingMemberLocations = HasConflictingMemberLocations(members)
         };
@@ -1093,6 +1103,11 @@ public sealed class IncidentFrameBuilderV3
             Reason = reason,
             MatchedCurrentCategory = currentCategory,
             MatchedCurrentCallIds = matchedCurrentCallIds,
+            HospitalHandoffOrTransportCallIds = frames
+                .SelectMany(frame => frame.HospitalHandoffOrTransportCallIds)
+                .Distinct()
+                .Order()
+                .ToList(),
             PromotionAmbiguousCallIds = collapseAmbiguousIds
         };
     }
