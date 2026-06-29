@@ -63,9 +63,10 @@ public sealed class RfSurveyService
         foreach (var session in await _database.ListRfSurveySessionsAsync(ct))
         {
             var row = await _database.GetRfSurveySessionAsync(session.Id, ct);
-            sessions.Add(row == null
+            var recovered = row == null
                 ? NormalizeAppliedSourcePlanSession(session)
-                : await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct));
+                : await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
+            sessions.Add(await RecoverCompletedSessionFromArtifactsAsync(recovered, ct));
         }
         return new RfSurveyListDto(sessions, ArtifactRoot);
     }
@@ -132,6 +133,103 @@ public sealed class RfSurveyService
         catch
         {
             return session;
+        }
+    }
+
+    private async Task<RfSurveySessionDto> RecoverCompletedSessionFromArtifactsAsync(RfSurveySessionDto session, CancellationToken ct)
+    {
+        if (session.CompletedAtUtc == null)
+            return session;
+
+        var artifactExperiments = await LoadArtifactExperimentsAsync(session.ArtifactPath, ct);
+        var latestStability = artifactExperiments
+            .Where(experiment => string.Equals(experiment.Type, "stability_verdict", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(experiment => experiment.CreatedAtUtc)
+            .LastOrDefault();
+        var stabilityPassed = string.Equals(latestStability?.Status, "passed", StringComparison.OrdinalIgnoreCase);
+        var (exportVerdict, exportStability) = await ReadExportPlanStateAsync(session.ArtifactPath, ct);
+        var exportStable = string.Equals(exportStability, "stable_candidate", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(exportVerdict, "applied", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(exportVerdict, "pass_candidate", StringComparison.OrdinalIgnoreCase);
+        if (!stabilityPassed && !exportStable)
+            return session;
+
+        var sourcePlanSummary = string.IsNullOrWhiteSpace(session.SourcePlanSummary)
+            ? await TryBuildAppliedSourcePlanSummaryFromArtifactAsync(session.ArtifactPath, ct)
+            : session.SourcePlanSummary;
+        return session with
+        {
+            Status = "completed",
+            Verdict = string.Equals(exportVerdict, "applied", StringComparison.OrdinalIgnoreCase) ? "applied" : "pass_candidate",
+            Stability = "stable_candidate",
+            SourcePlanSummary = sourcePlanSummary
+        };
+    }
+
+    private static async Task<IReadOnlyList<RfSurveyExperimentDto>> LoadArtifactExperimentsAsync(string artifactPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(artifactPath))
+            return [];
+        var path = Path.Combine(artifactPath, "experiments.json");
+        if (!File.Exists(path))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<IReadOnlyList<RfSurveyExperimentDto>>(
+                await File.ReadAllTextAsync(path, ct),
+                EngineConfig.JsonOptions()) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static async Task<(string Verdict, string Stability)> ReadExportPlanStateAsync(string artifactPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(artifactPath))
+            return ("", "");
+        var path = Path.Combine(artifactPath, "export-plan.json");
+        if (!File.Exists(path))
+            return ("", "");
+        try
+        {
+            var root = JsonNode.Parse(await File.ReadAllTextAsync(path, ct)) as JsonObject;
+            return (
+                root?["verdict"]?.GetValue<string>() ?? string.Empty,
+                root?["stability"]?.GetValue<string>() ?? string.Empty);
+        }
+        catch
+        {
+            return ("", "");
+        }
+    }
+
+    private static async Task<string> TryBuildAppliedSourcePlanSummaryFromArtifactAsync(string artifactPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(artifactPath))
+            return string.Empty;
+        var pointerPath = Path.Combine(artifactPath, "tr-config-source-apply.json");
+        if (!File.Exists(pointerPath))
+            return string.Empty;
+        try
+        {
+            var pointer = JsonNode.Parse(await File.ReadAllTextAsync(pointerPath, ct)) as JsonObject;
+            var candidatePath = pointer?["candidatePath"]?.GetValue<string>() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(candidatePath) || !File.Exists(candidatePath))
+                return string.Empty;
+            var changedSources = (pointer?["changedSources"] as JsonArray)?
+                .Select(ReadIntNode)
+                .Where(index => index >= 0)
+                .Distinct()
+                .Order()
+                .ToList() ?? [];
+            var candidate = JsonNode.Parse(await File.ReadAllTextAsync(candidatePath, ct));
+            return BuildAppliedSourcePlanSummary(candidate, changedSources);
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 
@@ -374,12 +472,15 @@ public sealed class RfSurveyService
 
         var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson) ?? new RfSurveyProfileDto();
         var recoveredSession = await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
+        recoveredSession = await RecoverCompletedSessionFromArtifactsAsync(recoveredSession, ct);
         var toolPrepState = await EnsureReusableToolPrepAsync(recoveredSession, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
         var refreshed = await RefreshProfileFactsAsync(recoveredSession, profile, row.Value.ProfileJson, toolPrepState.Json, invalidateExperiments: false, ct, preserveUpdatedAt: true);
         var session = NormalizeAppliedSourcePlanSession(refreshed.Session);
         profile = refreshed.Profile;
         var toolPrep = toolPrepState.Prep;
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
+        if (experiments.Count == 0)
+            experiments = await LoadArtifactExperimentsAsync(session.ArtifactPath, ct);
         var notes = await _database.ListRfSurveyNotesAsync(id, ct);
         return new RfSurveyDetailDto(session, profile, experiments, notes, toolPrep, PlanNextExperiments(session, profile, toolPrep, experiments));
     }
@@ -548,6 +649,7 @@ public sealed class RfSurveyService
             Stability = effectiveScopeInvalidated ? "unknown" : baseSession.Stability,
             BestControlChannel = effectiveScopeInvalidated ? string.Empty : baseSession.BestControlChannel,
             SourcePlanSummary = effectiveScopeInvalidated ? string.Empty : baseSession.SourcePlanSummary,
+            CompletedAtUtc = effectiveScopeInvalidated ? null : baseSession.CompletedAtUtc,
             UpdatedAtUtc = DateTime.UtcNow
         };
         if (effectiveScopeInvalidated)

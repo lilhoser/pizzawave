@@ -168,6 +168,129 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public async Task GetAsync_RecoversCompletedWorkspaceFromArtifactsWhenDatabaseRowsWereCleared()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-completed-recover-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var artifactPath = Path.Combine(root, "rf-completed");
+            Directory.CreateDirectory(artifactPath);
+            var candidatePath = Path.Combine(artifactPath, "tr-config-source-apply-20260620215935.json");
+            File.WriteAllText(candidatePath, """
+                {
+                  "sources": [
+                    { "center": 854743750, "rate": 10000000, "error": 0, "gain": 15, "device": "airspy=637862DC2E457DD7" }
+                  ],
+                  "systems": [
+                    { "shortName": "chattanooga-simulcast-hamilton-t", "control_channels": [855212500] }
+                  ]
+                }
+                """);
+            File.WriteAllText(Path.Combine(artifactPath, "tr-config-source-apply.json"), JsonSerializer.Serialize(new
+            {
+                candidatePath,
+                livePath = Path.Combine(root, "tr-config.json"),
+                changedSources = new[] { 0 }
+            }, EngineConfig.JsonOptions()));
+            var completedAt = DateTime.UtcNow.AddDays(-1);
+            var artifactExperiments = new[]
+            {
+                new RfSurveyExperimentDto
+                {
+                    Id = "rfx-voice",
+                    Type = "voice_capture_trial",
+                    Status = "passed",
+                    ResultSummary = "Captured 9 real call(s) with audio.",
+                    CreatedAtUtc = completedAt.AddMinutes(-5),
+                    FinishedAtUtc = completedAt.AddMinutes(-4)
+                },
+                new RfSurveyExperimentDto
+                {
+                    Id = "rfx-transcription",
+                    Type = "transcription_gate",
+                    Status = "passed",
+                    ResultSummary = "Transcription gate passed with 6 usable call transcript(s).",
+                    CreatedAtUtc = completedAt.AddMinutes(-3),
+                    FinishedAtUtc = completedAt.AddMinutes(-2)
+                },
+                new RfSurveyExperimentDto
+                {
+                    Id = "rfx-stability",
+                    Type = "stability_verdict",
+                    Status = "passed",
+                    ResultSummary = "Stable candidate: 6 usable call(s) over 133 second(s).",
+                    CreatedAtUtc = completedAt.AddMinutes(-1),
+                    FinishedAtUtc = completedAt
+                }
+            };
+            File.WriteAllText(Path.Combine(artifactPath, "experiments.json"), JsonSerializer.Serialize(artifactExperiments, EngineConfig.JsonOptions()));
+            File.WriteAllText(Path.Combine(artifactPath, "export-plan.json"), JsonSerializer.Serialize(new
+            {
+                verdict = "applied",
+                stability = "stable_candidate"
+            }, EngineConfig.JsonOptions()));
+            var trConfigPath = Path.Combine(root, "tr-config.json");
+            File.Copy(candidatePath, trConfigPath);
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var profile = new RfSurveyProfileDto
+            {
+                SiteLabel = "chattanooga-simulcast-hamilton-t",
+                SystemShortName = "chattanooga-simulcast-hamilton-t",
+                SystemShortNames = ["chattanooga-simulcast-hamilton-t"],
+                SourcePlanSystemShortNames = ["chattanooga-simulcast-hamilton-t"],
+                Systems = [new("chattanooga-simulcast-hamilton-t", "Chattanooga", [855212500], [])],
+                ControlChannelsHz = [855212500],
+                Sources = [new(0, "airspy=637862DC2E457DD7", "637862DC2E457DD7", "Airspy", 854743750, 10000000, 0, "15")],
+                SelectedSourceIndexes = [0],
+                CurrentStep = 3
+            };
+            var session = new RfSurveySessionDto
+            {
+                Id = "rf-completed",
+                Status = "draft",
+                SiteLabel = profile.SiteLabel,
+                SystemShortName = profile.SystemShortName,
+                Verdict = "not_started",
+                Stability = "unknown",
+                ArtifactPath = artifactPath,
+                CompletedAtUtc = completedAt
+            };
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, true, true, true, true, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var list = await service.ListAsync(CancellationToken.None);
+            var detail = await service.GetAsync("rf-completed", CancellationToken.None);
+
+            var listed = Assert.Single(list.Sessions);
+            Assert.Equal("completed", listed.Status);
+            Assert.Equal("applied", listed.Verdict);
+            Assert.Equal("stable_candidate", listed.Stability);
+            Assert.Contains("Applied 1 SDR source window", listed.SourcePlanSummary);
+            Assert.NotNull(detail);
+            Assert.Equal("completed", detail!.Session.Status);
+            Assert.Equal(3, detail.Experiments.Count);
+            Assert.DoesNotContain(detail.NextExperiments, experiment => experiment.Type == "stability_verdict");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task UpdateDraft_AppliedPlanIgnoresEmptySelectedSourceAutosave()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-applied-autosave-{Guid.NewGuid():N}");
