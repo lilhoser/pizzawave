@@ -2909,22 +2909,24 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     {message && <div className="setup-note">{message}</div>}
     <div className="rf-survey-table-wrap">
       <table className="table rf-survey-table">
-        <thead><tr><th>Updated</th><th>Name</th><th>Status</th><th>Verdict</th><th>RF Path</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Updated</th><th>Name</th><th>Sites Covered</th><th>Status</th><th>Verdict</th><th>RF Path</th><th>Actions</th></tr></thead>
         <tbody>
-          {!sessions.length && <tr><td colSpan={6}>No radio setup workspaces yet.</td></tr>}
+          {!sessions.length && <tr><td colSpan={7}>No radio setup workspaces yet.</td></tr>}
           {sessions.map(row => {
-            const canApply = row.status !== "draft" && row.verdict === "pass_candidate";
+            const canApply = canApplyRfSurveyWorkspace(row);
+            const coveredSites = row.coveredSites?.length ? row.coveredSites : row.systemShortName ? [row.systemShortName] : [];
             const rowBusy = busy.endsWith(`-${row.id}`);
             return <tr key={row.id}>
               <td>{new Date(row.updatedAtUtc).toLocaleDateString()}<br /><span className="muted">{new Date(row.updatedAtUtc).toLocaleTimeString()}</span></td>
               <td><strong>{row.siteLabel || row.systemShortName || row.id}</strong><br /><span className="muted">{row.sdrSummary}</span></td>
+              <td>{coveredSites.length ? <div className="rf-site-list">{coveredSites.map(site => <span key={site}>{site}</span>)}</div> : "--"}</td>
               <td>{label(row.status)}</td>
               <td>{label(row.verdict)}<br /><span className="muted">{label(row.stability)}</span></td>
               <td>{row.rfPathSummary || row.bestControlChannel || "--"}</td>
               <td><div className="table-actions">
                 <button disabled={rowBusy} onClick={() => void openSurvey(row.id)}>Open</button>
                 <button disabled={rowBusy || busy === `export-${row.id}`} onClick={() => void exportSurvey(row.id)}>{busy === `export-${row.id}` ? "Exporting" : "Export"}</button>
-                <button disabled={!canApply || rowBusy} onClick={() => void applySurveyWorkspace(row)} title={canApply ? "Apply this workspace's TR config plan to the live trunk-recorder config." : "Apply is available only after a non-draft survey has a pass candidate."}>{busy === `apply-${row.id}` ? "Applying" : "Apply"}</button>
+                <button disabled={!canApply || rowBusy} onClick={() => void applySurveyWorkspace(row)} title={canApply ? "Apply this workspace's TR config plan to the live trunk-recorder config." : "Apply is available after the workspace has an applied source plan or a stable/pass candidate."}>{busy === `apply-${row.id}` ? "Applying" : "Apply"}</button>
                 <button className="danger-button" disabled={rowBusy} onClick={() => void deleteSurvey(row)}>{busy === `delete-${row.id}` ? "Deleting" : "Delete"}</button>
               </div></td>
             </tr>;
@@ -2933,6 +2935,16 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       </table>
     </div>
   </div>;
+}
+
+function canApplyRfSurveyWorkspace(row: RfSurveySession) {
+  return Boolean(
+    row.sourcePlanSummary ||
+    row.status === "source_plan_applied" ||
+    row.status === "completed" ||
+    row.verdict === "pass_candidate" ||
+    row.verdict === "applied" ||
+    row.stability === "stable_candidate");
 }
 
 function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupCalibrationPlan | null, rrSites: SetupTrConfigSites | null, existing: RfSurveySystem[]): RfSurveySystem[] {
@@ -6625,10 +6637,11 @@ function RfSurveyConsolePanel({ surveys, reload }: { surveys: RfSurveyList | nul
       <p className="muted">Artifacts: {surveys?.artifactRoot ?? "--"}</p>
       {!sessions.length ? <p className="muted">No Radio Setup workspaces have been created yet.</p> : <div className="job-table">
         <table>
-          <thead><tr><th>Updated</th><th>Name</th><th>Verdict</th><th>RF Path</th><th></th></tr></thead>
+          <thead><tr><th>Updated</th><th>Name</th><th>Sites Covered</th><th>Verdict</th><th>RF Path</th><th></th></tr></thead>
           <tbody>{sessions.map(row => <tr key={row.id}>
             <td>{new Date(row.updatedAtUtc).toLocaleString()}</td>
             <td><strong>{row.siteLabel || row.systemShortName || row.id}</strong><br /><span className="muted">{row.sdrSummary}</span></td>
+            <td>{row.coveredSites?.length ? <div className="rf-site-list">{row.coveredSites.map(site => <span key={site}>{site}</span>)}</div> : row.systemShortName || "--"}</td>
             <td>{label(row.verdict)}<br /><span className="muted">{label(row.stability)}</span></td>
             <td>{row.rfPathSummary}</td>
             <td><button onClick={() => void openSurvey(row.id)}>Open</button></td>

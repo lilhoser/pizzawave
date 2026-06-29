@@ -277,9 +277,11 @@ public sealed class RfSurveyMultiSystemTests
             Assert.Equal("completed", listed.Status);
             Assert.Equal("applied", listed.Verdict);
             Assert.Equal("stable_candidate", listed.Stability);
+            Assert.Equal(["chattanooga-simulcast-hamilton-t"], listed.CoveredSites);
             Assert.Contains("Applied 1 SDR source window", listed.SourcePlanSummary);
             Assert.NotNull(detail);
             Assert.Equal("completed", detail!.Session.Status);
+            Assert.Equal(["chattanooga-simulcast-hamilton-t"], detail.Session.CoveredSites);
             Assert.Equal(3, detail.Experiments.Count);
             Assert.DoesNotContain(detail.NextExperiments, experiment => experiment.Type == "stability_verdict");
         }

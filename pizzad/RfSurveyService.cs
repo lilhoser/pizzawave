@@ -63,10 +63,14 @@ public sealed class RfSurveyService
         foreach (var session in await _database.ListRfSurveySessionsAsync(ct))
         {
             var row = await _database.GetRfSurveySessionAsync(session.Id, ct);
+            var profile = row == null
+                ? null
+                : DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson);
             var recovered = row == null
                 ? NormalizeAppliedSourcePlanSession(session)
                 : await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
-            sessions.Add(await RecoverCompletedSessionFromArtifactsAsync(recovered, ct));
+            recovered = await RecoverCompletedSessionFromArtifactsAsync(recovered, ct);
+            sessions.Add(profile == null ? recovered : recovered with { CoveredSites = CoveredSitesForProfile(RebuildProfileFacts(profile)) });
         }
         return new RfSurveyListDto(sessions, ArtifactRoot);
     }
@@ -231,6 +235,32 @@ public sealed class RfSurveyService
         {
             return string.Empty;
         }
+    }
+
+    private static IReadOnlyList<string> CoveredSitesForProfile(RfSurveyProfileDto profile)
+    {
+        var names = profile.SourcePlanSystemShortNames.Count > 0
+            ? profile.SourcePlanSystemShortNames
+            : profile.SystemShortNames.Count > 0
+                ? profile.SystemShortNames
+                : string.IsNullOrWhiteSpace(profile.SystemShortName) ? [] : [profile.SystemShortName];
+        if (names.Count == 0)
+            return [];
+
+        var sites = new List<string>();
+        foreach (var name in names)
+        {
+            var system = profile.Systems.FirstOrDefault(candidate =>
+                string.Equals(candidate.ShortName, name, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidate.SiteLabel, name, StringComparison.OrdinalIgnoreCase));
+            var label = system == null
+                ? name
+                : string.IsNullOrWhiteSpace(system.SiteLabel) ? system.ShortName : system.SiteLabel;
+            if (!string.IsNullOrWhiteSpace(label) &&
+                sites.All(existing => !string.Equals(existing, label, StringComparison.OrdinalIgnoreCase)))
+                sites.Add(label);
+        }
+        return sites;
     }
 
     public RfSurveyProfileDto BuildProfile(RfSurveyCreateRequest request)
@@ -475,7 +505,7 @@ public sealed class RfSurveyService
         recoveredSession = await RecoverCompletedSessionFromArtifactsAsync(recoveredSession, ct);
         var toolPrepState = await EnsureReusableToolPrepAsync(recoveredSession, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
         var refreshed = await RefreshProfileFactsAsync(recoveredSession, profile, row.Value.ProfileJson, toolPrepState.Json, invalidateExperiments: false, ct, preserveUpdatedAt: true);
-        var session = NormalizeAppliedSourcePlanSession(refreshed.Session);
+        var session = NormalizeAppliedSourcePlanSession(refreshed.Session) with { CoveredSites = CoveredSitesForProfile(refreshed.Profile) };
         profile = refreshed.Profile;
         var toolPrep = toolPrepState.Prep;
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);

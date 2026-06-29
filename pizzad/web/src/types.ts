@@ -658,6 +658,7 @@ export type RfSurveySession = {
   rfPathSummary: string;
   bestControlChannel: string;
   sourcePlanSummary: string;
+  coveredSites: string[];
   recommendationState: string;
   artifactPath: string;
   createdAtUtc: string;

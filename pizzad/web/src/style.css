@@ -2459,6 +2459,25 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   vertical-align: top;
   padding: 8px;
 }
+.rf-site-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 360px;
+  white-space: normal;
+}
+.rf-site-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid rgba(133, 149, 166, 0.28);
+  border-radius: 6px;
+  background: rgba(23, 29, 36, 0.86);
+  color: #d6e1ec;
+  font-size: 12px;
+  line-height: 1.2;
+}
 .rf-wizard-progress button {
   display: inline-flex;
   align-items: center;

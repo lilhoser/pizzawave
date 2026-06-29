@@ -1047,6 +1047,7 @@ public sealed record RfSurveySessionDto
     public string RfPathSummary { get; init; } = string.Empty;
     public string BestControlChannel { get; init; } = string.Empty;
     public string SourcePlanSummary { get; init; } = string.Empty;
+    public IReadOnlyList<string> CoveredSites { get; init; } = [];
     public string RecommendationState { get; init; } = "none";
     public string ArtifactPath { get; init; } = string.Empty;
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
