@@ -869,6 +869,37 @@ public sealed class IncidentFrameBuilderV3Tests
     }
 
     [Fact]
+    public void Build_FlagsFrameTitleRoadConflictForCurrentDetach()
+    {
+        var builder = new IncidentFrameBuilderV3();
+        var call = Call(168, 1000, "MVC with injuries at Alton Park Boulevard and West 37th Street.");
+        var candidates = new[]
+        {
+            Candidate(call, 0.8, "alton park blvd", highConfidenceGeocode: false)
+        };
+        var current = new[]
+        {
+            new IncidentFrameCurrentIncidentV3(
+                "active:430",
+                "active",
+                "MVC with possible entrapment at 5120 Highway 153",
+                "traffic",
+                ["C0000000000A8"],
+                ["C0000000000A8"],
+                [])
+        };
+
+        var frame = Assert.Single(builder.Build("test", [], candidates, current, 18));
+        var decision = Assert.Single(builder.BuildResolverDecisions([frame], candidates));
+
+        Assert.Contains("Alton Park", frame.Title);
+        Assert.Equal("current_matched", frame.Maturity);
+        Assert.Equal("conflicted", frame.Lifecycle);
+        Assert.Equal("detach_create", decision.Decision);
+        Assert.Equal("strong_location_conflicts_with_current", decision.DecisionReason);
+    }
+
+    [Fact]
     public void Build_DoesNotMergeUngeocodedConflictingAddressIntoCurrentUpdate()
     {
         var builder = new IncidentFrameBuilderV3();

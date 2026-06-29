@@ -1,5 +1,6 @@
 param(
     [string]$HostName = "lilhoser@192.168.1.173",
+    [string]$SshKey = "",
     [string]$Since = "2026-06-28 00:00:00",
     [string]$Until = "",
     [string]$ServiceName = "pizzad",
@@ -269,6 +270,8 @@ for update in unique_updates.values():
     call_id_set = set(update["callIds"])
     target_call_ids = incident_call_ids(target_active_id) if target_active_id is not None else set()
     overlapping_target_call_ids = sorted(call_id_set & target_call_ids)
+    extra_call_ids = sorted(call_id_set - target_call_ids)
+    missing_target_call_ids = sorted(target_call_ids - call_id_set)
     links = current_links(update["callIds"])
     linked_incidents = collections.defaultdict(set)
     for link in links:
@@ -277,11 +280,29 @@ for update in unique_updates.values():
 
     accepted_audits = [audit for audit in audits if audit["accepted"] and audit["ids"] & call_id_set]
     rejected_audits = [audit for audit in audits if not audit["accepted"] and audit["ids"] & call_id_set]
+    accepted_superset = [audit for audit in accepted_audits if call_id_set <= audit["ids"]]
+    accepted_exact = [audit for audit in accepted_audits if call_id_set == audit["ids"]]
+    rejected_extra = [audit for audit in rejected_audits if audit["ids"] & set(extra_call_ids)]
+    accepted_extra = [audit for audit in accepted_audits if audit["ids"] & set(extra_call_ids)]
 
     if not update["targetIncidentId"]:
         classification = "missing_target_incident_id"
     elif target_active_id is None:
         classification = "non_active_target_incident_id"
+    elif call_id_set == target_call_ids:
+        classification = "exact_current_membership_noop"
+    elif missing_target_call_ids and extra_call_ids:
+        classification = "would_replace_current_membership"
+    elif missing_target_call_ids:
+        classification = "would_drop_current_calls"
+    elif extra_call_ids and rejected_extra:
+        classification = "would_add_legacy_rejected_calls"
+    elif extra_call_ids and accepted_superset:
+        classification = "would_add_legacy_accepted_superset"
+    elif extra_call_ids and accepted_extra:
+        classification = "would_add_partially_accepted_calls"
+    elif extra_call_ids:
+        classification = "would_add_unproven_calls"
     elif overlapping_target_call_ids:
         classification = "active_target_with_current_overlap"
     else:
@@ -291,8 +312,13 @@ for update in unique_updates.values():
     update["targetActiveIncidentId"] = target_active_id
     update["targetCurrentCallIds"] = sorted(target_call_ids)
     update["targetOverlapCallIds"] = overlapping_target_call_ids
+    update["extraCallIds"] = extra_call_ids
+    update["missingTargetCallIds"] = missing_target_call_ids
     update["currentIncidentIds"] = sorted(linked_incidents.keys())
     update["topReason"] = update["reasons"].most_common(1)[0][0] if update["reasons"] else ""
+    update["acceptedExactAuditIds"] = [audit["id"] for audit in accepted_exact[-5:]]
+    update["acceptedSupersetAuditIds"] = [audit["id"] for audit in accepted_superset[-5:]]
+    update["rejectedExtraAuditIds"] = [audit["id"] for audit in rejected_extra[-5:]]
     update["acceptedAudits"] = [
         {
             "id": audit["id"],
@@ -316,6 +342,13 @@ for update in unique_updates.values():
 
 update_candidates = sorted(unique_updates.values(), key=lambda row: (row["firstSeen"], row["system"], row["targetIncidentId"], row["title"]))
 update_classification_counts = collections.Counter(row["classification"] for row in update_candidates)
+update_mutation_risk_counts = collections.Counter(
+    "no_change" if not row.get("extraCallIds") and not row.get("missingTargetCallIds")
+    else "would_add_only" if row.get("extraCallIds") and not row.get("missingTargetCallIds")
+    else "would_drop_only" if row.get("missingTargetCallIds") and not row.get("extraCallIds")
+    else "would_replace"
+    for row in update_candidates
+)
 
 payload = {
     "generatedAtUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -335,6 +368,7 @@ payload = {
         "createClassifications": dict(sorted(classification_counts.items())),
         "uniqueUpdateCandidates": len(update_candidates),
         "updateClassifications": dict(sorted(update_classification_counts.items())),
+        "updateMutationRiskCounts": dict(sorted(update_mutation_risk_counts.items())),
     },
     "createCandidates": create_candidates,
     "updateCandidates": update_candidates,
@@ -346,7 +380,11 @@ print(json.dumps(payload, indent=2, sort_keys=True))
 $sinceB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Since))
 $untilB64 = if ([string]::IsNullOrWhiteSpace($Until)) { "" } else { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Until)) }
 
-$sshArgs = @($HostName, "python3", "-", "--since-b64", $sinceB64, "--service", $ServiceName, "--database", $DatabasePath)
+$sshArgs = @("-o", "BatchMode=yes")
+if (![string]::IsNullOrWhiteSpace($SshKey)) {
+    $sshArgs += @("-i", $SshKey, "-o", "IdentitiesOnly=yes")
+}
+$sshArgs += @($HostName, "python3", "-", "--since-b64", $sinceB64, "--service", $ServiceName, "--database", $DatabasePath)
 if (![string]::IsNullOrWhiteSpace($Until)) {
     $sshArgs += @("--until-b64", $untilB64)
 }

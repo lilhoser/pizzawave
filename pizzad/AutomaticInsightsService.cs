@@ -329,7 +329,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     {
         var extraction = await ExtractIncidentStateAsync(systemShortName, activeIncidents, ragCandidates, start, end, ct, recordTruncationUsage: recordTruncationUsage);
         var updated = await PersistIncidentStateAsync(systemShortName, extraction.Result, activeIncidents, recent, ragCandidates, locationRows, ct);
-        await ApplyIncidentV3LiveUpdateCurrentAsync(systemShortName, extraction.IncidentV3Execution, activeIncidents, ragCandidates, ct);
+        await ApplyIncidentV3LiveUpdateCurrentAsync(systemShortName, extraction.IncidentV3Execution, activeIncidents, ragCandidates, locationRows, ct);
         return updated;
     }
 
@@ -433,7 +433,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     {
         var extraction = await ExtractIncidentStateAsync(systemShortName, activeIncidents, ragCandidates, start, end, ct, recoveredFallback: true, recordTruncationUsage: false);
         var updated = await PersistIncidentStateAsync(systemShortName, extraction.Result, activeIncidents, recent, ragCandidates, locationRows, ct);
-        await ApplyIncidentV3LiveUpdateCurrentAsync(systemShortName, extraction.IncidentV3Execution, activeIncidents, ragCandidates, ct);
+        await ApplyIncidentV3LiveUpdateCurrentAsync(systemShortName, extraction.IncidentV3Execution, activeIncidents, ragCandidates, locationRows, ct);
         return updated;
     }
 
@@ -656,12 +656,13 @@ public sealed class AutomaticInsightsService : BackgroundService
         IncidentPlanExecutionResultV3? execution,
         IReadOnlyList<IncidentDto> activeIncidents,
         IReadOnlyList<IncidentRagCandidate> candidateCalls,
+        IReadOnlyList<CallLocationDashboardRow> locationRows,
         CancellationToken ct)
     {
         if (execution is null || !execution.CanMutate)
             return;
 
-        var applied = await ExecuteIncidentV3LiveUpdateCurrentAsync(systemShortName, execution, activeIncidents, candidateCalls, ct);
+        var applied = await ExecuteIncidentV3LiveUpdateCurrentAsync(systemShortName, execution, activeIncidents, candidateCalls, locationRows, ct);
         _logger.LogInformation(
             "Incident v3 plan executor live update_current for {System}: appliedOperationCount={AppliedOperationCount}; requestedOperationCount={RequestedOperationCount}",
             systemShortName,
@@ -674,6 +675,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         IncidentPlanExecutionResultV3 execution,
         IReadOnlyList<IncidentDto> activeIncidents,
         IReadOnlyList<IncidentRagCandidate> candidateCalls,
+        IReadOnlyList<CallLocationDashboardRow> locationRows,
         CancellationToken ct)
     {
         var operations = execution.Operations
@@ -716,23 +718,23 @@ public sealed class AutomaticInsightsService : BackgroundService
                 .Select(IncidentCallToEngineCall)
                 .DistinctBy(call => call.Id)
                 .ToDictionary(call => call.Id);
-            var calls = new List<EngineCall>();
+            var proposedCalls = new List<EngineCall>();
             foreach (var callId in operation.CallIds.Distinct().Order())
             {
                 if (candidateCallsById.TryGetValue(callId, out var candidateCall))
-                    calls.Add(candidateCall);
+                    proposedCalls.Add(candidateCall);
                 else if (existingCallsById.TryGetValue(callId, out var existingCall))
-                    calls.Add(existingCall);
+                    proposedCalls.Add(existingCall);
             }
 
-            if (calls.Count != operation.CallIds.Distinct().Count())
+            if (proposedCalls.Count != operation.CallIds.Distinct().Count())
             {
                 await AuditIncidentV3LiveUpdateCurrentAsync(
                     systemShortName,
                     operation,
                     activeIncident,
                     operation.CallIds,
-                    calls.Select(call => call.Id).ToList(),
+                    proposedCalls.Select(call => call.Id).ToList(),
                     false,
                     "rejected:plan call ids were not fully resolvable",
                     candidateCallsById,
@@ -742,10 +744,72 @@ public sealed class AutomaticInsightsService : BackgroundService
                     systemShortName,
                     operation.TargetIncidentId,
                     string.Join(",", operation.CallIds.Distinct().Order()),
-                    string.Join(",", calls.Select(call => call.Id).Order()));
+                    string.Join(",", proposedCalls.Select(call => call.Id).Order()));
                 continue;
             }
 
+            var existingCallIds = existingCallsById.Keys.ToHashSet();
+            var proposedUnion = proposedCalls
+                .Concat(existingCallsById.Values)
+                .DistinctBy(call => call.Id)
+                .OrderBy(call => call.StartTime)
+                .ToList();
+            var validationCallIds = proposedUnion.Select(call => call.Id).Distinct().ToList();
+            var anchorsByCall = await _database.GetCallAnchorsAsync(validationCallIds, ct);
+            var operationItem = BuildIncidentV3LiveUpdateItem(operation, activeIncident, validationCallIds);
+            var ragById = candidateCalls
+                .Where(candidate => validationCallIds.Contains(candidate.Call.Id))
+                .DistinctBy(candidate => candidate.Call.Id)
+                .ToDictionary(candidate => candidate.Call.Id);
+            var finalMembership = FinalizeServerOwnedMembership(operationItem, activeIncident, proposedUnion, locationRows, anchorsByCall, ragById);
+            if (!finalMembership.Accepted)
+            {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    proposedCalls.Select(call => call.Id).ToList(),
+                    false,
+                    $"rejected:v3 live update_current failed final membership validation: {finalMembership.Reason}",
+                    candidateCallsById,
+                    ct);
+                continue;
+            }
+
+            var finalCallIds = finalMembership.Calls.Select(call => call.Id).ToHashSet();
+            if (!existingCallIds.IsSubsetOf(finalCallIds))
+            {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    finalMembership.Calls.Select(call => call.Id).ToList(),
+                    false,
+                    "rejected:v3 live update_current validation would drop existing active incident calls",
+                    candidateCallsById,
+                    ct);
+                continue;
+            }
+
+            var addedCallIds = finalCallIds.Except(existingCallIds).Order().ToList();
+            if (addedCallIds.Count == 0)
+            {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    finalMembership.Calls.Select(call => call.Id).ToList(),
+                    true,
+                    $"accepted:v3 live update_current validation produced no membership delta: {finalMembership.Reason}",
+                    candidateCallsById,
+                    ct);
+                continue;
+            }
+
+            var calls = finalMembership.Calls;
             var incident = activeIncident with
             {
                 Title = string.IsNullOrWhiteSpace(operation.Title) ? activeIncident.Title : operation.Title,
@@ -785,7 +849,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 operation.CallIds,
                 calls.Select(call => call.Id).ToList(),
                 true,
-                "accepted:v3 live update_current applied after legacy persistence",
+                $"accepted:v3 live update_current applied after legacy persistence; addedCallIds={string.Join(",", addedCallIds)}; validation={finalMembership.Reason}",
                 candidateCallsById,
                 ct);
             applied++;
@@ -843,6 +907,49 @@ public sealed class AutomaticInsightsService : BackgroundService
             0,
             JsonSerializer.Serialize(callIds),
             JsonSerializer.Serialize(metadata, EngineConfig.JsonOptions())), ct);
+    }
+
+    private static IncidentStateItem BuildIncidentV3LiveUpdateItem(
+        IncidentPlanExecutionOperationV3 operation,
+        IncidentDto activeIncident,
+        IReadOnlyList<long> callIds)
+    {
+        var title = string.IsNullOrWhiteSpace(operation.Title)
+            ? activeIncident.Title
+            : operation.Title;
+        var category = string.IsNullOrWhiteSpace(operation.Category)
+            ? activeIncident.Category
+            : operation.Category;
+        var location = string.IsNullOrWhiteSpace(operation.LocationLabel)
+            ? null
+            : new IncidentEventLocation(
+                "location",
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                operation.LocationLabel,
+                operation.LocationLabel,
+                callIds.Select(CallToken).ToList(),
+                0.7);
+
+        return new IncidentStateItem(
+            activeIncident.IncidentKey,
+            activeIncident.Status,
+            title,
+            string.IsNullOrWhiteSpace(operation.FrameTitle) ? activeIncident.Detail : operation.FrameTitle,
+            category,
+            0.5,
+            callIds.Select(CallToken).ToList(),
+            callIds.Select(CallToken).ToList(),
+            [],
+            [],
+            category,
+            new[] { title, operation.FrameTitle }.Where(value => !string.IsNullOrWhiteSpace(value)).ToList(),
+            false,
+            location);
     }
 
     private static bool TryParseActiveIncidentTarget(string? value, out long incidentId)

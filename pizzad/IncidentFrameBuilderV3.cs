@@ -1229,7 +1229,9 @@ public sealed class IncidentFrameBuilderV3
 
     private static HashSet<string> StrongFrameCurrentConflictAnchors(IncidentFrameV3 frame)
     {
-        return StrongCurrentConflictAnchors(frame.LocationLabel, frame.LocationIsHighConfidenceGeocode, frame.Anchors);
+        var anchors = StrongCurrentConflictAnchors(frame.LocationLabel, frame.LocationIsHighConfidenceGeocode, frame.Anchors);
+        anchors.UnionWith(TextLocationConflictAnchors(frame.Title));
+        return anchors;
     }
 
     private static bool HasStrongFrameCurrentConflictLocation(IncidentFrameV3 frame) =>
