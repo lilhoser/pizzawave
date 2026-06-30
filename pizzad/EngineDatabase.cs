@@ -2780,6 +2780,45 @@ public sealed class EngineDatabase
             .ToList();
     }
 
+    public async Task<IncidentDto?> GetIncidentByIdAsync(long incidentId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, COALESCE(incident_key, ''), title, detail, COALESCE(category, 'other'), COALESCE(status, 'active'), first_seen, last_seen, incident_score
+            FROM incidents
+            WHERE id = $id;
+            """;
+        Add(command, "$id", incidentId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var incident = new IncidentDto
+        {
+            Id = reader.GetInt64(0),
+            IncidentKey = reader.GetString(1),
+            Title = reader.GetString(2),
+            Detail = reader.GetString(3),
+            Category = reader.GetString(4),
+            Status = reader.GetString(5),
+            FirstSeen = reader.GetInt64(6),
+            LastSeen = reader.GetInt64(7),
+            Confidence = reader.GetDouble(8),
+            Calls = await ListIncidentCallsAsync(connection, incidentId, ct)
+        };
+
+        if (incident.Calls.Count == 0)
+            return null;
+
+        return incident with
+        {
+            Category = string.IsNullOrWhiteSpace(incident.Category) || incident.Category == "other"
+                ? DominantIncidentCategory(incident.Calls)
+                : incident.Category
+        };
+    }
+
     private static string DominantIncidentCategory(IReadOnlyList<IncidentCallDto> calls) =>
         calls.GroupBy(c => string.IsNullOrWhiteSpace(c.Category) ? "other" : c.Category)
             .OrderByDescending(g => g.Count())

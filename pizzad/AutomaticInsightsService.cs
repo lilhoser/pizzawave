@@ -686,7 +686,6 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (operations.Count == 0)
             return 0;
 
-        var activeById = activeIncidents.ToDictionary(incident => incident.Id);
         var candidateCallsById = candidateCalls
             .Select(candidate => candidate.Call)
             .DistinctBy(call => call.Id)
@@ -694,8 +693,28 @@ public sealed class AutomaticInsightsService : BackgroundService
         var applied = 0;
         foreach (var operation in operations)
         {
-            if (!TryParseActiveIncidentTarget(operation.TargetIncidentId, out var activeIncidentId) ||
-                !activeById.TryGetValue(activeIncidentId, out var activeIncident) ||
+            if (!TryParseActiveIncidentTarget(operation.TargetIncidentId, out var activeIncidentId))
+            {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    null,
+                    operation.CallIds,
+                    [],
+                    false,
+                    "rejected:target incident did not resolve to an active managed incident",
+                    candidateCallsById,
+                    ct);
+                _logger.LogWarning(
+                    "Incident v3 live update_current skipped for {System}: target incident '{TargetIncidentId}' did not resolve to an active managed incident.",
+                    systemShortName,
+                    operation.TargetIncidentId);
+                continue;
+            }
+
+            var activeIncident = await _database.GetIncidentByIdAsync(activeIncidentId, ct);
+            if (activeIncident is null ||
+                string.Equals(activeIncident.Status, "concluded", StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(activeIncident.IncidentKey))
             {
                 await AuditIncidentV3LiveUpdateCurrentAsync(
@@ -750,6 +769,28 @@ public sealed class AutomaticInsightsService : BackgroundService
             }
 
             var existingCallIds = existingCallsById.Keys.ToHashSet();
+            var missingExistingCallIds = MissingCurrentCallIdsForAddOnlyUpdate(activeIncident, operation.CallIds);
+            if (missingExistingCallIds.Count > 0)
+            {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    proposedCalls.Select(call => call.Id).ToList(),
+                    false,
+                    $"rejected:v3 live update_current plan would replace current membership; missingExistingCallIds={string.Join(",", missingExistingCallIds)}",
+                    candidateCallsById,
+                    ct);
+                _logger.LogWarning(
+                    "Incident v3 live update_current skipped for {System}: plan would replace current membership. target={TargetIncidentId}; missingExistingCallIds={MissingExistingCallIds}; planned={PlannedCallIds}",
+                    systemShortName,
+                    operation.TargetIncidentId,
+                    string.Join(",", missingExistingCallIds),
+                    string.Join(",", operation.CallIds.Distinct().Order()));
+                continue;
+            }
+
             var proposedUnion = proposedCalls
                 .Concat(existingCallsById.Values)
                 .DistinctBy(call => call.Id)
@@ -857,6 +898,19 @@ public sealed class AutomaticInsightsService : BackgroundService
         }
 
         return applied;
+    }
+
+    private static IReadOnlyList<long> MissingCurrentCallIdsForAddOnlyUpdate(
+        IncidentDto activeIncident,
+        IReadOnlyList<long> plannedCallIds)
+    {
+        var planned = plannedCallIds.ToHashSet();
+        return activeIncident.Calls
+            .Select(call => call.CallId)
+            .Distinct()
+            .Except(planned)
+            .Order()
+            .ToList();
     }
 
     private async Task AuditIncidentV3LiveUpdateCurrentAsync(

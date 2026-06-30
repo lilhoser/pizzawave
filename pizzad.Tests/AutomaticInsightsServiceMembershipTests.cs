@@ -342,6 +342,26 @@ public sealed class AutomaticInsightsServiceMembershipTests
     }
 
     [Fact]
+    public void MissingCurrentCallIdsForAddOnlyUpdate_DetectsReplacementStyleUpdate()
+    {
+        var existing = new IncidentDto
+        {
+            Id = 482,
+            Title = "Security check at 210 Taylor Rd",
+            Detail = "Sheriff units dispatched for a welfare check.",
+            Calls =
+            [
+                IncidentCall(126545, 1000, "Security says no accident found."),
+                IncidentCall(126549, 1010, "Welfare check at 210 Taylor Road."),
+                IncidentCall(126587, 1020, "Party wanted a crash report.")
+            ]
+        };
+
+        Assert.Equal([126587], MissingCurrentCallIdsForAddOnlyUpdate(existing, [126545, 126549]));
+        Assert.Empty(MissingCurrentCallIdsForAddOnlyUpdate(existing, [126545, 126549, 126587, 126630]));
+    }
+
+    [Fact]
     public void SiblingIncidentMergeConflict_BlocksDifferentFireAssistanceLocations()
     {
         var target = new IncidentDto
@@ -451,6 +471,19 @@ public sealed class AutomaticInsightsServiceMembershipTests
                 Array.Empty<CallLocationDashboardRow>(),
                 new Dictionary<long, IReadOnlyList<CallAnchorRecord>>()
             ])!;
+    }
+
+    private static IReadOnlyList<long> MissingCurrentCallIdsForAddOnlyUpdate(
+        IncidentDto existing,
+        IReadOnlyList<long> plannedCallIds)
+    {
+        var method = typeof(AutomaticInsightsService).GetMethod(
+            "MissingCurrentCallIdsForAddOnlyUpdate",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return ((System.Collections.IEnumerable)method.Invoke(null, [existing, plannedCallIds])!)
+            .Cast<long>()
+            .ToList();
     }
 
     private static IReadOnlyList<object> ParseIncidentExtractionResponse(string json)
