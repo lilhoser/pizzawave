@@ -284,6 +284,16 @@ for update in unique_updates.values():
     accepted_exact = [audit for audit in accepted_audits if call_id_set == audit["ids"]]
     rejected_extra = [audit for audit in rejected_audits if audit["ids"] & set(extra_call_ids)]
     accepted_extra = [audit for audit in accepted_audits if audit["ids"] & set(extra_call_ids)]
+    legacy_excluded_extra_ids = set()
+    for audit in accepted_audits:
+        reason = audit.get("reason") or ""
+        for excluded in re.findall(r"excluded (?:weak/unrelated|verifier-rejected) calls ([0-9,]+)", reason, re.IGNORECASE):
+            for value in excluded.split(","):
+                try:
+                    legacy_excluded_extra_ids.add(int(value.strip()))
+                except Exception:
+                    pass
+    legacy_excluded_extra_ids &= set(extra_call_ids)
 
     if not update["targetIncidentId"]:
         classification = "missing_target_incident_id"
@@ -295,7 +305,7 @@ for update in unique_updates.values():
         classification = "would_replace_current_membership"
     elif missing_target_call_ids:
         classification = "would_drop_current_calls"
-    elif extra_call_ids and rejected_extra:
+    elif extra_call_ids and (rejected_extra or legacy_excluded_extra_ids):
         classification = "would_add_legacy_rejected_calls"
     elif extra_call_ids and accepted_superset:
         classification = "would_add_legacy_accepted_superset"
@@ -319,6 +329,7 @@ for update in unique_updates.values():
     update["acceptedExactAuditIds"] = [audit["id"] for audit in accepted_exact[-5:]]
     update["acceptedSupersetAuditIds"] = [audit["id"] for audit in accepted_superset[-5:]]
     update["rejectedExtraAuditIds"] = [audit["id"] for audit in rejected_extra[-5:]]
+    update["legacyExcludedExtraCallIds"] = sorted(legacy_excluded_extra_ids)
     update["acceptedAudits"] = [
         {
             "id": audit["id"],
