@@ -1012,6 +1012,43 @@ public sealed class IncidentFrameBuilderV3Tests
     }
 
     [Fact]
+    public void BuildIncidentPlanDecisions_HoldsGenericCurrentUpdateWithNewCalls()
+    {
+        var builder = new IncidentFrameBuilderV3();
+        var genericCurrentFrame = new IncidentFrameV3(
+            "generic-current-frame",
+            "current:active-448:commercial-fire-alarm",
+            "current_matched",
+            "mature",
+            "Fire response",
+            "fire",
+            "",
+            [115191, 115233, 115241],
+            [],
+            [],
+            "active:448",
+            "Commercial fire alarm at 16 Hickson Pike",
+            "active",
+            "test")
+        {
+            MatchedCurrentCallIds = [115191],
+            MatchedCurrentCategory = "fire"
+        };
+        var resolverDecisions = new[]
+        {
+            ResolverDecision(115233, "attach_current", genericCurrentFrame.FrameId, wouldAttachCurrentIncidentId: "active:448"),
+            ResolverDecision(115241, "attach_current", genericCurrentFrame.FrameId, wouldAttachCurrentIncidentId: "active:448")
+        };
+
+        var plan = Assert.Single(builder.BuildIncidentPlanDecisions([genericCurrentFrame], resolverDecisions));
+
+        Assert.Equal("hold_pending", plan.Action);
+        Assert.Equal("active:448", plan.TargetIncidentId);
+        Assert.Equal([115233, 115241], plan.CallIds);
+        Assert.Contains("planDroppedBecause=generic_current_update_unproven", plan.Reason);
+    }
+
+    [Fact]
     public void Build_DoesNotFlagEquivalentCurrentMatchLocationText()
     {
         var builder = new IncidentFrameBuilderV3();

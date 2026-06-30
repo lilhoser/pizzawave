@@ -440,10 +440,12 @@ public sealed class IncidentFrameBuilderV3
             .ToList();
         if (newResolverCallIds.Any(frame.HospitalHandoffOrTransportCallIds.Contains))
             return "new_hospital_handoff_or_transport_member";
+        if (newResolverCallIds.Count == 1 && resolverCallIds.Count == 1)
+            return "single_call_current_update_unproven";
+        if (newResolverCallIds.Count > 0 && IsGenericTitle(frame.Title))
+            return "generic_current_update_unproven";
 
-        return newResolverCallIds.Count == 1 && resolverCallIds.Count == 1
-            ? "single_call_current_update_unproven"
-            : string.Empty;
+        return string.Empty;
     }
 
     private static bool IsStrongCreatePlanAnchor(string anchor)
