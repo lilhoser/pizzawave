@@ -339,6 +339,12 @@ public sealed class IncidentFrameBuilderV3
             planDroppedBecause = updateIneligibilityReason;
         }
         var callIds = PlanCallIds(action, resolverCallIds, frame, resolverClaimedCallIds);
+        var missingCurrentCallIds = MissingCurrentCallIds(action, callIds, frame);
+        if (missingCurrentCallIds.Count > 0)
+        {
+            action = "hold_pending";
+            planDroppedBecause = "current_update_would_drop_existing_membership";
+        }
         var currentCoverageCallIds = callIds
             .Except(resolverCallIds)
             .Order()
@@ -395,6 +401,26 @@ public sealed class IncidentFrameBuilderV3
 
         return resolverCallIds
             .Concat(frame.MatchedCurrentCallIds.Where(callId => !resolverClaimedCallIds.Contains(callId)))
+            .Distinct()
+            .Order()
+            .ToList();
+    }
+
+    private static List<long> MissingCurrentCallIds(
+        string action,
+        IReadOnlyList<long> planCallIds,
+        IncidentFrameV3? frame)
+    {
+        if (!string.Equals(action, "update_current", StringComparison.OrdinalIgnoreCase) ||
+            frame is null ||
+            frame.MatchedCurrentCallIds.Count == 0)
+        {
+            return [];
+        }
+
+        var planCallIdSet = planCallIds.ToHashSet();
+        return frame.MatchedCurrentCallIds
+            .Where(callId => !planCallIdSet.Contains(callId))
             .Distinct()
             .Order()
             .ToList();

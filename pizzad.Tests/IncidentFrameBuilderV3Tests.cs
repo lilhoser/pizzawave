@@ -2157,6 +2157,60 @@ public sealed class IncidentFrameBuilderV3Tests
     }
 
     [Fact]
+    public void BuildIncidentPlanDecisions_HoldsActiveCurrentUpdateThatWouldDropCurrentMembership()
+    {
+        var builder = new IncidentFrameBuilderV3();
+        var activeCurrentFrame = new IncidentFrameV3(
+            "active-current-frame",
+            "current:active-451:unconscious-persons",
+            "current_matched",
+            "mature",
+            "Unconscious person near 6708 Ringle Rd",
+            "ems",
+            "6708 ringle rd",
+            [116287, 116305, 116325],
+            [],
+            ["address:6708 ringle rd"],
+            "active:451",
+            "Two unconscious persons at Circle K on Ringle Rd",
+            "active",
+            "test")
+        {
+            MatchedCurrentCallIds = [116287, 116317, 116325],
+            MatchedCurrentCategory = "ems"
+        };
+        var otherFrame = new IncidentFrameV3(
+            "other-frame",
+            "other:116317",
+            "multi_call",
+            "mature",
+            "Separate medical update",
+            "ems",
+            "other",
+            [116317],
+            [],
+            ["address:other"],
+            "",
+            "",
+            "",
+            "test");
+        var resolverDecisions = new[]
+        {
+            ResolverDecision(116287, "attach_current", activeCurrentFrame.FrameId, wouldAttachCurrentIncidentId: "active:451"),
+            ResolverDecision(116305, "attach_current", activeCurrentFrame.FrameId, wouldAttachCurrentIncidentId: "active:451"),
+            ResolverDecision(116325, "attach_current", activeCurrentFrame.FrameId, wouldAttachCurrentIncidentId: "active:451"),
+            ResolverDecision(116317, "attach_new", otherFrame.FrameId, wouldCreateIncident: true)
+        };
+
+        var plans = builder.BuildIncidentPlanDecisions([activeCurrentFrame, otherFrame], resolverDecisions);
+
+        var currentPlan = Assert.Single(plans, plan => plan.TargetIncidentId == "active:451");
+        Assert.Equal("hold_pending", currentPlan.Action);
+        Assert.Equal([116287, 116305, 116325], currentPlan.CallIds);
+        Assert.Contains("planDroppedBecause=current_update_would_drop_existing_membership", currentPlan.Reason);
+    }
+
+    [Fact]
     public void BuildIncidentPlanDecisions_DoesNotCollapsePlaceholderCurrentIdsWithDifferentTitles()
     {
         var builder = new IncidentFrameBuilderV3();
