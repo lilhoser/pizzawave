@@ -40,6 +40,7 @@ if args.until:
 proc = subprocess.run(journal_args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
 records = []
+simulation_records_raw = []
 current = None
 for line in proc.stdout.splitlines():
     try:
@@ -48,14 +49,45 @@ for line in proc.stdout.splitlines():
         continue
 
     message = item.get("MESSAGE", "")
+    one_line_simulation = re.search(r"Incident v3 update_current validation simulation for ([^:]+): .*?results=(\[.*\])$", message.strip())
+    if one_line_simulation:
+        timestamp_us = int(item.get("__REALTIME_TIMESTAMP", "0") or 0)
+        simulation_records_raw.append({
+            "timestamp": timestamp_us / 1000000 if timestamp_us else 0,
+            "system": one_line_simulation.group(1),
+            "lines": [one_line_simulation.group(2)],
+        })
+        continue
+
     start = re.search(r"Incident v3 incident plan shadow for ([^:]+): .*?plans=\[$", message.strip())
     if start:
         if current:
-            records.append(current)
+            if current.get("kind") == "simulation":
+                simulation_records_raw.append(current)
+            else:
+                records.append(current)
         timestamp_us = int(item.get("__REALTIME_TIMESTAMP", "0") or 0)
         current = {
+            "kind": "plan",
             "timestamp": timestamp_us / 1000000 if timestamp_us else 0,
             "system": start.group(1),
+            "lines": ["["],
+            "depth": 1,
+        }
+        continue
+
+    start_simulation = re.search(r"Incident v3 update_current validation simulation for ([^:]+): .*?results=\[$", message.strip())
+    if start_simulation:
+        if current:
+            if current.get("kind") == "simulation":
+                simulation_records_raw.append(current)
+            else:
+                records.append(current)
+        timestamp_us = int(item.get("__REALTIME_TIMESTAMP", "0") or 0)
+        current = {
+            "kind": "simulation",
+            "timestamp": timestamp_us / 1000000 if timestamp_us else 0,
+            "system": start_simulation.group(1),
             "lines": ["["],
             "depth": 1,
         }
@@ -66,11 +98,17 @@ for line in proc.stdout.splitlines():
         current["lines"].append(text)
         current["depth"] += text.count("[") - text.count("]")
         if current["depth"] <= 0:
-            records.append(current)
+            if current.get("kind") == "simulation":
+                simulation_records_raw.append(current)
+            else:
+                records.append(current)
             current = None
 
 if current:
-    records.append(current)
+    if current.get("kind") == "simulation":
+        simulation_records_raw.append(current)
+    else:
+        records.append(current)
 
 plan_records = []
 parse_failures = 0
@@ -85,6 +123,21 @@ for record in records:
         "time": when,
         "system": record["system"],
         "plans": plans,
+    })
+
+simulation_records = []
+simulation_parse_failures = 0
+for record in simulation_records_raw:
+    try:
+        results = json.loads("\n".join(record["lines"]))
+    except Exception:
+        simulation_parse_failures += 1
+        continue
+    when = datetime.datetime.fromtimestamp(record["timestamp"]).isoformat(sep=" ", timespec="seconds") if record["timestamp"] else ""
+    simulation_records.append({
+        "time": when,
+        "system": record["system"],
+        "results": results,
     })
 
 conn = sqlite3.connect(args.database)
@@ -361,6 +414,49 @@ update_mutation_risk_counts = collections.Counter(
     for row in update_candidates
 )
 
+def get_any(row, *names, default=None):
+    for name in names:
+        if isinstance(row, dict) and name in row:
+            return row[name]
+    return default
+
+simulation_results = []
+for record in simulation_records:
+    for result in record["results"]:
+        planned = [int(value) for value in (get_any(result, "plannedCallIds", "PlannedCallIds", default=[]) or [])]
+        resolved = [int(value) for value in (get_any(result, "resolvedCallIds", "ResolvedCallIds", default=[]) or [])]
+        final = [int(value) for value in (get_any(result, "finalCallIds", "FinalCallIds", default=[]) or [])]
+        added = [int(value) for value in (get_any(result, "addedCallIds", "AddedCallIds", default=[]) or [])]
+        simulation_results.append({
+            "time": record["time"],
+            "system": record["system"],
+            "accepted": bool(get_any(result, "accepted", "Accepted", default=False)),
+            "validationReason": get_any(result, "validationReason", "ValidationReason", default=""),
+            "targetIncidentId": get_any(result, "targetIncidentId", "TargetIncidentId", default=""),
+            "targetIncidentTitle": get_any(result, "targetIncidentTitle", "TargetIncidentTitle", default=""),
+            "targetIncidentKey": get_any(result, "targetIncidentKey", "TargetIncidentKey", default=""),
+            "title": get_any(result, "title", "Title", default=""),
+            "frameTitle": get_any(result, "frameTitle", "FrameTitle", default=""),
+            "category": get_any(result, "category", "Category", default=""),
+            "blocked": bool(get_any(result, "blocked", "Blocked", default=False)),
+            "blockedBecause": get_any(result, "blockedBecause", "BlockedBecause", default=""),
+            "planReason": get_any(result, "reason", "Reason", default=""),
+            "plannedCallIds": planned,
+            "resolvedCallIds": resolved,
+            "finalCallIds": final,
+            "addedCallIds": added,
+            "callDetails": call_details(planned),
+        })
+
+simulation_reason_counts = collections.Counter(row["validationReason"] for row in simulation_results if not row["accepted"])
+simulation_acceptance_counts = collections.Counter("accepted" if row["accepted"] else "rejected" for row in simulation_results)
+simulation_delta_counts = collections.Counter(
+    "accepted_with_delta" if row["accepted"] and row["addedCallIds"]
+    else "accepted_noop" if row["accepted"]
+    else "rejected"
+    for row in simulation_results
+)
+
 payload = {
     "generatedAtUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
     "host": None,
@@ -380,9 +476,16 @@ payload = {
         "uniqueUpdateCandidates": len(update_candidates),
         "updateClassifications": dict(sorted(update_classification_counts.items())),
         "updateMutationRiskCounts": dict(sorted(update_mutation_risk_counts.items())),
+        "validationSimulationRecords": len(simulation_records),
+        "validationSimulationParseFailures": simulation_parse_failures,
+        "validationSimulationCandidates": len(simulation_results),
+        "validationSimulationAcceptanceCounts": dict(sorted(simulation_acceptance_counts.items())),
+        "validationSimulationDeltaCounts": dict(sorted(simulation_delta_counts.items())),
+        "validationSimulationRejectReasons": dict(sorted(simulation_reason_counts.items())),
     },
     "createCandidates": create_candidates,
     "updateCandidates": update_candidates,
+    "validationSimulationResults": simulation_results,
 }
 
 print(json.dumps(payload, indent=2, sort_keys=True))
