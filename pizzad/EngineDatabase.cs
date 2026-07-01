@@ -676,6 +676,43 @@ public sealed class EngineDatabase
         return rows;
     }
 
+    public async Task<List<IncidentOperationAuditRowDto>> ListAcceptedIncidentOperationAuditForKeyAsync(
+        string incidentKey,
+        int limit,
+        CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, timestamp_utc, system_short_name, incident_key, operation, accepted, reason, score, call_ids_json, metadata_json
+            FROM incident_operation_audit
+            WHERE incident_key = $incident_key
+              AND accepted = 1
+            ORDER BY timestamp_utc DESC, id DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$incident_key", incidentKey);
+        Add(command, "$limit", Math.Clamp(limit, 1, 250));
+        var rows = new List<IncidentOperationAuditRowDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var callIdsJson = reader.GetString(reader.GetOrdinal("call_ids_json"));
+            rows.Add(new IncidentOperationAuditRowDto(
+                reader.GetInt64(reader.GetOrdinal("id")),
+                DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc")), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                reader.GetString(reader.GetOrdinal("system_short_name")),
+                reader.GetString(reader.GetOrdinal("incident_key")),
+                reader.GetString(reader.GetOrdinal("operation")),
+                reader.GetInt32(reader.GetOrdinal("accepted")) != 0,
+                reader.GetString(reader.GetOrdinal("reason")),
+                reader.GetDouble(reader.GetOrdinal("score")),
+                ParseCallIds(callIdsJson),
+                reader.GetString(reader.GetOrdinal("metadata_json"))));
+        }
+        return rows;
+    }
+
     public async Task<GeocodeCacheDto?> GetGeocodeCacheAsync(string cacheKey, CancellationToken ct)
     {
         await using var connection = OpenConnection();

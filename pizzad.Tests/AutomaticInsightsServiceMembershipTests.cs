@@ -362,6 +362,47 @@ public sealed class AutomaticInsightsServiceMembershipTests
     }
 
     [Fact]
+    public void LegacyRejectedExtraCallIdsForAddOnlyUpdate_DetectsPreviouslyExcludedExtras()
+    {
+        var existing = new IncidentDto
+        {
+            Id = 4925,
+            IncidentKey = "llm:whiteoakmt-cleveland:1025389:event",
+            Calls =
+            [
+                IncidentCall(1025389, 1000, "Faulty smoke detector."),
+                IncidentCall(1025729, 1100, "Alarm company notified.")
+            ]
+        };
+        var audits = new[]
+        {
+            AuditRow(
+                true,
+                "accepted:assembler retained 2/5 verifier call(s): server-owned event membership; excluded weak/unrelated calls 1025479,1025557,1025615"),
+            AuditRow(
+                true,
+                "accepted:update incident; identity:accepted exact existing incident_id after retained evidence match")
+        };
+
+        Assert.Equal(
+            [1025479, 1025557, 1025615],
+            LegacyRejectedExtraCallIdsForAddOnlyUpdate(existing, [1025389, 1025479, 1025557, 1025615, 1025729], audits));
+        Assert.Empty(LegacyRejectedExtraCallIdsForAddOnlyUpdate(existing, [1025389, 1025729, 1026000], audits));
+    }
+
+    [Fact]
+    public void ExtractLegacyExcludedCallIds_ParsesSupportedAcceptedAuditReasons()
+    {
+        Assert.Equal(
+            [132989, 133791],
+            ExtractLegacyExcludedCallIds("accepted:assembler retained 3/5 verifier call(s): server-owned event membership; excluded weak/unrelated calls 132989,133791"));
+        Assert.Equal(
+            [42, 43],
+            ExtractLegacyExcludedCallIds("accepted:assembler retained verifier output; excluded verifier-rejected calls 42, 43"));
+        Assert.Empty(ExtractLegacyExcludedCallIds("accepted:update incident; identity:accepted exact existing incident_id after retained evidence match"));
+    }
+
+    [Fact]
     public void SiblingIncidentMergeConflict_BlocksDifferentFireAssistanceLocations()
     {
         var target = new IncidentDto
@@ -485,6 +526,43 @@ public sealed class AutomaticInsightsServiceMembershipTests
             .Cast<long>()
             .ToList();
     }
+
+    private static IReadOnlyList<long> LegacyRejectedExtraCallIdsForAddOnlyUpdate(
+        IncidentDto existing,
+        IReadOnlyList<long> plannedCallIds,
+        IReadOnlyList<IncidentOperationAuditRowDto> acceptedAudits)
+    {
+        var method = typeof(AutomaticInsightsService).GetMethod(
+            "LegacyRejectedExtraCallIdsForAddOnlyUpdate",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return ((System.Collections.IEnumerable)method.Invoke(null, [existing, plannedCallIds, acceptedAudits])!)
+            .Cast<long>()
+            .ToList();
+    }
+
+    private static IReadOnlyList<long> ExtractLegacyExcludedCallIds(string reason)
+    {
+        var method = typeof(AutomaticInsightsService).GetMethod(
+            "ExtractLegacyExcludedCallIds",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return ((System.Collections.IEnumerable)method.Invoke(null, [reason])!)
+            .Cast<long>()
+            .ToList();
+    }
+
+    private static IncidentOperationAuditRowDto AuditRow(bool accepted, string reason) => new(
+        1,
+        DateTime.UtcNow,
+        "whiteoakmt-cleveland",
+        "llm:whiteoakmt-cleveland:1025389:event",
+        "upsert_incident",
+        accepted,
+        reason,
+        0,
+        [],
+        "{}");
 
     private static IReadOnlyList<object> ParseIncidentExtractionResponse(string json)
     {

@@ -791,6 +791,29 @@ public sealed class AutomaticInsightsService : BackgroundService
                 continue;
             }
 
+            var recentAcceptedAudits = await _database.ListAcceptedIncidentOperationAuditForKeyAsync(activeIncident.IncidentKey, 40, ct);
+            var legacyRejectedExtraCallIds = LegacyRejectedExtraCallIdsForAddOnlyUpdate(activeIncident, operation.CallIds, recentAcceptedAudits);
+            if (legacyRejectedExtraCallIds.Count > 0)
+            {
+                await AuditIncidentV3LiveUpdateCurrentAsync(
+                    systemShortName,
+                    operation,
+                    activeIncident,
+                    operation.CallIds,
+                    proposedCalls.Select(call => call.Id).ToList(),
+                    false,
+                    $"rejected:v3 live update_current would add calls previously excluded by accepted legacy audit; rejectedCallIds={string.Join(",", legacyRejectedExtraCallIds)}",
+                    candidateCallsById,
+                    ct);
+                _logger.LogWarning(
+                    "Incident v3 live update_current skipped for {System}: plan would add calls previously excluded by accepted legacy audit. target={TargetIncidentId}; rejectedCallIds={RejectedCallIds}; planned={PlannedCallIds}",
+                    systemShortName,
+                    operation.TargetIncidentId,
+                    string.Join(",", legacyRejectedExtraCallIds),
+                    string.Join(",", operation.CallIds.Distinct().Order()));
+                continue;
+            }
+
             var proposedUnion = proposedCalls
                 .Concat(existingCallsById.Values)
                 .DistinctBy(call => call.Id)
@@ -911,6 +934,55 @@ public sealed class AutomaticInsightsService : BackgroundService
             .Except(planned)
             .Order()
             .ToList();
+    }
+
+    private static IReadOnlyList<long> LegacyRejectedExtraCallIdsForAddOnlyUpdate(
+        IncidentDto activeIncident,
+        IReadOnlyList<long> plannedCallIds,
+        IReadOnlyList<IncidentOperationAuditRowDto> acceptedAudits)
+    {
+        var currentCallIds = activeIncident.Calls.Select(call => call.CallId).ToHashSet();
+        var extraCallIds = plannedCallIds
+            .Distinct()
+            .Except(currentCallIds)
+            .ToHashSet();
+        if (extraCallIds.Count == 0)
+            return [];
+
+        var rejectedCallIds = new HashSet<long>();
+        foreach (var audit in acceptedAudits)
+        {
+            if (!audit.Accepted)
+                continue;
+            foreach (var callId in ExtractLegacyExcludedCallIds(audit.Reason))
+                rejectedCallIds.Add(callId);
+        }
+
+        return rejectedCallIds
+            .Intersect(extraCallIds)
+            .Order()
+            .ToList();
+    }
+
+    private static IReadOnlyList<long> ExtractLegacyExcludedCallIds(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return [];
+
+        var callIds = new HashSet<long>();
+        foreach (Match match in Regex.Matches(
+                     reason,
+                     @"excluded\s+(?:weak/unrelated|verifier-rejected)\s+calls\s+([0-9,\s]+)",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            foreach (var part in match.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (long.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var callId))
+                    callIds.Add(callId);
+            }
+        }
+
+        return callIds.Order().ToList();
     }
 
     private async Task AuditIncidentV3LiveUpdateCurrentAsync(
