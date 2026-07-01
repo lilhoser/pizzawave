@@ -487,7 +487,7 @@ public sealed class AutomaticInsightsService : BackgroundService
 
                 var parsed = ParseIncidentExtractionResponse(text);
                 await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, true, recoveredFallback ? "recovered_after_truncation_split" : string.Empty, ct);
-                var incidentV3Execution = RunIncidentV3FrameShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed);
+                var incidentV3Execution = await RunIncidentV3FrameShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, ct);
                 await RunIncidentV2ShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, endpoint, ct);
                 return new IncidentExtractionRunResult(parsed, incidentV3Execution);
             }
@@ -517,11 +517,12 @@ public sealed class AutomaticInsightsService : BackgroundService
         throw new InvalidOperationException(last?.Message ?? "Incident extraction request failed.", last);
     }
 
-    private IncidentPlanExecutionResultV3? RunIncidentV3FrameShadowAsync(
+    private async Task<IncidentPlanExecutionResultV3?> RunIncidentV3FrameShadowAsync(
         string systemShortName,
         IReadOnlyList<IncidentDto> activeIncidents,
         IReadOnlyList<IncidentRagCandidate> candidateCalls,
-        IncidentExtractionResult currentResult)
+        IncidentExtractionResult currentResult,
+        CancellationToken ct)
     {
         if (!_config.AiInsights.IncidentV3FrameShadowEnabled || candidateCalls.Count == 0)
             return null;
@@ -564,6 +565,7 @@ public sealed class AutomaticInsightsService : BackgroundService
             var promotionDecisions = _incidentFrameBuilderV3.BuildPromotionDecisions(frames);
             var resolverDecisions = _incidentFrameBuilderV3.BuildResolverDecisions(frames, candidateCalls);
             var incidentPlans = _incidentFrameBuilderV3.BuildIncidentPlanDecisions(frames, resolverDecisions);
+            incidentPlans = await ApplyIncidentV3AcceptedAuditPlanGuardsAsync(incidentPlans, activeIncidents, ct);
             _logger.LogInformation(
                 "Incident v3 frame shadow for {System}: frameCount={FrameCount}; currentIncidentCount={CurrentIncidentCount}; candidateCallIds={CandidateCallIds}; frames={Frames}",
                 systemShortName,
@@ -650,6 +652,51 @@ public sealed class AutomaticInsightsService : BackgroundService
             string.Join(",", execution.BlockReasons),
             JsonSerializer.Serialize(execution.Operations, EngineConfig.JsonOptions()));
         return execution;
+    }
+
+    private async Task<IReadOnlyList<IncidentPlanDecisionV3>> ApplyIncidentV3AcceptedAuditPlanGuardsAsync(
+        IReadOnlyList<IncidentPlanDecisionV3> incidentPlans,
+        IReadOnlyList<IncidentDto> activeIncidents,
+        CancellationToken ct)
+    {
+        var activeIncidentsById = activeIncidents
+            .Where(incident => incident.Id > 0)
+            .GroupBy(incident => incident.Id)
+            .ToDictionary(group => group.Key, group => group.First());
+        var targetIncidents = incidentPlans
+            .Where(plan => string.Equals(plan.Action, "update_current", StringComparison.OrdinalIgnoreCase))
+            .Select(plan => TryParseActiveIncidentTarget(plan.TargetIncidentId, out var incidentId) &&
+                            activeIncidentsById.TryGetValue(incidentId, out var incident)
+                ? incident
+                : null)
+            .Where(incident => incident is not null)
+            .DistinctBy(incident => incident!.IncidentKey)
+            .Cast<IncidentDto>()
+            .ToList();
+        if (targetIncidents.Count == 0)
+            return incidentPlans;
+
+        var acceptedAuditsByIncidentKey = new Dictionary<string, IReadOnlyList<IncidentOperationAuditRowDto>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var incident in targetIncidents)
+        {
+            if (string.IsNullOrWhiteSpace(incident.IncidentKey))
+                continue;
+            try
+            {
+                acceptedAuditsByIncidentKey[incident.IncidentKey] =
+                    await _database.ListAcceptedIncidentOperationAuditForKeyAsync(incident.IncidentKey, 40, ct);
+            }
+            catch (Exception ex) when (!IsCallerRequestedCompletionCancellation(ex, ct))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Incident v3 accepted-audit plan guard unavailable for active incident {IncidentId} ({IncidentKey}); leaving shadow plans unmodified.",
+                    incident.Id,
+                    incident.IncidentKey);
+            }
+        }
+
+        return BlockLegacyRejectedUpdateCurrentPlans(incidentPlans, activeIncidentsById, acceptedAuditsByIncidentKey);
     }
 
     private async Task ApplyIncidentV3LiveUpdateCurrentAsync(
@@ -963,6 +1010,45 @@ public sealed class AutomaticInsightsService : BackgroundService
             .Order()
             .ToList();
     }
+
+    private static IReadOnlyList<IncidentPlanDecisionV3> BlockLegacyRejectedUpdateCurrentPlans(
+        IReadOnlyList<IncidentPlanDecisionV3> incidentPlans,
+        IReadOnlyDictionary<long, IncidentDto> activeIncidentsById,
+        IReadOnlyDictionary<string, IReadOnlyList<IncidentOperationAuditRowDto>> acceptedAuditsByIncidentKey)
+    {
+        return incidentPlans
+            .Select(plan =>
+            {
+                if (!string.Equals(plan.Action, "update_current", StringComparison.OrdinalIgnoreCase) ||
+                    !TryParseActiveIncidentTarget(plan.TargetIncidentId, out var activeIncidentId) ||
+                    !activeIncidentsById.TryGetValue(activeIncidentId, out var activeIncident) ||
+                    string.IsNullOrWhiteSpace(activeIncident.IncidentKey) ||
+                    !acceptedAuditsByIncidentKey.TryGetValue(activeIncident.IncidentKey, out var acceptedAudits))
+                {
+                    return plan;
+                }
+
+                var legacyRejectedExtraCallIds = LegacyRejectedExtraCallIdsForAddOnlyUpdate(activeIncident, plan.CallIds, acceptedAudits);
+                if (legacyRejectedExtraCallIds.Count == 0)
+                    return plan;
+
+                return plan with
+                {
+                    Action = "hold_pending",
+                    TargetIncidentId = string.Empty,
+                    TargetIncidentTitle = string.Empty,
+                    Reason = AppendPlanReason(
+                        plan.Reason,
+                        $"planDroppedBecause=legacy_rejected_extra_call_ids:{string.Join(",", legacyRejectedExtraCallIds)}")
+                };
+            })
+            .ToList();
+    }
+
+    private static string AppendPlanReason(string reason, string addition) =>
+        string.IsNullOrWhiteSpace(reason)
+            ? addition
+            : $"{reason}; {addition}";
 
     private static IReadOnlyList<long> ExtractLegacyExcludedCallIds(string reason)
     {

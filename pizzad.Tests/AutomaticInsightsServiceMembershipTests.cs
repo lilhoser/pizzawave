@@ -391,6 +391,77 @@ public sealed class AutomaticInsightsServiceMembershipTests
     }
 
     [Fact]
+    public void BlockLegacyRejectedUpdateCurrentPlans_HoldsPlanWithPreviouslyExcludedExtras()
+    {
+        var existing = new IncidentDto
+        {
+            Id = 521,
+            IncidentKey = "llm:chattanooga-simulcast-hamilton-t:138649:event",
+            Calls =
+            [
+                IncidentCall(138649, 1000, "MVC with injuries at Amnicola Highway.")
+            ]
+        };
+        var plan = IncidentPlan(
+            "update_current",
+            "active:521",
+            [138643, 138649, 138651],
+            "resolverAction=attach_current; calls=138643,138649,138651; currentCoverageCallIds=138649");
+        var audits = new Dictionary<string, IReadOnlyList<IncidentOperationAuditRowDto>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [existing.IncidentKey] =
+            [
+                AuditRow(
+                    true,
+                    "accepted:assembler retained 1/5 verifier call(s): server-owned event membership; excluded weak/unrelated calls 138639,138641,138643,138651")
+            ]
+        };
+
+        var guarded = BlockLegacyRejectedUpdateCurrentPlans(
+            [plan],
+            new Dictionary<long, IncidentDto> { [521] = existing },
+            audits);
+
+        var result = Assert.Single(guarded);
+        Assert.Equal("hold_pending", result.Action);
+        Assert.Empty(result.TargetIncidentId);
+        Assert.Contains("planDroppedBecause=legacy_rejected_extra_call_ids:138643,138651", result.Reason);
+    }
+
+    [Fact]
+    public void BlockLegacyRejectedUpdateCurrentPlans_LeavesCleanAddOnlyPlanWritable()
+    {
+        var existing = new IncidentDto
+        {
+            Id = 521,
+            IncidentKey = "llm:chattanooga-simulcast-hamilton-t:138649:event",
+            Calls =
+            [
+                IncidentCall(138649, 1000, "MVC with injuries at Amnicola Highway.")
+            ]
+        };
+        var plan = IncidentPlan("update_current", "active:521", [138649, 138700], "resolverAction=attach_current");
+        var audits = new Dictionary<string, IReadOnlyList<IncidentOperationAuditRowDto>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [existing.IncidentKey] =
+            [
+                AuditRow(
+                    true,
+                    "accepted:assembler retained 1/3 verifier call(s): server-owned event membership; excluded weak/unrelated calls 138643,138651")
+            ]
+        };
+
+        var guarded = BlockLegacyRejectedUpdateCurrentPlans(
+            [plan],
+            new Dictionary<long, IncidentDto> { [521] = existing },
+            audits);
+
+        var result = Assert.Single(guarded);
+        Assert.Equal("update_current", result.Action);
+        Assert.Equal("active:521", result.TargetIncidentId);
+    }
+
+    [Fact]
     public void ExtractLegacyExcludedCallIds_ParsesSupportedAcceptedAuditReasons()
     {
         Assert.Equal(
@@ -541,6 +612,20 @@ public sealed class AutomaticInsightsServiceMembershipTests
             .ToList();
     }
 
+    private static IReadOnlyList<IncidentPlanDecisionV3> BlockLegacyRejectedUpdateCurrentPlans(
+        IReadOnlyList<IncidentPlanDecisionV3> incidentPlans,
+        IReadOnlyDictionary<long, IncidentDto> activeIncidentsById,
+        IReadOnlyDictionary<string, IReadOnlyList<IncidentOperationAuditRowDto>> acceptedAuditsByIncidentKey)
+    {
+        var method = typeof(AutomaticInsightsService).GetMethod(
+            "BlockLegacyRejectedUpdateCurrentPlans",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return ((System.Collections.IEnumerable)method.Invoke(null, [incidentPlans, activeIncidentsById, acceptedAuditsByIncidentKey])!)
+            .Cast<IncidentPlanDecisionV3>()
+            .ToList();
+    }
+
     private static IReadOnlyList<long> ExtractLegacyExcludedCallIds(string reason)
     {
         var method = typeof(AutomaticInsightsService).GetMethod(
@@ -563,6 +648,22 @@ public sealed class AutomaticInsightsServiceMembershipTests
         0,
         [],
         "{}");
+
+    private static IncidentPlanDecisionV3 IncidentPlan(
+        string action,
+        string targetIncidentId,
+        IReadOnlyList<long> callIds,
+        string reason) => new(
+            action,
+            targetIncidentId,
+            targetIncidentId,
+            "frame-1",
+            "MVC with injuries at Amnicola Hwy near Coca-Cola plant",
+            "Traffic crash near Amnicola Hwy",
+            "traffic",
+            "Amnicola Hwy",
+            callIds,
+            reason);
 
     private static IReadOnlyList<object> ParseIncidentExtractionResponse(string json)
     {
