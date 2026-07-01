@@ -898,7 +898,7 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<(long Pending, long Embedded, long Failed, DateTime? OldestPending)> GetEmbeddingJobStatsAsync(CancellationToken ct)
+    public async Task<(long Pending, long Embedded, long Failed, long RetryableFailed, DateTime? OldestPending, DateTime? LatestFailed)> GetEmbeddingJobStatsAsync(CancellationToken ct)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
@@ -907,18 +907,23 @@ public sealed class EngineDatabase
                 COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END), 0) AS pending,
                 COALESCE(SUM(CASE WHEN status='embedded' THEN 1 ELSE 0 END), 0) AS embedded,
                 COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0) AS failed,
-                COALESCE(MIN(CASE WHEN status='pending' THEN updated_at_utc ELSE NULL END), '') AS oldest_pending
+                COALESCE(SUM(CASE WHEN status='failed' AND attempts < 5 THEN 1 ELSE 0 END), 0) AS retryable_failed,
+                COALESCE(MIN(CASE WHEN status='pending' THEN updated_at_utc ELSE NULL END), '') AS oldest_pending,
+                COALESCE(MAX(CASE WHEN status='failed' THEN updated_at_utc ELSE NULL END), '') AS latest_failed
             FROM call_embedding_jobs;
             """;
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
-            return (0, 0, 0, null);
-        var oldest = reader.GetString(3);
+            return (0, 0, 0, 0, null, null);
+        var oldest = reader.GetString(4);
+        var latestFailed = reader.GetString(5);
         return (
             reader.GetInt64(0),
             reader.GetInt64(1),
             reader.GetInt64(2),
-            string.IsNullOrWhiteSpace(oldest) ? null : DateTime.Parse(oldest).ToUniversalTime());
+            reader.GetInt64(3),
+            string.IsNullOrWhiteSpace(oldest) ? null : DateTime.Parse(oldest).ToUniversalTime(),
+            string.IsNullOrWhiteSpace(latestFailed) ? null : DateTime.Parse(latestFailed).ToUniversalTime());
     }
 
     public async Task<List<EngineCall>> ListCallsAsync(long start, long end, string? category, CancellationToken ct)

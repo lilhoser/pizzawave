@@ -221,8 +221,10 @@ export type EmbeddingPipelineHealth = {
   queueDepth: number;
   embeddedCalls: number;
   failedCalls: number;
+  retryableFailedCalls: number;
   pendingCalls: number;
   oldestPendingUtc?: string | null;
+  latestFailedUtc?: string | null;
   lastSearchMs: number;
   lastUpsertMs: number;
   lastError: string;

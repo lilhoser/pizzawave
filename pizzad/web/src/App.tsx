@@ -7608,6 +7608,9 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
   const aiCompletionHealth = q?.aiCompletionHealth ?? engineHealth?.aiCompletionHealth;
   const aiCompletionIssue = aiCompletionHealth && !["ok", "unknown"].includes(aiCompletionHealth.status) ? aiCompletionHealth.message : "";
   const embeddingHealth = q?.embeddingHealth ?? engineHealth?.embeddingHealth;
+  const latestEmbeddingFailureMs = embeddingHealth?.latestFailedUtc ? new Date(embeddingHealth.latestFailedUtc).getTime() : Number.NaN;
+  const embeddingFailureRecent = Number.isFinite(latestEmbeddingFailureMs) && Date.now() - latestEmbeddingFailureMs <= 60 * 60 * 1000;
+  const activeEmbeddingFailureCount = embeddingHealth?.retryableFailedCalls ?? 0;
   const embeddingIssue = embeddingHealth?.enabled && !["ok", "disabled", "unknown"].includes(embeddingHealth.status)
     ? (embeddingHealth.lastError || (embeddingHealth.embeddingEndpointOk ? "Embedding pipeline health is degraded." : "Embedding endpoint health check failed."))
     : "";
@@ -7645,8 +7648,14 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
     aiCompletionHealth?.status === "ok" && aiCompletionHealth.failures > 0
       ? { severity: "Warning", source: "AI completions", message: aiCompletionHealth.message, status: "warning", details: ["status", "ai"] }
       : null,
-    embeddingHealth?.enabled && embeddingHealth.failedCalls > 0
-      ? { severity: "Warning", source: "Embedding history", message: `${embeddingHealth.failedCalls.toLocaleString()} embedding job(s) have failed historically.`, status: "warning", details: ["status", "embedding"] }
+    embeddingHealth?.enabled && (activeEmbeddingFailureCount > 0 || embeddingFailureRecent)
+      ? {
+        severity: "Warning",
+        source: "Embedding failures",
+        message: `${(activeEmbeddingFailureCount || embeddingHealth.failedCalls).toLocaleString()} embedding job(s) ${activeEmbeddingFailureCount > 0 ? "are still retryable" : "failed recently"}${embeddingHealth.latestFailedUtc ? `; latest ${formatJobDate(embeddingHealth.latestFailedUtc)}` : ""}.`,
+        status: "warning",
+        details: ["status", "embedding"]
+      }
       : null
   ].filter((row): row is QueueIssueRow => Boolean(row));
   const issueRows = [...blockerRows, ...warningRows];
@@ -7861,6 +7870,9 @@ function queueDetailRows(detail: QueueDetailKey, data: {
       { label: "Qdrant", value: embedding ? embedding.qdrantOk ? "OK" : "Issue" : "Unknown", status: embedding?.qdrantOk ? "ok" : "error" },
       { label: "Queue depth", value: embedding ? embedding.queueDepth.toLocaleString() : "0" },
       { label: "Pending calls", value: embedding ? embedding.pendingCalls.toLocaleString() : "0" },
+      { label: "Retryable failed calls", value: embedding ? (embedding.retryableFailedCalls ?? 0).toLocaleString() : "0", status: embedding && (embedding.retryableFailedCalls ?? 0) > 0 ? "warning" : "ok" },
+      { label: "Historical failed calls", value: embedding ? embedding.failedCalls.toLocaleString() : "0" },
+      { label: "Latest failed call", value: embedding?.latestFailedUtc ? formatJobDate(embedding.latestFailedUtc) : "None" },
       { label: "Last error", value: embedding?.lastError || "None" }
     ];
   }

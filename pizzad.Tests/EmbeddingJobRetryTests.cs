@@ -22,6 +22,24 @@ public sealed class EmbeddingJobRetryTests
         Assert.DoesNotContain(jobs, job => job.CallId == second);
     }
 
+    [Fact]
+    public async Task GetEmbeddingJobStats_SeparatesHistoricalAndRetryableFailures()
+    {
+        using var temp = new TempStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var callId = await database.UpsertCallAsync(Call("exhausted-failure"), CancellationToken.None);
+        await database.UpsertEmbeddingJobAsync(callId, "pending", string.Empty, CancellationToken.None);
+        for (var i = 0; i < 5; i++)
+            await database.MarkEmbeddingJobAsync(callId, "failed", "temporary outage", CancellationToken.None);
+
+        var stats = await database.GetEmbeddingJobStatsAsync(CancellationToken.None);
+
+        Assert.Equal(1, stats.Failed);
+        Assert.Equal(0, stats.RetryableFailed);
+        Assert.NotNull(stats.LatestFailed);
+    }
+
     private static EngineCall Call(string key) => new()
     {
         UniqueKey = key,

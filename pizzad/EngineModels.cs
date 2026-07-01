@@ -830,8 +830,10 @@ public sealed record EmbeddingPipelineHealthDto(
     int QueueDepth,
     long EmbeddedCalls,
     long FailedCalls,
+    long RetryableFailedCalls,
     long PendingCalls,
     DateTime? OldestPendingUtc,
+    DateTime? LatestFailedUtc,
     double LastSearchMs,
     double LastUpsertMs,
     string LastError);

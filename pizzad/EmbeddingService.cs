@@ -136,8 +136,10 @@ public sealed class EmbeddingService : BackgroundService
             QueueDepth,
             stats.Embedded,
             stats.Failed,
+            stats.RetryableFailed,
             stats.Pending,
             stats.OldestPending,
+            stats.LatestFailed,
             _lastSearchMs,
             _lastUpsertMs,
             _lastError);
