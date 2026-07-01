@@ -1,9 +1,17 @@
 # PizzaWave Current Status
 
-Last updated: 2026-05-24
+Last updated: 2026-07-01
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.
+
+## Latest Incident V3 Status
+
+The current incident v3 tuning phase is closed. Keep the v3 safety and executor
+validation simulation changes, but keep v3 live mutation disabled until
+transcription quality has been measured and improved. See
+`docs/incident-v3-closure-status.md` for the current decision, known-good v3
+work, remaining verification, and next recommended task.
 
 ## First Instruction For New Session
 
