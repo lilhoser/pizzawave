@@ -2763,6 +2763,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     if (!detail) return;
     const parameters = extraRequest.parameters as Record<string, unknown> | undefined;
     const skipConfirm = parameters?.waterfallIdentify === true;
+    const quietWaterfallIdentify = parameters?.waterfallIdentify === true;
     if (!skipConfirm && type !== "control_channel_quality" && type !== "rf_power_scan" && type !== "rf_validation_sweep" && !["voice_capture_trial", "transcription_gate", "stability_verdict"].includes(type) && !confirmAction(`Run ${label(type)}?`, `Estimated time: ${estimate}.`)) return;
     setBusy(type);
     setMessage("");
@@ -2773,14 +2774,19 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       const durationSeconds = type === "stability_verdict" ? 900 : type === "control_channel_quality" ? Number(duration) || 60 : type === "rf_power_scan" ? 5 : type === "rf_validation_sweep" ? 300 : 300;
       const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, { method: "POST", body: JSON.stringify({ type, durationSeconds, controlChannelHz, ...extraRequest }) });
       appendExperimentLog(experiment, appendRunLog);
-      if (experiment.status === "failed" || experiment.status === "blocked")
+      if (quietWaterfallIdentify) {
+        // Waterfall P25 Identify renders status on the spectrum and detected-CC row.
+      } else if (experiment.status === "failed" || experiment.status === "blocked")
         setMessage(experiment.blockingIssue || experiment.resultSummary || `${label(type)} ${label(experiment.status)}.`);
       else
         setMessage(`${label(type)} ${label(experiment.status)}.`);
       await refreshDetail();
+      return experiment;
     } catch (error) {
       appendRunLog(error instanceof Error ? error.message : "Experiment failed.", "error");
-      setMessage(error instanceof Error ? error.message : "Experiment failed.");
+      if (!quietWaterfallIdentify)
+        setMessage(error instanceof Error ? error.message : "Experiment failed.");
+      return undefined;
     } finally {
       if (type === "rf_power_scan" || type === "rf_validation_sweep")
         onTrOperationChange("");
@@ -3134,7 +3140,7 @@ function RfSurveyWizard({
   onInstallTools: () => Promise<void>;
   onStopAndInventory: () => Promise<void>;
   onRunP25: (controlChannelHz?: number) => Promise<void>;
-  onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
+  onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
   onRunCallQuality: () => Promise<void>;
   onApplyConfigDraft: () => Promise<void>;
   onConfigApplyStateChange: (value: boolean) => void;
@@ -3959,7 +3965,7 @@ function SiteValidationStep({
   onSdrTouched: () => void;
   onStopAndInventory: () => Promise<void>;
   onRunP25: (controlChannelHz?: number) => Promise<void>;
-  onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
+  onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
   onReload: () => Promise<void>;
   onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void;
   onOpenRunLog: () => void;
@@ -4508,7 +4514,7 @@ function SiteValidationStep({
           {activeValidationTarget && <div className="setup-note">Rerunning RF Sweep for {activeValidationTarget.siteLabel || activeValidationTarget.shortName} only. Previous site readiness remains shown until the targeted run finishes.</div>}
           {hideStaleSiteReadiness
             ? <div className="setup-note">Site readiness is reset for this RF Sweep. Results will repopulate as this run reaches candidate ranking.</div>
-            : validationSweep && <RfValidationRecommendations experiment={validationSweep} systems={systems} busy={Boolean(busy)} onRefreshSite={runValidationSweepForSite} />}
+            : validationSweep && <RfValidationRecommendations experiment={validationSweep} systems={systems} busy={Boolean(busy)} onRefreshSite={system => { void runValidationSweepForSite(system); }} />}
           {validationBlocked && validationBlocker && <div className="settings-message error">{validationBlocker}</div>}
           {validationCancelMessage && <div className="setup-note">{validationCancelMessage}</div>}
           {sweepMessage && <div className="setup-note">{sweepMessage}</div>}
@@ -4745,7 +4751,7 @@ function WaterfallStep({
   activeControlChannelHz: number;
   waterfallSweepControlChannels?: number[];
   onWaterfallSweepControlChannels?: (values: number[]) => void;
-  onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
+  onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
   onReload: () => Promise<void>;
 }) {
   const effectiveSources = sources.filter(source => selectedSources.includes(source.index));
@@ -4763,7 +4769,8 @@ function WaterfallStep({
   const [spectrumHover, setSpectrumHover] = useState<SpectrumHover | null>(null);
   const [ccSignalRows, setCcSignalRows] = useState<WaterfallCcSignalRow[]>([]);
   const [otherDetectedCcRows, setOtherDetectedCcRows] = useState<PositionedSpectrumPeak[]>([]);
-  const [identifyMessage, setIdentifyMessage] = useState("");
+  const [identifyOverlayMessage, setIdentifyOverlayMessage] = useState("");
+  const [identifyResults, setIdentifyResults] = useState<Record<string, WaterfallIdentifyResult>>({});
   const [status, setStatus] = useState<RfSurveyWaterfallStatus | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -4788,6 +4795,8 @@ function WaterfallStep({
   const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
   const sampleRateOk = Number.isFinite(sampleRateHz) && sampleRateHz > 0;
   const gainOk = !selectedSourceIsAirspy || validateAirspyLinearityGain(gain.trim() || selectedSource?.gain || "15");
+  const identifyRunning = busy === "identify";
+  const controlsDisabled = identifyRunning;
   const canStart = !locked && !busy && sourceOptions.length > 0 && frequencyOk && sampleRateOk && gainOk;
 
   useEffect(() => {
@@ -4911,7 +4920,7 @@ function WaterfallStep({
     setOtherDetectedCcRows([]);
     setSpectrumHover(null);
     setCcSignalRows([]);
-    setIdentifyMessage("");
+    setIdentifyOverlayMessage("");
     spectrumScaleRef.current = null;
     waterfallScaleRef.current = null;
     spectrumAxisRef.current = null;
@@ -4954,15 +4963,35 @@ function WaterfallStep({
   }
 
   async function runP25Identify(peak: PositionedSpectrumPeak) {
-    setIdentifyMessage(`Stopping waterfall and probing ${formatRfHz(Math.round(peak.frequencyHz))}...`);
-    if (status?.active)
-      await stopWaterfall();
-    const nearestTarget = nearestTargetControlChannel(peak.frequencyHz, systems, controlChannelOptions, 20_000);
     const frequency = Math.round(peak.frequencyHz);
+    const nearestTarget = nearestTargetControlChannel(peak.frequencyHz, systems, controlChannelOptions, 20_000);
     const offset = nearestTarget ? Math.round(frequency - nearestTarget.frequencyHz) : 0;
-    const targetLabel = nearestTarget ? `${nearestTarget.siteLabel} ${formatRfHz(nearestTarget.frequencyHz)}` : "No cached target CC within 20 kHz";
+    const targetLabel = nearestTarget ? `${nearestTarget.siteLabel} ${formatRfHz(nearestTarget.frequencyHz)}` : "";
+    const startedAtUtc = new Date().toISOString();
+    const runningResult: WaterfallIdentifyResult = {
+      key: peak.key,
+      peak,
+      frequencyHz: frequency,
+      status: "running",
+      summary: "P25 Identify running",
+      detail: targetLabel
+        ? `Matched cached target ${targetLabel}; measured offset ${offset >= 0 ? "+" : ""}${offset} Hz.`
+        : "This peak is not within 20 kHz of a cached control channel for the current RSW.",
+      targetLabel,
+      offsetHz: offset,
+      createdAtUtc: startedAtUtc
+    };
+    setIdentifyResults(current => ({ ...current, [peak.key]: runningResult }));
+    setBusy("identify");
+    setSpectrumHover(null);
+    setIdentifyOverlayMessage(`Stopping waterfall and probing ${formatRfHz(frequency)}...`);
     try {
-      await onRunExperiment("control_channel_p25_probe", "about 20 seconds", frequency, {
+      if (status?.active) {
+        const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(surveyId), { method: "POST" });
+        setStatus(next);
+      }
+      setIdentifyOverlayMessage(`Probing ${formatRfHz(frequency)} for P25 frame evidence...`);
+      const experiment = await onRunExperiment("control_channel_p25_probe", "about 20 seconds", frequency, {
         sourceIndex,
         durationSeconds: 10,
         parameters: {
@@ -4973,10 +5002,24 @@ function WaterfallStep({
           waterfallPeakOffsetHz: offset
         }
       });
-      setIdentifyMessage(`P25 Identify ran at ${formatRfHz(frequency)}. Cached target: ${targetLabel}. Measured offset ${offset >= 0 ? "+" : ""}${offset} Hz. Restart waterfall to continue visual monitoring.`);
+      setIdentifyResults(current => ({
+        ...current,
+        [peak.key]: summarizeWaterfallIdentifyResult(runningResult, experiment)
+      }));
       await onReload();
     } catch (error) {
-      setIdentifyMessage(error instanceof Error ? error.message : "P25 Identify failed.");
+      setIdentifyResults(current => ({
+        ...current,
+        [peak.key]: {
+          ...runningResult,
+          status: "failed",
+          summary: "P25 Identify failed",
+          detail: error instanceof Error ? error.message : "P25 Identify failed before the probe result was returned."
+        }
+      }));
+    } finally {
+      setIdentifyOverlayMessage("");
+      setBusy("");
     }
   }
 
@@ -5013,13 +5056,21 @@ function WaterfallStep({
           : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`
       ])
       : [["--", "--", "--", "No requested CC rows captured."]];
-    const otherRows = otherDetectedCcRows.length
-      ? otherDetectedCcRows.map(row => [
+    const reportOtherRows = [...otherDetectedCcRows];
+    for (const result of Object.values(identifyResults)) {
+      if (!reportOtherRows.some(row => row.key === result.key))
+        reportOtherRows.push(result.peak);
+    }
+    const otherRows = reportOtherRows.length
+      ? reportOtherRows.map(row => {
+        const identify = identifyResults[row.key];
+        return [
         "Detected peak",
         formatRfHz(Math.round(row.frequencyHz)),
-        `SNR ${formatFixed(row.snrDb, 1)} dB`,
-        `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`
-      ])
+        identify ? `P25 ${label(identify.status)}` : `SNR ${formatFixed(row.snrDb, 1)} dB`,
+        identify ? `${identify.summary}. ${identify.detail}` : `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`
+      ];
+      })
       : [["--", "--", "--", "No stable non-requested control-channel-like peaks detected."]];
     const width = 1280;
     const margin = 28;
@@ -5091,35 +5142,43 @@ function WaterfallStep({
   const frame = status?.frame;
   const visibleMessage = shouldShowWaterfallMessage(message, status) ? message : "";
   const peakSnrDb = frame && Number.isFinite(frame.peakDb) && Number.isFinite(frame.noiseFloorDb) ? frame.peakDb - frame.noiseFloorDb : NaN;
+  const displayedOtherDetectedCcRows = [...otherDetectedCcRows];
+  for (const result of Object.values(identifyResults)) {
+    if (!displayedOtherDetectedCcRows.some(row => row.key === result.key))
+      displayedOtherDetectedCcRows.push(result.peak);
+  }
   return <div className="rf-waterfall-panel">
     <div className="rf-waterfall-controls">
-      <label><span>Source</span><select value={String(sourceIndex)} disabled={locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
+      <label><span>Source</span><select value={String(sourceIndex)} disabled={controlsDisabled || locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
         {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}</option>)}
       </select></label>
-      <label><span>Frequency MHz</span><input className={frequencyOk ? "" : "invalid"} inputMode="decimal" list={controlChannelListId} value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} /><datalist id={controlChannelListId}>{controlChannelOptions.map(value => <option value={formatMhzInput(value)} label={formatRfHz(value)} key={value} />)}</datalist></label>
-      <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>
-      <label><span>{selectedSourceIsAirspy ? `Lin gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={gainOk ? "" : "invalid"} inputMode={selectedSourceIsAirspy ? "numeric" : undefined} value={gain} onChange={event => setGain(event.target.value)} /></label>
-      <label><span>Power span</span><select value={String(spectrumSpanDb)} onChange={event => setSpectrumSpanDb(Number(event.target.value))}>
+      <label><span>Frequency MHz</span><input className={frequencyOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" list={controlChannelListId} value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} /><datalist id={controlChannelListId}>{controlChannelOptions.map(value => <option value={formatMhzInput(value)} label={formatRfHz(value)} key={value} />)}</datalist></label>
+      <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>
+      <label><span>{selectedSourceIsAirspy ? `Lin gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={gainOk ? "" : "invalid"} disabled={controlsDisabled} inputMode={selectedSourceIsAirspy ? "numeric" : undefined} value={gain} onChange={event => setGain(event.target.value)} /></label>
+      <label><span>Power span</span><select value={String(spectrumSpanDb)} disabled={controlsDisabled} onChange={event => setSpectrumSpanDb(Number(event.target.value))}>
         <option value="20">20 dB</option>
         <option value="35">35 dB</option>
         <option value="50">50 dB</option>
         <option value="70">70 dB</option>
       </select></label>
-      <label className="rf-waterfall-check"><input type="checkbox" checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
+      <label className="rf-waterfall-check"><input type="checkbox" disabled={controlsDisabled} checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
       <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
-      <button disabled={!status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
-      <button type="button" className="icon-button" disabled={!frame} aria-label="Download waterfall screen grab" title="Download waterfall screen grab" onClick={downloadWaterfallReport}><Camera size={16} aria-hidden="true" /></button>
+      <button disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
+      <button type="button" className="icon-button" disabled={controlsDisabled || !frame} aria-label="Download waterfall screen grab" title="Download waterfall screen grab" onClick={downloadWaterfallReport}><Camera size={16} aria-hidden="true" /></button>
     </div>
     {locked && <div className="setup-note">Run SDR Inventory first.</div>}
     {visibleMessage && <div className="settings-message error">{visibleMessage}</div>}
-    {identifyMessage && <div className="setup-note">{identifyMessage}</div>}
     <div className="rf-waterfall-stage">
-      <div className="rf-waterfall-display" onMouseLeave={() => setSpectrumHover(null)}>
+      <div className={identifyRunning ? "rf-waterfall-display busy" : "rf-waterfall-display"} onMouseLeave={() => setSpectrumHover(null)}>
         <canvas className="rf-spectrum-canvas" ref={spectrumCanvasRef} width={1024} height={120} aria-label="RF spectrum" onMouseMove={handleSpectrumMouseMove} />
         {spectrumHover && <div className="rf-spectrum-hover" style={{ left: spectrumHover.left, top: spectrumHover.top }} onMouseDown={event => event.preventDefault()}>
           <span>{spectrumHover.text}</span>
         </div>}
         <canvas className="rf-waterfall-canvas" ref={canvasRef} width={1024} height={300} aria-label="RF waterfall" />
+        {identifyRunning && <div className="rf-waterfall-identify-overlay" role="status" aria-live="polite">
+          <strong>P25 Identify</strong>
+          <span>{identifyOverlayMessage || "Probing selected peak..."}</span>
+        </div>}
       </div>
       <div className="rf-waterfall-readout">
         <div><span>Status</span><code>{status ? label(status.status) : "Stopped"}</code></div>
@@ -5157,13 +5216,20 @@ function WaterfallStep({
     </div>
     <div className="rf-waterfall-cc-panel">
       <div className="rf-waterfall-cc-head"><span>Other detected CCs</span><small>Stable non-requested peaks; identify before treating as a site.</small></div>
-      {otherDetectedCcRows.length === 0 ? <div className="rf-waterfall-cc-empty">No stable non-requested control-channel-like peaks detected yet.</div> : otherDetectedCcRows.map(row => <div className="rf-waterfall-cc-row other-detected" key={row.key}>
-        <span>Detected peak</span>
-        <code>{formatRfHz(Math.round(row.frequencyHz))}</code>
-        <strong>SNR {formatFixed(row.snrDb, 1)} dB</strong>
-        <small>Power {formatFixed(row.powerDb, 1)} dB / seen {row.hits} hit(s)</small>
-        <button type="button" onClick={() => void runP25Identify(row)}>P25 Identify</button>
-      </div>)}
+      {displayedOtherDetectedCcRows.length === 0 ? <div className="rf-waterfall-cc-empty">No stable non-requested control-channel-like peaks detected yet.</div> : displayedOtherDetectedCcRows.map(row => {
+        const identify = identifyResults[row.key];
+        return <div className={`rf-waterfall-cc-row other-detected ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
+          <span>Detected peak</span>
+          <code>{formatRfHz(Math.round(row.frequencyHz))}</code>
+          <strong>{identify ? label(identify.status) : `SNR ${formatFixed(row.snrDb, 1)} dB`}</strong>
+          <small>
+            {identify
+              ? <><span className="rf-waterfall-identify-summary">{identify.summary}</span><span>{identify.detail}</span></>
+              : `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`}
+          </small>
+          <button type="button" disabled={identifyRunning} onClick={() => void runP25Identify(row)}>{identify?.status === "running" ? "Running..." : identify ? "Identify Again" : "P25 Identify"}</button>
+        </div>;
+      })}
     </div>
   </div>;
 }
@@ -5254,6 +5320,7 @@ type SpectrumDisplayScale = { lowDb: number; highDb: number };
 type SpectrumAxis = { startHz: number; sampleRate: number };
 type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; snrDb: number; hits: number; misses: number };
 type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number };
+type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string };
 type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
@@ -5381,6 +5448,36 @@ function nearestTargetControlChannel(frequencyHz: number, systems: RfSurveySyste
     .map(target => ({ ...target, distance: Math.abs(target.frequencyHz - frequencyHz) }))
     .filter(target => target.distance <= maxDistanceHz)
     .sort((left, right) => left.distance - right.distance)[0] ?? null;
+}
+
+function summarizeWaterfallIdentifyResult(base: WaterfallIdentifyResult, experiment: RfSurveyExperiment | undefined): WaterfallIdentifyResult {
+  if (!experiment)
+    return {
+      ...base,
+      status: "failed",
+      summary: "P25 Identify did not return a result",
+      detail: base.targetLabel
+        ? `${base.detail} No experiment result was returned.`
+        : "The peak is not in the saved CC list, and no experiment result was returned."
+    };
+  const status = experiment.status === "passed" || experiment.status === "blocked" || experiment.status === "failed"
+    ? experiment.status
+    : "failed";
+  const p25Summary = experiment.blockingIssue || experiment.resultSummary || label(experiment.status);
+  const targetDetail = base.targetLabel
+    ? `Matched saved CC ${base.targetLabel}; measured offset ${base.offsetHz >= 0 ? "+" : ""}${base.offsetHz} Hz.`
+    : "Not in saved CC list for this RSW; probed the measured peak directly.";
+  return {
+    ...base,
+    status,
+    summary: status === "passed"
+      ? "P25 frame evidence captured"
+      : status === "blocked"
+        ? "P25 Identify blocked"
+        : "No P25 frame evidence",
+    detail: `${p25Summary} ${targetDetail}`.trim(),
+    experimentId: experiment.id
+  };
 }
 
 function buildOtherDetectedCcRows(peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {

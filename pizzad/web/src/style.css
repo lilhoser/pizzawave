@@ -3564,6 +3564,37 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   min-width: 0;
 }
 
+.rf-waterfall-display.busy canvas {
+  filter: grayscale(.7) brightness(.48);
+}
+
+.rf-waterfall-identify-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid rgba(255, 237, 138, .45);
+  border-radius: 6px;
+  background: rgba(13, 17, 23, .46);
+  color: #e9ecef;
+  text-align: center;
+  pointer-events: none;
+}
+
+.rf-waterfall-identify-overlay strong {
+  color: #ffed8a;
+  font-size: 15px;
+}
+
+.rf-waterfall-identify-overlay span {
+  max-width: min(620px, 86vw);
+  color: #d7dde3;
+  font-size: 13px;
+}
+
 .rf-waterfall-stage canvas {
   width: 100%;
   border: 1px solid #30363d;
@@ -3676,6 +3707,19 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border-color: rgba(89, 168, 255, .5);
 }
 
+.rf-waterfall-cc-row.other-detected.identified.running {
+  border-color: rgba(255, 237, 138, .62);
+}
+
+.rf-waterfall-cc-row.other-detected.identified.passed {
+  border-color: rgba(84, 214, 138, .7);
+}
+
+.rf-waterfall-cc-row.other-detected.identified.failed,
+.rf-waterfall-cc-row.other-detected.identified.blocked {
+  border-color: rgba(255, 111, 111, .62);
+}
+
 .rf-waterfall-cc-row code {
   color: #d7ecff;
 }
@@ -3696,8 +3740,30 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #d7ecff;
 }
 
+.rf-waterfall-cc-row.other-detected.identified.running strong {
+  color: #ffed8a;
+}
+
+.rf-waterfall-cc-row.other-detected.identified.passed strong {
+  color: #6ee69f;
+}
+
+.rf-waterfall-cc-row.other-detected.identified.failed strong,
+.rf-waterfall-cc-row.other-detected.identified.blocked strong {
+  color: #ff8b8b;
+}
+
 .rf-waterfall-cc-row small {
   color: #9faab5;
+}
+
+.rf-waterfall-cc-row small span {
+  display: block;
+}
+
+.rf-waterfall-identify-summary {
+  color: #d7dde3;
+  font-weight: 700;
 }
 
 .rf-waterfall-cc-row button {
