@@ -3599,13 +3599,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-spectrum-hover span {
   display: block;
-  margin-bottom: 4px;
-}
-
-.rf-spectrum-hover button {
-  width: 100%;
-  padding: 3px 6px;
-  font-size: 11px;
 }
 
 .rf-waterfall-readout {
@@ -3679,6 +3672,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border-color: rgba(255, 237, 138, .42);
 }
 
+.rf-waterfall-cc-row.other-detected {
+  border-color: rgba(89, 168, 255, .5);
+}
+
 .rf-waterfall-cc-row code {
   color: #d7ecff;
 }
@@ -3693,6 +3690,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-cc-row.not-seen strong {
   color: #9faab5;
+}
+
+.rf-waterfall-cc-row.other-detected strong {
+  color: #d7ecff;
 }
 
 .rf-waterfall-cc-row small {

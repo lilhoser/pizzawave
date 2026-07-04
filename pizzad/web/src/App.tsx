@@ -4768,6 +4768,7 @@ function WaterfallStep({
   const [showControlChannelLines, setShowControlChannelLines] = useState(true);
   const [spectrumHover, setSpectrumHover] = useState<SpectrumHover | null>(null);
   const [ccSignalRows, setCcSignalRows] = useState<WaterfallCcSignalRow[]>([]);
+  const [otherDetectedCcRows, setOtherDetectedCcRows] = useState<PositionedSpectrumPeak[]>([]);
   const [identifyMessage, setIdentifyMessage] = useState("");
   const [status, setStatus] = useState<RfSurveyWaterfallStatus | null>(null);
   const [message, setMessage] = useState("");
@@ -4879,6 +4880,7 @@ function WaterfallStep({
     const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
     visiblePeaksRef.current = positionedPeaks;
     setCcSignalRows(buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current));
+    setOtherDetectedCcRows(buildOtherDetectedCcRows(positionedPeaks, systems, controlChannelOptions));
     drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
       controlChannelsHz: controlChannelOptions,
       showControlChannels: showControlChannelLines,
@@ -4901,6 +4903,7 @@ function WaterfallStep({
     peakHistoryRef.current.clear();
     ccSignalHistoryRef.current.clear();
     visiblePeaksRef.current = [];
+    setOtherDetectedCcRows([]);
     setSpectrumHover(null);
     setCcSignalRows([]);
     setIdentifyMessage("");
@@ -4972,25 +4975,6 @@ function WaterfallStep({
     }
   }
 
-  function prepareSweepSeedFromPeak(peak: PositionedSpectrumPeak) {
-    const nearestTarget = nearestTargetControlChannel(peak.frequencyHz, systems, controlChannelOptions, 20_000);
-    if (!nearestTarget) {
-      setIdentifyMessage("RF Sweep seed requires a cached requested control channel near the selected peak.");
-      return;
-    }
-    prepareWaterfallSweepSeed({
-      sourceIndex,
-      targetFrequencyHz: nearestTarget.frequencyHz,
-      measuredFrequencyHz: Math.round(peak.frequencyHz),
-      offsetHz: Math.round(peak.frequencyHz - nearestTarget.frequencyHz),
-      snrDb: peak.snrDb,
-      gain: gain.trim() || selectedSource?.gain || "",
-      sampleRateHz,
-      siteLabel: nearestTarget.siteLabel,
-      createdAtUtc: new Date().toISOString()
-    });
-  }
-
   function prepareSweepSeedFromSignalRow(row: WaterfallCcSignalRow) {
     if (row.status === "not-seen") {
       setIdentifyMessage("RF Sweep seed needs a stable waterfall trace for that requested control channel.");
@@ -5012,6 +4996,67 @@ function WaterfallStep({
   function prepareWaterfallSweepSeed(seed: WaterfallSweepSeed) {
     onWaterfallSweepSeed?.(seed);
     setIdentifyMessage(`Prepared RF Sweep seed for ${seed.siteLabel || formatRfHz(seed.targetFrequencyHz)}: offset ${seed.offsetHz >= 0 ? "+" : ""}${seed.offsetHz} Hz.`);
+  }
+
+  function downloadWaterfallReport() {
+    const spectrumImage = spectrumCanvasRef.current?.toDataURL("image/png") ?? "";
+    const waterfallImage = canvasRef.current?.toDataURL("image/png") ?? "";
+    if (!spectrumImage || !waterfallImage) {
+      setIdentifyMessage("Screen grab needs a rendered spectrum and waterfall frame.");
+      return;
+    }
+    const capturedAt = new Date().toISOString();
+    const requestedRows = ccSignalRows.length
+      ? ccSignalRows.map(row => `<tr><td>${escapeHtml(row.siteLabel)}</td><td>${escapeHtml(formatRfHz(row.frequencyHz))}</td><td>${escapeHtml(row.label)}</td><td>${escapeHtml(row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`)}</td></tr>`).join("")
+      : `<tr><td colspan="4">No requested CC rows captured.</td></tr>`;
+    const otherRows = otherDetectedCcRows.length
+      ? otherDetectedCcRows.map(row => `<tr><td>Detected peak</td><td>${escapeHtml(formatRfHz(Math.round(row.frequencyHz)))}</td><td>${escapeHtml(`SNR ${formatFixed(row.snrDb, 1)} dB`)}</td><td>${escapeHtml(`Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`)}</td></tr>`).join("")
+      : `<tr><td colspan="4">No stable non-requested control-channel-like peaks detected.</td></tr>`;
+    const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PizzaWave RF Waterfall ${escapeHtml(capturedAt)}</title>
+<style>
+body{margin:24px;background:#111418;color:#d7dde3;font:14px Segoe UI,Arial,sans-serif}
+h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:22px 0 8px}
+.meta{color:#9faab5;margin-bottom:18px}.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin:12px 0}
+.card{border:1px solid #30363d;border-radius:6px;padding:8px;background:#171b20}.card span{display:block;color:#9faab5;font-size:12px}.card strong{display:block;margin-top:2px}
+img{display:block;width:100%;max-width:1200px;border:1px solid #30363d;border-radius:6px;background:#00356f}
+table{width:100%;border-collapse:collapse;margin-top:8px}td,th{border:1px solid #30363d;padding:6px 8px;text-align:left}th{background:#20252a;color:#d7ecff}td{background:#171b20}
+</style>
+</head>
+<body>
+<h1>PizzaWave RF Waterfall Capture</h1>
+<div class="meta">${escapeHtml(capturedAt)} / Survey ${escapeHtml(surveyId)}</div>
+<div class="grid">
+<div class="card"><span>Status</span><strong>${escapeHtml(status ? label(status.status) : "Stopped")}</strong></div>
+<div class="card"><span>Center</span><strong>${escapeHtml(frame ? formatRfHz(frame.centerHz) : frequencyOk ? formatRfHz(frequencyHz) : "--")}</strong></div>
+<div class="card"><span>Sample rate</span><strong>${escapeHtml(frame ? `${formatFixed(frame.sampleRate / 1_000_000, 3)} MS/s` : sampleRateOk ? `${formatFixed(sampleRateHz / 1_000_000, 3)} MS/s` : "--")}</strong></div>
+<div class="card"><span>Gain</span><strong>${escapeHtml(selectedSourceIsAirspy ? `Linearity ${gain || "--"}` : gain || "--")}</strong></div>
+<div class="card"><span>Peak</span><strong>${escapeHtml(frame ? `${formatRfHz(frame.peakFrequencyHz)} / ${formatFixed(frame.peakDb, 1)} dB` : "--")}</strong></div>
+<div class="card"><span>SNR</span><strong>${escapeHtml(Number.isFinite(peakSnrDb) ? `${formatFixed(peakSnrDb, 1)} dB` : "--")}</strong></div>
+</div>
+<h2>RF Spectrum</h2>
+<img alt="RF spectrum" src="${spectrumImage}">
+<h2>Waterfall</h2>
+<img alt="RF waterfall" src="${waterfallImage}">
+<h2>Requested CC Signal Check</h2>
+<table><thead><tr><th>Site</th><th>Frequency</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${requestedRows}</tbody></table>
+<h2>Other detected CCs</h2>
+<table><thead><tr><th>Type</th><th>Frequency</th><th>SNR</th><th>Evidence</th></tr></thead><tbody>${otherRows}</tbody></table>
+</body>
+</html>`;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `pizzawave-waterfall-${surveyId}-${capturedAt.replace(/[:.]/g, "-")}.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setIdentifyMessage("Waterfall screen report downloaded.");
   }
 
   function handleSpectrumMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
@@ -5056,6 +5101,7 @@ function WaterfallStep({
       <label className="rf-waterfall-check"><input type="checkbox" checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
       <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
       <button disabled={!status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
+      <button type="button" disabled={!frame} onClick={downloadWaterfallReport}>Screen grab</button>
     </div>
     {locked && <div className="setup-note">Run SDR Inventory first.</div>}
     {visibleMessage && <div className="settings-message error">{visibleMessage}</div>}
@@ -5065,8 +5111,6 @@ function WaterfallStep({
         <canvas className="rf-spectrum-canvas" ref={spectrumCanvasRef} width={1024} height={120} aria-label="RF spectrum" onMouseMove={handleSpectrumMouseMove} />
         {spectrumHover && <div className="rf-spectrum-hover" style={{ left: spectrumHover.left, top: spectrumHover.top }} onMouseDown={event => event.preventDefault()}>
           <span>{spectrumHover.text}</span>
-          <button type="button" onMouseDown={event => event.preventDefault()} onClick={event => { event.stopPropagation(); void runP25Identify(spectrumHover.peak); }}>P25 Identify</button>
-          <button type="button" onMouseDown={event => event.preventDefault()} onClick={event => { event.stopPropagation(); prepareSweepSeedFromPeak(spectrumHover.peak); }}>Use for RF Sweep</button>
         </div>}
         <canvas className="rf-waterfall-canvas" ref={canvasRef} width={1024} height={300} aria-label="RF waterfall" />
       </div>
@@ -5091,6 +5135,16 @@ function WaterfallStep({
         <strong>{row.label}</strong>
         <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
         <button type="button" disabled={row.status === "not-seen"} onClick={() => prepareSweepSeedFromSignalRow(row)}>Use for RF Sweep</button>
+      </div>)}
+    </div>
+    <div className="rf-waterfall-cc-panel">
+      <div className="rf-waterfall-cc-head"><span>Other detected CCs</span><small>Stable non-requested peaks; identify before treating as a site.</small></div>
+      {otherDetectedCcRows.length === 0 ? <div className="rf-waterfall-cc-empty">No stable non-requested control-channel-like peaks detected yet.</div> : otherDetectedCcRows.map(row => <div className="rf-waterfall-cc-row other-detected" key={row.key}>
+        <span>Detected peak</span>
+        <code>{formatRfHz(Math.round(row.frequencyHz))}</code>
+        <strong>SNR {formatFixed(row.snrDb, 1)} dB</strong>
+        <small>Power {formatFixed(row.powerDb, 1)} dB / seen {row.hits} hit(s)</small>
+        <button type="button" onClick={() => void runP25Identify(row)}>P25 Identify</button>
       </div>)}
     </div>
   </div>;
@@ -5309,6 +5363,13 @@ function nearestTargetControlChannel(frequencyHz: number, systems: RfSurveySyste
     .map(target => ({ ...target, distance: Math.abs(target.frequencyHz - frequencyHz) }))
     .filter(target => target.distance <= maxDistanceHz)
     .sort((left, right) => left.distance - right.distance)[0] ?? null;
+}
+
+function buildOtherDetectedCcRows(peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {
+  return peaks
+    .filter(peak => !nearestTargetControlChannel(peak.frequencyHz, systems, fallbackControlChannels, 20_000))
+    .sort((left, right) => right.snrDb - left.snrDb)
+    .slice(0, 8);
 }
 
 function updateConsistentSpectrumPeaks(history: Map<string, SpectrumPeakTrack>, frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], axis: SpectrumAxis) {
@@ -5560,6 +5621,15 @@ function pooledSpectrumPower(powers: number[], start: number, end: number) {
 
 function formatSpectrumTickHz(value: number) {
   return `${(value / 1_000_000).toFixed(3)} MHz`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function drawWaterfallFrame(canvas: HTMLCanvasElement | null, powers: number[], scale: SpectrumDisplayScale) {
