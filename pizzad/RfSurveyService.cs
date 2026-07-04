@@ -2555,7 +2555,7 @@ public sealed class RfSurveyService
         if (!root.ContainsKey("scanAllControlChannels"))
             root["scanAllControlChannels"] = true;
         if (!root.ContainsKey("gainSequence"))
-            root["gainSequence"] = new JsonArray("0", "8", "14", "20", "21", "28");
+            root["gainSequence"] = new JsonArray("0", "8", "14", "20", "21");
         return JsonSerializer.SerializeToElement(root, EngineConfig.JsonOptions());
     }
 
