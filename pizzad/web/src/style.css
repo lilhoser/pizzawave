@@ -3685,7 +3685,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-cc-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 110px 82px minmax(220px, 1.4fr) 70px;
+  grid-template-columns: minmax(150px, 1fr) 110px 92px minmax(220px, 1.4fr) minmax(148px, auto);
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -3707,16 +3707,16 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border-color: rgba(89, 168, 255, .5);
 }
 
-.rf-waterfall-cc-row.other-detected.identified.running {
+.rf-waterfall-cc-row.identified.running {
   border-color: rgba(255, 237, 138, .62);
 }
 
-.rf-waterfall-cc-row.other-detected.identified.passed {
+.rf-waterfall-cc-row.identified.passed {
   border-color: rgba(84, 214, 138, .7);
 }
 
-.rf-waterfall-cc-row.other-detected.identified.failed,
-.rf-waterfall-cc-row.other-detected.identified.blocked {
+.rf-waterfall-cc-row.identified.failed,
+.rf-waterfall-cc-row.identified.blocked {
   border-color: rgba(255, 111, 111, .62);
 }
 
@@ -3740,19 +3740,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #d7ecff;
 }
 
-.rf-waterfall-cc-row.other-detected.identified.running strong {
-  color: #ffed8a;
-}
-
-.rf-waterfall-cc-row.other-detected.identified.passed strong {
-  color: #6ee69f;
-}
-
-.rf-waterfall-cc-row.other-detected.identified.failed strong,
-.rf-waterfall-cc-row.other-detected.identified.blocked strong {
-  color: #ff8b8b;
-}
-
 .rf-waterfall-cc-row small {
   color: #9faab5;
 }
@@ -3766,9 +3753,51 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-weight: 700;
 }
 
+.rf-waterfall-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+}
+
 .rf-waterfall-cc-row button {
   padding: 4px 6px;
   font-size: 11px;
+}
+
+.rf-waterfall-identify-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 7px 8px;
+  border: 1px solid rgba(89, 168, 255, .25);
+  border-radius: 5px;
+  background: rgba(13, 17, 23, .26);
+  color: #cbd5de;
+}
+
+.rf-waterfall-identify-detail.passed {
+  border-color: rgba(84, 214, 138, .48);
+}
+
+.rf-waterfall-identify-detail.failed,
+.rf-waterfall-identify-detail.blocked {
+  border-color: rgba(255, 111, 111, .5);
+}
+
+.rf-waterfall-identify-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.rf-waterfall-identify-chips code {
+  padding: 2px 5px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #151a1f;
+  color: #d7ecff;
 }
 
 .rf-waterfall-sweep-group {

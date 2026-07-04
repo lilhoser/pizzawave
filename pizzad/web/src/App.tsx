@@ -4782,6 +4782,7 @@ function WaterfallStep({
   const waterfallScaleRef = useRef<SpectrumDisplayScale | null>(null);
   const spectrumAxisRef = useRef<SpectrumAxis | null>(null);
   const peakHistoryRef = useRef<Map<string, SpectrumPeakTrack>>(new Map());
+  const otherDetectedCcHistoryRef = useRef<Map<string, WaterfallDetectedCcTrack>>(new Map());
   const ccSignalHistoryRef = useRef<Map<string, WaterfallCcSignalTrack>>(new Map());
   const visiblePeaksRef = useRef<PositionedSpectrumPeak[]>([]);
   const lastFrameRef = useRef("");
@@ -4843,7 +4844,7 @@ function WaterfallStep({
       const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
       const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
       const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
-      const nextOtherDetectedCcRows = buildOtherDetectedCcRows(positionedPeaks, systems, controlChannelOptions);
+      const nextOtherDetectedCcRows = updateVisibleOtherDetectedCcRows(otherDetectedCcHistoryRef.current, positionedPeaks, systems, controlChannelOptions);
       visiblePeaksRef.current = positionedPeaks;
       setCcSignalRows(nextCcSignalRows);
       setOtherDetectedCcRows(nextOtherDetectedCcRows);
@@ -4915,6 +4916,7 @@ function WaterfallStep({
     smoothedSpectrumRef.current = [];
     heldSpectrumRef.current = [];
     peakHistoryRef.current.clear();
+    otherDetectedCcHistoryRef.current.clear();
     ccSignalHistoryRef.current.clear();
     visiblePeaksRef.current = [];
     setOtherDetectedCcRows([]);
@@ -5069,17 +5071,23 @@ function WaterfallStep({
       ["SNR", Number.isFinite(peakSnrDb) ? `${formatFixed(peakSnrDb, 1)} dB` : "--"]
     ];
     const requestedRows = ccSignalRows.length
-      ? ccSignalRows.map(row => [
+      ? ccSignalRows.map(row => {
+        const identify = identifyResults[peakFromWaterfallCcSignalRow(row).key];
+        const evidence = row.status === "not-seen"
+          ? "No stable carrier estimate near this target yet."
+          : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`;
+        return [
         row.siteLabel,
         formatRfHz(row.frequencyHz),
         row.label,
-        row.status === "not-seen"
-          ? "No stable carrier estimate near this target yet."
-          : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`
-      ])
+        identify ? `${evidence} / ${waterfallIdentifyReportText(identify)}` : evidence
+      ];
+      })
       : [["--", "--", "--", "No requested CC rows captured."]];
     const reportOtherRows = [...otherDetectedCcRows];
     for (const result of Object.values(identifyResults)) {
+      if (result.key.startsWith("requested:"))
+        continue;
       if (!reportOtherRows.some(row => row.key === result.key))
         reportOtherRows.push(result.peak);
     }
@@ -5089,8 +5097,10 @@ function WaterfallStep({
         return [
         "Detected peak",
         formatRfHz(Math.round(row.frequencyHz)),
-        identify ? `P25 ${label(identify.status)}` : `SNR ${formatFixed(row.snrDb, 1)} dB`,
-        identify ? `${identify.summary}. ${identify.detail}` : `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`
+        `SNR ${formatFixed(row.snrDb, 1)} dB`,
+        identify
+          ? `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s) / ${waterfallIdentifyReportText(identify)}`
+          : `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`
       ];
       })
       : [["--", "--", "--", "No stable non-requested control-channel-like peaks detected."]];
@@ -5166,6 +5176,8 @@ function WaterfallStep({
   const peakSnrDb = frame && Number.isFinite(frame.peakDb) && Number.isFinite(frame.noiseFloorDb) ? frame.peakDb - frame.noiseFloorDb : NaN;
   const displayedOtherDetectedCcRows = [...otherDetectedCcRows];
   for (const result of Object.values(identifyResults)) {
+    if (result.key.startsWith("requested:"))
+      continue;
     if (!displayedOtherDetectedCcRows.some(row => row.key === result.key))
       displayedOtherDetectedCcRows.push(result.peak);
   }
@@ -5219,21 +5231,29 @@ function WaterfallStep({
       <div className="rf-waterfall-cc-head"><span>Requested CC Signal Check</span><small>Waterfall evidence only; P25 Identify or RF Sweep must confirm decode.</small></div>
       <fieldset className="rf-waterfall-sweep-group">
         <legend>Use for RF Sweep</legend>
-        {ccSignalRows.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect requested control channels.</div> : ccSignalRows.map(row => <div className={`rf-waterfall-cc-row ${row.status}`} key={`${row.systemShortName}-${row.frequencyHz}`}>
-          <span>{row.siteLabel}</span>
-          <code>{formatRfHz(row.frequencyHz)}</code>
-          <strong>{row.label}</strong>
-          <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
-          <label className="rf-waterfall-use-check">
-            <input
-              type="checkbox"
-              checked={selectedSweepControlChannelSet.has(row.frequencyHz)}
-              onChange={event => toggleSweepControlChannel(row.frequencyHz, event.target.checked)}
-              aria-label={`Use ${formatRfHz(row.frequencyHz)} for RF Sweep`}
-            />
-            <span>Use</span>
-          </label>
-        </div>)}
+        {ccSignalRows.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect requested control channels.</div> : ccSignalRows.map(row => {
+          const identifyPeak = peakFromWaterfallCcSignalRow(row);
+          const identify = identifyResults[identifyPeak.key];
+          return <div className={`rf-waterfall-cc-row ${row.status} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={`${row.systemShortName}-${row.frequencyHz}`}>
+            <span>{row.siteLabel}</span>
+            <code>{formatRfHz(row.frequencyHz)}</code>
+            <strong>{row.label}</strong>
+            <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
+            <span className="rf-waterfall-row-actions">
+              <label className="rf-waterfall-use-check">
+                <input
+                  type="checkbox"
+                  checked={selectedSweepControlChannelSet.has(row.frequencyHz)}
+                  onChange={event => toggleSweepControlChannel(row.frequencyHz, event.target.checked)}
+                  aria-label={`Use ${formatRfHz(row.frequencyHz)} for RF Sweep`}
+                />
+                <span>Use</span>
+              </label>
+              <button type="button" disabled={identifyRunning} onClick={() => void runP25Identify(identifyPeak)}>{identify?.status === "running" ? "Running..." : "P25 Identify"}</button>
+            </span>
+            {identify && <WaterfallIdentifyDetail result={identify} />}
+          </div>;
+        })}
       </fieldset>
     </div>
     <div className="rf-waterfall-cc-panel">
@@ -5243,17 +5263,60 @@ function WaterfallStep({
         return <div className={`rf-waterfall-cc-row other-detected ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
           <span>Detected peak</span>
           <code>{formatRfHz(Math.round(row.frequencyHz))}</code>
-          <strong>{identify ? label(identify.status) : `SNR ${formatFixed(row.snrDb, 1)} dB`}</strong>
-          <small>
-            {identify
-              ? <><span className="rf-waterfall-identify-summary">{identify.summary}</span><span>{identify.detail}</span></>
-              : `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`}
-          </small>
+          <strong>SNR {formatFixed(row.snrDb, 1)} dB</strong>
+          <small>Power {formatFixed(row.powerDb, 1)} dB / seen {row.hits} hit(s)</small>
           <button type="button" disabled={identifyRunning} onClick={() => void runP25Identify(row)}>{identify?.status === "running" ? "Running..." : identify ? "Identify Again" : "P25 Identify"}</button>
+          {identify && <WaterfallIdentifyDetail result={identify} />}
         </div>;
       })}
     </div>
   </div>;
+}
+
+function peakFromWaterfallCcSignalRow(row: WaterfallCcSignalRow): PositionedSpectrumPeak {
+  const useMeasuredPeak = row.status !== "not-seen" && Number.isFinite(row.peakFrequencyHz) && row.peakFrequencyHz > 0;
+  return {
+    key: `requested:${row.systemShortName}:${row.frequencyHz}`,
+    frequencyHz: Math.round(useMeasuredPeak ? row.peakFrequencyHz : row.frequencyHz),
+    powerDb: Number.isFinite(row.powerDb) ? row.powerDb : 0,
+    snrDb: Number.isFinite(row.snrDb) ? row.snrDb : 0,
+    hits: Math.max(1, Math.round(row.confidence * 20)),
+    misses: 0,
+    x: 0,
+    y: 0
+  };
+}
+
+function WaterfallIdentifyDetail({ result }: { result: WaterfallIdentifyResult }) {
+  const fields = result.fields;
+  const chips = fields ? [
+    fields.nac ? `NAC 0x${fields.nac}` : "",
+    fields.wacn ? `WACN ${fields.wacn}` : "",
+    fields.systemId ? `Sys ${fields.systemId}` : "",
+    fields.rfss ? `RFSS ${fields.rfss}` : "",
+    fields.site ? `Site ${fields.site}` : "",
+    fields.decodedControlChannelHz > 0 ? `Decoded CC ${formatRfHz(fields.decodedControlChannelHz)}` : "",
+    fields.tsbkCount > 0 ? `${fields.tsbkCount} TSBK` : "",
+    fields.grantCount > 0 ? `${fields.grantCount} grant markers` : ""
+  ].filter(Boolean) : [];
+  return <div className={`rf-waterfall-identify-detail ${result.status}`}>
+    <span className="rf-waterfall-identify-summary">P25 Identify: {label(result.status)}</span>
+    {chips.length > 0 && <span className="rf-waterfall-identify-chips">{chips.map(chip => <code key={chip}>{chip}</code>)}</span>}
+    <span>{result.detail}</span>
+  </div>;
+}
+
+function waterfallIdentifyReportText(result: WaterfallIdentifyResult) {
+  const fields = result.fields;
+  const chips = fields ? [
+    fields.nac ? `NAC 0x${fields.nac}` : "",
+    fields.wacn ? `WACN ${fields.wacn}` : "",
+    fields.systemId ? `Sys ${fields.systemId}` : "",
+    fields.rfss ? `RFSS ${fields.rfss}` : "",
+    fields.site ? `Site ${fields.site}` : "",
+    fields.decodedControlChannelHz > 0 ? `Decoded CC ${formatRfHz(fields.decodedControlChannelHz)}` : ""
+  ].filter(Boolean).join(", ") : "";
+  return `P25 Identify ${label(result.status)}${chips ? ` (${chips})` : ""}: ${result.detail}`;
 }
 
 function defaultWaterfallSampleRate(source?: RfSurveySource) {
@@ -5342,6 +5405,7 @@ type SpectrumDisplayScale = { lowDb: number; highDb: number };
 type SpectrumAxis = { startHz: number; sampleRate: number };
 type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; snrDb: number; hits: number; misses: number };
 type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number };
+type WaterfallDetectedCcTrack = PositionedSpectrumPeak & { displayHits: number; displayMisses: number; promoted: boolean };
 type P25IdentifyFields = { nac: string; wacn: string; systemId: string; rfss: string; site: string; decodedControlChannelHz: number; adjacentSites: string[]; secondaryControlChannels: string[]; tsbkCount: number; grantCount: number; demod: string; sourceIndex?: number; exitCode?: number; timedOut: boolean };
 type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string; fields?: P25IdentifyFields };
 type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
@@ -5596,9 +5660,38 @@ function p25IdentifySummary(fields: P25IdentifyFields) {
   return parts.join(" / ");
 }
 
-function buildOtherDetectedCcRows(peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {
-  return peaks
-    .filter(peak => !nearestTargetControlChannel(peak.frequencyHz, systems, fallbackControlChannels, 20_000))
+function updateVisibleOtherDetectedCcRows(history: Map<string, WaterfallDetectedCcTrack>, peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {
+  const promotionHits = 6;
+  const retentionMisses = 36;
+  const activeKeys = new Set<string>();
+  for (const track of history.values())
+    track.displayMisses += 1;
+  for (const peak of peaks.filter(row => !nearestTargetControlChannel(row.frequencyHz, systems, fallbackControlChannels, 20_000))) {
+    activeKeys.add(peak.key);
+    const previous = history.get(peak.key);
+    const nextHits = Math.min(30, (previous?.displayHits ?? 0) + 1);
+    history.set(peak.key, {
+      ...peak,
+      frequencyHz: ema(previous?.frequencyHz, peak.frequencyHz, 0.24),
+      powerDb: ema(previous?.powerDb, peak.powerDb, 0.32),
+      snrDb: ema(previous?.snrDb, peak.snrDb, 0.32),
+      x: ema(previous?.x, peak.x, 0.28),
+      y: ema(previous?.y, peak.y, 0.28),
+      hits: peak.hits,
+      misses: peak.misses,
+      displayHits: nextHits,
+      displayMisses: 0,
+      promoted: Boolean(previous?.promoted) || nextHits >= promotionHits
+    });
+  }
+  for (const [key, track] of history.entries()) {
+    if (!activeKeys.has(key))
+      track.displayHits = Math.max(0, track.displayHits - 0.35);
+    if (track.displayMisses > retentionMisses && track.displayHits < promotionHits)
+      history.delete(key);
+  }
+  return [...history.values()]
+    .filter(track => track.promoted && track.displayMisses <= retentionMisses)
     .sort((left, right) => right.snrDb - left.snrDb)
     .slice(0, 8);
 }
