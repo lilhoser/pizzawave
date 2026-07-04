@@ -16,12 +16,16 @@ This folder contains operational helpers for PizzaWave deployments.
 | `setup-remote-faster-whisper-server.ps1` | Installs the Windows GPU faster-whisper HTTP server |
 | `tr_tune.sh` | Guided trunk-recorder/RTL-SDR tuning helper |
 | `prime_tr_health.py` | One-time import helper for trunk-recorder health history |
-| `deploy_pizzad_tar.ps1` | Fast development deploy helper |
+| `deploy_pizzad_web.ps1` | Fast frontend-only deploy helper; rebuilds and copies `wwwroot` without restarting `pizzad` |
+| `deploy_pizzad_tar.ps1` | Full/direct development deploy helper with optional `-WebOnly`, `-BackendOnly`, `-SkipNpmCi`, `-NoRestart`, and health polling |
 
 ## Notes
 
 The preferred release path is the `.deb` package. Direct tar deployment is for
 development iteration only.
+
+For UI-only iteration, prefer `deploy_pizzad_web.ps1`. Use the full tar deploy
+when backend/runtime files changed.
 
 `pizzad` owns ongoing trunk-recorder health collection. Import helpers are for
 one-time priming or controlled maintenance tasks.

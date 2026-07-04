@@ -923,6 +923,12 @@ Deploy RPI:
 C:\projects\pizzawave\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
+For frontend-only RPI changes, prefer the web-only deploy helper:
+
+```powershell
+C:\projects\pizzawave\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
+```
+
 Rebuild the RPI-compatible native Qdrant binary if Qdrant is upgraded or the
 Pi is rebuilt with the same 16 KB page-size kernel:
 

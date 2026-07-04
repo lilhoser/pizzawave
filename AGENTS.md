@@ -31,6 +31,28 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 - Built web assets are checked into `pizzad/wwwroot`.
 - If web source changes, rebuild the UI before committing generated assets.
 
+## Deployment Helpers
+
+- For UI-only changes under `pizzad/web` or `pizzad/wwwroot`, use the web-only
+  deploy helper. It rebuilds the Vite app, copies only `wwwroot`, does not
+  publish the backend, and does not restart `pizzad`:
+
+```powershell
+.\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
+```
+
+- Use the full tar deploy only when backend/runtime/package files changed:
+
+```powershell
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+```
+
+- The tar helper also supports `-WebOnly`, `-BackendOnly`, `-SkipNpmCi`,
+  `-NoRestart`, and `-HealthTimeoutSeconds`. Prefer `-SkipNpmCi` for iterative
+  web deploys unless `package-lock.json` changed.
+- Do not restart `trunk-recorder` as part of deploy verification unless the user
+  explicitly asks. Verify `pizzad` health with `/api/v1/health`.
+
 ## Repo Map
 
 - `pizzad/`: engine, API server, AI incident logic, setup, RF survey, TR health,

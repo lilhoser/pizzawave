@@ -91,13 +91,32 @@ jobs with guardrails; imported calls suppress live/email alert notifications.
 
 ## Fast Development Deploys
 
-For rapid iteration during development, the repo includes a tar-based deploy
-helper:
+For rapid iteration during development, the repo includes direct deploy helpers.
+Use the fastest helper that matches the files changed.
+
+For UI-only changes (`pizzad/web` and generated `pizzad/wwwroot`), use the
+web-only helper. It rebuilds the Vite app, uploads only `wwwroot`, does not
+publish the backend, and does not restart `pizzad`:
+
+```powershell
+.\scripts\deploy_pizzad_web.ps1 -HostName user@host
+.\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
+```
+
+Use `-NpmCi` with the web helper when `package-lock.json` changed. Otherwise it
+skips `npm ci` for faster iteration.
+
+For backend/runtime changes, use the tar-based deploy helper:
 
 ```powershell
 .\scripts\deploy_pizzad_tar.ps1 -HostName user@host -Rid linux-x64
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@192.168.2.42 -SshKey $env:USERPROFILE\.ssh\pizzawave_rpi_ed25519 -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
+
+The tar helper supports `-WebOnly`, `-BackendOnly`, `-SkipNpmCi`, `-NoRestart`,
+and `-HealthTimeoutSeconds` for controlled iteration. The default full deploy
+rebuilds web assets, publishes `pizzad`, uploads the full publish directory,
+restarts `pizzad`, and polls `/api/v1/health`.
 
 This is not the preferred release path. Use `.deb` packages for normal deploys.
 
