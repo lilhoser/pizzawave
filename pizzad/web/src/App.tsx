@@ -3496,12 +3496,9 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
     !scopeHasDependentResults || confirmAction("Change selected sites?", "Changing selected sites clears saved RF measurements, error/gain sweep state, and call-quality results for this workspace.");
   const changeSystems = (next: string[]) => {
     if (!confirmScopeChange()) return;
-    const normalized = next.filter(Boolean);
+    const normalized = uniqueCaseInsensitive(next.filter(Boolean));
     onTouched();
-    if (normalized.length === 1)
-      setSurveySystem(normalized[0]);
-    else
-      setSurveySystems(normalized);
+    setSurveySystems(normalized);
   };
   const toggleSystem = (shortName: string) => {
     setDraftSystems(current => current.some(name => name.toLowerCase() === shortName.toLowerCase())
@@ -6674,6 +6671,20 @@ function SourcePlannerStep({
 
 function uniqueSortedFrequencies(values: number[]) {
   return [...new Set(values.filter(value => Number.isFinite(value) && value > 0).map(value => Math.round(value)))].sort((a, b) => a - b);
+}
+
+function uniqueCaseInsensitive(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key))
+      continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
 }
 
 function isValidTrSourcePlannerSampleRate(sampleRateHz: number) {
