@@ -10,6 +10,7 @@ import "./style.css";
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 const radioSetupApi = "/api/v1/system/radio-setup";
 const radioSetupDetailUrl = (id: string, compact = true) => `${radioSetupApi}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
+const waterfallStopUrl = (surveyId: string) => `${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`;
 type Page = "dashboard" | "tools" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
 type CategorySortMode = "name" | "recent" | "frequent";
@@ -2760,7 +2761,9 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
 
   async function runSimpleExperiment(type: string, estimate: string, controlChannelHz?: number, extraRequest: Record<string, unknown> = {}) {
     if (!detail) return;
-    if (type !== "control_channel_quality" && type !== "rf_power_scan" && type !== "rf_validation_sweep" && !["voice_capture_trial", "transcription_gate", "stability_verdict"].includes(type) && !confirmAction(`Run ${label(type)}?`, `Estimated time: ${estimate}.`)) return;
+    const parameters = extraRequest.parameters as Record<string, unknown> | undefined;
+    const skipConfirm = parameters?.waterfallIdentify === true;
+    if (!skipConfirm && type !== "control_channel_quality" && type !== "rf_power_scan" && type !== "rf_validation_sweep" && !["voice_capture_trial", "transcription_gate", "stability_verdict"].includes(type) && !confirmAction(`Run ${label(type)}?`, `Estimated time: ${estimate}.`)) return;
     setBusy(type);
     setMessage("");
     appendRunLog(`Running ${label(type)}...`);
@@ -3600,6 +3603,7 @@ type SweepCandidate = {
 type SweepResult = { jobId?: number; sourceIndex: number; serial: string; gain: string; outputDir: string; summaryPath: string; bestPath: string; best?: SweepCandidate | null; candidates: SweepCandidate[] };
 type SweepInsight = { recommendation: string; confidence: string; rationale: string; nextActions: string[]; rawText: string };
 type SweepHistoryEntry = { jobId?: number; capturedAtUtc: string; sourceIndex: number; bestErrorHz: number; bestScore: number; bestAvgDecodeRate: number; bestTotalDecode: number; bestHasDecodeSamples: boolean };
+type WaterfallSweepSeed = { sourceIndex: number; targetFrequencyHz: number; measuredFrequencyHz: number; offsetHz: number; snrDb: number; gain: string; sampleRateHz: number; siteLabel: string; createdAtUtc: string };
 type RfRunLogLine = { id: string; level: "info" | "result" | "error"; text: string; createdAtUtc: string };
 
 const AIRSPY_LINEARITY_GAIN_MAX = 21;
@@ -3713,6 +3717,16 @@ function loadJsonStorage<T>(key: string, fallback: T): T {
   }
 }
 
+function stopWaterfallSession(surveyId: string) {
+  if (!surveyId) return;
+  const url = waterfallStopUrl(surveyId);
+  const headers = new Headers();
+  const token = localStorage.getItem("pizzawave-admin-token");
+  if (token)
+    headers.set("Authorization", `Bearer ${token}`);
+  void fetch(url, { method: "POST", headers, keepalive: true }).catch(() => {});
+}
+
 function parseGainSequence(value: string) {
   const parsed = value
     .split(",")
@@ -3798,11 +3812,20 @@ function RfPathRefinementStep({
   onLoadPreviousRfPath: () => Promise<void>;
 } & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation">) {
   const storageKey = `pizzawave-radio-setup-rf-subpage-${props.surveyId}`;
+  const seedStorageKey = `pizzawave-radio-setup-waterfall-sweep-seed-${props.surveyId}`;
   const [subPage, setSubPageState] = useState<RfRefinementSubpage>(() => normalizeRfRefinementSubpage(localStorage.getItem(storageKey)));
+  const [waterfallSweepSeed, setWaterfallSweepSeed] = useState<WaterfallSweepSeed | null>(() => loadJsonStorage<WaterfallSweepSeed | null>(seedStorageKey, null));
   const [recoveredSweepStatus, setRecoveredSweepStatus] = useState("");
   const setSubPage = (value: RfRefinementSubpage) => {
+    if (subPage === "waterfall" && value !== "waterfall")
+      stopWaterfallSession(props.surveyId);
     setSubPageState(value);
     localStorage.setItem(storageKey, value);
+  };
+  const prepareWaterfallSeed = (seed: WaterfallSweepSeed) => {
+    setWaterfallSweepSeed(seed);
+    localStorage.setItem(seedStorageKey, JSON.stringify(seed));
+    setSubPage("power");
   };
   const rfPathEntered = path.chain.some(item => item.label?.trim() || item.length?.trim() || item.loss?.trim() || item.notes?.trim() || (item.connectorInType && item.connectorInType !== "unknown") || (item.connectorOutType && item.connectorOutType !== "unknown"));
   const persistedSweepStatus = props.sweep?.status === "running" ? undefined : props.sweep?.status;
@@ -3824,7 +3847,7 @@ function RfPathRefinementStep({
     </div>
     {subPage === "path"
       ? <RfPathStep path={path} setPath={setPath} onTouched={onRfPathTouched} onLoadPrevious={onLoadPreviousRfPath} busy={props.busy} />
-      : <SiteValidationStep {...props} activeOperation={subPage} onSweepRecovered={setRecoveredSweepStatus} />}
+      : <SiteValidationStep {...props} activeOperation={subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} onSweepRecovered={setRecoveredSweepStatus} />}
   </div>;
 }
 
@@ -3900,6 +3923,8 @@ function SiteValidationStep({
   onReload,
   onShowDetails,
   onOpenRunLog,
+  waterfallSweepSeed,
+  onWaterfallSweepSeed,
   onSweepRecovered
 }: {
   activeOperation: Exclude<RfRefinementSubpage, "path">;
@@ -3934,6 +3959,8 @@ function SiteValidationStep({
   onReload: () => Promise<void>;
   onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void;
   onOpenRunLog: () => void;
+  waterfallSweepSeed?: WaterfallSweepSeed | null;
+  onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
   onSweepRecovered?: (status: string) => void;
 }) {
   const [sweepBusy, setSweepBusy] = useState("");
@@ -4002,6 +4029,7 @@ function SiteValidationStep({
   const sweepInsightStorageKey = `pizzawave-radio-setup-sweep-insights-${surveyId}`;
   const sweepHistoryStorageKey = `pizzawave-radio-setup-sweep-history-${surveyId}`;
   const sweepRecoveryKey = useRef("");
+  const appliedWaterfallSeedKey = useRef("");
   useEffect(() => {
     if (controlChannels.length && !controlChannels.includes(activeControlChannelHz))
       setActiveControlChannelHz(controlChannels[0]);
@@ -4078,6 +4106,29 @@ function SiteValidationStep({
     if (Number.isFinite(selectedCc) && selectedCc > 0 && selectedCc !== activeControlChannelHz)
       setActiveControlChannelHz(selectedCc);
   }, [validationSweep?.id]);
+  useEffect(() => {
+    if (!waterfallSweepSeed) return;
+    const seedKey = `${waterfallSweepSeed.createdAtUtc}:${waterfallSweepSeed.sourceIndex}:${waterfallSweepSeed.targetFrequencyHz}:${Math.round(waterfallSweepSeed.offsetHz)}`;
+    if (appliedWaterfallSeedKey.current === seedKey) return;
+    appliedWaterfallSeedKey.current = seedKey;
+    if (waterfallSweepSeed.targetFrequencyHz > 0)
+      setActiveControlChannelHz(waterfallSweepSeed.targetFrequencyHz);
+    if (waterfallSweepSeed.sampleRateHz > 0)
+      setValidationSampleRateMhz(formatMhzInput(waterfallSweepSeed.sampleRateHz));
+    const roundedOffset = Math.round(waterfallSweepSeed.offsetHz / 100) * 100;
+    if (Math.abs(roundedOffset) >= 100)
+      setValidationErrorOffsets(`0,${roundedOffset},${-roundedOffset}`);
+    updateSweepInput(waterfallSweepSeed.sourceIndex, {
+      gain: waterfallSweepSeed.gain || undefined,
+      errorHz: String(Math.round(waterfallSweepSeed.offsetHz)),
+      rangeHz: "300",
+      stepHz: "100",
+      precision: "custom"
+    });
+    setHighlightedSweepSource(waterfallSweepSeed.sourceIndex);
+    window.setTimeout(() => setHighlightedSweepSource(current => current === waterfallSweepSeed.sourceIndex ? null : current), 1800);
+    setSweepMessage(`Prepared RF Sweep from waterfall ${waterfallSweepSeed.siteLabel || "candidate"}: target ${formatRfHz(waterfallSweepSeed.targetFrequencyHz)}, measured ${formatRfHz(waterfallSweepSeed.measuredFrequencyHz)}, offset ${waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}${formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz.`);
+  }, [waterfallSweepSeed?.createdAtUtc]);
   useEffect(() => {
     if (activeOperation !== "power" && !validationRunning) return;
     let stopped = false;
@@ -4428,6 +4479,7 @@ function SiteValidationStep({
         systems={systems}
         controlChannels={controlChannels}
         activeControlChannelHz={activeControlChannelHz}
+        onWaterfallSweepSeed={onWaterfallSweepSeed}
         onRunExperiment={onRunExperiment}
         onReload={onReload}
       />
@@ -4455,6 +4507,10 @@ function SiteValidationStep({
             </div>
             {validationSampleRateMessage && <div className="settings-message error">{validationSampleRateMessage}</div>}
             {airspyPowerGainMessage && <div className={airspyPowerGainInvalid ? "settings-message error" : "setup-note"}>{airspyPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
+            {waterfallSweepSeed && <div className="rf-waterfall-seed-note">
+              <strong>Waterfall seed</strong>
+              <span>{waterfallSweepSeed.siteLabel || "Selected CC"} / Source {waterfallSweepSeed.sourceIndex} / target {formatRfHz(waterfallSweepSeed.targetFrequencyHz)} / peak {formatRfHz(waterfallSweepSeed.measuredFrequencyHz)} / SNR {formatFixed(waterfallSweepSeed.snrDb, 1)} dB / offset {waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}{formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz</span>
+            </div>}
           </div>
           <div className="rf-sweep-callout" role="status" aria-live="polite">
             <span>Estimated time</span>
@@ -4687,6 +4743,7 @@ function WaterfallStep({
   systems,
   controlChannels,
   activeControlChannelHz,
+  onWaterfallSweepSeed,
   onRunExperiment,
   onReload
 }: {
@@ -4697,6 +4754,7 @@ function WaterfallStep({
   systems: RfSurveySystem[];
   controlChannels: number[];
   activeControlChannelHz: number;
+  onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
   onReload: () => Promise<void>;
 }) {
@@ -4728,7 +4786,6 @@ function WaterfallStep({
   const peakHistoryRef = useRef<Map<string, SpectrumPeakTrack>>(new Map());
   const ccSignalHistoryRef = useRef<Map<string, WaterfallCcSignalTrack>>(new Map());
   const visiblePeaksRef = useRef<PositionedSpectrumPeak[]>([]);
-  const activeRef = useRef(false);
   const lastFrameRef = useRef("");
   const hasGoodWaterfallFrameRef = useRef(false);
   const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
@@ -4754,10 +4811,6 @@ function WaterfallStep({
   useEffect(() => {
     spectrumScaleRef.current = null;
   }, [spectrumSpanDb]);
-
-  useEffect(() => {
-    activeRef.current = status?.active === true;
-  }, [status?.active]);
 
   useEffect(() => {
     let stopped = false;
@@ -4803,8 +4856,7 @@ function WaterfallStep({
 
   useEffect(() => {
     return () => {
-      if (activeRef.current)
-        void api.request(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`, { method: "POST" });
+      stopWaterfallSession(surveyId);
     };
   }, [surveyId]);
 
@@ -4893,7 +4945,7 @@ function WaterfallStep({
     setBusy("stop");
     setMessage("");
     try {
-      const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`, { method: "POST" });
+      const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(surveyId), { method: "POST" });
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
@@ -4928,6 +4980,48 @@ function WaterfallStep({
     } catch (error) {
       setIdentifyMessage(error instanceof Error ? error.message : "P25 Identify failed.");
     }
+  }
+
+  function prepareSweepSeedFromPeak(peak: PositionedSpectrumPeak) {
+    const nearestTarget = nearestTargetControlChannel(peak.frequencyHz, systems, controlChannelOptions, 20_000);
+    if (!nearestTarget) {
+      setIdentifyMessage("RF Sweep seed requires a cached requested control channel near the selected peak.");
+      return;
+    }
+    prepareWaterfallSweepSeed({
+      sourceIndex,
+      targetFrequencyHz: nearestTarget.frequencyHz,
+      measuredFrequencyHz: Math.round(peak.frequencyHz),
+      offsetHz: Math.round(peak.frequencyHz - nearestTarget.frequencyHz),
+      snrDb: peak.snrDb,
+      gain: gain.trim() || selectedSource?.gain || "",
+      sampleRateHz,
+      siteLabel: nearestTarget.siteLabel,
+      createdAtUtc: new Date().toISOString()
+    });
+  }
+
+  function prepareSweepSeedFromSignalRow(row: WaterfallCcSignalRow) {
+    if (row.status === "not-seen") {
+      setIdentifyMessage("RF Sweep seed needs a stable waterfall trace for that requested control channel.");
+      return;
+    }
+    prepareWaterfallSweepSeed({
+      sourceIndex,
+      targetFrequencyHz: row.frequencyHz,
+      measuredFrequencyHz: Math.round(row.peakFrequencyHz),
+      offsetHz: Math.round(row.offsetHz),
+      snrDb: row.snrDb,
+      gain: gain.trim() || selectedSource?.gain || "",
+      sampleRateHz,
+      siteLabel: row.siteLabel,
+      createdAtUtc: new Date().toISOString()
+    });
+  }
+
+  function prepareWaterfallSweepSeed(seed: WaterfallSweepSeed) {
+    onWaterfallSweepSeed?.(seed);
+    setIdentifyMessage(`Prepared RF Sweep seed for ${seed.siteLabel || formatRfHz(seed.targetFrequencyHz)}: offset ${seed.offsetHz >= 0 ? "+" : ""}${seed.offsetHz} Hz.`);
   }
 
   function handleSpectrumMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
@@ -4981,11 +5075,12 @@ function WaterfallStep({
     {visibleMessage && <div className="settings-message error">{visibleMessage}</div>}
     {identifyMessage && <div className="setup-note">{identifyMessage}</div>}
     <div className="rf-waterfall-stage">
-      <div className="rf-waterfall-display">
-        <canvas className="rf-spectrum-canvas" ref={spectrumCanvasRef} width={1024} height={120} aria-label="RF spectrum" onMouseMove={handleSpectrumMouseMove} onMouseLeave={() => setSpectrumHover(null)} />
-        {spectrumHover && <div className="rf-spectrum-hover" style={{ left: spectrumHover.left, top: spectrumHover.top }}>
+      <div className="rf-waterfall-display" onMouseLeave={() => setSpectrumHover(null)}>
+        <canvas className="rf-spectrum-canvas" ref={spectrumCanvasRef} width={1024} height={120} aria-label="RF spectrum" onMouseMove={handleSpectrumMouseMove} />
+        {spectrumHover && <div className="rf-spectrum-hover" style={{ left: spectrumHover.left, top: spectrumHover.top }} onMouseDown={event => event.preventDefault()}>
           <span>{spectrumHover.text}</span>
-          <button type="button" onClick={() => void runP25Identify(spectrumHover.peak)}>P25 Identify</button>
+          <button type="button" onMouseDown={event => event.preventDefault()} onClick={event => { event.stopPropagation(); void runP25Identify(spectrumHover.peak); }}>P25 Identify</button>
+          <button type="button" onMouseDown={event => event.preventDefault()} onClick={event => { event.stopPropagation(); prepareSweepSeedFromPeak(spectrumHover.peak); }}>Use for RF Sweep</button>
         </div>}
         <canvas className="rf-waterfall-canvas" ref={canvasRef} width={1024} height={300} aria-label="RF waterfall" />
       </div>
@@ -5009,6 +5104,7 @@ function WaterfallStep({
         <code>{formatRfHz(row.frequencyHz)}</code>
         <strong>{row.label}</strong>
         <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
+        <button type="button" disabled={row.status === "not-seen"} onClick={() => prepareSweepSeedFromSignalRow(row)}>Use for RF Sweep</button>
       </div>)}
     </div>
   </div>;

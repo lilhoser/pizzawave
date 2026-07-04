@@ -3655,7 +3655,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-cc-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 110px 90px minmax(240px, 1.4fr);
+  grid-template-columns: minmax(150px, 1fr) 110px 82px minmax(220px, 1.4fr) 112px;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -3691,6 +3691,30 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-cc-row small {
   color: #9faab5;
+}
+
+.rf-waterfall-cc-row button {
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+.rf-waterfall-seed-note {
+  display: grid;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 237, 138, .42);
+  border-radius: 6px;
+  background: rgba(255, 237, 138, .08);
+  color: #d7dde3;
+  font-size: 12px;
+}
+
+.rf-waterfall-seed-note strong {
+  color: #ffed8a;
+}
+
+.rf-waterfall-seed-note span {
+  overflow-wrap: anywhere;
 }
 .rf-step-progress-track.idle span {
   left: 0;
