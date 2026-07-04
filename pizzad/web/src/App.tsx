@@ -2424,6 +2424,53 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     }
   }
 
+  async function adoptWaterfallSite(system: RfSurveySystem) {
+    if (!detail || !system.shortName)
+      return;
+    const currentSystems = surveySystems.length
+      ? surveySystems
+      : detail.profile.systemShortNames?.length ? detail.profile.systemShortNames : detail.profile.systemShortName ? [detail.profile.systemShortName] : [];
+    if (currentSystems.some(name => name.toLowerCase() === system.shortName.toLowerCase()))
+      return;
+    const nextSystems = [...currentSystems, system.shortName];
+    const nextSourcePlanSystems = sourcePlanSystems.length ? Array.from(new Set([...sourcePlanSystems, system.shortName])) : nextSystems;
+    const systemDefinitions = buildSurveySystemDefinitions(nextSystems, scopePlan, radioReferenceSites, [...(detail.profile.systems ?? []), system]);
+    setBusy("adopt-rr-site");
+    setMessage("");
+    try {
+      const next = await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/draft`, {
+        method: "POST",
+        body: JSON.stringify({
+          systemShortName: nextSystems[0] ?? system.shortName,
+          systemShortNames: nextSystems,
+          sourcePlanSystemShortNames: nextSourcePlanSystems,
+          sourcePlanMode,
+          systemDefinitions,
+          radioReferenceSid: radioReferenceSid.trim() || detail.profile.radioReferenceSid || undefined,
+          siteLabel: surveySiteLabel,
+          rfPath: path,
+          selectedSourceIndexes: selectedSources.length ? selectedSources : detail.profile.selectedSourceIndexes,
+          sdrSources: sdrSources ?? undefined,
+          currentStep: step,
+          measurementMode,
+          probeDurationSeconds: Number(duration) || 45
+        })
+      });
+      setDetail(next);
+      setSurveySystem(nextSystems[0] ?? system.shortName);
+      setSurveySystems(nextSystems);
+      setSourcePlanSystems(nextSourcePlanSystems);
+      draftDirtyRef.current = false;
+      activeWorkspaceSystemsRef.current = nextSystems;
+      await loadSurveys();
+      setMessage(`Added ${system.siteLabel || system.shortName} to this RSW profile.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to add RR site to this RSW profile.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function openSurvey(id: string, openWizard = true, targetStep?: number, configSubPage?: ConfigDraftSubpage) {
     setBusy(`open-${id}`);
     setMessage("");
@@ -2907,6 +2954,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       onStopAndInventory={stopTrAndInventory}
       onRunP25={runP25}
       onRunExperiment={runSimpleExperiment}
+      onAdoptWaterfallSite={adoptWaterfallSite}
       onRunCallQuality={runCallQualityPipeline}
       onApplyConfigDraft={applyCurrentConfigDraft}
       onConfigApplyStateChange={setConfigApplyInFlight}
@@ -3080,6 +3128,7 @@ function RfSurveyWizard({
   onStopAndInventory,
   onRunP25,
   onRunExperiment,
+  onAdoptWaterfallSite,
   onRunCallQuality,
   onApplyConfigDraft,
   onConfigApplyStateChange,
@@ -3141,6 +3190,7 @@ function RfSurveyWizard({
   onStopAndInventory: () => Promise<void>;
   onRunP25: (controlChannelHz?: number) => Promise<void>;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
+  onAdoptWaterfallSite: (system: RfSurveySystem) => Promise<void>;
   onRunCallQuality: () => Promise<void>;
   onApplyConfigDraft: () => Promise<void>;
   onConfigApplyStateChange: (value: boolean) => void;
@@ -3314,7 +3364,7 @@ function RfSurveyWizard({
         {message && <div className="setup-note">{message}</div>}
         {step === 0 && <PrereqStep detail={detail} busy={busy} onToolPrep={onToolPrep} onInstallTools={onInstallTools} onShowDetails={onShowDetails} onOpenRunLog={onOpenRunLog} />}
         {step === 1 && <ScopeStep detail={detail} scopePlan={scopePlan} radioReferenceSid={radioReferenceSid} setRadioReferenceSid={setRadioReferenceSid} radioReferenceSites={radioReferenceSites} surveySystem={surveySystem} surveySystems={surveySystems} setSurveySystem={setSurveySystem} setSurveySystems={setSurveySystems} surveySiteLabel={surveySiteLabel} setSurveySiteLabel={setSurveySiteLabel} onTouched={() => setSdrScopeTouched(true)} scopeHasDependentResults={scopeHasDependentResults} onLoadRadioReferenceSites={onLoadRadioReferenceSites} busy={busy} />}
-        {step === 2 && <RfPathRefinementStep path={path} setPath={setPath} onRfPathTouched={() => setRfPathTouched(true)} onLoadPreviousRfPath={onLoadPreviousRfPath} busy={busy} ccQuality={ccQuality} staleCcQuality={staleCcQuality} ccQualityRuns={ccQualityRuns} inventory={inventory} powerScan={powerScan} validationSweep={validationSweep} stalePowerScan={stalePowerScan} p25={p25} staleP25={staleP25} sweep={sweep} staleSweep={staleSweep} nextExperiments={detail.nextExperiments ?? []} surveyId={detail.session.id} systemShortName={detail.profile.systemShortName} systems={detail.profile.systems ?? []} sources={sdrSources ?? detail.profile.sources} setSdrSources={setSdrSources} onSdrTouched={() => setSdrScopeTouched(true)} controlChannels={detail.profile.controlChannelsHz} activeControlChannelHz={activeControlChannelHz} setActiveControlChannelHz={setActiveControlChannelHz} duration={duration} setDuration={setDuration} selectedSources={selectedSources} onStopAndInventory={onStopAndInventory} onRunP25={onRunP25} onRunExperiment={onRunExperiment} onReload={onReload} onShowDetails={onShowDetails} onOpenRunLog={onOpenRunLog} />}
+        {step === 2 && <RfPathRefinementStep path={path} setPath={setPath} onRfPathTouched={() => setRfPathTouched(true)} onLoadPreviousRfPath={onLoadPreviousRfPath} busy={busy} ccQuality={ccQuality} staleCcQuality={staleCcQuality} ccQualityRuns={ccQualityRuns} inventory={inventory} powerScan={powerScan} validationSweep={validationSweep} stalePowerScan={stalePowerScan} p25={p25} staleP25={staleP25} sweep={sweep} staleSweep={staleSweep} nextExperiments={detail.nextExperiments ?? []} surveyId={detail.session.id} systemShortName={detail.profile.systemShortName} systems={detail.profile.systems ?? []} radioReferenceSites={radioReferenceSites} sources={sdrSources ?? detail.profile.sources} setSdrSources={setSdrSources} onSdrTouched={() => setSdrScopeTouched(true)} controlChannels={detail.profile.controlChannelsHz} activeControlChannelHz={activeControlChannelHz} setActiveControlChannelHz={setActiveControlChannelHz} duration={duration} setDuration={setDuration} selectedSources={selectedSources} onStopAndInventory={onStopAndInventory} onRunP25={onRunP25} onRunExperiment={onRunExperiment} onAdoptWaterfallSite={onAdoptWaterfallSite} onReload={onReload} onShowDetails={onShowDetails} onOpenRunLog={onOpenRunLog} />}
         {step === 3 && <ConfigDraftStep reload={onReload} detail={detail} selectedSources={selectedSources} setSelectedSources={setSelectedSources} sourcePlanSystems={sourcePlanSystems} setSourcePlanSystems={setSourcePlanSystems} sourcePlanMode={sourcePlanMode} setSourcePlanMode={setSourcePlanMode} sdrSources={sdrSources} setSdrSources={setSdrSources} onSdrTouched={() => setSdrScopeTouched(true)} onApplyStateChange={onConfigApplyStateChange} onApplied={async () => { await onRefreshDetail(); setStep(4); }} />}
         {step === 4 && <CallQualityStep busy={busy} voice={displayVoice} transcription={displayTranscription} stability={displayStability} sourcePlanApplied={sourcePlanApplied} sourcePlanSummary={detail.session.sourcePlanSummary} callQualityEnabled={callQualityPlan?.enabled === true} callQualityBlockingIssue={callQualityPlan?.blockingIssue || ""} resetActive={Boolean(callQualityRunStartedAtUtc && busy === "call_quality")} onOpenConfigDraftReview={openConfigDraftReview} onApplyConfigDraft={onApplyConfigDraft} onRun={onRunCallQuality} />}
       </section>
@@ -3918,6 +3968,7 @@ function SiteValidationStep({
   surveyId,
   systemShortName,
   systems,
+  radioReferenceSites,
   sources,
   controlChannels,
   activeControlChannelHz,
@@ -3930,6 +3981,7 @@ function SiteValidationStep({
   onStopAndInventory,
   onRunP25,
   onRunExperiment,
+  onAdoptWaterfallSite,
   onReload,
   onShowDetails,
   onOpenRunLog,
@@ -3954,6 +4006,7 @@ function SiteValidationStep({
   surveyId: string;
   systemShortName: string;
   systems: RfSurveySystem[];
+  radioReferenceSites: SetupTrConfigSites | null;
   sources: RfSurveySource[];
   controlChannels: number[];
   activeControlChannelHz: number;
@@ -3966,6 +4019,7 @@ function SiteValidationStep({
   onStopAndInventory: () => Promise<void>;
   onRunP25: (controlChannelHz?: number) => Promise<void>;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
+  onAdoptWaterfallSite: (system: RfSurveySystem) => Promise<void>;
   onReload: () => Promise<void>;
   onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void;
   onOpenRunLog: () => void;
@@ -4467,10 +4521,12 @@ function SiteValidationStep({
         sources={sources}
         selectedSources={selectedSources}
         systems={systems}
+        radioReferenceSites={radioReferenceSites}
         controlChannels={controlChannels}
         activeControlChannelHz={activeControlChannelHz}
         waterfallSweepControlChannels={selectedWaterfallSweepControlChannels}
         onWaterfallSweepControlChannels={onWaterfallSweepControlChannels}
+        onAdoptWaterfallSite={onAdoptWaterfallSite}
         onRunExperiment={onRunExperiment}
         onReload={onReload}
       />
@@ -4735,10 +4791,12 @@ function WaterfallStep({
   sources,
   selectedSources,
   systems,
+  radioReferenceSites,
   controlChannels,
   activeControlChannelHz,
   waterfallSweepControlChannels,
   onWaterfallSweepControlChannels,
+  onAdoptWaterfallSite,
   onRunExperiment,
   onReload
 }: {
@@ -4747,10 +4805,12 @@ function WaterfallStep({
   sources: RfSurveySource[];
   selectedSources: number[];
   systems: RfSurveySystem[];
+  radioReferenceSites: SetupTrConfigSites | null;
   controlChannels: number[];
   activeControlChannelHz: number;
   waterfallSweepControlChannels?: number[];
   onWaterfallSweepControlChannels?: (values: number[]) => void;
+  onAdoptWaterfallSite: (system: RfSurveySystem) => Promise<void>;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
   onReload: () => Promise<void>;
 }) {
@@ -5107,21 +5167,6 @@ function WaterfallStep({
       ["Peak", frame ? `${formatRfHz(frame.peakFrequencyHz)} / ${formatFixed(frame.peakDb, 1)} dB` : "--"],
       ["SNR", Number.isFinite(peakSnrDb) ? `${formatFixed(peakSnrDb, 1)} dB` : "--"]
     ];
-    const requestedRows = ccSignalRows.length
-      ? ccSignalRows.map(row => {
-        const identify = identifyResults[peakFromWaterfallCcSignalRow(row).key];
-        const evidence = row.status === "not-seen"
-          ? "No stable carrier estimate near this target yet."
-          : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`;
-        const labelText = waterfallCcSignalDisplayLabel(row, identify);
-        return [
-        row.siteLabel,
-        formatRfHz(row.frequencyHz),
-        labelText,
-        identify ? `${evidence} / ${waterfallIdentifyReportText(identify)}` : evidence
-      ];
-      })
-      : [["--", "--", "--", "No requested CC rows captured."]];
     const reportOtherRows = [...otherDetectedCcRows];
     for (const result of Object.values(identifyResults)) {
       if (result.key.startsWith("requested:"))
@@ -5134,26 +5179,26 @@ function WaterfallStep({
           promoted: true
         });
     }
-    const otherRows = reportOtherRows.length
-      ? reportOtherRows.map(row => {
-        const identify = identifyResults[row.key];
-        return [
-        "Detected peak",
-        formatRfHz(Math.round(row.frequencyHz)),
-        `SNR ${formatFixed(row.snrDb, 1)} dB`,
-        identify
-          ? `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s) / ${waterfallIdentifyReportText(identify)}`
-          : `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`
-      ];
+    const reportCandidates = buildWaterfallCandidateRows(ccSignalRows, reportOtherRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
+    const candidateRows = reportCandidates.length
+      ? reportCandidates.map(row => {
+        const identify = identifyResults[row.identifyPeak.key];
+        const evidence = [
+          `SNR ${formatFixed(row.snrDb, 1)} dB`,
+          `offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz`,
+          `confidence ${Math.round(row.confidence * 100)}%`,
+          identify ? waterfallIdentifyReportText(identify) : ""
+        ].filter(Boolean).join(" / ");
+        return [row.siteLabel, formatRfHz(row.targetFrequencyHz), row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--", waterfallCandidateSourceLabel(row, identify), evidence];
       })
-      : [["--", "--", "--", "No stable non-requested control-channel-like peaks detected."]];
+      : [["--", "--", "--", "--", "No candidate rows captured."]];
     const width = 1280;
     const margin = 28;
     const imageWidth = width - margin * 2;
     const spectrumHeight = Math.round(spectrumCanvas.height * imageWidth / spectrumCanvas.width);
     const waterfallHeight = Math.round(waterfallCanvas.height * imageWidth / waterfallCanvas.width);
     const tableHeight = (rows: string[][]) => 30 + rows.length * 56;
-    const height = margin + 52 + 108 + 28 + 24 + spectrumHeight + 28 + 24 + waterfallHeight + 30 + 24 + tableHeight(requestedRows) + 28 + 24 + tableHeight(otherRows) + margin;
+    const height = margin + 52 + 108 + 28 + 24 + spectrumHeight + 28 + 24 + waterfallHeight + 30 + 24 + tableHeight(candidateRows) + margin;
     const reportCanvas = document.createElement("canvas");
     reportCanvas.width = width;
     reportCanvas.height = height;
@@ -5176,8 +5221,7 @@ function WaterfallStep({
     y += 108;
     y = drawReportImage(ctx, "RF Spectrum", spectrumCanvas, margin, y, imageWidth, spectrumHeight);
     y = drawReportImage(ctx, "Waterfall", waterfallCanvas, margin, y, imageWidth, waterfallHeight);
-    y = drawReportTable(ctx, "Requested CC Signal Check", ["Site", "Frequency", "Status", "Evidence"], requestedRows, margin, y, imageWidth);
-    y = drawReportTable(ctx, "Other detected CCs", ["Type", "Frequency", "SNR", "Evidence"], otherRows, margin, y, imageWidth);
+    y = drawReportTable(ctx, "Control Channel Candidates", ["Site", "Matched CC", "Detected", "Source", "Evidence"], candidateRows, margin, y, imageWidth);
     reportCanvas.toBlob(blob => {
       if (!blob)
         return;
@@ -5229,6 +5273,12 @@ function WaterfallStep({
         promoted: true
       });
   }
+  const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
+  async function toggleCandidateForSweep(row: WaterfallCandidateRow, selected: boolean) {
+    if (selected && row.origin !== "selected" && row.system && !systems.some(system => system.shortName.toLowerCase() === row.system?.shortName.toLowerCase()))
+      await onAdoptWaterfallSite(row.system);
+    toggleSweepControlChannel(row.sweepFrequencyHz, selected);
+  }
   return <div className="rf-waterfall-panel">
     <div className="rf-waterfall-controls">
       <label><span>Source</span><select value={String(sourceIndex)} disabled={controlsDisabled || locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
@@ -5276,52 +5326,151 @@ function WaterfallStep({
       </div>
     </div>
     <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Requested CC Signal Check</span><small>Waterfall evidence only; P25 Identify or RF Sweep must confirm decode.</small></div>
-      <fieldset className="rf-waterfall-sweep-group">
-        <legend>Use for RF Sweep</legend>
-        {ccSignalRows.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect requested control channels.</div> : ccSignalRows.map(row => {
-          const identifyPeak = peakFromWaterfallCcSignalRow(row);
-          const identify = identifyResults[identifyPeak.key];
-          return <div className={`rf-waterfall-cc-row ${row.status} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={`${row.systemShortName}-${row.frequencyHz}`}>
-            <span>{row.siteLabel}</span>
-            <code>{formatRfHz(row.frequencyHz)}</code>
-            <strong>{waterfallCcSignalDisplayLabel(row, identify)}</strong>
-            <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
-            <span className="rf-waterfall-row-actions">
-              <label className="rf-waterfall-use-check">
-                <input
-                  type="checkbox"
-                  checked={selectedSweepControlChannelSet.has(row.frequencyHz)}
-                  onChange={event => toggleSweepControlChannel(row.frequencyHz, event.target.checked)}
-                  aria-label={`Use ${formatRfHz(row.frequencyHz)} for RF Sweep`}
-                />
-                <span>Use</span>
-              </label>
-              <button type="button" disabled={identifyRunning} onClick={() => void runP25Identify(identifyPeak)}>{identify?.status === "running" ? "Running..." : "P25 Identify"}</button>
-            </span>
+      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by SNR. Offset is relative to the matched selected-site or RR-catalog control channel.</small></div>
+      <div className="rf-waterfall-candidate-table">
+        <div className="rf-waterfall-candidate-row header">
+          <span>Use</span><span>Site</span><span>Matched CC</span><span>Detected</span><span>SNR</span><span>Offset</span><span>Confidence</span><span>Source</span><span>Action</span>
+        </div>
+        {waterfallCandidates.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect selected and nearby RR control channels.</div> : waterfallCandidates.map(row => {
+          const identify = identifyResults[row.identifyPeak.key];
+          const selected = selectedSweepControlChannelSet.has(row.sweepFrequencyHz);
+          return <div className={`rf-waterfall-candidate-row ${row.origin} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
+            <label className="rf-waterfall-use-check">
+              <input type="checkbox" checked={selected} onChange={event => void toggleCandidateForSweep(row, event.target.checked)} aria-label={`Use ${formatRfHz(row.sweepFrequencyHz)} for RF Sweep`} />
+              <span>{selected ? "Use" : ""}</span>
+            </label>
+            <span title={row.siteLabel}>{row.siteLabel}</span>
+            <code>{formatRfHz(row.targetFrequencyHz)}</code>
+            <code>{row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--"}</code>
+            <strong>{Number.isFinite(row.snrDb) ? `${formatFixed(row.snrDb, 1)} dB` : "--"}</strong>
+            <span>{Number.isFinite(row.offsetHz) ? `${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz` : "--"}</span>
+            <span>{Math.round(row.confidence * 100)}%</span>
+            <span>{waterfallCandidateSourceLabel(row, identify)}</span>
+            <button type="button" disabled={identifyRunning || row.identifyPeak.frequencyHz <= 0} onClick={() => void runP25Identify(row.identifyPeak)}>{identify?.status === "running" ? "Running..." : identify ? "P25 ID Again" : "P25 ID"}</button>
             {identify && <WaterfallIdentifyDetail result={identify} />}
           </div>;
         })}
-      </fieldset>
-    </div>
-    <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Other detected CCs</span><small>Stable non-requested peaks; identify before treating as a site.</small></div>
-      {displayedOtherDetectedCcRows.length === 0 ? <div className="rf-waterfall-cc-empty">No stable non-requested control-channel-like peaks detected yet.</div> : displayedOtherDetectedCcRows.map(row => {
-        const identify = identifyResults[row.key];
-        const nearestSaved = nearestTargetControlChannel(row.frequencyHz, systems, controlChannelOptions, Number.MAX_SAFE_INTEGER);
-        const nearestOffsetHz = nearestSaved ? Math.round(row.frequencyHz - nearestSaved.frequencyHz) : 0;
-        const confidence = waterfallOtherDetectedConfidence(row);
-        return <div className={`rf-waterfall-cc-row other-detected ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
-          <span>Detected peak</span>
-          <code>{formatRfHz(Math.round(row.frequencyHz))}</code>
-          <strong>SNR {formatFixed(row.snrDb, 1)} dB</strong>
-          <small>Power {formatFixed(row.powerDb, 1)} dB / nearest saved offset {nearestSaved ? `${nearestOffsetHz >= 0 ? "+" : ""}${formatFixed(nearestOffsetHz, 0)} Hz from ${formatRfHz(nearestSaved.frequencyHz)}` : "n/a"} / confidence {Math.round(confidence * 100)}% / seen {row.displayHits.toFixed(0)} hit(s)</small>
-          <button type="button" disabled={identifyRunning} onClick={() => void runP25Identify(row)}>{identify?.status === "running" ? "Running..." : identify ? "Identify Again" : "P25 Identify"}</button>
-          {identify && <WaterfallIdentifyDetail result={identify} />}
-        </div>;
-      })}
+      </div>
     </div>
   </div>;
+}
+
+function buildWaterfallCandidateRows(
+  requestedRows: WaterfallCcSignalRow[],
+  otherRows: WaterfallDetectedCcTrack[],
+  selectedSystems: RfSurveySystem[],
+  rrSites: SetupTrConfigSites | null,
+  fallbackControlChannels: number[],
+  identifyResults: Record<string, WaterfallIdentifyResult>
+): WaterfallCandidateRow[] {
+  const selectedRows: WaterfallCandidateRow[] = requestedRows.map(row => {
+    const identifyPeak = peakFromWaterfallCcSignalRow(row);
+    const detected = row.status === "not-seen" ? 0 : Math.round(row.peakFrequencyHz);
+    return {
+      key: identifyPeak.key,
+      origin: "selected" as const,
+      siteLabel: row.siteLabel,
+      systemShortName: row.systemShortName,
+      targetFrequencyHz: Math.round(row.frequencyHz),
+      detectedFrequencyHz: detected,
+      sweepFrequencyHz: Math.round(row.frequencyHz),
+      snrDb: Number.isFinite(row.snrDb) ? row.snrDb : Number.NEGATIVE_INFINITY,
+      offsetHz: Number.isFinite(row.offsetHz) ? Math.round(row.offsetHz) : 0,
+      confidence: clamp01(row.confidence),
+      hits: Math.max(1, Math.round(row.confidence * 20)),
+      identifyPeak,
+      system: selectedSystems.find(system => system.shortName === row.systemShortName)
+    };
+  });
+  const selectedNames = new Set(selectedSystems.map(system => system.shortName.toLowerCase()));
+  const rrTargets = radioReferenceControlChannelTargets(rrSites);
+  const fallbackTargets = fallbackControlChannels.map(frequencyHz => ({ systemShortName: "", siteLabel: "Selected CC", frequencyHz, system: undefined as RfSurveySystem | undefined }));
+  const otherCandidateRows: WaterfallCandidateRow[] = otherRows.map(row => {
+    const rrTarget = nearestFrequencyTarget(row.frequencyHz, rrTargets);
+    const fallbackTarget = rrTarget ?? nearestFrequencyTarget(row.frequencyHz, fallbackTargets);
+    const targetFrequencyHz = Math.round(fallbackTarget?.frequencyHz ?? row.frequencyHz);
+    const origin: WaterfallCandidateRow["origin"] = fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase())
+      ? "selected"
+      : rrTarget ? "rr" : "unknown";
+    const identifyPeak: PositionedSpectrumPeak = {
+      ...row,
+      tuneFrequencyHz: targetFrequencyHz,
+      measuredFrequencyHz: Math.round(row.frequencyHz),
+      targetFrequencyHz
+    };
+    return {
+      key: row.key,
+      origin,
+      siteLabel: fallbackTarget?.siteLabel ?? "Unmatched peak",
+      systemShortName: fallbackTarget?.systemShortName ?? "",
+      targetFrequencyHz,
+      detectedFrequencyHz: Math.round(row.frequencyHz),
+      sweepFrequencyHz: targetFrequencyHz,
+      snrDb: Number.isFinite(row.snrDb) ? row.snrDb : Number.NEGATIVE_INFINITY,
+      offsetHz: Math.round(row.frequencyHz - targetFrequencyHz),
+      confidence: waterfallOtherDetectedConfidence(row),
+      hits: row.displayHits,
+      identifyPeak,
+      system: fallbackTarget?.system
+    };
+  });
+  const rows: WaterfallCandidateRow[] = [...selectedRows, ...otherCandidateRows];
+  for (const result of Object.values(identifyResults)) {
+    if (rows.some(row => row.key === result.key))
+      continue;
+    const targetFrequencyHz = Math.round(result.targetFrequencyHz || result.frequencyHz);
+    rows.push({
+      key: result.key,
+      origin: "unknown",
+      siteLabel: result.targetLabel || "Identified peak",
+      systemShortName: "",
+      targetFrequencyHz,
+      detectedFrequencyHz: Math.round(result.measuredFrequencyHz || result.frequencyHz),
+      sweepFrequencyHz: targetFrequencyHz,
+      snrDb: result.peak.snrDb,
+      offsetHz: Math.round((result.measuredFrequencyHz || result.frequencyHz) - targetFrequencyHz),
+      confidence: clamp01(result.peak.hits / 30),
+      hits: result.peak.hits,
+      identifyPeak: result.peak,
+      system: undefined
+    });
+  }
+  return rows
+    .sort((left, right) => (right.snrDb - left.snrDb) || (right.confidence - left.confidence) || Math.abs(left.offsetHz) - Math.abs(right.offsetHz));
+}
+
+function radioReferenceControlChannelTargets(rrSites: SetupTrConfigSites | null) {
+  return (rrSites?.sites ?? []).flatMap(site => {
+    const system: RfSurveySystem = {
+      shortName: site.shortName || site.name,
+      siteLabel: site.name || site.shortName,
+      controlChannelsHz: site.controlChannelsMhz.map(value => Math.round(value * 1_000_000)),
+      voiceFrequenciesHz: []
+    };
+    return system.controlChannelsHz.map(frequencyHz => ({
+      systemShortName: system.shortName,
+      siteLabel: system.siteLabel,
+      frequencyHz,
+      system
+    }));
+  });
+}
+
+function nearestFrequencyTarget<T extends { frequencyHz: number }>(frequencyHz: number, targets: T[]) {
+  return targets
+    .map(target => ({ target, distance: Math.abs(target.frequencyHz - frequencyHz) }))
+    .sort((left, right) => left.distance - right.distance)[0]?.target ?? null;
+}
+
+function waterfallCandidateSourceLabel(row: WaterfallCandidateRow, identify?: WaterfallIdentifyResult) {
+  const prefix = row.origin === "selected" ? "Selected site" : row.origin === "rr" ? "RR catalog" : "Unmatched";
+  if (identify?.status === "passed")
+    return `${prefix} / P25`;
+  if (identify?.status === "failed")
+    return `${prefix} / RF only`;
+  if (identify?.status === "blocked")
+    return `${prefix} / blocked`;
+  return prefix;
 }
 
 function peakFromWaterfallCcSignalRow(row: WaterfallCcSignalRow): PositionedSpectrumPeak {
@@ -5477,6 +5626,7 @@ type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; freq
 type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
+type WaterfallCandidateRow = { key: string; origin: "selected" | "rr" | "unknown"; siteLabel: string; systemShortName: string; targetFrequencyHz: number; detectedFrequencyHz: number; sweepFrequencyHz: number; snrDb: number; offsetHz: number; confidence: number; hits: number; identifyPeak: PositionedSpectrumPeak; system?: RfSurveySystem };
 type WaterfallCcSignalTrack = { signalScore: number; hitCount: number; frameCount: number; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number };
 
 function buildSpectrumDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], spanDb = 45, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {

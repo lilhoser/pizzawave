@@ -3750,6 +3750,76 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-size: 12px;
 }
 
+.rf-waterfall-candidate-table {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.rf-waterfall-candidate-row {
+  display: grid;
+  grid-template-columns: 58px minmax(150px, 1.2fr) 112px 112px 78px 96px 78px 112px 86px;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #20252a;
+  color: #cbd5de;
+  font-size: 12px;
+}
+
+.rf-waterfall-candidate-row.header {
+  background: #151a1f;
+  color: #9faab5;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rf-waterfall-candidate-row.selected {
+  border-color: rgba(84, 214, 138, .55);
+}
+
+.rf-waterfall-candidate-row.rr {
+  border-color: rgba(89, 168, 255, .5);
+}
+
+.rf-waterfall-candidate-row.unknown {
+  border-color: rgba(255, 237, 138, .42);
+}
+
+.rf-waterfall-candidate-row.identified.passed {
+  border-color: rgba(84, 214, 138, .72);
+}
+
+.rf-waterfall-candidate-row.identified.failed,
+.rf-waterfall-candidate-row.identified.blocked {
+  border-color: rgba(255, 111, 111, .62);
+}
+
+.rf-waterfall-candidate-row > span,
+.rf-waterfall-candidate-row code,
+.rf-waterfall-candidate-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rf-waterfall-candidate-row code {
+  color: #d7ecff;
+}
+
+.rf-waterfall-candidate-row strong {
+  color: #f3f7fb;
+}
+
+.rf-waterfall-candidate-row button {
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
 .rf-waterfall-cc-row {
   display: grid;
   grid-template-columns: minmax(150px, 1fr) 110px 92px minmax(220px, 1.4fr) minmax(148px, auto);
