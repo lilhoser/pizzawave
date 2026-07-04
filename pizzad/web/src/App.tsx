@@ -5197,8 +5197,11 @@ function WaterfallStep({
     const imageWidth = width - margin * 2;
     const spectrumHeight = Math.round(spectrumCanvas.height * imageWidth / spectrumCanvas.width);
     const waterfallHeight = Math.round(waterfallCanvas.height * imageWidth / waterfallCanvas.width);
-    const tableHeight = (rows: string[][]) => 30 + rows.length * 56;
-    const height = margin + 52 + 108 + 28 + 24 + spectrumHeight + 28 + 24 + waterfallHeight + 30 + 24 + tableHeight(candidateRows) + margin;
+    const height = margin + 34 + 34 + 108
+      + 28 + spectrumHeight + 28
+      + 28 + waterfallHeight + 28
+      + reportTableHeight(candidateRows.length)
+      + margin;
     const reportCanvas = document.createElement("canvas");
     reportCanvas.width = width;
     reportCanvas.height = height;
@@ -6202,9 +6205,9 @@ function drawReportImage(ctx: CanvasRenderingContext2D, title: string, source: H
 }
 
 function drawReportTable(ctx: CanvasRenderingContext2D, title: string, headers: string[], rows: string[][], x: number, y: number, width: number) {
-  const rowHeight = 56;
+  const rowHeight = reportTableRowHeight();
   const headerHeight = 30;
-  const columns = [0.2, 0.16, 0.16, 0.48];
+  const columns = [0.17, 0.13, 0.13, 0.16, 0.41];
   const columnWidths = columns.map(value => value * width);
   ctx.fillStyle = "#e9ecef";
   ctx.font = "700 18px Segoe UI, Arial, sans-serif";
@@ -6233,12 +6236,20 @@ function drawReportTable(ctx: CanvasRenderingContext2D, title: string, headers: 
       ctx.fillRect(left, y, columnWidth, rowHeight);
       ctx.strokeRect(left, y, columnWidth, rowHeight);
       ctx.fillStyle = "#d7dde3";
-      drawReportCellText(ctx, String(row[index] ?? ""), left + 8, y + 18, columnWidth - 16, 2);
+      drawReportCellText(ctx, String(row[index] ?? ""), left + 8, y + 18, columnWidth - 16, 3);
       left += columnWidth;
     }
     y += rowHeight;
   }
   return y + 28;
+}
+
+function reportTableRowHeight() {
+  return 72;
+}
+
+function reportTableHeight(rowCount: number) {
+  return 28 + 30 + Math.max(1, rowCount) * reportTableRowHeight() + 28;
 }
 
 function drawReportCellText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, maxLines: number) {
