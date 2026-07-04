@@ -411,11 +411,13 @@ app.MapPost("/api/v1/setup/tr-config/save", async (SetupTrConfigSaveRequest requ
 .WithName("SetupTrConfigSave")
 .WithOpenApi();
 
-app.MapPost("/api/v1/setup/tr-config/patch-callstream", async (SetupTrConfigPatchRequest request, TrConfigService trConfig, HttpContext context, AuthService authService) =>
+app.MapPost("/api/v1/setup/tr-config/patch-callstream", async (SetupTrConfigPatchRequest request, TrConfigService trConfig, HttpContext context, AuthService authService, RfSurveyService surveys) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     try
     {
+        if (request.RestartTr)
+            await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
         return Results.Ok(await trConfig.PatchCallstreamAsync(request, context.RequestAborted));
     }
     catch (Exception ex)
@@ -449,7 +451,7 @@ app.MapPost("/api/v1/system/tr-config/editor/draft", async (TrConfigEditorSaveRe
 .WithName("SystemTrConfigEditorDraft")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/tr-config/editor/apply", async (TrConfigEditorSaveRequest request, HttpContext context, AuthService authService, TrConfigService trConfig, SetupTrConfigBuilderService builder, SetupJobService jobs) =>
+app.MapPost("/api/v1/system/tr-config/editor/apply", async (TrConfigEditorSaveRequest request, HttpContext context, AuthService authService, TrConfigService trConfig, SetupTrConfigBuilderService builder, SetupJobService jobs, RfSurveyService surveys) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     try
@@ -460,6 +462,7 @@ app.MapPost("/api/v1/system/tr-config/editor/apply", async (TrConfigEditorSaveRe
         if (!save.Ok)
             return Results.Ok(new { ok = false, message = save.Message, save, restartJob = (JobDto?)null, editor = await trConfig.GetEditorAsync(context.RequestAborted) });
         await trConfig.ClearEditorDraftAsync(context.RequestAborted);
+        await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
         var restartJob = await jobs.StartAsync("restart-tr", confirmed: true, parameters: null, context.RequestAborted);
         return Results.Ok(new { ok = true, message = "Saved TR config and queued trunk-recorder restart.", save, restartJob, editor = await trConfig.GetEditorAsync(context.RequestAborted) });
     }
@@ -483,9 +486,11 @@ app.MapGet("/api/v1/system/tr-config/backups", (HttpContext context, AuthService
 .WithName("SystemTrConfigBackups")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/tr-config/restore", async (TrConfigRestoreRequest request, HttpContext context, AuthService authService, TrConfigService trConfig) =>
+app.MapPost("/api/v1/system/tr-config/restore", async (TrConfigRestoreRequest request, HttpContext context, AuthService authService, TrConfigService trConfig, RfSurveyService surveys) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    if (request.RestartTr)
+        await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
     return Results.Ok(await trConfig.RestoreConfigBackupAsync(request, context.RequestAborted));
 })
 .WithName("SystemTrConfigRestore")
@@ -1709,7 +1714,7 @@ app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authS
 .WithName("SystemQueue")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/services/{service}/restart", async (string service, HttpContext context, AuthService authService, SetupJobService jobs) =>
+app.MapPost("/api/v1/system/services/{service}/restart", async (string service, HttpContext context, AuthService authService, SetupJobService jobs, RfSurveyService surveys) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var action = service.Trim().ToLowerInvariant() switch
@@ -1723,6 +1728,8 @@ app.MapPost("/api/v1/system/services/{service}/restart", async (string service, 
         return Results.BadRequest(new { message = "Unsupported service restart target." });
     try
     {
+        if (action == "restart-tr")
+            await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
         return Results.Ok(await jobs.StartAsync(action, confirmed: true, parameters: null, context.RequestAborted));
     }
     catch (Exception ex)

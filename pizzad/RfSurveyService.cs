@@ -12,6 +12,7 @@ namespace pizzad;
 public sealed class RfSurveyService
 {
     private const double TrUsableHalfBandwidthFactor = 0.46875;
+    private static readonly TimeSpan WaterfallConsumeTimeout = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExperimentCancellations = new();
     private readonly ConcurrentDictionary<string, WaterfallRuntime> _activeWaterfalls = new();
 
@@ -1117,8 +1118,28 @@ public sealed class RfSurveyService
     public Task<RfSurveyWaterfallStatusDto> GetWaterfallAsync(string id, bool includeHistory, CancellationToken ct)
     {
         if (_activeWaterfalls.TryGetValue(id, out var runtime))
+        {
+            runtime.MarkConsumed();
             return Task.FromResult(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory));
+        }
         return Task.FromResult(new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false));
+    }
+
+    public async Task<string> StopActiveWaterfallsBeforeTrStartAsync(CancellationToken ct)
+    {
+        var active = _activeWaterfalls.Keys.ToArray();
+        if (active.Length == 0)
+            return string.Empty;
+
+        var lines = new List<string>();
+        foreach (var waterfallId in active)
+        {
+            if (!_activeWaterfalls.ContainsKey(waterfallId))
+                continue;
+            var result = await StopWaterfallAsync(waterfallId, ct);
+            lines.Add($"Stopped active waterfall {waterfallId} before starting trunk-recorder: {result.Status}.");
+        }
+        return string.Join(Environment.NewLine, lines);
     }
 
     public async Task<RfSurveyWaterfallStatusDto> StopWaterfallAsync(string id, CancellationToken ct)
@@ -1173,7 +1194,7 @@ public sealed class RfSurveyService
             {
                 try
                 {
-                    runtime.TrRestartOutput = await RunServiceHelperAsync("start-tr", CancellationToken.None);
+                    runtime.TrRestartOutput = await RunServiceHelperAsync("start-tr", CancellationToken.None, stopWaterfallsFirst: false);
                 }
                 catch (Exception ex)
                 {
@@ -1181,6 +1202,8 @@ public sealed class RfSurveyService
                     _logger.LogError(ex, "Waterfall failed to restart trunk-recorder for survey {SurveyId}.", runtime.SurveyId);
                 }
             }
+            if (_activeWaterfalls.TryGetValue(runtime.SurveyId, out var current) && ReferenceEquals(current, runtime))
+                _activeWaterfalls.TryRemove(runtime.SurveyId, out _);
         }
     }
 
@@ -3663,6 +3686,7 @@ public sealed class RfSurveyService
         private const int MaxFrameHistory = 90;
         private readonly object _sync = new();
         private readonly Queue<RfSurveyWaterfallFrameDto> _frames = new();
+        private DateTime _lastConsumedAtUtc = DateTime.UtcNow;
         private int _sequence;
 
         public WaterfallRuntime(
@@ -3710,6 +3734,22 @@ public sealed class RfSurveyService
         public RfSurveyWaterfallFrameDto? Frame { get; private set; }
 
         public int NextSequence() => Interlocked.Increment(ref _sequence);
+
+        public void MarkConsumed()
+        {
+            lock (_sync)
+            {
+                _lastConsumedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        public bool IsUnconsumedFor(TimeSpan interval)
+        {
+            lock (_sync)
+            {
+                return DateTime.UtcNow - _lastConsumedAtUtc >= interval;
+            }
+        }
 
         public void SetFrame(RfSurveyWaterfallFrameDto frame)
         {
@@ -4156,6 +4196,13 @@ public sealed class RfSurveyService
             var firstFrameDeadline = DateTime.UtcNow.AddSeconds(5);
             while (!runtime.Cancellation.IsCancellationRequested)
             {
+                if (runtime.IsUnconsumedFor(WaterfallConsumeTimeout))
+                {
+                    runtime.SetMessage("stopping", $"Waterfall auto-stopped after {WaterfallConsumeTimeout.TotalMinutes:N0} minutes without UI consumption.");
+                    runtime.Cancellation.Cancel();
+                    return;
+                }
+
                 var snapshot = ring.SnapshotLatest(frameBytes);
                 if (snapshot.Length >= frameBytes)
                 {
@@ -7048,17 +7095,20 @@ public sealed class RfSurveyService
         return backup;
     }
 
-    private async Task<string> RunServiceHelperAsync(string action, CancellationToken ct)
+    private async Task<string> RunServiceHelperAsync(string action, CancellationToken ct, bool stopWaterfallsFirst = true)
     {
         if (OperatingSystem.IsWindows())
             return $"{action} is unavailable on Windows.";
+        var waterfallStopOutput = stopWaterfallsFirst && (string.Equals(action, "start-tr", StringComparison.OrdinalIgnoreCase) || string.Equals(action, "restart-tr", StringComparison.OrdinalIgnoreCase))
+            ? await StopActiveWaterfallsBeforeTrStartAsync(ct)
+            : string.Empty;
         var helper = FindAdminHelper();
         if (!string.IsNullOrWhiteSpace(helper))
         {
             var result = await RunAdminHelperAsync(helper, [action], ct);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"{action} failed: {result.Output.Trim()}");
-            return result.Output;
+            return string.IsNullOrWhiteSpace(waterfallStopOutput) ? result.Output : waterfallStopOutput + Environment.NewLine + result.Output;
         }
 
         var command = action switch
@@ -7071,7 +7121,7 @@ public sealed class RfSurveyService
         var direct = await RunCaptureAsync("systemctl", $"{command} {TrUnitName()}", ct);
         if (direct.ExitCode != 0)
             throw new InvalidOperationException($"systemctl {command} {TrUnitName()} failed: {direct.Stdout.Trim()}");
-        return direct.Stdout;
+        return string.IsNullOrWhiteSpace(waterfallStopOutput) ? direct.Stdout : waterfallStopOutput + Environment.NewLine + direct.Stdout;
     }
 
     private async Task<TrServiceState> QueryTrActiveAsync(CancellationToken ct)

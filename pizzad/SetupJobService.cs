@@ -9,13 +9,15 @@ public sealed class SetupJobService
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
     private readonly ILogger<SetupJobService> _logger;
+    private readonly IServiceProvider _services;
     private sealed record CalibrationSweepTarget(int SourceIndex, string Serial, string TemplateSerial, int BaseErrorHz, int RangeHz, int StepHz, int WarmupSec, int DurationSec, string Gain, int PassCount);
 
-    public SetupJobService(EngineDatabase database, EventStream events, ILogger<SetupJobService> logger)
+    public SetupJobService(EngineDatabase database, EventStream events, ILogger<SetupJobService> logger, IServiceProvider services)
     {
         _database = database;
         _events = events;
         _logger = logger;
+        _services = services;
     }
 
     public SetupArtifactReportDto CheckTrArtifacts()
@@ -646,6 +648,15 @@ public sealed class SetupJobService
         var helper = FindAdminHelper();
         if (string.IsNullOrWhiteSpace(helper))
             throw new FileNotFoundException("pizzawave_setup_admin.sh was not found.");
+        if (string.Equals(action, "start-tr", StringComparison.OrdinalIgnoreCase) || string.Equals(action, "restart-tr", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_services.GetService(typeof(RfSurveyService)) is RfSurveyService surveys)
+            {
+                var output = await surveys.StopActiveWaterfallsBeforeTrStartAsync(ct);
+                if (!string.IsNullOrWhiteSpace(output))
+                    await LogAsync(jobId, "info", output, ct);
+            }
+        }
         await RunCommandAsync(jobId, "sudo", $"{helper} {action}", ct);
     }
 
