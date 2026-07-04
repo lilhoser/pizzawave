@@ -4810,6 +4810,27 @@ function WaterfallStep({
   }, [spectrumSpanDb]);
 
   useEffect(() => {
+    const cached = waterfallDisplayCache.get(surveyId);
+    if (!cached) return;
+    smoothedSpectrumRef.current = cached.smoothedSpectrum.slice();
+    heldSpectrumRef.current = cached.heldSpectrum.slice();
+    spectrumScaleRef.current = cached.spectrumScale;
+    waterfallScaleRef.current = cached.waterfallScale;
+    spectrumAxisRef.current = cached.spectrumAxis;
+    peakHistoryRef.current = new Map(cached.peakHistory);
+    ccSignalHistoryRef.current = new Map(cached.ccSignalHistory);
+    visiblePeaksRef.current = cached.visiblePeaks.slice();
+    lastFrameRef.current = cached.lastFrameKey;
+    hasGoodWaterfallFrameRef.current = cached.hasGoodFrame;
+    setCcSignalRows(cached.ccSignalRows);
+    setOtherDetectedCcRows(cached.otherDetectedCcRows);
+    window.requestAnimationFrame(() => {
+      restoreWaterfallCacheCanvas(spectrumCanvasRef.current, cached.spectrumCanvas);
+      restoreWaterfallCacheCanvas(canvasRef.current, cached.waterfallCanvas);
+    });
+  }, [surveyId]);
+
+  useEffect(() => {
     let stopped = false;
     async function loadStatus() {
       try {
@@ -4878,15 +4899,33 @@ function WaterfallStep({
     waterfallScaleRef.current = buildWaterfallDisplayScale(frame, waterfallScaleRef.current);
     const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
     const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
+    const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
+    const nextOtherDetectedCcRows = buildOtherDetectedCcRows(positionedPeaks, systems, controlChannelOptions);
     visiblePeaksRef.current = positionedPeaks;
-    setCcSignalRows(buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current));
-    setOtherDetectedCcRows(buildOtherDetectedCcRows(positionedPeaks, systems, controlChannelOptions));
+    setCcSignalRows(nextCcSignalRows);
+    setOtherDetectedCcRows(nextOtherDetectedCcRows);
     drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
       controlChannelsHz: controlChannelOptions,
       showControlChannels: showControlChannelLines,
       peaks: positionedPeaks
     });
     drawWaterfallFrame(canvasRef.current, smoothWaterfallBins(frame.powersDb), waterfallScaleRef.current);
+    saveWaterfallDisplayCache(surveyId, {
+      spectrumCanvas: spectrumCanvasRef.current,
+      waterfallCanvas: canvasRef.current,
+      smoothedSpectrum: smoothedSpectrumRef.current,
+      heldSpectrum: heldSpectrumRef.current,
+      spectrumScale: spectrumScaleRef.current,
+      waterfallScale: waterfallScaleRef.current,
+      spectrumAxis: spectrumAxisRef.current,
+      peakHistory: peakHistoryRef.current,
+      ccSignalHistory: ccSignalHistoryRef.current,
+      visiblePeaks: visiblePeaksRef.current,
+      ccSignalRows: nextCcSignalRows,
+      otherDetectedCcRows: nextOtherDetectedCcRows,
+      lastFrameKey: lastFrameRef.current,
+      hasGoodFrame: hasGoodWaterfallFrameRef.current
+    });
   }, [status?.frame?.sequence, spectrumSpanDb, showControlChannelLines, controlChannels.join(","), systems.map(system => `${system.shortName}:${system.controlChannelsHz.join("/")}`).join("|")]);
 
   async function startWaterfall() {
@@ -4910,6 +4949,7 @@ function WaterfallStep({
     spectrumScaleRef.current = null;
     waterfallScaleRef.current = null;
     spectrumAxisRef.current = null;
+    waterfallDisplayCache.delete(surveyId);
     clearWaterfallCanvas(spectrumCanvasRef.current);
     clearWaterfallCanvas(canvasRef.current);
     try {
@@ -5001,10 +5041,8 @@ function WaterfallStep({
   function downloadWaterfallReport() {
     const spectrumCanvas = spectrumCanvasRef.current;
     const waterfallCanvas = canvasRef.current;
-    if (!spectrumCanvas || !waterfallCanvas) {
-      setIdentifyMessage("Screen grab needs a rendered spectrum and waterfall frame.");
+    if (!spectrumCanvas || !waterfallCanvas)
       return;
-    }
     const capturedAt = new Date().toISOString();
     const stats = [
       ["Status", status ? label(status.status) : "Stopped"],
@@ -5044,7 +5082,6 @@ function WaterfallStep({
     reportCanvas.height = height;
     const ctx = reportCanvas.getContext("2d");
     if (!ctx) {
-      setIdentifyMessage("Screen grab failed: browser could not create image canvas.");
       return;
     }
     ctx.fillStyle = "#111418";
@@ -5065,10 +5102,8 @@ function WaterfallStep({
     y = drawReportTable(ctx, "Requested CC Signal Check", ["Site", "Frequency", "Status", "Evidence"], requestedRows, margin, y, imageWidth);
     y = drawReportTable(ctx, "Other detected CCs", ["Type", "Frequency", "SNR", "Evidence"], otherRows, margin, y, imageWidth);
     reportCanvas.toBlob(blob => {
-      if (!blob) {
-        setIdentifyMessage("Screen grab failed: browser could not encode image.");
+      if (!blob)
         return;
-      }
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -5077,7 +5112,6 @@ function WaterfallStep({
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      setIdentifyMessage("Waterfall screen grab downloaded.");
     }, "image/jpeg", 0.9);
   }
 
@@ -5262,6 +5296,66 @@ type SpectrumHover = { left: number; top: number; text: string; peak: Positioned
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
 type WaterfallCcSignalTrack = { signalScore: number; hitCount: number; frameCount: number; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number };
+type WaterfallDisplayCache = {
+  spectrumCanvas: HTMLCanvasElement | null;
+  waterfallCanvas: HTMLCanvasElement | null;
+  smoothedSpectrum: number[];
+  heldSpectrum: number[];
+  spectrumScale: SpectrumDisplayScale | null;
+  waterfallScale: SpectrumDisplayScale | null;
+  spectrumAxis: SpectrumAxis | null;
+  peakHistory: [string, SpectrumPeakTrack][];
+  ccSignalHistory: [string, WaterfallCcSignalTrack][];
+  visiblePeaks: PositionedSpectrumPeak[];
+  ccSignalRows: WaterfallCcSignalRow[];
+  otherDetectedCcRows: PositionedSpectrumPeak[];
+  lastFrameKey: string;
+  hasGoodFrame: boolean;
+};
+
+const waterfallDisplayCache = new Map<string, WaterfallDisplayCache>();
+
+function cloneWaterfallCacheCanvas(source: HTMLCanvasElement | null) {
+  if (!source || source.width <= 0 || source.height <= 0)
+    return null;
+  const copy = document.createElement("canvas");
+  copy.width = source.width;
+  copy.height = source.height;
+  copy.getContext("2d")?.drawImage(source, 0, 0);
+  return copy;
+}
+
+function restoreWaterfallCacheCanvas(target: HTMLCanvasElement | null, source: HTMLCanvasElement | null) {
+  if (!target || !source)
+    return;
+  target.width = source.width;
+  target.height = source.height;
+  const ctx = target.getContext("2d");
+  if (!ctx)
+    return;
+  ctx.clearRect(0, 0, target.width, target.height);
+  ctx.drawImage(source, 0, 0);
+}
+
+function saveWaterfallDisplayCache(surveyId: string, value: Omit<WaterfallDisplayCache, "spectrumCanvas" | "waterfallCanvas" | "peakHistory" | "ccSignalHistory"> & {
+  spectrumCanvas: HTMLCanvasElement | null;
+  waterfallCanvas: HTMLCanvasElement | null;
+  peakHistory: Map<string, SpectrumPeakTrack>;
+  ccSignalHistory: Map<string, WaterfallCcSignalTrack>;
+}) {
+  waterfallDisplayCache.set(surveyId, {
+    ...value,
+    spectrumCanvas: cloneWaterfallCacheCanvas(value.spectrumCanvas),
+    waterfallCanvas: cloneWaterfallCacheCanvas(value.waterfallCanvas),
+    smoothedSpectrum: value.smoothedSpectrum.slice(),
+    heldSpectrum: value.heldSpectrum.slice(),
+    peakHistory: [...value.peakHistory.entries()],
+    ccSignalHistory: [...value.ccSignalHistory.entries()],
+    visiblePeaks: value.visiblePeaks.slice(),
+    ccSignalRows: value.ccSignalRows.slice(),
+    otherDetectedCcRows: value.otherDetectedCcRows.slice()
+  });
+}
 
 function buildSpectrumDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], spanDb = 45, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {
   if (previous)
