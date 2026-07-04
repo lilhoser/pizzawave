@@ -554,7 +554,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   content: "";
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  pointer-events: auto;
   background: rgba(10, 15, 20, 0.04);
 }
 .map-area-box {

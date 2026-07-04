@@ -3810,17 +3810,23 @@ function RfPathRefinementStep({
   setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>;
   onRfPathTouched: () => void;
   onLoadPreviousRfPath: () => Promise<void>;
-} & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation">) {
+} & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation" | "waterfallSweepSeed" | "onWaterfallSweepSeed" | "keepWaterfallRunning" | "setKeepWaterfallRunning">) {
   const storageKey = `pizzawave-radio-setup-rf-subpage-${props.surveyId}`;
   const seedStorageKey = `pizzawave-radio-setup-waterfall-sweep-seed-${props.surveyId}`;
+  const keepWaterfallKey = `pizzawave-radio-setup-waterfall-keep-running-${props.surveyId}`;
   const [subPage, setSubPageState] = useState<RfRefinementSubpage>(() => normalizeRfRefinementSubpage(localStorage.getItem(storageKey)));
   const [waterfallSweepSeed, setWaterfallSweepSeed] = useState<WaterfallSweepSeed | null>(() => loadJsonStorage<WaterfallSweepSeed | null>(seedStorageKey, null));
+  const [keepWaterfallRunning, setKeepWaterfallRunningState] = useState(() => localStorage.getItem(keepWaterfallKey) === "1");
   const [recoveredSweepStatus, setRecoveredSweepStatus] = useState("");
   const setSubPage = (value: RfRefinementSubpage) => {
-    if (subPage === "waterfall" && value !== "waterfall")
+    if (subPage === "waterfall" && value !== "waterfall" && !keepWaterfallRunning)
       stopWaterfallSession(props.surveyId);
     setSubPageState(value);
     localStorage.setItem(storageKey, value);
+  };
+  const setKeepWaterfallRunning = (value: boolean) => {
+    setKeepWaterfallRunningState(value);
+    localStorage.setItem(keepWaterfallKey, value ? "1" : "0");
   };
   const prepareWaterfallSeed = (seed: WaterfallSweepSeed) => {
     setWaterfallSweepSeed(seed);
@@ -3847,7 +3853,7 @@ function RfPathRefinementStep({
     </div>
     {subPage === "path"
       ? <RfPathStep path={path} setPath={setPath} onTouched={onRfPathTouched} onLoadPrevious={onLoadPreviousRfPath} busy={props.busy} />
-      : <SiteValidationStep {...props} activeOperation={subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} onSweepRecovered={setRecoveredSweepStatus} />}
+      : <SiteValidationStep {...props} activeOperation={subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} keepWaterfallRunning={keepWaterfallRunning} setKeepWaterfallRunning={setKeepWaterfallRunning} onSweepRecovered={setRecoveredSweepStatus} />}
   </div>;
 }
 
@@ -3925,6 +3931,8 @@ function SiteValidationStep({
   onOpenRunLog,
   waterfallSweepSeed,
   onWaterfallSweepSeed,
+  keepWaterfallRunning,
+  setKeepWaterfallRunning,
   onSweepRecovered
 }: {
   activeOperation: Exclude<RfRefinementSubpage, "path">;
@@ -3961,6 +3969,8 @@ function SiteValidationStep({
   onOpenRunLog: () => void;
   waterfallSweepSeed?: WaterfallSweepSeed | null;
   onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
+  keepWaterfallRunning: boolean;
+  setKeepWaterfallRunning: (value: boolean) => void;
   onSweepRecovered?: (status: string) => void;
 }) {
   const [sweepBusy, setSweepBusy] = useState("");
@@ -4479,6 +4489,8 @@ function SiteValidationStep({
         systems={systems}
         controlChannels={controlChannels}
         activeControlChannelHz={activeControlChannelHz}
+        keepRunning={keepWaterfallRunning}
+        setKeepRunning={setKeepWaterfallRunning}
         onWaterfallSweepSeed={onWaterfallSweepSeed}
         onRunExperiment={onRunExperiment}
         onReload={onReload}
@@ -4743,6 +4755,8 @@ function WaterfallStep({
   systems,
   controlChannels,
   activeControlChannelHz,
+  keepRunning,
+  setKeepRunning,
   onWaterfallSweepSeed,
   onRunExperiment,
   onReload
@@ -4754,6 +4768,8 @@ function WaterfallStep({
   systems: RfSurveySystem[];
   controlChannels: number[];
   activeControlChannelHz: number;
+  keepRunning: boolean;
+  setKeepRunning: (value: boolean) => void;
   onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
   onReload: () => Promise<void>;
@@ -4856,9 +4872,10 @@ function WaterfallStep({
 
   useEffect(() => {
     return () => {
-      stopWaterfallSession(surveyId);
+      if (!keepRunning)
+        stopWaterfallSession(surveyId);
     };
-  }, [surveyId]);
+  }, [surveyId, keepRunning]);
 
   useEffect(() => {
     const frame = status?.frame;
@@ -5068,6 +5085,7 @@ function WaterfallStep({
         <option value="70">70 dB</option>
       </select></label>
       <label className="rf-waterfall-check"><input type="checkbox" checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
+      <label className="rf-waterfall-check"><input type="checkbox" checked={keepRunning} onChange={event => setKeepRunning(event.target.checked)} /><span>Keep running</span></label>
       <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
       <button disabled={!status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
     </div>
