@@ -3591,6 +3591,17 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   box-shadow: 0 4px 12px rgba(0, 0, 0, .32);
 }
 
+.rf-spectrum-hover span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.rf-spectrum-hover button {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
 .rf-waterfall-readout {
   display: grid;
   gap: 8px;
@@ -3615,6 +3626,59 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #e9ecef;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.rf-waterfall-cc-panel {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #30363d;
+  border-radius: 7px;
+  padding: 8px;
+  background: #171b20;
+}
+
+.rf-waterfall-cc-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  color: #d7dde3;
+  font-weight: 700;
+}
+
+.rf-waterfall-cc-head small,
+.rf-waterfall-cc-empty {
+  color: #9faab5;
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.rf-waterfall-cc-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 110px 90px minmax(240px, 1.4fr);
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #20252a;
+  font-size: 12px;
+}
+
+.rf-waterfall-cc-row.visible {
+  border-color: rgba(84, 214, 138, .55);
+}
+
+.rf-waterfall-cc-row code {
+  color: #d7ecff;
+}
+
+.rf-waterfall-cc-row strong {
+  color: #ffed8a;
+}
+
+.rf-waterfall-cc-row small {
+  color: #9faab5;
 }
 .rf-step-progress-track.idle span {
   left: 0;
