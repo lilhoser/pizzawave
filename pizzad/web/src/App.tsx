@@ -5076,10 +5076,11 @@ function WaterfallStep({
         const evidence = row.status === "not-seen"
           ? "No stable carrier estimate near this target yet."
           : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`;
+        const labelText = waterfallCcSignalDisplayLabel(row, identify);
         return [
         row.siteLabel,
         formatRfHz(row.frequencyHz),
-        row.label,
+        labelText,
         identify ? `${evidence} / ${waterfallIdentifyReportText(identify)}` : evidence
       ];
       })
@@ -5237,7 +5238,7 @@ function WaterfallStep({
           return <div className={`rf-waterfall-cc-row ${row.status} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={`${row.systemShortName}-${row.frequencyHz}`}>
             <span>{row.siteLabel}</span>
             <code>{formatRfHz(row.frequencyHz)}</code>
-            <strong>{row.label}</strong>
+            <strong>{waterfallCcSignalDisplayLabel(row, identify)}</strong>
             <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
             <span className="rf-waterfall-row-actions">
               <label className="rf-waterfall-use-check">
@@ -5285,6 +5286,18 @@ function peakFromWaterfallCcSignalRow(row: WaterfallCcSignalRow): PositionedSpec
     x: 0,
     y: 0
   };
+}
+
+function waterfallCcSignalDisplayLabel(row: WaterfallCcSignalRow, identify?: WaterfallIdentifyResult) {
+  if (identify?.status === "running")
+    return "P25 running";
+  if (identify?.status === "passed")
+    return "P25 confirmed";
+  if (identify?.status === "failed")
+    return row.status === "not-seen" ? "P25 failed" : "RF only";
+  if (identify?.status === "blocked")
+    return "P25 blocked";
+  return row.status === "candidate" ? "RF candidate" : row.label;
 }
 
 function WaterfallIdentifyDetail({ result }: { result: WaterfallIdentifyResult }) {
