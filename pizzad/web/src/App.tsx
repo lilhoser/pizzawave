@@ -2291,7 +2291,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     localStorage.setItem("pizzawave-radio-setup-wizard-open", wizardOpen ? "1" : "0");
   }, [detail?.session.id, step, wizardOpen]);
   useEffect(() => {
-    if (!wizardOpen) return;
+    if (!wizardOpen || step !== 1) return;
     const sid = radioReferenceSid.trim();
     if (!sid || radioReferenceSites?.sites.length) return;
     const cached = readCachedRadioReferenceSites(sid);
@@ -2299,11 +2299,12 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       setRadioReferenceSites(cached);
       return;
     }
+    if (!radioReferenceSidEditedRef.current && (detail?.profile.systems?.length ?? 0) > 0) return;
     if (radioReferenceSidEditedRef.current) return;
     if (busy || rrSitesAutoLoadKeyRef.current === sid) return;
     rrSitesAutoLoadKeyRef.current = sid;
     void loadRadioReferenceSites(false);
-  }, [wizardOpen, radioReferenceSid, radioReferenceSites?.sites.length, busy]);
+  }, [wizardOpen, step, radioReferenceSid, radioReferenceSites?.sites.length, busy]);
   useEffect(() => {
     if (!wizardOpen || !detail || configApplyInFlight) return;
     const selectedSystemNames = surveySystems.length ? surveySystems : surveySystem ? [surveySystem] : [];
@@ -5178,17 +5179,17 @@ function WaterfallStep({
           promoted: true
         });
     }
-    const reportCandidates = buildWaterfallCandidateRows(ccSignalRows, reportOtherRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
+    const reportCandidates = buildWaterfallCandidateRows(ccSignalRows, reportOtherRows, systems, controlChannelOptions, identifyResults);
     const candidateRows = reportCandidates.length
       ? reportCandidates.map(row => {
         const identify = identifyResults[row.identifyPeak.key];
         const evidence = [
           `SNR ${formatFixed(row.snrDb, 1)} dB`,
-          `offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz`,
+          Number.isFinite(row.offsetHz) ? `offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz` : "",
           `confidence ${Math.round(row.confidence * 100)}%`,
           identify ? waterfallIdentifyReportText(identify) : ""
         ].filter(Boolean).join(" / ");
-        return [row.siteLabel, formatRfHz(row.targetFrequencyHz), row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--", waterfallCandidateSourceLabel(row, identify), evidence];
+        return [row.siteLabel, row.targetFrequencyHz > 0 ? formatRfHz(row.targetFrequencyHz) : "--", row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--", waterfallCandidateSourceLabel(row, identify), evidence];
       })
       : [["--", "--", "--", "--", "No candidate rows captured."]];
     const width = 1280;
@@ -5272,7 +5273,7 @@ function WaterfallStep({
         promoted: true
       });
   }
-  const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
+  const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, controlChannelOptions, identifyResults);
   async function toggleCandidateForSweep(row: WaterfallCandidateRow, selected: boolean) {
     if (selected && row.origin !== "selected" && row.system && !systems.some(system => system.shortName.toLowerCase() === row.system?.shortName.toLowerCase()))
       await onAdoptWaterfallSite(row.system);
@@ -5325,7 +5326,7 @@ function WaterfallStep({
       </div>
     </div>
     <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by SNR. Offset is relative to the matched selected-site or RR-catalog control channel.</small></div>
+      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by SNR. Offset is only shown when the peak matches a selected-site control channel.</small></div>
       <div className="rf-waterfall-candidate-table">
         <div className="rf-waterfall-candidate-row header">
           <span>Use</span><span>Site</span><span>Matched CC</span><span>Detected</span><span>SNR</span><span>Offset</span><span>Confidence</span><span>Source</span><span>Action</span>
@@ -5339,7 +5340,7 @@ function WaterfallStep({
               <span>{selected ? "Use" : ""}</span>
             </label>
             <span title={row.siteLabel}>{row.siteLabel}</span>
-            <code>{formatRfHz(row.targetFrequencyHz)}</code>
+            <code>{row.targetFrequencyHz > 0 ? formatRfHz(row.targetFrequencyHz) : "--"}</code>
             <code>{row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--"}</code>
             <strong>{Number.isFinite(row.snrDb) ? `${formatFixed(row.snrDb, 1)} dB` : "--"}</strong>
             <span>{Number.isFinite(row.offsetHz) ? `${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz` : "--"}</span>
@@ -5358,7 +5359,6 @@ function buildWaterfallCandidateRows(
   requestedRows: WaterfallCcSignalRow[],
   otherRows: WaterfallDetectedCcTrack[],
   selectedSystems: RfSurveySystem[],
-  rrSites: SetupTrConfigSites | null,
   fallbackControlChannels: number[],
   identifyResults: Record<string, WaterfallIdentifyResult>
 ): WaterfallCandidateRow[] {
@@ -5382,35 +5382,41 @@ function buildWaterfallCandidateRows(
     };
   });
   const selectedNames = new Set(selectedSystems.map(system => system.shortName.toLowerCase()));
-  const rrTargets = radioReferenceControlChannelTargets(rrSites);
+  const selectedTargets = selectedSystems.flatMap(system => system.controlChannelsHz.map(frequencyHz => ({
+    systemShortName: system.shortName,
+    siteLabel: system.siteLabel || system.shortName,
+    frequencyHz,
+    system
+  })));
   const fallbackTargets = fallbackControlChannels.map(frequencyHz => ({ systemShortName: "", siteLabel: "Selected CC", frequencyHz, system: undefined as RfSurveySystem | undefined }));
+  const matchableTargets = selectedTargets.length ? selectedTargets : fallbackTargets;
   const otherCandidateRows: WaterfallCandidateRow[] = otherRows.map(row => {
-    const rrTarget = nearestFrequencyTarget(row.frequencyHz, rrTargets);
-    const fallbackTarget = rrTarget ?? nearestFrequencyTarget(row.frequencyHz, fallbackTargets);
+    const fallbackTarget = nearestFrequencyTarget(row.frequencyHz, matchableTargets, 20_000);
+    const matchedSelected = Boolean(fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase()));
     const targetFrequencyHz = Math.round(fallbackTarget?.frequencyHz ?? row.frequencyHz);
     const origin: WaterfallCandidateRow["origin"] = fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase())
       ? "selected"
-      : rrTarget ? "rr" : "unknown";
+      : "unknown";
     const identifyPeak: PositionedSpectrumPeak = {
       ...row,
-      tuneFrequencyHz: targetFrequencyHz,
+      tuneFrequencyHz: matchedSelected ? targetFrequencyHz : Math.round(row.frequencyHz),
       measuredFrequencyHz: Math.round(row.frequencyHz),
-      targetFrequencyHz
+      targetFrequencyHz: matchedSelected ? targetFrequencyHz : 0
     };
     return {
       key: row.key,
       origin,
-      siteLabel: fallbackTarget?.siteLabel ?? "Unmatched peak",
-      systemShortName: fallbackTarget?.systemShortName ?? "",
-      targetFrequencyHz,
+      siteLabel: matchedSelected ? fallbackTarget?.siteLabel ?? "Selected CC" : "Unknown CC",
+      systemShortName: matchedSelected ? fallbackTarget?.systemShortName ?? "" : "",
+      targetFrequencyHz: matchedSelected ? targetFrequencyHz : 0,
       detectedFrequencyHz: Math.round(row.frequencyHz),
-      sweepFrequencyHz: targetFrequencyHz,
+      sweepFrequencyHz: matchedSelected ? targetFrequencyHz : Math.round(row.frequencyHz),
       snrDb: Number.isFinite(row.snrDb) ? row.snrDb : Number.NEGATIVE_INFINITY,
-      offsetHz: Math.round(row.frequencyHz - targetFrequencyHz),
+      offsetHz: matchedSelected ? Math.round(row.frequencyHz - targetFrequencyHz) : Number.NaN,
       confidence: waterfallOtherDetectedConfidence(row),
       hits: row.displayHits,
       identifyPeak,
-      system: fallbackTarget?.system
+      system: matchedSelected ? fallbackTarget?.system : undefined
     };
   });
   const rows: WaterfallCandidateRow[] = [...selectedRows, ...otherCandidateRows];
@@ -5418,57 +5424,41 @@ function buildWaterfallCandidateRows(
     if (rows.some(row => row.key === result.key))
       continue;
     const measuredFrequencyHz = Math.round(result.measuredFrequencyHz || result.frequencyHz);
-    const rrTarget = nearestFrequencyTarget(measuredFrequencyHz, rrTargets);
-    const fallbackTarget = rrTarget ?? nearestFrequencyTarget(measuredFrequencyHz, fallbackTargets);
+    const fallbackTarget = nearestFrequencyTarget(measuredFrequencyHz, matchableTargets, 20_000);
+    const matchedSelected = Boolean(fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase()));
     const targetFrequencyHz = Math.round(fallbackTarget?.frequencyHz ?? result.targetFrequencyHz ?? result.frequencyHz);
     const origin: WaterfallCandidateRow["origin"] = fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase())
       ? "selected"
-      : rrTarget ? "rr" : "unknown";
+      : "unknown";
     rows.push({
       key: result.key,
       origin,
-      siteLabel: fallbackTarget?.siteLabel ?? result.targetLabel ?? "Identified peak",
-      systemShortName: fallbackTarget?.systemShortName ?? "",
-      targetFrequencyHz,
+      siteLabel: matchedSelected ? fallbackTarget?.siteLabel ?? result.targetLabel ?? "Selected CC" : "Unknown CC",
+      systemShortName: matchedSelected ? fallbackTarget?.systemShortName ?? "" : "",
+      targetFrequencyHz: matchedSelected ? targetFrequencyHz : 0,
       detectedFrequencyHz: measuredFrequencyHz,
-      sweepFrequencyHz: targetFrequencyHz,
+      sweepFrequencyHz: matchedSelected ? targetFrequencyHz : measuredFrequencyHz,
       snrDb: result.peak.snrDb,
-      offsetHz: Math.round(measuredFrequencyHz - targetFrequencyHz),
+      offsetHz: matchedSelected ? Math.round(measuredFrequencyHz - targetFrequencyHz) : Number.NaN,
       confidence: clamp01(result.peak.hits / 30),
       hits: result.peak.hits,
       identifyPeak: result.peak,
-      system: fallbackTarget?.system
+      system: matchedSelected ? fallbackTarget?.system : undefined
     });
   }
   return rows
     .sort((left, right) => (right.snrDb - left.snrDb) || (right.confidence - left.confidence) || Math.abs(left.offsetHz) - Math.abs(right.offsetHz));
 }
 
-function radioReferenceControlChannelTargets(rrSites: SetupTrConfigSites | null) {
-  return (rrSites?.sites ?? []).flatMap(site => {
-    const system: RfSurveySystem = {
-      shortName: site.shortName || site.name,
-      siteLabel: site.name || site.shortName,
-      controlChannelsHz: site.controlChannelsMhz.map(value => Math.round(value * 1_000_000)),
-      voiceFrequenciesHz: []
-    };
-    return system.controlChannelsHz.map(frequencyHz => ({
-      systemShortName: system.shortName,
-      siteLabel: system.siteLabel,
-      frequencyHz,
-      system
-    }));
-  });
-}
-
-function nearestFrequencyTarget<T extends { frequencyHz: number }>(frequencyHz: number, targets: T[]) {
+function nearestFrequencyTarget<T extends { frequencyHz: number }>(frequencyHz: number, targets: T[], maxDistanceHz = Number.POSITIVE_INFINITY) {
   return targets
     .map(target => ({ target, distance: Math.abs(target.frequencyHz - frequencyHz) }))
+    .filter(row => row.distance <= maxDistanceHz)
     .sort((left, right) => left.distance - right.distance)[0]?.target ?? null;
 }
 
 function waterfallCandidateSourceLabel(row: WaterfallCandidateRow, identify?: WaterfallIdentifyResult) {
-  const prefix = row.origin === "selected" ? "Selected site" : row.origin === "rr" ? "RR catalog" : "Unmatched";
+  const prefix = row.origin === "selected" ? "Selected site" : "Unknown CC";
   if (identify?.status === "passed")
     return `${prefix} / P25`;
   if (identify?.status === "failed")
