@@ -786,19 +786,19 @@ app.MapPost("/api/v1/system/radio-setup", async (HttpContext context, RfSurveyCr
 .WithName("RadioSetupCreate")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/rf-surveys/{id}", async (HttpContext context, string id, AuthService authService, RfSurveyService surveys) =>
+app.MapGet("/api/v1/system/rf-surveys/{id}", async (HttpContext context, string id, bool? compact, AuthService authService, RfSurveyService surveys) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    var survey = await surveys.GetAsync(id, context.RequestAborted);
+    var survey = await surveys.GetAsync(id, context.RequestAborted, compact == true);
     return survey == null ? Results.NotFound() : Results.Ok(survey);
 })
 .WithName("RfSurveyGet")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/radio-setup/{id}", async (HttpContext context, string id, AuthService authService, RfSurveyService surveys) =>
+app.MapGet("/api/v1/system/radio-setup/{id}", async (HttpContext context, string id, bool? compact, AuthService authService, RfSurveyService surveys) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    var survey = await surveys.GetAsync(id, context.RequestAborted);
+    var survey = await surveys.GetAsync(id, context.RequestAborted, compact == true);
     return survey == null ? Results.NotFound() : Results.Ok(survey);
 })
 .WithName("RadioSetupGet")

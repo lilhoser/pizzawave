@@ -9,6 +9,7 @@ import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 const radioSetupApi = "/api/v1/system/radio-setup";
+const radioSetupDetailUrl = (id: string, compact = true) => `${radioSetupApi}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
 type Page = "dashboard" | "tools" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
 type CategorySortMode = "name" | "recent" | "frequent";
@@ -2423,66 +2424,74 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   }
 
   async function openSurvey(id: string, openWizard = true, targetStep?: number, configSubPage?: ConfigDraftSubpage) {
-    const next = await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(id)}`);
-    setDetail(next);
-    localStorage.setItem("pizzawave-radio-setup-workspace", next.session.id);
-    localStorage.setItem("pizzawave-radio-setup-wizard-open", openWizard ? "1" : "0");
-    if (configSubPage)
-      localStorage.setItem(`pizzawave-radio-setup-config-subpage-${next.session.id}`, configSubPage);
-    const restoredPath = normalizeRfPathProfile(next.profile.rfPath);
-    const restoredRadioReferenceSid = (next.profile.radioReferenceSid || "").trim();
-    setPath(restoredPath);
-    setSelectedSources(next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index));
-    setSdrSources(next.profile.sourceOverride ? next.profile.sources : null);
-    setRfPathTouched(true);
-    setSdrScopeTouched(true);
-    setMeasurementMode((next.profile.measurementMode as any) || "guided");
-    setDuration(String(next.profile.probeDurationSeconds || 45));
-    const nextSystems = next.profile.systemShortNames?.length ? next.profile.systemShortNames : next.profile.systemShortName ? [next.profile.systemShortName] : [];
-    activeWorkspaceSystemsRef.current = nextSystems;
-    const nextSourcePlanSystems = next.profile.sourcePlanSystemShortNames?.length ? next.profile.sourcePlanSystemShortNames : nextSystems;
-    const nextSourcePlanMode = next.profile.sourcePlanMode === "control" ? "control" : "full";
-    const matchingRadioReferenceSites = radioReferenceSites && radioReferenceCatalogContainsAnySystem(radioReferenceSites, nextSystems);
-    const signatureRadioReferenceSites = nextSystems.length > 0 && !matchingRadioReferenceSites ? null : radioReferenceSites;
-    const systemDefinitions = buildSurveySystemDefinitions(nextSystems, scopePlan, signatureRadioReferenceSites, next.profile.systems ?? []);
-    if (nextSystems.length > 0 && !matchingRadioReferenceSites) {
-      radioReferenceSidEditedRef.current = false;
-      rrSitesAutoLoadKeyRef.current = "";
-      setRadioReferenceSid(restoredRadioReferenceSid);
-      setRadioReferenceSites(null);
-    } else {
-      setRadioReferenceSid(restoredRadioReferenceSid);
+    setBusy(`open-${id}`);
+    setMessage("");
+    try {
+      const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(id));
+      setDetail(next);
+      localStorage.setItem("pizzawave-radio-setup-workspace", next.session.id);
+      localStorage.setItem("pizzawave-radio-setup-wizard-open", openWizard ? "1" : "0");
+      if (configSubPage)
+        localStorage.setItem(`pizzawave-radio-setup-config-subpage-${next.session.id}`, configSubPage);
+      const restoredPath = normalizeRfPathProfile(next.profile.rfPath);
+      const restoredRadioReferenceSid = (next.profile.radioReferenceSid || "").trim();
+      setPath(restoredPath);
+      setSelectedSources(next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index));
+      setSdrSources(next.profile.sourceOverride ? next.profile.sources : null);
+      setRfPathTouched(true);
+      setSdrScopeTouched(true);
+      setMeasurementMode((next.profile.measurementMode as any) || "guided");
+      setDuration(String(next.profile.probeDurationSeconds || 45));
+      const nextSystems = next.profile.systemShortNames?.length ? next.profile.systemShortNames : next.profile.systemShortName ? [next.profile.systemShortName] : [];
+      activeWorkspaceSystemsRef.current = nextSystems;
+      const nextSourcePlanSystems = next.profile.sourcePlanSystemShortNames?.length ? next.profile.sourcePlanSystemShortNames : nextSystems;
+      const nextSourcePlanMode = next.profile.sourcePlanMode === "control" ? "control" : "full";
+      const matchingRadioReferenceSites = radioReferenceSites && radioReferenceCatalogContainsAnySystem(radioReferenceSites, nextSystems);
+      const signatureRadioReferenceSites = nextSystems.length > 0 && !matchingRadioReferenceSites ? null : radioReferenceSites;
+      const systemDefinitions = buildSurveySystemDefinitions(nextSystems, scopePlan, signatureRadioReferenceSites, next.profile.systems ?? []);
+      if (nextSystems.length > 0 && !matchingRadioReferenceSites) {
+        radioReferenceSidEditedRef.current = false;
+        rrSitesAutoLoadKeyRef.current = "";
+        setRadioReferenceSid(restoredRadioReferenceSid);
+        setRadioReferenceSites(null);
+      } else {
+        setRadioReferenceSid(restoredRadioReferenceSid);
+      }
+      setSurveySystem(nextSystems[0] ?? next.profile.systemShortName);
+      setSurveySystems(nextSystems);
+      setSourcePlanSystems(nextSourcePlanSystems);
+      setSourcePlanMode(nextSourcePlanMode);
+      setSurveySiteLabel(next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName);
+      const savedStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-v2-${next.session.id}`));
+      const legacyStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-${next.session.id}`));
+      const legacyOrProfileStep = Number.isFinite(legacyStep) ? legacyStep : next.profile.currentStep || 0;
+      const migratedLegacyStep = legacyOrProfileStep === 4 || legacyOrProfileStep === 5 ? 4 : legacyOrProfileStep > 5 ? legacyOrProfileStep - 1 : legacyOrProfileStep;
+      const restoredStep = Math.max(0, Math.min(4, targetStep ?? (Number.isFinite(savedStep) ? savedStep : migratedLegacyStep)));
+      autosaveSignatureRef.current = JSON.stringify({
+        id: next.session.id,
+        systemShortName: nextSystems[0] ?? next.profile.systemShortName,
+        systemShortNames: nextSystems,
+        sourcePlanSystemShortNames: nextSourcePlanSystems,
+        sourcePlanMode: nextSourcePlanMode,
+        systemDefinitions,
+        radioReferenceSid: restoredRadioReferenceSid || undefined,
+        siteLabel: next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName,
+        rfPath: restoredPath,
+        selectedSourceIndexes: next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index),
+        sdrSources: next.profile.sourceOverride ? next.profile.sources : undefined,
+        currentStep: restoredStep,
+        measurementMode: (next.profile.measurementMode as any) || "guided",
+        probeDurationSeconds: next.profile.probeDurationSeconds || 45
+      });
+      draftDirtyRef.current = false;
+      setWizardOpen(openWizard);
+      setStep(restoredStep);
+      void loadScopePlan(nextSystems[0] ?? next.profile.systemShortName);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Unable to open Radio Setup workspace: ${error.message}` : "Unable to open Radio Setup workspace.");
+    } finally {
+      setBusy("");
     }
-    setSurveySystem(nextSystems[0] ?? next.profile.systemShortName);
-    setSurveySystems(nextSystems);
-    setSourcePlanSystems(nextSourcePlanSystems);
-    setSourcePlanMode(nextSourcePlanMode);
-    setSurveySiteLabel(next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName);
-    const savedStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-v2-${next.session.id}`));
-    const legacyStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-${next.session.id}`));
-    const legacyOrProfileStep = Number.isFinite(legacyStep) ? legacyStep : next.profile.currentStep || 0;
-    const migratedLegacyStep = legacyOrProfileStep === 4 || legacyOrProfileStep === 5 ? 4 : legacyOrProfileStep > 5 ? legacyOrProfileStep - 1 : legacyOrProfileStep;
-    const restoredStep = Math.max(0, Math.min(4, targetStep ?? (Number.isFinite(savedStep) ? savedStep : migratedLegacyStep)));
-    autosaveSignatureRef.current = JSON.stringify({
-      id: next.session.id,
-      systemShortName: nextSystems[0] ?? next.profile.systemShortName,
-      systemShortNames: nextSystems,
-      sourcePlanSystemShortNames: nextSourcePlanSystems,
-      sourcePlanMode: nextSourcePlanMode,
-      systemDefinitions,
-      radioReferenceSid: restoredRadioReferenceSid || undefined,
-      siteLabel: next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName,
-      rfPath: restoredPath,
-      selectedSourceIndexes: next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index),
-      sdrSources: next.profile.sourceOverride ? next.profile.sources : undefined,
-      currentStep: restoredStep,
-      measurementMode: (next.profile.measurementMode as any) || "guided",
-      probeDurationSeconds: next.profile.probeDurationSeconds || 45
-    });
-    draftDirtyRef.current = false;
-    setWizardOpen(openWizard);
-    setStep(restoredStep);
-    void loadScopePlan(nextSystems[0] ?? next.profile.systemShortName);
   }
 
   async function applySurveyWorkspace(row: RfSurveyList["sessions"][number]) {
@@ -2651,7 +2660,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
 
   async function refreshDetail() {
     if (!detail) return;
-    const next = await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}`);
+    const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(detail.session.id));
     setDetail(next);
     setSelectedSources(next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index));
     setSdrSources(next.profile.sourceOverride ? next.profile.sources : null);
@@ -2671,7 +2680,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
         .filter(row => row.id !== detail.session.id)
         .sort((a, b) => b.updatedAtUtc.localeCompare(a.updatedAtUtc));
       for (const session of candidates) {
-        const previous = await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(session.id)}`);
+        const previous = await api.request<RfSurveyDetail>(radioSetupDetailUrl(session.id));
         const previousPath = normalizeRfPathProfile(previous.profile.rfPath);
         if (!hasMeaningfulRfPath(previousPath))
           continue;

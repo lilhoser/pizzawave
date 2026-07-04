@@ -425,7 +425,7 @@ public sealed class RfSurveyService
         return new RfSurveyDetailDto(session, profile, [], [], toolPrep, PlanNextExperiments(session, profile, toolPrep, []));
     }
 
-    public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct)
+    public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct, bool compactExperiments = false)
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct);
         if (row == null)
@@ -440,8 +440,20 @@ public sealed class RfSurveyService
         var session = NormalizeAppliedSourcePlanSession(recoveredSession) with { SdrSummary = SummarizeSelectedSdrs(profile) };
         var toolPrep = toolPrepState.Prep;
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
+        if (compactExperiments)
+            experiments = experiments.Select(CompactExperimentForWorkspaceOpen).ToList();
         var notes = await _database.ListRfSurveyNotesAsync(id, ct);
         return new RfSurveyDetailDto(session, profile, experiments, notes, toolPrep, PlanNextExperiments(session, profile, toolPrep, experiments));
+    }
+
+    private static RfSurveyExperimentDto CompactExperimentForWorkspaceOpen(RfSurveyExperimentDto experiment)
+    {
+        const int MaxInlineJsonLength = 16_000;
+        return experiment with
+        {
+            EvidenceJson = experiment.EvidenceJson.Length > MaxInlineJsonLength ? "{}" : experiment.EvidenceJson,
+            InterpretationJson = experiment.InterpretationJson.Length > MaxInlineJsonLength ? "{}" : experiment.InterpretationJson
+        };
     }
 
     public async Task<RfSurveySweepProgressDto> GetSweepProgressAsync(string id, CancellationToken ct)
