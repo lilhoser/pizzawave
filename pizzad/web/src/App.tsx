@@ -4789,7 +4789,11 @@ function WaterfallStep({
   const hasGoodWaterfallFrameRef = useRef(false);
   const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
   const sampleRateHz = Math.round(Number(sampleRateMhz) * 1_000_000);
-  const controlChannelOptions = Array.from(new Set(controlChannels.filter(value => Number.isFinite(value) && value > 0).map(value => Math.round(value)))).sort((left, right) => left - right);
+  const controlChannelOptions = uniqueSortedFrequencies([
+    ...controlChannels,
+    ...systems.flatMap(system => system.controlChannelsHz),
+    activeControlChannelHz
+  ]);
   const selectedSweepControlChannels = normalizeControlChannelSelection(waterfallSweepControlChannels).filter(value => controlChannelOptions.includes(value));
   const selectedSweepControlChannelSet = new Set(selectedSweepControlChannels);
   const controlChannelListId = `rf-waterfall-cc-options-${surveyId}`;
@@ -4965,20 +4969,27 @@ function WaterfallStep({
   }
 
   async function runP25Identify(peak: PositionedSpectrumPeak) {
-    const frequency = Math.round(peak.frequencyHz);
-    const nearestTarget = nearestTargetControlChannel(peak.frequencyHz, systems, controlChannelOptions, 20_000);
-    const offset = nearestTarget ? Math.round(frequency - nearestTarget.frequencyHz) : 0;
+    const tuneFrequency = Math.round(peak.tuneFrequencyHz ?? peak.frequencyHz);
+    const measuredFrequency = Math.round(peak.measuredFrequencyHz ?? peak.frequencyHz);
+    const publishedTargetFrequency = Math.round(peak.targetFrequencyHz ?? 0);
+    const nearestTarget = publishedTargetFrequency > 0
+      ? nearestTargetControlChannel(publishedTargetFrequency, systems, controlChannelOptions, 20_000)
+      : nearestTargetControlChannel(measuredFrequency, systems, controlChannelOptions, 20_000);
+    const targetFrequency = publishedTargetFrequency > 0 ? publishedTargetFrequency : nearestTarget?.frequencyHz ?? 0;
+    const offset = targetFrequency > 0 ? Math.round(measuredFrequency - targetFrequency) : 0;
     const targetLabel = nearestTarget ? `${nearestTarget.siteLabel} ${formatRfHz(nearestTarget.frequencyHz)}` : "";
     const resumeWaterfall = status?.active === true;
     const startedAtUtc = new Date().toISOString();
     const runningResult: WaterfallIdentifyResult = {
       key: peak.key,
       peak,
-      frequencyHz: frequency,
+      frequencyHz: tuneFrequency,
+      measuredFrequencyHz: measuredFrequency,
+      targetFrequencyHz: targetFrequency,
       status: "running",
       summary: "P25 Identify running",
       detail: targetLabel
-        ? `Matched cached target ${targetLabel}; measured offset ${offset >= 0 ? "+" : ""}${offset} Hz.`
+        ? `Matched saved CC ${targetLabel}; waterfall peak offset ${offset >= 0 ? "+" : ""}${offset} Hz.`
         : "This peak is not within 20 kHz of a cached control channel for the current RSW.",
       targetLabel,
       offsetHz: offset,
@@ -4987,21 +4998,21 @@ function WaterfallStep({
     setIdentifyResults(current => ({ ...current, [peak.key]: runningResult }));
     setBusy("identify");
     setSpectrumHover(null);
-    setIdentifyOverlayMessage(`Stopping waterfall and probing ${formatRfHz(frequency)}...`);
+    setIdentifyOverlayMessage(`Stopping waterfall and probing ${formatRfHz(tuneFrequency)}...`);
     try {
       if (resumeWaterfall) {
         const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(surveyId), { method: "POST" });
         setStatus(next);
       }
-      setIdentifyOverlayMessage(`Probing ${formatRfHz(frequency)} for P25 frame evidence...`);
-      const experiment = await onRunExperiment("control_channel_p25_probe", "about 20 seconds", frequency, {
+      setIdentifyOverlayMessage(`Probing ${formatRfHz(tuneFrequency)} for P25 frame evidence...`);
+      const experiment = await onRunExperiment("control_channel_p25_probe", "about 20 seconds", tuneFrequency, {
         sourceIndex,
         durationSeconds: 10,
         parameters: {
           p25Demod: "cqpsk",
           waterfallIdentify: true,
-          waterfallMeasuredFrequencyHz: frequency,
-          waterfallNearestTargetHz: nearestTarget?.frequencyHz ?? 0,
+          waterfallMeasuredFrequencyHz: measuredFrequency,
+          waterfallNearestTargetHz: targetFrequency,
           waterfallPeakOffsetHz: offset
         }
       });
@@ -5278,7 +5289,10 @@ function peakFromWaterfallCcSignalRow(row: WaterfallCcSignalRow): PositionedSpec
   const useMeasuredPeak = row.status !== "not-seen" && Number.isFinite(row.peakFrequencyHz) && row.peakFrequencyHz > 0;
   return {
     key: `requested:${row.systemShortName}:${row.frequencyHz}`,
-    frequencyHz: Math.round(useMeasuredPeak ? row.peakFrequencyHz : row.frequencyHz),
+    frequencyHz: Math.round(row.frequencyHz),
+    tuneFrequencyHz: Math.round(row.frequencyHz),
+    measuredFrequencyHz: Math.round(useMeasuredPeak ? row.peakFrequencyHz : row.frequencyHz),
+    targetFrequencyHz: Math.round(row.frequencyHz),
     powerDb: Number.isFinite(row.powerDb) ? row.powerDb : 0,
     snrDb: Number.isFinite(row.snrDb) ? row.snrDb : 0,
     hits: Math.max(1, Math.round(row.confidence * 20)),
@@ -5417,10 +5431,10 @@ function smoothWaterfallBins(powers: number[]) {
 type SpectrumDisplayScale = { lowDb: number; highDb: number };
 type SpectrumAxis = { startHz: number; sampleRate: number };
 type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; snrDb: number; hits: number; misses: number };
-type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number };
+type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number; tuneFrequencyHz?: number; measuredFrequencyHz?: number; targetFrequencyHz?: number };
 type WaterfallDetectedCcTrack = PositionedSpectrumPeak & { displayHits: number; displayMisses: number; promoted: boolean };
 type P25IdentifyFields = { nac: string; wacn: string; systemId: string; rfss: string; site: string; decodedControlChannelHz: number; adjacentSites: string[]; secondaryControlChannels: string[]; tsbkCount: number; grantCount: number; demod: string; sourceIndex?: number; exitCode?: number; timedOut: boolean };
-type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string; fields?: P25IdentifyFields };
+type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; measuredFrequencyHz: number; targetFrequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string; fields?: P25IdentifyFields };
 type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
@@ -5569,12 +5583,14 @@ function summarizeWaterfallIdentifyResult(base: WaterfallIdentifyResult, experim
     ? `Matched saved CC ${base.targetLabel}; measured offset ${base.offsetHz >= 0 ? "+" : ""}${base.offsetHz} Hz.`
     : "Not in saved CC list for this RSW; probed the measured peak directly.";
   const identitySummary = p25IdentifySummary(fields);
+  const measuredFrequency = base.measuredFrequencyHz || base.frequencyHz;
+  const tunedFrequency = base.frequencyHz;
   const tunedOffset = fields.decodedControlChannelHz > 0
-    ? Math.round(base.frequencyHz - fields.decodedControlChannelHz)
+    ? Math.round(measuredFrequency - fields.decodedControlChannelHz)
     : 0;
   const decodedDetail = fields.decodedControlChannelHz > 0
-    ? `Decoded CC ${formatRfHz(fields.decodedControlChannelHz)}; waterfall peak ${formatRfHz(base.frequencyHz)} (${tunedOffset >= 0 ? "+" : ""}${tunedOffset} Hz from decoded CC).`
-    : `Waterfall peak ${formatRfHz(base.frequencyHz)}.`;
+    ? `Tuned ${formatRfHz(tunedFrequency)}; decoded CC ${formatRfHz(fields.decodedControlChannelHz)}; waterfall peak ${formatRfHz(measuredFrequency)} (${tunedOffset >= 0 ? "+" : ""}${tunedOffset} Hz from decoded CC).`
+    : `Tuned ${formatRfHz(tunedFrequency)}; waterfall peak ${formatRfHz(measuredFrequency)}.`;
   const activityDetail = [
     fields.tsbkCount > 0 ? `${fields.tsbkCount} TSBK message${fields.tsbkCount === 1 ? "" : "s"}` : "",
     fields.grantCount > 0 ? `${fields.grantCount} grant/message marker${fields.grantCount === 1 ? "" : "s"}` : "",
