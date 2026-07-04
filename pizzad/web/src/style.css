@@ -3654,7 +3654,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-cc-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 110px 82px minmax(220px, 1.4fr) 112px;
+  grid-template-columns: minmax(150px, 1fr) 110px 82px minmax(220px, 1.4fr) 70px;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -3705,23 +3705,65 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-size: 11px;
 }
 
-.rf-waterfall-seed-note {
+.rf-waterfall-sweep-group {
   display: grid;
-  gap: 3px;
-  padding: 7px 9px;
-  border: 1px solid rgba(255, 237, 138, .42);
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #30363d;
   border-radius: 6px;
-  background: rgba(255, 237, 138, .08);
+}
+
+.rf-waterfall-sweep-group legend {
+  padding: 0 5px;
+  color: #d7dde3;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.rf-waterfall-use-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d7dde3;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rf-waterfall-use-check input {
+  width: auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.rf-waterfall-sweep-selection {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid rgba(89, 168, 255, .4);
+  border-radius: 6px;
+  background: rgba(89, 168, 255, .08);
   color: #d7dde3;
   font-size: 12px;
 }
 
-.rf-waterfall-seed-note strong {
-  color: #ffed8a;
+.rf-waterfall-sweep-selection strong {
+  color: #d7ecff;
 }
 
-.rf-waterfall-seed-note span {
+.rf-waterfall-sweep-selection span {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.rf-waterfall-sweep-selection button {
+  padding: 4px 7px;
+  font-size: 11px;
 }
 .rf-step-progress-track.idle span {
   left: 0;

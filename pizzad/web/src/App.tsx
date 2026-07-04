@@ -3603,7 +3603,6 @@ type SweepCandidate = {
 type SweepResult = { jobId?: number; sourceIndex: number; serial: string; gain: string; outputDir: string; summaryPath: string; bestPath: string; best?: SweepCandidate | null; candidates: SweepCandidate[] };
 type SweepInsight = { recommendation: string; confidence: string; rationale: string; nextActions: string[]; rawText: string };
 type SweepHistoryEntry = { jobId?: number; capturedAtUtc: string; sourceIndex: number; bestErrorHz: number; bestScore: number; bestAvgDecodeRate: number; bestTotalDecode: number; bestHasDecodeSamples: boolean };
-type WaterfallSweepSeed = { sourceIndex: number; targetFrequencyHz: number; measuredFrequencyHz: number; offsetHz: number; snrDb: number; gain: string; sampleRateHz: number; siteLabel: string; createdAtUtc: string };
 type RfRunLogLine = { id: string; level: "info" | "result" | "error"; text: string; createdAtUtc: string };
 
 const AIRSPY_LINEARITY_GAIN_MAX = 21;
@@ -3800,20 +3799,20 @@ function RfPathRefinementStep({
   setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>;
   onRfPathTouched: () => void;
   onLoadPreviousRfPath: () => Promise<void>;
-} & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation" | "waterfallSweepSeed" | "onWaterfallSweepSeed">) {
+} & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation" | "waterfallSweepControlChannels" | "onWaterfallSweepControlChannels">) {
   const storageKey = `pizzawave-radio-setup-rf-subpage-${props.surveyId}`;
-  const seedStorageKey = `pizzawave-radio-setup-waterfall-sweep-seed-${props.surveyId}`;
+  const ccSelectionStorageKey = `pizzawave-radio-setup-waterfall-sweep-ccs-${props.surveyId}`;
   const [subPage, setSubPageState] = useState<RfRefinementSubpage>(() => normalizeRfRefinementSubpage(localStorage.getItem(storageKey)));
-  const [waterfallSweepSeed, setWaterfallSweepSeed] = useState<WaterfallSweepSeed | null>(() => loadJsonStorage<WaterfallSweepSeed | null>(seedStorageKey, null));
+  const [waterfallSweepControlChannels, setWaterfallSweepControlChannels] = useState<number[]>(() => normalizeControlChannelSelection(loadJsonStorage<number[]>(ccSelectionStorageKey, [])));
   const [recoveredSweepStatus, setRecoveredSweepStatus] = useState("");
   const setSubPage = (value: RfRefinementSubpage) => {
     setSubPageState(value);
     localStorage.setItem(storageKey, value);
   };
-  const prepareWaterfallSeed = (seed: WaterfallSweepSeed) => {
-    setWaterfallSweepSeed(seed);
-    localStorage.setItem(seedStorageKey, JSON.stringify(seed));
-    setSubPage("power");
+  const updateWaterfallSweepControlChannels = (values: number[]) => {
+    const normalized = normalizeControlChannelSelection(values);
+    setWaterfallSweepControlChannels(normalized);
+    localStorage.setItem(ccSelectionStorageKey, JSON.stringify(normalized));
   };
   const rfPathEntered = path.chain.some(item => item.label?.trim() || item.length?.trim() || item.loss?.trim() || item.notes?.trim() || (item.connectorInType && item.connectorInType !== "unknown") || (item.connectorOutType && item.connectorOutType !== "unknown"));
   const persistedSweepStatus = props.sweep?.status === "running" ? undefined : props.sweep?.status;
@@ -3837,7 +3836,13 @@ function RfPathRefinementStep({
       ? <RfPathStep path={path} setPath={setPath} onTouched={onRfPathTouched} onLoadPrevious={onLoadPreviousRfPath} busy={props.busy} />
       : null}
     <div style={{ display: subPage === "path" ? "none" : undefined }}>
-      <SiteValidationStep {...props} activeOperation={subPage === "path" ? "waterfall" : subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} onSweepRecovered={setRecoveredSweepStatus} />
+      <SiteValidationStep
+        {...props}
+        activeOperation={subPage === "path" ? "waterfall" : subPage}
+        waterfallSweepControlChannels={waterfallSweepControlChannels}
+        onWaterfallSweepControlChannels={updateWaterfallSweepControlChannels}
+        onSweepRecovered={setRecoveredSweepStatus}
+      />
     </div>
   </div>;
 }
@@ -3847,6 +3852,14 @@ type RfRefinementSubpage = "path" | "cc" | "inventory" | "waterfall" | "power" |
 function normalizeRfRefinementSubpage(value: string | null): RfRefinementSubpage {
   if (value === "cc" || value === "p25" || value === "sweep") return "power";
   return value === "inventory" || value === "waterfall" || value === "power" ? value : "path";
+}
+
+function normalizeControlChannelSelection(values: unknown): number[] {
+  return Array.from(new Set((Array.isArray(values) ? values : [])
+    .map(value => Number(value))
+    .filter(value => Number.isFinite(value) && value > 0)
+    .map(value => Math.round(value))))
+    .sort((left, right) => left - right);
 }
 
 function RfConditionOverview({ path, systemShortName, sources, selectedSources, controlChannels }: { path: RfSurveyPathProfile; systemShortName: string; sources: RfSurveySource[]; selectedSources: number[]; controlChannels: number[] }) {
@@ -3914,8 +3927,8 @@ function SiteValidationStep({
   onReload,
   onShowDetails,
   onOpenRunLog,
-  waterfallSweepSeed,
-  onWaterfallSweepSeed,
+  waterfallSweepControlChannels,
+  onWaterfallSweepControlChannels,
   onSweepRecovered
 }: {
   activeOperation: Exclude<RfRefinementSubpage, "path">;
@@ -3950,8 +3963,8 @@ function SiteValidationStep({
   onReload: () => Promise<void>;
   onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void;
   onOpenRunLog: () => void;
-  waterfallSweepSeed?: WaterfallSweepSeed | null;
-  onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
+  waterfallSweepControlChannels?: number[];
+  onWaterfallSweepControlChannels?: (values: number[]) => void;
   onSweepRecovered?: (status: string) => void;
 }) {
   const [sweepBusy, setSweepBusy] = useState("");
@@ -3992,8 +4005,10 @@ function SiteValidationStep({
   const validationAutoError = validationErrorOffsets.trim().toLowerCase() === "auto";
   const validationMetricCount = Math.max(1, Math.min(3, Number(validationMetricsCandidates) || 2));
   const validationRfCandidateLimit = 3;
-  const powerSweepPasses = Math.max(1, effectivePowerSources.length) * Math.max(1, controlChannels.length) * Math.max(1, effectivePowerGains.length);
-  const validationP25SeedCount = Math.max(1, controlChannels.length + (systems.length || 1));
+  const selectedWaterfallSweepControlChannels = normalizeControlChannelSelection(waterfallSweepControlChannels).filter(value => controlChannels.includes(value));
+  const validationRunControlChannels = selectedWaterfallSweepControlChannels.length ? selectedWaterfallSweepControlChannels : controlChannels;
+  const powerSweepPasses = Math.max(1, effectivePowerSources.length) * Math.max(1, validationRunControlChannels.length) * Math.max(1, effectivePowerGains.length);
+  const validationP25SeedCount = Math.max(1, validationRunControlChannels.length + (systems.length || 1));
   const validationProbePasses = validationP25SeedCount * Math.max(1, validationOffsets.length);
   const validationVoiceCandidateCount = Math.max(2, Math.min(3, systems.length || 1));
   const validationVoiceSeconds = 45;
@@ -4007,7 +4022,7 @@ function SiteValidationStep({
   const validationResultCandidates = useMemo(() => rfSweepCandidateProgressFromExperiment(validationSweep), [validationSweep?.id, validationSweep?.evidenceJson]);
   const showLiveValidationProgress = validationRunning || validationProgress?.active === true;
   const activeValidationTarget = showLiveValidationProgress ? validationTargetSystem : null;
-  const activeValidationControlChannels = activeValidationTarget?.controlChannelsHz?.length ? activeValidationTarget.controlChannelsHz : controlChannels;
+  const activeValidationControlChannels = activeValidationTarget?.controlChannelsHz?.length ? activeValidationTarget.controlChannelsHz : validationRunControlChannels;
   const activeValidationPowerPasses = Math.max(1, effectivePowerSources.length) * Math.max(1, activeValidationControlChannels.length) * Math.max(1, effectivePowerGains.length);
   const activeValidationP25SeedCount = Math.max(1, activeValidationControlChannels.length + (activeValidationTarget ? 1 : systems.length || 1));
   const activeValidationProbePasses = activeValidationP25SeedCount * Math.max(1, validationOffsets.length);
@@ -4020,7 +4035,6 @@ function SiteValidationStep({
   const sweepInsightStorageKey = `pizzawave-radio-setup-sweep-insights-${surveyId}`;
   const sweepHistoryStorageKey = `pizzawave-radio-setup-sweep-history-${surveyId}`;
   const sweepRecoveryKey = useRef("");
-  const appliedWaterfallSeedKey = useRef("");
   useEffect(() => {
     if (controlChannels.length && !controlChannels.includes(activeControlChannelHz))
       setActiveControlChannelHz(controlChannels[0]);
@@ -4098,32 +4112,6 @@ function SiteValidationStep({
       setActiveControlChannelHz(selectedCc);
   }, [validationSweep?.id]);
   useEffect(() => {
-    if (!waterfallSweepSeed) return;
-    const seedKey = `${waterfallSweepSeed.createdAtUtc}:${waterfallSweepSeed.sourceIndex}:${waterfallSweepSeed.targetFrequencyHz}:${Math.round(waterfallSweepSeed.offsetHz)}`;
-    if (appliedWaterfallSeedKey.current === seedKey) return;
-    appliedWaterfallSeedKey.current = seedKey;
-    if (waterfallSweepSeed.targetFrequencyHz > 0)
-      setActiveControlChannelHz(waterfallSweepSeed.targetFrequencyHz);
-    if (waterfallSweepSeed.sampleRateHz > 0)
-      setValidationSampleRateMhz(formatMhzInput(waterfallSweepSeed.sampleRateHz));
-    const seedGain = waterfallSweepSeed.gain?.trim();
-    if (seedGain)
-      setPowerGainSequence(seedGain);
-    const roundedOffset = Math.round(waterfallSweepSeed.offsetHz / 100) * 100;
-    if (Math.abs(roundedOffset) >= 100)
-      setValidationErrorOffsets(`0,${roundedOffset},${-roundedOffset}`);
-    updateSweepInput(waterfallSweepSeed.sourceIndex, {
-      gain: waterfallSweepSeed.gain || undefined,
-      errorHz: String(Math.round(waterfallSweepSeed.offsetHz)),
-      rangeHz: "300",
-      stepHz: "100",
-      precision: "custom"
-    });
-    setHighlightedSweepSource(waterfallSweepSeed.sourceIndex);
-    window.setTimeout(() => setHighlightedSweepSource(current => current === waterfallSweepSeed.sourceIndex ? null : current), 1800);
-    setSweepMessage(`Prepared RF Sweep from waterfall ${waterfallSweepSeed.siteLabel || "candidate"}: target ${formatRfHz(waterfallSweepSeed.targetFrequencyHz)}, measured ${formatRfHz(waterfallSweepSeed.measuredFrequencyHz)}, gain ${seedGain || "default"}, offset ${waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}${formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz.`);
-  }, [waterfallSweepSeed?.createdAtUtc]);
-  useEffect(() => {
     if (activeOperation !== "power" && !validationRunning) return;
     let stopped = false;
     async function refresh() {
@@ -4161,16 +4149,18 @@ function SiteValidationStep({
   });
   const runPowerScan = () => onRunExperiment("rf_power_scan", `about ${powerSweepPasses * 5} seconds`, undefined, powerScanRequest());
   const validationSweepRequest = (targetSystem?: RfSurveySystem) => {
-    const targetControlChannelCount = Math.max(1, targetSystem?.controlChannelsHz?.length ?? controlChannels.length);
+    const selectedChannels = selectedWaterfallSweepControlChannels.length ? selectedWaterfallSweepControlChannels : [];
+    const targetControlChannels = targetSystem?.controlChannelsHz?.length ? targetSystem.controlChannelsHz : selectedChannels;
+    const targetControlChannelCount = Math.max(1, targetControlChannels.length || validationRunControlChannels.length);
     const targetP25SeedCount = Math.max(1, targetControlChannelCount + (targetSystem ? 1 : systems.length || 1));
     const targetVoiceCandidateCount = targetSystem ? Math.max(1, Math.min(2, targetControlChannelCount)) : validationVoiceCandidateCount;
     return {
       parameters: {
-        scanAllControlChannels: !targetSystem,
+        scanAllControlChannels: !targetSystem && selectedChannels.length === 0,
         ...(targetSystem ? {
           targetSystemShortName: targetSystem.shortName,
           controlChannelsHz: targetSystem.controlChannelsHz
-        } : {}),
+        } : selectedChannels.length ? { controlChannelsHz: selectedChannels } : {}),
         gainSequence: effectivePowerGains,
         sampleRateHz: validationSampleRateOk ? parsedValidationSampleRateHz : undefined,
         errorOffsetsHz: validationOffsets,
@@ -4473,7 +4463,8 @@ function SiteValidationStep({
         systems={systems}
         controlChannels={controlChannels}
         activeControlChannelHz={activeControlChannelHz}
-        onWaterfallSweepSeed={onWaterfallSweepSeed}
+        waterfallSweepControlChannels={selectedWaterfallSweepControlChannels}
+        onWaterfallSweepControlChannels={onWaterfallSweepControlChannels}
         onRunExperiment={onRunExperiment}
         onReload={onReload}
       />
@@ -4501,10 +4492,11 @@ function SiteValidationStep({
             </div>
             {validationSampleRateMessage && <div className="settings-message error">{validationSampleRateMessage}</div>}
             {airspyPowerGainMessage && <div className={airspyPowerGainInvalid ? "settings-message error" : "setup-note"}>{airspyPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
-            {waterfallSweepSeed && <div className="rf-waterfall-seed-note">
-              <strong>Waterfall seed</strong>
-              <span>{waterfallSweepSeed.siteLabel || "Selected CC"} / Source {waterfallSweepSeed.sourceIndex} / target {formatRfHz(waterfallSweepSeed.targetFrequencyHz)} / peak {formatRfHz(waterfallSweepSeed.measuredFrequencyHz)} / gain {waterfallSweepSeed.gain || "default"} / SNR {formatFixed(waterfallSweepSeed.snrDb, 1)} dB / offset {waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}{formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz</span>
-            </div>}
+            <div className="rf-waterfall-sweep-selection">
+              <strong>RF Sweep CCs</strong>
+              <span>{selectedWaterfallSweepControlChannels.length ? selectedWaterfallSweepControlChannels.map(formatRfHz).join(", ") : "All requested control channels"}</span>
+              {selectedWaterfallSweepControlChannels.length > 0 && <button type="button" onClick={() => onWaterfallSweepControlChannels?.([])}>Clear</button>}
+            </div>
           </div>
           <div className="rf-sweep-callout" role="status" aria-live="polite">
             <span>Estimated time</span>
@@ -4739,7 +4731,8 @@ function WaterfallStep({
   systems,
   controlChannels,
   activeControlChannelHz,
-  onWaterfallSweepSeed,
+  waterfallSweepControlChannels,
+  onWaterfallSweepControlChannels,
   onRunExperiment,
   onReload
 }: {
@@ -4750,7 +4743,8 @@ function WaterfallStep({
   systems: RfSurveySystem[];
   controlChannels: number[];
   activeControlChannelHz: number;
-  onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
+  waterfallSweepControlChannels?: number[];
+  onWaterfallSweepControlChannels?: (values: number[]) => void;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
   onReload: () => Promise<void>;
 }) {
@@ -4788,6 +4782,8 @@ function WaterfallStep({
   const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
   const sampleRateHz = Math.round(Number(sampleRateMhz) * 1_000_000);
   const controlChannelOptions = Array.from(new Set(controlChannels.filter(value => Number.isFinite(value) && value > 0).map(value => Math.round(value)))).sort((left, right) => left - right);
+  const selectedSweepControlChannels = normalizeControlChannelSelection(waterfallSweepControlChannels).filter(value => controlChannelOptions.includes(value));
+  const selectedSweepControlChannelSet = new Set(selectedSweepControlChannels);
   const controlChannelListId = `rf-waterfall-cc-options-${surveyId}`;
   const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
   const sampleRateOk = Number.isFinite(sampleRateHz) && sampleRateHz > 0;
@@ -4984,27 +4980,13 @@ function WaterfallStep({
     }
   }
 
-  function prepareSweepSeedFromSignalRow(row: WaterfallCcSignalRow) {
-    if (row.status === "not-seen") {
-      setIdentifyMessage("RF Sweep seed needs a stable waterfall trace for that requested control channel.");
-      return;
-    }
-    prepareWaterfallSweepSeed({
-      sourceIndex,
-      targetFrequencyHz: row.frequencyHz,
-      measuredFrequencyHz: Math.round(row.peakFrequencyHz),
-      offsetHz: Math.round(row.offsetHz),
-      snrDb: row.snrDb,
-      gain: gain.trim() || selectedSource?.gain || "",
-      sampleRateHz,
-      siteLabel: row.siteLabel,
-      createdAtUtc: new Date().toISOString()
-    });
-  }
-
-  function prepareWaterfallSweepSeed(seed: WaterfallSweepSeed) {
-    onWaterfallSweepSeed?.(seed);
-    setIdentifyMessage(`Prepared RF Sweep seed for ${seed.siteLabel || formatRfHz(seed.targetFrequencyHz)}: offset ${seed.offsetHz >= 0 ? "+" : ""}${seed.offsetHz} Hz.`);
+  function toggleSweepControlChannel(frequencyHz: number, selected: boolean) {
+    const next = new Set(selectedSweepControlChannels);
+    if (selected)
+      next.add(Math.round(frequencyHz));
+    else
+      next.delete(Math.round(frequencyHz));
+    onWaterfallSweepControlChannels?.(Array.from(next));
   }
 
   function downloadWaterfallReport() {
@@ -5154,13 +5136,24 @@ function WaterfallStep({
     </div>
     <div className="rf-waterfall-cc-panel">
       <div className="rf-waterfall-cc-head"><span>Requested CC Signal Check</span><small>Waterfall evidence only; P25 Identify or RF Sweep must confirm decode.</small></div>
-      {ccSignalRows.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect requested control channels.</div> : ccSignalRows.map(row => <div className={`rf-waterfall-cc-row ${row.status}`} key={`${row.systemShortName}-${row.frequencyHz}`}>
-        <span>{row.siteLabel}</span>
-        <code>{formatRfHz(row.frequencyHz)}</code>
-        <strong>{row.label}</strong>
-        <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
-        <button type="button" disabled={row.status === "not-seen"} onClick={() => prepareSweepSeedFromSignalRow(row)}>Use for RF Sweep</button>
-      </div>)}
+      <fieldset className="rf-waterfall-sweep-group">
+        <legend>Use for RF Sweep</legend>
+        {ccSignalRows.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect requested control channels.</div> : ccSignalRows.map(row => <div className={`rf-waterfall-cc-row ${row.status}`} key={`${row.systemShortName}-${row.frequencyHz}`}>
+          <span>{row.siteLabel}</span>
+          <code>{formatRfHz(row.frequencyHz)}</code>
+          <strong>{row.label}</strong>
+          <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
+          <label className="rf-waterfall-use-check">
+            <input
+              type="checkbox"
+              checked={selectedSweepControlChannelSet.has(row.frequencyHz)}
+              onChange={event => toggleSweepControlChannel(row.frequencyHz, event.target.checked)}
+              aria-label={`Use ${formatRfHz(row.frequencyHz)} for RF Sweep`}
+            />
+            <span>Use</span>
+          </label>
+        </div>)}
+      </fieldset>
     </div>
     <div className="rf-waterfall-cc-panel">
       <div className="rf-waterfall-cc-head"><span>Other detected CCs</span><small>Stable non-requested peaks; identify before treating as a site.</small></div>
