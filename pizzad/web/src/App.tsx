@@ -4106,6 +4106,9 @@ function SiteValidationStep({
       setActiveControlChannelHz(waterfallSweepSeed.targetFrequencyHz);
     if (waterfallSweepSeed.sampleRateHz > 0)
       setValidationSampleRateMhz(formatMhzInput(waterfallSweepSeed.sampleRateHz));
+    const seedGain = waterfallSweepSeed.gain?.trim();
+    if (seedGain)
+      setPowerGainSequence(seedGain);
     const roundedOffset = Math.round(waterfallSweepSeed.offsetHz / 100) * 100;
     if (Math.abs(roundedOffset) >= 100)
       setValidationErrorOffsets(`0,${roundedOffset},${-roundedOffset}`);
@@ -4118,7 +4121,7 @@ function SiteValidationStep({
     });
     setHighlightedSweepSource(waterfallSweepSeed.sourceIndex);
     window.setTimeout(() => setHighlightedSweepSource(current => current === waterfallSweepSeed.sourceIndex ? null : current), 1800);
-    setSweepMessage(`Prepared RF Sweep from waterfall ${waterfallSweepSeed.siteLabel || "candidate"}: target ${formatRfHz(waterfallSweepSeed.targetFrequencyHz)}, measured ${formatRfHz(waterfallSweepSeed.measuredFrequencyHz)}, offset ${waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}${formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz.`);
+    setSweepMessage(`Prepared RF Sweep from waterfall ${waterfallSweepSeed.siteLabel || "candidate"}: target ${formatRfHz(waterfallSweepSeed.targetFrequencyHz)}, measured ${formatRfHz(waterfallSweepSeed.measuredFrequencyHz)}, gain ${seedGain || "default"}, offset ${waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}${formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz.`);
   }, [waterfallSweepSeed?.createdAtUtc]);
   useEffect(() => {
     if (activeOperation !== "power" && !validationRunning) return;
@@ -4500,7 +4503,7 @@ function SiteValidationStep({
             {airspyPowerGainMessage && <div className={airspyPowerGainInvalid ? "settings-message error" : "setup-note"}>{airspyPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
             {waterfallSweepSeed && <div className="rf-waterfall-seed-note">
               <strong>Waterfall seed</strong>
-              <span>{waterfallSweepSeed.siteLabel || "Selected CC"} / Source {waterfallSweepSeed.sourceIndex} / target {formatRfHz(waterfallSweepSeed.targetFrequencyHz)} / peak {formatRfHz(waterfallSweepSeed.measuredFrequencyHz)} / SNR {formatFixed(waterfallSweepSeed.snrDb, 1)} dB / offset {waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}{formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz</span>
+              <span>{waterfallSweepSeed.siteLabel || "Selected CC"} / Source {waterfallSweepSeed.sourceIndex} / target {formatRfHz(waterfallSweepSeed.targetFrequencyHz)} / peak {formatRfHz(waterfallSweepSeed.measuredFrequencyHz)} / gain {waterfallSweepSeed.gain || "default"} / SNR {formatFixed(waterfallSweepSeed.snrDb, 1)} dB / offset {waterfallSweepSeed.offsetHz >= 0 ? "+" : ""}{formatFixed(waterfallSweepSeed.offsetHz, 0)} Hz</span>
             </div>}
           </div>
           <div className="rf-sweep-callout" role="status" aria-live="polite">
