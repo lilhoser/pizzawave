@@ -5009,6 +5009,23 @@ function WaterfallStep({
   }, [activeControlChannelHz]);
 
   useEffect(() => {
+    if (!selectedSweepControlChannels.length)
+      return;
+    const current = normalizeWaterfallSweepSelections(waterfallSweepSelections);
+    const selected = new Set(selectedSweepControlChannels);
+    const next = current.map(row => selected.has(row.frequencyHz)
+      ? {
+        ...row,
+        sourceIndex,
+        gain: gain.trim() || selectedSource?.gain || "",
+        sampleRateHz: sampleRateOk ? sampleRateHz : row.sampleRateHz
+      }
+      : row);
+    if (JSON.stringify(next) !== JSON.stringify(current))
+      onWaterfallSweepSelections?.(next);
+  }, [selectedSweepControlChannels.join(","), sourceIndex, gain, sampleRateHz, sampleRateOk, selectedSource?.gain]);
+
+  useEffect(() => {
     if (!frequencyMenuOpen)
       return;
     const closeOnOutsideClick = (event: MouseEvent) => {
