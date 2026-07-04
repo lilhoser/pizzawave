@@ -5766,6 +5766,8 @@ function summarizeWaterfallIdentifyResult(base: WaterfallIdentifyResult, experim
     : "failed";
   const p25Summary = experiment.blockingIssue || experiment.resultSummary || label(experiment.status);
   const fields = parseP25IdentifyFields(experiment);
+  const hasStrongIdentityEvidence = p25IdentifyHasStrongEvidence(fields);
+  const effectiveStatus: WaterfallIdentifyResult["status"] = status === "passed" && !hasStrongIdentityEvidence ? "failed" : status;
   const demodDetail = attemptedDemods.length > 1 ? `Tried demods: ${attemptedDemods.join(", ")}.` : "";
   const targetDetail = base.targetLabel
     ? `Matched saved CC ${base.targetLabel}; measured offset ${base.offsetHz >= 0 ? "+" : ""}${base.offsetHz} Hz.`
@@ -5787,15 +5789,17 @@ function summarizeWaterfallIdentifyResult(base: WaterfallIdentifyResult, experim
   ].filter(Boolean).join("; ");
   return {
     ...base,
-    status,
-    summary: status === "passed"
+    status: effectiveStatus,
+    summary: effectiveStatus === "passed"
       ? identitySummary || "P25 frame evidence captured"
-      : status === "blocked"
+      : effectiveStatus === "blocked"
         ? "P25 Identify blocked"
-        : "No P25 frame evidence",
-    detail: status === "passed"
+        : status === "passed"
+          ? "Weak/invalid P25 evidence"
+          : "No P25 frame evidence",
+    detail: effectiveStatus === "passed"
       ? [decodedDetail, targetDetail, activityDetail, demodDetail].filter(Boolean).join(" ")
-      : [p25Summary, targetDetail, demodDetail].filter(Boolean).join(" "),
+      : [status === "passed" && !hasStrongIdentityEvidence ? "Probe only reported weak evidence such as NAC without decoded P25 control-channel messages." : p25Summary, targetDetail, demodDetail].filter(Boolean).join(" "),
     experimentId: experiment.id,
     fields
   };
@@ -5875,6 +5879,20 @@ function p25IdentifySummary(fields: P25IdentifyFields) {
     fields.site ? `Site ${fields.site}` : ""
   ].filter(Boolean);
   return parts.join(" / ");
+}
+
+function p25IdentifyHasStrongEvidence(fields: P25IdentifyFields) {
+  return Boolean(
+    fields.wacn ||
+    fields.systemId ||
+    fields.rfss ||
+    fields.site ||
+    fields.decodedControlChannelHz > 0 ||
+    fields.tsbkCount > 0 ||
+    fields.grantCount > 0 ||
+    fields.adjacentSites.length ||
+    fields.secondaryControlChannels.length
+  );
 }
 
 function waterfallOtherDetectedConfidence(row: Pick<WaterfallDetectedCcTrack, "displayHits" | "displayMisses">) {

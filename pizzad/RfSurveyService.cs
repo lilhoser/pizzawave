@@ -6972,7 +6972,7 @@ public sealed class RfSurveyService
             return false;
         var strongMarkers = new[]
         {
-            "tsbk", "nac ", "nac:", "duid", "voice grant", "grp_v_ch_grant", "net_sts_bcst", "rfss_sts_bcst",
+            "tsbk", "duid", "voice grant", "grp_v_ch_grant", "net_sts_bcst", "rfss_sts_bcst",
             "secondary control channel", "mbt"
         };
         return strongMarkers.Any(lowered.Contains);
