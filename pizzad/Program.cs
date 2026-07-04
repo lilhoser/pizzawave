@@ -1032,6 +1032,41 @@ app.MapGet("/api/v1/system/radio-setup/{id}/sweep-progress", async (HttpContext 
 .WithName("RadioSetupSweepProgress")
 .WithOpenApi();
 
+app.MapPost("/api/v1/system/radio-setup/{id}/waterfall/start", async (HttpContext context, string id, RfSurveyWaterfallStartRequest request, AuthService authService, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await surveys.StartWaterfallAsync(id, request, context.RequestAborted));
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound();
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("RadioSetupWaterfallStart")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/radio-setup/{id}/waterfall", async (HttpContext context, string id, AuthService authService, RfSurveyService surveys) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await surveys.GetWaterfallAsync(id, context.RequestAborted));
+})
+.WithName("RadioSetupWaterfall")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/radio-setup/{id}/waterfall/stop", async (HttpContext context, string id, AuthService authService, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await surveys.StopWaterfallAsync(id, context.RequestAborted));
+})
+.WithName("RadioSetupWaterfallStop")
+.WithOpenApi();
+
 app.MapGet("/api/v1/system/rf-surveys/{id}/p25-probe-preview", async (HttpContext context, string id, long? controlChannelHz, int? durationSeconds, AuthService authService, RfSurveyService surveys) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

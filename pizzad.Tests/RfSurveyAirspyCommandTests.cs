@@ -99,6 +99,24 @@ public sealed class RfSurveyAirspyCommandTests
     }
 
     [Fact]
+    public void P25ProbeSampleRate_AirspyPrefersSixMsps()
+    {
+        var source = AirspySource("airspy=26A464DC28793293", "26A464DC28793293") with { SampleRate = 3_000_000 };
+        var profile = new RfSurveyProfileDto
+        {
+            Sources = [source],
+            Devices =
+            [
+                new(0, source.Serial, "Airspy Mini", "Airspy", source.Device, "", [3_000_000, 6_000_000], 3_000_000)
+            ]
+        };
+
+        var sampleRate = InvokeP25ProbeSampleRate(profile, source);
+
+        Assert.Equal(6_000_000, sampleRate);
+    }
+
+    [Fact]
     public void BuildP25ProbeGainArgs_RtlUsesGenericGain()
     {
         var source = new RfSurveySourceDto(
@@ -170,6 +188,14 @@ public sealed class RfSurveyAirspyCommandTests
             ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "BuildP25ProbeGainArgs");
         return (string)(method.Invoke(null, [source])
             ?? throw new InvalidOperationException("BuildP25ProbeGainArgs returned null."));
+    }
+
+    private static int InvokeP25ProbeSampleRate(RfSurveyProfileDto profile, RfSurveySourceDto source)
+    {
+        var method = typeof(RfSurveyService).GetMethod("P25ProbeSampleRate", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "P25ProbeSampleRate");
+        return (int)(method.Invoke(null, [profile, source])
+            ?? throw new InvalidOperationException("P25ProbeSampleRate returned null."));
     }
 
     private static JsonElement InvokeBuildRfValidationPowerParameters(JsonElement parameters)

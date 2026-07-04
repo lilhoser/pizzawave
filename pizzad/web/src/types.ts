@@ -624,6 +624,7 @@ export type RfSurveyDevice = { index: number; serial: string; label: string; sdr
 export type RfSurveySystem = { shortName: string; siteLabel: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[] };
 export type RfSurveyProfile = {
   siteLabel: string;
+  radioReferenceSid?: string;
   systemShortName: string;
   systemShortNames: string[];
   sourcePlanSystemShortNames: string[];
@@ -669,6 +670,8 @@ export type RfSurveyCancelExperimentResult = { cancelRequested: boolean; message
 export type RfSurveySweepProgressRow = { sourceIndex: number; controlChannelHz: number; gain: string; status: string; issue: string; snrDb?: number | null; peakOffsetHz?: number | null; overload: boolean };
 export type RfSurveySweepCandidateProgress = { id: string; sourceIndex: number; controlChannelHz: number; gain: string; errorHz: number; p25Status: string; p25Summary: string; metricsStatus: string; metricsSummary: string; voiceStatus: string; voiceSummary: string; voiceTotalCalls: number; voiceRealCalls: number };
 export type RfSurveySweepProgress = { active: boolean; directory: string; rows: RfSurveySweepProgressRow[]; candidates?: RfSurveySweepCandidateProgress[] | null };
+export type RfSurveyWaterfallFrame = { sequence: number; capturedAtUtc: string; centerHz: number; sampleRate: number; startHz: number; binWidthHz: number; powersDb: number[]; minDb: number; maxDb: number; noiseFloorDb: number; peakDb: number; peakFrequencyHz: number; clipPct: number; overload: boolean; bytes: number; output: string };
+export type RfSurveyWaterfallStatus = { active: boolean; status: string; message: string; sourceIndex: number; sdrType: string; centerHz: number; sampleRate: number; gain: string; binCount: number; startedAtUtc: string | null; updatedAtUtc: string | null; frame: RfSurveyWaterfallFrame | null; trWasActive: boolean; trStopOutput: string; trRestartOutput: string; trRestartError: string };
 export type RfSurveyP25ProbePreview = { configured: boolean; ready: boolean; command: string; workingDirectory: string; blockingIssue: string; placeholders: string[] };
 export type RfSurveyExportPlan = { surveyId: string; artifactPath: string; planPath: string; markdownPath: string; verdict: string; stability: string; recommendations: string[]; blockers: string[] };
 export type RfSurveyTrActionResult = { ok: boolean; action: string; message: string; candidatePath: string; backupPath: string; restorePath: string; serviceOutput: string };

@@ -842,7 +842,7 @@ public sealed class SetupJobService
             .ToList();
         if (sampleRates.Count == 0)
             sampleRates = [3_000_000, 6_000_000];
-        var defaultRate = sampleRates.Contains(3_000_000) ? 3_000_000 : sampleRates.Min();
+        var defaultRate = sampleRates.Contains(6_000_000) ? 6_000_000 : sampleRates.Min();
 
         if (serialMatches.Count == 0)
             return [AirspyDevice(startIndex, string.Empty, label, string.Empty, "Airspy was reported, but airspy_info did not expose a serial number.", sampleRates, defaultRate)];
@@ -867,7 +867,7 @@ public sealed class SetupJobService
             "32",
             warning);
 
-    private static SetupSdrDeviceDto AirspyDevice(int index, string serial, string label, string usbLine, string warning, IReadOnlyList<int>? sampleRates = null, int defaultSampleRate = 3_000_000) =>
+    private static SetupSdrDeviceDto AirspyDevice(int index, string serial, string label, string usbLine, string warning, IReadOnlyList<int>? sampleRates = null, int defaultSampleRate = 6_000_000) =>
         new(
             index,
             "Airspy",

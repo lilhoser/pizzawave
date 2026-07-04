@@ -771,7 +771,7 @@ public sealed partial class SetupTrConfigBuilderService
         var sampleRate = requestedSampleRate > 0
             ? requestedSampleRate
             : type.Equals("Airspy", StringComparison.OrdinalIgnoreCase)
-                ? (defaultRate > 0 ? defaultRate : 3_000_000)
+                ? (defaultRate > 0 ? defaultRate : 6_000_000)
                 : (defaultRate > 0 ? defaultRate : DefaultSampleRate);
         if (type.Equals("Airspy", StringComparison.OrdinalIgnoreCase))
             sampleRate = AirspyRuntimeSampleRate(sampleRate, device.SampleRateOptions);

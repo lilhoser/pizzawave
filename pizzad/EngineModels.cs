@@ -1062,6 +1062,7 @@ public sealed record RfSurveyDetailDto(
 public sealed record RfSurveyProfileDto
 {
     public string SiteLabel { get; init; } = string.Empty;
+    public string RadioReferenceSid { get; init; } = string.Empty;
     public string SystemShortName { get; init; } = string.Empty;
     public IReadOnlyList<string> SystemShortNames { get; init; } = [];
     public IReadOnlyList<string> SourcePlanSystemShortNames { get; init; } = [];
@@ -1213,6 +1214,51 @@ public sealed record RfSurveySweepCandidateProgressDto(
     int VoiceTotalCalls,
     int VoiceRealCalls);
 
+public sealed record RfSurveyWaterfallStartRequest(
+    int? SourceIndex = null,
+    long? FrequencyHz = null,
+    int? SampleRateHz = null,
+    string? Gain = null,
+    int BinCount = 160,
+    int CaptureMilliseconds = 250,
+    int RefreshMilliseconds = 1200);
+
+public sealed record RfSurveyWaterfallStatusDto(
+    bool Active,
+    string Status,
+    string Message,
+    int SourceIndex,
+    string SdrType,
+    long CenterHz,
+    int SampleRate,
+    string Gain,
+    int BinCount,
+    DateTime? StartedAtUtc,
+    DateTime? UpdatedAtUtc,
+    RfSurveyWaterfallFrameDto? Frame,
+    bool TrWasActive,
+    string TrStopOutput = "",
+    string TrRestartOutput = "",
+    string TrRestartError = "");
+
+public sealed record RfSurveyWaterfallFrameDto(
+    int Sequence,
+    DateTime CapturedAtUtc,
+    long CenterHz,
+    int SampleRate,
+    double StartHz,
+    double BinWidthHz,
+    IReadOnlyList<double> PowersDb,
+    double MinDb,
+    double MaxDb,
+    double NoiseFloorDb,
+    double PeakDb,
+    double PeakFrequencyHz,
+    double ClipPct,
+    bool Overload,
+    long Bytes,
+    string Output);
+
 public sealed record RfSurveyP25ProbePreviewDto(
     bool Configured,
     bool Ready,
@@ -1328,7 +1374,8 @@ public sealed record RfSurveyCreateRequest(
     IReadOnlyList<string>? SourcePlanSystemShortNames = null,
     string? SourcePlanMode = null,
     IReadOnlyList<RfSurveySystemDto>? SystemDefinitions = null,
-    IReadOnlyList<RfSurveySourceDto>? SdrSources = null);
+    IReadOnlyList<RfSurveySourceDto>? SdrSources = null,
+    string? RadioReferenceSid = null);
 
 public sealed record RfSurveyDraftUpdateRequest(
     string? SystemShortName = null,
@@ -1344,7 +1391,8 @@ public sealed record RfSurveyDraftUpdateRequest(
     IReadOnlyList<string>? SourcePlanSystemShortNames = null,
     string? SourcePlanMode = null,
     IReadOnlyList<RfSurveySystemDto>? SystemDefinitions = null,
-    IReadOnlyList<RfSurveySourceDto>? SdrSources = null);
+    IReadOnlyList<RfSurveySourceDto>? SdrSources = null,
+    string? RadioReferenceSid = null);
 
 public sealed record RfSurveyNoteRequest(string Text);
 

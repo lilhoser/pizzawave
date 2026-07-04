@@ -3500,6 +3500,122 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.rf-waterfall-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.rf-waterfall-controls {
+  display: grid;
+  grid-template-columns: minmax(118px, 1fr) minmax(128px, .9fr) minmax(92px, .58fr) minmax(84px, .52fr) minmax(78px, .46fr) minmax(92px, .52fr) minmax(74px, .42fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.rf-waterfall-controls label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rf-waterfall-controls label span {
+  color: #9faab5;
+  font-size: 12px;
+}
+
+.rf-waterfall-controls input,
+.rf-waterfall-controls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.rf-waterfall-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  color: #cbd5de;
+}
+
+.rf-waterfall-check input {
+  width: auto;
+  margin: 0;
+}
+
+.rf-waterfall-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.rf-waterfall-display {
+  position: relative;
+  display: grid;
+  grid-template-rows: 150px minmax(260px, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.rf-waterfall-stage canvas {
+  width: 100%;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+
+.rf-spectrum-canvas {
+  height: 150px;
+  background: #202225;
+}
+
+.rf-waterfall-canvas {
+  height: 360px;
+  background: #00356f;
+}
+
+.rf-spectrum-hover {
+  position: absolute;
+  z-index: 2;
+  transform: translateX(-50%);
+  max-width: min(280px, 86%);
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 223, 53, .72);
+  border-radius: 4px;
+  background: rgba(13, 17, 23, .92);
+  color: #ffed8a;
+  font-size: 12px;
+  line-height: 1.2;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .32);
+}
+
+.rf-waterfall-readout {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.rf-waterfall-readout div {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  background: #20252a;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+
+.rf-waterfall-readout span {
+  color: #9faab5;
+  font-size: 12px;
+}
+
+.rf-waterfall-readout code {
+  color: #e9ecef;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .rf-step-progress-track.idle span {
   left: 0;
   width: 0;
@@ -4607,6 +4723,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   .rf-power-row { min-width: 980px; }
   .rf-sweep-plan-grid { grid-template-columns: 1fr; }
   .rf-sweep-plan-head { display: grid; }
+  .rf-waterfall-controls,
+  .rf-waterfall-stage { grid-template-columns: 1fr; }
+  .rf-spectrum-canvas { height: 96px; }
+  .rf-waterfall-canvas { height: 240px; }
   .rf-operation-table { overflow-x: auto; }
   .rf-validation-layout { grid-template-columns: 1fr; }
   .rf-validation-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }

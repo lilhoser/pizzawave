@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -436,10 +436,12 @@ function App() {
   const trIntentionallyStopped = liveTrActivity?.status === "stopped";
   const livePillClass = [
     "pill",
-    liveTrActivity?.stale ? "live-status-error" : trIntentionallyStopped ? "live-status-warning" : status === "Reconnecting" ? "live-status-warning" : status === "Live" ? "live-status-ok" : ""
+    trCoveragePaused ? "ingest-paused" : liveTrActivity?.stale ? "live-status-error" : trIntentionallyStopped ? "live-status-warning" : status === "Reconnecting" ? "live-status-warning" : status === "Live" ? "live-status-ok" : ""
   ].filter(Boolean).join(" ");
-  const livePillText = liveTrActivity?.stale ? "Live stale" : trIntentionallyStopped ? "TR stopped" : status;
-  const livePillTitle = liveTrActivity?.stale || trIntentionallyStopped
+  const livePillText = trCoveragePaused ? "TR paused" : liveTrActivity?.stale ? "Live stale" : trIntentionallyStopped ? "TR stopped" : status;
+  const livePillTitle = trCoveragePaused
+    ? radioSetupTrOperation || "trunk-recorder is temporarily paused or restarting while a Radio Setup job is running."
+    : liveTrActivity?.stale || trIntentionallyStopped
     ? liveTrActivity.message
     : "Live means the browser is connected to pizzad and recent TR activity has not crossed the silence threshold.";
   const cpuPillClass = ["pill", "status-pill-button", `cpu-health-${cpuSnapshot?.severity ?? "unknown"}`].join(" ");
@@ -660,7 +662,6 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           <button disabled={settingsLoadState.loading} onClick={() => void exportSettingsFile()}>Export Settings</button>
         </>}
         <span className={livePillClass} title={livePillTitle}>{livePillText}</span>
-        {trCoveragePaused && <span className="pill ingest-paused" title={radioSetupTrOperation || "trunk-recorder is temporarily paused or restarting while a Radio Setup job is running."}>TR paused</span>}
         {activeAutoplay && <span className="pill playback-status" title={activeAutoplay.label}>Playing "{activeAutoplay.label}"</span>}
         {alertSettings?.playback?.enabled && <div className="autoplay-menu-wrap">
           <button type="button" className={autoplayMuted ? "icon-button muted-button" : "icon-button"} title={autoplayMuted ? "Autoplay muted or blocked. Open playback menu." : "Autoplay enabled. Open playback menu."} onClick={() => setAutoplayMenuOpen(v => !v)}>{autoplayMuted ? <BellOff size={16} /> : <Bell size={16} />}</button>
@@ -2230,10 +2231,16 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   const [operationJob, setOperationJob] = useState<Job | null>(null);
   const [operationJobLogs, setOperationJobLogs] = useState<JobLog[]>([]);
   const autosaveSignatureRef = useRef("");
+  const draftDirtyRef = useRef(false);
   const restoredWorkspaceRef = useRef(false);
   const operationLogLastId = useRef(0);
   const rrSitesAutoLoadKeyRef = useRef("");
   const radioReferenceSidEditedRef = useRef(false);
+  const activeWorkspaceSystemsRef = useRef<string[]>([]);
+
+  function markDraftDirty() {
+    draftDirtyRef.current = true;
+  }
 
   useEffect(() => { void loadSurveys(); void loadRadioSetupContext(); }, []);
   useEffect(() => {
@@ -2288,9 +2295,9 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     const cached = readCachedRadioReferenceSites(sid);
     if (cached) {
       setRadioReferenceSites(cached);
-      pruneSelectedSitesToRadioReferenceCatalog(cached);
       return;
     }
+    if (!radioReferenceSidEditedRef.current && (detail?.profile.systems?.length ?? 0) > 0) return;
     if (radioReferenceSidEditedRef.current) return;
     if (busy || rrSitesAutoLoadKeyRef.current === sid) return;
     rrSitesAutoLoadKeyRef.current = sid;
@@ -2310,6 +2317,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       sourcePlanSystemShortNames: sourcePlanSystems.length ? sourcePlanSystems : selectedSystemNames,
       sourcePlanMode,
       systemDefinitions,
+      radioReferenceSid: radioReferenceSid.trim() || undefined,
       siteLabel: surveySiteLabel,
       rfPath: path,
       selectedSourceIndexes: autosaveSelectedSources,
@@ -2320,18 +2328,20 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     };
     const signature = JSON.stringify({ id: detail.session.id, ...body });
     if (signature === autosaveSignatureRef.current) return;
+    if (!draftDirtyRef.current) return;
     const timer = window.setTimeout(() => {
       autosaveSignatureRef.current = signature;
       void api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/draft`, {
         method: "POST",
         body: JSON.stringify(body)
       }).then(next => {
+        draftDirtyRef.current = false;
         setDetail(next);
         void loadSurveys();
       }).catch(error => setMessage(error instanceof Error ? error.message : "Unable to autosave radio setup draft."));
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [wizardOpen, detail?.session.id, surveySystem, surveySystems.join("|"), sourcePlanSystems.join("|"), sourcePlanMode, radioReferenceSites?.sites.length, surveySiteLabel, path, selectedSources, sdrSources, step, measurementMode, duration, configApplyInFlight]);
+  }, [wizardOpen, detail?.session.id, surveySystem, surveySystems.join("|"), sourcePlanSystems.join("|"), sourcePlanMode, radioReferenceSid, radioReferenceSites?.sites.length, surveySiteLabel, path, selectedSources, sdrSources, step, measurementMode, duration, configApplyInFlight]);
 
   async function loadSurveys() {
     const next = await api.request<RfSurveyList>(radioSetupApi);
@@ -2349,12 +2359,13 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     try {
       const status = await api.request<SetupStatus>("/api/v1/setup/status");
       const sid = String(status.values?.setup?.radioReferenceSid || status.values?.setup?.trRadioReferenceSid || status.values?.setup?.radioReferenceSystemId || "").trim();
+      if (activeWorkspaceSystemsRef.current.length > 0)
+        return;
       if (sid) {
         radioReferenceSidEditedRef.current = false;
         setRadioReferenceSid(sid);
         const cached = readCachedRadioReferenceSites(sid);
         setRadioReferenceSites(cached);
-        pruneSelectedSitesToRadioReferenceCatalog(cached);
       } else {
         radioReferenceSidEditedRef.current = false;
         setRadioReferenceSites(null);
@@ -2367,6 +2378,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   }
 
   function updateRadioReferenceSid(value: string) {
+    markDraftDirty();
     radioReferenceSidEditedRef.current = true;
     rrSitesAutoLoadKeyRef.current = "";
     setRadioReferenceSid(value);
@@ -2392,6 +2404,8 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     setBusy("rr-sites");
     setMessage("");
     try {
+      if (announce)
+        markDraftDirty();
       const result = await api.request<SetupTrConfigSites>("/api/v1/setup/tr-config/sites", {
         method: "POST",
         body: JSON.stringify({ radioReferenceSid: radioReferenceSid.trim() })
@@ -2416,6 +2430,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     if (configSubPage)
       localStorage.setItem(`pizzawave-radio-setup-config-subpage-${next.session.id}`, configSubPage);
     const restoredPath = normalizeRfPathProfile(next.profile.rfPath);
+    const restoredRadioReferenceSid = (next.profile.radioReferenceSid || "").trim();
     setPath(restoredPath);
     setSelectedSources(next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index));
     setSdrSources(next.profile.sourceOverride ? next.profile.sources : null);
@@ -2424,34 +2439,49 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     setMeasurementMode((next.profile.measurementMode as any) || "guided");
     setDuration(String(next.profile.probeDurationSeconds || 45));
     const nextSystems = next.profile.systemShortNames?.length ? next.profile.systemShortNames : next.profile.systemShortName ? [next.profile.systemShortName] : [];
+    activeWorkspaceSystemsRef.current = nextSystems;
     const nextSourcePlanSystems = next.profile.sourcePlanSystemShortNames?.length ? next.profile.sourcePlanSystemShortNames : nextSystems;
     const nextSourcePlanMode = next.profile.sourcePlanMode === "control" ? "control" : "full";
+    const matchingRadioReferenceSites = radioReferenceSites && radioReferenceCatalogContainsAnySystem(radioReferenceSites, nextSystems);
+    const signatureRadioReferenceSites = nextSystems.length > 0 && !matchingRadioReferenceSites ? null : radioReferenceSites;
+    const systemDefinitions = buildSurveySystemDefinitions(nextSystems, scopePlan, signatureRadioReferenceSites, next.profile.systems ?? []);
+    if (nextSystems.length > 0 && !matchingRadioReferenceSites) {
+      radioReferenceSidEditedRef.current = false;
+      rrSitesAutoLoadKeyRef.current = "";
+      setRadioReferenceSid(restoredRadioReferenceSid);
+      setRadioReferenceSites(null);
+    } else {
+      setRadioReferenceSid(restoredRadioReferenceSid);
+    }
     setSurveySystem(nextSystems[0] ?? next.profile.systemShortName);
     setSurveySystems(nextSystems);
     setSourcePlanSystems(nextSourcePlanSystems);
     setSourcePlanMode(nextSourcePlanMode);
     setSurveySiteLabel(next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName);
+    const savedStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-v2-${next.session.id}`));
+    const legacyStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-${next.session.id}`));
+    const legacyOrProfileStep = Number.isFinite(legacyStep) ? legacyStep : next.profile.currentStep || 0;
+    const migratedLegacyStep = legacyOrProfileStep === 4 || legacyOrProfileStep === 5 ? 4 : legacyOrProfileStep > 5 ? legacyOrProfileStep - 1 : legacyOrProfileStep;
+    const restoredStep = Math.max(0, Math.min(4, targetStep ?? (Number.isFinite(savedStep) ? savedStep : migratedLegacyStep)));
     autosaveSignatureRef.current = JSON.stringify({
       id: next.session.id,
       systemShortName: nextSystems[0] ?? next.profile.systemShortName,
       systemShortNames: nextSystems,
       sourcePlanSystemShortNames: nextSourcePlanSystems,
       sourcePlanMode: nextSourcePlanMode,
+      systemDefinitions,
+      radioReferenceSid: restoredRadioReferenceSid || undefined,
       siteLabel: next.profile.siteLabel || next.session.siteLabel || next.profile.systemShortName,
       rfPath: restoredPath,
       selectedSourceIndexes: next.profile.selectedSourceIndexes?.length ? next.profile.selectedSourceIndexes : next.profile.sources.map(source => source.index),
       sdrSources: next.profile.sourceOverride ? next.profile.sources : undefined,
-      currentStep: Math.max(0, Math.min(4, next.profile.currentStep || 0)),
+      currentStep: restoredStep,
       measurementMode: (next.profile.measurementMode as any) || "guided",
       probeDurationSeconds: next.profile.probeDurationSeconds || 45
     });
+    draftDirtyRef.current = false;
     setWizardOpen(openWizard);
-    const savedStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-v2-${next.session.id}`));
-    const legacyStep = Number(localStorage.getItem(`pizzawave-radio-setup-step-${next.session.id}`));
-    const legacyOrProfileStep = Number.isFinite(legacyStep) ? legacyStep : next.profile.currentStep || 0;
-    const migratedLegacyStep = legacyOrProfileStep === 4 || legacyOrProfileStep === 5 ? 4 : legacyOrProfileStep > 5 ? legacyOrProfileStep - 1 : legacyOrProfileStep;
-    const restoredStep = targetStep ?? (Number.isFinite(savedStep) ? savedStep : migratedLegacyStep);
-    setStep(Math.max(0, Math.min(4, restoredStep)));
+    setStep(restoredStep);
     void loadScopePlan(nextSystems[0] ?? next.profile.systemShortName);
   }
 
@@ -2525,6 +2555,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       await api.request(`${radioSetupApi}/${encodeURIComponent(row.id)}`, { method: "DELETE" });
       if (detail?.session.id === row.id) {
         setDetail(null);
+        activeWorkspaceSystemsRef.current = [];
         setWizardOpen(false);
         localStorage.removeItem("pizzawave-radio-setup-workspace");
         localStorage.removeItem("pizzawave-radio-setup-wizard-open");
@@ -2556,7 +2587,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       const initialPath = emptyRfPath();
       const created = await api.request<RfSurveyDetail>(radioSetupApi, {
         method: "POST",
-        body: JSON.stringify({ siteLabel: "Radio Setup", mode: measurementMode, rfPath: initialPath, selectedSourceIndexes: [], currentStep: 0, measurementMode, probeDurationSeconds: Number(duration) || 45, systemShortNames: [] })
+        body: JSON.stringify({ siteLabel: "Radio Setup", radioReferenceSid: radioReferenceSid.trim() || undefined, mode: measurementMode, rfPath: initialPath, selectedSourceIndexes: [], currentStep: 0, measurementMode, probeDurationSeconds: Number(duration) || 45, systemShortNames: [] })
       });
       setDetail(created);
       localStorage.setItem("pizzawave-radio-setup-workspace", created.session.id);
@@ -2575,6 +2606,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       setSdrScopeTouched(false);
       setWizardOpen(true);
       setStep(0);
+      draftDirtyRef.current = false;
       await loadSurveys();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to start radio setup.");
@@ -2798,17 +2830,17 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       path={path}
       setPath={setPath}
       rfPathTouched={rfPathTouched}
-      setRfPathTouched={setRfPathTouched}
+      setRfPathTouched={(value) => { if (value) markDraftDirty(); setRfPathTouched(value); }}
       selectedSources={selectedSources}
       setSelectedSources={setSelectedSources}
       sdrSources={sdrSources}
       setSdrSources={setSdrSources}
       sdrScopeTouched={sdrScopeTouched}
-      setSdrScopeTouched={setSdrScopeTouched}
+      setSdrScopeTouched={(value) => { if (value) markDraftDirty(); setSdrScopeTouched(value); }}
       measurementMode={measurementMode}
-      setMeasurementMode={setMeasurementMode}
+      setMeasurementMode={(value) => { markDraftDirty(); setMeasurementMode(value); }}
       duration={duration}
-      setDuration={setDuration}
+      setDuration={(value) => { markDraftDirty(); setDuration(value); }}
       scopePlan={scopePlan}
       radioReferenceSid={radioReferenceSid}
       setRadioReferenceSid={updateRadioReferenceSid}
@@ -2821,6 +2853,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       setSourcePlanMode={setSourcePlanMode}
       setSurveySystem={(value) => {
         const previous = surveySystem;
+        markDraftDirty();
         setSurveySystem(value);
         setSurveySystems(value ? [value] : []);
         setSourcePlanSystems(value ? [value] : []);
@@ -2833,6 +2866,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       setSurveySystems={(values) => {
         const previous = surveySystems.length ? surveySystems.join(", ") : surveySystem;
         const next = values.filter(Boolean);
+        markDraftDirty();
         setSurveySystems(next);
         setSurveySystem(next[0] ?? "");
         setSourcePlanSystems(next);
@@ -2845,7 +2879,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
         setSelectedSources(Array.from(new Set(proposed)).sort((a, b) => a - b));
       }}
       surveySiteLabel={surveySiteLabel}
-      setSurveySiteLabel={setSurveySiteLabel}
+      setSurveySiteLabel={(value) => { markDraftDirty(); setSurveySiteLabel(value); }}
       setScopePlan={setScopePlan}
       onClose={() => { setWizardOpen(false); localStorage.setItem("pizzawave-radio-setup-wizard-open", "0"); void loadSurveys(); }}
       onLoadScopePlan={loadScopePlan}
@@ -2936,6 +2970,11 @@ function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupC
       });
       continue;
     }
+    const previous = existing.find(system => system.shortName === name);
+    if (previous) {
+      add(previous);
+      continue;
+    }
     if (rrCatalogLoaded)
       continue;
     const live = scopePlan?.systems.find(system => system.shortName === name);
@@ -2943,11 +2982,15 @@ function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupC
       add({ shortName: live.shortName, siteLabel: live.shortName, controlChannelsHz: live.controlChannelsHz, voiceFrequenciesHz: live.voiceFrequenciesHz });
       continue;
     }
-    const previous = existing.find(system => system.shortName === name);
-    if (previous)
-      add(previous);
   }
   return definitions;
+}
+
+function radioReferenceCatalogContainsAnySystem(sites: SetupTrConfigSites | null, systemNames: string[]) {
+  if (!sites || systemNames.length === 0)
+    return false;
+  const catalogNames = new Set(sites.sites.flatMap(site => [site.shortName, site.name]).filter(Boolean).map(value => value.toLowerCase()));
+  return systemNames.some(name => catalogNames.has(name.toLowerCase()));
 }
 
 function buildSiteSourceCoverageRows(systems: RfSurveySystem[], sources: RfSurveySource[]) {
@@ -3370,17 +3413,8 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
       proposedSourceIndexes: [] as number[]
     }));
   const siteCandidates = rrCatalogLoaded ? rrSystems : liveSystems;
-  const siteCandidateSet = new Set(siteCandidates.map(system => system.shortName.toLowerCase()));
-  const visibleDraftSystems = rrCatalogLoaded
-    ? draftSystems.filter(name => siteCandidateSet.has(name.toLowerCase()))
-    : draftSystems;
+  const visibleDraftSystems = draftSystems;
   const draftSystemSet = new Set(visibleDraftSystems);
-  const catalogKey = `${rrCatalogLoaded ? "rr" : "live"}:${siteCandidates.map(system => system.shortName).join("|")}`;
-  useEffect(() => {
-    if (!rrCatalogLoaded)
-      return;
-    setDraftSystems(current => current.filter(name => siteCandidateSet.has(name.toLowerCase())));
-  }, [rrCatalogLoaded, catalogKey]);
   const confirmScopeChange = () =>
     !scopeHasDependentResults || confirmAction("Change selected sites?", "Changing selected sites clears saved RF measurements, error/gain sweep state, and call-quality results for this workspace.");
   const changeSystems = (next: string[]) => {
@@ -3559,6 +3593,8 @@ type SweepInsight = { recommendation: string; confidence: string; rationale: str
 type SweepHistoryEntry = { jobId?: number; capturedAtUtc: string; sourceIndex: number; bestErrorHz: number; bestScore: number; bestAvgDecodeRate: number; bestTotalDecode: number; bestHasDecodeSamples: boolean };
 type RfRunLogLine = { id: string; level: "info" | "result" | "error"; text: string; createdAtUtc: string };
 
+const AIRSPY_LINEARITY_GAIN_MAX = 21;
+
 const sweepPrecisionPresets: Record<Exclude<SweepPrecision, "custom">, Pick<SweepSourceInput, "rangeHz" | "stepHz" | "warmupSec" | "durationSec">> = {
   quick: { rangeHz: "600", stepHz: "300", warmupSec: "5", durationSec: "20" },
   balanced: { rangeHz: "600", stepHz: "150", warmupSec: "10", durationSec: "45" },
@@ -3572,10 +3608,10 @@ function sweepReliabilityLabel(input: SweepSourceInput) {
   return "Custom";
 }
 
-function defaultSweepInput(source?: Pick<RfSurveySource, "gain" | "errorHz">): SweepSourceInput {
+function defaultSweepInput(source?: Pick<RfSurveySource, "gain" | "errorHz" | "sdrType" | "device">): SweepSourceInput {
   return {
     precision: "quick",
-    gain: source?.gain || "",
+    gain: source?.gain || (source && isAirspyRfSource(source) ? "15" : ""),
     errorHz: source?.errorHz ? String(source.errorHz) : "",
     ppm: "",
     ...sweepPrecisionPresets.quick
@@ -3676,7 +3712,7 @@ function parseGainSequence(value: string) {
   return parsed.length ? parsed : ["0", "8", "14", "20", "21"];
 }
 
-function isAirspyRfSource(source: RfSurveySource) {
+function isAirspyRfSource(source: Pick<RfSurveySource, "sdrType" | "device">) {
   return source.sdrType?.toLowerCase() === "airspy" || source.device?.toLowerCase().includes("airspy=");
 }
 
@@ -3685,9 +3721,20 @@ function effectivePowerGainSequence(gains: string[], sources: RfSurveySource[]) 
     return gains;
   const airspyGains = gains.filter(gain => {
     const value = Number(gain);
-    return Number.isInteger(value) && value >= 0 && value <= 21;
+    return Number.isInteger(value) && value >= 0 && value <= AIRSPY_LINEARITY_GAIN_MAX;
   });
   return airspyGains.length ? airspyGains : ["15"];
+}
+
+function validateAirspyLinearityGain(value: string) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= AIRSPY_LINEARITY_GAIN_MAX;
+}
+
+function airspyGainNotice(sources: RfSurveySource[]) {
+  return sources.some(isAirspyRfSource)
+    ? `Airspy detected: RF captures use linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}.`
+    : "";
 }
 
 function parseIntegerSequence(value: string, fallback: number[]) {
@@ -3755,6 +3802,7 @@ function RfPathRefinementStep({
   const pages: { id: RfRefinementSubpage; title: string; status?: string; optional?: boolean }[] = [
     { id: "path", title: "RF Path", status: rfPathEntered ? "completed" : undefined },
     { id: "inventory", title: "SDR Inventory", status: props.inventory?.status },
+    { id: "waterfall", title: "Waterfall", status: undefined, optional: true },
     { id: "power", title: "RF Sweep", status: validationSweepStatus }
   ];
   return <div className="rf-step-stack">
@@ -3771,11 +3819,11 @@ function RfPathRefinementStep({
   </div>;
 }
 
-type RfRefinementSubpage = "path" | "cc" | "inventory" | "power" | "p25" | "sweep";
+type RfRefinementSubpage = "path" | "cc" | "inventory" | "waterfall" | "power" | "p25" | "sweep";
 
 function normalizeRfRefinementSubpage(value: string | null): RfRefinementSubpage {
   if (value === "cc" || value === "p25" || value === "sweep") return "power";
-  return value === "inventory" || value === "power" ? value : "path";
+  return value === "inventory" || value === "waterfall" || value === "power" ? value : "path";
 }
 
 function RfConditionOverview({ path, systemShortName, sources, selectedSources, controlChannels }: { path: RfSurveyPathProfile; systemShortName: string; sources: RfSurveySource[]; selectedSources: number[]; controlChannels: number[] }) {
@@ -3904,6 +3952,8 @@ function SiteValidationStep({
   const effectivePowerSources = effectiveSweepSources;
   const powerGains = parseGainSequence(powerGainSequence);
   const effectivePowerGains = effectivePowerGainSequence(powerGains, effectivePowerSources);
+  const airspyPowerGainMessage = airspyGainNotice(effectivePowerSources);
+  const airspyPowerGainInvalid = effectivePowerSources.some(isAirspyRfSource) && powerGains.some(gain => !validateAirspyLinearityGain(gain));
   const selectedSampleRates = effectivePowerSources.map(source => source.sampleRate).filter(rate => Number.isFinite(rate) && rate > 0);
   const defaultSweepSampleRate = selectedSampleRates.length ? selectedSampleRates[0] : 2_400_000;
   const sweepSampleRatesSame = selectedSampleRates.length > 0 && selectedSampleRates.every(rate => rate === defaultSweepSampleRate);
@@ -4092,6 +4142,11 @@ function SiteValidationStep({
       setValidationProgress(null);
       return;
     }
+    if (airspyPowerGainInvalid) {
+      setSweepMessage(`Airspy RF Sweep gain must be whole-number linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}.`);
+      setValidationProgress(null);
+      return;
+    }
     return onRunExperiment("rf_validation_sweep", `about ${formatElapsed(validationEstimateSeconds)}`, undefined, validationSweepRequest());
   };
   const runValidationSweepForSite = (system: RfSurveySystem) => {
@@ -4199,6 +4254,14 @@ function SiteValidationStep({
       setSweepMessage("Sweep requires a site, control channel, and selected SDR source.");
       return;
     }
+    const invalidAirspySource = effectiveSweepSources.find(source => {
+      const input = sweepInputs[String(source.index)] ?? defaultSweepInput(source);
+      return isAirspyRfSource(source) && !validateAirspyLinearityGain(input.gain.trim() || source.gain || "15");
+    });
+    if (invalidAirspySource) {
+      setSweepMessage(`Source ${invalidAirspySource.index} is Airspy; sweep gain must be whole-number linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}.`);
+      return;
+    }
     setSweepBusy("start");
     setSweepMessage("");
     try {
@@ -4208,6 +4271,8 @@ function SiteValidationStep({
         effectiveSweepSources.map(source => ({
           index: source.index,
           serial: source.serial,
+          sdrType: source.sdrType,
+          device: source.device,
           centerFrequency: source.centerHz,
           sampleRate: source.sampleRate,
           errorHz: source.errorHz,
@@ -4337,6 +4402,25 @@ function SiteValidationStep({
       body: null
     },
     {
+      id: "waterfall",
+      title: "Waterfall",
+      status: undefined,
+      estimate: "live",
+      locked: !inventory,
+      action: "Start",
+      busyKey: "waterfall",
+      begin: undefined,
+      result: undefined,
+      body: <WaterfallStep
+        surveyId={surveyId}
+        locked={!inventory}
+        sources={sources}
+        selectedSources={selectedSources}
+        controlChannels={controlChannels}
+        activeControlChannelHz={activeControlChannelHz}
+      />
+    },
+    {
       id: "power",
       title: "RF Sweep",
       status: validationSweepStatus,
@@ -4351,13 +4435,14 @@ function SiteValidationStep({
           <div className="rf-sweep-form">
             <div className="rf-cc-runline compact">
               <label><span>Sample rate MHz</span><input className={validationSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" value={validationSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
-              <label><span>Gain sequence</span><input value={powerGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
+              <label><span>Gain sequence</span><input className={airspyPowerGainInvalid ? "invalid" : ""} value={powerGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
               <label><span>Error search</span><input className="rf-short-input" size={6} value={validationErrorOffsets} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
               <label><span>Metric candidates</span><input className="rf-short-input" size={6} inputMode="numeric" value={validationMetricsCandidates} onChange={event => setValidationMetricsCandidates(event.target.value)} /></label>
-              <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationSampleRateOk} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
+              <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationSampleRateOk || airspyPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
               {(validationRunning || validationProgress?.active) && <button disabled={sweepBusy === "cancel-validation"} onClick={() => void cancelValidationSweep()}>{sweepBusy === "cancel-validation" ? "Canceling..." : "Cancel"}</button>}
             </div>
             {validationSampleRateMessage && <div className="settings-message error">{validationSampleRateMessage}</div>}
+            {airspyPowerGainMessage && <div className={airspyPowerGainInvalid ? "settings-message error" : "setup-note"}>{airspyPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
           </div>
           <div className="rf-sweep-callout" role="status" aria-live="polite">
             <span>Estimated time</span>
@@ -4447,6 +4532,8 @@ function SiteValidationStep({
           {effectiveSweepSources.map(source => {
             const input = sweepInputs[String(source.index)] ?? defaultSweepInput(source);
             const sourceState = sweepSourceStates[String(source.index)] ?? "Pending";
+            const sourceIsAirspy = isAirspyRfSource(source);
+            const sourceGainInvalid = sourceIsAirspy && !validateAirspyLinearityGain(input.gain.trim() || source.gain || "15");
             return <div className={highlightedSweepSource === source.index ? "rf-sweep-row flash" : "rf-sweep-row"} key={source.index}>
               <div><strong>Source {source.index}</strong><small>{source.serial || source.device}</small></div>
               <label><span>{sweepReliabilityLabel(input)}</span><select value={input.precision} onChange={event => applySweepPrecision(source.index, event.target.value as SweepPrecision)}>
@@ -4456,7 +4543,7 @@ function SiteValidationStep({
                 <option value="custom">Custom</option>
               </select></label>
               <label><span>Base error Hz</span><input inputMode="numeric" value={input.errorHz} onChange={event => updateSweepField(source.index, { errorHz: event.target.value })} /></label>
-              <label><span>Gain</span><input value={input.gain} onChange={event => updateSweepField(source.index, { gain: event.target.value })} /></label>
+              <label><span>{sourceIsAirspy ? `Linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={sourceGainInvalid ? "invalid" : ""} value={input.gain} onChange={event => updateSweepField(source.index, { gain: event.target.value })} /></label>
               <label><span>Range Hz</span><input inputMode="numeric" value={input.rangeHz} onChange={event => updateSweepField(source.index, { rangeHz: event.target.value })} /></label>
               <label><span>Step Hz</span><input inputMode="numeric" value={input.stepHz} onChange={event => updateSweepField(source.index, { stepHz: event.target.value })} /></label>
               <label><span>{input.warmupSec}s warmup</span><input inputMode="numeric" value={input.durationSec} onChange={event => updateSweepField(source.index, { durationSec: event.target.value })} /></label>
@@ -4559,7 +4646,7 @@ function SiteValidationStep({
       : current.result?.type === "sdr_inventory"
         ? () => onShowDetails({ title: "SDR Inventory Details", body: <pre className="log-box">{current.result?.evidenceJson}</pre> })
         : undefined;
-  const hideSubpageHeader = current.id === "inventory" || current.id === "power";
+  const hideSubpageHeader = current.id === "inventory" || current.id === "power" || current.id === "waterfall";
   return <div className="rf-step-stack">
     {!hideSubpageHeader && <div className="rf-section-headline">
       <div>
@@ -4570,14 +4657,718 @@ function SiteValidationStep({
       <span>Estimated time: {current.estimate}</span>
       <span>Recommended next: {nextRequired.title}</span>
     </div>}
-    {currentRunning && current.id !== "power" && <StepProgressIndicator label={`${current.title} is running`} />}
+    {currentRunning && current.id !== "power" && current.id !== "waterfall" && <StepProgressIndicator label={`${current.title} is running`} />}
     {current.body}
     {current.id !== "cc" && current.id !== "power" && current.result && <ExperimentSummary experiment={current.result} onDetails={detailsAction} />}
-    {current.id !== "cc" && current.id !== "power" && <div className="rf-subpage-actions">
+    {current.id !== "cc" && current.id !== "power" && current.id !== "waterfall" && <div className="rf-subpage-actions">
       <button className="danger-button" disabled={!canBeginCurrent} onClick={() => void current.begin?.()}>{currentActionLabel}</button>
       {current.locked && <span className="muted">Run SDR inventory first</span>}
     </div>}
   </div>;
+}
+
+function WaterfallStep({
+  surveyId,
+  locked,
+  sources,
+  selectedSources,
+  controlChannels,
+  activeControlChannelHz
+}: {
+  surveyId: string;
+  locked: boolean;
+  sources: RfSurveySource[];
+  selectedSources: number[];
+  controlChannels: number[];
+  activeControlChannelHz: number;
+}) {
+  const effectiveSources = sources.filter(source => selectedSources.includes(source.index));
+  const sourceOptions = effectiveSources.length ? effectiveSources : sources.slice(0, 1);
+  const defaultSource = sourceOptions[0] ?? sources[0];
+  const [sourceIndex, setSourceIndex] = useState(() => defaultSource?.index ?? 0);
+  const selectedSource = sources.find(source => source.index === sourceIndex) ?? defaultSource;
+  const selectedSourceIsAirspy = selectedSource ? isAirspyRfSource(selectedSource) : false;
+  const defaultFrequency = activeControlChannelHz || controlChannels[0] || selectedSource?.centerHz || 0;
+  const [frequencyMhz, setFrequencyMhz] = useState(() => defaultFrequency ? formatMhzInput(defaultFrequency) : "");
+  const [sampleRateMhz, setSampleRateMhz] = useState(() => formatMhzInput(defaultWaterfallSampleRate(selectedSource)));
+  const [gain, setGain] = useState(() => selectedSource?.gain || "15");
+  const [spectrumSpanDb, setSpectrumSpanDb] = useState(35);
+  const [showControlChannelLines, setShowControlChannelLines] = useState(true);
+  const [spectrumHover, setSpectrumHover] = useState<SpectrumHover | null>(null);
+  const [status, setStatus] = useState<RfSurveyWaterfallStatus | null>(null);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState("");
+  const spectrumCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const smoothedSpectrumRef = useRef<number[]>([]);
+  const heldSpectrumRef = useRef<number[]>([]);
+  const spectrumScaleRef = useRef<SpectrumDisplayScale | null>(null);
+  const waterfallScaleRef = useRef<SpectrumDisplayScale | null>(null);
+  const spectrumAxisRef = useRef<SpectrumAxis | null>(null);
+  const peakHistoryRef = useRef<Map<string, SpectrumPeakTrack>>(new Map());
+  const visiblePeaksRef = useRef<PositionedSpectrumPeak[]>([]);
+  const activeRef = useRef(false);
+  const lastFrameRef = useRef("");
+  const hasGoodWaterfallFrameRef = useRef(false);
+  const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
+  const sampleRateHz = Math.round(Number(sampleRateMhz) * 1_000_000);
+  const controlChannelOptions = Array.from(new Set(controlChannels.filter(value => Number.isFinite(value) && value > 0).map(value => Math.round(value)))).sort((left, right) => left - right);
+  const selectedControlChannelHz = controlChannelOptions.find(value => Math.abs(value - frequencyHz) < 500) ?? 0;
+  const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
+  const sampleRateOk = Number.isFinite(sampleRateHz) && sampleRateHz > 0;
+  const gainOk = !selectedSourceIsAirspy || validateAirspyLinearityGain(gain.trim() || selectedSource?.gain || "15");
+  const canStart = !locked && !busy && sourceOptions.length > 0 && frequencyOk && sampleRateOk && gainOk;
+
+  useEffect(() => {
+    if (!selectedSource) return;
+    setSampleRateMhz(current => current || formatMhzInput(defaultWaterfallSampleRate(selectedSource)));
+    setGain(current => current || selectedSource.gain || "15");
+  }, [selectedSource?.index]);
+
+  useEffect(() => {
+    if (!activeControlChannelHz) return;
+    setFrequencyMhz(current => current || formatMhzInput(activeControlChannelHz));
+  }, [activeControlChannelHz]);
+
+  useEffect(() => {
+    spectrumScaleRef.current = null;
+  }, [spectrumSpanDb]);
+
+  useEffect(() => {
+    activeRef.current = status?.active === true;
+  }, [status?.active]);
+
+  useEffect(() => {
+    let stopped = false;
+    async function loadStatus() {
+      try {
+        const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall`);
+        if (stopped) return;
+        setStatus(next);
+        setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
+      } catch (error) {
+        if (!stopped)
+          setMessage(error instanceof Error ? error.message : "Waterfall status refresh failed.");
+      }
+    }
+    void loadStatus();
+    return () => {
+      stopped = true;
+    };
+  }, [surveyId]);
+
+  useEffect(() => {
+    if (!status?.active) return;
+    let stopped = false;
+    async function poll() {
+      try {
+        const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall`);
+        if (!stopped) {
+          setStatus(next);
+          if (shouldShowWaterfallMessage(next.message, next))
+            setMessage(next.message);
+        }
+      } catch (error) {
+        if (!stopped)
+          setMessage(error instanceof Error ? error.message : "Waterfall status refresh failed.");
+      }
+    }
+    const timer = window.setInterval(() => void poll(), 120);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [surveyId, status?.active]);
+
+  useEffect(() => {
+    return () => {
+      if (activeRef.current)
+        void api.request(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`, { method: "POST" });
+    };
+  }, [surveyId]);
+
+  useEffect(() => {
+    const frame = status?.frame;
+    const renderKey = frame ? `${frame.sequence}:${spectrumSpanDb}:${showControlChannelLines ? "cc" : "no-cc"}:${controlChannels.join(",")}` : "";
+    if (!frame || renderKey === lastFrameRef.current)
+      return;
+    lastFrameRef.current = renderKey;
+    if (frame.powersDb.length === 0) {
+      const detail = frame.output || status?.message || "Waterfall capture did not return IQ samples.";
+      if (!hasGoodWaterfallFrameRef.current) {
+        setMessage(detail);
+        drawWaterfallNotice(spectrumCanvasRef.current, detail, true);
+        drawWaterfallNotice(canvasRef.current, "No spectrum samples to display.", false);
+      } else {
+        setMessage("");
+      }
+      return;
+    }
+    hasGoodWaterfallFrameRef.current = true;
+    const smoothed = smoothSpectrumPowers(smoothedSpectrumRef.current, frame.powersDb, 0.22);
+    smoothedSpectrumRef.current = smoothed;
+    heldSpectrumRef.current = holdSpectrumPowers(heldSpectrumRef.current, smoothed);
+    const axis = spectrumAxisRef.current ?? { startHz: frame.startHz, sampleRate: frame.sampleRate };
+    spectrumAxisRef.current = axis;
+    spectrumScaleRef.current = buildSpectrumDisplayScale(frame, smoothed, spectrumSpanDb, spectrumScaleRef.current);
+    waterfallScaleRef.current = buildWaterfallDisplayScale(frame, waterfallScaleRef.current);
+    const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
+    const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
+    visiblePeaksRef.current = positionedPeaks;
+    drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
+      controlChannelsHz: controlChannelOptions,
+      showControlChannels: showControlChannelLines,
+      peaks: positionedPeaks
+    });
+    drawWaterfallFrame(canvasRef.current, smoothWaterfallBins(frame.powersDb), waterfallScaleRef.current);
+  }, [status?.frame?.sequence, spectrumSpanDb, showControlChannelLines, controlChannels.join(",")]);
+
+  async function startWaterfall() {
+    if (!gainOk) {
+      setMessage(`Airspy waterfall gain must be whole-number linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}.`);
+      return;
+    }
+    setBusy("start");
+    setMessage("");
+    lastFrameRef.current = "";
+    hasGoodWaterfallFrameRef.current = false;
+    smoothedSpectrumRef.current = [];
+    heldSpectrumRef.current = [];
+    peakHistoryRef.current.clear();
+    visiblePeaksRef.current = [];
+    setSpectrumHover(null);
+    spectrumScaleRef.current = null;
+    waterfallScaleRef.current = null;
+    spectrumAxisRef.current = null;
+    clearWaterfallCanvas(spectrumCanvasRef.current);
+    clearWaterfallCanvas(canvasRef.current);
+    try {
+      const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/start`, {
+        method: "POST",
+        body: JSON.stringify({
+          sourceIndex,
+          frequencyHz,
+          sampleRateHz,
+          gain,
+          binCount: 4096,
+          captureMilliseconds: 60,
+          refreshMilliseconds: 120
+        })
+      });
+      setStatus(next);
+      setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Waterfall failed to start.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function stopWaterfall() {
+    setBusy("stop");
+    setMessage("");
+    try {
+      const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`, { method: "POST" });
+      setStatus(next);
+      setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Waterfall failed to stop.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function handleSpectrumMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
+    const canvas = spectrumCanvasRef.current;
+    const axis = spectrumAxisRef.current;
+    if (!canvas || !axis)
+      return;
+    const rect = canvas.getBoundingClientRect();
+    const xCanvas = (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width);
+    const nearest = nearestSpectrumPeak(xCanvas, visiblePeaksRef.current);
+    if (!nearest) {
+      setSpectrumHover(null);
+      return;
+    }
+    const xCss = nearest.x * rect.width / canvas.width;
+    const yCss = nearest.y * rect.height / canvas.height;
+    setSpectrumHover({
+      left: canvas.offsetLeft + xCss,
+      top: canvas.offsetTop + Math.max(6, yCss - 34),
+      text: `${formatSpectrumTickHz(nearest.frequencyHz)} / ${formatFixed(nearest.powerDb, 1)} dB / SNR ${formatFixed(nearest.snrDb, 1)} dB`
+    });
+  }
+
+  const frame = status?.frame;
+  const visibleMessage = shouldShowWaterfallMessage(message, status) ? message : "";
+  const peakSnrDb = frame && Number.isFinite(frame.peakDb) && Number.isFinite(frame.noiseFloorDb) ? frame.peakDb - frame.noiseFloorDb : NaN;
+  return <div className="rf-waterfall-panel">
+    <div className="rf-waterfall-controls">
+      <label><span>Source</span><select value={String(sourceIndex)} disabled={locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
+        {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}</option>)}
+      </select></label>
+      <label><span>Control channel</span><select value={selectedControlChannelHz ? String(selectedControlChannelHz) : ""} disabled={controlChannelOptions.length === 0} onChange={event => event.target.value && setFrequencyMhz(formatMhzInput(Number(event.target.value)))}>
+        <option value="">Manual</option>
+        {controlChannelOptions.map(value => <option value={String(value)} key={value}>{formatRfHz(value)}</option>)}
+      </select></label>
+      <label><span>Frequency MHz</span><input className={frequencyOk ? "" : "invalid"} inputMode="decimal" value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} /></label>
+      <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>
+      <label><span>{selectedSourceIsAirspy ? `Lin gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={gainOk ? "" : "invalid"} inputMode={selectedSourceIsAirspy ? "numeric" : undefined} value={gain} onChange={event => setGain(event.target.value)} /></label>
+      <label><span>Power span</span><select value={String(spectrumSpanDb)} onChange={event => setSpectrumSpanDb(Number(event.target.value))}>
+        <option value="20">20 dB</option>
+        <option value="35">35 dB</option>
+        <option value="50">50 dB</option>
+        <option value="70">70 dB</option>
+      </select></label>
+      <label className="rf-waterfall-check"><input type="checkbox" checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
+      <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
+      <button disabled={!status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
+    </div>
+    {locked && <div className="setup-note">Run SDR Inventory first.</div>}
+    {visibleMessage && <div className="settings-message error">{visibleMessage}</div>}
+    <div className="rf-waterfall-stage">
+      <div className="rf-waterfall-display">
+        <canvas className="rf-spectrum-canvas" ref={spectrumCanvasRef} width={1024} height={120} aria-label="RF spectrum" onMouseMove={handleSpectrumMouseMove} onMouseLeave={() => setSpectrumHover(null)} />
+        {spectrumHover && <div className="rf-spectrum-hover" style={{ left: spectrumHover.left, top: spectrumHover.top }}>{spectrumHover.text}</div>}
+        <canvas className="rf-waterfall-canvas" ref={canvasRef} width={1024} height={300} aria-label="RF waterfall" />
+      </div>
+      <div className="rf-waterfall-readout">
+        <div><span>Status</span><code>{status ? label(status.status) : "Stopped"}</code></div>
+        <div><span>Center</span><code>{frame ? formatRfHz(frame.centerHz) : frequencyOk ? formatRfHz(frequencyHz) : "--"}</code></div>
+        <div><span>Span</span><code>{frame ? `${formatFixed(frame.sampleRate / 1_000_000, 3)} MHz` : "--"}</code></div>
+        <div><span>Rate</span><code>{frame ? `${formatFixed(frame.sampleRate / 1_000_000, 3)} MS/s` : sampleRateOk ? `${formatFixed(sampleRateHz / 1_000_000, 3)} MS/s` : "--"}</code></div>
+        <div><span>Gain</span><code>{selectedSourceIsAirspy ? `Linearity ${gain || "--"}` : gain || "--"}</code></div>
+        <div><span>Peak</span><code>{frame ? `${formatRfHz(frame.peakFrequencyHz)} / ${formatFixed(frame.peakDb, 1)} dB` : "--"}</code></div>
+        <div><span>Floor</span><code>{frame ? `${formatFixed(frame.noiseFloorDb, 1)} dB` : "--"}</code></div>
+        <div><span>SNR</span><code>{Number.isFinite(peakSnrDb) ? `${formatFixed(peakSnrDb, 1)} dB` : "--"}</code></div>
+        <div><span>Clip</span><code>{frame ? `${formatFixed(frame.clipPct, 2)}%${frame.overload ? " overload" : ""}` : "--"}</code></div>
+        <div><span>TR</span><code>{status?.active && status.trWasActive ? "Paused" : status?.trRestartError ? "Restart failed" : "Normal"}</code></div>
+      </div>
+    </div>
+  </div>;
+}
+
+function defaultWaterfallSampleRate(source?: RfSurveySource) {
+  return source?.sdrType?.toLowerCase() === "airspy" || source?.device?.toLowerCase().includes("airspy")
+    ? 6_000_000
+    : source?.sampleRate || 2_400_000;
+}
+
+function shouldShowWaterfallMessage(message: string | undefined, status: RfSurveyWaterfallStatus | null | undefined) {
+  const text = (message ?? "").trim();
+  if (!text)
+    return false;
+  if (status?.trRestartError || status?.status === "failed")
+    return true;
+  return /\b(fail(?:ed|ure)?|error|invalid|requires?|must|unable|blocked|too small|not created|no spectrum|no samples|did not)\b/i.test(text);
+}
+
+function clearWaterfallCanvas(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.fillStyle = "#00356f";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawWaterfallNotice(canvas: HTMLCanvasElement | null, message: string, spectrum: boolean) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = spectrum ? "#202225" : "#00356f";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(230, 237, 243, .86)";
+  ctx.font = "13px Segoe UI, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(truncateCanvasText(ctx, message, canvas.width - 36), canvas.width / 2, canvas.height / 2);
+}
+
+function truncateCanvasText(ctx: CanvasRenderingContext2D, value: string, maxWidth: number) {
+  const text = value.trim() || "Waterfall capture failed.";
+  if (ctx.measureText(text).width <= maxWidth)
+    return text;
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (ctx.measureText(`${text.slice(0, mid)}...`).width <= maxWidth)
+      low = mid;
+    else
+      high = mid - 1;
+  }
+  return `${text.slice(0, low)}...`;
+}
+
+function smoothSpectrumPowers(previous: number[], next: number[], alpha: number) {
+  if (!previous.length || previous.length !== next.length)
+    return next.slice();
+  const attack = Math.max(alpha, 0.58);
+  const decay = Math.min(alpha, 0.16);
+  return next.map((value, index) => {
+    const previousValue = previous[index];
+    const weight = value > previousValue ? attack : decay;
+    return previousValue * (1 - weight) + value * weight;
+  });
+}
+
+function holdSpectrumPowers(previous: number[], next: number[]) {
+  if (!previous.length || previous.length !== next.length)
+    return next.slice();
+  const decayDbPerFrame = 1.6;
+  return next.map((value, index) => Math.max(value, previous[index] - decayDbPerFrame));
+}
+
+function smoothWaterfallBins(powers: number[]) {
+  if (powers.length < 3)
+    return powers.slice();
+  return powers.map((value, index) => {
+    const left = index > 0 ? powers[index - 1] : value;
+    const right = index < powers.length - 1 ? powers[index + 1] : value;
+    return left * 0.22 + value * 0.56 + right * 0.22;
+  });
+}
+
+type SpectrumDisplayScale = { lowDb: number; highDb: number };
+type SpectrumAxis = { startHz: number; sampleRate: number };
+type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; snrDb: number; hits: number; misses: number };
+type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number };
+type SpectrumHover = { left: number; top: number; text: string };
+type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
+
+function buildSpectrumDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], spanDb = 45, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {
+  if (previous)
+    return previous;
+  const span = Math.max(15, Math.min(90, spanDb));
+  const finitePowers = powers.filter(Number.isFinite);
+  const peak = Number.isFinite(frame.peakDb) ? frame.peakDb : finitePowers.length ? Math.max(...finitePowers) : -40;
+  const noise = Number.isFinite(frame.noiseFloorDb) ? frame.noiseFloorDb : finitePowers.length ? percentile(finitePowers, 0.5) : peak - span * 0.55;
+  const high = Math.ceil(Math.max(peak + 3, noise + Math.min(span * 0.72, 18)) / 5) * 5;
+  return { lowDb: high - span, highDb: high };
+}
+
+function buildWaterfallDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {
+  if (previous)
+    return previous;
+  const noise = Number.isFinite(frame.noiseFloorDb) ? frame.noiseFloorDb : frame.minDb;
+  const peak = Number.isFinite(frame.peakDb) ? frame.peakDb : frame.maxDb;
+  const low = Math.floor((noise + 1) / 2) * 2;
+  const span = Math.max(18, Math.min(34, peak - low + 6));
+  return { lowDb: low, highDb: low + span };
+}
+
+function updateConsistentSpectrumPeaks(history: Map<string, SpectrumPeakTrack>, frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], axis: SpectrumAxis) {
+  const noiseFloorDb = Number.isFinite(frame.noiseFloorDb) ? frame.noiseFloorDb : percentile(powers.filter(Number.isFinite), 0.5);
+  const candidates: SpectrumPeakTrack[] = [];
+  for (let index = 2; index < powers.length - 2; index++) {
+    const value = powers[index];
+    if (!Number.isFinite(value))
+      continue;
+    const snrDb = value - noiseFloorDb;
+    if (snrDb < 8)
+      continue;
+    if (value < powers[index - 1] || value < powers[index + 1] || value < powers[index - 2] || value < powers[index + 2])
+      continue;
+    const frequencyHz = axis.startHz + (index + 0.5) * axis.sampleRate / Math.max(1, powers.length);
+    const key = String(Math.round(frequencyHz / 5_000) * 5_000);
+    candidates.push({ key, frequencyHz, powerDb: value, snrDb, hits: 1, misses: 0 });
+  }
+
+  for (const track of history.values()) {
+    track.misses += 1;
+    track.hits = Math.max(0, track.hits - 1);
+  }
+
+  for (const candidate of candidates.sort((left, right) => right.snrDb - left.snrDb).slice(0, 16)) {
+    const previous = history.get(candidate.key);
+    history.set(candidate.key, previous
+      ? {
+        ...previous,
+        frequencyHz: previous.frequencyHz * 0.65 + candidate.frequencyHz * 0.35,
+        powerDb: previous.powerDb * 0.55 + candidate.powerDb * 0.45,
+        snrDb: previous.snrDb * 0.55 + candidate.snrDb * 0.45,
+        hits: Math.min(8, previous.hits + 2),
+        misses: 0
+      }
+      : candidate);
+  }
+
+  for (const [key, track] of history.entries()) {
+    if (track.misses > 12 || track.hits <= 0)
+      history.delete(key);
+  }
+
+  return [...history.values()]
+    .filter(track => track.hits >= 4 && track.misses <= 2 && track.snrDb >= 8)
+    .sort((left, right) => right.snrDb - left.snrDb)
+    .slice(0, 10);
+}
+
+function positionSpectrumPeaks(peaks: SpectrumPeakTrack[], scale: SpectrumDisplayScale, axis: SpectrumAxis): PositionedSpectrumPeak[] {
+  const { margin, plotWidth, plotHeight } = spectrumGeometry();
+  const low = scale.lowDb;
+  const high = Math.max(low + 1, scale.highDb);
+  const yFor = (value: number) => margin.top + (1 - Math.max(0, Math.min(1, (value - low) / Math.max(1, high - low)))) * plotHeight;
+  return peaks
+    .map(peak => ({
+      ...peak,
+      x: margin.left + (peak.frequencyHz - axis.startHz) / Math.max(1, axis.sampleRate) * plotWidth,
+      y: yFor(peak.powerDb)
+    }))
+    .filter(peak => peak.x >= margin.left && peak.x <= margin.left + plotWidth && peak.y >= margin.top && peak.y <= margin.top + plotHeight);
+}
+
+function nearestSpectrumPeak(xCanvas: number, peaks: PositionedSpectrumPeak[]) {
+  let nearest: PositionedSpectrumPeak | null = null;
+  let nearestDistance = Infinity;
+  for (const peak of peaks) {
+    const distance = Math.abs(peak.x - xCanvas);
+    if (distance < nearestDistance) {
+      nearest = peak;
+      nearestDistance = distance;
+    }
+  }
+  return nearest && nearestDistance <= 16 ? nearest : null;
+}
+
+function spectrumGeometry(width = 1024, height = 150) {
+  const margin = { left: 58, right: 10, top: 10, bottom: 30 };
+  return {
+    margin,
+    plotWidth: width - margin.left - margin.right,
+    plotHeight: height - margin.top - margin.bottom
+  };
+}
+
+function drawSpectrumFrame(canvas: HTMLCanvasElement | null, frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], scale: SpectrumDisplayScale, axis: SpectrumAxis, options?: SpectrumDrawOptions) {
+  if (!canvas || powers.length === 0) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = 1024;
+  const height = 150;
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const { margin, plotWidth, plotHeight } = spectrumGeometry(width, height);
+  const low = scale.lowDb;
+  const high = Math.max(low + 1, scale.highDb);
+  const yFor = (value: number) => margin.top + (1 - Math.max(0, Math.min(1, (value - low) / Math.max(1, high - low)))) * plotHeight;
+  const noiseFloorDb = Number.isFinite(frame.noiseFloorDb) ? frame.noiseFloorDb : Math.min(...powers.filter(Number.isFinite));
+  const noiseY = yFor(noiseFloorDb);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#202225";
+  ctx.fillRect(0, 0, width, height);
+  ctx.font = "11px Segoe UI, system-ui, sans-serif";
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(230, 237, 243, .24)";
+  ctx.strokeRect(margin.left, margin.top, plotWidth, plotHeight);
+  ctx.fillStyle = "rgba(230, 237, 243, .86)";
+  ctx.save();
+  ctx.translate(14, margin.top + plotHeight / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center";
+  ctx.fillText("Power (dB)", 0, 0);
+  ctx.restore();
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let t = 0; t <= 4; t++) {
+    const value = low + (high - low) * t / 4;
+    const y = yFor(value);
+    ctx.strokeStyle = t === 0 || t === 4 ? "rgba(230, 237, 243, .22)" : "rgba(230, 237, 243, .10)";
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(margin.left + plotWidth, y);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(230, 237, 243, .8)";
+    ctx.fillText(`${Math.round(value)}`, margin.left - 6, y);
+  }
+  ctx.strokeStyle = "rgba(255, 223, 53, .95)";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(margin.left, noiseY);
+  ctx.lineTo(margin.left + plotWidth, noiseY);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(230, 237, 243, .38)";
+  ctx.beginPath();
+  ctx.moveTo(margin.left + plotWidth / 2, margin.top);
+  ctx.lineTo(margin.left + plotWidth / 2, margin.top + plotHeight);
+  ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let t = 0; t <= 4; t++) {
+    const x = margin.left + plotWidth * t / 4;
+    const frequency = axis.startHz + axis.sampleRate * t / 4;
+    ctx.strokeStyle = "rgba(230, 237, 243, .28)";
+    ctx.beginPath();
+    ctx.moveTo(x, margin.top + plotHeight);
+    ctx.lineTo(x, margin.top + plotHeight + 5);
+    ctx.stroke();
+    ctx.fillStyle = t === 2 ? "#ffdf35" : "rgba(230, 237, 243, .84)";
+    ctx.fillText(formatSpectrumTickHz(frequency), x, margin.top + plotHeight + 8);
+  }
+  if (options?.showControlChannels) {
+    ctx.textBaseline = "top";
+    for (const frequency of options.controlChannelsHz) {
+      if (frequency < axis.startHz || frequency > axis.startHz + axis.sampleRate)
+        continue;
+      const x = margin.left + (frequency - axis.startHz) / Math.max(1, axis.sampleRate) * plotWidth;
+      ctx.strokeStyle = frequency === frame.centerHz ? "rgba(255, 70, 70, .95)" : "rgba(255, 70, 70, .62)";
+      ctx.lineWidth = frequency === frame.centerHz ? 1.6 : 1.1;
+      ctx.beginPath();
+      ctx.moveTo(x, margin.top);
+      ctx.lineTo(x, margin.top + plotHeight);
+      ctx.stroke();
+    }
+  }
+  const points: Array<[number, number]> = [];
+  for (let x = margin.left; x <= margin.left + plotWidth; x++) {
+    const start = Math.floor((x - margin.left) / Math.max(1, plotWidth) * powers.length);
+    const end = Math.max(start + 1, Math.ceil((x - margin.left + 1) / Math.max(1, plotWidth) * powers.length));
+    const value = pooledSpectrumPower(powers, start, end);
+    points.push([x, yFor(value)]);
+  }
+  const baselineY = margin.top + plotHeight;
+  const fill = ctx.createLinearGradient(0, margin.top, 0, baselineY);
+  fill.addColorStop(0, "rgba(118, 236, 255, .72)");
+  fill.addColorStop(0.55, "rgba(51, 195, 214, .36)");
+  fill.addColorStop(1, "rgba(10, 98, 126, .08)");
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], baselineY);
+  for (const [x, y] of points)
+    ctx.lineTo(x, y);
+  ctx.lineTo(points[points.length - 1][0], baselineY);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.beginPath();
+  for (const [index, point] of points.entries()) {
+    if (index === 0) ctx.moveTo(point[0], point[1]);
+    else ctx.lineTo(point[0], point[1]);
+  }
+  ctx.strokeStyle = "#8cf3ff";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  if (options?.peaks.length) {
+    const labelSlots: Array<[number, number]> = [];
+    ctx.font = "11px Segoe UI, system-ui, sans-serif";
+    for (const peak of options.peaks) {
+      const text = (peak.frequencyHz / 1_000_000).toFixed(4);
+      const labelWidth = ctx.measureText(text).width + 8;
+      const labelX = Math.max(margin.left + 2, Math.min(margin.left + plotWidth - labelWidth - 2, peak.x - labelWidth / 2));
+      const labelY = Math.max(margin.top + 2, peak.y - 18);
+      if (labelSlots.some(([left, right]) => labelX < right + 6 && labelX + labelWidth > left - 6))
+        continue;
+      labelSlots.push([labelX, labelX + labelWidth]);
+      ctx.strokeStyle = "rgba(255, 223, 53, .78)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(peak.x, peak.y - 2);
+      ctx.lineTo(peak.x, labelY + 13);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(13, 17, 23, .82)";
+      ctx.fillRect(labelX, labelY, labelWidth, 14);
+      ctx.strokeStyle = "rgba(255, 223, 53, .48)";
+      ctx.strokeRect(labelX, labelY, labelWidth, 14);
+      ctx.fillStyle = "#ffdf35";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, labelX + labelWidth / 2, labelY + 7);
+    }
+  }
+}
+
+function percentile(values: number[], quantile: number) {
+  if (values.length === 0)
+    return NaN;
+  const sorted = values.slice().sort((left, right) => left - right);
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.round((sorted.length - 1) * quantile)));
+  return sorted[index];
+}
+
+function pooledSpectrumPower(powers: number[], start: number, end: number) {
+  const left = Math.max(0, Math.min(powers.length - 1, start));
+  const right = Math.max(left + 1, Math.min(powers.length, end));
+  let max = -Infinity;
+  let total = 0;
+  let count = 0;
+  for (let index = left; index < right; index++) {
+    const value = powers[index];
+    if (!Number.isFinite(value))
+      continue;
+    max = Math.max(max, value);
+    total += value;
+    count += 1;
+  }
+  if (count === 0)
+    return powers[left] ?? 0;
+  return max * 0.7 + total / count * 0.3;
+}
+
+function formatSpectrumTickHz(value: number) {
+  return `${(value / 1_000_000).toFixed(3)} MHz`;
+}
+
+function drawWaterfallFrame(canvas: HTMLCanvasElement | null, powers: number[], scale: SpectrumDisplayScale) {
+  if (!canvas || powers.length === 0) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const pixelRatio = typeof window === "undefined" ? 1 : Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const displayWidth = Math.ceil(canvas.getBoundingClientRect().width * pixelRatio);
+  const width = Math.max(4096, powers.length, displayWidth);
+  const resized = canvas.width !== width || canvas.height < 120;
+  if (canvas.width !== width)
+    canvas.width = width;
+  if (canvas.height < 120)
+    canvas.height = 260;
+  if (resized) {
+    ctx.fillStyle = "#00356f";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  const scrollRows = 4;
+  ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height - scrollRows, 0, scrollRows, canvas.width, canvas.height - scrollRows);
+  const row = ctx.createImageData(canvas.width, scrollRows);
+  const finitePowers = powers.filter(Number.isFinite);
+  if (finitePowers.length === 0)
+    return;
+  const low = scale.lowDb;
+  const high = Math.max(low + 1, scale.highDb);
+  for (let x = 0; x < canvas.width; x++) {
+    const position = x / Math.max(1, canvas.width - 1) * (powers.length - 1);
+    const left = Math.floor(position);
+    const right = Math.min(powers.length - 1, left + 1);
+    const mix = position - left;
+    const value = powers[left] * (1 - mix) + powers[right] * mix;
+    const color = waterfallColor((value - low) / Math.max(1, high - low));
+    for (let y = 0; y < scrollRows; y++) {
+      const index = (y * canvas.width + x) * 4;
+      row.data[index] = color[0];
+      row.data[index + 1] = color[1];
+      row.data[index + 2] = color[2];
+      row.data[index + 3] = 255;
+    }
+  }
+  ctx.putImageData(row, 0, 0);
+}
+
+function waterfallColor(value: number): [number, number, number] {
+  const t = Math.max(0, Math.min(1, value));
+  if (t < 0.18)
+    return [0, 53, 111];
+  if (t < 0.45) {
+    const p = (t - 0.18) / 0.27;
+    return [0, Math.round(70 + p * 120), Math.round(145 + p * 100)];
+  }
+  if (t < 0.62) {
+    const p = (t - 0.45) / 0.17;
+    return [Math.round(p * 80), Math.round(190 + p * 35), Math.round(245 - p * 170)];
+  }
+  if (t < 0.82) {
+    const p = (t - 0.62) / 0.2;
+    return [Math.round(80 + p * 175), Math.round(225 + p * 5), Math.round(75 - p * 40)];
+  }
+  const p = (t - 0.82) / 0.18;
+  return [255, Math.round(230 - p * 140), Math.round(35 - p * 15)];
 }
 
 function CallQualityStep({
@@ -5576,7 +6367,7 @@ function RfSweepPermutationResults({
         <span>Control channel</span>
         <span>Gains</span>
         <span>SNR</span>
-        <span>Offset</span>
+        <span>CC offset</span>
         <span>Issue</span>
       </div>
       {groups.length === 0 && <div className="rf-sweep-plan-row neutral" role="row">
@@ -5636,7 +6427,7 @@ function RfSweepPermutationResults({
                 return <div className={`rf-sweep-plan-followup ${rfSweepRowClass(stage.status, stage.label)}`} key={candidate.id || `${group.key}-${item.gain}-${candidate.errorHz}`}>
                   <span></span>
                   <span className={`section-status ${rfSweepStatusTone(stage.status, stage.label)}`.trim()}>{stage.label || "P25 probe"}</span>
-                  <span>Error {candidate.errorHz} Hz</span>
+                  <span>Tune error {candidate.errorHz} Hz</span>
                   <span>{stage.status ? label(stage.status) : "pending"}</span>
                   <span>{stage.summary || "Waiting for follow-up result."}</span>
                 </div>;
@@ -5814,7 +6605,7 @@ function RfValidationStageSummary({ candidate, experiment, systems = [] }: { can
   return <div className="rf-validation-stage-card">
     <div>
       <strong>{experiment.status === "passed" ? "Validated Candidate" : "Current Best Candidate"}</strong>
-      <span>{system?.siteLabel || system?.shortName || candidate.systemShortName || "Unknown site"} / Source {candidate.sourceIndex}, {candidate.controlChannelHz ? formatRfHz(Number(candidate.controlChannelHz)) : "--"}, gain {candidate.gain ?? "auto"}, error {candidate.errorHz ?? 0} Hz</span>
+      <span>{system?.siteLabel || system?.shortName || candidate.systemShortName || "Unknown site"} / Source {candidate.sourceIndex}, {candidate.controlChannelHz ? formatRfHz(Number(candidate.controlChannelHz)) : "--"}, gain {candidate.gain ?? "auto"}, tune error {candidate.errorHz ?? 0} Hz</span>
     </div>
     <div className="rf-validation-stage-strip">
       {stages.map(stage => <div className="rf-validation-stage" key={stage.label}>
@@ -5882,7 +6673,7 @@ function RfValidationRecommendations({
           </div>
           {best && <div className="rf-site-best">
             <span>Best evidence</span>
-            <code>{formatRfHz(Number(best.controlChannelHz))} / source {best.sourceIndex} / gain {best.gain ?? "auto"} / error {best.errorHz ?? 0} Hz</code>
+            <code>{formatRfHz(Number(best.controlChannelHz))} / source {best.sourceIndex} / gain {best.gain ?? "auto"} / tune error {best.errorHz ?? 0} Hz</code>
             <span>{rfValidationCandidateOutcome(best)}</span>
           </div>}
           <div className="rf-site-readiness-table">
@@ -5895,7 +6686,7 @@ function RfValidationRecommendations({
                 <span className={rfValidationStageClass(candidate?.p25Frames ? "passed" : candidate?.p25Status)}>{label(candidate?.p25Status || "not run")}</span>
                 <span className={rfValidationStageClass(candidate?.metricsStatus)}>{label(candidate?.metricsStatus || "not run")}</span>
                 <span className={rfValidationStageClass(rfValidationCandidateVoiceStatus(candidate))}>{label(rfValidationCandidateVoiceStatus(candidate))}{candidate?.voiceRealCalls ? ` (${candidate.voiceRealCalls})` : ""}</span>
-                <span>{candidate ? `gain ${candidate.gain ?? "auto"}, error ${candidate.errorHz ?? 0} Hz` : "--"}</span>
+                <span>{candidate ? `gain ${candidate.gain ?? "auto"}, tune error ${candidate.errorHz ?? 0} Hz` : "--"}</span>
                 <span>{candidate ? rfValidationCandidateOutcome(candidate) : "No candidate tested"}</span>
               </div>;
             })}
@@ -10049,7 +10840,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           </>}
           {trInstallMode === "freshTr" && trConfigStage === "sites" && <>
             <div className="setup-fetch-row">
-              <SettingInput label="RadioReference SID" description="Example: 6355 for TACN." value={trDraftSid} onChange={updateTrRadioReferenceSid} inputMode="numeric" />
+              <SettingInput label="RadioReference SID" description="Enter the numeric RadioReference system ID." value={trDraftSid} onChange={updateTrRadioReferenceSid} inputMode="numeric" />
               <button className="danger-button" disabled={Boolean(busy) || !trDraftSid.trim()} onClick={() => void fetchRadioReferenceSites()}>{busy === "tr-sites-fetch" ? "Fetching..." : "Fetch"}</button>
             </div>
             {trSiteList && <>
@@ -12146,7 +12937,7 @@ function buildGuidedSweepParameters(
 function buildGuidedSweepBatchParameters(
   systemShortName: string,
   modulation: string,
-  sources: Array<{ index: number; serial: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string; input: SweepSourceInput }>,
+  sources: Array<{ index: number; serial: string; sdrType?: string; device?: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string; input: SweepSourceInput }>,
   controlFrequencyHz: number,
   templateSerial = ""
 ) {
@@ -12170,7 +12961,7 @@ function buildGuidedSweepBatchParameters(
         stepHz: Math.max(1, numberOrDefault(source.input.stepHz, 300)),
         warmupSec: Math.max(0, numberOrDefault(source.input.warmupSec, 5)),
         durationSec: Math.max(1, numberOrDefault(source.input.durationSec, 20)),
-        gain: source.input.gain.trim() || (source.gain && source.gain !== "0" ? source.gain : "32"),
+        gain: source.input.gain.trim() || (source.gain && source.gain !== "0" ? source.gain : isAirspyRfSource({ sdrType: source.sdrType ?? "", device: source.device ?? "" }) ? "15" : "32"),
         templateSerial
       };
     })
