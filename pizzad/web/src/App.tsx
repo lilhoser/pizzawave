@@ -4193,12 +4193,19 @@ function SiteValidationStep({
   const validationRequestSampleRateHz = waterfallSampleRateHz || (validationSampleRateOk ? parsedValidationSampleRateHz : 0);
   const validationRequestSampleRateOk = waterfallSampleRateHz > 0 || validationSampleRateOk;
   const validationHandoffSourceIndex = selectedWaterfallSourceIndexes.length === 1 ? selectedWaterfallSourceIndexes[0] : undefined;
+  const hasWaterfallSweepHandoff = selectedWaterfallSweepSelections.length > 0;
+  const validationFormSampleRateMhz = waterfallSampleRateHz ? formatMhzInput(waterfallSampleRateHz) : validationSampleRateMhz;
+  const validationFormGainSequence = hasWaterfallSweepHandoff ? validationPowerGains.join(",") : powerGainSequence;
+  const validationPowerGainInvalid = validationPowerSources.some(isAirspyRfSource) && validationPowerGains.some(gain => !validateAirspyLinearityGain(gain));
   const powerSweepPasses = Math.max(1, validationPowerSources.length) * Math.max(1, validationRunControlChannels.length) * Math.max(1, validationPowerGains.length);
-  const validationP25SeedCount = Math.max(1, validationRunControlChannels.length + (systems.length || 1));
+  const validationP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, powerSweepPasses, validationRunControlChannels.length + (systems.length || 1)));
   const validationProbePasses = validationP25SeedCount * Math.max(1, validationOffsets.length);
-  const validationVoiceCandidateCount = Math.max(2, Math.min(3, systems.length || 1));
+  const validationMetricRunCount = Math.max(1, Math.min(validationMetricCount, validationP25SeedCount));
+  const validationVoiceCandidateCount = hasWaterfallSweepHandoff
+    ? Math.max(1, Math.min(2, validationP25SeedCount))
+    : Math.max(2, Math.min(3, systems.length || 1));
   const validationVoiceSeconds = 45;
-  const validationEstimateSeconds = powerSweepPasses * 2 + validationProbePasses * 10 + validationMetricCount * 15 + validationVoiceCandidateCount * validationVoiceSeconds + 45;
+  const validationEstimateSeconds = powerSweepPasses * 2 + validationProbePasses * 10 + validationMetricRunCount * 15 + validationVoiceCandidateCount * validationVoiceSeconds + 45;
   const validationRunning = busy === "rf_validation_sweep";
   const validationPlan = nextExperiments.find(plan => plan.type === "rf_validation_sweep");
   const validationSweepStatus = rfValidationEffectiveStatus(validationSweep, systems);
@@ -4212,10 +4219,11 @@ function SiteValidationStep({
   const activeValidationPowerSources = activeValidationTarget ? effectivePowerSources : validationPowerSources;
   const activeValidationPowerGains = activeValidationTarget ? effectivePowerGains : validationPowerGains;
   const activeValidationPowerPasses = Math.max(1, activeValidationPowerSources.length) * Math.max(1, activeValidationControlChannels.length) * Math.max(1, activeValidationPowerGains.length);
-  const activeValidationP25SeedCount = Math.max(1, activeValidationControlChannels.length + (activeValidationTarget ? 1 : systems.length || 1));
+  const activeValidationP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, activeValidationPowerPasses, activeValidationControlChannels.length + (activeValidationTarget ? 1 : systems.length || 1)));
   const activeValidationProbePasses = activeValidationP25SeedCount * Math.max(1, validationOffsets.length);
+  const activeValidationMetricRunCount = Math.max(1, Math.min(validationMetricCount, activeValidationP25SeedCount));
   const activeValidationVoiceCandidateCount = activeValidationTarget ? Math.max(1, Math.min(2, activeValidationControlChannels.length)) : validationVoiceCandidateCount;
-  const activeValidationEstimateSeconds = activeValidationPowerPasses * 2 + activeValidationProbePasses * 10 + validationMetricCount * 15 + activeValidationVoiceCandidateCount * validationVoiceSeconds + (activeValidationTarget ? 30 : 45);
+  const activeValidationEstimateSeconds = activeValidationPowerPasses * 2 + activeValidationProbePasses * 10 + activeValidationMetricRunCount * 15 + activeValidationVoiceCandidateCount * validationVoiceSeconds + (activeValidationTarget ? 30 : 45);
   const validationProgressRows = showLiveValidationProgress ? validationProgress?.rows ?? [] : validationResultRows;
   const validationProgressCandidates = showLiveValidationProgress ? validationProgress?.candidates ?? [] : validationResultCandidates;
   const hideStaleSiteReadiness = showLiveValidationProgress && !activeValidationTarget;
@@ -4342,8 +4350,12 @@ function SiteValidationStep({
     const selectedChannels = selectedWaterfallSweepControlChannels.length ? selectedWaterfallSweepControlChannels : [];
     const targetControlChannels = targetSystem?.controlChannelsHz?.length ? targetSystem.controlChannelsHz : selectedChannels;
     const targetControlChannelCount = Math.max(1, targetControlChannels.length || validationRunControlChannels.length);
-    const targetP25SeedCount = Math.max(1, targetControlChannelCount + (targetSystem ? 1 : systems.length || 1));
+    const targetPowerSourceCount = targetSystem ? effectivePowerSources.length : validationPowerSources.length;
+    const targetGainCount = targetSystem ? effectivePowerGains.length : validationPowerGains.length;
+    const targetRfPasses = Math.max(1, targetPowerSourceCount) * targetControlChannelCount * Math.max(1, targetGainCount);
+    const targetP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, targetRfPasses, targetControlChannelCount + (targetSystem ? 1 : systems.length || 1)));
     const targetVoiceCandidateCount = targetSystem ? Math.max(1, Math.min(2, targetControlChannelCount)) : validationVoiceCandidateCount;
+    const targetMetricCandidateCount = targetSystem ? Math.max(1, Math.min(validationMetricCount, targetP25SeedCount)) : validationMetricRunCount;
     return {
       ...(!targetSystem && validationHandoffSourceIndex !== undefined ? { sourceIndex: validationHandoffSourceIndex } : {}),
       parameters: {
@@ -4361,7 +4373,7 @@ function SiteValidationStep({
         metricsDurationSeconds: 15,
         rfCandidateLimit: validationRfCandidateLimit,
         p25CandidateLimit: targetP25SeedCount,
-        metricsCandidateLimit: validationMetricCount,
+        metricsCandidateLimit: targetMetricCandidateCount,
         voiceCandidateLimit: targetVoiceCandidateCount,
         voiceDurationSeconds: validationVoiceSeconds
       }
@@ -4377,7 +4389,7 @@ function SiteValidationStep({
       setValidationProgress(null);
       return;
     }
-    if (airspyPowerGainInvalid) {
+    if (validationPowerGainInvalid) {
       setSweepMessage(`Airspy RF Sweep gain must be whole-number linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}.`);
       setValidationProgress(null);
       return;
@@ -4676,15 +4688,15 @@ function SiteValidationStep({
         <div className="rf-sweep-compact">
           <div className="rf-sweep-form">
             <div className="rf-cc-runline compact">
-              <label><span>Sample rate MHz</span><input className={validationRequestSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" value={validationSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
-              <label><span>Gain sequence</span><input className={airspyPowerGainInvalid ? "invalid" : ""} value={powerGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
+              <label><span>Sample rate MHz</span><input className={validationRequestSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" disabled={waterfallSampleRateHz > 0} value={validationFormSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
+              <label><span>Gain sequence</span><input className={validationPowerGainInvalid ? "invalid" : ""} disabled={hasWaterfallSweepHandoff} value={validationFormGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
               <label><span>Error search</span><input className="rf-short-input" size={6} value={validationErrorOffsets} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
               <label><span>Metric candidates</span><input className="rf-short-input" size={6} inputMode="numeric" value={validationMetricsCandidates} onChange={event => setValidationMetricsCandidates(event.target.value)} /></label>
-              <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationRequestSampleRateOk || airspyPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
+              <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationRequestSampleRateOk || validationPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
               {(validationRunning || validationProgress?.active) && <button disabled={sweepBusy === "cancel-validation"} onClick={() => void cancelValidationSweep()}>{sweepBusy === "cancel-validation" ? "Canceling..." : "Cancel"}</button>}
             </div>
             {validationSampleRateMessage && !waterfallSampleRateHz && <div className="settings-message error">{validationSampleRateMessage}</div>}
-            {airspyPowerGainMessage && <div className={airspyPowerGainInvalid ? "settings-message error" : "setup-note"}>{airspyPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
+            {airspyPowerGainMessage && <div className={validationPowerGainInvalid ? "settings-message error" : "setup-note"}>{validationPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
             <div className="rf-waterfall-sweep-selection">
               <strong>RF Sweep CCs</strong>
               <span>{selectedWaterfallSweepControlChannels.length ? `${selectedWaterfallSweepControlChannels.map(formatRfHz).join(", ")} / gain ${validationPowerGains.join(", ")}${waterfallSampleRateHz ? ` / ${formatMhzInput(waterfallSampleRateHz)} MS/s` : ""}${validationHandoffSourceIndex !== undefined ? ` / source ${validationHandoffSourceIndex}` : ""}` : "All requested control channels"}</span>
@@ -4716,7 +4728,7 @@ function SiteValidationStep({
             <div><span>Sample rate</span><code>{validationRequestSampleRateOk ? `${formatMhzInput(validationRequestSampleRateHz)} MHz` : "Invalid"}</code></div>
             <div><span>RF screens</span><code>{activeValidationPowerSources.length} source(s) x {activeValidationControlChannels.length} CC x {activeValidationPowerGains.length} gain = {activeValidationPowerPasses}</code></div>
             <div><span>P25 probes</span><code>{activeValidationP25SeedCount} control channel seed(s) x {validationOffsets.length} offset(s) = {activeValidationProbePasses}</code></div>
-            <div><span>Follow-up limits</span><code>{validationMetricCount} TR metric candidate(s); {activeValidationVoiceCandidateCount} voice trial candidate(s)</code></div>
+            <div><span>Follow-up limits</span><code>{activeValidationMetricRunCount} TR metric candidate(s); {activeValidationVoiceCandidateCount} voice trial candidate(s)</code></div>
           </div>
           <RfSweepPermutationResults
             sources={activeValidationPowerSources}
