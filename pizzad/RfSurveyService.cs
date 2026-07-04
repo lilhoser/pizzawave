@@ -165,15 +165,16 @@ public sealed class RfSurveyService
                 selectedDefinitions.Any(definition => string.Equals(definition.ShortName, system.ShortName, StringComparison.OrdinalIgnoreCase)))
             ?? selectedSystems.FirstOrDefault();
         var selectedSystemNames = selectedDefinitions.Select(system => system.ShortName).ToList();
+        var profileSystemNames = requestedSystemNames.Count > 0 ? requestedSystemNames : selectedSystemNames;
         var requestedSourcePlanNames = NormalizeRequestedSystemNames(request.SourcePlanSystemShortNames, null);
         var sourcePlanSystemNames = requestedSourcePlanNames.Count > 0
             ? requestedSourcePlanNames
-                .Where(name => selectedSystemNames.Any(selected => string.Equals(selected, name, StringComparison.OrdinalIgnoreCase)))
-                .DefaultIfEmpty(selectedSystemNames.FirstOrDefault() ?? string.Empty)
+                .Where(name => profileSystemNames.Any(selected => string.Equals(selected, name, StringComparison.OrdinalIgnoreCase)))
+                .DefaultIfEmpty(profileSystemNames.FirstOrDefault() ?? string.Empty)
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList()
-            : selectedSystemNames;
+            : profileSystemNames;
         var unresolvedNames = requestedSystemNames
             .Where(requested => selectedSystemNames.All(selected => !string.Equals(selected, requested, StringComparison.OrdinalIgnoreCase)))
             .ToList();
@@ -202,12 +203,12 @@ public sealed class RfSurveyService
         return new RfSurveyProfileDto
         {
             SiteLabel = string.IsNullOrWhiteSpace(request.SiteLabel)
-                ? selectedSystemNames.Count == 1 ? selectedSystemNames[0] : selectedSystemNames.Count > 1 ? string.Join(", ", selectedSystemNames) : "Radio Setup"
+                ? profileSystemNames.Count == 1 ? profileSystemNames[0] : profileSystemNames.Count > 1 ? string.Join(", ", profileSystemNames) : "Radio Setup"
                 : request.SiteLabel.Trim(),
             RadioReferenceSid = string.IsNullOrWhiteSpace(request.RadioReferenceSid) ? string.Empty : request.RadioReferenceSid.Trim(),
-            SystemShortName = selectedSystem?.ShortName ?? request.SystemShortName?.Trim() ?? string.Empty,
-            SystemShortNames = selectedSystemNames.Count > 0
-                ? selectedSystemNames
+            SystemShortName = selectedSystem?.ShortName ?? profileSystemNames.FirstOrDefault() ?? request.SystemShortName?.Trim() ?? string.Empty,
+            SystemShortNames = profileSystemNames.Count > 0
+                ? profileSystemNames
                 : string.IsNullOrWhiteSpace(request.SystemShortName) ? [] : [request.SystemShortName.Trim()],
             SourcePlanSystemShortNames = sourcePlanSystemNames,
             SourcePlanMode = NormalizeSourcePlanMode(request.SourcePlanMode),

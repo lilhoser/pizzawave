@@ -2308,7 +2308,8 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   useEffect(() => {
     if (!wizardOpen || !detail || configApplyInFlight) return;
     const selectedSystemNames = surveySystems.length ? surveySystems : surveySystem ? [surveySystem] : [];
-    const systemDefinitions = buildSurveySystemDefinitions(selectedSystemNames, scopePlan, radioReferenceSites, detail.profile.systems ?? []);
+    const draftRadioReferenceSites = radioReferenceSites ?? readCachedRadioReferenceSites(radioReferenceSid.trim());
+    const systemDefinitions = buildSurveySystemDefinitions(selectedSystemNames, scopePlan, draftRadioReferenceSites, detail.profile.systems ?? []);
     const appliedSelectedSources = detail.profile.selectedSourceIndexes?.length
       ? detail.profile.selectedSourceIndexes
       : detail.profile.sources.map(source => source.index);
@@ -2434,7 +2435,8 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       return;
     const nextSystems = [...currentSystems, system.shortName];
     const nextSourcePlanSystems = sourcePlanSystems.length ? Array.from(new Set([...sourcePlanSystems, system.shortName])) : nextSystems;
-    const systemDefinitions = buildSurveySystemDefinitions(nextSystems, scopePlan, radioReferenceSites, [...(detail.profile.systems ?? []), system]);
+    const draftRadioReferenceSites = radioReferenceSites ?? readCachedRadioReferenceSites(radioReferenceSid.trim());
+    const systemDefinitions = buildSurveySystemDefinitions(nextSystems, scopePlan, draftRadioReferenceSites, [...(detail.profile.systems ?? []), system]);
     setBusy("adopt-rr-site");
     setMessage("");
     try {
@@ -2930,7 +2932,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       }}
       setSurveySystems={(values) => {
         const previous = surveySystems.length ? surveySystems.join(", ") : surveySystem;
-        const next = values.filter(Boolean);
+        const next = uniqueCaseInsensitive(values);
         markDraftDirty();
         setSurveySystems(next);
         setSurveySystem(next[0] ?? "");
@@ -3026,7 +3028,7 @@ function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupC
   };
   const rrCatalogLoaded = Boolean(rrSites);
   for (const name of selectedNames) {
-    const rr = rrSites?.sites.find(site => site.shortName === name || site.name === name);
+    const rr = rrSites?.sites.find(site => stringEqualsIgnoreCase(site.shortName, name) || stringEqualsIgnoreCase(site.name, name));
     if (rr) {
       add({
         shortName: rr.shortName || rr.name,
@@ -3036,14 +3038,14 @@ function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupC
       });
       continue;
     }
-    const previous = existing.find(system => system.shortName === name);
+    const previous = existing.find(system => stringEqualsIgnoreCase(system.shortName, name));
     if (previous) {
       add(previous);
       continue;
     }
     if (rrCatalogLoaded)
       continue;
-    const live = scopePlan?.systems.find(system => system.shortName === name);
+    const live = scopePlan?.systems.find(system => stringEqualsIgnoreCase(system.shortName, name));
     if (live) {
       add({ shortName: live.shortName, siteLabel: live.shortName, controlChannelsHz: live.controlChannelsHz, voiceFrequenciesHz: live.voiceFrequenciesHz });
       continue;
@@ -3503,7 +3505,7 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
   const toggleSystem = (shortName: string) => {
     setDraftSystems(current => current.some(name => name.toLowerCase() === shortName.toLowerCase())
       ? current.filter(name => name !== shortName)
-      : [...current, shortName]);
+      : uniqueCaseInsensitive([...effectiveSystems, ...current, shortName]));
   };
   const applySystemSelection = () => changeSystems(draftSystems);
   const query = siteSearch.trim().toLowerCase();
@@ -6685,6 +6687,10 @@ function uniqueCaseInsensitive(values: string[]) {
     result.push(trimmed);
   }
   return result;
+}
+
+function stringEqualsIgnoreCase(left: string | undefined | null, right: string | undefined | null) {
+  return (left ?? "").trim().toLowerCase() === (right ?? "").trim().toLowerCase();
 }
 
 function isValidTrSourcePlannerSampleRate(sampleRateHz: number) {
