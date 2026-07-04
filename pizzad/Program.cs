@@ -1051,10 +1051,10 @@ app.MapPost("/api/v1/system/radio-setup/{id}/waterfall/start", async (HttpContex
 .WithName("RadioSetupWaterfallStart")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/radio-setup/{id}/waterfall", async (HttpContext context, string id, AuthService authService, RfSurveyService surveys) =>
+app.MapGet("/api/v1/system/radio-setup/{id}/waterfall", async (HttpContext context, string id, AuthService authService, RfSurveyService surveys, bool history = false) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await surveys.GetWaterfallAsync(id, context.RequestAborted));
+    return Results.Ok(await surveys.GetWaterfallAsync(id, history, context.RequestAborted));
 })
 .WithName("RadioSetupWaterfall")
 .WithOpenApi();

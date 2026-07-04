@@ -1239,7 +1239,8 @@ public sealed record RfSurveyWaterfallStatusDto(
     bool TrWasActive,
     string TrStopOutput = "",
     string TrRestartOutput = "",
-    string TrRestartError = "");
+    string TrRestartError = "",
+    IReadOnlyList<RfSurveyWaterfallFrameDto>? Frames = null);
 
 public sealed record RfSurveyWaterfallFrameDto(
     int Sequence,

@@ -1114,10 +1114,10 @@ public sealed class RfSurveyService
         return runtime.ToDto(true);
     }
 
-    public Task<RfSurveyWaterfallStatusDto> GetWaterfallAsync(string id, CancellationToken ct)
+    public Task<RfSurveyWaterfallStatusDto> GetWaterfallAsync(string id, bool includeHistory, CancellationToken ct)
     {
         if (_activeWaterfalls.TryGetValue(id, out var runtime))
-            return Task.FromResult(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true));
+            return Task.FromResult(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory));
         return Task.FromResult(new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false));
     }
 
@@ -1136,7 +1136,7 @@ public sealed class RfSurveyService
             }
         }
         runtime.Cancellation.Dispose();
-        return runtime.ToDto(false) with { Status = "stopped", Message = "Waterfall stopped." };
+        return runtime.ToDto(false, false) with { Status = "stopped", Message = "Waterfall stopped." };
     }
 
     private async Task RunWaterfallLoopAsync(WaterfallRuntime runtime)
@@ -3660,7 +3660,9 @@ public sealed class RfSurveyService
 
     private sealed class WaterfallRuntime
     {
+        private const int MaxFrameHistory = 90;
         private readonly object _sync = new();
+        private readonly Queue<RfSurveyWaterfallFrameDto> _frames = new();
         private int _sequence;
 
         public WaterfallRuntime(
@@ -3714,6 +3716,12 @@ public sealed class RfSurveyService
             lock (_sync)
             {
                 Frame = frame;
+                if (frame.PowersDb.Count > 0)
+                {
+                    _frames.Enqueue(frame);
+                    while (_frames.Count > MaxFrameHistory)
+                        _frames.Dequeue();
+                }
                 UpdatedAtUtc = frame.CapturedAtUtc;
                 var hasPowers = frame.PowersDb.Count > 0;
                 Status = hasPowers ? "running" : "failed";
@@ -3731,10 +3739,11 @@ public sealed class RfSurveyService
             }
         }
 
-        public RfSurveyWaterfallStatusDto ToDto(bool active)
+        public RfSurveyWaterfallStatusDto ToDto(bool active, bool includeHistory = false)
         {
             lock (_sync)
             {
+                var frames = includeHistory ? _frames.ToArray() : null;
                 return new RfSurveyWaterfallStatusDto(
                     active,
                     active ? Status : "stopped",
@@ -3751,7 +3760,8 @@ public sealed class RfSurveyService
                     TrWasActive,
                     TrStopOutput,
                     TrRestartOutput,
-                    TrRestartError);
+                    TrRestartError,
+                    frames);
             }
         }
     }

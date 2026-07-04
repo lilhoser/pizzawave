@@ -4809,34 +4809,56 @@ function WaterfallStep({
     spectrumScaleRef.current = null;
   }, [spectrumSpanDb]);
 
-  useEffect(() => {
-    const cached = waterfallDisplayCache.get(surveyId);
-    if (!cached) return;
-    smoothedSpectrumRef.current = cached.smoothedSpectrum.slice();
-    heldSpectrumRef.current = cached.heldSpectrum.slice();
-    spectrumScaleRef.current = cached.spectrumScale;
-    waterfallScaleRef.current = cached.waterfallScale;
-    spectrumAxisRef.current = cached.spectrumAxis;
-    peakHistoryRef.current = new Map(cached.peakHistory);
-    ccSignalHistoryRef.current = new Map(cached.ccSignalHistory);
-    visiblePeaksRef.current = cached.visiblePeaks.slice();
-    lastFrameRef.current = cached.lastFrameKey;
-    hasGoodWaterfallFrameRef.current = cached.hasGoodFrame;
-    setCcSignalRows(cached.ccSignalRows);
-    setOtherDetectedCcRows(cached.otherDetectedCcRows);
-    window.requestAnimationFrame(() => {
-      restoreWaterfallCacheCanvas(spectrumCanvasRef.current, cached.spectrumCanvas);
-      restoreWaterfallCacheCanvas(canvasRef.current, cached.waterfallCanvas);
-    });
-  }, [surveyId]);
+  function renderWaterfallStatus(next: RfSurveyWaterfallStatus | null) {
+    const frames = next?.frames?.length ? next.frames : next?.frame ? [next.frame] : [];
+    for (const frame of frames) {
+      const renderKey = `${frame.sequence}:${spectrumSpanDb}:${showControlChannelLines ? "cc" : "no-cc"}:${controlChannels.join(",")}`;
+      if (renderKey === lastFrameRef.current)
+        continue;
+      lastFrameRef.current = renderKey;
+      if (frame.powersDb.length === 0) {
+        const detail = frame.output || next?.message || "Waterfall capture did not return IQ samples.";
+        if (!hasGoodWaterfallFrameRef.current) {
+          setMessage(detail);
+          drawWaterfallNotice(spectrumCanvasRef.current, detail, true);
+          drawWaterfallNotice(canvasRef.current, "No spectrum samples to display.", false);
+        } else {
+          setMessage("");
+        }
+        continue;
+      }
+      hasGoodWaterfallFrameRef.current = true;
+      const smoothed = smoothSpectrumPowers(smoothedSpectrumRef.current, frame.powersDb, 0.22);
+      smoothedSpectrumRef.current = smoothed;
+      heldSpectrumRef.current = holdSpectrumPowers(heldSpectrumRef.current, smoothed);
+      const axis = spectrumAxisRef.current ?? { startHz: frame.startHz, sampleRate: frame.sampleRate };
+      spectrumAxisRef.current = axis;
+      spectrumScaleRef.current = buildSpectrumDisplayScale(frame, smoothed, spectrumSpanDb, spectrumScaleRef.current);
+      waterfallScaleRef.current = buildWaterfallDisplayScale(frame, waterfallScaleRef.current);
+      const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
+      const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
+      const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
+      const nextOtherDetectedCcRows = buildOtherDetectedCcRows(positionedPeaks, systems, controlChannelOptions);
+      visiblePeaksRef.current = positionedPeaks;
+      setCcSignalRows(nextCcSignalRows);
+      setOtherDetectedCcRows(nextOtherDetectedCcRows);
+      drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
+        controlChannelsHz: controlChannelOptions,
+        showControlChannels: showControlChannelLines,
+        peaks: positionedPeaks
+      });
+      drawWaterfallFrame(canvasRef.current, smoothWaterfallBins(frame.powersDb), waterfallScaleRef.current);
+    }
+  }
 
   useEffect(() => {
     let stopped = false;
     async function loadStatus() {
       try {
-        const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall`);
+        const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
         if (stopped) return;
-        setStatus(next);
+        window.requestAnimationFrame(() => renderWaterfallStatus(next));
+        setStatus({ ...next, frames: null });
         setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
       } catch (error) {
         if (!stopped)
@@ -4873,59 +4895,7 @@ function WaterfallStep({
   }, [surveyId, status?.active]);
 
   useEffect(() => {
-    const frame = status?.frame;
-    const renderKey = frame ? `${frame.sequence}:${spectrumSpanDb}:${showControlChannelLines ? "cc" : "no-cc"}:${controlChannels.join(",")}` : "";
-    if (!frame || renderKey === lastFrameRef.current)
-      return;
-    lastFrameRef.current = renderKey;
-    if (frame.powersDb.length === 0) {
-      const detail = frame.output || status?.message || "Waterfall capture did not return IQ samples.";
-      if (!hasGoodWaterfallFrameRef.current) {
-        setMessage(detail);
-        drawWaterfallNotice(spectrumCanvasRef.current, detail, true);
-        drawWaterfallNotice(canvasRef.current, "No spectrum samples to display.", false);
-      } else {
-        setMessage("");
-      }
-      return;
-    }
-    hasGoodWaterfallFrameRef.current = true;
-    const smoothed = smoothSpectrumPowers(smoothedSpectrumRef.current, frame.powersDb, 0.22);
-    smoothedSpectrumRef.current = smoothed;
-    heldSpectrumRef.current = holdSpectrumPowers(heldSpectrumRef.current, smoothed);
-    const axis = spectrumAxisRef.current ?? { startHz: frame.startHz, sampleRate: frame.sampleRate };
-    spectrumAxisRef.current = axis;
-    spectrumScaleRef.current = buildSpectrumDisplayScale(frame, smoothed, spectrumSpanDb, spectrumScaleRef.current);
-    waterfallScaleRef.current = buildWaterfallDisplayScale(frame, waterfallScaleRef.current);
-    const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
-    const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
-    const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
-    const nextOtherDetectedCcRows = buildOtherDetectedCcRows(positionedPeaks, systems, controlChannelOptions);
-    visiblePeaksRef.current = positionedPeaks;
-    setCcSignalRows(nextCcSignalRows);
-    setOtherDetectedCcRows(nextOtherDetectedCcRows);
-    drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
-      controlChannelsHz: controlChannelOptions,
-      showControlChannels: showControlChannelLines,
-      peaks: positionedPeaks
-    });
-    drawWaterfallFrame(canvasRef.current, smoothWaterfallBins(frame.powersDb), waterfallScaleRef.current);
-    saveWaterfallDisplayCache(surveyId, {
-      spectrumCanvas: spectrumCanvasRef.current,
-      waterfallCanvas: canvasRef.current,
-      smoothedSpectrum: smoothedSpectrumRef.current,
-      heldSpectrum: heldSpectrumRef.current,
-      spectrumScale: spectrumScaleRef.current,
-      waterfallScale: waterfallScaleRef.current,
-      spectrumAxis: spectrumAxisRef.current,
-      peakHistory: peakHistoryRef.current,
-      ccSignalHistory: ccSignalHistoryRef.current,
-      visiblePeaks: visiblePeaksRef.current,
-      ccSignalRows: nextCcSignalRows,
-      otherDetectedCcRows: nextOtherDetectedCcRows,
-      lastFrameKey: lastFrameRef.current,
-      hasGoodFrame: hasGoodWaterfallFrameRef.current
-    });
+    renderWaterfallStatus(status);
   }, [status?.frame?.sequence, spectrumSpanDb, showControlChannelLines, controlChannels.join(","), systems.map(system => `${system.shortName}:${system.controlChannelsHz.join("/")}`).join("|")]);
 
   async function startWaterfall() {
@@ -4949,7 +4919,6 @@ function WaterfallStep({
     spectrumScaleRef.current = null;
     waterfallScaleRef.current = null;
     spectrumAxisRef.current = null;
-    waterfallDisplayCache.delete(surveyId);
     clearWaterfallCanvas(spectrumCanvasRef.current);
     clearWaterfallCanvas(canvasRef.current);
     try {
@@ -5296,66 +5265,6 @@ type SpectrumHover = { left: number; top: number; text: string; peak: Positioned
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
 type WaterfallCcSignalTrack = { signalScore: number; hitCount: number; frameCount: number; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number };
-type WaterfallDisplayCache = {
-  spectrumCanvas: HTMLCanvasElement | null;
-  waterfallCanvas: HTMLCanvasElement | null;
-  smoothedSpectrum: number[];
-  heldSpectrum: number[];
-  spectrumScale: SpectrumDisplayScale | null;
-  waterfallScale: SpectrumDisplayScale | null;
-  spectrumAxis: SpectrumAxis | null;
-  peakHistory: [string, SpectrumPeakTrack][];
-  ccSignalHistory: [string, WaterfallCcSignalTrack][];
-  visiblePeaks: PositionedSpectrumPeak[];
-  ccSignalRows: WaterfallCcSignalRow[];
-  otherDetectedCcRows: PositionedSpectrumPeak[];
-  lastFrameKey: string;
-  hasGoodFrame: boolean;
-};
-
-const waterfallDisplayCache = new Map<string, WaterfallDisplayCache>();
-
-function cloneWaterfallCacheCanvas(source: HTMLCanvasElement | null) {
-  if (!source || source.width <= 0 || source.height <= 0)
-    return null;
-  const copy = document.createElement("canvas");
-  copy.width = source.width;
-  copy.height = source.height;
-  copy.getContext("2d")?.drawImage(source, 0, 0);
-  return copy;
-}
-
-function restoreWaterfallCacheCanvas(target: HTMLCanvasElement | null, source: HTMLCanvasElement | null) {
-  if (!target || !source)
-    return;
-  target.width = source.width;
-  target.height = source.height;
-  const ctx = target.getContext("2d");
-  if (!ctx)
-    return;
-  ctx.clearRect(0, 0, target.width, target.height);
-  ctx.drawImage(source, 0, 0);
-}
-
-function saveWaterfallDisplayCache(surveyId: string, value: Omit<WaterfallDisplayCache, "spectrumCanvas" | "waterfallCanvas" | "peakHistory" | "ccSignalHistory"> & {
-  spectrumCanvas: HTMLCanvasElement | null;
-  waterfallCanvas: HTMLCanvasElement | null;
-  peakHistory: Map<string, SpectrumPeakTrack>;
-  ccSignalHistory: Map<string, WaterfallCcSignalTrack>;
-}) {
-  waterfallDisplayCache.set(surveyId, {
-    ...value,
-    spectrumCanvas: cloneWaterfallCacheCanvas(value.spectrumCanvas),
-    waterfallCanvas: cloneWaterfallCacheCanvas(value.waterfallCanvas),
-    smoothedSpectrum: value.smoothedSpectrum.slice(),
-    heldSpectrum: value.heldSpectrum.slice(),
-    peakHistory: [...value.peakHistory.entries()],
-    ccSignalHistory: [...value.ccSignalHistory.entries()],
-    visiblePeaks: value.visiblePeaks.slice(),
-    ccSignalRows: value.ccSignalRows.slice(),
-    otherDetectedCcRows: value.otherDetectedCcRows.slice()
-  });
-}
 
 function buildSpectrumDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], spanDb = 45, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {
   if (previous)
