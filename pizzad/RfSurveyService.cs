@@ -1673,7 +1673,7 @@ public sealed class RfSurveyService
                             rows.Add(new RfPowerScanRow(scanSource.Index, scanSource.SdrType, scanSource.Serial, scanSource.Device, scanSource.CenterHz, scanSource.SampleRate, scanSource.SampleRate, scanSource.ErrorHz, scanSource.Gain, controlChannel, duration, commandName, -1, "", "", 0, "unavailable", rtlSelector.Issue, null, null, null, null, 0, false, "", null, null));
                             continue;
                         }
-                        var command = BuildRfPowerScanCommand(scanSource, controlChannel, sampleRate, sampleCount, rawPath, isAirspy, rtlSelector.Argument, pinAirspySerial);
+                        var command = BuildRfPowerScanCommandWithSerialPinning(scanSource, controlChannel, sampleRate, sampleCount, rawPath, isAirspy, rtlSelector.Argument, pinAirspySerial);
                         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
                         linked.CancelAfter(TimeSpan.FromSeconds(duration + 12));
                         var result = OperatingSystem.IsWindows()
@@ -2567,6 +2567,15 @@ public sealed class RfSurveyService
         return Math.Clamp(fallback, min, max);
     }
 
+    private static int? ReadNullableIntParameter(JsonElement? parameters, string name)
+    {
+        if (parameters is { ValueKind: JsonValueKind.Object } root &&
+            root.TryGetProperty(name, out var element) &&
+            TryReadInt(element, out var value))
+            return value;
+        return null;
+    }
+
     private static bool ReadBoolParameter(JsonElement? parameters, string name, bool fallback)
     {
         if (parameters is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(name, out var element))
@@ -2916,6 +2925,47 @@ public sealed class RfSurveyService
                 })
                 .ToList()
         };
+    }
+
+    private static RfSurveyProfileDto ProfileWithP25ProbeOverrides(RfSurveyProfileDto profile, RfSurveyRunExperimentRequest request)
+    {
+        if (!request.SourceIndex.HasValue || request.Parameters is not { ValueKind: JsonValueKind.Object })
+            return profile;
+
+        var overrides = ReadP25ProbeOverrides(request);
+        if (string.IsNullOrWhiteSpace(overrides.Gain) &&
+            !overrides.ErrorHz.HasValue &&
+            !overrides.SampleRateHz.HasValue)
+            return profile;
+
+        return profile with
+        {
+            Sources = profile.Sources
+                .Select(source =>
+                {
+                    if (source.Index != request.SourceIndex.Value)
+                        return source;
+                    return source with
+                    {
+                        Gain = string.IsNullOrWhiteSpace(overrides.Gain) ? source.Gain : overrides.Gain,
+                        ErrorHz = overrides.ErrorHz ?? source.ErrorHz,
+                        SampleRate = overrides.SampleRateHz ?? source.SampleRate
+                    };
+                })
+                .ToList()
+        };
+    }
+
+    private static P25ProbeOverrides ReadP25ProbeOverrides(RfSurveyRunExperimentRequest request)
+    {
+        var gain = ReadStringParameter(request.Parameters, "probeGain");
+        if (string.IsNullOrWhiteSpace(gain))
+            gain = ReadStringParameter(request.Parameters, "gain");
+
+        return new P25ProbeOverrides(
+            gain,
+            ReadNullableIntParameter(request.Parameters, "probeErrorHz"),
+            ReadNullableIntParameter(request.Parameters, "probeSampleRateHz"));
     }
 
     private static RfSurveySystemDto? SystemForControlChannel(RfSurveyProfileDto profile, long controlChannelHz) =>
@@ -3452,6 +3502,8 @@ public sealed class RfSurveyService
             new(candidate.SourceIndex, candidate.ControlChannelHz, candidate.Gain ?? string.Empty);
     }
 
+    private sealed record P25ProbeOverrides(string Gain, int? ErrorHz, int? SampleRateHz);
+
     private sealed record RfValidationCandidate
     {
         public string Id { get; init; } = string.Empty;
@@ -3900,7 +3952,10 @@ public sealed class RfSurveyService
     private static bool IsRfPeakOffTarget(double? peakOffsetHz) =>
         peakOffsetHz.HasValue && Math.Abs(peakOffsetHz.Value) > 25_000;
 
-    private static string BuildRfPowerScanCommand(RfSurveySourceDto source, long frequencyHz, int sampleRate, int sampleCount, string rawPath, bool isAirspy, string rtlDeviceArg, bool pinAirspySerial)
+    private static string BuildRfPowerScanCommand(RfSurveySourceDto source, long frequencyHz, int sampleRate, int sampleCount, string rawPath, bool isAirspy, string rtlDeviceArg) =>
+        BuildRfPowerScanCommandWithSerialPinning(source, frequencyHz, sampleRate, sampleCount, rawPath, isAirspy, rtlDeviceArg, pinAirspySerial: true);
+
+    private static string BuildRfPowerScanCommandWithSerialPinning(RfSurveySourceDto source, long frequencyHz, int sampleRate, int sampleCount, string rawPath, bool isAirspy, string rtlDeviceArg, bool pinAirspySerial)
     {
         var output = ShellQuote(rawPath);
         if (isAirspy)
@@ -4535,7 +4590,8 @@ public sealed class RfSurveyService
         if (controlChannel <= 0)
             return BlockedOutcome("control_channel_p25_probe", "P25 probing requires a known control channel.", "Import/confirm RR or TR ground truth first.", "No control channel is available.", new { profile.ControlChannelsHz });
 
-        var preview = BuildP25ProbePreview(profile, artifactPath, controlChannel, request.DurationSeconds);
+        var probeProfile = ProfileWithP25ProbeOverrides(profile, request);
+        var preview = BuildP25ProbePreview(probeProfile, artifactPath, controlChannel, request.DurationSeconds);
         if (!preview.Ready)
             return BlockedOutcome(
                 "control_channel_p25_probe",
@@ -4566,7 +4622,7 @@ public sealed class RfSurveyService
         var demod = NormalizeP25Demod(ReadStringParameter(request.Parameters, "p25Demod"));
         if (string.IsNullOrWhiteSpace(demod))
             demod = NormalizeP25Demod(ReadStringParameter(request.Parameters, "demod"));
-        var command = RenderP25ProbeCommand(profile, controlChannel, request.DurationSeconds, outputDir, request.SourceIndex, demod);
+        var command = RenderP25ProbeCommand(probeProfile, controlChannel, request.DurationSeconds, outputDir, request.SourceIndex, demod);
         var requestedDuration = Math.Clamp(request.DurationSeconds, 10, 300);
         var timeout = request.DurationSeconds > 0
             ? Math.Clamp(requestedDuration + 15, 20, 90)
@@ -4609,7 +4665,7 @@ public sealed class RfSurveyService
             "Radio Setup temporarily paused TR if needed; configured P25 probe command; SDR available; known control channel.",
             restartFailed ? "P25 probe ran, but trunk-recorder did not restart afterward." : hasFrames ? "P25 probe output contained frame/sync evidence." : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "P25 probe ran but did not contain recognizable P25 frame/sync evidence.",
             restartFailed ? $"trunk-recorder did not restart after P25 probe: {trRestartError}" : hasFrames ? "" : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "No recognizable P25 frame/sync evidence was captured.",
-            new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, demod, staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
+            new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, demod, probeOverrides = ReadP25ProbeOverrides(request), staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
             new
             {
                 recommendation = restartFailed
@@ -5048,7 +5104,7 @@ public sealed class RfSurveyService
                 source["rate"] = runtimeRate;
             if (!string.IsNullOrWhiteSpace(profileSource.Device))
                 source["device"] = IsAirspySource(profileSource)
-                    ? NormalizeP25ProbeDeviceArgs(profileSource, useNamedAirspyStageGains: true)
+                    ? NormalizeP25ProbeDeviceArgsWithSerialPinning(profileSource, useNamedAirspyStageGains: true, pinAirspySerial: true)
                     : profileSource.Device;
             if (IsAirspySource(profileSource) || IsRtlSource(profileSource))
                 source["driver"] = "osmosdr";
@@ -6786,7 +6842,7 @@ public sealed class RfSurveyService
             ["{gain}"] = ShellQuote(NormalizeP25ProbeGain(source?.Gain)),
             ["{error_hz}"] = (source?.ErrorHz ?? 0).ToString(CultureInfo.InvariantCulture),
             ["{error_ppm}"] = errorPpm.ToString("F6", CultureInfo.InvariantCulture),
-            ["{device}"] = ShellQuote(NormalizeP25ProbeDeviceArgs(source, usesTypedGainArgs, pinAirspySerial)),
+            ["{device}"] = ShellQuote(NormalizeP25ProbeDeviceArgsWithSerialPinning(source, usesTypedGainArgs, pinAirspySerial)),
             ["{serial}"] = ShellQuote(pinAirspySerial ? source?.Serial ?? string.Empty : string.Empty),
             ["{source_index}"] = (source?.Index ?? -1).ToString(CultureInfo.InvariantCulture),
             ["{duration_seconds}"] = duration.ToString(CultureInfo.InvariantCulture),
@@ -6979,7 +7035,10 @@ public sealed class RfSurveyService
         };
     }
 
-    private static string NormalizeP25ProbeDeviceArgs(RfSurveySourceDto? source, bool useNamedAirspyStageGains = false, bool pinAirspySerial = true)
+    private static string NormalizeP25ProbeDeviceArgs(RfSurveySourceDto? source, bool useNamedAirspyStageGains = false) =>
+        NormalizeP25ProbeDeviceArgsWithSerialPinning(source, useNamedAirspyStageGains, pinAirspySerial: true);
+
+    private static string NormalizeP25ProbeDeviceArgsWithSerialPinning(RfSurveySourceDto? source, bool useNamedAirspyStageGains, bool pinAirspySerial)
     {
         var device = (source?.Device ?? string.Empty).Trim();
         if (!IsAirspySource(source))
