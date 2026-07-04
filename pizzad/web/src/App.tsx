@@ -4999,64 +4999,86 @@ function WaterfallStep({
   }
 
   function downloadWaterfallReport() {
-    const spectrumImage = spectrumCanvasRef.current?.toDataURL("image/png") ?? "";
-    const waterfallImage = canvasRef.current?.toDataURL("image/png") ?? "";
-    if (!spectrumImage || !waterfallImage) {
+    const spectrumCanvas = spectrumCanvasRef.current;
+    const waterfallCanvas = canvasRef.current;
+    if (!spectrumCanvas || !waterfallCanvas) {
       setIdentifyMessage("Screen grab needs a rendered spectrum and waterfall frame.");
       return;
     }
     const capturedAt = new Date().toISOString();
+    const stats = [
+      ["Status", status ? label(status.status) : "Stopped"],
+      ["Center", frame ? formatRfHz(frame.centerHz) : frequencyOk ? formatRfHz(frequencyHz) : "--"],
+      ["Sample rate", frame ? `${formatFixed(frame.sampleRate / 1_000_000, 3)} MS/s` : sampleRateOk ? `${formatFixed(sampleRateHz / 1_000_000, 3)} MS/s` : "--"],
+      ["Gain", selectedSourceIsAirspy ? `Linearity ${gain || "--"}` : gain || "--"],
+      ["Peak", frame ? `${formatRfHz(frame.peakFrequencyHz)} / ${formatFixed(frame.peakDb, 1)} dB` : "--"],
+      ["SNR", Number.isFinite(peakSnrDb) ? `${formatFixed(peakSnrDb, 1)} dB` : "--"]
+    ];
     const requestedRows = ccSignalRows.length
-      ? ccSignalRows.map(row => `<tr><td>${escapeHtml(row.siteLabel)}</td><td>${escapeHtml(formatRfHz(row.frequencyHz))}</td><td>${escapeHtml(row.label)}</td><td>${escapeHtml(row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`)}</td></tr>`).join("")
-      : `<tr><td colspan="4">No requested CC rows captured.</td></tr>`;
+      ? ccSignalRows.map(row => [
+        row.siteLabel,
+        formatRfHz(row.frequencyHz),
+        row.label,
+        row.status === "not-seen"
+          ? "No stable carrier estimate near this target yet."
+          : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`
+      ])
+      : [["--", "--", "--", "No requested CC rows captured."]];
     const otherRows = otherDetectedCcRows.length
-      ? otherDetectedCcRows.map(row => `<tr><td>Detected peak</td><td>${escapeHtml(formatRfHz(Math.round(row.frequencyHz)))}</td><td>${escapeHtml(`SNR ${formatFixed(row.snrDb, 1)} dB`)}</td><td>${escapeHtml(`Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`)}</td></tr>`).join("")
-      : `<tr><td colspan="4">No stable non-requested control-channel-like peaks detected.</td></tr>`;
-    const html = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>PizzaWave RF Waterfall ${escapeHtml(capturedAt)}</title>
-<style>
-body{margin:24px;background:#111418;color:#d7dde3;font:14px Segoe UI,Arial,sans-serif}
-h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:22px 0 8px}
-.meta{color:#9faab5;margin-bottom:18px}.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin:12px 0}
-.card{border:1px solid #30363d;border-radius:6px;padding:8px;background:#171b20}.card span{display:block;color:#9faab5;font-size:12px}.card strong{display:block;margin-top:2px}
-img{display:block;width:100%;max-width:1200px;border:1px solid #30363d;border-radius:6px;background:#00356f}
-table{width:100%;border-collapse:collapse;margin-top:8px}td,th{border:1px solid #30363d;padding:6px 8px;text-align:left}th{background:#20252a;color:#d7ecff}td{background:#171b20}
-</style>
-</head>
-<body>
-<h1>PizzaWave RF Waterfall Capture</h1>
-<div class="meta">${escapeHtml(capturedAt)} / Survey ${escapeHtml(surveyId)}</div>
-<div class="grid">
-<div class="card"><span>Status</span><strong>${escapeHtml(status ? label(status.status) : "Stopped")}</strong></div>
-<div class="card"><span>Center</span><strong>${escapeHtml(frame ? formatRfHz(frame.centerHz) : frequencyOk ? formatRfHz(frequencyHz) : "--")}</strong></div>
-<div class="card"><span>Sample rate</span><strong>${escapeHtml(frame ? `${formatFixed(frame.sampleRate / 1_000_000, 3)} MS/s` : sampleRateOk ? `${formatFixed(sampleRateHz / 1_000_000, 3)} MS/s` : "--")}</strong></div>
-<div class="card"><span>Gain</span><strong>${escapeHtml(selectedSourceIsAirspy ? `Linearity ${gain || "--"}` : gain || "--")}</strong></div>
-<div class="card"><span>Peak</span><strong>${escapeHtml(frame ? `${formatRfHz(frame.peakFrequencyHz)} / ${formatFixed(frame.peakDb, 1)} dB` : "--")}</strong></div>
-<div class="card"><span>SNR</span><strong>${escapeHtml(Number.isFinite(peakSnrDb) ? `${formatFixed(peakSnrDb, 1)} dB` : "--")}</strong></div>
-</div>
-<h2>RF Spectrum</h2>
-<img alt="RF spectrum" src="${spectrumImage}">
-<h2>Waterfall</h2>
-<img alt="RF waterfall" src="${waterfallImage}">
-<h2>Requested CC Signal Check</h2>
-<table><thead><tr><th>Site</th><th>Frequency</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${requestedRows}</tbody></table>
-<h2>Other detected CCs</h2>
-<table><thead><tr><th>Type</th><th>Frequency</th><th>SNR</th><th>Evidence</th></tr></thead><tbody>${otherRows}</tbody></table>
-</body>
-</html>`;
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `pizzawave-waterfall-${surveyId}-${capturedAt.replace(/[:.]/g, "-")}.html`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    setIdentifyMessage("Waterfall screen report downloaded.");
+      ? otherDetectedCcRows.map(row => [
+        "Detected peak",
+        formatRfHz(Math.round(row.frequencyHz)),
+        `SNR ${formatFixed(row.snrDb, 1)} dB`,
+        `Power ${formatFixed(row.powerDb, 1)} dB / seen ${row.hits} hit(s)`
+      ])
+      : [["--", "--", "--", "No stable non-requested control-channel-like peaks detected."]];
+    const width = 1280;
+    const margin = 28;
+    const imageWidth = width - margin * 2;
+    const spectrumHeight = Math.round(spectrumCanvas.height * imageWidth / spectrumCanvas.width);
+    const waterfallHeight = Math.round(waterfallCanvas.height * imageWidth / waterfallCanvas.width);
+    const tableHeight = (rows: string[][]) => 30 + rows.length * 56;
+    const height = margin + 52 + 108 + 28 + 24 + spectrumHeight + 28 + 24 + waterfallHeight + 30 + 24 + tableHeight(requestedRows) + 28 + 24 + tableHeight(otherRows) + margin;
+    const reportCanvas = document.createElement("canvas");
+    reportCanvas.width = width;
+    reportCanvas.height = height;
+    const ctx = reportCanvas.getContext("2d");
+    if (!ctx) {
+      setIdentifyMessage("Screen grab failed: browser could not create image canvas.");
+      return;
+    }
+    ctx.fillStyle = "#111418";
+    ctx.fillRect(0, 0, width, height);
+    let y = margin;
+    ctx.fillStyle = "#e9ecef";
+    ctx.font = "700 24px Segoe UI, Arial, sans-serif";
+    ctx.fillText("PizzaWave RF Waterfall Capture", margin, y + 26);
+    y += 34;
+    ctx.fillStyle = "#9faab5";
+    ctx.font = "14px Segoe UI, Arial, sans-serif";
+    ctx.fillText(`${capturedAt} / Survey ${surveyId}`, margin, y + 18);
+    y += 34;
+    drawReportStats(ctx, stats, margin, y, imageWidth);
+    y += 108;
+    y = drawReportImage(ctx, "RF Spectrum", spectrumCanvas, margin, y, imageWidth, spectrumHeight);
+    y = drawReportImage(ctx, "Waterfall", waterfallCanvas, margin, y, imageWidth, waterfallHeight);
+    y = drawReportTable(ctx, "Requested CC Signal Check", ["Site", "Frequency", "Status", "Evidence"], requestedRows, margin, y, imageWidth);
+    y = drawReportTable(ctx, "Other detected CCs", ["Type", "Frequency", "SNR", "Evidence"], otherRows, margin, y, imageWidth);
+    reportCanvas.toBlob(blob => {
+      if (!blob) {
+        setIdentifyMessage("Screen grab failed: browser could not encode image.");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `pizzawave-waterfall-${surveyId}-${capturedAt.replace(/[:.]/g, "-")}.jpg`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setIdentifyMessage("Waterfall screen grab downloaded.");
+    }, "image/jpeg", 0.9);
   }
 
   function handleSpectrumMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
@@ -5623,13 +5645,115 @@ function formatSpectrumTickHz(value: number) {
   return `${(value / 1_000_000).toFixed(3)} MHz`;
 }
 
-function escapeHtml(value: unknown) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function drawReportStats(ctx: CanvasRenderingContext2D, stats: string[][], x: number, y: number, width: number) {
+  const gap = 10;
+  const columns = 3;
+  const cardWidth = (width - gap * (columns - 1)) / columns;
+  const cardHeight = 46;
+  stats.forEach((item, index) => {
+    const left = x + (index % columns) * (cardWidth + gap);
+    const top = y + Math.floor(index / columns) * (cardHeight + gap);
+    ctx.fillStyle = "#171b20";
+    ctx.strokeStyle = "#30363d";
+    ctx.lineWidth = 1;
+    ctx.fillRect(left, top, cardWidth, cardHeight);
+    ctx.strokeRect(left, top, cardWidth, cardHeight);
+    ctx.fillStyle = "#9faab5";
+    ctx.font = "12px Segoe UI, Arial, sans-serif";
+    ctx.fillText(item[0] ?? "", left + 10, top + 17);
+    ctx.fillStyle = "#e9ecef";
+    ctx.font = "700 14px Segoe UI, Arial, sans-serif";
+    ctx.fillText(fitCanvasText(ctx, item[1] ?? "", cardWidth - 20), left + 10, top + 36);
+  });
+}
+
+function drawReportImage(ctx: CanvasRenderingContext2D, title: string, source: HTMLCanvasElement, x: number, y: number, width: number, height: number) {
+  ctx.fillStyle = "#e9ecef";
+  ctx.font = "700 18px Segoe UI, Arial, sans-serif";
+  ctx.fillText(title, x, y + 18);
+  y += 28;
+  ctx.fillStyle = "#00356f";
+  ctx.fillRect(x, y, width, height);
+  ctx.drawImage(source, x, y, width, height);
+  ctx.strokeStyle = "#30363d";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+  return y + height + 28;
+}
+
+function drawReportTable(ctx: CanvasRenderingContext2D, title: string, headers: string[], rows: string[][], x: number, y: number, width: number) {
+  const rowHeight = 56;
+  const headerHeight = 30;
+  const columns = [0.2, 0.16, 0.16, 0.48];
+  const columnWidths = columns.map(value => value * width);
+  ctx.fillStyle = "#e9ecef";
+  ctx.font = "700 18px Segoe UI, Arial, sans-serif";
+  ctx.fillText(title, x, y + 18);
+  y += 28;
+  let left = x;
+  ctx.font = "700 12px Segoe UI, Arial, sans-serif";
+  for (let index = 0; index < headers.length; index++) {
+    const columnWidth = columnWidths[index] ?? width / headers.length;
+    ctx.fillStyle = "#20252a";
+    ctx.strokeStyle = "#30363d";
+    ctx.fillRect(left, y, columnWidth, headerHeight);
+    ctx.strokeRect(left, y, columnWidth, headerHeight);
+    ctx.fillStyle = "#d7ecff";
+    ctx.fillText(headers[index] ?? "", left + 8, y + 20);
+    left += columnWidth;
+  }
+  y += headerHeight;
+  ctx.font = "12px Segoe UI, Arial, sans-serif";
+  for (const row of rows) {
+    left = x;
+    for (let index = 0; index < headers.length; index++) {
+      const columnWidth = columnWidths[index] ?? width / headers.length;
+      ctx.fillStyle = "#171b20";
+      ctx.strokeStyle = "#30363d";
+      ctx.fillRect(left, y, columnWidth, rowHeight);
+      ctx.strokeRect(left, y, columnWidth, rowHeight);
+      ctx.fillStyle = "#d7dde3";
+      drawReportCellText(ctx, String(row[index] ?? ""), left + 8, y + 18, columnWidth - 16, 2);
+      left += columnWidth;
+    }
+    y += rowHeight;
+  }
+  return y + 28;
+}
+
+function drawReportCellText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, maxLines: number) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      line = candidate;
+      continue;
+    }
+    if (line)
+      lines.push(line);
+    line = word;
+    if (lines.length >= maxLines)
+      break;
+  }
+  if (line && lines.length < maxLines)
+    lines.push(line);
+  for (let index = 0; index < lines.length; index++) {
+    const value = index === maxLines - 1 && words.join(" ").length > lines.join(" ").length
+      ? fitCanvasText(ctx, lines[index], maxWidth)
+      : lines[index];
+    ctx.fillText(value, x, y + index * 16);
+  }
+}
+
+function fitCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth)
+    return text;
+  let value = text;
+  while (value.length > 1 && ctx.measureText(`${value}...`).width > maxWidth)
+    value = value.slice(0, -1);
+  return `${value}...`;
 }
 
 function drawWaterfallFrame(canvas: HTMLCanvasElement | null, powers: number[], scale: SpectrumDisplayScale) {
