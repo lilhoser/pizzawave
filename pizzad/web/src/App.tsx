@@ -4967,6 +4967,7 @@ function WaterfallStep({
     const nearestTarget = nearestTargetControlChannel(peak.frequencyHz, systems, controlChannelOptions, 20_000);
     const offset = nearestTarget ? Math.round(frequency - nearestTarget.frequencyHz) : 0;
     const targetLabel = nearestTarget ? `${nearestTarget.siteLabel} ${formatRfHz(nearestTarget.frequencyHz)}` : "";
+    const resumeWaterfall = status?.active === true;
     const startedAtUtc = new Date().toISOString();
     const runningResult: WaterfallIdentifyResult = {
       key: peak.key,
@@ -4986,7 +4987,7 @@ function WaterfallStep({
     setSpectrumHover(null);
     setIdentifyOverlayMessage(`Stopping waterfall and probing ${formatRfHz(frequency)}...`);
     try {
-      if (status?.active) {
+      if (resumeWaterfall) {
         const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(surveyId), { method: "POST" });
         setStatus(next);
       }
@@ -5018,6 +5019,27 @@ function WaterfallStep({
         }
       }));
     } finally {
+      if (resumeWaterfall) {
+        setIdentifyOverlayMessage("Restarting waterfall...");
+        try {
+          const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/start`, {
+            method: "POST",
+            body: JSON.stringify({
+              sourceIndex,
+              frequencyHz,
+              sampleRateHz,
+              gain,
+              binCount: 4096,
+              captureMilliseconds: 60,
+              refreshMilliseconds: 120
+            })
+          });
+          setStatus(next);
+          setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
+        } catch (error) {
+          setMessage(error instanceof Error ? `P25 Identify completed, but waterfall restart failed: ${error.message}` : "P25 Identify completed, but waterfall restart failed.");
+        }
+      }
       setIdentifyOverlayMessage("");
       setBusy("");
     }
@@ -5320,7 +5342,8 @@ type SpectrumDisplayScale = { lowDb: number; highDb: number };
 type SpectrumAxis = { startHz: number; sampleRate: number };
 type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; snrDb: number; hits: number; misses: number };
 type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number };
-type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string };
+type P25IdentifyFields = { nac: string; wacn: string; systemId: string; rfss: string; site: string; decodedControlChannelHz: number; adjacentSites: string[]; secondaryControlChannels: string[]; tsbkCount: number; grantCount: number; demod: string; sourceIndex?: number; exitCode?: number; timedOut: boolean };
+type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string; fields?: P25IdentifyFields };
 type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
@@ -5464,20 +5487,113 @@ function summarizeWaterfallIdentifyResult(base: WaterfallIdentifyResult, experim
     ? experiment.status
     : "failed";
   const p25Summary = experiment.blockingIssue || experiment.resultSummary || label(experiment.status);
+  const fields = parseP25IdentifyFields(experiment);
   const targetDetail = base.targetLabel
     ? `Matched saved CC ${base.targetLabel}; measured offset ${base.offsetHz >= 0 ? "+" : ""}${base.offsetHz} Hz.`
     : "Not in saved CC list for this RSW; probed the measured peak directly.";
+  const identitySummary = p25IdentifySummary(fields);
+  const tunedOffset = fields.decodedControlChannelHz > 0
+    ? Math.round(base.frequencyHz - fields.decodedControlChannelHz)
+    : 0;
+  const decodedDetail = fields.decodedControlChannelHz > 0
+    ? `Decoded CC ${formatRfHz(fields.decodedControlChannelHz)}; waterfall peak ${formatRfHz(base.frequencyHz)} (${tunedOffset >= 0 ? "+" : ""}${tunedOffset} Hz from decoded CC).`
+    : `Waterfall peak ${formatRfHz(base.frequencyHz)}.`;
+  const activityDetail = [
+    fields.tsbkCount > 0 ? `${fields.tsbkCount} TSBK message${fields.tsbkCount === 1 ? "" : "s"}` : "",
+    fields.grantCount > 0 ? `${fields.grantCount} grant/message marker${fields.grantCount === 1 ? "" : "s"}` : "",
+    fields.adjacentSites.length ? `Adjacent ${fields.adjacentSites.slice(0, 3).join(", ")}` : "",
+    fields.secondaryControlChannels.length ? `Secondary CC ${fields.secondaryControlChannels.slice(0, 3).join(", ")}` : ""
+  ].filter(Boolean).join("; ");
   return {
     ...base,
     status,
     summary: status === "passed"
-      ? "P25 frame evidence captured"
+      ? identitySummary || "P25 frame evidence captured"
       : status === "blocked"
         ? "P25 Identify blocked"
         : "No P25 frame evidence",
-    detail: `${p25Summary} ${targetDetail}`.trim(),
-    experimentId: experiment.id
+    detail: status === "passed"
+      ? [decodedDetail, targetDetail, activityDetail].filter(Boolean).join(" ")
+      : `${p25Summary} ${targetDetail}`.trim(),
+    experimentId: experiment.id,
+    fields
   };
+}
+
+function parseP25IdentifyFields(experiment: RfSurveyExperiment | undefined): P25IdentifyFields {
+  const evidence = parseExperimentJson<any>(experiment?.evidenceJson ?? "{}");
+  const output = String(evidence?.output ?? "");
+  const fields: P25IdentifyFields = {
+    nac: "",
+    wacn: "",
+    systemId: "",
+    rfss: "",
+    site: "",
+    decodedControlChannelHz: 0,
+    adjacentSites: [],
+    secondaryControlChannels: [],
+    tsbkCount: 0,
+    grantCount: 0,
+    demod: String(evidence?.demod ?? ""),
+    sourceIndex: Number.isFinite(Number(evidence?.sourceIndex)) ? Number(evidence.sourceIndex) : undefined,
+    exitCode: Number.isFinite(Number(evidence?.exitCode)) ? Number(evidence.exitCode) : undefined,
+    timedOut: /timed out|was canceled/i.test(output)
+  };
+  const nac = /\bNAC\s+0x([0-9a-f]+)/i.exec(output);
+  if (nac)
+    fields.nac = nac[1].toUpperCase();
+  const netStatus = /net_sts_bcst:\s*wacn:\s*([0-9a-f]+)\s+syid:\s*([0-9a-f]+)/i.exec(output);
+  if (netStatus) {
+    fields.wacn = netStatus[1].toUpperCase();
+    fields.systemId = netStatus[2].toUpperCase();
+  }
+  const rfssStatus = /rfss_sts_bcst:\s*syid:\s*([0-9a-f]+)\s+rfid:\s*([0-9a-f]+)\s+stid:\s*([0-9a-f]+)\s+ch1:\s*([0-9a-f]+)\(([^)]*)\)/ig;
+  let rfssMatch: RegExpExecArray | null;
+  while ((rfssMatch = rfssStatus.exec(output)) !== null) {
+    fields.systemId ||= rfssMatch[1].toUpperCase();
+    fields.rfss ||= rfssMatch[2].toUpperCase();
+    fields.site ||= rfssMatch[3].toUpperCase();
+    const decoded = p25ChannelTextToHz(rfssMatch[5]);
+    if (decoded > 0)
+      fields.decodedControlChannelHz ||= decoded;
+  }
+  const adjacentStatus = /adj_sts_bcst:\s*rfid:\s*([0-9a-f]+)\s+stid:\s*([0-9a-f]+)\s+ch1:\s*[0-9a-f]+\(([^)]*)\)/ig;
+  let adjacentMatch: RegExpExecArray | null;
+  while ((adjacentMatch = adjacentStatus.exec(output)) !== null) {
+    const frequency = p25ChannelTextToHz(adjacentMatch[3]);
+    fields.adjacentSites.push(`${adjacentMatch[1].toUpperCase()}-${adjacentMatch[2].toUpperCase()}${frequency > 0 ? ` ${formatRfHz(frequency)}` : ""}`);
+  }
+  const secondaryStatus = /sccb:\s*rfid:\s*([0-9a-f]+)\s+stid:\s*([0-9a-f]+)\s+ch1:\s*[0-9a-f]+\(([^)]*)\)(?:\s+ch2:\s*[0-9a-f]+\(([^)]*)\))?/ig;
+  let secondaryMatch: RegExpExecArray | null;
+  while ((secondaryMatch = secondaryStatus.exec(output)) !== null) {
+    for (const value of [secondaryMatch[3], secondaryMatch[4]]) {
+      const frequency = p25ChannelTextToHz(value);
+      if (frequency > 0)
+        fields.secondaryControlChannels.push(formatRfHz(frequency));
+    }
+  }
+  fields.adjacentSites = Array.from(new Set(fields.adjacentSites)).slice(0, 6);
+  fields.secondaryControlChannels = Array.from(new Set(fields.secondaryControlChannels)).slice(0, 6);
+  fields.tsbkCount = (output.match(/\bTSBK\b/ig) ?? []).length + (output.match(/\btsbk\(/ig) ?? []).length;
+  fields.grantCount = (output.match(/voice grant|grp_v_ch_grant|grg_add_cmd|grant/ig) ?? []).length;
+  return fields;
+}
+
+function p25ChannelTextToHz(value: string | undefined) {
+  const text = (value ?? "").trim();
+  const mhz = /^(\d{3,4}\.\d+)$/.exec(text);
+  return mhz ? Math.round(Number(mhz[1]) * 1_000_000) : 0;
+}
+
+function p25IdentifySummary(fields: P25IdentifyFields) {
+  const parts = [
+    fields.nac ? `NAC 0x${fields.nac}` : "",
+    fields.wacn ? `WACN ${fields.wacn}` : "",
+    fields.systemId ? `Sys ${fields.systemId}` : "",
+    fields.rfss ? `RFSS ${fields.rfss}` : "",
+    fields.site ? `Site ${fields.site}` : ""
+  ].filter(Boolean);
+  return parts.join(" / ");
 }
 
 function buildOtherDetectedCcRows(peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {
