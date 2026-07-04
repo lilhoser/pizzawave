@@ -3508,7 +3508,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-controls {
   display: grid;
-  grid-template-columns: minmax(108px, 1fr) minmax(136px, 1fr) minmax(82px, .55fr) minmax(76px, .5fr) minmax(86px, .55fr) minmax(68px, auto) auto auto;
+  grid-template-columns: minmax(108px, 1fr) minmax(136px, 1fr) minmax(82px, .55fr) minmax(76px, .5fr) minmax(86px, .55fr) minmax(68px, auto) auto auto 31px;
   gap: 6px;
   align-items: end;
 }
