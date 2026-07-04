@@ -3717,16 +3717,6 @@ function loadJsonStorage<T>(key: string, fallback: T): T {
   }
 }
 
-function stopWaterfallSession(surveyId: string) {
-  if (!surveyId) return;
-  const url = waterfallStopUrl(surveyId);
-  const headers = new Headers();
-  const token = localStorage.getItem("pizzawave-admin-token");
-  if (token)
-    headers.set("Authorization", `Bearer ${token}`);
-  void fetch(url, { method: "POST", headers, keepalive: true }).catch(() => {});
-}
-
 function parseGainSequence(value: string) {
   const parsed = value
     .split(",")
@@ -3816,29 +3806,10 @@ function RfPathRefinementStep({
   const [subPage, setSubPageState] = useState<RfRefinementSubpage>(() => normalizeRfRefinementSubpage(localStorage.getItem(storageKey)));
   const [waterfallSweepSeed, setWaterfallSweepSeed] = useState<WaterfallSweepSeed | null>(() => loadJsonStorage<WaterfallSweepSeed | null>(seedStorageKey, null));
   const [recoveredSweepStatus, setRecoveredSweepStatus] = useState("");
-  const waterfallIdleStopTimer = useRef<number | null>(null);
-  const clearWaterfallIdleStop = () => {
-    if (waterfallIdleStopTimer.current == null) return;
-    window.clearTimeout(waterfallIdleStopTimer.current);
-    waterfallIdleStopTimer.current = null;
-  };
   const setSubPage = (value: RfRefinementSubpage) => {
-    if (value === "waterfall")
-      clearWaterfallIdleStop();
-    else if (subPage === "waterfall") {
-      clearWaterfallIdleStop();
-      waterfallIdleStopTimer.current = window.setTimeout(() => {
-        stopWaterfallSession(props.surveyId);
-        waterfallIdleStopTimer.current = null;
-      }, 120_000);
-    }
     setSubPageState(value);
     localStorage.setItem(storageKey, value);
   };
-  useEffect(() => () => {
-    clearWaterfallIdleStop();
-    stopWaterfallSession(props.surveyId);
-  }, [props.surveyId]);
   const prepareWaterfallSeed = (seed: WaterfallSweepSeed) => {
     setWaterfallSweepSeed(seed);
     localStorage.setItem(seedStorageKey, JSON.stringify(seed));
@@ -3864,7 +3835,10 @@ function RfPathRefinementStep({
     </div>
     {subPage === "path"
       ? <RfPathStep path={path} setPath={setPath} onTouched={onRfPathTouched} onLoadPrevious={onLoadPreviousRfPath} busy={props.busy} />
-      : <SiteValidationStep {...props} activeOperation={subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} onSweepRecovered={setRecoveredSweepStatus} />}
+      : null}
+    <div style={{ display: subPage === "path" ? "none" : undefined }}>
+      <SiteValidationStep {...props} activeOperation={subPage === "path" ? "waterfall" : subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} onSweepRecovered={setRecoveredSweepStatus} />
+    </div>
   </div>;
 }
 
@@ -4721,6 +4695,7 @@ function SiteValidationStep({
         ? "Rerun"
         : item.action;
   const current = substeps.find(item => item.id === activeOperation) ?? nextRequired;
+  const waterfallSubstep = substeps.find(item => item.id === "waterfall");
   const canBeginCurrent = Boolean(current.begin) && !current.locked && !busy && !sweepBusy && !sweepJobRunning;
   const currentActionLabel = actionLabelFor(current);
   const currentRunning = busy === current.busyKey || (current.busyKey === "sweep" && (sweepBusy === "start" || sweepJobRunning));
@@ -4743,7 +4718,8 @@ function SiteValidationStep({
       <span>Recommended next: {nextRequired.title}</span>
     </div>}
     {currentRunning && current.id !== "power" && current.id !== "waterfall" && <StepProgressIndicator label={`${current.title} is running`} />}
-    {current.body}
+    {current.id !== "waterfall" ? current.body : null}
+    {waterfallSubstep?.body && <div style={current.id === "waterfall" ? undefined : { display: "none" }} aria-hidden={current.id === "waterfall" ? undefined : "true"}>{waterfallSubstep.body}</div>}
     {current.id !== "cc" && current.id !== "power" && current.result && <ExperimentSummary experiment={current.result} onDetails={detailsAction} />}
     {current.id !== "cc" && current.id !== "power" && current.id !== "waterfall" && <div className="rf-subpage-actions">
       <button className="danger-button" disabled={!canBeginCurrent} onClick={() => void current.begin?.()}>{currentActionLabel}</button>
@@ -4870,12 +4846,6 @@ function WaterfallStep({
       window.clearInterval(timer);
     };
   }, [surveyId, status?.active]);
-
-  useEffect(() => {
-    return () => {
-      stopWaterfallSession(surveyId);
-    };
-  }, [surveyId]);
 
   useEffect(() => {
     const frame = status?.frame;
