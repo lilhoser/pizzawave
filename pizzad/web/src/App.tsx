@@ -2291,7 +2291,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     localStorage.setItem("pizzawave-radio-setup-wizard-open", wizardOpen ? "1" : "0");
   }, [detail?.session.id, step, wizardOpen]);
   useEffect(() => {
-    if (!wizardOpen || step !== 1) return;
+    if (!wizardOpen) return;
     const sid = radioReferenceSid.trim();
     if (!sid || radioReferenceSites?.sites.length) return;
     const cached = readCachedRadioReferenceSites(sid);
@@ -2299,12 +2299,11 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       setRadioReferenceSites(cached);
       return;
     }
-    if (!radioReferenceSidEditedRef.current && (detail?.profile.systems?.length ?? 0) > 0) return;
     if (radioReferenceSidEditedRef.current) return;
     if (busy || rrSitesAutoLoadKeyRef.current === sid) return;
     rrSitesAutoLoadKeyRef.current = sid;
     void loadRadioReferenceSites(false);
-  }, [wizardOpen, step, radioReferenceSid, radioReferenceSites?.sites.length, busy]);
+  }, [wizardOpen, radioReferenceSid, radioReferenceSites?.sites.length, busy]);
   useEffect(() => {
     if (!wizardOpen || !detail || configApplyInFlight) return;
     const selectedSystemNames = surveySystems.length ? surveySystems : surveySystem ? [surveySystem] : [];
@@ -5418,21 +5417,27 @@ function buildWaterfallCandidateRows(
   for (const result of Object.values(identifyResults)) {
     if (rows.some(row => row.key === result.key))
       continue;
-    const targetFrequencyHz = Math.round(result.targetFrequencyHz || result.frequencyHz);
+    const measuredFrequencyHz = Math.round(result.measuredFrequencyHz || result.frequencyHz);
+    const rrTarget = nearestFrequencyTarget(measuredFrequencyHz, rrTargets);
+    const fallbackTarget = rrTarget ?? nearestFrequencyTarget(measuredFrequencyHz, fallbackTargets);
+    const targetFrequencyHz = Math.round(fallbackTarget?.frequencyHz ?? result.targetFrequencyHz ?? result.frequencyHz);
+    const origin: WaterfallCandidateRow["origin"] = fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase())
+      ? "selected"
+      : rrTarget ? "rr" : "unknown";
     rows.push({
       key: result.key,
-      origin: "unknown",
-      siteLabel: result.targetLabel || "Identified peak",
-      systemShortName: "",
+      origin,
+      siteLabel: fallbackTarget?.siteLabel ?? result.targetLabel ?? "Identified peak",
+      systemShortName: fallbackTarget?.systemShortName ?? "",
       targetFrequencyHz,
-      detectedFrequencyHz: Math.round(result.measuredFrequencyHz || result.frequencyHz),
+      detectedFrequencyHz: measuredFrequencyHz,
       sweepFrequencyHz: targetFrequencyHz,
       snrDb: result.peak.snrDb,
-      offsetHz: Math.round((result.measuredFrequencyHz || result.frequencyHz) - targetFrequencyHz),
+      offsetHz: Math.round(measuredFrequencyHz - targetFrequencyHz),
       confidence: clamp01(result.peak.hits / 30),
       hits: result.peak.hits,
       identifyPeak: result.peak,
-      system: undefined
+      system: fallbackTarget?.system
     });
   }
   return rows
