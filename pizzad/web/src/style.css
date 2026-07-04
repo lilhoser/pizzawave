@@ -3665,16 +3665,28 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-size: 12px;
 }
 
-.rf-waterfall-cc-row.visible {
+.rf-waterfall-cc-row.candidate {
   border-color: rgba(84, 214, 138, .55);
+}
+
+.rf-waterfall-cc-row.weak-trace {
+  border-color: rgba(255, 237, 138, .42);
 }
 
 .rf-waterfall-cc-row code {
   color: #d7ecff;
 }
 
-.rf-waterfall-cc-row strong {
+.rf-waterfall-cc-row.candidate strong {
+  color: #6ee69f;
+}
+
+.rf-waterfall-cc-row.weak-trace strong {
   color: #ffed8a;
+}
+
+.rf-waterfall-cc-row.not-seen strong {
+  color: #9faab5;
 }
 
 .rf-waterfall-cc-row small {

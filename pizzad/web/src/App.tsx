@@ -4704,7 +4704,7 @@ function WaterfallStep({
   const [spectrumSpanDb, setSpectrumSpanDb] = useState(35);
   const [showControlChannelLines, setShowControlChannelLines] = useState(true);
   const [spectrumHover, setSpectrumHover] = useState<SpectrumHover | null>(null);
-  const [ccReachability, setCcReachability] = useState<WaterfallCcReachability[]>([]);
+  const [ccSignalRows, setCcSignalRows] = useState<WaterfallCcSignalRow[]>([]);
   const [identifyMessage, setIdentifyMessage] = useState("");
   const [status, setStatus] = useState<RfSurveyWaterfallStatus | null>(null);
   const [message, setMessage] = useState("");
@@ -4717,6 +4717,7 @@ function WaterfallStep({
   const waterfallScaleRef = useRef<SpectrumDisplayScale | null>(null);
   const spectrumAxisRef = useRef<SpectrumAxis | null>(null);
   const peakHistoryRef = useRef<Map<string, SpectrumPeakTrack>>(new Map());
+  const ccSignalHistoryRef = useRef<Map<string, WaterfallCcSignalTrack>>(new Map());
   const visiblePeaksRef = useRef<PositionedSpectrumPeak[]>([]);
   const activeRef = useRef(false);
   const lastFrameRef = useRef("");
@@ -4826,7 +4827,7 @@ function WaterfallStep({
     const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
     const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
     visiblePeaksRef.current = positionedPeaks;
-    setCcReachability(buildWaterfallCcReachability(systems, controlChannelOptions, smoothed, frame, axis));
+    setCcSignalRows(buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current));
     drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
       controlChannelsHz: controlChannelOptions,
       showControlChannels: showControlChannelLines,
@@ -4847,9 +4848,10 @@ function WaterfallStep({
     smoothedSpectrumRef.current = [];
     heldSpectrumRef.current = [];
     peakHistoryRef.current.clear();
+    ccSignalHistoryRef.current.clear();
     visiblePeaksRef.current = [];
     setSpectrumHover(null);
-    setCcReachability([]);
+    setCcSignalRows([]);
     setIdentifyMessage("");
     spectrumScaleRef.current = null;
     waterfallScaleRef.current = null;
@@ -4992,12 +4994,12 @@ function WaterfallStep({
       </div>
     </div>
     <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Requested CC Reachability</span><small>Use offsets as RF sweep error seeds when a target CC is visible.</small></div>
-      {ccReachability.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to evaluate requested control channels.</div> : ccReachability.map(row => <div className={row.visible ? "rf-waterfall-cc-row visible" : "rf-waterfall-cc-row"} key={`${row.systemShortName}-${row.frequencyHz}`}>
+      <div className="rf-waterfall-cc-head"><span>Requested CC Signal Check</span><small>Waterfall evidence only; P25 Identify or RF Sweep must confirm decode.</small></div>
+      {ccSignalRows.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect requested control channels.</div> : ccSignalRows.map(row => <div className={`rf-waterfall-cc-row ${row.status}`} key={`${row.systemShortName}-${row.frequencyHz}`}>
         <span>{row.siteLabel}</span>
         <code>{formatRfHz(row.frequencyHz)}</code>
-        <strong>{row.visible ? `${formatFixed(row.snrDb, 1)} dB SNR` : "not visible"}</strong>
-        <small>{row.visible ? `peak ${formatRfHz(row.peakFrequencyHz)} / offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz` : "No stable carrier near this target in the current waterfall window."}</small>
+        <strong>{row.label}</strong>
+        <small>{row.status === "not-seen" ? "No stable carrier estimate near this target yet." : `avg SNR ${formatFixed(row.snrDb, 1)} dB / best offset ${row.offsetHz >= 0 ? "+" : ""}${formatFixed(row.offsetHz, 0)} Hz / confidence ${Math.round(row.confidence * 100)}%`}</small>
       </div>)}
     </div>
   </div>;
@@ -5091,7 +5093,8 @@ type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; sn
 type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number };
 type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
-type WaterfallCcReachability = { systemShortName: string; siteLabel: string; frequencyHz: number; visible: boolean; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number };
+type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
+type WaterfallCcSignalTrack = { signalScore: number; hitCount: number; frameCount: number; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number };
 
 function buildSpectrumDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], spanDb = 45, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {
   if (previous)
@@ -5114,7 +5117,7 @@ function buildWaterfallDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["
   return { lowDb: low, highDb: low + span };
 }
 
-function buildWaterfallCcReachability(systems: RfSurveySystem[], fallbackControlChannels: number[], powers: number[], frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, axis: SpectrumAxis): WaterfallCcReachability[] {
+function buildWaterfallCcSignalRows(systems: RfSurveySystem[], fallbackControlChannels: number[], powers: number[], frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, axis: SpectrumAxis, history: Map<string, WaterfallCcSignalTrack>): WaterfallCcSignalRow[] {
   const targets = systems.length
     ? systems.flatMap(system => system.controlChannelsHz.map(frequencyHz => ({
       systemShortName: system.shortName || system.siteLabel || "System",
@@ -5125,17 +5128,54 @@ function buildWaterfallCcReachability(systems: RfSurveySystem[], fallbackControl
   const uniqueTargets = new Map<string, (typeof targets)[number]>();
   for (const target of targets)
     uniqueTargets.set(`${target.systemShortName}:${target.frequencyHz}`, target);
+  const currentKeys = new Set(uniqueTargets.keys());
+  for (const key of [...history.keys()]) {
+    if (!currentKeys.has(key))
+      history.delete(key);
+  }
   return [...uniqueTargets.values()].map(target => {
+    const key = `${target.systemShortName}:${target.frequencyHz}`;
     const nearest = nearestPeakAroundFrequency(target.frequencyHz, powers, frame, axis, 25_000);
+    const previous = history.get(key);
+    const isSignalFrame = Boolean(nearest && nearest.snrDb >= 6);
+    const signalScore = clamp01((previous?.signalScore ?? 0) * (isSignalFrame ? 0.9 : 0.94) + (isSignalFrame ? 0.1 : 0));
+    const hitCount = Math.min(200, (previous?.hitCount ?? 0) * 0.985 + (isSignalFrame ? 1 : 0));
+    const frameCount = Math.min(200, (previous?.frameCount ?? 0) * 0.985 + 1);
+    const confidence = frameCount > 0 ? clamp01(hitCount / frameCount) : 0;
+    const nextTrack: WaterfallCcSignalTrack = {
+      signalScore,
+      hitCount,
+      frameCount,
+      peakFrequencyHz: nearest && isSignalFrame ? ema(previous?.peakFrequencyHz, nearest.frequencyHz, 0.18) : previous?.peakFrequencyHz ?? target.frequencyHz,
+      offsetHz: nearest && isSignalFrame ? ema(previous?.offsetHz, nearest.frequencyHz - target.frequencyHz, 0.18) : previous?.offsetHz ?? 0,
+      snrDb: nearest && isSignalFrame ? ema(previous?.snrDb, nearest.snrDb, 0.18) : (previous?.snrDb ?? 0) * 0.97,
+      powerDb: nearest && isSignalFrame ? ema(previous?.powerDb, nearest.powerDb, 0.18) : previous?.powerDb ?? 0
+    };
+    history.set(key, nextTrack);
+    const status = nextTrack.signalScore >= 0.48 && nextTrack.snrDb >= 10 && confidence >= 0.35
+      ? "candidate"
+      : nextTrack.signalScore >= 0.18 && nextTrack.snrDb >= 6
+        ? "weak-trace"
+        : "not-seen";
     return {
       ...target,
-      visible: Boolean(nearest && nearest.snrDb >= 6),
-      peakFrequencyHz: nearest?.frequencyHz ?? target.frequencyHz,
-      offsetHz: nearest ? nearest.frequencyHz - target.frequencyHz : 0,
-      snrDb: nearest?.snrDb ?? 0,
-      powerDb: nearest?.powerDb ?? 0
+      status,
+      label: status === "candidate" ? "candidate" : status === "weak-trace" ? "weak trace" : "not seen",
+      peakFrequencyHz: nextTrack.peakFrequencyHz,
+      offsetHz: nextTrack.offsetHz,
+      snrDb: nextTrack.snrDb,
+      powerDb: nextTrack.powerDb,
+      confidence
     };
   });
+}
+
+function ema(previous: number | undefined, next: number, alpha: number) {
+  return Number.isFinite(previous) ? previous! * (1 - alpha) + next * alpha : next;
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
 }
 
 function nearestPeakAroundFrequency(frequencyHz: number, powers: number[], frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, axis: SpectrumAxis, searchHz: number) {
