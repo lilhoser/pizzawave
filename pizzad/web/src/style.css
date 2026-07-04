@@ -3508,8 +3508,8 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-controls {
   display: grid;
-  grid-template-columns: minmax(118px, 1fr) minmax(128px, .9fr) minmax(92px, .58fr) minmax(84px, .52fr) minmax(78px, .46fr) minmax(92px, .52fr) minmax(74px, .42fr) auto auto;
-  gap: 8px;
+  grid-template-columns: minmax(108px, 1fr) minmax(136px, 1fr) minmax(82px, .55fr) minmax(76px, .5fr) minmax(86px, .55fr) minmax(68px, auto) auto auto;
+  gap: 6px;
   align-items: end;
 }
 
@@ -3528,6 +3528,12 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .rf-waterfall-controls select {
   width: 100%;
   min-width: 0;
+}
+
+.rf-waterfall-controls button {
+  min-height: 31px;
+  padding: 5px 8px;
+  white-space: nowrap;
 }
 
 .rf-waterfall-check {

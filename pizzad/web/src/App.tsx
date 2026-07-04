@@ -3810,24 +3810,35 @@ function RfPathRefinementStep({
   setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>;
   onRfPathTouched: () => void;
   onLoadPreviousRfPath: () => Promise<void>;
-} & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation" | "waterfallSweepSeed" | "onWaterfallSweepSeed" | "keepWaterfallRunning" | "setKeepWaterfallRunning">) {
+} & Omit<React.ComponentProps<typeof SiteValidationStep>, "activeOperation" | "waterfallSweepSeed" | "onWaterfallSweepSeed">) {
   const storageKey = `pizzawave-radio-setup-rf-subpage-${props.surveyId}`;
   const seedStorageKey = `pizzawave-radio-setup-waterfall-sweep-seed-${props.surveyId}`;
-  const keepWaterfallKey = `pizzawave-radio-setup-waterfall-keep-running-${props.surveyId}`;
   const [subPage, setSubPageState] = useState<RfRefinementSubpage>(() => normalizeRfRefinementSubpage(localStorage.getItem(storageKey)));
   const [waterfallSweepSeed, setWaterfallSweepSeed] = useState<WaterfallSweepSeed | null>(() => loadJsonStorage<WaterfallSweepSeed | null>(seedStorageKey, null));
-  const [keepWaterfallRunning, setKeepWaterfallRunningState] = useState(() => localStorage.getItem(keepWaterfallKey) === "1");
   const [recoveredSweepStatus, setRecoveredSweepStatus] = useState("");
+  const waterfallIdleStopTimer = useRef<number | null>(null);
+  const clearWaterfallIdleStop = () => {
+    if (waterfallIdleStopTimer.current == null) return;
+    window.clearTimeout(waterfallIdleStopTimer.current);
+    waterfallIdleStopTimer.current = null;
+  };
   const setSubPage = (value: RfRefinementSubpage) => {
-    if (subPage === "waterfall" && value !== "waterfall" && !keepWaterfallRunning)
-      stopWaterfallSession(props.surveyId);
+    if (value === "waterfall")
+      clearWaterfallIdleStop();
+    else if (subPage === "waterfall") {
+      clearWaterfallIdleStop();
+      waterfallIdleStopTimer.current = window.setTimeout(() => {
+        stopWaterfallSession(props.surveyId);
+        waterfallIdleStopTimer.current = null;
+      }, 120_000);
+    }
     setSubPageState(value);
     localStorage.setItem(storageKey, value);
   };
-  const setKeepWaterfallRunning = (value: boolean) => {
-    setKeepWaterfallRunningState(value);
-    localStorage.setItem(keepWaterfallKey, value ? "1" : "0");
-  };
+  useEffect(() => () => {
+    clearWaterfallIdleStop();
+    stopWaterfallSession(props.surveyId);
+  }, [props.surveyId]);
   const prepareWaterfallSeed = (seed: WaterfallSweepSeed) => {
     setWaterfallSweepSeed(seed);
     localStorage.setItem(seedStorageKey, JSON.stringify(seed));
@@ -3853,7 +3864,7 @@ function RfPathRefinementStep({
     </div>
     {subPage === "path"
       ? <RfPathStep path={path} setPath={setPath} onTouched={onRfPathTouched} onLoadPrevious={onLoadPreviousRfPath} busy={props.busy} />
-      : <SiteValidationStep {...props} activeOperation={subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} keepWaterfallRunning={keepWaterfallRunning} setKeepWaterfallRunning={setKeepWaterfallRunning} onSweepRecovered={setRecoveredSweepStatus} />}
+      : <SiteValidationStep {...props} activeOperation={subPage} waterfallSweepSeed={waterfallSweepSeed} onWaterfallSweepSeed={prepareWaterfallSeed} onSweepRecovered={setRecoveredSweepStatus} />}
   </div>;
 }
 
@@ -3931,8 +3942,6 @@ function SiteValidationStep({
   onOpenRunLog,
   waterfallSweepSeed,
   onWaterfallSweepSeed,
-  keepWaterfallRunning,
-  setKeepWaterfallRunning,
   onSweepRecovered
 }: {
   activeOperation: Exclude<RfRefinementSubpage, "path">;
@@ -3969,8 +3978,6 @@ function SiteValidationStep({
   onOpenRunLog: () => void;
   waterfallSweepSeed?: WaterfallSweepSeed | null;
   onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
-  keepWaterfallRunning: boolean;
-  setKeepWaterfallRunning: (value: boolean) => void;
   onSweepRecovered?: (status: string) => void;
 }) {
   const [sweepBusy, setSweepBusy] = useState("");
@@ -4489,8 +4496,6 @@ function SiteValidationStep({
         systems={systems}
         controlChannels={controlChannels}
         activeControlChannelHz={activeControlChannelHz}
-        keepRunning={keepWaterfallRunning}
-        setKeepRunning={setKeepWaterfallRunning}
         onWaterfallSweepSeed={onWaterfallSweepSeed}
         onRunExperiment={onRunExperiment}
         onReload={onReload}
@@ -4755,8 +4760,6 @@ function WaterfallStep({
   systems,
   controlChannels,
   activeControlChannelHz,
-  keepRunning,
-  setKeepRunning,
   onWaterfallSweepSeed,
   onRunExperiment,
   onReload
@@ -4768,8 +4771,6 @@ function WaterfallStep({
   systems: RfSurveySystem[];
   controlChannels: number[];
   activeControlChannelHz: number;
-  keepRunning: boolean;
-  setKeepRunning: (value: boolean) => void;
   onWaterfallSweepSeed?: (seed: WaterfallSweepSeed) => void;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<void>;
   onReload: () => Promise<void>;
@@ -4807,7 +4808,7 @@ function WaterfallStep({
   const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
   const sampleRateHz = Math.round(Number(sampleRateMhz) * 1_000_000);
   const controlChannelOptions = Array.from(new Set(controlChannels.filter(value => Number.isFinite(value) && value > 0).map(value => Math.round(value)))).sort((left, right) => left - right);
-  const selectedControlChannelHz = controlChannelOptions.find(value => Math.abs(value - frequencyHz) < 500) ?? 0;
+  const controlChannelListId = `rf-waterfall-cc-options-${surveyId}`;
   const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
   const sampleRateOk = Number.isFinite(sampleRateHz) && sampleRateHz > 0;
   const gainOk = !selectedSourceIsAirspy || validateAirspyLinearityGain(gain.trim() || selectedSource?.gain || "15");
@@ -4872,10 +4873,9 @@ function WaterfallStep({
 
   useEffect(() => {
     return () => {
-      if (!keepRunning)
-        stopWaterfallSession(surveyId);
+      stopWaterfallSession(surveyId);
     };
-  }, [surveyId, keepRunning]);
+  }, [surveyId]);
 
   useEffect(() => {
     const frame = status?.frame;
@@ -5071,11 +5071,7 @@ function WaterfallStep({
       <label><span>Source</span><select value={String(sourceIndex)} disabled={locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
         {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}</option>)}
       </select></label>
-      <label><span>Control channel</span><select value={selectedControlChannelHz ? String(selectedControlChannelHz) : ""} disabled={controlChannelOptions.length === 0} onChange={event => event.target.value && setFrequencyMhz(formatMhzInput(Number(event.target.value)))}>
-        <option value="">Manual</option>
-        {controlChannelOptions.map(value => <option value={String(value)} key={value}>{formatRfHz(value)}</option>)}
-      </select></label>
-      <label><span>Frequency MHz</span><input className={frequencyOk ? "" : "invalid"} inputMode="decimal" value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} /></label>
+      <label><span>Frequency MHz</span><input className={frequencyOk ? "" : "invalid"} inputMode="decimal" list={controlChannelListId} value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} /><datalist id={controlChannelListId}>{controlChannelOptions.map(value => <option value={formatMhzInput(value)} label={formatRfHz(value)} key={value} />)}</datalist></label>
       <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>
       <label><span>{selectedSourceIsAirspy ? `Lin gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={gainOk ? "" : "invalid"} inputMode={selectedSourceIsAirspy ? "numeric" : undefined} value={gain} onChange={event => setGain(event.target.value)} /></label>
       <label><span>Power span</span><select value={String(spectrumSpanDb)} onChange={event => setSpectrumSpanDb(Number(event.target.value))}>
@@ -5085,7 +5081,6 @@ function WaterfallStep({
         <option value="70">70 dB</option>
       </select></label>
       <label className="rf-waterfall-check"><input type="checkbox" checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
-      <label className="rf-waterfall-check"><input type="checkbox" checked={keepRunning} onChange={event => setKeepRunning(event.target.checked)} /><span>Keep running</span></label>
       <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
       <button disabled={!status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
     </div>
