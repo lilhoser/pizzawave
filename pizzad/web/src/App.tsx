@@ -2238,6 +2238,7 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
   const operationLogLastId = useRef(0);
   const rrSitesAutoLoadKeyRef = useRef("");
   const radioReferenceSidEditedRef = useRef(false);
+  const siteDefinitionRepairKeyRef = useRef("");
   const activeWorkspaceSystemsRef = useRef<string[]>([]);
 
   function markDraftDirty() {
@@ -2345,6 +2346,71 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
     }, 600);
     return () => window.clearTimeout(timer);
   }, [wizardOpen, detail?.session.id, surveySystem, surveySystems.join("|"), sourcePlanSystems.join("|"), sourcePlanMode, radioReferenceSid, radioReferenceSites?.sites.length, surveySiteLabel, path, selectedSources, sdrSources, step, measurementMode, duration, configApplyInFlight]);
+
+  useEffect(() => {
+    if (!wizardOpen || !detail || configApplyInFlight) return;
+    const selectedSystemNames = uniqueCaseInsensitive(surveySystems.length
+      ? surveySystems
+      : surveySystem ? [surveySystem] : detail.profile.systemShortNames?.length ? detail.profile.systemShortNames : detail.profile.systemShortName ? [detail.profile.systemShortName] : []);
+    if (selectedSystemNames.length === 0)
+      return;
+    const sid = radioReferenceSid.trim() || detail.profile.radioReferenceSid || "";
+    const selectedDefinitions = buildSurveySystemDefinitions(selectedSystemNames, scopePlan, radioReferenceSites ?? readCachedRadioReferenceSites(sid), detail.profile.systems ?? []);
+    const selectedDefinitionNames = new Set(selectedDefinitions.map(system => system.shortName.toLowerCase()));
+    const missingSelectedDefinitions = selectedSystemNames.some(name => !selectedDefinitionNames.has(name.toLowerCase()));
+    if (missingSelectedDefinitions && sid && !radioReferenceSites?.sites.length && rrSitesAutoLoadKeyRef.current !== `resolve:${sid}`) {
+      const cached = readCachedRadioReferenceSites(sid);
+      if (cached) {
+        rrSitesAutoLoadKeyRef.current = `resolve:${sid}`;
+        setRadioReferenceSites(cached);
+      } else if (!busy) {
+        rrSitesAutoLoadKeyRef.current = `resolve:${sid}`;
+        void api.request<SetupTrConfigSites>("/api/v1/setup/tr-config/sites", {
+          method: "POST",
+          body: JSON.stringify({ radioReferenceSid: sid })
+        }).then(result => {
+          writeCachedRadioReferenceSites(sid, result);
+          setRadioReferenceSites(result);
+        }).catch(() => {
+          rrSitesAutoLoadKeyRef.current = "";
+        });
+      }
+      return;
+    }
+    const currentSignature = surveySystemDefinitionsSignature(detail.profile.systems ?? []);
+    const resolvedSignature = surveySystemDefinitionsSignature(selectedDefinitions);
+    if (!selectedDefinitions.length || currentSignature === resolvedSignature)
+      return;
+    const repairKey = JSON.stringify({ id: detail.session.id, selectedSystemNames, resolvedSignature });
+    if (siteDefinitionRepairKeyRef.current === repairKey)
+      return;
+    siteDefinitionRepairKeyRef.current = repairKey;
+    const appliedSelectedSources = detail.profile.selectedSourceIndexes?.length
+      ? detail.profile.selectedSourceIndexes
+      : detail.profile.sources.map(source => source.index);
+    void api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/draft`, {
+      method: "POST",
+      body: JSON.stringify({
+        systemShortName: selectedSystemNames[0] ?? detail.profile.systemShortName,
+        systemShortNames: selectedSystemNames,
+        sourcePlanSystemShortNames: sourcePlanSystems.length ? sourcePlanSystems : selectedSystemNames,
+        sourcePlanMode,
+        systemDefinitions: selectedDefinitions,
+        radioReferenceSid: sid || undefined,
+        siteLabel: surveySiteLabel,
+        rfPath: path,
+        selectedSourceIndexes: selectedSources.length ? selectedSources : appliedSelectedSources,
+        sdrSources: sdrSources ?? undefined,
+        currentStep: step,
+        measurementMode,
+        probeDurationSeconds: Number(duration) || 45
+      })
+    }).then(next => {
+      setDetail(next);
+      draftDirtyRef.current = false;
+      void loadSurveys();
+    }).catch(error => setMessage(error instanceof Error ? error.message : "Unable to repair selected site definitions."));
+  }, [wizardOpen, detail?.session.id, detail?.profile.systems, surveySystem, surveySystems.join("|"), sourcePlanSystems.join("|"), sourcePlanMode, radioReferenceSid, radioReferenceSites?.sites.length, surveySiteLabel, path, selectedSources, sdrSources, step, measurementMode, duration, busy, configApplyInFlight]);
 
   async function loadSurveys() {
     const next = await api.request<RfSurveyList>(radioSetupApi);
@@ -6687,6 +6753,19 @@ function uniqueCaseInsensitive(values: string[]) {
     result.push(trimmed);
   }
   return result;
+}
+
+function surveySystemDefinitionsSignature(systems: RfSurveySystem[]) {
+  return systems
+    .map(system => ({
+      shortName: (system.shortName ?? "").trim().toLowerCase(),
+      siteLabel: (system.siteLabel ?? "").trim(),
+      controlChannelsHz: uniqueSortedFrequencies(system.controlChannelsHz ?? []),
+      voiceFrequenciesHz: uniqueSortedFrequencies(system.voiceFrequenciesHz ?? [])
+    }))
+    .sort((left, right) => left.shortName.localeCompare(right.shortName))
+    .map(system => `${system.shortName}:${system.siteLabel}:${system.controlChannelsHz.join(",")}:${system.voiceFrequenciesHz.join(",")}`)
+    .join("|");
 }
 
 function stringEqualsIgnoreCase(left: string | undefined | null, right: string | undefined | null) {
