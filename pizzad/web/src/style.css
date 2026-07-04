@@ -3530,6 +3530,73 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   min-width: 0;
 }
 
+.rf-waterfall-controls .rf-frequency-combo {
+  position: relative;
+}
+
+.rf-frequency-combo-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 31px;
+}
+
+.rf-frequency-combo-input input {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.rf-waterfall-controls .rf-frequency-combo-input button {
+  display: grid;
+  place-items: center;
+  min-height: 31px;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.rf-frequency-menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid rgba(90, 167, 255, .42);
+  border-radius: 6px;
+  background: #151b22;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .38);
+}
+
+.rf-waterfall-controls .rf-frequency-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: #e7edf3;
+  text-align: left;
+}
+
+.rf-frequency-menu button:hover,
+.rf-frequency-menu button[aria-selected="true"] {
+  background: rgba(90, 167, 255, .18);
+}
+
+.rf-frequency-menu button span,
+.rf-frequency-menu-empty {
+  color: #9faab5;
+  font-size: 11px;
+}
+
+.rf-frequency-menu-empty {
+  padding: 6px;
+}
+
 .rf-waterfall-controls button {
   min-height: 31px;
   padding: 5px 8px;

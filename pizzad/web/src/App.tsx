@@ -4774,8 +4774,10 @@ function WaterfallStep({
   const [status, setStatus] = useState<RfSurveyWaterfallStatus | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
+  const [frequencyMenuOpen, setFrequencyMenuOpen] = useState(false);
   const spectrumCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frequencyComboRef = useRef<HTMLLabelElement | null>(null);
   const smoothedSpectrumRef = useRef<number[]>([]);
   const heldSpectrumRef = useRef<number[]>([]);
   const spectrumScaleRef = useRef<SpectrumDisplayScale | null>(null);
@@ -4796,7 +4798,6 @@ function WaterfallStep({
   ]);
   const selectedSweepControlChannels = normalizeControlChannelSelection(waterfallSweepControlChannels).filter(value => controlChannelOptions.includes(value));
   const selectedSweepControlChannelSet = new Set(selectedSweepControlChannels);
-  const controlChannelListId = `rf-waterfall-cc-options-${surveyId}`;
   const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
   const sampleRateOk = Number.isFinite(sampleRateHz) && sampleRateHz > 0;
   const gainOk = !selectedSourceIsAirspy || validateAirspyLinearityGain(gain.trim() || selectedSource?.gain || "15");
@@ -4814,6 +4815,17 @@ function WaterfallStep({
     if (!activeControlChannelHz) return;
     setFrequencyMhz(current => current || formatMhzInput(activeControlChannelHz));
   }, [activeControlChannelHz]);
+
+  useEffect(() => {
+    if (!frequencyMenuOpen)
+      return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!frequencyComboRef.current?.contains(event.target as Node))
+        setFrequencyMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [frequencyMenuOpen]);
 
   useEffect(() => {
     spectrumScaleRef.current = null;
@@ -5198,7 +5210,7 @@ function WaterfallStep({
       <label><span>Source</span><select value={String(sourceIndex)} disabled={controlsDisabled || locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
         {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}</option>)}
       </select></label>
-      <label><span>Frequency MHz</span><input className={frequencyOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" list={controlChannelListId} value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} /><datalist id={controlChannelListId}>{controlChannelOptions.map(value => <option value={formatMhzInput(value)} label={formatRfHz(value)} key={value} />)}</datalist></label>
+      <label className="rf-frequency-combo" ref={frequencyComboRef}><span>Frequency MHz</span><div className="rf-frequency-combo-input"><input className={frequencyOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} onFocus={() => setFrequencyMenuOpen(true)} /><button type="button" disabled={controlsDisabled} aria-label="Show saved control channels" title="Show saved control channels" onClick={() => setFrequencyMenuOpen(open => !open)}><ChevronDown size={14} aria-hidden="true" /></button></div>{frequencyMenuOpen && <div className="rf-frequency-menu" role="listbox" aria-label="Saved control channels">{controlChannelOptions.length === 0 ? <div className="rf-frequency-menu-empty">No saved CCs</div> : controlChannelOptions.map(value => <button type="button" role="option" aria-selected={formatMhzInput(value) === frequencyMhz} key={value} onMouseDown={event => event.preventDefault()} onClick={() => { setFrequencyMhz(formatMhzInput(value)); setFrequencyMenuOpen(false); }}>{formatMhzInput(value)}<span>{formatRfHz(value)}</span></button>)}</div>}</label>
       <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>
       <label><span>{selectedSourceIsAirspy ? `Lin gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={gainOk ? "" : "invalid"} disabled={controlsDisabled} inputMode={selectedSourceIsAirspy ? "numeric" : undefined} value={gain} onChange={event => setGain(event.target.value)} /></label>
       <label><span>Power span</span><select value={String(spectrumSpanDb)} disabled={controlsDisabled} onChange={event => setSpectrumSpanDb(Number(event.target.value))}>
