@@ -45,7 +45,9 @@ public sealed class SetupTalkgroupService
                 Description = r.Description,
                 Tag = r.Tag,
                 SourceCategory = r.Category,
-                OpsCategory = r.OpsCategory,
+                OpsCategory = string.IsNullOrWhiteSpace(r.OpsCategory)
+                    ? TalkgroupCatalogService.NormalizeOpsCategory(r.Category, r.Tag, r.AlphaTag, r.Description)
+                    : r.OpsCategory,
                 Enabled = true,
                 Source = "setup"
             })

@@ -611,12 +611,19 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-selection-summary strong {
   flex: 0 0 auto;
 }
-.site-setup-selection-summary span {
+.site-setup-selection-summary > span {
   min-width: 0;
   color: #cbd5de;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.site-setup-selected-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 .site-setup-site-table-wrap {
   max-height: min(52vh, 560px);

@@ -906,11 +906,7 @@ function SiteSetupSystemsSection({ setup, saveState, onSave }: { setup: SiteSetu
     }
   }
 
-  async function toggleSite(site: SetupTrConfigSite, checked: boolean) {
-    const name = site.shortName || site.name;
-    const nextNames = checked
-      ? [...selectedNames, name]
-      : selectedNames.filter(value => !stringEqualsIgnoreCase(value, name));
+  async function saveSelectedSystems(nextNames: string[]) {
     const uniqueNames = Array.from(new Set(nextNames)).filter(Boolean).sort((a, b) => a.localeCompare(b));
     const systems = buildSurveySystemDefinitions(uniqueNames, null, radioReferenceSites, setup.desired.systems, radioReferenceSid.trim());
     await onSave({
@@ -920,6 +916,18 @@ function SiteSetupSystemsSection({ setup, saveState, onSave }: { setup: SiteSetu
       sourcePlanMode: setup.desired.sourcePlanMode || "full",
       systems
     }, "systems");
+  }
+
+  async function toggleSite(site: SetupTrConfigSite, checked: boolean) {
+    const name = site.shortName || site.name;
+    const nextNames = checked
+      ? [...selectedNames, name]
+      : selectedNames.filter(value => !stringEqualsIgnoreCase(value, name));
+    await saveSelectedSystems(nextNames);
+  }
+
+  async function removeSelectedSystem(shortName: string) {
+    await saveSelectedSystems(selectedNames.filter(value => !stringEqualsIgnoreCase(value, shortName)));
   }
 
   const selectedSet = new Set(selectedNames.map(value => value.toLowerCase()));
@@ -949,7 +957,14 @@ function SiteSetupSystemsSection({ setup, saveState, onSave }: { setup: SiteSetu
     </label>
     <div className="site-setup-selection-summary">
       <strong>{selectedSystems.length.toLocaleString()} selected</strong>
-      <span>{selectedSystems.map(system => system.siteLabel || system.shortName).join(", ") || "No systems selected"}</span>
+      <div className="site-setup-selected-chips">
+        {selectedSystems.length
+          ? selectedSystems.map(system => {
+            const labelText = system.siteLabel || system.shortName;
+            return <button type="button" className="rf-selected-site-chip" key={system.shortName || labelText} onClick={() => void removeSelectedSystem(system.shortName || labelText)} title={`Remove ${labelText}`}>{labelText} <span aria-hidden="true">x</span></button>;
+          })
+          : <span>No systems selected</span>}
+      </div>
     </div>
     <div className="site-setup-site-table-wrap">
       <table className="table compact-table site-setup-site-table">
@@ -986,35 +1001,34 @@ function selectedSetupSystemNames(setup: SiteSetup) {
   return Array.from(new Set(names.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
-type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalogSystems: string[] };
+type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalogSystem: string };
 
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const systemNames = selectedSetupSystemNames(setup);
   const fallbackSystem = setup.desired.siteLabel || systemNames[0] || "";
   const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
   if (sids.length === 0)
-    return [{ key: "source-0", radioReferenceSid: "", catalogSystems: fallbackSystem ? [fallbackSystem] : [] }];
+    return [{ key: "source-0", radioReferenceSid: "", catalogSystem: fallbackSystem }];
   const selectedSystems = setup.desired.systems.length
     ? setup.desired.systems
     : systemNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
-  const bySid = new Map<string, string[]>();
-  selectedSystems.forEach(system => {
+  const rows = selectedSystems
+    .map((system, index) => {
       const sid = radioReferenceSidForSetupSystem(system, sids);
       const catalogSystem = system.shortName || system.siteLabel || fallbackSystem;
-      if (!sid || !catalogSystem)
-        return;
-      bySid.set(sid, Array.from(new Set([...(bySid.get(sid) ?? []), catalogSystem])));
-    });
-  const rows = Array.from(bySid.entries())
-    .map(([sid, catalogSystems], index) => ({ key: `source-${sid}-${index}`, radioReferenceSid: sid, catalogSystems }));
+      return catalogSystem
+        ? { key: `source-${sid || "unknown"}-${index}-${catalogSystem}`, radioReferenceSid: sid, catalogSystem }
+        : null;
+    })
+    .filter((row): row is SiteSetupTalkgroupSource => Boolean(row?.catalogSystem));
   if (rows.length > 0)
     return rows;
   const targetSystems = systemNames.length ? systemNames : [fallbackSystem || `rr-${sids[0]}`];
-  return [{
-    key: `source-${sids[0]}-0`,
-    radioReferenceSid: sids[0],
-    catalogSystems: targetSystems
-  }];
+  return targetSystems.map((system, index) => ({
+    key: `source-${sids.length === 1 ? sids[0] : "unknown"}-${index}-${system}`,
+    radioReferenceSid: sids.length === 1 ? sids[0] : "",
+    catalogSystem: system
+  }));
 }
 
 function parseRadioReferenceSidList(value: string) {
@@ -1030,7 +1044,7 @@ function radioReferenceSidForSetupSystem(system: Pick<RfSurveySystem, "shortName
     if (cached?.sites.some(site => names.some(name => stringEqualsIgnoreCase(name, site.shortName) || stringEqualsIgnoreCase(name, site.name))))
       return sid;
   }
-  return candidateSids.length === 1 ? candidateSids[0] : "";
+  return "";
 }
 
 function combineTalkgroupPreviews(previews: SetupTalkgroupPreview[]): SetupTalkgroupPreview {
@@ -1048,15 +1062,15 @@ function combineTalkgroupPreviews(previews: SetupTalkgroupPreview[]): SetupTalkg
   };
 }
 
-function expandTalkgroupPreviewToSystems(preview: SetupTalkgroupPreview, catalogSystems: string[]): SetupTalkgroupPreview {
-  const systems = Array.from(new Set(catalogSystems.map(normalizeTalkgroupSystem).filter(Boolean)));
-  if (systems.length === 0)
+function scopeTalkgroupPreviewToSystem(preview: SetupTalkgroupPreview, catalogSystem: string): SetupTalkgroupPreview {
+  const system = normalizeTalkgroupSystem(catalogSystem);
+  if (!system)
     return preview;
-  const rows = systems.flatMap(system => preview.rows.map(row => ({
+  const rows = preview.rows.map(row => ({
     ...row,
     systemShortName: system,
     key: `${system}:${row.id}`
-  })));
+  }));
   const included = rows.filter(row => row.included);
   return {
     ...preview,
@@ -1079,7 +1093,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const autoPreviewKeyRef = useRef("");
-  const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.radioReferenceSid}:${row.catalogSystems.join(",")}`).join("|");
+  const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|");
   useEffect(() => {
     const next = initialTalkgroupSources(setup);
     setRrSources(next);
@@ -1087,15 +1101,17 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
     setMessage("");
   }, [setupSourceKey]);
   useEffect(() => {
-    const key = `${includeExcluded ? "all" : "normal"}:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystems.join(",")}`).join("|")}`;
+    const key = `${includeExcluded ? "all" : "normal"}:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
     if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoPreviewKeyRef.current === key)
       return;
     autoPreviewKeyRef.current = key;
     void previewTalkgroups();
-  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystems.join(",")}`).join("|"), includeExcluded]);
+  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|"), includeExcluded]);
 
   async function previewTalkgroups() {
-    const activeSources = rrSources.map(row => ({ ...row, radioReferenceSid: row.radioReferenceSid.trim() })).filter(row => row.radioReferenceSid);
+    const activeSources = rrSources
+      .map(row => ({ ...row, radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() }))
+      .filter(row => row.radioReferenceSid && row.catalogSystem);
     if (activeSources.length === 0) {
       setMessage("Enter at least one RR system ID first.");
       return;
@@ -1108,7 +1124,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
           method: "POST",
           body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: includeExcluded })
         });
-        return expandTalkgroupPreviewToSystems(preview, row.catalogSystems);
+        return scopeTalkgroupPreviewToSystem(preview, row.catalogSystem);
       })));
       setPreview(result);
       setMessage(`Previewed ${result.includedCount.toLocaleString()} included row(s).`);
@@ -1139,7 +1155,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
           category: "talkgroups",
           action: applyMode === "merge" ? "catalog_merged" : "catalog_replaced",
           summary: `Talkgroup catalog ${applyMode === "merge" ? "merged" : "replaced"} with ${result.includedCount.toLocaleString()} row(s).`,
-          details: { applyMode, rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystems: row.catalogSystems })).filter(row => row.radioReferenceSid), includedCount: result.includedCount },
+          details: { applyMode, rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid), includedCount: result.includedCount },
           source: "ui"
         })
       });
@@ -1163,7 +1179,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
   }
 
   function addSource() {
-    setRrSources(current => [...current, { key: `source-${Date.now()}-${current.length}`, radioReferenceSid: "", catalogSystems: [] }]);
+    setRrSources(current => [...current, { key: `source-${Date.now()}-${current.length}`, radioReferenceSid: "", catalogSystem: "" }]);
   }
 
   function removeSource(index: number) {
@@ -1178,7 +1194,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
     <div className="site-setup-source-list">
       {rrSources.map((row, index) => <div className="site-setup-source-row" key={row.key}>
         <label><span>RR system ID</span><input value={row.radioReferenceSid} inputMode="numeric" onChange={event => updateSource(index, { radioReferenceSid: event.target.value })} /></label>
-        <label><span>Systems</span><input value={row.catalogSystems.join(", ")} onChange={event => updateSource(index, { catalogSystems: event.target.value.split(",").map(value => value.trim()).filter(Boolean) })} /></label>
+        <label><span>System</span><input value={row.catalogSystem} onChange={event => updateSource(index, { catalogSystem: event.target.value })} /></label>
         <button type="button" disabled={rrSources.length <= 1} onClick={() => removeSource(index)}>Remove</button>
       </div>)}
       <button type="button" onClick={addSource}>Add RR List</button>
@@ -13374,6 +13390,13 @@ function SdrDetectionPanel({ detection }: { detection: SetupSdrDetection }) {
 function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void; readOnly?: boolean }) {
   const categories = ["police", "fire", "ems", "traffic", "other"];
   const hasSystem = preview.rows.some(row => row.systemShortName);
+  const categoryRank: Record<string, number> = { police: 0, fire: 1, ems: 2, traffic: 3, other: 4 };
+  const visibleRows = preview.rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) =>
+      ((categoryRank[a.row.opsCategory || "other"] ?? 9) - (categoryRank[b.row.opsCategory || "other"] ?? 9)) ||
+      (a.row.systemShortName || "").localeCompare(b.row.systemShortName || "", undefined, { sensitivity: "base" }) ||
+      (a.row.id - b.row.id));
   return <div className="talkgroup-preview">
     <div className="setup-job-head">
       <strong>{preview.includedCount.toLocaleString()} included / {preview.excludedCount.toLocaleString()} excluded</strong>
@@ -13383,7 +13406,7 @@ function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { previ
     <div className="talkgroup-preview-table">
       <table className="table">
         <thead><tr><th>Use</th>{hasSystem && <th>System</th>}<th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Category</th><th>Reason</th></tr></thead>
-        <tbody>{preview.rows.slice(0, 500).map((row, index) => <tr className={row.included ? "" : "excluded-row"} key={`${talkgroupCatalogKey(row)}-${index}`}>
+        <tbody>{visibleRows.slice(0, 500).map(({ row, index }) => <tr className={row.included ? "" : "excluded-row"} key={`${talkgroupCatalogKey(row)}-${index}`}>
           <td><input type="checkbox" checked={row.included} disabled={readOnly} onChange={e => updateRow(index, { included: e.target.checked })} /></td>
           {hasSystem && <td>{readOnly ? (row.systemShortName || "--") : <input value={row.systemShortName ?? ""} onChange={e => updateRow(index, { systemShortName: e.target.value, key: e.target.value.trim() ? `${normalizeTalkgroupSystem(e.target.value)}:${row.id}` : String(row.id) })} />}</td>}
           <td>{readOnly ? row.id : <input type="number" value={row.id} onChange={e => {
