@@ -15,6 +15,7 @@ public sealed class RfSurveyService
     private static readonly TimeSpan WaterfallConsumeTimeout = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExperimentCancellations = new();
     private readonly ConcurrentDictionary<string, WaterfallRuntime> _activeWaterfalls = new();
+    private readonly ConcurrentDictionary<string, RfSurveyWaterfallStatusDto> _lastWaterfalls = new();
 
     private static readonly string[] ScopeInvalidatedExperimentTypes =
     [
@@ -453,9 +454,79 @@ public sealed class RfSurveyService
         const int MaxInlineJsonLength = 16_000;
         return experiment with
         {
-            EvidenceJson = experiment.EvidenceJson.Length > MaxInlineJsonLength ? "{}" : experiment.EvidenceJson,
+            EvidenceJson = experiment.EvidenceJson.Length > MaxInlineJsonLength ? CompactExperimentEvidenceJson(experiment) : experiment.EvidenceJson,
             InterpretationJson = experiment.InterpretationJson.Length > MaxInlineJsonLength ? "{}" : experiment.InterpretationJson
         };
+    }
+
+    private static string CompactExperimentEvidenceJson(RfSurveyExperimentDto experiment)
+    {
+        if (!string.Equals(experiment.Type, "rf_validation_sweep", StringComparison.OrdinalIgnoreCase))
+            return "{}";
+
+        try
+        {
+            if (JsonNode.Parse(experiment.EvidenceJson) is not JsonObject root)
+                return "{}";
+
+            var compact = new JsonObject();
+            CopyNode(root, compact, "systemShortName");
+            CopyNode(root, compact, "selectedControlChannelHz");
+            CopyNode(root, compact, "selectedSourceIndex");
+            CopyNode(root, compact, "selectedGain");
+            CopyNode(root, compact, "selectedErrorHz");
+            CopyNode(root, compact, "technicalBlocker");
+            CopyNode(root, compact, "parameters");
+            CopyNode(root, compact, "liveCandidateId");
+            CopyNode(root, compact, "p25ProbedCandidateIds");
+            CopyNode(root, compact, "voiceTestedCandidateIds");
+            CopyNode(root, compact, "siteReadiness");
+
+            if (root["power"] is JsonObject power)
+            {
+                var compactPower = new JsonObject();
+                CopyNode(power, compactPower, "controlChannelHz");
+                CopyNode(power, compactPower, "controlChannelsHz");
+                CopyNode(power, compactPower, "rows");
+                compact["power"] = compactPower;
+            }
+
+            if (root["candidates"] is JsonArray candidates)
+            {
+                var compactCandidates = new JsonArray();
+                foreach (var item in candidates.OfType<JsonObject>())
+                    compactCandidates.Add(CompactRfValidationCandidate(item));
+                compact["candidates"] = compactCandidates;
+            }
+
+            return compact.ToJsonString(EngineConfig.JsonOptions());
+        }
+        catch
+        {
+            return "{}";
+        }
+    }
+
+    private static JsonObject CompactRfValidationCandidate(JsonObject candidate)
+    {
+        var compact = new JsonObject();
+        foreach (var name in new[]
+                 {
+                     "id", "systemShortName", "siteLabel", "sourceIndex", "sdrType", "serial", "device",
+                     "centerHz", "sampleRate", "errorHz", "errorOffsetHz", "gain", "controlChannelHz",
+                     "rfStatus", "snrDb", "peakFrequencyHz", "peakOffsetHz", "peakDb", "noiseFloorDb",
+                     "overload", "score", "p25Status", "p25Summary", "p25Frames", "p25Demod",
+                     "p25ExitCode", "metricsStatus", "metricsSummary", "metricsRow", "voiceStatus",
+                     "voiceSummary", "voiceTotalCalls", "voiceRealCalls"
+                 })
+            CopyNode(candidate, compact, name);
+        return compact;
+    }
+
+    private static void CopyNode(JsonObject source, JsonObject target, string name)
+    {
+        if (source.TryGetPropertyValue(name, out var value) && value != null)
+            target[name] = JsonNode.Parse(value.ToJsonString());
     }
 
     public async Task<RfSurveySweepProgressDto> GetSweepProgressAsync(string id, CancellationToken ct)
@@ -1113,6 +1184,7 @@ public sealed class RfSurveyService
             trStopOutput);
         _activeWaterfalls[id] = runtime;
         runtime.Task = Task.Run(() => RunWaterfallLoopAsync(runtime), CancellationToken.None);
+        RememberWaterfall(runtime, active: true);
         return runtime.ToDto(true);
     }
 
@@ -1123,6 +1195,8 @@ public sealed class RfSurveyService
             runtime.MarkConsumed();
             return Task.FromResult(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory));
         }
+        if (_lastWaterfalls.TryGetValue(id, out var last))
+            return Task.FromResult(includeHistory ? last : last with { Frames = null });
         return Task.FromResult(new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false));
     }
 
@@ -1146,7 +1220,11 @@ public sealed class RfSurveyService
     public async Task<RfSurveyWaterfallStatusDto> StopWaterfallAsync(string id, CancellationToken ct)
     {
         if (!_activeWaterfalls.TryRemove(id, out var runtime))
+        {
+            if (_lastWaterfalls.TryGetValue(id, out var last))
+                return last with { Frames = null };
             return new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false);
+        }
 
         runtime.Cancellation.Cancel();
         if (runtime.Task != null)
@@ -1158,7 +1236,9 @@ public sealed class RfSurveyService
             }
         }
         runtime.Cancellation.Dispose();
-        return runtime.ToDto(false, false) with { Status = "stopped", Message = "Waterfall stopped." };
+        var stopped = runtime.ToDto(false, true) with { Status = "stopped", Message = "Waterfall stopped." };
+        _lastWaterfalls[id] = stopped;
+        return stopped with { Frames = null };
     }
 
     private async Task RunWaterfallLoopAsync(WaterfallRuntime runtime)
@@ -1205,7 +1285,13 @@ public sealed class RfSurveyService
             }
             if (_activeWaterfalls.TryGetValue(runtime.SurveyId, out var current) && ReferenceEquals(current, runtime))
                 _activeWaterfalls.TryRemove(runtime.SurveyId, out _);
+            RememberWaterfall(runtime, active: false);
         }
+    }
+
+    private void RememberWaterfall(WaterfallRuntime runtime, bool active)
+    {
+        _lastWaterfalls[runtime.SurveyId] = runtime.ToDto(active, includeHistory: true);
     }
 
     public async Task<RfSurveyExperimentDto> RunExperimentAsync(string id, RfSurveyRunExperimentRequest request, CancellationToken ct)
