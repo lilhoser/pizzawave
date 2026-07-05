@@ -739,25 +739,13 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
 
 function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () => Promise<void> }) {
   if (!setup) return <div className="pane">Loading Site Setup...</div>;
-  const desiredSystems = setup.desired.systems?.length
-    ? setup.desired.systems.map(system => system.shortName)
-    : setup.desired.systemShortNames ?? [];
-  const desiredControlChannels = setup.desired.systems?.flatMap(system => system.controlChannelsHz ?? []) ?? [];
-  const appliedSourceSummary = setup.applied.sources.map(source => {
-    const gain = source.gain ? `, gain ${source.gain}` : "";
-    return `#${source.index} ${source.centerHz ? formatRfHz(source.centerHz) : "--"} @ ${source.sampleRate ? formatRfHz(source.sampleRate) : "--"}${gain}`;
-  });
-  const desiredSourceSummary = setup.desired.sources?.map(source => {
-    const gain = source.gain ? `, gain ${source.gain}` : "";
-    return `#${source.index} ${source.centerHz ? formatRfHz(source.centerHz) : "--"} @ ${source.sampleRate ? formatRfHz(source.sampleRate) : "--"}${gain}`;
-  }) ?? [];
+  const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
 
   return <div className="site-setup-shell">
     <section className="pane site-setup-pane">
       <div className="site-setup-head">
         <div>
           <h2>Site Setup</h2>
-          <p className="muted">Edit desired site state, validate RF, then apply a monitored TR configuration when a disruptive step is actually needed.</p>
         </div>
         <div className="site-setup-actions">
           <button type="button" onClick={() => void reload()}><RefreshCw size={14} /> Refresh</button>
@@ -765,36 +753,9 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
         </div>
       </div>
 
-      <div className="site-setup-grid">
-        <section className="site-setup-card">
-          <h3>Monitoring</h3>
-          <strong>{label(setup.status.monitoringState || "unknown")}</strong>
-          <span>{setup.status.message || "No monitoring status reported."}</span>
-          <small>{setup.status.pendingApply ? "Desired setup differs from applied monitoring config." : "Desired setup matches the applied monitoring snapshot."}</small>
-        </section>
-        <section className="site-setup-card">
-          <h3>Currently Monitoring</h3>
-          <strong>{setup.applied.systemShortNames.length ? setup.applied.systemShortNames.join(", ") : "No systems"}</strong>
-          <span>{setup.applied.controlChannelsHz.length ? formatFrequencyList(setup.applied.controlChannelsHz) : "No control channels"}</span>
-          <small>{setup.applied.configExists ? `Config ${setup.applied.configHash.slice(0, 12) || "hash pending"}` : "No TR config file found."}</small>
-        </section>
-        <section className="site-setup-card">
-          <h3>Desired Setup</h3>
-          <strong>{setup.desired.siteLabel || desiredSystems.join(", ") || "Unset"}</strong>
-          <span>{desiredControlChannels.length ? formatFrequencyList(desiredControlChannels) : "No selected control channels"}</span>
-          <small>{setup.desired.updatedAtUtc ? `Updated ${new Date(setup.desired.updatedAtUtc).toLocaleString()}` : "Seeded from the applied config until edited."}</small>
-        </section>
-        <section className="site-setup-card">
-          <h3>Activity</h3>
-          <strong>{setup.recentActivity.length.toLocaleString()} recent event{setup.recentActivity.length === 1 ? "" : "s"}</strong>
-          <span>{setup.recentActivity[0]?.summary ?? "No setup activity recorded yet."}</span>
-          <small>{setup.recentActivity[0]?.timestampUtc ? new Date(setup.recentActivity[0].timestampUtc).toLocaleString() : "Changes will be audited here."}</small>
-        </section>
-      </div>
-
       <div className="site-setup-layout">
         <section className="site-setup-section-nav" aria-label="Site Setup sections">
-          {["Overview", "Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"].map((section, index) =>
+          {sections.map((section, index) =>
             <button type="button" key={section} className={index === 0 ? "active" : ""} disabled={index !== 0}>
               <span>{index + 1}</span>
               <strong>{section}</strong>
@@ -803,36 +764,10 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
 
         <section className="site-setup-panel">
           <div className="site-setup-panel-head">
-            <h3>Overview</h3>
+            <h3>Location</h3>
             <span className={setup.status.pendingApply ? "pill live-status-warning" : "pill live-status-ok"}>{setup.status.pendingApply ? "Pending apply" : "Applied"}</span>
           </div>
-          <div className="site-setup-two-col">
-            <div>
-              <h4>Pending Changes</h4>
-              {setup.pendingChanges.length
-                ? <ul className="site-setup-list">{setup.pendingChanges.map((change, index) => <li key={`${change.category}-${index}`}><strong>{label(change.category)}</strong><span>{change.summary}</span></li>)}</ul>
-                : <p className="muted">No pending config changes.</p>}
-            </div>
-            <div>
-              <h4>Source Snapshot</h4>
-              <ul className="site-setup-list">
-                <li><strong>Applied</strong><span>{appliedSourceSummary.join("; ") || "No applied sources"}</span></li>
-                <li><strong>Desired</strong><span>{desiredSourceSummary.join("; ") || "No desired source plan yet"}</span></li>
-              </ul>
-            </div>
-          </div>
-          <h4>Recent Activity</h4>
-          <table className="table compact-table">
-            <thead><tr><th>Time</th><th>Category</th><th>Action</th><th>Summary</th></tr></thead>
-            <tbody>
-              {setup.recentActivity.length ? setup.recentActivity.slice(0, 8).map(row => <tr key={row.id}>
-                <td>{new Date(row.timestampUtc).toLocaleString()}</td>
-                <td>{label(row.category)}</td>
-                <td>{label(row.action)}</td>
-                <td>{row.summary}</td>
-              </tr>) : <tr><td colSpan={4}>No setup activity recorded.</td></tr>}
-            </tbody>
-          </table>
+          <p className="muted">Location controls will move here in the next milestone.</p>
         </section>
       </div>
     </section>
