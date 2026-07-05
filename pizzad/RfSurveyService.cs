@@ -309,7 +309,7 @@ public sealed class RfSurveyService
                 var serial = FirstNonEmpty(JsonString(source, "serial"), ExtractAirspySerial(device), ExtractRtlSerial(device));
                 var index = JsonInt(source, "index");
                 var sampleRate = (int)JsonLong(source, "rate");
-                var gain = JsonString(source, "gain");
+                var gain = ReadTrSourceGain(source);
                 if (index < 0 || sources.Any(existing => existing.Index == index))
                     index = ordinal;
                 sources.Add(new RfSurveySourceDto(
@@ -329,6 +329,27 @@ public sealed class RfSurveyService
         {
             return [];
         }
+    }
+
+    private static string ReadTrSourceGain(JsonElement source)
+    {
+        var gain = JsonString(source, "gain");
+        if (!string.IsNullOrWhiteSpace(gain))
+            return gain.Trim();
+        var lna = JsonInt(source, "lnaGain");
+        var mix = JsonInt(source, "mixGain");
+        var ifGain = JsonInt(source, "ifGain");
+        if (lna <= 0 && mix <= 0 && ifGain <= 0)
+            return string.Empty;
+        if (lna >= 15 && mix >= 12 && ifGain >= 8)
+            return "21";
+        if (lna >= 12 && mix >= 10 && ifGain >= 6)
+            return "19";
+        if (lna >= 8 && mix >= 6 && ifGain >= 4)
+            return "13";
+        if (lna >= 4 && mix >= 4 && ifGain >= 2)
+            return "7";
+        return "0";
     }
 
     private static RfSurveyProfileDto NormalizeStoredProfileForWorkflow(RfSurveyProfileDto profile)
@@ -930,6 +951,7 @@ public sealed class RfSurveyService
         var liveJson = await File.ReadAllTextAsync(livePath, ct);
         var sourcePlanSystemNames = SourcePlanSystemNames(profile);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
+        var rfSourceCandidates = BuildRfValidationSourceCandidates(profile, experiments);
         var observedFrequencies = await BuildObservedVoiceFrequenciesBySystemAsync(ct);
         var plannedSystems = AddObservedVoiceFrequencies(
             BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, warnings),
@@ -978,6 +1000,7 @@ public sealed class RfSurveyService
             var sourceIndex = selected[planIndex];
             var source = EnsureSourceObject(draftRoot, sourceIndex);
             var profileSource = profile.Sources.FirstOrDefault(row => row.Index == sourceIndex);
+            rfSourceCandidates.TryGetValue(sourceIndex, out var rfCandidate);
             SourceWindow? window = windows.Count == 0
                 ? null
                 : windows[Math.Min(planIndex, windows.Count - 1)];
@@ -988,10 +1011,11 @@ public sealed class RfSurveyService
             PatchSourceField(source, "rate", runtimeRate, changes, sourceIndex);
             if (window != null)
                 PatchSourceField(source, "center", window.Value.CenterHz, changes, sourceIndex);
-            if (profileSource?.ErrorHz is int error)
-                PatchSourceField(source, "error", error, changes, sourceIndex);
-            if (!string.IsNullOrWhiteSpace(profileSource?.Gain))
-                PatchSourceField(source, "gain", ParseJsonValue(profileSource.Gain), changes, sourceIndex);
+            var error = rfCandidate?.ErrorHz ?? profileSource?.ErrorHz;
+            if (error is int errorHz)
+                PatchSourceField(source, "error", errorHz, changes, sourceIndex);
+            var gain = !string.IsNullOrWhiteSpace(rfCandidate?.Gain) ? rfCandidate.Gain : profileSource?.Gain;
+            PatchSourceGainFields(source, profileSource, gain, changes, sourceIndex);
         }
         PatchCallstreamStreams(draftRoot, keptSystems, changes);
         NormalizeRadioSetupTrConfig(draftRoot, changes);
@@ -6298,6 +6322,46 @@ public sealed class RfSurveyService
             .Any(IsMonitorableRfCandidate));
     }
 
+    private static IReadOnlyDictionary<int, RfValidationCandidate> BuildRfValidationSourceCandidates(
+        RfSurveyProfileDto profile,
+        IReadOnlyList<RfSurveyExperimentDto> experiments)
+    {
+        var requested = SourcePlanSystemNames(profile);
+        var systems = profile.Systems
+            .Where(system => requested.Count == 0 || requested.Any(name => string.Equals(name, system.ShortName, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var selectedSources = profile.SelectedSourceIndexes.Count > 0
+            ? profile.SelectedSourceIndexes.ToHashSet()
+            : profile.Sources.Select(source => source.Index).ToHashSet();
+        foreach (var experiment in experiments
+            .Where(experiment => string.Equals(experiment.Type, "rf_validation_sweep", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(experiment => experiment.CreatedAtUtc))
+        {
+            var candidates = ReadRfValidationCandidates(experiment.EvidenceJson)
+                .Where(candidate => selectedSources.Count == 0 || selectedSources.Contains(candidate.SourceIndex))
+                .Where(candidate => systems.Count == 0 || systems.Any(system => CandidateBelongsToSystem(candidate, system)))
+                .Select(candidate => candidate.Score == 0 ? candidate with { Score = ScoreRfValidationCandidate(candidate) } : candidate)
+                .ToList();
+            if (candidates.Count == 0)
+                continue;
+
+            var usable = candidates.Any(IsMonitorableRfCandidate)
+                ? candidates.Where(IsMonitorableRfCandidate).ToList()
+                : candidates.Where(candidate => candidate.P25Frames || string.Equals(candidate.P25Status, "passed", StringComparison.OrdinalIgnoreCase)).ToList();
+            var chosen = usable
+                .GroupBy(candidate => candidate!.SourceIndex)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderByDescending(ScoreRfValidationCandidate)
+                        .First());
+            if (chosen.Count > 0)
+                return chosen;
+        }
+
+        return new Dictionary<int, RfValidationCandidate>();
+    }
+
     private static IReadOnlyList<RfValidationCandidate> ReadRfValidationCandidates(string? evidenceJson)
     {
         if (string.IsNullOrWhiteSpace(evidenceJson))
@@ -6706,7 +6770,7 @@ public sealed class RfSurveyService
         SetObjectValue(system, "system", "recordUUVCalls", true, changes);
         SetObjectValue(system, "system", "hideEncrypted", true, changes);
         SetObjectValue(system, "system", "hideUnknownTalkgroups", false, changes);
-        SetObjectValue(system, "system", "minDuration", 5, changes);
+        SetObjectValue(system, "system", "minDuration", 0, changes);
         SetObjectValue(system, "system", "minTransmissionDuration", 0, changes);
         SetObjectValue(system, "system", "talkgroupDisplayFormat", "id_tag", changes);
         SetObjectValue(system, "system", "multiSite", true, changes);
@@ -6723,10 +6787,39 @@ public sealed class RfSurveyService
         SetObjectValue(postprocess, "system audio_postprocess", "loudnorm_two_pass", false, changes);
     }
 
+    private static void PatchSourceGainFields(JsonObject source, RfSurveySourceDto? profileSource, string? gain, List<string> changes, int sourceIndex)
+    {
+        if (string.IsNullOrWhiteSpace(gain))
+            return;
+
+        if (IsAirspySource(profileSource))
+        {
+            if (source.Remove("gain"))
+                changes.Add($"source {sourceIndex} gain removed for Airspy stage gains");
+            var stageGains = BuildAirspyStageGains(gain);
+            PatchSourceField(source, "lnaGain", stageGains.Lna, changes, sourceIndex);
+            PatchSourceField(source, "mixGain", stageGains.Mix, changes, sourceIndex);
+            PatchSourceField(source, "ifGain", stageGains.If, changes, sourceIndex);
+            return;
+        }
+
+        if (source.Remove("lnaGain"))
+            changes.Add($"source {sourceIndex} lnaGain removed for generic gain");
+        if (source.Remove("mixGain"))
+            changes.Add($"source {sourceIndex} mixGain removed for generic gain");
+        if (source.Remove("ifGain"))
+            changes.Add($"source {sourceIndex} ifGain removed for generic gain");
+        PatchSourceField(source, "gain", ParseJsonValue(gain), changes, sourceIndex);
+    }
+
+    private static bool HasAirspyStageGains(JsonObject source) =>
+        source.ContainsKey("lnaGain") || source.ContainsKey("mixGain") || source.ContainsKey("ifGain");
+
     private static void NormalizeRadioSetupSource(JsonObject source, int sourceIndex, List<string> changes)
     {
         SetObjectValue(source, $"source {sourceIndex}", "error", 0, changes);
-        SetObjectValue(source, $"source {sourceIndex}", "gain", 32, changes);
+        if (!HasAirspyStageGains(source))
+            SetObjectValue(source, $"source {sourceIndex}", "gain", 32, changes);
         SetObjectValue(source, $"source {sourceIndex}", "digitalRecorders", TrRecorderCapacitySizer.MinimumDigitalRecorders, changes);
         SetObjectValue(source, $"source {sourceIndex}", "analogRecorders", 0, changes);
         SetObjectValue(source, $"source {sourceIndex}", "driver", "osmosdr", changes);
