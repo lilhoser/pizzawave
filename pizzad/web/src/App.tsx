@@ -1316,7 +1316,7 @@ function LocationSourceCall({ call, searchQuery = "" }: { call: LocationHeat["so
 
 function CategoryView({ data, rangeHours, searchQuery }: { data: CategoryPage | null; rangeHours: number; searchQuery: string }) {
   const [sortMode, setSortModeState] = useState<CategorySortMode>(() => normalizeCategorySort(localStorage.getItem("pizzawave-category-sort")));
-  const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") === "1");
+  const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") !== "0");
   function setSortMode(value: CategorySortMode) {
     setSortModeState(value);
     localStorage.setItem("pizzawave-category-sort", value);
