@@ -12029,12 +12029,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   async function previewTalkgroups(source: "csv" | "rr") {
     setBusy(`talkgroups-${source}`);
     try {
-      const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-        method: "POST",
-        body: JSON.stringify(source === "rr"
-          ? { radioReferenceSid: talkgroupSid, includeNormallyExcluded: includeExcludedTalkgroups }
-          : { csvText: talkgroupsCsv, includeNormallyExcluded: includeExcludedTalkgroups })
-      });
+      const preview = await previewTalkgroupsForSelectedSystems(source, source === "csv" ? talkgroupsCsv : undefined);
       setTalkgroupPreview(preview);
       setMessage(`Previewed ${preview.rows.length.toLocaleString()} talkgroups: ${preview.includedCount.toLocaleString()} included, ${preview.excludedCount.toLocaleString()} excluded.`);
     } catch (error) {
@@ -12055,12 +12050,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     }
     setBusy(`talkgroups-${source}`);
     try {
-      const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-        method: "POST",
-        body: JSON.stringify(source === "rr"
-          ? { radioReferenceSid: talkgroupSid.trim(), includeNormallyExcluded: includeExcludedTalkgroups }
-          : { csvText, includeNormallyExcluded: includeExcludedTalkgroups })
-      });
+      const preview = await previewTalkgroupsForSelectedSystems(source, csvText);
       const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", { method: "POST", body: JSON.stringify({ rows: preview.rows }) });
       setTalkgroupPreview(saved);
       if (source === "rr") {
@@ -12077,6 +12067,29 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     } finally {
       setBusy("");
     }
+  }
+
+  function selectedTalkgroupSystems() {
+    const draftSystems = (trDraft?.systems ?? [])
+      .filter(system => selectedTrSites.length === 0 || selectedTrSites.some(site => stringEqualsIgnoreCase(site, system.siteName) || stringEqualsIgnoreCase(site, system.shortName)))
+      .map(system => system.shortName)
+      .filter(Boolean);
+    const siteListSystems = selectedTrSites
+      .map(site => trSiteList?.sites.find(row => stringEqualsIgnoreCase(row.name, site) || stringEqualsIgnoreCase(row.shortName, site))?.shortName || site)
+      .filter(Boolean);
+    return Array.from(new Set((draftSystems.length ? draftSystems : siteListSystems).map(normalizeTalkgroupSystem).filter(Boolean)));
+  }
+
+  async function previewTalkgroupsForSelectedSystems(source: "csv" | "rr", csvText?: string) {
+    const systems = selectedTalkgroupSystems();
+    const scopes = systems.length ? systems : [""];
+    const previews = await Promise.all(scopes.map(systemShortName => api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
+      method: "POST",
+      body: JSON.stringify(source === "rr"
+        ? { radioReferenceSid: talkgroupSid.trim(), includeNormallyExcluded: includeExcludedTalkgroups, systemShortName }
+        : { csvText: csvText ?? talkgroupsCsv, includeNormallyExcluded: includeExcludedTalkgroups, systemShortName })
+    })));
+    return combineTalkgroupPreviews(previews);
   }
 
   async function importTalkgroupCsvFile(file: File | null) {
