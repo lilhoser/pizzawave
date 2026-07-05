@@ -60,14 +60,52 @@ public sealed class SetupTalkgroupService
         if (rows.Count == 0)
             throw new InvalidOperationException("No included talkgroup rows were provided.");
 
-        var document = new TalkgroupCatalogDocument { Items = rows };
+        var sync = SyncIntoExistingCatalog(rows);
+        var document = sync.Document;
         var result = await _catalog.SaveAsync(document, generateTrCsv: true, ct);
         var preview = new TalkgroupCatalogPreview(
             rows,
             [],
             rows.GroupBy(r => r.OpsCategory).OrderBy(g => g.Key).ToDictionary(g => g.Key, g => g.Count()),
-            $"Saved {result.Count:N0} row(s) to the PizzaWave talkgroup catalog and regenerated {result.GeneratedCsvPath}.");
+            $"Synced {rows.Count:N0} setup row(s) into the PizzaWave talkgroup catalog: {sync.Added:N0} added, {sync.Refreshed:N0} refreshed, {sync.Retained:N0} existing row(s) retained. Preserved matching operator policy and regenerated {result.GeneratedCsvPath}.");
         return ToSetupPreview(preview, includeExcluded: false);
+    }
+
+    private (TalkgroupCatalogDocument Document, int Added, int Refreshed, int Retained) SyncIntoExistingCatalog(List<TalkgroupCatalogItem> rows)
+    {
+        var existing = _catalog.Load();
+        var importedByKey = rows.ToDictionary(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase);
+        var retained = existing.Items
+            .Where(row => !importedByKey.ContainsKey(TalkgroupCatalogService.ItemKey(row)))
+            .ToList();
+        var added = 0;
+        var refreshed = 0;
+        var synced = rows.Select(row =>
+        {
+            var key = TalkgroupCatalogService.ItemKey(row);
+            var existingRow = existing.Items.LastOrDefault(item =>
+                string.Equals(TalkgroupCatalogService.ItemKey(item), key, StringComparison.OrdinalIgnoreCase));
+            if (existingRow == null)
+            {
+                added++;
+                return row;
+            }
+
+            refreshed++;
+            var manualCatalogRow = string.Equals(existingRow.Source, "manual", StringComparison.OrdinalIgnoreCase);
+            return row with
+            {
+                AlphaTag = manualCatalogRow ? existingRow.AlphaTag : row.AlphaTag,
+                Description = manualCatalogRow ? existingRow.Description : row.Description,
+                Tag = manualCatalogRow ? existingRow.Tag : row.Tag,
+                Enabled = existingRow.Enabled,
+                OpsCategory = existingRow.OpsCategory,
+                IncidentEligible = existingRow.IncidentEligible,
+                Notes = existingRow.Notes,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+        });
+        return (existing with { Items = retained.Concat(synced).ToList() }, added, refreshed, retained.Count);
     }
 
     private static SetupTalkgroupPreviewDto ToSetupPreview(TalkgroupCatalogPreview preview, bool includeExcluded)
