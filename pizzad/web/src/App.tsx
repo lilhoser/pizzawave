@@ -697,7 +697,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("tools")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
-        {setupStatus?.completed && page === "tools" && <ToolsView onOpenTalkgroups={() => goSettings("talkgroups")} onTrOperationChange={setRadioSetupTrOperation} />}
+        {setupStatus?.completed && page === "tools" && <ToolsView onTrOperationChange={setRadioSetupTrOperation} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenRadioSetup={() => setPage("tools")} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} targetTab={settingsTargetTab} clearTargetTab={() => setSettingsTargetTab(null)} />}
       </main>
@@ -2132,7 +2132,7 @@ function MetricsOverviewPanel({ data, dashboard, engineHealth, tokenUsage, bandw
   </div>;
 }
 
-function ToolsView({ onOpenTalkgroups, onTrOperationChange }: { onOpenTalkgroups: () => void; onTrOperationChange: (value: string) => void }) {
+function ToolsView({ onTrOperationChange }: { onTrOperationChange: (value: string) => void }) {
   const [tab, setTabState] = useState(() => localStorage.getItem("pizzawave-tools-tab") || "radio-setup");
   const [immersive, setImmersive] = useState(false);
   const setTab = (value: string) => {
@@ -2149,7 +2149,7 @@ function ToolsView({ onOpenTalkgroups, onTrOperationChange }: { onOpenTalkgroups
     {!immersive && <div className="tools-tabs">
       <button className={tab === "radio-setup" ? "active" : ""} onClick={() => setTab("radio-setup")}>Radio Setup</button>
     </div>}
-    {tab === "radio-setup" && <RfSurveyPanel setImmersive={setImmersive} onOpenTalkgroups={onOpenTalkgroups} onTrOperationChange={onTrOperationChange} />}
+    {tab === "radio-setup" && <RfSurveyPanel setImmersive={setImmersive} onTrOperationChange={onTrOperationChange} />}
   </div>;
 }
 
@@ -2203,7 +2203,7 @@ function hasMeaningfulRfPath(value?: RfSurveyPathProfile | null) {
       (item.passband ?? "").trim());
 }
 
-function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: { setImmersive?: (value: boolean) => void; onOpenTalkgroups: () => void; onTrOperationChange: (value: string) => void }) {
+function RfSurveyPanel({ setImmersive, onTrOperationChange }: { setImmersive?: (value: boolean) => void; onTrOperationChange: (value: string) => void }) {
   const [surveys, setSurveys] = useState<RfSurveyList | null>(null);
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -3030,7 +3030,6 @@ function RfSurveyPanel({ setImmersive, onOpenTalkgroups, onTrOperationChange }: 
       onLoadPreviousRfPath={loadPreviousRfPath}
       onReload={loadSurveys}
       onRefreshDetail={refreshDetail}
-      onOpenTalkgroups={onOpenTalkgroups}
       onShowDetails={setDetails}
       details={details}
       setDetails={setDetails}
@@ -3204,7 +3203,6 @@ function RfSurveyWizard({
   onLoadPreviousRfPath,
   onReload,
   onRefreshDetail,
-  onOpenTalkgroups,
   onShowDetails,
   details,
   setDetails,
@@ -3266,7 +3264,6 @@ function RfSurveyWizard({
   onLoadPreviousRfPath: () => Promise<void>;
   onReload: () => Promise<void>;
   onRefreshDetail: () => Promise<void>;
-  onOpenTalkgroups: () => void;
   onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void;
   details: { title: string; body: React.ReactNode } | null;
   setDetails: (value: { title: string; body: React.ReactNode } | null) => void;
@@ -3617,11 +3614,6 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
       })}
       {availableSystems.length === 0 && <div className="setup-note">{filteredSystems.length === 0 ? "No matching sites." : "Matching sites are already selected."}</div>}
     </div>
-    <RswTalkgroupImportPanel
-      radioReferenceSid={radioReferenceSid}
-      radioReferenceSystemName={radioReferenceSites?.systemName}
-      className="rsw-talkgroup-import"
-    />
   </div>;
 }
 
@@ -12908,119 +12900,6 @@ function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { previ
       </table>
       {preview.rows.length > 500 && <div className="muted">Showing first 500 rows.</div>}
     </div>
-  </div>;
-}
-
-function RswTalkgroupImportPanel({
-  radioReferenceSid,
-  radioReferenceSystemName,
-  className = ""
-}: {
-  radioReferenceSid: string;
-  radioReferenceSystemName?: string;
-  className?: string;
-}) {
-  const defaultScope = defaultTalkgroupCatalogScope(radioReferenceSystemName);
-  const [catalogScope, setCatalogScope] = useState(defaultScope);
-  const [applyMode, setApplyMode] = useState<"merge" | "replace">("merge");
-  const [includeExcluded, setIncludeExcluded] = useState(false);
-  const [enabled, setEnabled] = useState(false);
-  const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
-  const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState("");
-  const normalizedScope = normalizeTalkgroupSystem(catalogScope);
-  const sid = radioReferenceSid.trim();
-
-  useEffect(() => {
-    if (!catalogScope.trim() && defaultScope)
-      setCatalogScope(defaultScope);
-  }, [defaultScope, catalogScope]);
-
-  useEffect(() => {
-    if (!enabled)
-      return;
-    if (!sid || !normalizedScope) {
-      setPreview(null);
-      setMessage("");
-      return;
-    }
-    const timer = window.setTimeout(() => void loadTalkgroups(), 250);
-    return () => window.clearTimeout(timer);
-  }, [enabled, sid, normalizedScope, includeExcluded, applyMode]);
-
-  function scopeRows(rows: SetupTalkgroupRow[], scope = normalizedScope) {
-    return rows.map(row => ({
-      ...row,
-      systemShortName: scope,
-      key: `${scope}:${row.id}`
-    }));
-  }
-
-  async function loadTalkgroups() {
-    if (!sid || !normalizedScope)
-      return;
-    setBusy("talkgroups");
-    try {
-      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-        method: "POST",
-        body: JSON.stringify({ radioReferenceSid: sid, includeNormallyExcluded: includeExcluded, systemShortName: normalizedScope })
-      });
-      const rows = scopeRows(result.rows);
-      setPreview({ ...result, rows, includedCount: rows.filter(row => row.included).length, excludedCount: rows.filter(row => !row.included).length });
-      const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
-        method: "POST",
-        body: JSON.stringify({ rows, applyMode })
-      });
-      setMessage(`Loaded ${saved.includedCount.toLocaleString()} TG row(s) for ${catalogScope.trim()}.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup load failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function updateRow(index: number, patch: Partial<SetupTalkgroupRow>) {
-    setPreview(current => {
-      if (!current) return current;
-      const rows = current.rows.map((row, i) => i === index ? { ...row, ...patch } : row);
-      const included = rows.filter(row => row.included);
-      const includedByCategory = included.reduce<Record<string, number>>((acc, row) => {
-        const key = row.opsCategory || "other";
-        acc[key] = (acc[key] ?? 0) + 1;
-        return acc;
-      }, {});
-      return { ...current, rows, includedCount: included.length, excludedCount: rows.length - included.length, includedByCategory };
-    });
-  }
-
-  return <div className={`talkgroup-import-panel ${className}`}>
-    <div className="talkgroup-import-head">
-      <h4>Talkgroups</h4>
-      <label className="talkgroup-update-toggle">
-        <input type="checkbox" checked={enabled} onChange={event => {
-          setEnabled(event.target.checked);
-          if (!event.target.checked) {
-            setPreview(null);
-            setMessage("");
-            setBusy("");
-          }
-        }} />
-        <span>Update TG catalog</span>
-      </label>
-    </div>
-    {enabled && <>
-      <div className="rsw-talkgroup-controls">
-        <label><span>System name</span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
-        <label><span>Mode</span><select value={applyMode} onChange={event => setApplyMode(event.target.value === "replace" ? "replace" : "merge")}><option value="merge">Merge</option><option value="replace">Overwrite</option></select></label>
-        <label className="rsw-talkgroup-check">
-          <input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.target.checked)} />
-          <span>Include excluded TGs</span>
-        </label>
-        <button className="danger-button" disabled={Boolean(busy) || !sid || !normalizedScope} onClick={() => void loadTalkgroups()}>{busy === "talkgroups" ? "Updating..." : preview ? "Reload" : "Update"}</button>
-      </div>
-      {message && <div className="setup-note">{message}</div>}
-      {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} readOnly />}
-    </>}
   </div>;
 }
 
