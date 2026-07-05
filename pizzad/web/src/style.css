@@ -2917,6 +2917,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   overflow-wrap: anywhere;
   line-height: 1.25;
 }
+.rf-source-window-cell {
+  display: block;
+  margin-bottom: 4px;
+}
+.rf-source-window-cell:last-child {
+  margin-bottom: 0;
+}
 .rf-source-plan-row .section-status {
   display: inline-block;
   max-width: 100%;

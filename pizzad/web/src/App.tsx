@@ -7044,8 +7044,10 @@ function trUsableSpanHz(sampleRateHz: number) {
   return Math.max(1, Math.floor(Math.max(0, sampleRateHz) * 0.46875) * 2);
 }
 
-function buildSuggestedSourcePlan(frequencies: number[], sampleRateHz: number) {
+function buildSuggestedSourcePlan(frequencies: number[], sampleRateHz: number, priorityFrequencies: number[] = []) {
   const span = trUsableSpanHz(sampleRateHz);
+  const halfSpan = Math.max(1, Math.floor(span / 2));
+  const priorities = uniqueSortedFrequencies(priorityFrequencies);
   const rows: { lowHz: number; centerHz: number; highHz: number; count: number }[] = [];
   let index = 0;
   while (index < frequencies.length) {
@@ -7053,8 +7055,16 @@ function buildSuggestedSourcePlan(frequencies: number[], sampleRateHz: number) {
     let endIndex = index;
     while (endIndex + 1 < frequencies.length && frequencies[endIndex + 1] - start <= span) endIndex += 1;
     const end = frequencies[endIndex];
-    const center = Math.round((start + end) / 2);
-    rows.push({ lowHz: Math.round(center - span / 2), centerHz: center, highHz: Math.round(center + span / 2), count: endIndex - index + 1 });
+    const midpoint = Math.round((start + end) / 2);
+    const minCenter = end - halfSpan;
+    const maxCenter = start + halfSpan;
+    const priority = priorities
+      .filter(value => value >= start && value <= end)
+      .sort((left, right) => Math.abs(left - midpoint) - Math.abs(right - midpoint))[0];
+    const center = minCenter > maxCenter
+      ? midpoint
+      : Math.min(maxCenter, Math.max(minCenter, priority || midpoint));
+    rows.push({ lowHz: Math.round(center - halfSpan), centerHz: center, highHz: Math.round(center + halfSpan), count: endIndex - index + 1 });
     index = endIndex + 1;
   }
   return rows;
@@ -7080,7 +7090,8 @@ type SourcePlanOption = {
 function buildSourcePlanOption(label: string, id: string, systems: RfSurveySystem[], selectedNames: string[], mode: "full" | "control", sampleRateHz: number, availableSources: number): SourcePlanOption {
   const included = systems.filter(system => selectedNames.includes(system.shortName));
   const frequencies = uniqueSortedFrequencies(included.flatMap(system => mode === "control" ? system.controlChannelsHz : systemPlanFrequencies(system)));
-  const windows = buildSuggestedSourcePlan(frequencies, sampleRateHz);
+  const priorityFrequencies = mode === "control" ? uniqueSortedFrequencies(included.flatMap(system => system.controlChannelsHz)) : [];
+  const windows = buildSuggestedSourcePlan(frequencies, sampleRateHz, priorityFrequencies);
   const missingCc = included.filter(system => system.controlChannelsHz.length === 0).map(system => system.siteLabel || system.shortName);
   const reason = missingCc.length > 0
     ? `No RF-validated control channel for ${missingCc.join(", ")}.`
@@ -7223,7 +7234,7 @@ function SourcePlanOptionsTable({
       <span>Option</span>
       <span>Sites</span>
       <span>Validated CC / frequencies</span>
-      <span>Source windows</span>
+      <span>Source centers / windows</span>
       <span>Fit</span>
       <span>Select</span>
     </div>
@@ -7250,7 +7261,10 @@ function SourcePlanOptionsTable({
           <code>{option.frequencies.filter(freq => systems.some(system => option.systems.includes(system.shortName) && system.controlChannelsHz.includes(freq))).map(formatRfHz).join(", ") || "--"}</code>
           <small>{option.frequencyCount} {option.mode === "control" ? "validated CC" : "total frequency"} entr{option.frequencyCount === 1 ? "y" : "ies"}</small>
         </span>
-        <span>{option.windows.length ? option.windows.map((window, index) => <code key={`${option.id}-${index}`}>{formatRfHz(window.lowHz)}-{formatRfHz(window.highHz)}</code>) : "--"}</span>
+        <span>{option.windows.length ? option.windows.map((window, index) => <span className="rf-source-window-cell" key={`${option.id}-${index}`}>
+          <code>{formatRfHz(window.centerHz)}</code>
+          <small>{formatRfHz(window.lowHz)}-{formatRfHz(window.highHz)}</small>
+        </span>) : "--"}</span>
         <span className={option.fits ? "section-status ok" : "section-status warning"}>{option.reason}</span>
         <span>{isCustom
           ? <button className="primary" disabled={!option.fits || selectedPlanKey === `${option.mode}:${option.systems.slice().sort().join("|")}`} onClick={() => onApply(option)}>Apply Custom</button>

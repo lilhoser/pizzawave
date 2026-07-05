@@ -985,12 +985,14 @@ public sealed class RfSurveyService
             .Where(rate => rate > 0)
             .DefaultIfEmpty(2_400_000)
             .Max();
-        var priorityFrequencies = plannedSystems
-            .SelectMany(system => system.ControlChannelsHz)
-            .Where(value => value > 0)
-            .Distinct()
-            .Order()
-            .ToList();
+        var priorityFrequencies = controlOnlyPlan
+            ? plannedSystems
+                .SelectMany(system => system.ControlChannelsHz)
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList()
+            : [];
         var windows = BuildSourceWindows(frequencies, defaultRate, priorityFrequencies);
         if (windows.Count > selected.Count)
             warnings.Add($"The selected site needs {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
