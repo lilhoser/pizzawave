@@ -12936,6 +12936,18 @@ function RswTalkgroupImportPanel({
       setCatalogScope(defaultScope);
   }, [defaultScope, catalogScope]);
 
+  useEffect(() => {
+    if (!enabled)
+      return;
+    if (!sid || !normalizedScope) {
+      setPreview(null);
+      setMessage("");
+      return;
+    }
+    const timer = window.setTimeout(() => void loadTalkgroups(), 250);
+    return () => window.clearTimeout(timer);
+  }, [enabled, sid, normalizedScope, includeExcluded, applyMode]);
+
   function scopeRows(rows: SetupTalkgroupRow[], scope = normalizedScope) {
     return rows.map(row => ({
       ...row,
@@ -13004,7 +13016,7 @@ function RswTalkgroupImportPanel({
           <input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.target.checked)} />
           <span>Include excluded TGs</span>
         </label>
-        <button className="danger-button" disabled={Boolean(busy) || !sid || !normalizedScope} onClick={() => void loadTalkgroups()}>{busy === "talkgroups" ? "Updating..." : "Update"}</button>
+        <button className="danger-button" disabled={Boolean(busy) || !sid || !normalizedScope} onClick={() => void loadTalkgroups()}>{busy === "talkgroups" ? "Updating..." : preview ? "Reload" : "Update"}</button>
       </div>
       {message && <div className="setup-note">{message}</div>}
       {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} readOnly />}
