@@ -12866,6 +12866,7 @@ function RswTalkgroupImportPanel({
 }) {
   const defaultScope = defaultTalkgroupCatalogScope(radioReferenceSystemName);
   const [catalogScope, setCatalogScope] = useState(defaultScope);
+  const [applyMode, setApplyMode] = useState<"merge" | "replace">("merge");
   const [includeExcluded, setIncludeExcluded] = useState(false);
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
@@ -12886,7 +12887,7 @@ function RswTalkgroupImportPanel({
     }
     const timer = window.setTimeout(() => void loadTalkgroups(), 500);
     return () => window.clearTimeout(timer);
-  }, [sid, normalizedScope, includeExcluded]);
+  }, [sid, normalizedScope, includeExcluded, applyMode]);
 
   function scopeRows(rows: SetupTalkgroupRow[], scope = normalizedScope) {
     return rows.map(row => ({
@@ -12909,7 +12910,7 @@ function RswTalkgroupImportPanel({
       setPreview({ ...result, rows, includedCount: rows.filter(row => row.included).length, excludedCount: rows.filter(row => !row.included).length });
       const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
         method: "POST",
-        body: JSON.stringify({ rows, applyMode: "merge" })
+        body: JSON.stringify({ rows, applyMode })
       });
       setMessage(`Loaded ${saved.includedCount.toLocaleString()} TG row(s) for ${catalogScope.trim()}.`);
     } catch (error) {
@@ -12937,6 +12938,7 @@ function RswTalkgroupImportPanel({
     <h4>Talkgroups</h4>
     <div className="rf-inline-fields">
       <label className="setting-field"><span>Talkgroup system name</span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
+      <label className="setting-field"><span>Apply mode</span><select value={applyMode} onChange={event => setApplyMode(event.target.value === "replace" ? "replace" : "merge")}><option value="merge">Merge</option><option value="replace">Overwrite</option></select></label>
       <label className="setting-checkbox">
         <input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.target.checked)} />
         <span>Include excluded TGs</span>
