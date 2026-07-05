@@ -43,6 +43,7 @@ public sealed class RfSurveyService
     private readonly EngineDatabase _database;
     private readonly SetupCalibrationService _calibration;
     private readonly SetupJobService _jobs;
+    private readonly TalkgroupCatalogService _talkgroups;
     private readonly ILogger<RfSurveyService> _logger;
 
     public RfSurveyService(
@@ -50,12 +51,14 @@ public sealed class RfSurveyService
         EngineDatabase database,
         SetupCalibrationService calibration,
         SetupJobService jobs,
+        TalkgroupCatalogService talkgroups,
         ILogger<RfSurveyService> logger)
     {
         _config = config;
         _database = database;
         _calibration = calibration;
         _jobs = jobs;
+        _talkgroups = talkgroups;
         _logger = logger;
     }
 
@@ -836,6 +839,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(row.Session.ArtifactPath, "tr-config-restore-pointer.json", new { backupPath, livePath, createdAtUtc = DateTime.UtcNow }, ct);
 
         await InstallTrFileAsync(candidatePath, livePath, ct);
+        await _talkgroups.GenerateTrCsvAsync(ct);
         var serviceOutput = request.RestartTr ? await RunServiceHelperAsync("restart-tr", ct) : "Restart TR manually before capture trials.";
         return new RfSurveyTrActionResultDto(true, "apply-temp-config", "Temporary TR config was installed. TR restart is required before measuring this candidate.", candidatePath, backupPath, backupPath, serviceOutput);
     }
@@ -883,7 +887,7 @@ public sealed class RfSurveyService
         if (draftRoot["plugins"] is JsonArray draftPlugins)
             PatchLiveCallstreamFromDraft(liveRoot, draftPlugins);
         var configChanges = new List<string>();
-        NormalizeRadioSetupTrConfig(liveRoot, configChanges);
+        NormalizeRadioSetupTrConfig(liveRoot, configChanges, _config.TrunkRecorder.TalkgroupsPath);
 
         var candidateJson = liveRoot.ToJsonString(EngineConfig.JsonOptions()) + Environment.NewLine;
         var coverage = TrConfigSourceCoverageValidator.Validate(candidateJson);
@@ -894,6 +898,7 @@ public sealed class RfSurveyService
         Directory.CreateDirectory(row.Session.ArtifactPath);
         await File.WriteAllTextAsync(candidatePath, candidateJson, ct);
         var backupPath = await InstallTrFileAsync(candidatePath, livePath, ct);
+        await _talkgroups.GenerateTrCsvAsync(ct);
         var serviceOutput = request.RestartTr ? await RunServiceHelperAsync("restart-tr", ct) : "Restart TR when you are ready for the change to take effect.";
         var sourcePlanSummary = BuildAppliedSourcePlanSummary(liveRoot, changed);
         await WriteArtifactAsync(row.Session.ArtifactPath, "tr-config-source-apply.json", new
@@ -1020,7 +1025,7 @@ public sealed class RfSurveyService
             PatchSourceGainFields(source, profileSource, gain, changes, sourceIndex);
         }
         PatchCallstreamStreams(draftRoot, keptSystems, changes);
-        NormalizeRadioSetupTrConfig(draftRoot, changes);
+        NormalizeRadioSetupTrConfig(draftRoot, changes, _config.TrunkRecorder.TalkgroupsPath);
 
         var draftJson = NormalizeJson(draftRoot);
         var draftPath = Path.Combine(row.Session.ArtifactPath, "config-draft.json");
@@ -5278,7 +5283,7 @@ public sealed class RfSurveyService
             system.Remove("controlChannels");
         }
         PatchCallstreamStreams(root, string.IsNullOrWhiteSpace(systemName) ? [] : [systemName], changes);
-        NormalizeRadioSetupTrConfig(root, changes);
+        NormalizeRadioSetupTrConfig(root, changes, _config.TrunkRecorder.TalkgroupsPath);
         if (FindSystemObject(root, systemName) is JsonObject voiceSystem)
         {
             voiceSystem["minDuration"] = 0;
@@ -6727,7 +6732,7 @@ public sealed class RfSurveyService
             changes.Add("callstream streams updated for workspace system list");
     }
 
-    private static void NormalizeRadioSetupTrConfig(JsonObject root, List<string> changes)
+    private static void NormalizeRadioSetupTrConfig(JsonObject root, List<string> changes, string talkgroupsPath)
     {
         SetRootValue(root, "ver", 2, changes);
         SetRootValue(root, "defaultMode", "digital", changes);
@@ -6745,7 +6750,7 @@ public sealed class RfSurveyService
         if (root["systems"] is JsonArray systems)
         {
             foreach (var system in systems.OfType<JsonObject>())
-                NormalizeRadioSetupSystem(system, changes);
+                NormalizeRadioSetupSystem(system, changes, talkgroupsPath);
         }
 
         if (root["sources"] is JsonArray sources)
@@ -6760,7 +6765,7 @@ public sealed class RfSurveyService
         TrRecorderCapacitySizer.EnsureJsonConfigRecorderCapacity(root, changes);
     }
 
-    private static void NormalizeRadioSetupSystem(JsonObject system, List<string> changes)
+    private static void NormalizeRadioSetupSystem(JsonObject system, List<string> changes, string talkgroupsPath)
     {
         SetObjectValue(system, "system", "type", "p25", changes);
         SetObjectValue(system, "system", "modulation", "qpsk", changes);
@@ -6776,7 +6781,8 @@ public sealed class RfSurveyService
         SetObjectValue(system, "system", "minTransmissionDuration", 0, changes);
         SetObjectValue(system, "system", "talkgroupDisplayFormat", "id_tag", changes);
         SetObjectValue(system, "system", "multiSite", true, changes);
-        SetObjectValue(system, "system", "talkgroupsFile", "/etc/trunk-recorder/talkgroups.csv", changes);
+        var shortName = system["shortName"]?.GetValue<string>() ?? system["short_name"]?.GetValue<string>() ?? system["name"]?.GetValue<string>() ?? string.Empty;
+        SetObjectValue(system, "system", "talkgroupsFile", TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, shortName), changes);
 
         var postprocess = system["audio_postprocess"] as JsonObject;
         if (postprocess == null)

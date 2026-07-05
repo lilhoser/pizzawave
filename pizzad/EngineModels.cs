@@ -147,6 +147,8 @@ public sealed record BarStatDto(string Label, int Value, double Ratio, string Va
 
 public sealed record TopTalkgroupDto(
     string Label,
+    string TalkgroupKey,
+    string SystemShortName,
     long Talkgroup,
     int Count,
     double Share,
@@ -161,6 +163,8 @@ public sealed record TopTalkgroupDto(
 public sealed record CategoryGroupDto(
     string Label,
     IReadOnlyList<EngineCall> Calls,
+    string TalkgroupKey = "",
+    string SystemShortName = "",
     long Talkgroup = 0,
     int Count = 0,
     long LastHeard = 0,
@@ -1466,7 +1470,7 @@ public sealed record ProfileStateDto(
 
 public sealed record SaveProfilesRequest(Guid ActiveProfileId, IReadOnlyList<ProcessingProfile> Profiles);
 
-public sealed record TalkgroupOptionDto(long Talkgroup, string Label, string Category);
+public sealed record TalkgroupOptionDto(string Key, string SystemShortName, long Talkgroup, string Label, string Category);
 
 public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);
 

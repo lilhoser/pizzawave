@@ -14,11 +14,13 @@ public sealed partial class SetupTrConfigBuilderService
 
     private readonly HttpClient _http;
     private readonly EngineConfig _config;
+    private readonly TalkgroupCatalogService _talkgroups;
 
-    public SetupTrConfigBuilderService(HttpClient http, EngineConfig config)
+    public SetupTrConfigBuilderService(HttpClient http, EngineConfig config, TalkgroupCatalogService talkgroups)
     {
         _http = http;
         _config = config;
+        _talkgroups = talkgroups;
     }
 
     public async Task<SetupTrConfigSitesDto> ListSitesAsync(SetupTrConfigSitesRequest request, CancellationToken ct)
@@ -207,6 +209,7 @@ public sealed partial class SetupTrConfigBuilderService
             await File.WriteAllTextAsync(path, NormalizeText(request.ConfigJson), Encoding.UTF8, ct);
         }
         _config.Setup.TrConfigured = true;
+        await _talkgroups.GenerateTrCsvAsync(ct);
         await SaveConfigAsync(ct);
         return new SetupValidationResult(true, $"Saved TR config to {path}. A timestamped backup was created if a file already existed.", new { path, backup });
     }
@@ -407,7 +410,7 @@ public sealed partial class SetupTrConfigBuilderService
                 ["type"] = "p25",
                 ["shortName"] = system.ShortName,
                 ["control_channels"] = system.ControlChannelsMhz.Select(MhzToHz).ToList(),
-                ["talkgroupsFile"] = _config.TrunkRecorder.TalkgroupsPath
+                ["talkgroupsFile"] = TalkgroupCatalogService.TrCsvPathForSystem(_config.TrunkRecorder.TalkgroupsPath, system.ShortName)
             }).ToList(),
             ["plugins"] = new[]
             {
@@ -452,7 +455,7 @@ public sealed partial class SetupTrConfigBuilderService
         root["controlWarnRate"] = -1;
         root["audioStreaming"] = true;
         PatchSources(root, sources, systems);
-        PatchSystems(root, systems);
+        PatchSystems(root, systems, _config.TrunkRecorder.TalkgroupsPath);
         PatchCallstream(root, systems);
         return root.ToJsonString(EngineConfig.JsonOptions());
     }
@@ -484,7 +487,7 @@ public sealed partial class SetupTrConfigBuilderService
         root["sources"] = patched;
     }
 
-    private static void PatchSystems(JsonObject root, IReadOnlyList<SetupTrConfigSystemDto> systems)
+    private static void PatchSystems(JsonObject root, IReadOnlyList<SetupTrConfigSystemDto> systems, string talkgroupsPath)
     {
         var existingSystems = root["systems"] as JsonArray;
         var templateSystem = existingSystems?.OfType<JsonObject>().FirstOrDefault();
@@ -495,7 +498,7 @@ public sealed partial class SetupTrConfigBuilderService
             var system = CloneObject(existingSystems?.ElementAtOrDefault(i) as JsonObject ?? templateSystem);
             system["type"] = "p25";
             system["shortName"] = draft.ShortName;
-            system["talkgroupsFile"] = system["talkgroupsFile"]?.GetValue<string>() ?? "/etc/trunk-recorder/talkgroups.csv";
+            system["talkgroupsFile"] = TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, draft.ShortName);
             system["control_channels"] = LongArray(draft.ControlChannelsMhz.Select(MhzToHz));
             system.Remove("channels");
             patched.Add(system);

@@ -994,11 +994,13 @@ function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
   if (sids.length === 0)
     return [{ key: "source-0", radioReferenceSid: "", catalogSystem: fallbackSystem }];
-  return sids.map((sid, index) => {
-    const cached = readCachedRadioReferenceSites(sid);
-    const system = defaultTalkgroupCatalogScope(cached?.systemName) || fallbackSystem || `rr-${sid}`;
-    return { key: `source-${sid}-${index}`, radioReferenceSid: sid, catalogSystem: system };
-  });
+  const targetSystems = systems.length ? systems : [fallbackSystem || `rr-${sids[0]}`];
+  return sids.flatMap((sid, sidIndex) =>
+    targetSystems.map((system, systemIndex) => ({
+      key: `source-${sid}-${sidIndex}-${systemIndex}-${system}`,
+      radioReferenceSid: sid,
+      catalogSystem: system
+    })));
 }
 
 function parseRadioReferenceSidList(value: string) {
@@ -2040,7 +2042,7 @@ function IncidentSummary({ incident, linkedLocation, onShowLocation, stripeCateg
 
 function CategoryCallGroups({ groups, category, rangeHours, searchQuery, hideWeakCalls }: { groups: CategoryPage["groups"]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
-  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} key={`${group.talkgroup}-${group.label}`} />)}</>;
+  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} key={`${group.talkgroupKey || group.talkgroup}-${group.label}`} />)}</>;
 }
 
 function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWeakCalls }: { group: CategoryPage["groups"][number]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean }) {
@@ -2054,16 +2056,17 @@ function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWe
     setCalls(group.calls ?? []);
     setError("");
     setLoading(false);
-  }, [category, group.talkgroup, rangeHours]);
+  }, [category, group.talkgroupKey, group.talkgroup, rangeHours]);
   useEffect(() => {
     if (!open || calls.length || loading || group.talkgroup === undefined) return;
     setLoading(true);
     setError("");
-    api.request<CategoryPage["groups"][number]>(`/api/v1/categories/${category}/talkgroups/${group.talkgroup}/calls?${rangeQuery(rangeHours)}&limit=150`)
+    const key = encodeURIComponent(group.talkgroupKey || String(group.talkgroup));
+    api.request<CategoryPage["groups"][number]>(`/api/v1/categories/${category}/talkgroup-keys/${key}/calls?${rangeQuery(rangeHours)}&limit=150`)
       .then(result => setCalls(result.calls ?? []))
       .catch(err => setError(err instanceof Error ? err.message : "Failed to load calls"))
       .finally(() => setLoading(false));
-  }, [open, calls.length, loading, category, group.talkgroup, rangeHours]);
+  }, [open, calls.length, loading, category, group.talkgroupKey, group.talkgroup, rangeHours]);
   const visibleCalls = calls.filter(call => (!hideWeakCalls || isStrongCall(call)) && matchesCallSearch(call, searchQuery));
   return <details className={`call-group category-${category}`} open={open} onToggle={e => setOpen(e.currentTarget.open)}>
     <summary><span><HighlightedText text={group.label} query={searchQuery} /></span><span className="muted">{hideWeakCalls ? `${visibleCount.toLocaleString()} of ${count.toLocaleString()} calls shown` : `${count.toLocaleString()} calls`}{group.lastHeard ? `; latest ${relativeTime(group.lastHeard)}` : ""}</span></summary>
@@ -14305,13 +14308,6 @@ function createClientId() {
 
 function normalizeTalkgroupSystem(value?: string | null) {
   return String(value ?? "").trim().replace(/\s+/g, "-").toLowerCase();
-}
-
-function defaultTalkgroupCatalogScope(value?: string | null) {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  const acronym = /\(([A-Za-z0-9_-]{2,})\)/.exec(text);
-  return acronym ? acronym[1].toUpperCase() : text;
 }
 
 function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemShortName" | "id"> | Pick<SetupTalkgroupRow, "key" | "systemShortName" | "id">) {

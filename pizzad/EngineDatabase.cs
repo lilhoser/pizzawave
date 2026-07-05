@@ -1033,6 +1033,7 @@ public sealed class EngineDatabase
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT
+                COALESCE(NULLIF(system_short_name, ''), '') AS system_short_name,
                 talkgroup,
                 COALESCE(NULLIF(talkgroup_name, ''), 'TG ' || talkgroup) AS label,
                 COUNT(*) AS call_count,
@@ -1041,7 +1042,7 @@ public sealed class EngineDatabase
             FROM calls
             WHERE start_time >= $start AND start_time <= $end
               AND category = $category
-            GROUP BY talkgroup, label
+            GROUP BY system_short_name, talkgroup, label
             ORDER BY label COLLATE NOCASE ASC;
             """;
         Add(command, "$start", start);
@@ -1053,10 +1054,14 @@ public sealed class EngineDatabase
         {
             var callCount = reader.GetInt32(reader.GetOrdinal("call_count"));
             var strongCallCount = reader.GetInt32(reader.GetOrdinal("strong_call_count"));
+            var systemShortName = reader.GetString(reader.GetOrdinal("system_short_name"));
+            var talkgroup = reader.GetInt64(reader.GetOrdinal("talkgroup"));
             groups.Add(new CategoryGroupDto(
                 reader.GetString(reader.GetOrdinal("label")),
                 [],
-                reader.GetInt64(reader.GetOrdinal("talkgroup")),
+                TalkgroupCatalogService.CatalogKey(systemShortName, talkgroup),
+                systemShortName,
+                talkgroup,
                 callCount,
                 reader.GetInt64(reader.GetOrdinal("last_heard")),
                 strongCallCount,
@@ -1065,7 +1070,7 @@ public sealed class EngineDatabase
         return groups;
     }
 
-    public async Task<List<EngineCall>> ListCategoryTalkgroupCallsAsync(long start, long end, string category, long talkgroup, int limit, CancellationToken ct)
+    public async Task<List<EngineCall>> ListCategoryTalkgroupCallsAsync(long start, long end, string category, string? systemShortName, long talkgroup, int limit, CancellationToken ct)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
@@ -1073,6 +1078,7 @@ public sealed class EngineDatabase
             SELECT * FROM calls
             WHERE start_time >= $start AND start_time <= $end
               AND category = $category
+              AND COALESCE(NULLIF(system_short_name, ''), '') = $system
               AND talkgroup = $talkgroup
             ORDER BY start_time DESC, id DESC
             LIMIT $limit;
@@ -1080,6 +1086,7 @@ public sealed class EngineDatabase
         Add(command, "$start", start);
         Add(command, "$end", end);
         Add(command, "$category", category);
+        Add(command, "$system", systemShortName?.Trim() ?? string.Empty);
         Add(command, "$talkgroup", talkgroup);
         Add(command, "$limit", Math.Clamp(limit, 1, 500));
         var calls = new List<EngineCall>();

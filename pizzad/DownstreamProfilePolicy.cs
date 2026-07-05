@@ -14,9 +14,6 @@ public static class DownstreamProfilePolicy
         if (profile == null)
             return true;
 
-        if (profile.AllowedTalkgroups.Count > 0 && !profile.AllowedTalkgroups.Contains(talkgroup))
-            return false;
-
         var setting = FindSetting(profile, systemShortName, talkgroup);
         if (setting?.Enabled == false)
             return false;

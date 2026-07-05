@@ -90,7 +90,7 @@ public sealed class DashboardService
     private async Task<DashboardDto> BuildDashboardCoreAsync(long start, long end, CancellationToken ct)
     {
         var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct));
-        var alerts = (await _database.ListAlertMatchesAsync(start, end, ct)).Where(a => Allows(a.Category, a.Talkgroup)).ToList();
+        var alerts = (await _database.ListAlertMatchesAsync(start, end, ct)).Where(a => Allows(a.Category, a.SystemShortName, a.Talkgroup)).ToList();
         var allowedCallIds = calls.Select(c => c.Id).ToHashSet();
         var incidents = (await ListIncidentsAsync(start, end, ct)).Where(i => i.Calls.Any(c => allowedCallIds.Contains(c.CallId))).ToList();
         var tokenUsage = await _database.GetTokenUsageAsync(start, end, ct);
@@ -151,35 +151,38 @@ public sealed class DashboardService
     {
         category = NormalizeCategory(category);
         var groups = (await _database.ListCategoryTalkgroupsAsync(start, end, category, ct))
-            .Where(g => Allows(category, g.Talkgroup))
+            .Where(g => Allows(category, g.SystemShortName, g.Talkgroup))
             .ToList();
         if (!string.IsNullOrWhiteSpace(searchQuery))
         {
             var matchingCalls = await _database.ListCategorySearchCallsAsync(start, end, category, searchQuery, ct);
             var callsByTalkgroup = matchingCalls
                 .Where(call => Allows(category, call.SystemShortName, call.Talkgroup))
-                .GroupBy(call => call.Talkgroup)
+                .GroupBy(call => TalkgroupCatalogService.CatalogKey(call.SystemShortName, call.Talkgroup))
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(call => call.StartTime).ThenByDescending(call => call.Id).ToList());
             groups = groups
-                .Where(group => callsByTalkgroup.ContainsKey(group.Talkgroup) || group.Label.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
-                .Select(group => callsByTalkgroup.TryGetValue(group.Talkgroup, out var calls)
-                    ? new CategoryGroupDto(group.Label, calls, group.Talkgroup, group.Count, group.LastHeard, group.StrongCount, group.WeakCount)
+                .Where(group => callsByTalkgroup.ContainsKey(group.TalkgroupKey) || group.Label.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
+                .Select(group => callsByTalkgroup.TryGetValue(group.TalkgroupKey, out var calls)
+                    ? group with { Calls = calls }
                     : group)
                 .ToList();
         }
         return new CategoryPageDto(category, "talkgroup", groups, [], []);
     }
 
-    public async Task<CategoryGroupDto> BuildCategoryTalkgroupCallsAsync(string category, long talkgroup, long start, long end, int limit, CancellationToken ct)
+    public async Task<CategoryGroupDto> BuildCategoryTalkgroupCallsAsync(string category, string talkgroupKey, long start, long end, int limit, CancellationToken ct)
     {
         category = NormalizeCategory(category);
-        if (!Allows(category, talkgroup))
-            return new CategoryGroupDto($"TG {talkgroup}", [], talkgroup, 0, 0);
+        var parsed = ParseTalkgroupKey(talkgroupKey);
+        if (parsed.Talkgroup <= 0)
+            return new CategoryGroupDto("Unknown TG", [], talkgroupKey, parsed.SystemShortName, 0, 0, 0);
+        if (!Allows(category, parsed.SystemShortName, parsed.Talkgroup))
+            return new CategoryGroupDto($"TG {parsed.Talkgroup}", [], TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, 0, 0);
 
-        var calls = await _database.ListCategoryTalkgroupCallsAsync(start, end, category, talkgroup, limit, ct);
-        var label = calls.Count > 0 ? GetTalkgroupLabel(calls[0]) : $"TG {talkgroup}";
+        var calls = await _database.ListCategoryTalkgroupCallsAsync(start, end, category, parsed.SystemShortName, parsed.Talkgroup, limit, ct);
+        var label = calls.Count > 0 ? GetTalkgroupLabel(calls[0]) : $"TG {parsed.Talkgroup}";
         var strongCount = calls.Count(IsStrongCall);
-        return new CategoryGroupDto(label, calls, talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount);
+        return new CategoryGroupDto(label, calls, TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount);
     }
 
     public Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
@@ -193,16 +196,12 @@ public sealed class DashboardService
         string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase);
 
-    private bool Allows(string category, long talkgroup)
-        => Allows(category, string.Empty, talkgroup);
-
     private bool Allows(string category, string? systemShortName, long talkgroup)
     {
         var profile = _config.Profiles.Items.FirstOrDefault(p => p.Id == _config.Profiles.ActiveProfileId);
         if (profile == null) return true;
         var setting = FindSetting(profile, systemShortName, talkgroup);
         if (setting?.Enabled == false) return false;
-        if (profile.AllowedTalkgroups.Count > 0 && !profile.AllowedTalkgroups.Contains(talkgroup)) return false;
         var effectiveCategory = string.IsNullOrWhiteSpace(setting?.Category) ? category : setting!.Category;
         return NormalizeCategory(effectiveCategory) switch
         {
@@ -224,6 +223,20 @@ public sealed class DashboardService
             ?? rows.LastOrDefault(row => string.Equals(TalkgroupCatalogService.SettingKey(row), talkgroup.ToString(CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase))
             ?? rows.LastOrDefault(row => string.IsNullOrWhiteSpace(row.SystemShortName))
             ?? rows[^1];
+    }
+
+    private static (string SystemShortName, long Talkgroup) ParseTalkgroupKey(string value)
+    {
+        var text = (value ?? string.Empty).Trim();
+        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            return (string.Empty, id);
+        var separator = text.LastIndexOf(':');
+        if (separator <= 0 || separator >= text.Length - 1)
+            return (string.Empty, 0);
+        var system = text[..separator].Trim();
+        return long.TryParse(text[(separator + 1)..].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out id)
+            ? (system, id)
+            : (string.Empty, 0);
     }
 
     private static IReadOnlyList<HourCategoryDto> BuildVolume(List<EngineCall> calls) =>
@@ -483,15 +496,18 @@ public sealed class DashboardService
     {
         var total = Math.Max(1, calls.Count);
         var trendBins = TrendBinCount(start, end);
-        return calls.GroupBy(c => c.Talkgroup)
+        return calls.GroupBy(c => TalkgroupCatalogService.CatalogKey(c.SystemShortName, c.Talkgroup))
             .OrderByDescending(g => g.Count())
             .Take(12)
             .Select(g =>
             {
                 var trendCounts = BuildTrendCounts(g.ToList(), start, end, trendBins);
+                var first = g.First();
                 return new TopTalkgroupDto(
-                    GetTalkgroupLabel(g.First()),
+                    GetTalkgroupLabel(first),
                     g.Key,
+                    first.SystemShortName,
+                    first.Talkgroup,
                     g.Count(),
                     g.Count() / (double)total,
                     g.Max(c => c.StartTime),

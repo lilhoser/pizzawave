@@ -92,8 +92,37 @@ public sealed class TalkgroupCatalogService
         var path = _config.TrunkRecorder.TalkgroupsPath;
         if (string.IsNullOrWhiteSpace(path))
             throw new InvalidOperationException("trunkRecorder.talkgroupsPath is not configured.");
-        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        var enabledRows = normalized.Items.Where(i => i.Enabled).ToList();
+        var backupPath = await WriteTalkgroupCsvAsync(path, enabledRows.OrderBy(i => i.Id).ToList(), ct);
 
+        foreach (var group in enabledRows
+            .Where(row => !string.IsNullOrWhiteSpace(row.SystemShortName))
+            .GroupBy(row => NormalizeSystemShortName(row.SystemShortName), StringComparer.OrdinalIgnoreCase))
+        {
+            await WriteTalkgroupCsvAsync(
+                TrCsvPathForSystem(path, group.Key),
+                group.OrderBy(row => row.Id).ToList(),
+                ct);
+        }
+
+        return new TalkgroupTrCsvResult(path, backupPath, enabledRows.Count);
+    }
+
+    public static string TrCsvPathForSystem(string basePath, string? systemShortName)
+    {
+        var system = NormalizeSystemShortName(systemShortName);
+        if (string.IsNullOrWhiteSpace(system))
+            return basePath;
+        var directory = Path.GetDirectoryName(basePath);
+        var fileName = Path.GetFileNameWithoutExtension(basePath);
+        var extension = Path.GetExtension(basePath);
+        var scopedName = $"{(string.IsNullOrWhiteSpace(fileName) ? "talkgroups" : fileName)}.{SanitizePathToken(system)}{(string.IsNullOrWhiteSpace(extension) ? ".csv" : extension)}";
+        return string.IsNullOrWhiteSpace(directory) ? scopedName : Path.Combine(directory, scopedName);
+    }
+
+    private async Task<string?> WriteTalkgroupCsvAsync(string path, IReadOnlyList<TalkgroupCatalogItem> rows, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
         var protectedWrite = NeedsProtectedTrWrite(path);
         string? backupPath = null;
         if (!protectedWrite && File.Exists(path))
@@ -104,7 +133,7 @@ public sealed class TalkgroupCatalogService
 
         var builder = new StringBuilder();
         builder.AppendLine("Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category");
-        foreach (var row in normalized.Items.Where(i => i.Enabled).OrderBy(i => i.Id))
+        foreach (var row in rows)
         {
             builder.AppendLine(string.Join(",",
                 row.Id.ToString(CultureInfo.InvariantCulture),
@@ -125,7 +154,7 @@ public sealed class TalkgroupCatalogService
             await File.WriteAllTextAsync(path, builder.ToString(), new UTF8Encoding(false), ct);
         }
 
-        return new TalkgroupTrCsvResult(path, backupPath, normalized.Items.Count(i => i.Enabled));
+        return backupPath;
     }
 
     private bool NeedsProtectedTrWrite(string path) =>
@@ -207,7 +236,7 @@ public sealed class TalkgroupCatalogService
             .Where(i => i.Enabled)
             .OrderBy(i => BuildLabel(i), StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(i => i.Id)
-            .Select(i => new TalkgroupOptionDto(i.Id, BuildLabel(i), i.OpsCategory))
+            .Select(i => new TalkgroupOptionDto(ItemKey(i), i.SystemShortName, i.Id, BuildLabel(i), i.OpsCategory))
             .ToList();
 
     public IReadOnlyList<TalkgroupCatalogItem> EffectiveItemsForActiveProfile(TalkgroupCatalogDocument document)
@@ -222,12 +251,10 @@ public sealed class TalkgroupCatalogService
             .Where(t => t.Id > 0)
             .GroupBy(SettingKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Last());
-        var legacyAllowed = (profile?.AllowedTalkgroups ?? []).Where(id => id > 0).ToHashSet();
-        var hasLegacyAllowed = legacyAllowed.Count > 0;
         foreach (var row in document.Items)
         {
             var setting = FirstSettingMatch(overrides, row);
-            var enabled = setting?.Enabled ?? (hasLegacyAllowed ? legacyAllowed.Contains(row.Id) : row.Enabled);
+            var enabled = setting?.Enabled ?? row.Enabled;
             var category = NormalizeCategoryValue(string.IsNullOrWhiteSpace(setting?.Category) ? row.OpsCategory : setting!.Category);
             var label = setting?.Label?.Trim() ?? string.Empty;
             yield return row with
@@ -553,6 +580,15 @@ public sealed class TalkgroupCatalogService
     {
         value ??= string.Empty;
         return value.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
+    }
+
+    private static string SanitizePathToken(string value)
+    {
+        var builder = new StringBuilder();
+        foreach (var c in NormalizeSystemShortName(value))
+            builder.Append(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-');
+        var text = builder.ToString().Trim('-');
+        return string.IsNullOrWhiteSpace(text) ? "system" : text;
     }
 
     private static string FirstNonEmpty(params string?[] values) =>

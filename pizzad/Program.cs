@@ -581,9 +581,18 @@ app.MapGet("/api/v1/categories/{category}/talkgroups/{talkgroup:long}/calls", as
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
-    return Results.Ok(await dashboard.BuildCategoryTalkgroupCallsAsync(category, talkgroup, range.Start, range.End, limit ?? 100, context.RequestAborted));
+    return Results.Ok(await dashboard.BuildCategoryTalkgroupCallsAsync(category, talkgroup.ToString(CultureInfo.InvariantCulture), range.Start, range.End, limit ?? 100, context.RequestAborted));
 })
 .WithName("CategoryTalkgroupCalls")
+.WithOpenApi();
+
+app.MapGet("/api/v1/categories/{category}/talkgroup-keys/{talkgroupKey}/calls", async (HttpContext context, string category, string talkgroupKey, int? limit, long? start, long? end, AuthService authService, DashboardService dashboard) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = new TimeRangeQuery(start, end).Resolve();
+    return Results.Ok(await dashboard.BuildCategoryTalkgroupCallsAsync(category, Uri.UnescapeDataString(talkgroupKey), range.Start, range.End, limit ?? 100, context.RequestAborted));
+})
+.WithName("CategoryTalkgroupKeyCalls")
 .WithOpenApi();
 
 app.MapGet("/api/v1/calls/{id:long}", async (HttpContext context, long id, AuthService authService, EngineDatabase database) =>
