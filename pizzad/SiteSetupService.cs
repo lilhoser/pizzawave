@@ -254,6 +254,7 @@ public sealed class SiteSetupService
     {
         value.DesiredVersion,
         value.SiteLabel,
+        value.LocationNotes,
         value.RadioReferenceSid,
         value.SystemShortNames,
         value.SourcePlanSystemShortNames,

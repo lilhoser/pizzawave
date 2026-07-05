@@ -532,6 +532,46 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-panel h4 {
   margin: 0 0 8px;
 }
+.site-setup-form {
+  display: grid;
+  gap: 12px;
+  max-width: 900px;
+}
+.site-setup-form .setting-field {
+  grid-template-columns: minmax(120px, 170px) minmax(260px, 1fr) minmax(92px, auto);
+  max-width: none;
+}
+.site-setup-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+.site-setup-form .settings-message {
+  margin: 0;
+  white-space: nowrap;
+}
+.site-setup-readonly-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+.site-setup-readonly-grid div {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  background: #171a1d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+.site-setup-readonly-grid span {
+  color: #9faab5;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.site-setup-readonly-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .dashboard-stats-panel .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

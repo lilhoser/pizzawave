@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -738,8 +738,23 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
 }
 
 function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () => Promise<void> }) {
-  if (!setup) return <div className="pane">Loading Site Setup...</div>;
+  const [current, setCurrent] = useState<SiteSetup | null>(setup);
+  const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
+  useEffect(() => setCurrent(setup), [setup]);
+  if (!current) return <div className="pane">Loading Site Setup...</div>;
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
+  async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
+    if (!current) return;
+    const desired = { ...current.desired, ...patch };
+    setSaveState({ field, status: "saving", message: "Saving" });
+    try {
+      const next = await api.request<SiteSetup>(siteSetupApi, { method: "PATCH", body: JSON.stringify({ desired, source: "ui" }) });
+      setCurrent(next);
+      setSaveState({ field, status: "saved", message: "Saved" });
+    } catch (error) {
+      setSaveState({ field, status: "error", message: error instanceof Error ? error.message : "Save failed" });
+    }
+  }
 
   return <div className="site-setup-shell">
     <section className="pane site-setup-pane">
@@ -765,12 +780,55 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
         <section className="site-setup-panel">
           <div className="site-setup-panel-head">
             <h3>Location</h3>
-            <span className={setup.status.pendingApply ? "pill live-status-warning" : "pill live-status-ok"}>{setup.status.pendingApply ? "Pending apply" : "Applied"}</span>
+            <span className={current.status.pendingApply ? "pill live-status-warning" : "pill live-status-ok"}>{current.status.pendingApply ? "Pending apply" : "Applied"}</span>
           </div>
-          <p className="muted">Location controls will move here in the next milestone.</p>
+          <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />
         </section>
       </div>
     </section>
+  </div>;
+}
+
+function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
+  const [siteLabel, setSiteLabel] = useState(setup.desired.siteLabel);
+  const [locationNotes, setLocationNotes] = useState(setup.desired.locationNotes);
+  useEffect(() => {
+    setSiteLabel(setup.desired.siteLabel);
+    setLocationNotes(setup.desired.locationNotes);
+  }, [setup.desired.siteLabel, setup.desired.locationNotes, setup.desired.desiredVersion]);
+
+  function statusFor(field: string) {
+    if (saveState.field !== field || saveState.status === "idle") return null;
+    return <span className={saveState.status === "error" ? "settings-message error" : saveState.status === "saved" ? "settings-message ok" : "settings-message"}>{saveState.message}</span>;
+  }
+  function saveSiteLabel() {
+    const value = siteLabel.trim();
+    if (value === setup.desired.siteLabel) return;
+    void onSave({ siteLabel: value }, "siteLabel");
+  }
+  function saveLocationNotes() {
+    const value = locationNotes.trim();
+    if (value === setup.desired.locationNotes) return;
+    void onSave({ locationNotes: value }, "locationNotes");
+  }
+
+  return <div className="site-setup-form">
+    <label className="setting-field">
+      <span>Site name</span>
+      <input value={siteLabel} onChange={event => setSiteLabel(event.target.value)} onBlur={saveSiteLabel} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+      {statusFor("siteLabel")}
+    </label>
+    <label className="setting-field">
+      <span>Location notes</span>
+      <textarea value={locationNotes} onChange={event => setLocationNotes(event.target.value)} onBlur={saveLocationNotes} rows={4} />
+      {statusFor("locationNotes")}
+    </label>
+    <div className="site-setup-readonly-grid">
+      <div><span>Monitoring state</span><strong>{label(setup.status.monitoringState || "unknown")}</strong></div>
+      <div><span>Applied systems</span><strong>{setup.applied.systemShortNames.join(", ") || "None"}</strong></div>
+      <div><span>Desired systems</span><strong>{(setup.desired.systems.length ? setup.desired.systems.map(system => system.shortName) : setup.desired.systemShortNames).join(", ") || "None"}</strong></div>
+      <div><span>Last updated</span><strong>{setup.desired.updatedAtUtc ? new Date(setup.desired.updatedAtUtc).toLocaleString() : "Not edited"}</strong></div>
+    </div>
   </div>;
 }
 
