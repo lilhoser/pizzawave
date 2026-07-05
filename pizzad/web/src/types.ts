@@ -585,6 +585,28 @@ export type SetupCalibrationRange = { lowHz: number; highHz: number; centerHz: n
 export type SetupCalibrationSystemPlan = { shortName: string; modulation: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; requiredRanges: SetupCalibrationRange[]; requiredSdrCount: number; proposedSourceIndexes: number[]; warnings: string[] };
 export type SetupCalibrationSourcePlan = { index: number; serial: string; device: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string; coveredSystems: string[] };
 export type SetupCalibrationPlan = { systems: SetupCalibrationSystemPlan[]; sources: SetupCalibrationSourcePlan[]; warnings: string[]; diagnostics: string };
+export type SiteSetupAppliedSource = { index: number; device: string; serial: string; centerHz: number; sampleRate: number; errorHz: number; gain: string };
+export type SiteSetupAppliedConfig = { configPath: string; configExists: boolean; configHash: string; configUpdatedAtUtc?: string | null; systemShortNames: string[]; controlChannelsHz: number[]; sources: SiteSetupAppliedSource[] };
+export type SiteSetupStatus = { monitoringState: string; message: string; pendingApply: boolean; desiredVersion: number; appliedConfigHash: string; lastAppliedAtUtc?: string | null };
+export type SiteSetupPendingChange = { category: string; summary: string };
+export type SiteSetupActivity = { id: number; timestampUtc: string; category: string; action: string; summary: string; detailsJson: string; desiredVersion: number; appliedConfigHash: string; monitoringState: string; source: string };
+export type SiteSetupConfig = {
+  desiredVersion: number;
+  siteLabel: string;
+  locationNotes: string;
+  radioReferenceSid: string;
+  systemShortNames: string[];
+  sourcePlanSystemShortNames: string[];
+  sourcePlanMode: string;
+  systems: RfSurveySystem[];
+  selectedSourceIndexes: number[];
+  sources: RfSurveySource[];
+  rfPath: RfSurveyPathProfile;
+  updatedAtUtc?: string | null;
+  lastAppliedAtUtc?: string | null;
+  lastAppliedConfigHash: string;
+};
+export type SiteSetup = { desired: SiteSetupConfig; applied: SiteSetupAppliedConfig; status: SiteSetupStatus; pendingChanges: SiteSetupPendingChange[]; recentActivity: SiteSetupActivity[] };
 export type RfSurveyRfChainItem = {
   type: string;
   label: string;

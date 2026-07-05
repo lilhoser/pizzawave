@@ -4,14 +4,15 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 const radioSetupApi = "/api/v1/system/radio-setup";
+const siteSetupApi = "/api/v1/setup/site";
 const radioSetupDetailUrl = (id: string, compact = true) => `${radioSetupApi}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
 const waterfallStopUrl = (surveyId: string) => `${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`;
-type Page = "dashboard" | "tools" | "system" | "settings" | typeof categories[number];
+type Page = "dashboard" | "setup" | "tools" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
 type CategorySortMode = "name" | "recent" | "frequent";
 type AuthPromptState = { request: AuthTokenRequest; resolve: (token: string | null) => void; token: string; message: string };
@@ -98,6 +99,7 @@ function App() {
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null);
   const [profileState, setProfileState] = useState<ProfileState | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [siteSetup, setSiteSetup] = useState<SiteSetup | null>(null);
   const [radioSetupStatus, setRadioSetupStatus] = useState<RfSurveyList | null>(null);
   const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
   const [recommendations, setRecommendations] = useState<SystemRecommendations | null>(null);
@@ -275,6 +277,8 @@ function App() {
       setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}${search ? `&q=${encodeURIComponent(search)}` : ""}`));
     } else if (page === "tools") {
       // Tool pages fetch their own focused data.
+    } else if (page === "setup") {
+      setSiteSetup(await api.request<SiteSetup>(siteSetupApi));
     } else if (page === "system") {
       setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
     }
@@ -411,7 +415,7 @@ function App() {
     };
   }, []);
 
-  const nav = useMemo(() => ["dashboard", ...categories, "tools", "system", "settings"] as Page[], []);
+  const nav = useMemo(() => ["dashboard", ...categories, "setup", "tools", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
   const activeJobCount = jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length;
@@ -677,11 +681,11 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {ingestPaused && <span className="pill ingest-paused" title={`New live callstream payloads are being dropped. ${engineHealth?.ingest?.reason ?? ""}`}>Ingest paused</span>}
         <span className="pill" title="REST loads the current view; SSE triggers live refreshes when calls, jobs, alerts, summaries, or health change.">REST+SSE</span>
       </header>
-      {showCalibrationBanner && <RadioSetupCalibrationBanner onOpen={() => setPage("tools")} />}
+      {showCalibrationBanner && <RadioSetupCalibrationBanner onOpen={() => setPage("setup")} />}
       {!inSetup && <aside className="nav">
         {visibleNav.map(item => (
           <React.Fragment key={item}>
-            {item === "tools" && <div className="nav-divider" />}
+            {item === "setup" && <div className="nav-divider" />}
             <button className={item === page ? "active" : ""} onClick={() => {
               if (page === "settings" && item !== "settings" && !confirmDiscardUnappliedSettings()) return;
               setPage(item);
@@ -697,6 +701,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("tools")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
+        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} />}
         {setupStatus?.completed && page === "tools" && <ToolsView onTrOperationChange={setRadioSetupTrOperation} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenRadioSetup={() => setPage("tools")} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} targetTab={settingsTargetTab} clearTargetTab={() => setSettingsTargetTab(null)} />}
@@ -725,10 +730,112 @@ function radioSetupHasStableCandidate(list: RfSurveyList) {
 function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
   return <div className="calibration-banner">
     <div>
-      <strong>TR config needs Radio Setup calibration</strong>
-      <span>First-run setup can create a bootable TR config, but RF path, source coverage, P25 decode, and call-quality gates still need a Radio Setup workspace before the config should be treated as validated.</span>
+      <strong>Monitoring config needs Site Setup calibration</strong>
+      <span>RF path, source coverage, P25 decode, and call-quality gates should be validated before the current config is treated as stable.</span>
     </div>
-    <button className="danger-button" onClick={onOpen}>Open Radio Setup</button>
+    <button className="danger-button" onClick={onOpen}>Open Setup</button>
+  </div>;
+}
+
+function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () => Promise<void> }) {
+  if (!setup) return <div className="pane">Loading Site Setup...</div>;
+  const desiredSystems = setup.desired.systems?.length
+    ? setup.desired.systems.map(system => system.shortName)
+    : setup.desired.systemShortNames ?? [];
+  const desiredControlChannels = setup.desired.systems?.flatMap(system => system.controlChannelsHz ?? []) ?? [];
+  const appliedSourceSummary = setup.applied.sources.map(source => {
+    const gain = source.gain ? `, gain ${source.gain}` : "";
+    return `#${source.index} ${source.centerHz ? formatRfHz(source.centerHz) : "--"} @ ${source.sampleRate ? formatRfHz(source.sampleRate) : "--"}${gain}`;
+  });
+  const desiredSourceSummary = setup.desired.sources?.map(source => {
+    const gain = source.gain ? `, gain ${source.gain}` : "";
+    return `#${source.index} ${source.centerHz ? formatRfHz(source.centerHz) : "--"} @ ${source.sampleRate ? formatRfHz(source.sampleRate) : "--"}${gain}`;
+  }) ?? [];
+
+  return <div className="site-setup-shell">
+    <section className="pane site-setup-pane">
+      <div className="site-setup-head">
+        <div>
+          <h2>Site Setup</h2>
+          <p className="muted">Edit desired site state, validate RF, then apply a monitored TR configuration when a disruptive step is actually needed.</p>
+        </div>
+        <div className="site-setup-actions">
+          <button type="button" onClick={() => void reload()}><RefreshCw size={14} /> Refresh</button>
+          <button type="button" className="danger-button" disabled title="Apply Config will move here when the RF/config sections are migrated.">Apply Config</button>
+        </div>
+      </div>
+
+      <div className="site-setup-grid">
+        <section className="site-setup-card">
+          <h3>Monitoring</h3>
+          <strong>{label(setup.status.monitoringState || "unknown")}</strong>
+          <span>{setup.status.message || "No monitoring status reported."}</span>
+          <small>{setup.status.pendingApply ? "Desired setup differs from applied monitoring config." : "Desired setup matches the applied monitoring snapshot."}</small>
+        </section>
+        <section className="site-setup-card">
+          <h3>Currently Monitoring</h3>
+          <strong>{setup.applied.systemShortNames.length ? setup.applied.systemShortNames.join(", ") : "No systems"}</strong>
+          <span>{setup.applied.controlChannelsHz.length ? formatFrequencyList(setup.applied.controlChannelsHz) : "No control channels"}</span>
+          <small>{setup.applied.configExists ? `Config ${setup.applied.configHash.slice(0, 12) || "hash pending"}` : "No TR config file found."}</small>
+        </section>
+        <section className="site-setup-card">
+          <h3>Desired Setup</h3>
+          <strong>{setup.desired.siteLabel || desiredSystems.join(", ") || "Unset"}</strong>
+          <span>{desiredControlChannels.length ? formatFrequencyList(desiredControlChannels) : "No selected control channels"}</span>
+          <small>{setup.desired.updatedAtUtc ? `Updated ${new Date(setup.desired.updatedAtUtc).toLocaleString()}` : "Seeded from the applied config until edited."}</small>
+        </section>
+        <section className="site-setup-card">
+          <h3>Activity</h3>
+          <strong>{setup.recentActivity.length.toLocaleString()} recent event{setup.recentActivity.length === 1 ? "" : "s"}</strong>
+          <span>{setup.recentActivity[0]?.summary ?? "No setup activity recorded yet."}</span>
+          <small>{setup.recentActivity[0]?.timestampUtc ? new Date(setup.recentActivity[0].timestampUtc).toLocaleString() : "Changes will be audited here."}</small>
+        </section>
+      </div>
+
+      <div className="site-setup-layout">
+        <section className="site-setup-section-nav" aria-label="Site Setup sections">
+          {["Overview", "Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"].map((section, index) =>
+            <button type="button" key={section} className={index === 0 ? "active" : ""} disabled={index !== 0}>
+              <span>{index + 1}</span>
+              <strong>{section}</strong>
+            </button>)}
+        </section>
+
+        <section className="site-setup-panel">
+          <div className="site-setup-panel-head">
+            <h3>Overview</h3>
+            <span className={setup.status.pendingApply ? "pill live-status-warning" : "pill live-status-ok"}>{setup.status.pendingApply ? "Pending apply" : "Applied"}</span>
+          </div>
+          <div className="site-setup-two-col">
+            <div>
+              <h4>Pending Changes</h4>
+              {setup.pendingChanges.length
+                ? <ul className="site-setup-list">{setup.pendingChanges.map((change, index) => <li key={`${change.category}-${index}`}><strong>{label(change.category)}</strong><span>{change.summary}</span></li>)}</ul>
+                : <p className="muted">No pending config changes.</p>}
+            </div>
+            <div>
+              <h4>Source Snapshot</h4>
+              <ul className="site-setup-list">
+                <li><strong>Applied</strong><span>{appliedSourceSummary.join("; ") || "No applied sources"}</span></li>
+                <li><strong>Desired</strong><span>{desiredSourceSummary.join("; ") || "No desired source plan yet"}</span></li>
+              </ul>
+            </div>
+          </div>
+          <h4>Recent Activity</h4>
+          <table className="table compact-table">
+            <thead><tr><th>Time</th><th>Category</th><th>Action</th><th>Summary</th></tr></thead>
+            <tbody>
+              {setup.recentActivity.length ? setup.recentActivity.slice(0, 8).map(row => <tr key={row.id}>
+                <td>{new Date(row.timestampUtc).toLocaleString()}</td>
+                <td>{label(row.category)}</td>
+                <td>{label(row.action)}</td>
+                <td>{row.summary}</td>
+              </tr>) : <tr><td colSpan={4}>No setup activity recorded.</td></tr>}
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </section>
   </div>;
 }
 
@@ -14439,13 +14546,14 @@ function profileIncludes(profile: ProcessingProfile | undefined, item: string) {
 }
 
 function normalizePage(value: string | null): Page {
-  return value === "dashboard" || value === "tools" || value === "system" || value === "settings" || categories.includes(value as any)
+  return value === "dashboard" || value === "setup" || value === "tools" || value === "system" || value === "settings" || categories.includes(value as any)
     ? value as Page
     : "dashboard";
 }
 
 function navIcon(item: Page) {
   if (item === "dashboard") return <Gauge size={15} />;
+  if (item === "setup") return <Wrench size={15} />;
   if (item === "tools") return <Wrench size={15} />;
   if (item === "settings") return <Settings size={15} />;
   if (item === "system") return <Activity size={15} />;
@@ -14457,6 +14565,7 @@ function label(value: string) {
   if (value === "inconclusive" || value === "voice_inconclusive" || value === "unknown") return "Unknown";
   if (value === "ems") return "EMS";
   if (value === "system") return "System";
+  if (value === "setup") return "Setup";
   if (value === "tools") return "Tools";
   return value[0].toUpperCase() + value.slice(1).replaceAll("_", " ");
 }
