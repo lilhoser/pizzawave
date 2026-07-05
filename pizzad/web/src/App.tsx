@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyCandidate, RfSurveyCaptureTrialResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyList, RfSurveyP25ProbePreview, RfSurveyPathProfile, RfSurveyProfile, RfSurveySession, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TalkgroupCatalogSaveResult, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -740,9 +740,11 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
 function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () => Promise<void> }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
+  const [section, setSection] = useState("Location");
   useEffect(() => setCurrent(setup), [setup]);
   if (!current) return <div className="pane">Loading Site Setup...</div>;
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
+  const enabledSections = new Set(["Location", "Systems & Sites"]);
   async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
     if (!current) return;
     const desired = { ...current.desired, ...patch };
@@ -771,19 +773,20 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
 
       <div className="site-setup-layout">
         <section className="site-setup-section-nav" aria-label="Site Setup sections">
-          {sections.map((section, index) =>
-            <button type="button" key={section} className={index === 0 ? "active" : ""} disabled={index !== 0}>
+          {sections.map((item, index) =>
+            <button type="button" key={item} className={item === section ? "active" : ""} disabled={!enabledSections.has(item)} onClick={() => setSection(item)}>
               <span>{index + 1}</span>
-              <strong>{section}</strong>
+              <strong>{item}</strong>
             </button>)}
         </section>
 
         <section className="site-setup-panel">
           <div className="site-setup-panel-head">
-            <h3>Location</h3>
+            <h3>{section}</h3>
             <span className={current.status.pendingApply ? "pill live-status-warning" : "pill live-status-ok"}>{current.status.pendingApply ? "Pending apply" : "Applied"}</span>
           </div>
-          <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />
+          {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
+          {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
         </section>
       </div>
     </section>
@@ -847,6 +850,135 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
       {statusFor("locationNotes")}
     </label>
   </div>;
+}
+
+function SiteSetupSystemsSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
+  const [radioReferenceSid, setRadioReferenceSid] = useState(setup.desired.radioReferenceSid);
+  const [radioReferenceSites, setRadioReferenceSites] = useState<SetupTrConfigSites | null>(() => readCachedRadioReferenceSites(setup.desired.radioReferenceSid));
+  const [siteSearch, setSiteSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const selectedNames = selectedSetupSystemNames(setup);
+  useEffect(() => {
+    setRadioReferenceSid(setup.desired.radioReferenceSid);
+    setRadioReferenceSites(readCachedRadioReferenceSites(setup.desired.radioReferenceSid));
+  }, [setup.desired.radioReferenceSid]);
+
+  function statusFor(field: string) {
+    if (saveState.field !== field || saveState.status === "idle") return null;
+    return <span className={saveState.status === "error" ? "settings-message error" : saveState.status === "saved" ? "settings-message ok" : "settings-message"}>{saveState.message}</span>;
+  }
+
+  async function saveSid() {
+    const sid = radioReferenceSid.trim();
+    if (sid === setup.desired.radioReferenceSid) return;
+    setRadioReferenceSites(readCachedRadioReferenceSites(sid));
+    await onSave({ radioReferenceSid: sid }, "radioReferenceSid");
+  }
+
+  async function loadSites() {
+    const sid = radioReferenceSid.trim();
+    if (!sid) {
+      setMessage("Enter an RR system ID first.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api.request<SetupTrConfigSites>("/api/v1/setup/tr-config/sites", {
+        method: "POST",
+        body: JSON.stringify({ radioReferenceSid: sid })
+      });
+      writeCachedRadioReferenceSites(sid, result);
+      setRadioReferenceSites(result);
+      if (sid !== setup.desired.radioReferenceSid)
+        await onSave({ radioReferenceSid: sid }, "radioReferenceSid");
+      setMessage(`${result.sites.length.toLocaleString()} sites loaded.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load sites.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleSite(site: SetupTrConfigSite, checked: boolean) {
+    const name = site.shortName || site.name;
+    const nextNames = checked
+      ? [...selectedNames, name]
+      : selectedNames.filter(value => !stringEqualsIgnoreCase(value, name));
+    const uniqueNames = Array.from(new Set(nextNames)).filter(Boolean).sort((a, b) => a.localeCompare(b));
+    const systems = buildSurveySystemDefinitions(uniqueNames, null, radioReferenceSites, setup.desired.systems);
+    await onSave({
+      radioReferenceSid: radioReferenceSid.trim(),
+      systemShortNames: uniqueNames,
+      sourcePlanSystemShortNames: uniqueNames,
+      sourcePlanMode: setup.desired.sourcePlanMode || "full",
+      systems
+    }, "systems");
+  }
+
+  const selectedSet = new Set(selectedNames.map(value => value.toLowerCase()));
+  const query = siteSearch.trim().toLowerCase();
+  const sites = (radioReferenceSites?.sites ?? []).filter(site => {
+    if (!query) return true;
+    return [site.name, site.shortName, ...site.controlChannelsMhz.map(formatMhz)].some(value => value.toLowerCase().includes(query));
+  });
+  const selectedSystems = setup.desired.systems.length
+    ? setup.desired.systems
+    : selectedNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
+
+  return <div className="site-setup-form site-setup-systems">
+    <div className="site-setup-inline-fields">
+      <label className="setting-field">
+        <span>RR system ID</span>
+        <input value={radioReferenceSid} inputMode="numeric" onChange={event => setRadioReferenceSid(event.target.value)} onBlur={() => void saveSid()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+        {statusFor("radioReferenceSid")}
+      </label>
+      <button type="button" disabled={busy || !radioReferenceSid.trim()} onClick={() => void loadSites()}>{busy ? "Loading" : radioReferenceSites ? "Reload Sites" : "Load Sites"}</button>
+    </div>
+    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    <label className="setting-field">
+      <span>Search sites</span>
+      <input value={siteSearch} onChange={event => setSiteSearch(event.target.value)} placeholder="Name, short name, or control channel" />
+      {statusFor("systems")}
+    </label>
+    <div className="site-setup-selection-summary">
+      <strong>{selectedSystems.length.toLocaleString()} selected</strong>
+      <span>{selectedSystems.map(system => system.siteLabel || system.shortName).join(", ") || "No systems selected"}</span>
+    </div>
+    <div className="site-setup-site-table-wrap">
+      <table className="table compact-table site-setup-site-table">
+        <thead><tr><th></th><th>Site</th><th>Short name</th><th>Control channels</th></tr></thead>
+        <tbody>
+          {radioReferenceSites && sites.length === 0 && <tr><td colSpan={4}>No matching sites.</td></tr>}
+          {!radioReferenceSites && selectedSystems.map(system => <tr key={system.shortName}>
+            <td></td>
+            <td>{system.siteLabel || system.shortName}</td>
+            <td>{system.shortName}</td>
+            <td>{system.controlChannelsHz.length ? formatFrequencyList(system.controlChannelsHz) : "--"}</td>
+          </tr>)}
+          {!radioReferenceSites && selectedSystems.length === 0 && <tr><td colSpan={4}>Load sites to select systems.</td></tr>}
+          {radioReferenceSites && sites.map(site => {
+            const siteKey = site.shortName || site.name;
+            const checked = selectedSet.has(siteKey.toLowerCase());
+            return <tr key={siteKey} className={checked ? "selected" : ""}>
+              <td><input type="checkbox" checked={checked} onChange={event => void toggleSite(site, event.currentTarget.checked)} aria-label={`Select ${site.name || site.shortName}`} /></td>
+              <td>{site.name || site.shortName}</td>
+              <td>{site.shortName}</td>
+              <td>{site.controlChannelsMhz.length ? site.controlChannelsMhz.map(formatMhz).join(", ") : "--"}</td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function selectedSetupSystemNames(setup: SiteSetup) {
+  const names = setup.desired.systemShortNames.length
+    ? setup.desired.systemShortNames
+    : setup.desired.systems.map(system => system.shortName);
+  return Array.from(new Set(names.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
 function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string }) {
