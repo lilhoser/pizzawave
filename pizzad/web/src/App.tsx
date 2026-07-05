@@ -702,7 +702,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("tools")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
-        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} profileState={profileState} setProfileState={setProfileState} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} />}
+        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} />}
         {setupStatus?.completed && page === "tools" && <ToolsView onTrOperationChange={setRadioSetupTrOperation} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenRadioSetup={() => setPage("tools")} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
@@ -738,7 +738,7 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
   </div>;
 }
 
-function SiteSetupView({ setup, reload, profileState, setProfileState, targetSection, clearTargetSection }: { setup: SiteSetup | null; reload: () => Promise<void>; profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; targetSection?: string | null; clearTargetSection?: () => void }) {
+function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const [section, setSection] = useState("Location");
@@ -797,7 +797,7 @@ function SiteSetupView({ setup, reload, profileState, setProfileState, targetSec
           </div>
           {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} profileState={profileState} setProfileState={setProfileState} reload={reload} />}
+          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
         </section>
       </div>
     </section>
@@ -1091,9 +1091,8 @@ function scopeTalkgroupPreviewToSystem(preview: SetupTalkgroupPreview, catalogSy
   };
 }
 
-function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, reload }: { setup: SiteSetup; profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void> }) {
+function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reload: () => Promise<void> }) {
   const [rrSources, setRrSources] = useState(() => initialTalkgroupSources(setup));
-  const [includeExcluded, setIncludeExcluded] = useState(false);
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1107,12 +1106,12 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
     setMessage("");
   }, [setupSourceKey]);
   useEffect(() => {
-    const key = `${includeExcluded ? "all" : "normal"}:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
+    const key = `normal:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
     if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoPreviewKeyRef.current === key)
       return;
     autoPreviewKeyRef.current = key;
     void previewTalkgroups();
-  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|"), includeExcluded]);
+  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|")]);
 
   async function previewTalkgroups() {
     const activeSources = rrSources
@@ -1128,7 +1127,7 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
       const result = combineTalkgroupPreviews(await Promise.all(activeSources.map(async row => {
         const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
           method: "POST",
-          body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: includeExcluded })
+          body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: false })
         });
         return scopeTalkgroupPreviewToSystem(preview, row.catalogSystem);
       })));
@@ -1165,7 +1164,7 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
           summary: `RadioReference talkgroups synced into catalog: ${result.includedCount.toLocaleString()} row(s).`,
           details: {
             rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid),
-            includeExcluded,
+            includeExcluded: false,
             diagnostics: result.diagnostics
           },
           source: "ui"
@@ -1179,14 +1178,6 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
     }
   }
 
-  function updateSource(index: number, patch: Partial<SiteSetupTalkgroupSource>) {
-    setRrSources(current => current.map((row, i) => i === index ? { ...row, ...patch } : row));
-  }
-
-  function addSource() {
-    setRrSources(current => [...current, { key: `source-${Date.now()}-${current.length}`, radioReferenceSid: "", catalogSystem: "" }]);
-  }
-
   function removeSource(index: number) {
     setRrSources(current => current.length <= 1 ? current : current.filter((_, i) => i !== index));
   }
@@ -1198,35 +1189,35 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
   return <div className="site-setup-form site-setup-talkgroups">
     <div className="site-setup-talkgroup-import">
       <div className="site-setup-source-list">
-        {rrSources.map((row, index) => <div className="site-setup-source-row" key={row.key}>
-          <label><span>RR system ID</span><input value={row.radioReferenceSid} inputMode="numeric" onChange={event => updateSource(index, { radioReferenceSid: event.target.value })} /></label>
-          <label><span>System</span><input value={row.catalogSystem} onChange={event => updateSource(index, { catalogSystem: event.target.value })} /></label>
-          <button type="button" disabled={rrSources.length <= 1 || Boolean(busy)} onClick={() => removeSource(index)}>Remove</button>
-        </div>)}
-        <button type="button" disabled={Boolean(busy)} onClick={addSource}>Add RR List</button>
-      </div>
-      <div className="site-setup-inline-fields">
-        <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} disabled={Boolean(busy)} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
+        {rrSources.map((row, index) => <button
+          type="button"
+          className="site-setup-source-chip"
+          disabled={rrSources.length <= 1 || Boolean(busy)}
+          onClick={() => removeSource(index)}
+          title={rrSources.length <= 1 ? "At least one talkgroup source is required." : "Remove this talkgroup source"}
+          key={row.key}>
+          <span>{row.catalogSystem || "Unmapped system"}</span>
+          <small>RR {row.radioReferenceSid || "--"}</small>
+          {rrSources.length > 1 && <b aria-hidden="true">x</b>}
+        </button>)}
         {busy === "preview-rr" && <span className="settings-message">Fetching talkgroups...</span>}
       </div>
       {message && <div className={messageClass}>{message}</div>}
       {preview && <TalkgroupSyncSummary preview={preview} busy={busy === "sync-rr"} onSync={() => void syncTalkgroups()} />}
     </div>
     <TalkgroupCatalogSettingsCard
-      profileState={profileState}
-      setProfileState={setProfileState}
       reload={reload}
       reloadToken={catalogReloadToken}
       embedded
       pendingSyncRows={preview?.rows.filter(row => row.included) ?? []}
-      onAppliedActivity={async ({ catalogChanged, profileChanged, rowCount }) => {
+      onAppliedActivity={async ({ rowCount }) => {
         await api.request<unknown>(`${siteSetupApi}/activity`, {
           method: "POST",
           body: JSON.stringify({
             category: "talkgroups",
-            action: catalogChanged ? "catalog_policy_applied" : "profile_policy_applied",
-            summary: `Talkgroup ${catalogChanged ? "catalog" : "profile"} policy applied from Setup${profileChanged && catalogChanged ? " with profile changes" : ""}.`,
-            details: { catalogChanged, profileChanged, rowCount },
+            action: "catalog_policy_applied",
+            summary: "Talkgroup catalog policy applied from Setup.",
+            details: { catalogChanged: true, profileChanged: false, rowCount },
             source: "ui"
           })
         });
@@ -13995,24 +13986,21 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
   </div>;
 }
 
-function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, reloadToken = 0, embedded = false, pendingSyncRows = [], onAppliedActivity }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void>; reloadToken?: number; embedded?: boolean; pendingSyncRows?: SetupTalkgroupRow[]; onAppliedActivity?: (details: { catalogChanged: boolean; profileChanged: boolean; rowCount: number }) => Promise<void> }) {
+function TalkgroupCatalogSettingsCard({ reload, reloadToken = 0, embedded = false, pendingSyncRows = [], onAppliedActivity }: { reload: () => Promise<void>; reloadToken?: number; embedded?: boolean; pendingSyncRows?: SetupTalkgroupRow[]; onAppliedActivity?: (details: { catalogChanged: boolean; profileChanged: boolean; rowCount: number }) => Promise<void> }) {
   const [response, setResponse] = useState<TalkgroupCatalogResponse | null>(null);
   const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
-  const [profileDraft, setProfileDraft] = useState<ProfileState | null>(profileState);
   const [filter, setFilter] = useState("");
   const [enabledFilter, setEnabledFilter] = useState<"all" | "enabled" | "disabled" | "high-load">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sortKey, setSortKey] = useState<"state" | "id" | "name" | "category" | "load">("id");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
-  const [showHelp, setShowHelp] = useState(false);
   const [queue, setQueue] = useState<QueueSnapshot | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => { void loadCatalog(); }, [reloadToken]);
   useEffect(() => { void loadTalkgroupLoad(); }, [reloadToken]);
-  useEffect(() => setProfileDraft(profileState), [profileState]);
   useEffect(() => {
     if (enabledFilter === "high-load")
       void loadTalkgroupLoad();
@@ -14045,96 +14033,27 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
     setDraft(current => current && ({ ...current, items: current.items.map(item => talkgroupCatalogKey(item) === key ? { ...item, ...patch } : item) }));
   }
 
-  function addItem() {
-    const nextId = Math.max(0, ...(draft?.items.map(i => i.id) ?? [0])) + 1;
-    const now = new Date().toISOString();
-    setDraft(current => ({
-      schemaVersion: current?.schemaVersion ?? 1,
-      updatedAtUtc: current?.updatedAtUtc ?? now,
-      items: [...(current?.items ?? []), { key: String(nextId), systemShortName: "", id: nextId, mode: "D", alphaTag: "", description: "", tag: "", sourceCategory: "", opsCategory: "other", enabled: true, incidentEligible: true, source: "manual", notes: "", updatedAtUtc: now }]
-    }));
-  }
-
   function deleteItem(key: string) {
-    if (!confirmAction("Delete talkgroup from catalog?", "This will remove the TG from the catalog draft. It will not affect capture until you click Apply, which regenerates the trunk-recorder CSV and restarts services.")) return;
+    if (!confirmAction("Delete talkgroup from catalog?", "This will remove the TG from the catalog draft. It will not affect capture until you click Save TGs, which regenerates the trunk-recorder CSV and restarts services.")) return;
     setDraft(current => current && ({ ...current, items: current.items.filter(item => talkgroupCatalogKey(item) !== key) }));
   }
 
-  function updateProfile(id: string, patch: Partial<ProcessingProfile>) {
-    setProfileDraft(current => current && ({ ...current, profiles: current.profiles.map(p => p.id === id ? { ...p, ...patch } : p) }));
-  }
-
-  function addProfile() {
-    const name = window.prompt("New profile name")?.trim() ?? "";
-    if (!name) {
-      setMessage("Profile name is required.");
-      return;
-    }
-    if (profileDraft?.profiles.some(profile => profile.name.trim().toLowerCase() === name.toLowerCase())) {
-      setMessage(`Profile '${name}' already exists.`);
-      return;
-    }
-    const id = createClientId();
-    setProfileDraft(current => current && ({
-      ...current,
-      profiles: [...current.profiles, { id, name, includePolice: true, includeFire: true, includeEMS: true, includeTraffic: true, includeOther: true, allowedTalkgroups: [], talkgroups: [] }],
-      activeProfileId: id
-    }));
-    setMessage("New profile added to draft. Click Apply to save it.");
-  }
-
-  function deleteProfile(id: string) {
-    if (!confirmAction("Delete profile?", "This removes the selected profile from the local draft. It will not take effect until you click Apply.")) return;
-    setProfileDraft(current => {
-      if (!current || current.profiles.length <= 1) return current;
-      const profiles = current.profiles.filter(p => p.id !== id);
-      return { activeProfileId: current.activeProfileId === id ? profiles[0].id : current.activeProfileId, profiles };
-    });
-  }
-
   async function applyChanges() {
-    if (!draft || !profileDraft) return;
-    const profileNames = profileDraft.profiles.map(profile => profile.name.trim()).filter(Boolean);
-    if (profileNames.length !== profileDraft.profiles.length) {
-      setMessage("Every profile needs a name before Apply.");
-      return;
-    }
-    if (new Set(profileNames.map(name => name.toLowerCase())).size !== profileNames.length) {
-      setMessage("Profile names must be unique before Apply.");
-      return;
-    }
+    if (!draft) return;
     const catalogChanged = catalogDirty();
-    const profileChanged = profileDirty();
-    if (!catalogChanged && !profileChanged) {
+    if (!catalogChanged) {
       setMessage("No unapplied changes.");
       return;
     }
-    const consequences = [
-      profileChanged ? "save profile display/downstream policy" : "",
-      catalogChanged ? "update the catalog, regenerate the trunk-recorder CSV, and restart trunk-recorder plus pizzad" : ""
-    ].filter(Boolean).join("; ");
-    if (!confirmAction("Apply talkgroup changes?", `PizzaWave will ${consequences}. Cancel keeps your draft unchanged.`)) return;
+    if (!confirmAction("Save talkgroup catalog changes?", "PizzaWave will update the catalog, regenerate the trunk-recorder CSV, and restart trunk-recorder plus pizzad. Cancel keeps your draft unchanged.")) return;
     setBusy("apply");
     setMessage("Applying talkgroup changes...");
     try {
-      let csvPath = "";
-      if (catalogChanged) {
-        const savedCatalog = await api.request<TalkgroupCatalogSaveResult>("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(draft) });
-        csvPath = savedCatalog.generatedCsvPath;
-      }
-      if (profileChanged) {
-        const savedProfiles = await api.request<ProfileState>("/api/v1/profiles", { method: "POST", body: JSON.stringify(profileDraft) });
-        setProfileDraft(savedProfiles);
-        setProfileState(savedProfiles);
-      }
-      await onAppliedActivity?.({ catalogChanged, profileChanged, rowCount: draft.items.length });
-      if (catalogChanged) {
-        await api.request<Job>("/api/v1/system/services/trunk-recorder/restart", { method: "POST" });
-        await api.request<Job>("/api/v1/system/services/pizzad/restart", { method: "POST" });
-      }
-      setMessage(catalogChanged
-        ? `Applied changes, regenerated ${csvPath || "talkgroups CSV"}, and queued service restarts.`
-        : "Profile policy saved. It applies to dashboard filters, alerts, embeddings, and incident creation without restart.");
+      const savedCatalog = await api.request<TalkgroupCatalogSaveResult>("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(draft) });
+      await onAppliedActivity?.({ catalogChanged: true, profileChanged: false, rowCount: draft.items.length });
+      await api.request<Job>("/api/v1/system/services/trunk-recorder/restart", { method: "POST" });
+      await api.request<Job>("/api/v1/system/services/pizzad/restart", { method: "POST" });
+      setMessage(`Saved talkgroup catalog, regenerated ${savedCatalog.generatedCsvPath || "talkgroups CSV"}, and queued service restarts.`);
       await reload();
       await loadCatalog();
     } catch (error) {
@@ -14144,43 +14063,30 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
     }
   }
 
-  function activeProfile() {
-    return profileDraft?.profiles.find(p => p.id === profileDraft.activeProfileId) ?? profileDraft?.profiles[0] ?? null;
-  }
-
-  function activeSetting(item: TalkgroupCatalogItem) {
-    const itemKey = talkgroupCatalogKey(item);
-    return activeProfile()?.talkgroups?.find(t => profileTalkgroupKey(t) === itemKey)
-      ?? activeProfile()?.talkgroups?.find(t => t.id === item.id && !t.systemShortName);
-  }
-
-  function effectiveRow(item: TalkgroupCatalogItem): TalkgroupCatalogItem {
-    const setting = activeSetting(item);
-    return {
-      ...item,
-      enabled: setting?.enabled ?? item.enabled,
-      alphaTag: setting?.label?.trim() || item.alphaTag,
-      opsCategory: setting?.category?.trim() || item.opsCategory,
-      incidentEligible: setting?.incidentEligible ?? item.incidentEligible
+  async function clearCatalog() {
+    if (!confirmAction("Clear all talkgroups?", "This creates a clean talkgroup catalog, regenerates the trunk-recorder CSV, and restarts trunk-recorder plus pizzad.")) return;
+    const emptyDocument: TalkgroupCatalogDocument = {
+      schemaVersion: draft?.schemaVersion ?? response?.document.schemaVersion ?? 1,
+      updatedAtUtc: new Date().toISOString(),
+      items: []
     };
-  }
-
-  function updateActiveTalkgroup(item: TalkgroupCatalogItem, patch: Partial<{ enabled: boolean; label: string; category: string; incidentEligible: boolean }>) {
-    if (!profileDraft) return;
-    const itemKey = talkgroupCatalogKey(item);
-    setProfileDraft(current => {
-      if (!current) return current;
-      const profiles = current.profiles.map(profile => {
-        if (profile.id !== current.activeProfileId) return profile;
-        const settings = [...(profile.talkgroups ?? [])];
-        const index = settings.findIndex(t => profileTalkgroupKey(t) === itemKey);
-        const next = { ...(index >= 0 ? settings[index] : { key: itemKey, systemShortName: item.systemShortName ?? "", id: item.id }), ...patch };
-        if (index >= 0) settings[index] = next;
-        else settings.push(next);
-        return { ...profile, talkgroups: settings, allowedTalkgroups: [] };
-      });
-      return { ...current, profiles };
-    });
+    setBusy("clear");
+    setMessage("Clearing talkgroup catalog...");
+    try {
+      const savedCatalog = await api.request<TalkgroupCatalogSaveResult>("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(emptyDocument) });
+      await onAppliedActivity?.({ catalogChanged: true, profileChanged: false, rowCount: 0 });
+      await api.request<Job>("/api/v1/system/services/trunk-recorder/restart", { method: "POST" });
+      await api.request<Job>("/api/v1/system/services/pizzad/restart", { method: "POST" });
+      setDraft(emptyDocument);
+      setResponse(current => current ? { ...current, document: emptyDocument } : current);
+      setMessage(`Cleared talkgroup catalog and regenerated ${savedCatalog.generatedCsvPath || "talkgroups CSV"}.`);
+      await reload();
+      await loadCatalog();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Clear talkgroups failed.");
+    } finally {
+      setBusy("");
+    }
   }
 
   const needle = filter.trim().toLowerCase();
@@ -14191,7 +14097,7 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
   const pendingVirtualItems = pendingRows
     .filter(row => !catalogKeys.has(talkgroupCatalogKey(row)))
     .map(talkgroupPreviewRowToCatalogItem);
-  const effectiveItems = [...catalogItems.map(effectiveRow), ...pendingVirtualItems];
+  const effectiveItems = [...catalogItems, ...pendingVirtualItems];
   const categoryOptions = Array.from(new Set(effectiveItems.map(item => item.opsCategory).filter(Boolean))).sort();
   const highLoadByTalkgroup = new Map((queue?.topAudioTalkgroups ?? []).map(row => [row.talkgroup, row]));
   function loadFor(item: TalkgroupCatalogItem) {
@@ -14256,16 +14162,11 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
     );
     return metadataChanged ? { kind: "updated", text: "RR update" } : { kind: "matched", text: "Matched RR" };
   }
-  const active = activeProfile();
   const originalDocumentJson = response ? JSON.stringify(response.document) : "";
-  const originalProfileJson = profileState ? JSON.stringify(profileState) : "";
   function catalogDirty() {
     return Boolean(draft && originalDocumentJson && JSON.stringify(draft) !== originalDocumentJson);
   }
-  function profileDirty() {
-    return Boolean(profileDraft && originalProfileJson && JSON.stringify(profileDraft) !== originalProfileJson);
-  }
-  const hasUnappliedChanges = catalogDirty() || profileDirty();
+  const hasUnappliedChanges = catalogDirty();
   useEffect(() => {
     if (hasUnappliedChanges)
       localStorage.setItem("pizzawave-unapplied-talkgroups", "1");
@@ -14281,36 +14182,11 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
   }, [hasUnappliedChanges]);
 
   return <div className={`${embedded ? "site-setup-catalog-editor" : "card settings-card wide"} talkgroups-settings-card`}>
-    <div className="settings-card-meta">
-      <h3>{embedded ? "Catalog and Profiles" : "Talkgroups"}</h3>
-      <div className="settings-card-actions">
-        <button type="button" onClick={() => setShowHelp(true)}>Help</button>
-        <button className="danger-button" disabled={Boolean(busy) || !hasUnappliedChanges} onClick={() => void applyChanges()}>{busy === "apply" ? "Applying..." : "Apply"}</button>
-      </div>
-      {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
-    </div>
     <div className="settings-fields">
-      {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
-        <div className="card talkgroup-help-modal" onClick={event => event.stopPropagation()}>
-          <div className="recommendation-head">
-            <h3>Talkgroups Help</h3>
-            <button type="button" onClick={() => setShowHelp(false)}>Close</button>
-          </div>
-          <p>Profiles control dashboard visibility and downstream alert, embedding, and incident participation. Profile enable/disable changes do not stop capture or transcription.</p>
-          <p>Deleting a catalog TG is a capture change. Apply saves the draft, regenerates the trunk-recorder CSV, and restarts services only when catalog capture changes exist.</p>
-          <p>High Load refreshes queue/load data when selected and filters the same table, so edits happen in one place.</p>
-        </div>
-      </div>}
-      {profileDraft && <>
-        <div className="profile-toolbar compact-profile-toolbar">
-        <span className="compact-label">Profile</span>
-        <select value={profileDraft.activeProfileId} onChange={e => setProfileDraft({ ...profileDraft, activeProfileId: e.target.value })}>{profileDraft.profiles.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select>
-        <span className="compact-label">Name</span>
-        {active && <input value={active.name} onChange={e => updateProfile(active.id, { name: e.target.value })} />}
-        <button type="button" className="danger-button" disabled={Boolean(busy)} onClick={addProfile}>Add</button>
-        {active && <button type="button" className="danger-button" disabled={profileDraft.profiles.length <= 1} onClick={() => deleteProfile(active.id)}>Delete</button>}
-        </div>
-        <div className="talkgroup-filters">
+      {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
+      {hasUnappliedChanges && <p className="settings-message error">Unapplied changes. Click Save TGs to save them, or leave this page to discard the draft.</p>}
+      <div className="talkgroup-catalog-table">
+        <div className="table-top-pagination">
           <input placeholder="Filter TGs" value={filter} onChange={e => setFilter(e.target.value)} />
           <select value={enabledFilter} onChange={e => setEnabledFilter(e.target.value as "all" | "enabled" | "disabled" | "high-load")}>
             <option value="all">All TGs</option>
@@ -14322,17 +14198,14 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
             <option value="all">All categories</option>
             {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
           </select>
-        </div>
-      </>}
-      {hasUnappliedChanges && <p className="settings-message error">Unapplied changes. Click Apply to save them, or leave this page to discard the draft.</p>}
-      <div className="talkgroup-catalog-table">
-        <div className="table-top-pagination">
           <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} enabled{pendingRows.length ? ` / ${pendingRows.length.toLocaleString()} RR preview` : ""}</span>
           <button disabled={currentPage <= 1} onClick={() => setPage(1)}>First</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
           <span>{currentPage} / {pageCount}</span>
           <button disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
           <button disabled={currentPage >= pageCount} onClick={() => setPage(pageCount)}>Last</button>
+          <button className="danger-button" disabled={Boolean(busy) || !hasUnappliedChanges} onClick={() => void applyChanges()}>{busy === "apply" ? "Saving..." : "Save TGs"}</button>
+          <button className="danger-button" disabled={Boolean(busy) || effectiveItems.length === 0} onClick={() => void clearCatalog()}>{busy === "clear" ? "Clearing..." : "Clear TGs"}</button>
         </div>
         <table className="table compact-table">
           <thead><tr>
@@ -14349,11 +14222,11 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
             const sync = syncStatusFor(item);
             const previewOnly = sync.kind === "new";
             return <tr className={`${item.enabled ? "" : "excluded-row"} ${sync.kind !== "catalog" ? `talkgroup-sync-${sync.kind}` : ""}`} key={`${talkgroupCatalogKey(item)}-${index}`}>
-              <td><button type="button" disabled={previewOnly} onClick={() => updateActiveTalkgroup(item, { enabled: !item.enabled })}>{previewOnly ? "Pending" : item.enabled ? "Disable" : "Enable"}</button></td>
+              <td><button type="button" disabled={previewOnly} onClick={() => updateItem(talkgroupCatalogKey(item), { enabled: !item.enabled })}>{previewOnly ? "Pending" : item.enabled ? "Disable" : "Enable"}</button></td>
               {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
               <td>{item.id}</td>
-              <td><input value={item.alphaTag} disabled={previewOnly} onChange={e => updateActiveTalkgroup(item, { label: e.target.value })} /></td>
-              <td><select value={item.opsCategory} disabled={previewOnly} onChange={e => updateActiveTalkgroup(item, { category: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
+              <td><input value={item.alphaTag} disabled={previewOnly} onChange={e => updateItem(talkgroupCatalogKey(item), { alphaTag: e.target.value })} /></td>
+              <td><select value={item.opsCategory} disabled={previewOnly} onChange={e => updateItem(talkgroupCatalogKey(item), { opsCategory: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
               <td className="talkgroup-sync-column"><span className={`talkgroup-sync-badge sync-${sync.kind}`}>{sync.text}</span></td>
               <td>{highLoadByTalkgroup.has(item.id) ? `${highLoadByTalkgroup.get(item.id)!.calls.toLocaleString()} / ${formatDurationMinutes(highLoadByTalkgroup.get(item.id)!.audioSeconds / 60)}` : "--"}</td>
               <td>{previewOnly ? <span className="muted">Sync first</span> : <button className="danger-button" onClick={() => deleteItem(talkgroupCatalogKey(item))}>Delete</button>}</td>
@@ -14472,13 +14345,6 @@ function talkgroupPreviewRowToCatalogItem(row: SetupTalkgroupRow): TalkgroupCata
     source: "rr-preview",
     notes: ""
   };
-}
-
-function profileTalkgroupKey(item: { key?: string; systemShortName?: string; id: number }) {
-  const key = String(item.key ?? "").trim().toLowerCase();
-  if (key) return key;
-  const system = normalizeTalkgroupSystem(item.systemShortName);
-  return system ? `${system}:${item.id}` : String(item.id);
 }
 
 function withSettingsDefaults(value: Record<string, any>) {
