@@ -4925,6 +4925,69 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   gap: 10px;
   align-items: end;
 }
+.talkgroup-import-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #30363d;
+  border-radius: 7px;
+  padding: 10px;
+  background: #12161b;
+}
+.talkgroup-import-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.talkgroup-import-head h4 {
+  margin: 0;
+}
+.talkgroup-update-toggle,
+.rsw-talkgroup-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #cbd5de;
+  font-size: 12px;
+  font-weight: 700;
+}
+.talkgroup-update-toggle input,
+.rsw-talkgroup-check input {
+  width: auto;
+  margin: 0;
+}
+.rsw-talkgroup-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(120px, 160px) minmax(150px, max-content) max-content;
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+.rsw-talkgroup-controls label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: #9faab5;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.rsw-talkgroup-controls input,
+.rsw-talkgroup-controls select {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  text-transform: none;
+}
+.rsw-talkgroup-controls .rsw-talkgroup-check {
+  display: inline-flex;
+  align-self: center;
+  color: #cbd5de;
+  text-transform: none;
+}
 .rf-site-list {
   display: grid;
   gap: 6px;
@@ -6347,6 +6410,14 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   .tr-config-editor-grid,
   .tr-config-rr-grid {
     grid-template-columns: 1fr;
+  }
+  .rsw-talkgroup-controls {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .talkgroup-import-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .tr-config-raw {
     position: static;

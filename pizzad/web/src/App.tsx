@@ -12924,6 +12924,7 @@ function RswTalkgroupImportPanel({
   const [catalogScope, setCatalogScope] = useState(defaultScope);
   const [applyMode, setApplyMode] = useState<"merge" | "replace">("merge");
   const [includeExcluded, setIncludeExcluded] = useState(false);
+  const [enabled, setEnabled] = useState(false);
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -12934,16 +12935,6 @@ function RswTalkgroupImportPanel({
     if (!catalogScope.trim() && defaultScope)
       setCatalogScope(defaultScope);
   }, [defaultScope, catalogScope]);
-
-  useEffect(() => {
-    if (!sid || !normalizedScope) {
-      setPreview(null);
-      setMessage("");
-      return;
-    }
-    const timer = window.setTimeout(() => void loadTalkgroups(), 500);
-    return () => window.clearTimeout(timer);
-  }, [sid, normalizedScope, includeExcluded, applyMode]);
 
   function scopeRows(rows: SetupTalkgroupRow[], scope = normalizedScope) {
     return rows.map(row => ({
@@ -12991,18 +12982,33 @@ function RswTalkgroupImportPanel({
   }
 
   return <div className={`talkgroup-import-panel ${className}`}>
-    <h4>Talkgroups</h4>
-    <div className="rf-inline-fields">
-      <label className="setting-field"><span>Talkgroup system name</span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
-      <label className="setting-field"><span>Apply mode</span><select value={applyMode} onChange={event => setApplyMode(event.target.value === "replace" ? "replace" : "merge")}><option value="merge">Merge</option><option value="replace">Overwrite</option></select></label>
-      <label className="setting-checkbox">
-        <input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.target.checked)} />
-        <span>Include excluded TGs</span>
+    <div className="talkgroup-import-head">
+      <h4>Talkgroups</h4>
+      <label className="talkgroup-update-toggle">
+        <input type="checkbox" checked={enabled} onChange={event => {
+          setEnabled(event.target.checked);
+          if (!event.target.checked) {
+            setPreview(null);
+            setMessage("");
+            setBusy("");
+          }
+        }} />
+        <span>Update TG catalog</span>
       </label>
-      {busy && <span className="muted">Loading TGs...</span>}
     </div>
-    {message && <div className="setup-note">{message}</div>}
-    {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} readOnly />}
+    {enabled && <>
+      <div className="rsw-talkgroup-controls">
+        <label><span>System name</span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
+        <label><span>Mode</span><select value={applyMode} onChange={event => setApplyMode(event.target.value === "replace" ? "replace" : "merge")}><option value="merge">Merge</option><option value="replace">Overwrite</option></select></label>
+        <label className="rsw-talkgroup-check">
+          <input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.target.checked)} />
+          <span>Include excluded TGs</span>
+        </label>
+        <button className="danger-button" disabled={Boolean(busy) || !sid || !normalizedScope} onClick={() => void loadTalkgroups()}>{busy === "talkgroups" ? "Updating..." : "Update"}</button>
+      </div>
+      {message && <div className="setup-note">{message}</div>}
+      {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} readOnly />}
+    </>}
   </div>;
 }
 
