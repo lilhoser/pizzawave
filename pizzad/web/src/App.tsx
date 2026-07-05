@@ -10334,7 +10334,7 @@ function TrConfigReviewCoverage({ systems, sources }: { systems: any[]; sources:
   const sourceWindows = sources.map((source, index): { index: number; device: string; center: number; rate: number; low: number; high: number } => {
     const center = readTrFrequencyHz(source?.center);
     const rate = Math.round(Number(source?.rate) || 0);
-    const half = Math.floor(Math.max(0, rate) * 0.46875);
+    const half = Math.max(0, Math.floor(rate / 2) - 50_000);
     return {
       index,
       device: String(source?.device ?? ""),
@@ -10364,25 +10364,23 @@ function TrConfigReviewCoverage({ systems, sources }: { systems: any[]; sources:
       <strong>{sources.length} TR source window{sources.length === 1 ? "" : "s"} for {systems.length} system{systems.length === 1 ? "" : "s"}</strong>
       <span>A source is an SDR tuning window. One source can cover multiple systems when their control channels are inside the same sampled span.</span>
     </div>
+    <div className="tr-config-review-source-table">
+      <div className="tr-config-review-source-row header"><span>Source</span><span>Center</span><span>Window</span><span>Rate</span></div>
+      {sourceWindows.map(source => <div className="tr-config-review-source-row" key={source.index}>
+        <span><strong>#{source.index}</strong><small>{source.device || "--"}</small></span>
+        <span><code>{formatRfHz(source.center)}</code></span>
+        <span>{formatRfHz(source.low)}-{formatRfHz(source.high)}</span>
+        <span>{formatHz(source.rate)}</span>
+      </div>)}
+    </div>
     <div className="tr-config-review-table">
-      <div className="tr-config-review-row header"><span>System</span><span>Control channels</span><span>Source center</span><span>Covered by source</span></div>
+      <div className="tr-config-review-row header"><span>System</span><span>Control channels</span><span>Covered by source</span></div>
       {rows.map(row => <div className={row.uncovered.length ? "tr-config-review-row warning" : "tr-config-review-row"} key={row.shortName}>
         <span><strong>{row.shortName}</strong></span>
         <span>{row.channels.length ? row.channels.map(formatRfHz).join(", ") : "--"}</span>
         <span>
           {row.covered.length
-            ? row.covered.map(index => {
-              const source = sourceWindows[index];
-              return <code key={index}>#{index} {formatRfHz(source.center)}</code>;
-            })
-            : "--"}
-        </span>
-        <span>
-          {row.covered.length
-            ? row.covered.map(index => {
-              const source = sourceWindows[index];
-              return <code key={index}>#{index} {formatRfHz(source.low)}-{formatRfHz(source.high)}</code>;
-            })
+            ? row.covered.map(index => <code key={index}>#{index}</code>)
             : "--"}
           {row.uncovered.length > 0 && <small>Uncovered: {row.uncovered.map(formatRfHz).join(", ")}</small>}
         </span>
