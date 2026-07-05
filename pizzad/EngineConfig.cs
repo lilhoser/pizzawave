@@ -77,9 +77,17 @@ public sealed class EngineConfig
         var directory = Path.GetDirectoryName(path) ?? ".";
         Directory.CreateDirectory(directory);
         var tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        File.WriteAllText(tempPath, content);
-        TryPreserveUnixMode(path, tempPath);
-        File.Move(tempPath, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            TryPreserveUnixMode(path, tempPath);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch (UnauthorizedAccessException) when (File.Exists(path))
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            File.WriteAllText(path, content);
+        }
     }
 
     private static void TryPreserveUnixMode(string originalPath, string tempPath)
