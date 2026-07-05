@@ -163,7 +163,7 @@ public sealed class DashboardService
             groups = groups
                 .Where(group => callsByTalkgroup.ContainsKey(group.Talkgroup) || group.Label.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
                 .Select(group => callsByTalkgroup.TryGetValue(group.Talkgroup, out var calls)
-                    ? new CategoryGroupDto(group.Label, calls, group.Talkgroup, group.Count, group.LastHeard)
+                    ? new CategoryGroupDto(group.Label, calls, group.Talkgroup, group.Count, group.LastHeard, group.StrongCount, group.WeakCount)
                     : group)
                 .ToList();
         }
@@ -178,7 +178,8 @@ public sealed class DashboardService
 
         var calls = await _database.ListCategoryTalkgroupCallsAsync(start, end, category, talkgroup, limit, ct);
         var label = calls.Count > 0 ? GetTalkgroupLabel(calls[0]) : $"TG {talkgroup}";
-        return new CategoryGroupDto(label, calls, talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max());
+        var strongCount = calls.Count(IsStrongCall);
+        return new CategoryGroupDto(label, calls, talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount);
     }
 
     public Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
@@ -187,6 +188,10 @@ public sealed class DashboardService
     }
 
     private List<EngineCall> ApplyProfile(IEnumerable<EngineCall> calls) => calls.Where(c => Allows(c.Category, c.SystemShortName, c.Talkgroup)).ToList();
+
+    private static bool IsStrongCall(EngineCall call) =>
+        string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase);
 
     private bool Allows(string category, long talkgroup)
         => Allows(category, string.Empty, talkgroup);

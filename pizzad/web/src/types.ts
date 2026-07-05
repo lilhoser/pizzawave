@@ -109,7 +109,7 @@ export type EngineCall = {
 export type CategoryPage = {
   category: string;
   groupBy: string;
-  groups: { label: string; calls: EngineCall[]; talkgroup: number; count: number; lastHeard: number }[];
+  groups: { label: string; calls: EngineCall[]; talkgroup: number; count: number; lastHeard: number; strongCount: number; weakCount: number }[];
   insights: CategoryInsight[];
   incidents: Incident[];
 };

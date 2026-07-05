@@ -1316,27 +1316,44 @@ function LocationSourceCall({ call, searchQuery = "" }: { call: LocationHeat["so
 
 function CategoryView({ data, rangeHours, searchQuery }: { data: CategoryPage | null; rangeHours: number; searchQuery: string }) {
   const [sortMode, setSortModeState] = useState<CategorySortMode>(() => normalizeCategorySort(localStorage.getItem("pizzawave-category-sort")));
+  const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") === "1");
   function setSortMode(value: CategorySortMode) {
     setSortModeState(value);
     localStorage.setItem("pizzawave-category-sort", value);
   }
+  function setHideWeakCalls(value: boolean) {
+    setHideWeakCallsState(value);
+    localStorage.setItem("pizzawave-hide-weak-category-calls", value ? "1" : "0");
+  }
   if (!data) return <div className="category-page">Loading...</div>;
-  const sortedGroups = sortCategoryGroups(data.groups, sortMode);
+  const totalCallCount = data.groups.reduce((sum, group) => sum + group.count, 0);
+  const strongCallCount = data.groups.reduce((sum, group) => sum + group.strongCount, 0);
+  const displayCallCount = hideWeakCalls ? strongCallCount : totalCallCount;
+  const visibleSourceGroups = hideWeakCalls ? data.groups.filter(group => group.strongCount > 0) : data.groups;
+  const sortedGroups = sortCategoryGroups(visibleSourceGroups, sortMode);
   const filteredGroups = sortedGroups.filter(group => matchesCategoryGroupSearch(group, searchQuery));
   return <div className="category-page category-mode-page" data-category={data.category}>
     <section className="pane category-pane raw-category">
       <div className="category-header">
         <div className="category-title-row">
           <h2>{label(data.category)} Calls by Talkgroup</h2>
-          <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
-            <button type="button" className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
-            <button type="button" className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
-            <button type="button" className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
+          <div className="category-actions">
+            <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
+              <button type="button" className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
+              <button type="button" className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
+              <button type="button" className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
+            </div>
+            <label className="category-quality-toggle">
+              <input type="checkbox" checked={hideWeakCalls} onChange={event => setHideWeakCalls(event.currentTarget.checked)} />
+              <span>Hide weak calls</span>
+            </label>
           </div>
-          <span className="muted">{filteredGroups.length.toLocaleString()} of {data.groups.length.toLocaleString()} talkgroup{data.groups.length === 1 ? "" : "s"}</span>
+          <span className="muted category-counts">
+            {displayCallCount.toLocaleString()} of {totalCallCount.toLocaleString()} call{totalCallCount === 1 ? "" : "s"} shown / {filteredGroups.length.toLocaleString()} of {data.groups.length.toLocaleString()} talkgroup{data.groups.length === 1 ? "" : "s"}
+          </span>
         </div>
       </div>
-      <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} />
+      <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} />
     </section>
   </div>;
 }
@@ -1596,17 +1613,18 @@ function IncidentSummary({ incident, linkedLocation, onShowLocation, stripeCateg
   </summary>;
 }
 
-function CategoryCallGroups({ groups, category, rangeHours, searchQuery }: { groups: CategoryPage["groups"]; category: string; rangeHours: number; searchQuery: string }) {
+function CategoryCallGroups({ groups, category, rangeHours, searchQuery, hideWeakCalls }: { groups: CategoryPage["groups"]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
-  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} rangeHours={rangeHours} searchQuery={searchQuery} key={`${group.talkgroup}-${group.label}`} />)}</>;
+  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} key={`${group.talkgroup}-${group.label}`} />)}</>;
 }
 
-function CollapsibleCallGroup({ group, category, rangeHours, searchQuery }: { group: CategoryPage["groups"][number]; category: string; rangeHours: number; searchQuery: string }) {
+function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWeakCalls }: { group: CategoryPage["groups"][number]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean }) {
   const [open, setOpen] = useState(false);
   const [calls, setCalls] = useState<EngineCall[]>(group.calls ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const count = group.count || calls.length;
+  const visibleCount = hideWeakCalls ? group.strongCount : count;
   useEffect(() => {
     setCalls(group.calls ?? []);
     setError("");
@@ -1621,13 +1639,13 @@ function CollapsibleCallGroup({ group, category, rangeHours, searchQuery }: { gr
       .catch(err => setError(err instanceof Error ? err.message : "Failed to load calls"))
       .finally(() => setLoading(false));
   }, [open, calls.length, loading, category, group.talkgroup, rangeHours]);
-  const visibleCalls = calls.filter(call => matchesCallSearch(call, searchQuery));
+  const visibleCalls = calls.filter(call => (!hideWeakCalls || isStrongCall(call)) && matchesCallSearch(call, searchQuery));
   return <details className={`call-group category-${category}`} open={open} onToggle={e => setOpen(e.currentTarget.open)}>
-    <summary><span><HighlightedText text={group.label} query={searchQuery} /></span><span className="muted">{count.toLocaleString()} calls{group.lastHeard ? `; latest ${relativeTime(group.lastHeard)}` : ""}</span></summary>
+    <summary><span><HighlightedText text={group.label} query={searchQuery} /></span><span className="muted">{hideWeakCalls ? `${visibleCount.toLocaleString()} of ${count.toLocaleString()} calls shown` : `${count.toLocaleString()} calls`}{group.lastHeard ? `; latest ${relativeTime(group.lastHeard)}` : ""}</span></summary>
     {open && loading && <div className="call-group-status">Loading calls...</div>}
     {open && error && <div className="call-group-status error">{error}</div>}
     {open && visibleCalls.map(c => <CallRow call={c} searchQuery={searchQuery} key={c.id} />)}
-    {open && calls.length > 0 && visibleCalls.length === 0 && <div className="call-group-status">No loaded calls match this search.</div>}
+    {open && calls.length > 0 && visibleCalls.length === 0 && <div className="call-group-status">{hideWeakCalls ? "No loaded strong calls match this view." : "No loaded calls match this search."}</div>}
     {open && calls.length >= 150 && <div className="call-group-status">Showing latest 150 calls.</div>}
   </details>;
 }
@@ -1763,6 +1781,10 @@ function matchesCallSearch(call: EngineCall, query: string) {
     call.transcriptionStatus,
     call.qualityReason
   ], query);
+}
+
+function isStrongCall(call: EngineCall) {
+  return call.transcriptionStatus?.toLowerCase() === "complete" && call.qualityReason?.toLowerCase() === "ok";
 }
 
 function matchesCategoryGroupSearch(group: CategoryPage["groups"][number], query: string) {

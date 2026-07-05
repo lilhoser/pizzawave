@@ -1148,6 +1148,12 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .category-title-row .muted {
   flex-basis: 100%;
 }
+.category-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .category-sort-toggle {
   flex: 0 0 auto;
   border-radius: 5px;
@@ -1157,6 +1163,22 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   padding: 2px 7px;
   font-size: 11px;
   line-height: 1.2;
+}
+.category-quality-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.category-quality-toggle input {
+  width: auto;
+  margin: 0;
+}
+.category-counts {
+  font-size: 12px;
 }
 .search-highlight {
   background: #f7c948;

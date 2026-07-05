@@ -163,7 +163,9 @@ public sealed record CategoryGroupDto(
     IReadOnlyList<EngineCall> Calls,
     long Talkgroup = 0,
     int Count = 0,
-    long LastHeard = 0);
+    long LastHeard = 0,
+    int StrongCount = 0,
+    int WeakCount = 0);
 
 public sealed record CategoryInsightDto(
     long Id,

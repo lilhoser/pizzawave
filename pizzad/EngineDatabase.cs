@@ -984,6 +984,7 @@ public sealed class EngineDatabase
                 talkgroup,
                 COALESCE(NULLIF(talkgroup_name, ''), 'TG ' || talkgroup) AS label,
                 COUNT(*) AS call_count,
+                SUM(CASE WHEN transcription_status='complete' AND quality_reason='ok' THEN 1 ELSE 0 END) AS strong_call_count,
                 MAX(start_time) AS last_heard
             FROM calls
             WHERE start_time >= $start AND start_time <= $end
@@ -998,12 +999,16 @@ public sealed class EngineDatabase
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
+            var callCount = reader.GetInt32(reader.GetOrdinal("call_count"));
+            var strongCallCount = reader.GetInt32(reader.GetOrdinal("strong_call_count"));
             groups.Add(new CategoryGroupDto(
                 reader.GetString(reader.GetOrdinal("label")),
                 [],
                 reader.GetInt64(reader.GetOrdinal("talkgroup")),
-                reader.GetInt32(reader.GetOrdinal("call_count")),
-                reader.GetInt64(reader.GetOrdinal("last_heard"))));
+                callCount,
+                reader.GetInt64(reader.GetOrdinal("last_heard")),
+                strongCallCount,
+                callCount - strongCallCount));
         }
         return groups;
     }
