@@ -744,7 +744,11 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
   useEffect(() => setCurrent(setup), [setup]);
   if (!current) return <div className="pane">Loading Site Setup...</div>;
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
-  const enabledSections = new Set(["Location", "Systems & Sites"]);
+  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups"]);
+  async function refreshSiteSetup() {
+    const next = await api.request<SiteSetup>(siteSetupApi);
+    setCurrent(next);
+  }
   async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
     if (!current) return;
     const desired = { ...current.desired, ...patch };
@@ -787,6 +791,7 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
           </div>
           {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
+          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} onActivity={refreshSiteSetup} />}
         </section>
       </div>
     </section>
@@ -979,6 +984,117 @@ function selectedSetupSystemNames(setup: SiteSetup) {
     ? setup.desired.systemShortNames
     : setup.desired.systems.map(system => system.shortName);
   return Array.from(new Set(names.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; onActivity: () => Promise<void> }) {
+  const [radioReferenceSid, setRadioReferenceSid] = useState(setup.desired.radioReferenceSid);
+  const [catalogSystem, setCatalogSystem] = useState(setup.desired.siteLabel || selectedSetupSystemNames(setup)[0] || "");
+  const [csvText, setCsvText] = useState("");
+  const [includeExcluded, setIncludeExcluded] = useState(false);
+  const [applyMode, setApplyMode] = useState<"merge" | "replace">("merge");
+  const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => setRadioReferenceSid(setup.desired.radioReferenceSid), [setup.desired.radioReferenceSid]);
+
+  async function previewTalkgroups(source: "rr" | "csv") {
+    const sid = radioReferenceSid.trim();
+    const csv = csvText.trim();
+    if (source === "rr" && !sid) {
+      setMessage("Enter an RR system ID first.");
+      return;
+    }
+    if (source === "csv" && !csv) {
+      setMessage("Paste CSV text first.");
+      return;
+    }
+    setBusy(`preview-${source}`);
+    setMessage("");
+    try {
+      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
+        method: "POST",
+        body: JSON.stringify(source === "rr"
+          ? { radioReferenceSid: sid, includeNormallyExcluded: includeExcluded, systemShortName: catalogSystem.trim() }
+          : { csvText: csv, includeNormallyExcluded: includeExcluded, systemShortName: catalogSystem.trim() })
+      });
+      setPreview(result);
+      setMessage(`Previewed ${result.includedCount.toLocaleString()} included row(s).`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup preview failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveTalkgroups() {
+    if (!preview) {
+      setMessage("Preview talkgroups before saving.");
+      return;
+    }
+    setBusy("save");
+    setMessage("");
+    try {
+      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
+        method: "POST",
+        body: JSON.stringify({ rows: preview.rows, applyMode })
+      });
+      setPreview(result);
+      setMessage(result.diagnostics);
+      await api.request<unknown>(`${siteSetupApi}/activity`, {
+        method: "POST",
+        body: JSON.stringify({
+          category: "talkgroups",
+          action: applyMode === "merge" ? "catalog_merged" : "catalog_replaced",
+          summary: `Talkgroup catalog ${applyMode === "merge" ? "merged" : "replaced"} with ${result.includedCount.toLocaleString()} row(s).`,
+          details: { applyMode, radioReferenceSid: radioReferenceSid.trim(), catalogSystem: catalogSystem.trim(), includedCount: result.includedCount },
+          source: "ui"
+        })
+      });
+      await onActivity();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup save failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function updateTalkgroupRow(index: number, patch: Partial<SetupTalkgroupRow>) {
+    setPreview(current => {
+      if (!current) return current;
+      return { ...current, rows: current.rows.map((row, i) => i === index ? { ...row, ...patch } : row) };
+    });
+  }
+
+  const messageClass = message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") || message.toLowerCase().includes("enter") || message.toLowerCase().includes("paste")
+    ? "settings-message error"
+    : "settings-message ok";
+
+  return <div className="site-setup-form site-setup-talkgroups">
+    <div className="site-setup-inline-fields">
+      <label className="setting-field">
+        <span>RR system ID</span>
+        <input value={radioReferenceSid} inputMode="numeric" onChange={event => setRadioReferenceSid(event.target.value)} />
+      </label>
+      <label className="setting-field">
+        <span>Catalog system</span>
+        <input value={catalogSystem} onChange={event => setCatalogSystem(event.target.value)} />
+      </label>
+    </div>
+    <div className="site-setup-inline-fields">
+      <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
+      <label className="setting-checkbox"><input type="radio" checked={applyMode === "merge"} onChange={() => setApplyMode("merge")} /> Merge catalog</label>
+      <label className="setting-checkbox"><input type="radio" checked={applyMode === "replace"} onChange={() => setApplyMode("replace")} /> Replace catalog</label>
+      <button type="button" disabled={Boolean(busy) || !radioReferenceSid.trim()} onClick={() => void previewTalkgroups("rr")}>{busy === "preview-rr" ? "Fetching" : "Preview RR"}</button>
+      <button type="button" className="danger-button" disabled={Boolean(busy) || !preview} onClick={() => void saveTalkgroups()}>{busy === "save" ? "Saving" : "Save Catalog"}</button>
+    </div>
+    <label className="setting-field site-setup-wide-field">
+      <span>CSV text</span>
+      <textarea value={csvText} onChange={event => setCsvText(event.target.value)} rows={4} />
+      <button type="button" disabled={Boolean(busy) || !csvText.trim()} onClick={() => void previewTalkgroups("csv")}>{busy === "preview-csv" ? "Previewing" : "Preview CSV"}</button>
+    </label>
+    {message && <div className={messageClass}>{message}</div>}
+    {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateTalkgroupRow} />}
+  </div>;
 }
 
 function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string }) {

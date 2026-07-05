@@ -638,6 +638,27 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-site-table input[type="checkbox"] {
   margin: 0;
 }
+.site-setup-talkgroups .setting-checkbox {
+  margin: 0 8px 0 0;
+}
+.site-setup-wide-field {
+  align-items: start;
+}
+.site-setup-wide-field button {
+  margin: 0;
+}
+.site-setup-talkgroups .talkgroup-preview {
+  max-width: none;
+}
+.site-setup-talkgroups .talkgroup-preview-table {
+  max-height: min(48vh, 520px);
+  overflow: auto;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+.site-setup-talkgroups .talkgroup-preview-table table {
+  margin: 0;
+}
 .dashboard-stats-panel .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
