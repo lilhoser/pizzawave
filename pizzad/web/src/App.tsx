@@ -1179,13 +1179,6 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
     }
   }
 
-  function updateTalkgroupRow(index: number, patch: Partial<SetupTalkgroupRow>) {
-    setPreview(current => {
-      if (!current) return current;
-      return { ...current, rows: current.rows.map((row, i) => i === index ? { ...row, ...patch } : row) };
-    });
-  }
-
   function updateSource(index: number, patch: Partial<SiteSetupTalkgroupSource>) {
     setRrSources(current => current.map((row, i) => i === index ? { ...row, ...patch } : row));
   }
@@ -1214,11 +1207,10 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
       </div>
       <div className="site-setup-inline-fields">
         <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} disabled={Boolean(busy)} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
-        <button type="button" className="danger-button" disabled={Boolean(busy) || !preview || preview.includedCount === 0} onClick={() => void syncTalkgroups()}>{busy === "sync-rr" ? "Syncing" : "Sync RR Talkgroups"}</button>
         {busy === "preview-rr" && <span className="settings-message">Fetching talkgroups...</span>}
       </div>
       {message && <div className={messageClass}>{message}</div>}
-      {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateTalkgroupRow} />}
+      {preview && <TalkgroupSyncSummary preview={preview} busy={busy === "sync-rr"} onSync={() => void syncTalkgroups()} />}
     </div>
     <TalkgroupCatalogSettingsCard
       profileState={profileState}
@@ -1226,6 +1218,7 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
       reload={reload}
       reloadToken={catalogReloadToken}
       embedded
+      pendingSyncRows={preview?.rows.filter(row => row.included) ?? []}
       onAppliedActivity={async ({ catalogChanged, profileChanged, rowCount }) => {
         await api.request<unknown>(`${siteSetupApi}/activity`, {
           method: "POST",
@@ -1239,6 +1232,22 @@ function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, relo
         });
       }}
     />
+  </div>;
+}
+
+function TalkgroupSyncSummary({ preview, busy, onSync }: { preview: SetupTalkgroupPreview; busy: boolean; onSync: () => void }) {
+  const included = preview.rows.filter(row => row.included);
+  const excluded = preview.rows.length - included.length;
+  const categoriesText = Object.entries(preview.includedByCategory ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([category, count]) => `${label(category)} ${count.toLocaleString()}`)
+    .join(" / ");
+  return <div className="talkgroup-sync-summary">
+    <div>
+      <strong>{included.length.toLocaleString()} RR talkgroup row{included.length === 1 ? "" : "s"} ready</strong>
+      <span>{categoriesText || "No category counts"}{excluded > 0 ? ` / ${excluded.toLocaleString()} excluded` : ""}</span>
+    </div>
+    <button type="button" className="danger-button" disabled={busy || included.length === 0} onClick={onSync}>{busy ? "Syncing" : "Sync into Catalog"}</button>
   </div>;
 }
 
@@ -13986,7 +13995,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
   </div>;
 }
 
-function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, reloadToken = 0, embedded = false, onAppliedActivity }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void>; reloadToken?: number; embedded?: boolean; onAppliedActivity?: (details: { catalogChanged: boolean; profileChanged: boolean; rowCount: number }) => Promise<void> }) {
+function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, reloadToken = 0, embedded = false, pendingSyncRows = [], onAppliedActivity }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void>; reloadToken?: number; embedded?: boolean; pendingSyncRows?: SetupTalkgroupRow[]; onAppliedActivity?: (details: { catalogChanged: boolean; profileChanged: boolean; rowCount: number }) => Promise<void> }) {
   const [response, setResponse] = useState<TalkgroupCatalogResponse | null>(null);
   const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
   const [profileDraft, setProfileDraft] = useState<ProfileState | null>(profileState);
@@ -14175,7 +14184,14 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
   }
 
   const needle = filter.trim().toLowerCase();
-  const effectiveItems = (draft?.items ?? []).map(effectiveRow);
+  const catalogItems = draft?.items ?? [];
+  const catalogKeys = new Set(catalogItems.map(talkgroupCatalogKey));
+  const pendingRows = pendingSyncRows.filter(row => row.included && row.id > 0);
+  const pendingByKey = new Map(pendingRows.map(row => [talkgroupCatalogKey(row), row]));
+  const pendingVirtualItems = pendingRows
+    .filter(row => !catalogKeys.has(talkgroupCatalogKey(row)))
+    .map(talkgroupPreviewRowToCatalogItem);
+  const effectiveItems = [...catalogItems.map(effectiveRow), ...pendingVirtualItems];
   const categoryOptions = Array.from(new Set(effectiveItems.map(item => item.opsCategory).filter(Boolean))).sort();
   const highLoadByTalkgroup = new Map((queue?.topAudioTalkgroups ?? []).map(row => [row.talkgroup, row]));
   function loadFor(item: TalkgroupCatalogItem) {
@@ -14223,6 +14239,23 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
   const endRow = Math.min(rows.length, currentPage * pageSize);
   const enabledCount = effectiveItems.filter(item => item.enabled).length;
   const hasSystemScopedRows = effectiveItems.some(item => item.systemShortName);
+  function syncStatusFor(item: TalkgroupCatalogItem) {
+    const key = talkgroupCatalogKey(item);
+    const pending = pendingByKey.get(key);
+    if (!pending)
+      return { kind: "catalog", text: "Catalog" };
+    if (!catalogKeys.has(key))
+      return { kind: "new", text: "New from RR" };
+    const raw = catalogItems.find(row => talkgroupCatalogKey(row) === key);
+    const metadataChanged = raw && (
+      (raw.mode ?? "") !== (pending.mode ?? "") ||
+      (raw.alphaTag ?? "") !== (pending.alphaTag ?? "") ||
+      (raw.description ?? "") !== (pending.description ?? "") ||
+      (raw.tag ?? "") !== (pending.tag ?? "") ||
+      (raw.sourceCategory ?? "") !== (pending.category ?? "")
+    );
+    return metadataChanged ? { kind: "updated", text: "RR update" } : { kind: "matched", text: "Matched RR" };
+  }
   const active = activeProfile();
   const originalDocumentJson = response ? JSON.stringify(response.document) : "";
   const originalProfileJson = profileState ? JSON.stringify(profileState) : "";
@@ -14294,7 +14327,7 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
       {hasUnappliedChanges && <p className="settings-message error">Unapplied changes. Click Apply to save them, or leave this page to discard the draft.</p>}
       <div className="talkgroup-catalog-table">
         <div className="table-top-pagination">
-          <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} enabled</span>
+          <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} enabled{pendingRows.length ? ` / ${pendingRows.length.toLocaleString()} RR preview` : ""}</span>
           <button disabled={currentPage <= 1} onClick={() => setPage(1)}>First</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
           <span>{currentPage} / {pageCount}</span>
@@ -14308,18 +14341,24 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, r
             <th><button type="button" className="sort-header" onClick={() => sortBy("id")}>TG ID {sortKey === "id" ? sortDir : ""}</button></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("name")}>Name {sortKey === "name" ? sortDir : ""}</button></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("category")}>Category {sortKey === "category" ? sortDir : ""}</button></th>
+            <th className="talkgroup-sync-column">Sync</th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("load")}>Recent load {sortKey === "load" ? sortDir : ""}</button></th>
             <th>Catalog</th>
           </tr></thead>
-          <tbody>{visibleRows.map((item, index) => <tr className={item.enabled ? "" : "excluded-row"} key={`${talkgroupCatalogKey(item)}-${index}`}>
-            <td><button type="button" onClick={() => updateActiveTalkgroup(item, { enabled: !item.enabled })}>{item.enabled ? "Disable" : "Enable"}</button></td>
-            {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
-            <td>{item.id}</td>
-            <td><input value={item.alphaTag} onChange={e => updateActiveTalkgroup(item, { label: e.target.value })} /></td>
-            <td><select value={item.opsCategory} onChange={e => updateActiveTalkgroup(item, { category: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
-            <td>{highLoadByTalkgroup.has(item.id) ? `${highLoadByTalkgroup.get(item.id)!.calls.toLocaleString()} / ${formatDurationMinutes(highLoadByTalkgroup.get(item.id)!.audioSeconds / 60)}` : "--"}</td>
-            <td><button className="danger-button" onClick={() => deleteItem(talkgroupCatalogKey(item))}>Delete</button></td>
-          </tr>)}</tbody>
+          <tbody>{visibleRows.map((item, index) => {
+            const sync = syncStatusFor(item);
+            const previewOnly = sync.kind === "new";
+            return <tr className={`${item.enabled ? "" : "excluded-row"} ${sync.kind !== "catalog" ? `talkgroup-sync-${sync.kind}` : ""}`} key={`${talkgroupCatalogKey(item)}-${index}`}>
+              <td><button type="button" disabled={previewOnly} onClick={() => updateActiveTalkgroup(item, { enabled: !item.enabled })}>{previewOnly ? "Pending" : item.enabled ? "Disable" : "Enable"}</button></td>
+              {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
+              <td>{item.id}</td>
+              <td><input value={item.alphaTag} disabled={previewOnly} onChange={e => updateActiveTalkgroup(item, { label: e.target.value })} /></td>
+              <td><select value={item.opsCategory} disabled={previewOnly} onChange={e => updateActiveTalkgroup(item, { category: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
+              <td className="talkgroup-sync-column"><span className={`talkgroup-sync-badge sync-${sync.kind}`}>{sync.text}</span></td>
+              <td>{highLoadByTalkgroup.has(item.id) ? `${highLoadByTalkgroup.get(item.id)!.calls.toLocaleString()} / ${formatDurationMinutes(highLoadByTalkgroup.get(item.id)!.audioSeconds / 60)}` : "--"}</td>
+              <td>{previewOnly ? <span className="muted">Sync first</span> : <button className="danger-button" onClick={() => deleteItem(talkgroupCatalogKey(item))}>Delete</button>}</td>
+            </tr>;
+          })}</tbody>
         </table>
       </div>
     </div>
@@ -14414,6 +14453,25 @@ function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemSho
   if (key) return key;
   const system = normalizeTalkgroupSystem(item.systemShortName);
   return system ? `${system}:${item.id}` : String(item.id);
+}
+
+function talkgroupPreviewRowToCatalogItem(row: SetupTalkgroupRow): TalkgroupCatalogItem {
+  const systemShortName = normalizeTalkgroupSystem(row.systemShortName);
+  return {
+    key: row.key || (systemShortName ? `${systemShortName}:${row.id}` : String(row.id)),
+    systemShortName,
+    id: row.id,
+    mode: row.mode || "D",
+    alphaTag: row.alphaTag || "",
+    description: row.description || "",
+    tag: row.tag || "",
+    sourceCategory: row.category || "",
+    opsCategory: row.opsCategory || row.category || "other",
+    enabled: true,
+    incidentEligible: true,
+    source: "rr-preview",
+    notes: ""
+  };
 }
 
 function profileTalkgroupKey(item: { key?: string; systemShortName?: string; id: number }) {
