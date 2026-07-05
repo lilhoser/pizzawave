@@ -991,8 +991,18 @@ type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalo
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const systems = selectedSetupSystemNames(setup);
   const fallbackSystem = setup.desired.siteLabel || systems[0] || "";
-  const sid = setup.desired.radioReferenceSid || "";
-  return [{ key: "source-0", radioReferenceSid: sid, catalogSystem: fallbackSystem }];
+  const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
+  if (sids.length === 0)
+    return [{ key: "source-0", radioReferenceSid: "", catalogSystem: fallbackSystem }];
+  return sids.map((sid, index) => {
+    const cached = readCachedRadioReferenceSites(sid);
+    const system = defaultTalkgroupCatalogScope(cached?.systemName) || fallbackSystem || `rr-${sid}`;
+    return { key: `source-${sid}-${index}`, radioReferenceSid: sid, catalogSystem: system };
+  });
+}
+
+function parseRadioReferenceSidList(value: string) {
+  return Array.from(new Set((value.match(/\d+/g) ?? []).map(row => row.trim()).filter(Boolean)));
 }
 
 function combineTalkgroupPreviews(previews: SetupTalkgroupPreview[]): SetupTalkgroupPreview {
@@ -1018,6 +1028,21 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const autoPreviewKeyRef = useRef("");
+  const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|");
+  useEffect(() => {
+    const next = initialTalkgroupSources(setup);
+    setRrSources(next);
+    setPreview(null);
+    setMessage("");
+  }, [setupSourceKey]);
+  useEffect(() => {
+    const key = `${includeExcluded ? "all" : "normal"}:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
+    if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoPreviewKeyRef.current === key)
+      return;
+    autoPreviewKeyRef.current = key;
+    void previewTalkgroups("rr");
+  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|"), includeExcluded]);
 
   async function previewTalkgroups(source: "rr" | "csv") {
     const csv = csvText.trim();
