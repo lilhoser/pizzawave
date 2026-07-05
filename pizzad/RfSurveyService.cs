@@ -34,7 +34,7 @@ public sealed class RfSurveyService
         @"\[(?<system>[^\]]+)\]\s+(?:freq:\s*)?(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?:Control Channel Message Decode Rate:\s*)?(?<rate>-?\d+(?:\.\d+)?)\s*(?:/sec|msg/sec)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex TrCallEventRegex = new(
-        @"\[(?<system>[^\]]+)\]\s+(?<call>\d+)C\s+TG:\s+(?<tg>\d+)\s+Freq:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<message>.*)$",
+        @"\[(?<system>[^\]]+)\]\s+(?<call>\d+)C\s+TG:\s+(?<tg>\d+)\b.*?\bFreq:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<message>.*)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex CallstreamNoSamplesRegex = new(
         @"call_end\s+callstream\s+with\s+call\s+id\s+(?<call>\d+)\s+has\s+no\s+samples",
@@ -930,7 +930,11 @@ public sealed class RfSurveyService
         var liveJson = await File.ReadAllTextAsync(livePath, ct);
         var sourcePlanSystemNames = SourcePlanSystemNames(profile);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
-        var plannedSystems = BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, warnings);
+        var observedFrequencies = await BuildObservedVoiceFrequenciesBySystemAsync(ct);
+        var plannedSystems = AddObservedVoiceFrequencies(
+            BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, warnings),
+            observedFrequencies,
+            warnings);
         var controlOnlyPlan = string.Equals(profile.SourcePlanMode, "control", StringComparison.OrdinalIgnoreCase);
         var draftSystems = controlOnlyPlan
             ? plannedSystems.Select(system => system with { VoiceFrequenciesHz = [] }).ToList()
@@ -959,7 +963,13 @@ public sealed class RfSurveyService
             .Where(rate => rate > 0)
             .DefaultIfEmpty(2_400_000)
             .Max();
-        var windows = BuildSourceWindows(frequencies, defaultRate);
+        var priorityFrequencies = plannedSystems
+            .SelectMany(system => system.ControlChannelsHz)
+            .Where(value => value > 0)
+            .Distinct()
+            .Order()
+            .ToList();
+        var windows = BuildSourceWindows(frequencies, defaultRate, priorityFrequencies);
         if (windows.Count > selected.Count)
             warnings.Add($"The selected site needs {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
 
@@ -5483,7 +5493,19 @@ public sealed class RfSurveyService
             };
         }
 
-        voiceCoverage = BuildVoiceCoverageEvidence(profile, coverage?.Sources);
+        var observedVoiceFrequencies = await BuildObservedVoiceFrequenciesBySystemAsync(ct);
+        var coverageSystems = AddObservedVoiceFrequencies(profile.Systems, observedVoiceFrequencies, warnings);
+        var coverageProfile = profile with
+        {
+            Systems = coverageSystems,
+            VoiceFrequenciesHz = coverageSystems
+                .SelectMany(system => system.VoiceFrequenciesHz)
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList()
+        };
+        voiceCoverage = BuildVoiceCoverageEvidence(coverageProfile, coverage?.Sources);
         if (voiceCoverage is VoiceCoverageEvidence voiceCoverageEvidence && voiceCoverageEvidence.TotalVoiceFrequencies > 0 && voiceCoverageEvidence.UncoveredVoiceFrequencies.Count > 0)
             warnings.Add($"Current selected source window does not cover {voiceCoverageEvidence.UncoveredVoiceFrequencies.Count} of {voiceCoverageEvidence.TotalVoiceFrequencies} known site voice frequencies. Call Quality may pass only if traffic lands inside the covered window.");
 
@@ -6180,6 +6202,79 @@ public sealed class RfSurveyService
         return planned;
     }
 
+    private static IReadOnlyList<RfSurveySystemDto> AddObservedVoiceFrequencies(
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyDictionary<string, IReadOnlyList<long>> observedFrequencies,
+        List<string> warnings)
+    {
+        if (systems.Count == 0 || observedFrequencies.Count == 0)
+            return systems;
+
+        var augmented = new List<RfSurveySystemDto>(systems.Count);
+        foreach (var system in systems)
+        {
+            if (system.VoiceFrequenciesHz.Count > 0 ||
+                !observedFrequencies.TryGetValue(system.ShortName, out var observed) ||
+                observed.Count == 0)
+            {
+                augmented.Add(system);
+                continue;
+            }
+
+            var controlChannels = system.ControlChannelsHz.ToHashSet();
+            var voice = observed
+                .Where(value => value > 0 && !controlChannels.Contains(value))
+                .Distinct()
+                .Order()
+                .ToList();
+            if (voice.Count == 0)
+            {
+                augmented.Add(system);
+                continue;
+            }
+
+            augmented.Add(system with { VoiceFrequenciesHz = voice });
+            warnings.Add($"{system.SiteLabel}: no imported voice channel list was available; Config Draft is using {voice.Count} observed PizzaWave call frequenc{(voice.Count == 1 ? "y" : "ies")} for source-window planning.");
+        }
+        return augmented;
+    }
+
+    private async Task<Dictionary<string, IReadOnlyList<long>>> BuildObservedVoiceFrequenciesBySystemAsync(CancellationToken ct)
+    {
+        var combined = (await _database.ListObservedCallFrequenciesBySystemAsync(ct))
+            .ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.Where(value => value > 0).ToHashSet(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var log = await ReadTrJournalAsync(DateTime.UtcNow.AddHours(-12), DateTime.UtcNow, ct);
+        foreach (Match match in TrCallEventRegex.Matches(log))
+        {
+            var message = match.Groups["message"].Value;
+            if (!message.Contains("no source covering", StringComparison.OrdinalIgnoreCase) &&
+                !message.Contains("Starting P25 Recorder", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var system = match.Groups["system"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(system))
+                continue;
+            var frequency = (long)Math.Round(ParseDouble(match.Groups["freq"].Value) * 1_000_000d);
+            if (frequency <= 0)
+                continue;
+            if (!combined.TryGetValue(system, out var values))
+            {
+                values = [];
+                combined[system] = values;
+            }
+            values.Add(frequency);
+        }
+
+        return combined.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyList<long>)kvp.Value.Distinct().Order().ToList(),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     private static bool SourcePlanRfValidationPassed(RfSurveyProfileDto profile, IReadOnlyList<RfSurveyExperimentDto> experiments)
     {
         var requested = SourcePlanSystemNames(profile);
@@ -6696,12 +6791,18 @@ public sealed class RfSurveyService
         };
     }
 
-    private static List<SourceWindow> BuildSourceWindows(IReadOnlyList<long> frequencies, int sampleRate)
+    private static List<SourceWindow> BuildSourceWindows(IReadOnlyList<long> frequencies, int sampleRate, IReadOnlyList<long>? priorityFrequencies = null)
     {
         var rows = new List<SourceWindow>();
         if (frequencies.Count == 0)
             return rows;
-        var span = Math.Max(1, TrUsableHalfBandwidthHz(sampleRate) * 2);
+        var halfSpan = Math.Max(1, TrUsableHalfBandwidthHz(sampleRate));
+        var span = halfSpan * 2;
+        var priorities = (priorityFrequencies ?? [])
+            .Where(value => value > 0)
+            .Distinct()
+            .Order()
+            .ToList();
         var index = 0;
         while (index < frequencies.Count)
         {
@@ -6710,10 +6811,27 @@ public sealed class RfSurveyService
             while (endIndex + 1 < frequencies.Count && frequencies[endIndex + 1] - start <= span)
                 endIndex++;
             var end = frequencies[endIndex];
-            rows.Add(new SourceWindow((long)Math.Round((start + end) / 2.0), start, end, endIndex - index + 1));
+            var center = CenterForSourceWindow(start, end, halfSpan, priorities);
+            rows.Add(new SourceWindow(center, start, end, endIndex - index + 1));
             index = endIndex + 1;
         }
         return rows;
+    }
+
+    private static long CenterForSourceWindow(long start, long end, long halfSpan, IReadOnlyList<long> priorityFrequencies)
+    {
+        var midpoint = (long)Math.Round((start + end) / 2.0, MidpointRounding.AwayFromZero);
+        var minCenter = end - halfSpan;
+        var maxCenter = start + halfSpan;
+        if (minCenter > maxCenter)
+            return midpoint;
+
+        var priority = priorityFrequencies
+            .Where(value => value >= start && value <= end)
+            .OrderBy(value => Math.Abs(value - midpoint))
+            .FirstOrDefault();
+        var desired = priority > 0 ? priority : midpoint;
+        return Math.Clamp(desired, minCenter, maxCenter);
     }
 
     private static void PatchSourceField(JsonObject source, string field, object? value, List<string> changes, int sourceIndex)
