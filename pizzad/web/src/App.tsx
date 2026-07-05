@@ -3617,10 +3617,9 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
       })}
       {availableSystems.length === 0 && <div className="setup-note">{filteredSystems.length === 0 ? "No matching sites." : "Matching sites are already selected."}</div>}
     </div>
-    <TalkgroupImportPanel
-      defaultSid={radioReferenceSid}
-      targetSystems={effectiveSystems}
-      applyMode="merge"
+    <RswTalkgroupImportPanel
+      radioReferenceSid={radioReferenceSid}
+      radioReferenceSystemName={radioReferenceSites?.systemName}
       className="rsw-talkgroup-import"
     />
   </div>;
@@ -12824,7 +12823,7 @@ function SdrDetectionPanel({ detection }: { detection: SetupSdrDetection }) {
   </div>;
 }
 
-function TalkgroupPreviewTable({ preview, updateRow }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void }) {
+function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void; readOnly?: boolean }) {
   const categories = ["police", "fire", "ems", "traffic", "other"];
   const hasSystem = preview.rows.some(row => row.systemShortName);
   return <div className="talkgroup-preview">
@@ -12837,124 +12836,85 @@ function TalkgroupPreviewTable({ preview, updateRow }: { preview: SetupTalkgroup
       <table className="table">
         <thead><tr><th>Use</th>{hasSystem && <th>System</th>}<th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Category</th><th>Reason</th></tr></thead>
         <tbody>{preview.rows.slice(0, 500).map((row, index) => <tr className={row.included ? "" : "excluded-row"} key={`${talkgroupCatalogKey(row)}-${index}`}>
-          <td><input type="checkbox" checked={row.included} onChange={e => updateRow(index, { included: e.target.checked })} /></td>
-          {hasSystem && <td><input value={row.systemShortName ?? ""} onChange={e => updateRow(index, { systemShortName: e.target.value, key: e.target.value.trim() ? `${normalizeTalkgroupSystem(e.target.value)}:${row.id}` : String(row.id) })} /></td>}
-          <td><input type="number" value={row.id} onChange={e => {
+          <td><input type="checkbox" checked={row.included} disabled={readOnly} onChange={e => updateRow(index, { included: e.target.checked })} /></td>
+          {hasSystem && <td>{readOnly ? (row.systemShortName || "--") : <input value={row.systemShortName ?? ""} onChange={e => updateRow(index, { systemShortName: e.target.value, key: e.target.value.trim() ? `${normalizeTalkgroupSystem(e.target.value)}:${row.id}` : String(row.id) })} />}</td>}
+          <td>{readOnly ? row.id : <input type="number" value={row.id} onChange={e => {
             const id = numberOrZero(e.target.value);
             updateRow(index, { id, key: row.systemShortName ? `${normalizeTalkgroupSystem(row.systemShortName)}:${id}` : String(id) });
-          }} /></td>
+          }} />}</td>
           <td>{row.mode}</td>
-          <td><input value={row.alphaTag} onChange={e => updateRow(index, { alphaTag: e.target.value })} /></td>
-          <td><input value={row.description} onChange={e => updateRow(index, { description: e.target.value })} /></td>
-          <td><input value={row.tag} onChange={e => updateRow(index, { tag: e.target.value })} /></td>
-          <td><select value={row.opsCategory} onChange={e => updateRow(index, { opsCategory: e.target.value })}>{categories.map(c => <option key={c} value={c}>{label(c)}</option>)}</select></td>
+          <td>{readOnly ? row.alphaTag : <input value={row.alphaTag} onChange={e => updateRow(index, { alphaTag: e.target.value })} />}</td>
+          <td>{readOnly ? row.description : <input value={row.description} onChange={e => updateRow(index, { description: e.target.value })} />}</td>
+          <td>{readOnly ? row.tag : <input value={row.tag} onChange={e => updateRow(index, { tag: e.target.value })} />}</td>
+          <td>{readOnly ? label(row.opsCategory) : <select value={row.opsCategory} onChange={e => updateRow(index, { opsCategory: e.target.value })}>{categories.map(c => <option key={c} value={c}>{label(c)}</option>)}</select>}</td>
           <td>{row.exclusionReason}</td>
         </tr>)}</tbody>
       </table>
-      {preview.rows.length > 500 && <div className="muted">Showing first 500 rows. Save still writes all included rows.</div>}
+      {preview.rows.length > 500 && <div className="muted">Showing first 500 rows.</div>}
     </div>
   </div>;
 }
 
-function TalkgroupImportPanel({
-  defaultSid,
-  targetSystems,
-  applyMode,
+function RswTalkgroupImportPanel({
+  radioReferenceSid,
+  radioReferenceSystemName,
   className = ""
 }: {
-  defaultSid: string;
-  targetSystems?: string[];
-  applyMode: "replace" | "merge";
+  radioReferenceSid: string;
+  radioReferenceSystemName?: string;
   className?: string;
 }) {
-  const [sid, setSid] = useState(defaultSid);
-  const [csvText, setCsvText] = useState("");
+  const defaultScope = defaultTalkgroupCatalogScope(radioReferenceSystemName);
+  const [catalogScope, setCatalogScope] = useState(defaultScope);
   const [includeExcluded, setIncludeExcluded] = useState(false);
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  const scopedSystems = uniqueCaseInsensitive((targetSystems ?? []).map(normalizeTalkgroupSystem).filter(Boolean));
-  useEffect(() => setSid(defaultSid), [defaultSid]);
+  const normalizedScope = normalizeTalkgroupSystem(catalogScope);
+  const sid = radioReferenceSid.trim();
 
-  function scopeRows(rows: SetupTalkgroupRow[]) {
-    if (applyMode !== "merge" || scopedSystems.length === 0)
-      return rows;
-    return scopedSystems.flatMap(system => rows.map(row => ({
+  useEffect(() => {
+    if (!catalogScope.trim() && defaultScope)
+      setCatalogScope(defaultScope);
+  }, [defaultScope, catalogScope]);
+
+  useEffect(() => {
+    if (!sid || !normalizedScope) {
+      setPreview(null);
+      setMessage("");
+      return;
+    }
+    const timer = window.setTimeout(() => void loadTalkgroups(), 500);
+    return () => window.clearTimeout(timer);
+  }, [sid, normalizedScope, includeExcluded]);
+
+  function scopeRows(rows: SetupTalkgroupRow[], scope = normalizedScope) {
+    return rows.map(row => ({
       ...row,
-      systemShortName: system,
-      key: `${system}:${row.id}`
-    })));
+      systemShortName: scope,
+      key: `${scope}:${row.id}`
+    }));
   }
 
-  async function previewSource(source: "rr" | "csv") {
-    if (source === "rr" && !sid.trim()) {
-      setMessage("Enter a RadioReference SID first.");
+  async function loadTalkgroups() {
+    if (!sid || !normalizedScope)
       return;
-    }
-    if (source === "csv" && !csvText.trim()) {
-      setMessage("Paste or choose a talkgroup CSV first.");
-      return;
-    }
-    setBusy(`preview-${source}`);
+    setBusy("talkgroups");
     try {
-      const systemShortName = scopedSystems.length === 1 ? scopedSystems[0] : "";
       const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
         method: "POST",
-        body: JSON.stringify(source === "rr"
-          ? { radioReferenceSid: sid.trim(), includeNormallyExcluded: includeExcluded, systemShortName }
-          : { csvText, includeNormallyExcluded: includeExcluded, systemShortName })
+        body: JSON.stringify({ radioReferenceSid: sid, includeNormallyExcluded: includeExcluded, systemShortName: normalizedScope })
       });
       const rows = scopeRows(result.rows);
       setPreview({ ...result, rows, includedCount: rows.filter(row => row.included).length, excludedCount: rows.filter(row => !row.included).length });
-      setMessage(`Previewed ${rows.filter(row => row.included).length.toLocaleString()} row(s).`);
+      const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
+        method: "POST",
+        body: JSON.stringify({ rows, applyMode: "merge" })
+      });
+      setMessage(`Loaded ${saved.includedCount.toLocaleString()} TG row(s) for ${catalogScope.trim()}.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup preview failed.");
+      setMessage(error instanceof Error ? error.message : "Talkgroup load failed.");
     } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveRows(rows: SetupTalkgroupRow[]) {
-    const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
-      method: "POST",
-      body: JSON.stringify({ rows, applyMode })
-    });
-    setPreview(saved);
-    setMessage(saved.diagnostics);
-  }
-
-  async function importSource(source: "rr" | "csv", csvOverride?: string) {
-    setBusy(`import-${source}`);
-    try {
-      let rows = preview?.rows ?? [];
-      if (!rows.length) {
-        const systemShortName = scopedSystems.length === 1 ? scopedSystems[0] : "";
-        const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-          method: "POST",
-          body: JSON.stringify(source === "rr"
-            ? { radioReferenceSid: sid.trim(), includeNormallyExcluded: includeExcluded, systemShortName }
-            : { csvText: csvOverride ?? csvText, includeNormallyExcluded: includeExcluded, systemShortName })
-        });
-        rows = scopeRows(result.rows);
-      }
-      await saveRows(rows);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup import failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function importCsvFile(file: File | null) {
-    if (!file) return;
-    setBusy("csv-file");
-    try {
-      const text = await file.text();
-      setCsvText(text);
-      setBusy("");
-      await importSource("csv", text);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup CSV import failed.");
       setBusy("");
     }
   }
@@ -12974,26 +12934,13 @@ function TalkgroupImportPanel({
   }
 
   return <div className={`talkgroup-import-panel ${className}`}>
-    <div className="setup-note">
-      <strong>Talkgroup Import</strong>
-      <span>{applyMode === "merge" ? "Merge imported TGs into the catalog for the selected RSW site(s)." : "Replace the talkgroup catalog during first-run setup."}</span>
+    <div className="rf-inline-fields">
+      <label className="setting-field"><span>Talkgroup system name<small>Defaults from the RR system name. TR ignores this; PizzaWave uses it to avoid TG ID collisions.</small></span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
+      <SettingCheckbox label="Include excluded TGs" description="Include encrypted, deprecated, unknown, and other rows normally skipped during import." checked={includeExcluded} onChange={setIncludeExcluded} />
+      {busy && <span className="muted">Loading TGs...</span>}
     </div>
-    {applyMode === "merge" && <div className="muted">Target sites: {scopedSystems.length ? scopedSystems.join(", ") : "select at least one site first"}</div>}
-    <div className="setup-row">
-      <SettingInput label="RadioReference SID" description="Fetch TG catalog rows for this system." value={sid} onChange={setSid} inputMode="numeric" />
-      <button className="danger-button" disabled={Boolean(busy) || !sid.trim() || (applyMode === "merge" && scopedSystems.length === 0)} onClick={() => void importSource("rr")}>{busy === "import-rr" ? "Fetching..." : "Fetch"}</button>
-      <button disabled={Boolean(busy) || !sid.trim() || (applyMode === "merge" && scopedSystems.length === 0)} onClick={() => void previewSource("rr")}>Preview</button>
-    </div>
-    <SettingCheckbox label="Include normally excluded rows" description="Include encrypted, deprecated, unknown, and other rows that PizzaWave normally skips during import." checked={includeExcluded} onChange={setIncludeExcluded} />
-    <label className="setting-field">
-      <span>Import existing CSV<small>Load a RadioReference/PizzaWave talkgroup CSV.</small></span>
-      <input type="file" accept=".csv,text/csv" disabled={Boolean(busy) || (applyMode === "merge" && scopedSystems.length === 0)} onChange={event => void importCsvFile(event.target.files?.[0] ?? null)} />
-    </label>
-    {preview && <div className="rf-primary-actions">
-      <button className="danger-button" disabled={Boolean(busy)} onClick={() => preview && void saveRows(preview.rows)}>Save Preview</button>
-    </div>}
     {message && <div className="setup-note">{message}</div>}
-    {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} />}
+    {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} readOnly />}
   </div>;
 }
 
@@ -13952,6 +13899,13 @@ function createClientId() {
 
 function normalizeTalkgroupSystem(value?: string | null) {
   return String(value ?? "").trim().replace(/\s+/g, "-").toLowerCase();
+}
+
+function defaultTalkgroupCatalogScope(value?: string | null) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const acronym = /\(([A-Za-z0-9_-]{2,})\)/.exec(text);
+  return acronym ? acronym[1].toUpperCase() : text;
 }
 
 function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemShortName" | "id"> | Pick<SetupTalkgroupRow, "key" | "systemShortName" | "id">) {

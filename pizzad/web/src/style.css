@@ -4878,6 +4878,12 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   gap: 8px;
   max-width: 760px;
 }
+.rf-inline-fields {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
 .rf-site-list {
   display: grid;
   gap: 6px;
