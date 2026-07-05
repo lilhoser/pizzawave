@@ -912,7 +912,7 @@ function SiteSetupSystemsSection({ setup, saveState, onSave }: { setup: SiteSetu
       ? [...selectedNames, name]
       : selectedNames.filter(value => !stringEqualsIgnoreCase(value, name));
     const uniqueNames = Array.from(new Set(nextNames)).filter(Boolean).sort((a, b) => a.localeCompare(b));
-    const systems = buildSurveySystemDefinitions(uniqueNames, null, radioReferenceSites, setup.desired.systems);
+    const systems = buildSurveySystemDefinitions(uniqueNames, null, radioReferenceSites, setup.desired.systems, radioReferenceSid.trim());
     await onSave({
       radioReferenceSid: radioReferenceSid.trim(),
       systemShortNames: uniqueNames,
@@ -986,25 +986,51 @@ function selectedSetupSystemNames(setup: SiteSetup) {
   return Array.from(new Set(names.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
-type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalogSystem: string };
+type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalogSystems: string[] };
 
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
-  const systems = selectedSetupSystemNames(setup);
-  const fallbackSystem = setup.desired.siteLabel || systems[0] || "";
+  const systemNames = selectedSetupSystemNames(setup);
+  const fallbackSystem = setup.desired.siteLabel || systemNames[0] || "";
   const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
   if (sids.length === 0)
-    return [{ key: "source-0", radioReferenceSid: "", catalogSystem: fallbackSystem }];
-  const targetSystems = systems.length ? systems : [fallbackSystem || `rr-${sids[0]}`];
-  return sids.flatMap((sid, sidIndex) =>
-    targetSystems.map((system, systemIndex) => ({
-      key: `source-${sid}-${sidIndex}-${systemIndex}-${system}`,
-      radioReferenceSid: sid,
-      catalogSystem: system
-    })));
+    return [{ key: "source-0", radioReferenceSid: "", catalogSystems: fallbackSystem ? [fallbackSystem] : [] }];
+  const selectedSystems = setup.desired.systems.length
+    ? setup.desired.systems
+    : systemNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
+  const bySid = new Map<string, string[]>();
+  selectedSystems.forEach(system => {
+      const sid = radioReferenceSidForSetupSystem(system, sids);
+      const catalogSystem = system.shortName || system.siteLabel || fallbackSystem;
+      if (!sid || !catalogSystem)
+        return;
+      bySid.set(sid, Array.from(new Set([...(bySid.get(sid) ?? []), catalogSystem])));
+    });
+  const rows = Array.from(bySid.entries())
+    .map(([sid, catalogSystems], index) => ({ key: `source-${sid}-${index}`, radioReferenceSid: sid, catalogSystems }));
+  if (rows.length > 0)
+    return rows;
+  const targetSystems = systemNames.length ? systemNames : [fallbackSystem || `rr-${sids[0]}`];
+  return [{
+    key: `source-${sids[0]}-0`,
+    radioReferenceSid: sids[0],
+    catalogSystems: targetSystems
+  }];
 }
 
 function parseRadioReferenceSidList(value: string) {
   return Array.from(new Set((value.match(/\d+/g) ?? []).map(row => row.trim()).filter(Boolean)));
+}
+
+function radioReferenceSidForSetupSystem(system: Pick<RfSurveySystem, "shortName" | "siteLabel" | "radioReferenceSid">, candidateSids: string[]) {
+  const explicit = String(system.radioReferenceSid ?? "").trim();
+  if (explicit) return explicit;
+  const names = [system.shortName, system.siteLabel].map(value => String(value ?? "").trim()).filter(Boolean);
+  for (const sid of candidateSids) {
+    const cached = readCachedRadioReferenceSites(sid);
+    if (cached?.sites.some(site => names.some(name => stringEqualsIgnoreCase(name, site.shortName) || stringEqualsIgnoreCase(name, site.name))))
+      return sid;
+  }
+  return candidateSids.length === 1 ? candidateSids[0] : "";
 }
 
 function combineTalkgroupPreviews(previews: SetupTalkgroupPreview[]): SetupTalkgroupPreview {
@@ -1022,16 +1048,38 @@ function combineTalkgroupPreviews(previews: SetupTalkgroupPreview[]): SetupTalkg
   };
 }
 
+function expandTalkgroupPreviewToSystems(preview: SetupTalkgroupPreview, catalogSystems: string[]): SetupTalkgroupPreview {
+  const systems = Array.from(new Set(catalogSystems.map(normalizeTalkgroupSystem).filter(Boolean)));
+  if (systems.length === 0)
+    return preview;
+  const rows = systems.flatMap(system => preview.rows.map(row => ({
+    ...row,
+    systemShortName: system,
+    key: `${system}:${row.id}`
+  })));
+  const included = rows.filter(row => row.included);
+  return {
+    ...preview,
+    rows,
+    includedCount: included.length,
+    excludedCount: rows.length - included.length,
+    includedByCategory: included.reduce<Record<string, number>>((acc, row) => {
+      const category = row.opsCategory || "other";
+      acc[category] = (acc[category] ?? 0) + 1;
+      return acc;
+    }, {})
+  };
+}
+
 function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; onActivity: () => Promise<void> }) {
   const [rrSources, setRrSources] = useState(() => initialTalkgroupSources(setup));
-  const [csvText, setCsvText] = useState("");
   const [includeExcluded, setIncludeExcluded] = useState(false);
   const [applyMode, setApplyMode] = useState<"merge" | "replace">("merge");
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const autoPreviewKeyRef = useRef("");
-  const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|");
+  const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.radioReferenceSid}:${row.catalogSystems.join(",")}`).join("|");
   useEffect(() => {
     const next = initialTalkgroupSources(setup);
     setRrSources(next);
@@ -1039,36 +1087,29 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
     setMessage("");
   }, [setupSourceKey]);
   useEffect(() => {
-    const key = `${includeExcluded ? "all" : "normal"}:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
+    const key = `${includeExcluded ? "all" : "normal"}:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystems.join(",")}`).join("|")}`;
     if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoPreviewKeyRef.current === key)
       return;
     autoPreviewKeyRef.current = key;
-    void previewTalkgroups("rr");
-  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|"), includeExcluded]);
+    void previewTalkgroups();
+  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystems.join(",")}`).join("|"), includeExcluded]);
 
-  async function previewTalkgroups(source: "rr" | "csv") {
-    const csv = csvText.trim();
-    const activeSources = rrSources.map(row => ({ ...row, radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid);
-    if (source === "rr" && activeSources.length === 0) {
+  async function previewTalkgroups() {
+    const activeSources = rrSources.map(row => ({ ...row, radioReferenceSid: row.radioReferenceSid.trim() })).filter(row => row.radioReferenceSid);
+    if (activeSources.length === 0) {
       setMessage("Enter at least one RR system ID first.");
       return;
     }
-    if (source === "csv" && !csv) {
-      setMessage("Paste CSV text first.");
-      return;
-    }
-    setBusy(`preview-${source}`);
+    setBusy("preview-rr");
     setMessage("");
     try {
-      const result = source === "rr"
-        ? combineTalkgroupPreviews(await Promise.all(activeSources.map(row => api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
+      const result = combineTalkgroupPreviews(await Promise.all(activeSources.map(async row => {
+        const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
           method: "POST",
-          body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: includeExcluded, systemShortName: row.catalogSystem })
-        }))))
-        : await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-          method: "POST",
-          body: JSON.stringify({ csvText: csv, includeNormallyExcluded: includeExcluded, systemShortName: activeSources[0]?.catalogSystem || selectedSetupSystemNames(setup)[0] || "" })
+          body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: includeExcluded })
         });
+        return expandTalkgroupPreviewToSystems(preview, row.catalogSystems);
+      })));
       setPreview(result);
       setMessage(`Previewed ${result.includedCount.toLocaleString()} included row(s).`);
     } catch (error) {
@@ -1098,7 +1139,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
           category: "talkgroups",
           action: applyMode === "merge" ? "catalog_merged" : "catalog_replaced",
           summary: `Talkgroup catalog ${applyMode === "merge" ? "merged" : "replaced"} with ${result.includedCount.toLocaleString()} row(s).`,
-          details: { applyMode, rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid), includedCount: result.includedCount },
+          details: { applyMode, rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystems: row.catalogSystems })).filter(row => row.radioReferenceSid), includedCount: result.includedCount },
           source: "ui"
         })
       });
@@ -1122,7 +1163,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
   }
 
   function addSource() {
-    setRrSources(current => [...current, { key: `source-${Date.now()}-${current.length}`, radioReferenceSid: "", catalogSystem: "" }]);
+    setRrSources(current => [...current, { key: `source-${Date.now()}-${current.length}`, radioReferenceSid: "", catalogSystems: [] }]);
   }
 
   function removeSource(index: number) {
@@ -1137,7 +1178,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
     <div className="site-setup-source-list">
       {rrSources.map((row, index) => <div className="site-setup-source-row" key={row.key}>
         <label><span>RR system ID</span><input value={row.radioReferenceSid} inputMode="numeric" onChange={event => updateSource(index, { radioReferenceSid: event.target.value })} /></label>
-        <label><span>Catalog system</span><input value={row.catalogSystem} onChange={event => updateSource(index, { catalogSystem: event.target.value })} /></label>
+        <label><span>Systems</span><input value={row.catalogSystems.join(", ")} onChange={event => updateSource(index, { catalogSystems: event.target.value.split(",").map(value => value.trim()).filter(Boolean) })} /></label>
         <button type="button" disabled={rrSources.length <= 1} onClick={() => removeSource(index)}>Remove</button>
       </div>)}
       <button type="button" onClick={addSource}>Add RR List</button>
@@ -1146,14 +1187,9 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
       <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
       <label className="setting-checkbox"><input type="radio" checked={applyMode === "merge"} onChange={() => setApplyMode("merge")} /> Merge catalog</label>
       <label className="setting-checkbox"><input type="radio" checked={applyMode === "replace"} onChange={() => setApplyMode("replace")} /> Replace catalog</label>
-      <button type="button" disabled={Boolean(busy) || !rrSources.some(row => row.radioReferenceSid.trim())} onClick={() => void previewTalkgroups("rr")}>{busy === "preview-rr" ? "Fetching" : "Preview RR"}</button>
+      <button type="button" disabled={Boolean(busy) || !rrSources.some(row => row.radioReferenceSid.trim())} onClick={() => void previewTalkgroups()}>{busy === "preview-rr" ? "Fetching" : "Preview RR"}</button>
       <button type="button" className="danger-button" disabled={Boolean(busy) || !preview} onClick={() => void saveTalkgroups()}>{busy === "save" ? "Saving" : "Save Catalog"}</button>
     </div>
-    <label className="setting-field site-setup-wide-field">
-      <span>CSV text</span>
-      <textarea value={csvText} onChange={event => setCsvText(event.target.value)} rows={4} />
-      <button type="button" disabled={Boolean(busy) || !csvText.trim()} onClick={() => void previewTalkgroups("csv")}>{busy === "preview-csv" ? "Previewing" : "Preview CSV"}</button>
-    </label>
     {message && <div className={messageClass}>{message}</div>}
     {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateTalkgroupRow} />}
   </div>;
@@ -3534,7 +3570,7 @@ function RfSurveyPanel({ setImmersive, onTrOperationChange }: { setImmersive?: (
   </div>;
 }
 
-function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupCalibrationPlan | null, rrSites: SetupTrConfigSites | null, existing: RfSurveySystem[]): RfSurveySystem[] {
+function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupCalibrationPlan | null, rrSites: SetupTrConfigSites | null, existing: RfSurveySystem[], radioReferenceSid = ""): RfSurveySystem[] {
   const definitions: RfSurveySystem[] = [];
   const add = (definition: RfSurveySystem) => {
     if (!definition.shortName || definitions.some(row => row.shortName.toLowerCase() === definition.shortName.toLowerCase()))
@@ -3549,7 +3585,8 @@ function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupC
         shortName: rr.shortName || rr.name,
         siteLabel: rr.name || rr.shortName,
         controlChannelsHz: rr.controlChannelsMhz.map(value => Math.round(value * 1_000_000)),
-        voiceFrequenciesHz: []
+        voiceFrequenciesHz: [],
+        radioReferenceSid: radioReferenceSid.trim()
       });
       continue;
     }

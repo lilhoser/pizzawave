@@ -1169,7 +1169,8 @@ public sealed record RfSurveySystemDto(
     string ShortName,
     string SiteLabel,
     IReadOnlyList<long> ControlChannelsHz,
-    IReadOnlyList<long> VoiceFrequenciesHz);
+    IReadOnlyList<long> VoiceFrequenciesHz,
+    string RadioReferenceSid = "");
 
 public sealed record RfSurveyRfChainItemDto(
     string Type = "",
