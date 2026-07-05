@@ -767,6 +767,7 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
           <button type="button" className="danger-button" disabled title="Apply Config will move here when the RF/config sections are migrated.">Apply Config</button>
         </div>
       </div>
+      <SiteSetupChangeStrip setup={current} />
 
       <div className="site-setup-layout">
         <section className="site-setup-section-nav" aria-label="Site Setup sections">
@@ -785,6 +786,28 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
           <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />
         </section>
       </div>
+    </section>
+  </div>;
+}
+
+function SiteSetupChangeStrip({ setup }: { setup: SiteSetup }) {
+  const latest = setup.recentActivity[0];
+  const changedCategories = setup.pendingChanges.map(change => label(change.category));
+  return <div className="site-setup-change-strip" aria-label="Setup change summary">
+    <section>
+      <span>Config changes</span>
+      <strong>{setup.pendingChanges.length ? `${setup.pendingChanges.length} pending` : "None"}</strong>
+      <small>{changedCategories.join(", ") || "No unapplied setup changes"}</small>
+    </section>
+    <section>
+      <span>Last setup change</span>
+      <strong>{latest ? label(latest.action) : "No activity"}</strong>
+      <small>{latest ? `${latest.summary} / ${new Date(latest.timestampUtc).toLocaleString()}` : "No setup activity recorded"}</small>
+    </section>
+    <section>
+      <span>Apply state</span>
+      <strong>{setup.status.pendingApply ? "Apply needed" : "Current"}</strong>
+      <small>{setup.status.pendingApply ? "Desired setup differs from the running TR config" : "No pending TR config apply"}</small>
     </section>
   </div>;
 }
@@ -823,12 +846,6 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
       <textarea value={locationNotes} onChange={event => setLocationNotes(event.target.value)} onBlur={saveLocationNotes} rows={4} />
       {statusFor("locationNotes")}
     </label>
-    <div className="site-setup-readonly-grid">
-      <div><span>Monitoring state</span><strong>{label(setup.status.monitoringState || "unknown")}</strong></div>
-      <div><span>Applied systems</span><strong>{setup.applied.systemShortNames.join(", ") || "None"}</strong></div>
-      <div><span>Desired systems</span><strong>{(setup.desired.systems.length ? setup.desired.systems.map(system => system.shortName) : setup.desired.systemShortNames).join(", ") || "None"}</strong></div>
-      <div><span>Last updated</span><strong>{setup.desired.updatedAtUtc ? new Date(setup.desired.updatedAtUtc).toLocaleString() : "Not edited"}</strong></div>
-    </div>
   </div>;
 }
 
