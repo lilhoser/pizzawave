@@ -7340,7 +7340,7 @@ function appendExperimentLog(experiment: RfSurveyExperiment, append: (text: stri
       if (row.command) append(`$ ${row.command}`, "info");
       if (row.output) append(trimLogText(row.output), row.status === "measured" ? "result" : "error");
       const metrics = row.status === "measured"
-        ? `Source ${row.index}, CC ${row.controlChannelHz ? formatRfHz(Number(row.controlChannelHz)) : "--"}, gain ${row.gain ?? "auto"}: CC SNR ${formatFixed(row.snrDb, 1)} dB, CC peak ${formatFixed(row.peakDb, 1)} dB, noise ${formatFixed(row.noiseFloorDb, 1)} dB, CC offset ${formatFixed(row.peakOffsetHz, 0)} Hz`
+        ? `Source ${row.index}, CC ${row.controlChannelHz ? formatRfHz(Number(row.controlChannelHz)) : "--"}, gain ${row.gain ?? "auto"}: CC SNR ${formatFixed(row.snrDb, 1)} dB, CC peak ${formatFixed(row.peakDb, 1)} dB, noise ${formatFixed(row.noiseFloorDb, 1)} dB, peak delta ${formatFixed(row.peakOffsetHz, 0)} Hz`
         : `Source ${row.index}: ${row.issue || label(row.status || "failed")}`;
       append(metrics, row.status === "measured" ? "result" : "error");
     }
@@ -7676,7 +7676,7 @@ function RfSweepPermutationResults({
         <span>Control channel</span>
         <span>Gains</span>
         <span>SNR</span>
-        <span>CC offset</span>
+        <span>Peak delta</span>
         <span>Issue</span>
       </div>
       {groups.length === 0 && <div className="rf-sweep-plan-row neutral" role="row">
@@ -8231,7 +8231,7 @@ function RfPowerVisualAid({ experiment }: { experiment: RfSurveyExperiment }) {
       note="Any repeated clipping means gain or external amplification is too high."
     />
     <div className="rf-aid-context">
-      <div><span>CC offset</span><code>{Number.isFinite(ccOffset) ? `${formatFixed(ccOffset, 0)} Hz` : "--"}</code></div>
+      <div><span>Peak delta</span><code>{Number.isFinite(ccOffset) ? `${formatFixed(ccOffset, 0)} Hz` : "--"}</code></div>
       <div><span>Noise floor</span><code>{best.noiseFloorDb == null ? "--" : `${formatFixed(best.noiseFloorDb, 1)} dBFS`}</code></div>
       <p>{adjacentText}</p>
     </div>
@@ -8298,7 +8298,7 @@ function RfPowerScanDetails({ experiment }: { experiment: RfSurveyExperiment }) 
       </div>
     </details>
     <div className="rf-power-table">
-      <div className="rf-power-row header"><span>SDR</span><span>CC</span><span>Status</span><span>Quality</span><span>Gain</span><span>CC SNR</span><span>CC Peak</span><span>Noise</span><span>CC Offset</span><span>Strongest</span><span>Clip</span><span>Output</span></div>
+      <div className="rf-power-row header"><span>SDR</span><span>CC</span><span>Status</span><span>Quality</span><span>Gain</span><span>CC SNR</span><span>CC Peak</span><span>Noise</span><span>Peak delta</span><span>Strongest</span><span>Clip</span><span>Output</span></div>
       {rows.map((row: any, index: number) => {
         const quality = rfPowerQuality(row);
         return <div className={row.overload ? "rf-power-row warning" : row.status === "measured" ? "rf-power-row" : "rf-power-row failed"} key={`${row.index}-${index}`}>
