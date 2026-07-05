@@ -12934,9 +12934,13 @@ function RswTalkgroupImportPanel({
   }
 
   return <div className={`talkgroup-import-panel ${className}`}>
+    <h4>Talkgroups</h4>
     <div className="rf-inline-fields">
-      <label className="setting-field"><span>Talkgroup system name<small>Defaults from the RR system name. TR ignores this; PizzaWave uses it to avoid TG ID collisions.</small></span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
-      <SettingCheckbox label="Include excluded TGs" description="Include encrypted, deprecated, unknown, and other rows normally skipped during import." checked={includeExcluded} onChange={setIncludeExcluded} />
+      <label className="setting-field"><span>Talkgroup system name</span><input value={catalogScope} onChange={event => setCatalogScope(event.target.value)} placeholder={radioReferenceSystemName || "System name"} /></label>
+      <label className="setting-checkbox">
+        <input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.target.checked)} />
+        <span>Include excluded TGs</span>
+      </label>
       {busy && <span className="muted">Loading TGs...</span>}
     </div>
     {message && <div className="setup-note">{message}</div>}
