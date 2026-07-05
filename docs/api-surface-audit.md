@@ -20,7 +20,7 @@ Removed from the rig-side API:
   - Removed because recommendation cards should not directly mutate runtime
     policy. Recommendations now point operators to the relevant UI.
 - `POST /api/v1/talkgroups/catalog/generate-tr-csv`
-  - Removed because Settings > Talkgroups > Apply is the single catalog mutation
+  - Removed because Setup > Talkgroups > Apply is the single catalog mutation
     path and already regenerates the TR CSV when needed.
 
 Removed associated stale code:

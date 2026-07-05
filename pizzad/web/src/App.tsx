@@ -116,7 +116,7 @@ function App() {
   const [dashboardMode, setDashboardMode] = useState<DashboardMode>("incidents");
   const [globalSearch, setGlobalSearch] = useState("");
   const [systemTargetTab, setSystemTargetTab] = useState<SystemTopTab | null>(null);
-  const [settingsTargetTab, setSettingsTargetTab] = useState<string | null>(null);
+  const [setupTargetSection, setSetupTargetSection] = useState<string | null>(null);
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
   const refreshStatusRef = useRef<() => Promise<void>>(async () => { });
   const refreshVisiblePageRef = useRef<() => Promise<void>>(async () => { });
@@ -591,9 +591,10 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
     setSystemTargetTab(tab);
     setPage("system");
   }
-  function goSettings(tab: string) {
-    setSettingsTargetTab(tab);
-    setPage("settings");
+  function goSetup(section?: string) {
+    if (page === "settings" && !confirmDiscardUnappliedSettings()) return;
+    setSetupTargetSection(section ?? null);
+    setPage("setup");
   }
   function submitAuthToken(event?: React.FormEvent) {
     event?.preventDefault();
@@ -701,13 +702,13 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("tools")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
-        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} />}
+        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} profileState={profileState} setProfileState={setProfileState} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} />}
         {setupStatus?.completed && page === "tools" && <ToolsView onTrOperationChange={setRadioSetupTrOperation} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenRadioSetup={() => setPage("tools")} />}
-        {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} profileState={profileState} setProfileState={setProfileState} targetTab={settingsTargetTab} clearTargetTab={() => setSettingsTargetTab(null)} />}
+        {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
       </main>
       {!inSetup && <footer className="statusbar">
-        <button type="button" className="pill status-pill-button" onClick={() => goSettings("talkgroups")}>Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</button>
+        <button type="button" className="pill status-pill-button" onClick={() => goSetup("Talkgroups")}>Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</button>
         <span className="status-separator">|</span>
         <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
         <button type="button" className="pill status-pill-button" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
@@ -737,11 +738,16 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
   </div>;
 }
 
-function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () => Promise<void> }) {
+function SiteSetupView({ setup, reload, profileState, setProfileState, targetSection, clearTargetSection }: { setup: SiteSetup | null; reload: () => Promise<void>; profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; targetSection?: string | null; clearTargetSection?: () => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const [section, setSection] = useState("Location");
   useEffect(() => setCurrent(setup), [setup]);
+  useEffect(() => {
+    if (!targetSection) return;
+    setSection(targetSection);
+    clearTargetSection?.();
+  }, [targetSection, clearTargetSection]);
   if (!current) return <div className="pane">Loading Site Setup...</div>;
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
   const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups"]);
@@ -791,7 +797,7 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
           </div>
           {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} />}
+          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} profileState={profileState} setProfileState={setProfileState} reload={reload} />}
         </section>
       </div>
     </section>
@@ -1085,12 +1091,13 @@ function scopeTalkgroupPreviewToSystem(preview: SetupTalkgroupPreview, catalogSy
   };
 }
 
-function SiteSetupTalkgroupsSection({ setup }: { setup: SiteSetup }) {
+function SiteSetupTalkgroupsSection({ setup, profileState, setProfileState, reload }: { setup: SiteSetup; profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void> }) {
   const [rrSources, setRrSources] = useState(() => initialTalkgroupSources(setup));
   const [includeExcluded, setIncludeExcluded] = useState(false);
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [catalogReloadToken, setCatalogReloadToken] = useState(0);
   const autoPreviewKeyRef = useRef("");
   const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|");
   useEffect(() => {
@@ -1134,6 +1141,44 @@ function SiteSetupTalkgroupsSection({ setup }: { setup: SiteSetup }) {
     }
   }
 
+  async function syncTalkgroups() {
+    const currentPreview = preview;
+    if (!currentPreview || currentPreview.includedCount === 0) {
+      setMessage("Preview talkgroups before syncing.");
+      return;
+    }
+    setBusy("sync-rr");
+    setMessage("");
+    try {
+      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
+        method: "POST",
+        body: JSON.stringify({ rows: currentPreview.rows })
+      });
+      setPreview(result);
+      setMessage(result.diagnostics);
+      setCatalogReloadToken(value => value + 1);
+      await api.request<unknown>(`${siteSetupApi}/activity`, {
+        method: "POST",
+        body: JSON.stringify({
+          category: "talkgroups",
+          action: "rr_talkgroups_synced",
+          summary: `RadioReference talkgroups synced into catalog: ${result.includedCount.toLocaleString()} row(s).`,
+          details: {
+            rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid),
+            includeExcluded,
+            diagnostics: result.diagnostics
+          },
+          source: "ui"
+        })
+      });
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup sync failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   function updateTalkgroupRow(index: number, patch: Partial<SetupTalkgroupRow>) {
     setPreview(current => {
       if (!current) return current;
@@ -1158,20 +1203,42 @@ function SiteSetupTalkgroupsSection({ setup }: { setup: SiteSetup }) {
     : "settings-message ok";
 
   return <div className="site-setup-form site-setup-talkgroups">
-    <div className="site-setup-source-list">
-      {rrSources.map((row, index) => <div className="site-setup-source-row" key={row.key}>
-        <label><span>RR system ID</span><input value={row.radioReferenceSid} inputMode="numeric" onChange={event => updateSource(index, { radioReferenceSid: event.target.value })} /></label>
-        <label><span>System</span><input value={row.catalogSystem} onChange={event => updateSource(index, { catalogSystem: event.target.value })} /></label>
-        <button type="button" disabled={rrSources.length <= 1} onClick={() => removeSource(index)}>Remove</button>
-      </div>)}
-      <button type="button" onClick={addSource}>Add RR List</button>
+    <div className="site-setup-talkgroup-import">
+      <div className="site-setup-source-list">
+        {rrSources.map((row, index) => <div className="site-setup-source-row" key={row.key}>
+          <label><span>RR system ID</span><input value={row.radioReferenceSid} inputMode="numeric" onChange={event => updateSource(index, { radioReferenceSid: event.target.value })} /></label>
+          <label><span>System</span><input value={row.catalogSystem} onChange={event => updateSource(index, { catalogSystem: event.target.value })} /></label>
+          <button type="button" disabled={rrSources.length <= 1 || Boolean(busy)} onClick={() => removeSource(index)}>Remove</button>
+        </div>)}
+        <button type="button" disabled={Boolean(busy)} onClick={addSource}>Add RR List</button>
+      </div>
+      <div className="site-setup-inline-fields">
+        <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} disabled={Boolean(busy)} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
+        <button type="button" className="danger-button" disabled={Boolean(busy) || !preview || preview.includedCount === 0} onClick={() => void syncTalkgroups()}>{busy === "sync-rr" ? "Syncing" : "Sync RR Talkgroups"}</button>
+        {busy === "preview-rr" && <span className="settings-message">Fetching talkgroups...</span>}
+      </div>
+      {message && <div className={messageClass}>{message}</div>}
+      {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateTalkgroupRow} />}
     </div>
-    <div className="site-setup-inline-fields">
-      <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
-      {busy === "preview-rr" && <span className="settings-message">Fetching talkgroups...</span>}
-    </div>
-    {message && <div className={messageClass}>{message}</div>}
-    {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateTalkgroupRow} />}
+    <TalkgroupCatalogSettingsCard
+      profileState={profileState}
+      setProfileState={setProfileState}
+      reload={reload}
+      reloadToken={catalogReloadToken}
+      embedded
+      onAppliedActivity={async ({ catalogChanged, profileChanged, rowCount }) => {
+        await api.request<unknown>(`${siteSetupApi}/activity`, {
+          method: "POST",
+          body: JSON.stringify({
+            category: "talkgroups",
+            action: catalogChanged ? "catalog_policy_applied" : "profile_policy_applied",
+            summary: `Talkgroup ${catalogChanged ? "catalog" : "profile"} policy applied from Setup${profileChanged && catalogChanged ? " with profile changes" : ""}.`,
+            details: { catalogChanged, profileChanged, rowCount },
+            source: "ui"
+          })
+        });
+      }}
+    />
   </div>;
 }
 
@@ -1991,7 +2058,7 @@ function confirmDiscardUnappliedSettings() {
   const detail = dirtyTalkgroups && dirtySettings
     ? "You have unapplied settings and talkgroup changes. Leaving Settings will discard the local drafts."
     : dirtyTalkgroups
-      ? "You have unapplied changes in Settings > Talkgroups. Leaving Settings will discard the local draft."
+      ? "You have unapplied changes in Setup > Talkgroups. Leaving this page will discard the local draft."
       : "You have unapplied settings changes. Leaving Settings will discard the local draft.";
   const ok = confirmAction("Discard unapplied settings?", detail);
   if (ok) {
@@ -13390,8 +13457,17 @@ function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { previ
   </div>;
 }
 
-function SettingsView({ settingsSections, settingsLoadState, reload, profileState, setProfileState, targetTab, clearTargetTab }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void>; profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; targetTab?: string | null; clearTargetTab?: () => void }) {
-  const [settingsTab, setSettingsTab] = useState(() => localStorage.getItem("pizzawave-settings-tab") || "transcription");
+function SettingsView({ settingsSections, settingsLoadState, reload }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void> }) {
+  const settingsTabs = [
+    ["transcription", "Transcription"],
+    ["ai", "AI"],
+    ["embeddings", "Embeddings"],
+    ["alerts", "Alerts"],
+    ["admin", "Security"],
+    ["system", "System Info"]
+  ] as const;
+  const normalizeSettingsTab = (tab: string | null | undefined) => settingsTabs.some(([id]) => id === tab) ? tab! : "transcription";
+  const [settingsTab, setSettingsTab] = useState(() => normalizeSettingsTab(localStorage.getItem("pizzawave-settings-tab")));
   const [sections, setSections] = useState<Record<string, any>>({});
   const [baselineSections, setBaselineSections] = useState<Record<string, any>>({});
   const [message, setMessage] = useState("");
@@ -13425,11 +13501,6 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
     return () => window.clearInterval(timer);
   }, [modelBusy]);
   useEffect(() => localStorage.setItem("pizzawave-settings-tab", settingsTab), [settingsTab]);
-  useEffect(() => {
-    if (!targetTab) return;
-    setSettingsTab(targetTab);
-    clearTargetTab?.();
-  }, [targetTab, clearTargetTab]);
   const dirtySections = useMemo(() => {
     const names = Object.keys(sections).filter(section => section !== "profiles");
     return names.filter(section => JSON.stringify(sections[section] ?? {}) !== JSON.stringify(baselineSections[section] ?? {}));
@@ -13620,15 +13691,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
 
     <div className="settings-layout">
       <div className="settings-nav">
-        {[
-          ["transcription", "Transcription"],
-          ["ai", "AI"],
-          ["embeddings", "Embeddings"],
-          ["talkgroups", "Talkgroups"],
-          ["alerts", "Alerts"],
-          ["admin", "Security"],
-          ["system", "System Info"]
-        ].map(([id, text]) => <button key={id} className={settingsTab === id ? "active" : ""} onClick={() => setSettingsTab(id)}>{text}</button>)}
+        {settingsTabs.map(([id, text]) => <button key={id} className={settingsTab === id ? "active" : ""} onClick={() => setSettingsTab(id)}>{text}</button>)}
       </div>
 
     <div className="settings-flow">
@@ -13726,8 +13789,6 @@ function SettingsView({ settingsSections, settingsLoadState, reload, profileStat
         </div>
         <AlertRulesEditor rules={alerts.rules ?? []} baselineRules={baselineSections.alerts?.rules ?? []} onChange={rules => update("alerts", ["rules"], rules)} />
       </SettingsCard>}
-
-      {settingsTab === "talkgroups" && <TalkgroupCatalogSettingsCard profileState={profileState} setProfileState={setProfileState} reload={reload} />}
 
       {settingsTab === "admin" && <SettingsCard title="Security" description="Protects write, setup, and service-control actions. Dashboard reads stay open unless read auth is enabled." busy={savingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")}>
         <SettingSelect label="Mode" description="Use token for normal deployments. None disables PizzaWave API authorization." value={auth.mode ?? "token"} options={["token", "none"]} onChange={v => update("auth", ["mode"], v)} />
@@ -13925,7 +13986,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
   </div>;
 }
 
-function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void> }) {
+function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload, reloadToken = 0, embedded = false, onAppliedActivity }: { profileState: ProfileState | null; setProfileState: (value: ProfileState | null) => void; reload: () => Promise<void>; reloadToken?: number; embedded?: boolean; onAppliedActivity?: (details: { catalogChanged: boolean; profileChanged: boolean; rowCount: number }) => Promise<void> }) {
   const [response, setResponse] = useState<TalkgroupCatalogResponse | null>(null);
   const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
   const [profileDraft, setProfileDraft] = useState<ProfileState | null>(profileState);
@@ -13940,8 +14001,8 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect(() => { void loadCatalog(); }, []);
-  useEffect(() => { void loadTalkgroupLoad(); }, []);
+  useEffect(() => { void loadCatalog(); }, [reloadToken]);
+  useEffect(() => { void loadTalkgroupLoad(); }, [reloadToken]);
   useEffect(() => setProfileDraft(profileState), [profileState]);
   useEffect(() => {
     if (enabledFilter === "high-load")
@@ -14057,6 +14118,7 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
         setProfileDraft(savedProfiles);
         setProfileState(savedProfiles);
       }
+      await onAppliedActivity?.({ catalogChanged, profileChanged, rowCount: draft.items.length });
       if (catalogChanged) {
         await api.request<Job>("/api/v1/system/services/trunk-recorder/restart", { method: "POST" });
         await api.request<Job>("/api/v1/system/services/pizzad/restart", { method: "POST" });
@@ -14185,9 +14247,9 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnappliedChanges]);
 
-  return <div className="card settings-card wide talkgroups-settings-card">
+  return <div className={`${embedded ? "site-setup-catalog-editor" : "card settings-card wide"} talkgroups-settings-card`}>
     <div className="settings-card-meta">
-      <h3>Talkgroups</h3>
+      <h3>{embedded ? "Catalog and Profiles" : "Talkgroups"}</h3>
       <div className="settings-card-actions">
         <button type="button" onClick={() => setShowHelp(true)}>Help</button>
         <button className="danger-button" disabled={Boolean(busy) || !hasUnappliedChanges} onClick={() => void applyChanges()}>{busy === "apply" ? "Applying..." : "Apply"}</button>

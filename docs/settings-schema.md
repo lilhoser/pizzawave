@@ -129,7 +129,7 @@ and incident creation without a service restart.
 | `profiles.items[].talkgroups[].category` | optional profile-specific PizzaWave category |
 | `profiles.items[].talkgroups[].incidentEligible` | legacy compatibility field; profile enable/disable is the operator-facing incident/alert/embedding gate |
 
-Settings > Talkgroups uses a draft-and-Apply model. Profile-only changes save
+Setup > Talkgroups uses a draft-and-Apply model. Profile-only changes save
 without restarting services. Catalog/capture changes regenerate
 `trunkRecorder.talkgroupsPath` and require trunk-recorder/pizzad restart.
 

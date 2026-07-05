@@ -648,6 +648,14 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-talkgroups .setting-checkbox {
   margin: 0 8px 0 0;
 }
+.site-setup-talkgroups {
+  max-width: none;
+}
+.site-setup-talkgroup-import {
+  display: grid;
+  gap: 10px;
+  max-width: 940px;
+}
 .site-setup-source-list {
   display: grid;
   gap: 8px;
@@ -691,6 +699,18 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .site-setup-talkgroups .talkgroup-preview-table table {
   margin: 0;
+}
+.site-setup-catalog-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 4px;
+}
+.site-setup-catalog-editor .settings-fields {
+  max-width: none;
+}
+.site-setup-catalog-editor .talkgroup-catalog-table {
+  max-height: min(58vh, 680px);
 }
 .dashboard-stats-panel .kpis {
   display: grid;

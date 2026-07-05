@@ -299,7 +299,7 @@ Current master TODO list:
 
 ## 2026-05-21 Checkpoint
 
-- Settings > Talkgroups RPI-screen validation is complete.
+- Setup > Talkgroups RPI-screen validation is complete.
 - Recurring quality monitoring was consolidated into one hourly heartbeat:
   `pizzawave-cross-rig-quality-check`.
   - Scope through 2026-05-21: omicrontheta, RPI, and OT-vs-RPI comparison.
@@ -445,7 +445,7 @@ Rules:
 runtime policy overlay for UI visibility and downstream alert/embedding/incident
 participation; switching profiles and enabling/disabling a TG in the profile no
 longer requires a service restart. Catalog deletion remains a capture change:
-Settings > Talkgroups > Apply saves the draft, regenerates the TR CSV, and
+Setup > Talkgroups > Apply saves the draft, regenerates the TR CSV, and
 restarts trunk-recorder/pizzad only when the catalog itself changed.
 
 The old profile talkgroup picker, separate high-load TG list, and immediate

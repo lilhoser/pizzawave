@@ -164,7 +164,7 @@ public sealed class SystemRecommendationService
                 "medium",
                 "Candidate talkgroups for defer/ignore priority",
                 detail,
-                "Review these talkgroups in Settings > Talkgroups, then disable noisy profile participation if they are not operationally useful.",
+                "Review these talkgroups in Setup > Talkgroups, then disable noisy profile participation if they are not operationally useful.",
                 new RecommendationTargetDto("pizzad", "jobs", ""),
                 [])
                 {
