@@ -6884,6 +6884,7 @@ function SourcePlannerStep({
   const effectiveCustomSystems = customSystems.filter(name => allSystemNames.includes(name));
   const alternatives = useMemo(() => buildSourcePlanAlternatives(plannerSystems, effectiveSampleRateHz, profile.sources.length), [plannerSystems, effectiveSampleRateHz, profile.sources.length]);
   const currentCustom = useMemo(() => buildCustomSourcePlanOption(plannerSystems, effectiveCustomSystems, customMode, effectiveSampleRateHz, profile.sources.length), [plannerSystems, effectiveCustomSystems.join("|"), customMode, effectiveSampleRateHz, profile.sources.length]);
+  const activePlan = useMemo(() => buildCustomSourcePlanOption(plannerSystems, activeSourcePlanSystems, sourcePlanMode, effectiveSampleRateHz, profile.sources.length), [plannerSystems, activeSourcePlanSystems.join("|"), sourcePlanMode, effectiveSampleRateHz, profile.sources.length]);
   useEffect(() => {
     if (!customSeedKey || customSeedRef.current === customSeedKey) return;
     customSeedRef.current = customSeedKey;
@@ -6922,6 +6923,12 @@ function SourcePlannerStep({
           {supportedRateOptions.length > 0 && <small>Supported by detected SDR inventory: {supportedRateOptions.map((rate: number) => (rate / 1_000_000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")).join(", ")} MHz.</small>}
         </div>
       </div>
+      <SelectedSourceCenterTable
+        sources={profile.sources}
+        selectedSources={selectedSources}
+        plan={activePlan}
+        sampleRateHz={effectiveSampleRateHz}
+      />
       <div className="rf-source-validation-summary">
         {validationSummaries.map(row => <div key={row.shortName} className={row.validated.length ? "" : "warning"}>
           <strong>{row.label}</strong>
@@ -6943,6 +6950,35 @@ function SourcePlannerStep({
         onApply={applyOption}
       />
     </div>
+  </div>;
+}
+
+function SelectedSourceCenterTable({ sources, selectedSources, plan, sampleRateHz }: { sources: RfSurveySource[]; selectedSources: number[]; plan: SourcePlanOption; sampleRateHz: number }) {
+  const activeIndexes = selectedSources.length ? selectedSources : sources.map(source => source.index);
+  const rows = activeIndexes
+    .map((sourceIndex, index) => {
+      const source = sources.find(row => row.index === sourceIndex);
+      const window = plan.windows[Math.min(index, Math.max(0, plan.windows.length - 1))];
+      return { sourceIndex, source, window };
+    })
+    .filter(row => row.source);
+  if (rows.length === 0)
+    return null;
+  return <div className="rf-selected-source-table">
+    <div className="rf-selected-source-row header">
+      <span>Source</span>
+      <span>Device</span>
+      <span>Calculated center</span>
+      <span>Usable window</span>
+      <span>Rate</span>
+    </div>
+    {rows.map(row => <div className="rf-selected-source-row" key={row.sourceIndex}>
+      <span><strong>Source {row.sourceIndex}</strong></span>
+      <span>{row.source?.serial || row.source?.device || row.source?.sdrType || "--"}</span>
+      <span><code>{row.window ? formatRfHz(row.window.centerHz) : "--"}</code></span>
+      <span>{row.window ? `${formatRfHz(row.window.lowHz)}-${formatRfHz(row.window.highHz)}` : "--"}</span>
+      <span>{formatHz(sampleRateHz)}</span>
+    </div>)}
   </div>;
 }
 
