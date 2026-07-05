@@ -179,22 +179,26 @@ public sealed class TalkgroupCatalogService
             ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected TR writes are unavailable.");
     }
 
-    public ResolvedCatalogTalkgroup Resolve(long id)
+    public ResolvedCatalogTalkgroup Resolve(long id) => Resolve(string.Empty, id);
+
+    public ResolvedCatalogTalkgroup Resolve(string? systemShortName, long id)
     {
-        var row = Load().Items.FirstOrDefault(i => i.Id == id && i.Enabled);
+        var row = FindBestMatch(Load().Items.Where(i => i.Enabled), systemShortName, id);
         return row == null
             ? new ResolvedCatalogTalkgroup(id, $"TG {id}", "other", false)
             : new ResolvedCatalogTalkgroup(id, BuildLabel(row), row.OpsCategory, true, row.IncidentEligible);
     }
 
-    public bool IsIncidentEligible(long id)
+    public bool IsIncidentEligible(long id) => IsIncidentEligible(string.Empty, id);
+
+    public bool IsIncidentEligible(string? systemShortName, long id)
     {
-        var row = Load().Items.FirstOrDefault(i => i.Id == id && i.Enabled);
+        var row = FindBestMatch(Load().Items.Where(i => i.Enabled), systemShortName, id);
         if (row == null)
             return true;
 
         var profile = _config.Profiles.Items.FirstOrDefault(p => p.Id == _config.Profiles.ActiveProfileId);
-        var setting = profile?.Talkgroups.FirstOrDefault(t => t.Id == id);
+        var setting = FindBestMatch(profile?.Talkgroups ?? [], systemShortName, id);
         return setting?.IncidentEligible ?? row.IncidentEligible;
     }
 
@@ -216,13 +220,13 @@ public sealed class TalkgroupCatalogService
     {
         var overrides = (profile?.Talkgroups ?? [])
             .Where(t => t.Id > 0)
-            .GroupBy(t => t.Id)
+            .GroupBy(SettingKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Last());
         var legacyAllowed = (profile?.AllowedTalkgroups ?? []).Where(id => id > 0).ToHashSet();
         var hasLegacyAllowed = legacyAllowed.Count > 0;
         foreach (var row in document.Items)
         {
-            overrides.TryGetValue(row.Id, out var setting);
+            var setting = FirstSettingMatch(overrides, row);
             var enabled = setting?.Enabled ?? (hasLegacyAllowed ? legacyAllowed.Contains(row.Id) : row.Enabled);
             var category = NormalizeCategoryValue(string.IsNullOrWhiteSpace(setting?.Category) ? row.OpsCategory : setting!.Category);
             var label = setting?.Label?.Trim() ?? string.Empty;
@@ -236,17 +240,46 @@ public sealed class TalkgroupCatalogService
         }
     }
 
-    public static TalkgroupCatalogPreview PreviewCsv(string text)
+    public static TalkgroupCatalogPreview PreviewCsv(string text, string? systemShortName = null)
     {
-        var rows = ParseCsv(text);
+        var rows = ParseCsv(text, systemShortName);
         return BuildPreview(rows, "csv");
     }
 
-    public static TalkgroupCatalogPreview PreviewRadioReferenceHtml(string html)
+    public static TalkgroupCatalogPreview PreviewRadioReferenceHtml(string html, string? systemShortName = null)
     {
-        var rows = ParseTalkgroupsFromHtml(html);
+        var rows = ParseTalkgroupsFromHtml(html, systemShortName);
         return BuildPreview(rows, "radioreference");
     }
+
+    public static string NormalizeSystemShortName(string? value) =>
+        Regex.Replace((value ?? string.Empty).Trim(), @"\s+", "-").ToLowerInvariant();
+
+    public static string CatalogKey(string? systemShortName, long id)
+    {
+        var system = NormalizeSystemShortName(systemShortName);
+        return string.IsNullOrWhiteSpace(system)
+            ? id.ToString(CultureInfo.InvariantCulture)
+            : $"{system}:{id.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    public static string SystemFromKeyOrValue(string? key, string? systemShortName, long id)
+    {
+        var system = NormalizeSystemShortName(systemShortName);
+        if (!string.IsNullOrWhiteSpace(system))
+            return system;
+        var normalizedKey = (key ?? string.Empty).Trim().ToLowerInvariant();
+        var suffix = $":{id.ToString(CultureInfo.InvariantCulture)}";
+        return normalizedKey.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? normalizedKey[..^suffix.Length]
+            : string.Empty;
+    }
+
+    public static string ItemKey(TalkgroupCatalogItem item) =>
+        !string.IsNullOrWhiteSpace(item.Key) ? item.Key.Trim().ToLowerInvariant() : CatalogKey(item.SystemShortName, item.Id);
+
+    public static string SettingKey(ProfileTalkgroupSetting setting) =>
+        !string.IsNullOrWhiteSpace(setting.Key) ? setting.Key.Trim().ToLowerInvariant() : CatalogKey(setting.SystemShortName, setting.Id);
 
     public static string NormalizeOpsCategory(params string?[] values)
     {
@@ -295,10 +328,10 @@ public sealed class TalkgroupCatalogService
     private static TalkgroupCatalogPreview BuildPreview(List<TalkgroupCatalogItem> rows, string source)
     {
         var diagnostics = new List<string>();
-        var duplicateCount = rows.Count - rows.Select(r => r.Id).Distinct().Count();
+        var duplicateCount = rows.Count - rows.Select(ItemKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var normalized = rows
             .Where(r => r.Id > 0)
-            .GroupBy(r => r.Id)
+            .GroupBy(ItemKey, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())
             .Select(r => r with
             {
@@ -307,6 +340,7 @@ public sealed class TalkgroupCatalogService
                     : r.OpsCategory),
                 Source = string.IsNullOrWhiteSpace(r.Source) ? source : r.Source
             })
+            .Select(NormalizeItem)
             .Select(r => r with { IncidentEligible = r.IncidentEligible && DefaultIncidentEligible(r) })
             .OrderBy(r => r.Id)
             .ToList();
@@ -314,7 +348,7 @@ public sealed class TalkgroupCatalogService
         var included = normalized.Where(r => !ShouldExcludeImported(r)).ToList();
         var excluded = normalized.Count - included.Count;
         if (duplicateCount > 0)
-            diagnostics.Add($"{duplicateCount:N0} duplicate row(s) collapsed by talkgroup id.");
+            diagnostics.Add($"{duplicateCount:N0} duplicate row(s) collapsed by catalog key.");
         if (excluded > 0)
             diagnostics.Add($"{excluded:N0} encrypted, unknown, deprecated, unused, or unwanted row(s) excluded.");
 
@@ -330,7 +364,7 @@ public sealed class TalkgroupCatalogService
             string.Join(" ", diagnostics.DefaultIfEmpty($"Parsed {included.Count:N0} talkgroup row(s).")));
     }
 
-    private static List<TalkgroupCatalogItem> ParseCsv(string text)
+    private static List<TalkgroupCatalogItem> ParseCsv(string text, string? defaultSystemShortName)
     {
         using var reader = new StringReader(text ?? string.Empty);
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -354,6 +388,7 @@ public sealed class TalkgroupCatalogService
 
             rows.Add(new TalkgroupCatalogItem
             {
+                SystemShortName = NullIfEmpty(GetField(csv, "systemshortname", "system short name", "system", "rrsystem", "rr system")) ?? NormalizeSystemShortName(defaultSystemShortName),
                 Id = id,
                 Mode = NullIfEmpty(GetField(csv, "mode")) ?? "D",
                 AlphaTag = NullIfEmpty(GetField(csv, "alphatag", "alpha", "alpha tag")) ?? string.Empty,
@@ -368,7 +403,7 @@ public sealed class TalkgroupCatalogService
         return rows;
     }
 
-    private static List<TalkgroupCatalogItem> ParseTalkgroupsFromHtml(string html)
+    private static List<TalkgroupCatalogItem> ParseTalkgroupsFromHtml(string html, string? systemShortName)
     {
         var rows = new List<TalkgroupCatalogItem>();
         if (string.IsNullOrWhiteSpace(html))
@@ -378,11 +413,11 @@ public sealed class TalkgroupCatalogService
         var section = ExtractTalkgroupsSectionHtml(clean);
         var seen = new HashSet<long>();
         foreach (Match table in Regex.Matches(section, "<table[^>]*>[\\s\\S]*?</table>", RegexOptions.IgnoreCase))
-            ParseTalkgroupTable(table.Value, seen, rows);
+            ParseTalkgroupTable(table.Value, seen, rows, systemShortName);
         return rows.OrderBy(r => r.Id).ToList();
     }
 
-    private static void ParseTalkgroupTable(string tableHtml, HashSet<long> seen, List<TalkgroupCatalogItem> rows)
+    private static void ParseTalkgroupTable(string tableHtml, HashSet<long> seen, List<TalkgroupCatalogItem> rows, string? systemShortName)
     {
         var trMatches = Regex.Matches(tableHtml, "<tr[^>]*>(?<row>[\\s\\S]*?)</tr>", RegexOptions.IgnoreCase);
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -408,6 +443,7 @@ public sealed class TalkgroupCatalogService
             var tag = cells[headers["tag"]];
             rows.Add(new TalkgroupCatalogItem
             {
+                SystemShortName = NormalizeSystemShortName(systemShortName),
                 Id = id,
                 Mode = cells[headers["mode"]],
                 AlphaTag = cells[headers["alpha_tag"]],
@@ -424,9 +460,10 @@ public sealed class TalkgroupCatalogService
     {
         var rows = document.Items
             .Where(i => i.Id > 0)
-            .GroupBy(i => i.Id)
+            .GroupBy(ItemKey, StringComparer.OrdinalIgnoreCase)
             .Select(g => NormalizeItem(g.First()))
-            .OrderBy(i => i.Id)
+            .OrderBy(i => i.SystemShortName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(i => i.Id)
             .ToList();
         return document with
         {
@@ -436,19 +473,58 @@ public sealed class TalkgroupCatalogService
         };
     }
 
-    private static TalkgroupCatalogItem NormalizeItem(TalkgroupCatalogItem item) => item with
+    private static TalkgroupCatalogItem NormalizeItem(TalkgroupCatalogItem item)
     {
-        Mode = string.IsNullOrWhiteSpace(item.Mode) ? "D" : item.Mode.Trim(),
-        AlphaTag = item.AlphaTag?.Trim() ?? string.Empty,
-        Description = item.Description?.Trim() ?? string.Empty,
-        Tag = item.Tag?.Trim() ?? string.Empty,
-        SourceCategory = item.SourceCategory?.Trim() ?? string.Empty,
-        OpsCategory = NormalizeCategoryValue(item.OpsCategory),
-        Source = item.Source?.Trim() ?? string.Empty,
-        IncidentEligible = item.IncidentEligible && DefaultIncidentEligible(item),
-        Notes = item.Notes?.Trim() ?? string.Empty,
-        UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTime.UtcNow : item.UpdatedAtUtc
-    };
+        var system = SystemFromKeyOrValue(item.Key, item.SystemShortName, item.Id);
+        return item with
+        {
+            SystemShortName = system,
+            Key = CatalogKey(system, item.Id),
+            Mode = string.IsNullOrWhiteSpace(item.Mode) ? "D" : item.Mode.Trim(),
+            AlphaTag = item.AlphaTag?.Trim() ?? string.Empty,
+            Description = item.Description?.Trim() ?? string.Empty,
+            Tag = item.Tag?.Trim() ?? string.Empty,
+            SourceCategory = item.SourceCategory?.Trim() ?? string.Empty,
+            OpsCategory = NormalizeCategoryValue(item.OpsCategory),
+            Source = item.Source?.Trim() ?? string.Empty,
+            IncidentEligible = item.IncidentEligible && DefaultIncidentEligible(item),
+            Notes = item.Notes?.Trim() ?? string.Empty,
+            UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTime.UtcNow : item.UpdatedAtUtc
+        };
+    }
+
+    private static TalkgroupCatalogItem? FindBestMatch(IEnumerable<TalkgroupCatalogItem> items, string? systemShortName, long id)
+    {
+        var rows = items.Where(i => i.Id == id).ToList();
+        if (rows.Count == 0)
+            return null;
+        var exactKey = CatalogKey(systemShortName, id);
+        return rows.FirstOrDefault(row => string.Equals(ItemKey(row), exactKey, StringComparison.OrdinalIgnoreCase))
+            ?? rows.FirstOrDefault(row => string.Equals(ItemKey(row), id.ToString(CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase))
+            ?? rows.FirstOrDefault(row => string.IsNullOrWhiteSpace(row.SystemShortName))
+            ?? rows[0];
+    }
+
+    private static ProfileTalkgroupSetting? FindBestMatch(IEnumerable<ProfileTalkgroupSetting> items, string? systemShortName, long id)
+    {
+        var rows = items.Where(i => i.Id == id).ToList();
+        if (rows.Count == 0)
+            return null;
+        var exactKey = CatalogKey(systemShortName, id);
+        return rows.LastOrDefault(row => string.Equals(SettingKey(row), exactKey, StringComparison.OrdinalIgnoreCase))
+            ?? rows.LastOrDefault(row => string.Equals(SettingKey(row), id.ToString(CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase))
+            ?? rows.LastOrDefault(row => string.IsNullOrWhiteSpace(row.SystemShortName))
+            ?? rows[^1];
+    }
+
+    private static ProfileTalkgroupSetting? FirstSettingMatch(IReadOnlyDictionary<string, ProfileTalkgroupSetting> overrides, TalkgroupCatalogItem row)
+    {
+        if (overrides.TryGetValue(ItemKey(row), out var exact))
+            return exact;
+        if (overrides.TryGetValue(row.Id.ToString(CultureInfo.InvariantCulture), out var legacy))
+            return legacy;
+        return null;
+    }
 
     private string CatalogPath() =>
         string.IsNullOrWhiteSpace(_config.TrunkRecorder.TalkgroupCatalogPath)
@@ -592,6 +668,8 @@ public sealed record TalkgroupCatalogDocument
 
 public sealed record TalkgroupCatalogItem
 {
+    public string Key { get; init; } = string.Empty;
+    public string SystemShortName { get; init; } = string.Empty;
     public long Id { get; init; }
     public string Mode { get; init; } = "D";
     public string AlphaTag { get; init; } = string.Empty;

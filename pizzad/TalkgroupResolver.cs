@@ -13,7 +13,7 @@ public sealed class TalkgroupResolver
 
     public EngineCall Enrich(EngineCall call)
     {
-        var resolved = Resolve(call.Talkgroup);
+        var resolved = Resolve(call.SystemShortName, call.Talkgroup);
         return call with
         {
             TalkgroupName = string.IsNullOrWhiteSpace(call.TalkgroupName) || call.TalkgroupName.StartsWith("TG ", StringComparison.OrdinalIgnoreCase)
@@ -26,6 +26,12 @@ public sealed class TalkgroupResolver
     public ResolvedTalkgroup Resolve(long talkgroup)
     {
         var resolved = _catalog.Resolve(talkgroup);
+        return new ResolvedTalkgroup(resolved.Label, resolved.Category);
+    }
+
+    public ResolvedTalkgroup Resolve(string? systemShortName, long talkgroup)
+    {
+        var resolved = _catalog.Resolve(systemShortName, talkgroup);
         return new ResolvedTalkgroup(resolved.Label, resolved.Category);
     }
 

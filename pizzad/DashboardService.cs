@@ -157,7 +157,7 @@ public sealed class DashboardService
         {
             var matchingCalls = await _database.ListCategorySearchCallsAsync(start, end, category, searchQuery, ct);
             var callsByTalkgroup = matchingCalls
-                .Where(call => Allows(category, call.Talkgroup))
+                .Where(call => Allows(category, call.SystemShortName, call.Talkgroup))
                 .GroupBy(call => call.Talkgroup)
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(call => call.StartTime).ThenByDescending(call => call.Id).ToList());
             groups = groups
@@ -186,13 +186,16 @@ public sealed class DashboardService
         return _database.ListIncidentsAsync(start, end, ct);
     }
 
-    private List<EngineCall> ApplyProfile(IEnumerable<EngineCall> calls) => calls.Where(c => Allows(c.Category, c.Talkgroup)).ToList();
+    private List<EngineCall> ApplyProfile(IEnumerable<EngineCall> calls) => calls.Where(c => Allows(c.Category, c.SystemShortName, c.Talkgroup)).ToList();
 
     private bool Allows(string category, long talkgroup)
+        => Allows(category, string.Empty, talkgroup);
+
+    private bool Allows(string category, string? systemShortName, long talkgroup)
     {
         var profile = _config.Profiles.Items.FirstOrDefault(p => p.Id == _config.Profiles.ActiveProfileId);
         if (profile == null) return true;
-        var setting = profile.Talkgroups.LastOrDefault(t => t.Id == talkgroup);
+        var setting = FindSetting(profile, systemShortName, talkgroup);
         if (setting?.Enabled == false) return false;
         if (profile.AllowedTalkgroups.Count > 0 && !profile.AllowedTalkgroups.Contains(talkgroup)) return false;
         var effectiveCategory = string.IsNullOrWhiteSpace(setting?.Category) ? category : setting!.Category;
@@ -204,6 +207,18 @@ public sealed class DashboardService
             "traffic" => profile.IncludeTraffic,
             _ => profile.IncludeOther
         };
+    }
+
+    private static ProfileTalkgroupSetting? FindSetting(ProcessingProfile profile, string? systemShortName, long talkgroup)
+    {
+        var rows = profile.Talkgroups.Where(t => t.Id == talkgroup).ToList();
+        if (rows.Count == 0)
+            return null;
+        var exactKey = TalkgroupCatalogService.CatalogKey(systemShortName, talkgroup);
+        return rows.LastOrDefault(row => string.Equals(TalkgroupCatalogService.SettingKey(row), exactKey, StringComparison.OrdinalIgnoreCase))
+            ?? rows.LastOrDefault(row => string.Equals(TalkgroupCatalogService.SettingKey(row), talkgroup.ToString(CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase))
+            ?? rows.LastOrDefault(row => string.IsNullOrWhiteSpace(row.SystemShortName))
+            ?? rows[^1];
     }
 
     private static IReadOnlyList<HourCategoryDto> BuildVolume(List<EngineCall> calls) =>

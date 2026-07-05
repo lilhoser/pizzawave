@@ -20,12 +20,12 @@ public sealed class SetupTalkgroupService
         {
             var url = BuildRadioReferenceUrl(request);
             var html = await _http.GetStringAsync(url, ct);
-            preview = TalkgroupCatalogService.PreviewRadioReferenceHtml(html);
+            preview = TalkgroupCatalogService.PreviewRadioReferenceHtml(html, request.SystemShortName);
             preview = preview with { Diagnostics = $"Fetched {url}. {preview.Diagnostics}" };
         }
         else
         {
-            preview = TalkgroupCatalogService.PreviewCsv(request.CsvText ?? string.Empty);
+            preview = TalkgroupCatalogService.PreviewCsv(request.CsvText ?? string.Empty, request.SystemShortName);
         }
 
         return ToSetupPreview(preview, request.IncludeNormallyExcluded);
@@ -35,11 +35,10 @@ public sealed class SetupTalkgroupService
     {
         var rows = request.Rows
             .Where(r => r.Included && r.Id > 0)
-            .GroupBy(r => r.Id)
-            .Select(g => g.First())
-            .OrderBy(r => r.Id)
             .Select(r => new TalkgroupCatalogItem
             {
+                Key = string.IsNullOrWhiteSpace(r.Key) ? TalkgroupCatalogService.CatalogKey(r.SystemShortName, r.Id) : r.Key.Trim(),
+                SystemShortName = TalkgroupCatalogService.NormalizeSystemShortName(r.SystemShortName),
                 Id = r.Id,
                 Mode = string.IsNullOrWhiteSpace(r.Mode) ? "D" : r.Mode,
                 AlphaTag = r.AlphaTag,
@@ -50,11 +49,18 @@ public sealed class SetupTalkgroupService
                 Enabled = true,
                 Source = "setup"
             })
+            .GroupBy(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+        rows = rows
+            .OrderBy(r => r.Id)
             .ToList();
         if (rows.Count == 0)
             throw new InvalidOperationException("No included talkgroup rows were provided.");
 
-        var document = new TalkgroupCatalogDocument { Items = rows };
+        var document = string.Equals(request.ApplyMode, "merge", StringComparison.OrdinalIgnoreCase)
+            ? MergeIntoExistingCatalog(rows)
+            : new TalkgroupCatalogDocument { Items = rows };
         var result = await _catalog.SaveAsync(document, generateTrCsv: true, ct);
         var preview = new TalkgroupCatalogPreview(
             rows,
@@ -64,18 +70,34 @@ public sealed class SetupTalkgroupService
         return ToSetupPreview(preview, includeExcluded: false);
     }
 
+    private TalkgroupCatalogDocument MergeIntoExistingCatalog(List<TalkgroupCatalogItem> rows)
+    {
+        var existing = _catalog.Load();
+        var importedByKey = rows.ToDictionary(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase);
+        var merged = existing.Items
+            .Where(row => !importedByKey.ContainsKey(TalkgroupCatalogService.ItemKey(row)))
+            .Concat(rows)
+            .ToList();
+        return existing with { Items = merged };
+    }
+
     private static SetupTalkgroupPreviewDto ToSetupPreview(TalkgroupCatalogPreview preview, bool includeExcluded)
     {
         var includedRows = preview.Included.Select(row => ToPreviewRow(row, included: true, string.Empty));
         var excludedRows = includeExcluded
             ? preview.Excluded.Select(row => ToPreviewRow(row, included: false, "excluded by import policy"))
             : [];
-        var rows = includedRows.Concat(excludedRows).OrderBy(r => r.Id).ToList();
+        var rows = includedRows.Concat(excludedRows)
+            .OrderBy(r => r.SystemShortName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Id)
+            .ToList();
         return new SetupTalkgroupPreviewDto(rows, preview.IncludedByCategory, preview.Included.Count, preview.Excluded.Count, preview.Diagnostics);
     }
 
     private static SetupTalkgroupRowDto ToPreviewRow(TalkgroupCatalogItem row, bool included, string reason) => new()
     {
+        Key = TalkgroupCatalogService.ItemKey(row),
+        SystemShortName = row.SystemShortName,
         Id = row.Id,
         Mode = row.Mode,
         AlphaTag = row.AlphaTag,

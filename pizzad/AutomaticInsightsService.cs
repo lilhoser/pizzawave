@@ -5142,7 +5142,7 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private bool IsCatalogIncidentEligibleOrStrongSignal(EngineCall call)
     {
-        if (_catalog.IsIncidentEligible(call.Talkgroup))
+        if (_catalog.IsIncidentEligible(call.SystemShortName, call.Talkgroup))
             return true;
         return IncidentCandidateValidator.HasStrongIncidentSignal($"{call.TalkgroupName} {call.Transcription}");
     }
@@ -5329,7 +5329,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     }
 
     private IncidentCandidateCall ToIncidentCandidateCall(EngineCall call) =>
-        new(call.Id, call.StartTime, call.Transcription, call.Category, call.TalkgroupName, call.SystemShortName, IncidentEligible: _catalog.IsIncidentEligible(call.Talkgroup));
+        new(call.Id, call.StartTime, call.Transcription, call.Category, call.TalkgroupName, call.SystemShortName, IncidentEligible: _catalog.IsIncidentEligible(call.SystemShortName, call.Talkgroup));
 
     private IncidentCandidateCall ToIncidentCandidateCall(EngineCall call, IReadOnlyDictionary<long, IReadOnlyList<CallAnchorRecord>> anchorsByCall) =>
         new(
@@ -5340,7 +5340,7 @@ public sealed class AutomaticInsightsService : BackgroundService
             call.TalkgroupName,
             call.SystemShortName,
             anchorsByCall.TryGetValue(call.Id, out var anchors) ? anchors : [],
-            _catalog.IsIncidentEligible(call.Talkgroup));
+            _catalog.IsIncidentEligible(call.SystemShortName, call.Talkgroup));
 
     private static string StripCodeFence(string content) =>
         Regex.Replace(content.Trim(), "^```(?:json)?\\s*|\\s*```$", string.Empty, RegexOptions.IgnoreCase);

@@ -276,12 +276,14 @@ public sealed record SetupSdrDetectionDto(
     string RawOutput,
     string Message);
 
-public sealed record SetupTalkgroupParseRequest(string? CsvText = null, string? RadioReferenceSid = null, string? RadioReferenceUrl = null, bool IncludeNormallyExcluded = false);
+public sealed record SetupTalkgroupParseRequest(string? CsvText = null, string? RadioReferenceSid = null, string? RadioReferenceUrl = null, bool IncludeNormallyExcluded = false, string? SystemShortName = null);
 
-public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows);
+public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows, string ApplyMode = "replace");
 
 public sealed record SetupTalkgroupRowDto
 {
+    public string Key { get; init; } = string.Empty;
+    public string SystemShortName { get; init; } = string.Empty;
     public long Id { get; init; }
     public string Mode { get; init; } = string.Empty;
     public string AlphaTag { get; init; } = string.Empty;

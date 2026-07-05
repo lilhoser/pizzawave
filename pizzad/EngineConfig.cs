@@ -210,6 +210,8 @@ public sealed class EngineConfig
             profile.Talkgroups ??= new();
             foreach (var talkgroup in profile.Talkgroups)
             {
+                talkgroup.SystemShortName = TalkgroupCatalogService.SystemFromKeyOrValue(talkgroup.Key, talkgroup.SystemShortName, talkgroup.Id);
+                talkgroup.Key = TalkgroupCatalogService.CatalogKey(talkgroup.SystemShortName, talkgroup.Id);
                 talkgroup.Category = string.IsNullOrWhiteSpace(talkgroup.Category) ? string.Empty : talkgroup.Category.Trim().ToLowerInvariant();
                 talkgroup.Label = talkgroup.Label?.Trim() ?? string.Empty;
             }
@@ -492,6 +494,8 @@ public sealed class ProcessingProfile
 
 public sealed class ProfileTalkgroupSetting
 {
+    public string Key { get; set; } = string.Empty;
+    public string SystemShortName { get; set; } = string.Empty;
     public long Id { get; set; }
     public bool? Enabled { get; set; }
     public string Label { get; set; } = string.Empty;

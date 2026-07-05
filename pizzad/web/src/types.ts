@@ -494,11 +494,13 @@ export type RemoteBandwidthBucket = { label: string; activity: string; requestBy
 export type RemoteBandwidthEntry = { timestampUtc: string; activity: string; endpoint: string; requestBytes: number; responseBytes: number; totalBytes: number; basis: string; estimated: boolean };
 export type RemoteBandwidthReport = { ledger: string; remoteHost: string; transcriptionEndpoint: string; aiEndpoint: string; transcriptionIncluded: boolean; notes: string; summary: RemoteBandwidthSummary; monthlySummary: RemoteBandwidthSummary; allTimeSummary: RemoteBandwidthSummary; byDay: RemoteBandwidthBucket[]; byActivity: RemoteBandwidthBucket[]; entries: RemoteBandwidthEntry[] };
 export type IncidentOperationAuditRow = { id: number; timestampUtc: string; systemShortName: string; incidentKey: string; operation: string; accepted: boolean; reason: string; score: number; callIds: number[]; metadataJson: string };
-export type ProfileTalkgroupSetting = { id: number; enabled?: boolean | null; label?: string; category?: string; incidentEligible?: boolean | null };
+export type ProfileTalkgroupSetting = { key?: string; systemShortName?: string; id: number; enabled?: boolean | null; label?: string; category?: string; incidentEligible?: boolean | null };
 export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeOther: boolean; allowedTalkgroups: number[]; talkgroups?: ProfileTalkgroupSetting[]; createdAtUtc?: string; updatedAtUtc?: string };
 export type ProfileState = { activeProfileId: string; profiles: ProcessingProfile[]; restartRecommended?: boolean; generatedCsvPath?: string; message?: string };
 export type TalkgroupOption = { talkgroup: number; label: string; category: string };
 export type TalkgroupCatalogItem = {
+  key: string;
+  systemShortName: string;
   id: number;
   mode: string;
   alphaTag: string;
@@ -562,7 +564,7 @@ export type BackupRestoreCancelResult = { canceled: boolean; message: string };
 export type MigrationActionResult = { ok: boolean; message: string };
 export type MigrationResetResult = { ok: boolean; message: string; warnings: string[]; backup?: BackupCreateResult | null };
 export type SetupValidationResult = { ok: boolean; message: string; detail?: any };
-export type SetupTalkgroupRow = { id: number; mode: string; alphaTag: string; description: string; tag: string; category: string; opsCategory: string; included: boolean; exclusionReason: string };
+export type SetupTalkgroupRow = { key: string; systemShortName: string; id: number; mode: string; alphaTag: string; description: string; tag: string; category: string; opsCategory: string; included: boolean; exclusionReason: string };
 export type SetupTalkgroupPreview = { rows: SetupTalkgroupRow[]; includedByCategory: Record<string, number>; includedCount: number; excludedCount: number; diagnostics: string };
 export type SetupTrConfigSystem = { systemName: string; shortName: string; siteName: string; frequenciesMhz: number[]; controlChannelsMhz: number[]; centerFrequency: number; assignedSerial: string; warning: string };
 export type SetupTrConfigSource = { label: string; serial: string; type: string; driver: string; deviceArgs: string; centerFrequency: number; sampleRate: number; gain: string; gainMode: string; coveredFrequenciesMhz: number[]; omittedFrequenciesMhz: number[] };

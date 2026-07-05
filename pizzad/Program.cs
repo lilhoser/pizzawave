@@ -1795,7 +1795,13 @@ app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest 
         profile.Talkgroups ??= new();
         profile.Talkgroups = profile.Talkgroups
             .Where(t => t.Id > 0)
-            .GroupBy(t => t.Id)
+            .Select(t =>
+            {
+                t.SystemShortName = TalkgroupCatalogService.SystemFromKeyOrValue(t.Key, t.SystemShortName, t.Id);
+                t.Key = TalkgroupCatalogService.CatalogKey(t.SystemShortName, t.Id);
+                return t;
+            })
+            .GroupBy(TalkgroupCatalogService.SettingKey, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.Last())
             .ToList();
         profile.UpdatedAtUtc = DateTime.UtcNow;

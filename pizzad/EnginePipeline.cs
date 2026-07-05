@@ -656,7 +656,7 @@ public sealed class EnginePipeline
         var callstreamCallId = metadata.CallId;
         var source = metadata.Source;
         var frequency = metadata.Frequency;
-        var resolved = _talkgroups.Resolve(talkgroup);
+        var resolved = _talkgroups.Resolve(system, talkgroup);
         var unique = $"{system}|{talkgroup}|{start}|{stop}|{callstreamCallId}|{frequency}";
         return new EngineCall
         {

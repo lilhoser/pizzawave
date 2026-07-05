@@ -3617,6 +3617,12 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
       })}
       {availableSystems.length === 0 && <div className="setup-note">{filteredSystems.length === 0 ? "No matching sites." : "Matching sites are already selected."}</div>}
     </div>
+    <TalkgroupImportPanel
+      defaultSid={radioReferenceSid}
+      targetSystems={effectiveSystems}
+      applyMode="merge"
+      className="rsw-talkgroup-import"
+    />
   </div>;
 }
 
@@ -11629,7 +11635,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     setTalkgroupPreview(current => {
       const rows = current?.rows ?? [];
       const nextId = rows.reduce((max, row) => Math.max(max, row.id), 0) + 1;
-      const nextRows = [...rows, { id: nextId, mode: "D", alphaTag: "", description: "", tag: "", category: "other", opsCategory: "other", included: true, exclusionReason: "" }];
+      const nextRows = [...rows, { key: String(nextId), systemShortName: "", id: nextId, mode: "D", alphaTag: "", description: "", tag: "", category: "other", opsCategory: "other", included: true, exclusionReason: "" }];
       return {
         rows: nextRows,
         includedByCategory: nextRows.filter(row => row.included).reduce<Record<string, number>>((acc, row) => {
@@ -12820,6 +12826,7 @@ function SdrDetectionPanel({ detection }: { detection: SetupSdrDetection }) {
 
 function TalkgroupPreviewTable({ preview, updateRow }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void }) {
   const categories = ["police", "fire", "ems", "traffic", "other"];
+  const hasSystem = preview.rows.some(row => row.systemShortName);
   return <div className="talkgroup-preview">
     <div className="setup-job-head">
       <strong>{preview.includedCount.toLocaleString()} included / {preview.excludedCount.toLocaleString()} excluded</strong>
@@ -12828,10 +12835,14 @@ function TalkgroupPreviewTable({ preview, updateRow }: { preview: SetupTalkgroup
     <div className="muted">{preview.diagnostics}</div>
     <div className="talkgroup-preview-table">
       <table className="table">
-        <thead><tr><th>Use</th><th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Category</th><th>Reason</th></tr></thead>
-        <tbody>{preview.rows.slice(0, 500).map((row, index) => <tr className={row.included ? "" : "excluded-row"} key={row.id}>
+        <thead><tr><th>Use</th>{hasSystem && <th>System</th>}<th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Category</th><th>Reason</th></tr></thead>
+        <tbody>{preview.rows.slice(0, 500).map((row, index) => <tr className={row.included ? "" : "excluded-row"} key={`${talkgroupCatalogKey(row)}-${index}`}>
           <td><input type="checkbox" checked={row.included} onChange={e => updateRow(index, { included: e.target.checked })} /></td>
-          <td><input type="number" value={row.id} onChange={e => updateRow(index, { id: numberOrZero(e.target.value) })} /></td>
+          {hasSystem && <td><input value={row.systemShortName ?? ""} onChange={e => updateRow(index, { systemShortName: e.target.value, key: e.target.value.trim() ? `${normalizeTalkgroupSystem(e.target.value)}:${row.id}` : String(row.id) })} /></td>}
+          <td><input type="number" value={row.id} onChange={e => {
+            const id = numberOrZero(e.target.value);
+            updateRow(index, { id, key: row.systemShortName ? `${normalizeTalkgroupSystem(row.systemShortName)}:${id}` : String(id) });
+          }} /></td>
           <td>{row.mode}</td>
           <td><input value={row.alphaTag} onChange={e => updateRow(index, { alphaTag: e.target.value })} /></td>
           <td><input value={row.description} onChange={e => updateRow(index, { description: e.target.value })} /></td>
@@ -12842,6 +12853,147 @@ function TalkgroupPreviewTable({ preview, updateRow }: { preview: SetupTalkgroup
       </table>
       {preview.rows.length > 500 && <div className="muted">Showing first 500 rows. Save still writes all included rows.</div>}
     </div>
+  </div>;
+}
+
+function TalkgroupImportPanel({
+  defaultSid,
+  targetSystems,
+  applyMode,
+  className = ""
+}: {
+  defaultSid: string;
+  targetSystems?: string[];
+  applyMode: "replace" | "merge";
+  className?: string;
+}) {
+  const [sid, setSid] = useState(defaultSid);
+  const [csvText, setCsvText] = useState("");
+  const [includeExcluded, setIncludeExcluded] = useState(false);
+  const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const scopedSystems = uniqueCaseInsensitive((targetSystems ?? []).map(normalizeTalkgroupSystem).filter(Boolean));
+  useEffect(() => setSid(defaultSid), [defaultSid]);
+
+  function scopeRows(rows: SetupTalkgroupRow[]) {
+    if (applyMode !== "merge" || scopedSystems.length === 0)
+      return rows;
+    return scopedSystems.flatMap(system => rows.map(row => ({
+      ...row,
+      systemShortName: system,
+      key: `${system}:${row.id}`
+    })));
+  }
+
+  async function previewSource(source: "rr" | "csv") {
+    if (source === "rr" && !sid.trim()) {
+      setMessage("Enter a RadioReference SID first.");
+      return;
+    }
+    if (source === "csv" && !csvText.trim()) {
+      setMessage("Paste or choose a talkgroup CSV first.");
+      return;
+    }
+    setBusy(`preview-${source}`);
+    try {
+      const systemShortName = scopedSystems.length === 1 ? scopedSystems[0] : "";
+      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
+        method: "POST",
+        body: JSON.stringify(source === "rr"
+          ? { radioReferenceSid: sid.trim(), includeNormallyExcluded: includeExcluded, systemShortName }
+          : { csvText, includeNormallyExcluded: includeExcluded, systemShortName })
+      });
+      const rows = scopeRows(result.rows);
+      setPreview({ ...result, rows, includedCount: rows.filter(row => row.included).length, excludedCount: rows.filter(row => !row.included).length });
+      setMessage(`Previewed ${rows.filter(row => row.included).length.toLocaleString()} row(s).`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup preview failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveRows(rows: SetupTalkgroupRow[]) {
+    const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
+      method: "POST",
+      body: JSON.stringify({ rows, applyMode })
+    });
+    setPreview(saved);
+    setMessage(saved.diagnostics);
+  }
+
+  async function importSource(source: "rr" | "csv", csvOverride?: string) {
+    setBusy(`import-${source}`);
+    try {
+      let rows = preview?.rows ?? [];
+      if (!rows.length) {
+        const systemShortName = scopedSystems.length === 1 ? scopedSystems[0] : "";
+        const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
+          method: "POST",
+          body: JSON.stringify(source === "rr"
+            ? { radioReferenceSid: sid.trim(), includeNormallyExcluded: includeExcluded, systemShortName }
+            : { csvText: csvOverride ?? csvText, includeNormallyExcluded: includeExcluded, systemShortName })
+        });
+        rows = scopeRows(result.rows);
+      }
+      await saveRows(rows);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup import failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function importCsvFile(file: File | null) {
+    if (!file) return;
+    setBusy("csv-file");
+    try {
+      const text = await file.text();
+      setCsvText(text);
+      setBusy("");
+      await importSource("csv", text);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Talkgroup CSV import failed.");
+      setBusy("");
+    }
+  }
+
+  function updateRow(index: number, patch: Partial<SetupTalkgroupRow>) {
+    setPreview(current => {
+      if (!current) return current;
+      const rows = current.rows.map((row, i) => i === index ? { ...row, ...patch } : row);
+      const included = rows.filter(row => row.included);
+      const includedByCategory = included.reduce<Record<string, number>>((acc, row) => {
+        const key = row.opsCategory || "other";
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {});
+      return { ...current, rows, includedCount: included.length, excludedCount: rows.length - included.length, includedByCategory };
+    });
+  }
+
+  return <div className={`talkgroup-import-panel ${className}`}>
+    <div className="setup-note">
+      <strong>Talkgroup Import</strong>
+      <span>{applyMode === "merge" ? "Merge imported TGs into the catalog for the selected RSW site(s)." : "Replace the talkgroup catalog during first-run setup."}</span>
+    </div>
+    {applyMode === "merge" && <div className="muted">Target sites: {scopedSystems.length ? scopedSystems.join(", ") : "select at least one site first"}</div>}
+    <div className="setup-row">
+      <SettingInput label="RadioReference SID" description="Fetch TG catalog rows for this system." value={sid} onChange={setSid} inputMode="numeric" />
+      <button className="danger-button" disabled={Boolean(busy) || !sid.trim() || (applyMode === "merge" && scopedSystems.length === 0)} onClick={() => void importSource("rr")}>{busy === "import-rr" ? "Fetching..." : "Fetch"}</button>
+      <button disabled={Boolean(busy) || !sid.trim() || (applyMode === "merge" && scopedSystems.length === 0)} onClick={() => void previewSource("rr")}>Preview</button>
+    </div>
+    <SettingCheckbox label="Include normally excluded rows" description="Include encrypted, deprecated, unknown, and other rows that PizzaWave normally skips during import." checked={includeExcluded} onChange={setIncludeExcluded} />
+    <label className="setting-field">
+      <span>Import existing CSV<small>Load a RadioReference/PizzaWave talkgroup CSV.</small></span>
+      <input type="file" accept=".csv,text/csv" disabled={Boolean(busy) || (applyMode === "merge" && scopedSystems.length === 0)} onChange={event => void importCsvFile(event.target.files?.[0] ?? null)} />
+    </label>
+    {preview && <div className="rf-primary-actions">
+      <button className="danger-button" disabled={Boolean(busy)} onClick={() => preview && void saveRows(preview.rows)}>Save Preview</button>
+    </div>}
+    {message && <div className="setup-note">{message}</div>}
+    {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateRow} />}
   </div>;
 }
 
@@ -13426,8 +13578,8 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
     }
   }
 
-  function updateItem(id: number, patch: Partial<TalkgroupCatalogItem>) {
-    setDraft(current => current && ({ ...current, items: current.items.map(item => item.id === id ? { ...item, ...patch } : item) }));
+  function updateItem(key: string, patch: Partial<TalkgroupCatalogItem>) {
+    setDraft(current => current && ({ ...current, items: current.items.map(item => talkgroupCatalogKey(item) === key ? { ...item, ...patch } : item) }));
   }
 
   function addItem() {
@@ -13436,13 +13588,13 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
     setDraft(current => ({
       schemaVersion: current?.schemaVersion ?? 1,
       updatedAtUtc: current?.updatedAtUtc ?? now,
-      items: [...(current?.items ?? []), { id: nextId, mode: "D", alphaTag: "", description: "", tag: "", sourceCategory: "", opsCategory: "other", enabled: true, incidentEligible: true, source: "manual", notes: "", updatedAtUtc: now }]
+      items: [...(current?.items ?? []), { key: String(nextId), systemShortName: "", id: nextId, mode: "D", alphaTag: "", description: "", tag: "", sourceCategory: "", opsCategory: "other", enabled: true, incidentEligible: true, source: "manual", notes: "", updatedAtUtc: now }]
     }));
   }
 
-  function deleteItem(id: number) {
+  function deleteItem(key: string) {
     if (!confirmAction("Delete talkgroup from catalog?", "This will remove the TG from the catalog draft. It will not affect capture until you click Apply, which regenerates the trunk-recorder CSV and restarts services.")) return;
-    setDraft(current => current && ({ ...current, items: current.items.filter(item => item.id !== id) }));
+    setDraft(current => current && ({ ...current, items: current.items.filter(item => talkgroupCatalogKey(item) !== key) }));
   }
 
   function updateProfile(id: string, patch: Partial<ProcessingProfile>) {
@@ -13532,12 +13684,14 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
     return profileDraft?.profiles.find(p => p.id === profileDraft.activeProfileId) ?? profileDraft?.profiles[0] ?? null;
   }
 
-  function activeSetting(id: number) {
-    return activeProfile()?.talkgroups?.find(t => t.id === id);
+  function activeSetting(item: TalkgroupCatalogItem) {
+    const itemKey = talkgroupCatalogKey(item);
+    return activeProfile()?.talkgroups?.find(t => profileTalkgroupKey(t) === itemKey)
+      ?? activeProfile()?.talkgroups?.find(t => t.id === item.id && !t.systemShortName);
   }
 
   function effectiveRow(item: TalkgroupCatalogItem): TalkgroupCatalogItem {
-    const setting = activeSetting(item.id);
+    const setting = activeSetting(item);
     return {
       ...item,
       enabled: setting?.enabled ?? item.enabled,
@@ -13547,15 +13701,16 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
     };
   }
 
-  function updateActiveTalkgroup(id: number, patch: Partial<{ enabled: boolean; label: string; category: string; incidentEligible: boolean }>) {
+  function updateActiveTalkgroup(item: TalkgroupCatalogItem, patch: Partial<{ enabled: boolean; label: string; category: string; incidentEligible: boolean }>) {
     if (!profileDraft) return;
+    const itemKey = talkgroupCatalogKey(item);
     setProfileDraft(current => {
       if (!current) return current;
       const profiles = current.profiles.map(profile => {
         if (profile.id !== current.activeProfileId) return profile;
         const settings = [...(profile.talkgroups ?? [])];
-        const index = settings.findIndex(t => t.id === id);
-        const next = { ...(index >= 0 ? settings[index] : { id }), ...patch };
+        const index = settings.findIndex(t => profileTalkgroupKey(t) === itemKey);
+        const next = { ...(index >= 0 ? settings[index] : { key: itemKey, systemShortName: item.systemShortName ?? "", id: item.id }), ...patch };
         if (index >= 0) settings[index] = next;
         else settings.push(next);
         return { ...profile, talkgroups: settings, allowedTalkgroups: [] };
@@ -13601,6 +13756,7 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
       String(item.id).includes(needle) ||
       item.alphaTag.toLowerCase().includes(needle) ||
       item.description.toLowerCase().includes(needle) ||
+      (item.systemShortName ?? "").toLowerCase().includes(needle) ||
       item.tag.toLowerCase().includes(needle) ||
       item.opsCategory.toLowerCase().includes(needle))
     .sort(compareRows);
@@ -13611,6 +13767,7 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
   const startRow = rows.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const endRow = Math.min(rows.length, currentPage * pageSize);
   const enabledCount = effectiveItems.filter(item => item.enabled).length;
+  const hasSystemScopedRows = effectiveItems.some(item => item.systemShortName);
   const active = activeProfile();
   const originalDocumentJson = response ? JSON.stringify(response.document) : "";
   const originalProfileJson = profileState ? JSON.stringify(profileState) : "";
@@ -13692,19 +13849,21 @@ function TalkgroupCatalogSettingsCard({ profileState, setProfileState, reload }:
         <table className="table compact-table">
           <thead><tr>
             <th><button type="button" className="sort-header" onClick={() => sortBy("state")}>State {sortKey === "state" ? sortDir : ""}</button></th>
+            {hasSystemScopedRows && <th>System</th>}
             <th><button type="button" className="sort-header" onClick={() => sortBy("id")}>TG ID {sortKey === "id" ? sortDir : ""}</button></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("name")}>Name {sortKey === "name" ? sortDir : ""}</button></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("category")}>Category {sortKey === "category" ? sortDir : ""}</button></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("load")}>Recent load {sortKey === "load" ? sortDir : ""}</button></th>
             <th>Catalog</th>
           </tr></thead>
-          <tbody>{visibleRows.map((item, index) => <tr className={item.enabled ? "" : "excluded-row"} key={`${item.id}-${index}`}>
-            <td><button type="button" onClick={() => updateActiveTalkgroup(item.id, { enabled: !item.enabled })}>{item.enabled ? "Disable" : "Enable"}</button></td>
+          <tbody>{visibleRows.map((item, index) => <tr className={item.enabled ? "" : "excluded-row"} key={`${talkgroupCatalogKey(item)}-${index}`}>
+            <td><button type="button" onClick={() => updateActiveTalkgroup(item, { enabled: !item.enabled })}>{item.enabled ? "Disable" : "Enable"}</button></td>
+            {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
             <td>{item.id}</td>
-            <td><input value={item.alphaTag} onChange={e => updateActiveTalkgroup(item.id, { label: e.target.value })} /></td>
-            <td><select value={item.opsCategory} onChange={e => updateActiveTalkgroup(item.id, { category: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
+            <td><input value={item.alphaTag} onChange={e => updateActiveTalkgroup(item, { label: e.target.value })} /></td>
+            <td><select value={item.opsCategory} onChange={e => updateActiveTalkgroup(item, { category: e.target.value })}>{categories.map(c => <option value={c} key={c}>{label(c)}</option>)}</select></td>
             <td>{highLoadByTalkgroup.has(item.id) ? `${highLoadByTalkgroup.get(item.id)!.calls.toLocaleString()} / ${formatDurationMinutes(highLoadByTalkgroup.get(item.id)!.audioSeconds / 60)}` : "--"}</td>
-            <td><button className="danger-button" onClick={() => deleteItem(item.id)}>Delete</button></td>
+            <td><button className="danger-button" onClick={() => deleteItem(talkgroupCatalogKey(item))}>Delete</button></td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -13789,6 +13948,24 @@ function createClientId() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0"));
   return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
+function normalizeTalkgroupSystem(value?: string | null) {
+  return String(value ?? "").trim().replace(/\s+/g, "-").toLowerCase();
+}
+
+function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemShortName" | "id"> | Pick<SetupTalkgroupRow, "key" | "systemShortName" | "id">) {
+  const key = String(item.key ?? "").trim().toLowerCase();
+  if (key) return key;
+  const system = normalizeTalkgroupSystem(item.systemShortName);
+  return system ? `${system}:${item.id}` : String(item.id);
+}
+
+function profileTalkgroupKey(item: { key?: string; systemShortName?: string; id: number }) {
+  const key = String(item.key ?? "").trim().toLowerCase();
+  if (key) return key;
+  const system = normalizeTalkgroupSystem(item.systemShortName);
+  return system ? `${system}:${item.id}` : String(item.id);
 }
 
 function withSettingsDefaults(value: Record<string, any>) {
