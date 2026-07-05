@@ -60,9 +60,7 @@ public sealed class SetupTalkgroupService
         if (rows.Count == 0)
             throw new InvalidOperationException("No included talkgroup rows were provided.");
 
-        var document = string.Equals(request.ApplyMode, "merge", StringComparison.OrdinalIgnoreCase)
-            ? MergeIntoExistingCatalog(rows)
-            : new TalkgroupCatalogDocument { Items = rows };
+        var document = new TalkgroupCatalogDocument { Items = rows };
         var result = await _catalog.SaveAsync(document, generateTrCsv: true, ct);
         var preview = new TalkgroupCatalogPreview(
             rows,
@@ -70,17 +68,6 @@ public sealed class SetupTalkgroupService
             rows.GroupBy(r => r.OpsCategory).OrderBy(g => g.Key).ToDictionary(g => g.Key, g => g.Count()),
             $"Saved {result.Count:N0} row(s) to the PizzaWave talkgroup catalog and regenerated {result.GeneratedCsvPath}.");
         return ToSetupPreview(preview, includeExcluded: false);
-    }
-
-    private TalkgroupCatalogDocument MergeIntoExistingCatalog(List<TalkgroupCatalogItem> rows)
-    {
-        var existing = _catalog.Load();
-        var importedByKey = rows.ToDictionary(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase);
-        var merged = existing.Items
-            .Where(row => !importedByKey.ContainsKey(TalkgroupCatalogService.ItemKey(row)))
-            .Concat(rows)
-            .ToList();
-        return existing with { Items = merged };
     }
 
     private static SetupTalkgroupPreviewDto ToSetupPreview(TalkgroupCatalogPreview preview, bool includeExcluded)

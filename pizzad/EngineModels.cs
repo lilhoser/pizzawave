@@ -284,7 +284,7 @@ public sealed record SetupSdrDetectionDto(
 
 public sealed record SetupTalkgroupParseRequest(string? CsvText = null, string? RadioReferenceSid = null, string? RadioReferenceUrl = null, bool IncludeNormallyExcluded = false, string? SystemShortName = null);
 
-public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows, string ApplyMode = "replace");
+public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows);
 
 public sealed record SetupTalkgroupRowDto
 {

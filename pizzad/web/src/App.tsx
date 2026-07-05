@@ -791,7 +791,7 @@ function SiteSetupView({ setup, reload }: { setup: SiteSetup | null; reload: () 
           </div>
           {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} onActivity={refreshSiteSetup} />}
+          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} />}
         </section>
       </div>
     </section>
@@ -1085,10 +1085,9 @@ function scopeTalkgroupPreviewToSystem(preview: SetupTalkgroupPreview, catalogSy
   };
 }
 
-function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; onActivity: () => Promise<void> }) {
+function SiteSetupTalkgroupsSection({ setup }: { setup: SiteSetup }) {
   const [rrSources, setRrSources] = useState(() => initialTalkgroupSources(setup));
   const [includeExcluded, setIncludeExcluded] = useState(false);
-  const [applyMode, setApplyMode] = useState<"merge" | "replace">("merge");
   const [preview, setPreview] = useState<SetupTalkgroupPreview | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1135,38 +1134,6 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
     }
   }
 
-  async function saveTalkgroups() {
-    if (!preview) {
-      setMessage("Preview talkgroups before saving.");
-      return;
-    }
-    setBusy("save");
-    setMessage("");
-    try {
-      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
-        method: "POST",
-        body: JSON.stringify({ rows: preview.rows, applyMode })
-      });
-      setPreview(result);
-      setMessage(result.diagnostics);
-      await api.request<unknown>(`${siteSetupApi}/activity`, {
-        method: "POST",
-        body: JSON.stringify({
-          category: "talkgroups",
-          action: applyMode === "merge" ? "catalog_merged" : "catalog_replaced",
-          summary: `Talkgroup catalog ${applyMode === "merge" ? "merged" : "replaced"} with ${result.includedCount.toLocaleString()} row(s).`,
-          details: { applyMode, rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid), includedCount: result.includedCount },
-          source: "ui"
-        })
-      });
-      await onActivity();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup save failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
   function updateTalkgroupRow(index: number, patch: Partial<SetupTalkgroupRow>) {
     setPreview(current => {
       if (!current) return current;
@@ -1201,10 +1168,7 @@ function SiteSetupTalkgroupsSection({ setup, onActivity }: { setup: SiteSetup; o
     </div>
     <div className="site-setup-inline-fields">
       <label className="setting-checkbox"><input type="checkbox" checked={includeExcluded} onChange={event => setIncludeExcluded(event.currentTarget.checked)} /> Include normally excluded rows</label>
-      <label className="setting-checkbox"><input type="radio" checked={applyMode === "merge"} onChange={() => setApplyMode("merge")} /> Merge catalog</label>
-      <label className="setting-checkbox"><input type="radio" checked={applyMode === "replace"} onChange={() => setApplyMode("replace")} /> Replace catalog</label>
-      <button type="button" disabled={Boolean(busy) || !rrSources.some(row => row.radioReferenceSid.trim())} onClick={() => void previewTalkgroups()}>{busy === "preview-rr" ? "Fetching" : "Preview RR"}</button>
-      <button type="button" className="danger-button" disabled={Boolean(busy) || !preview} onClick={() => void saveTalkgroups()}>{busy === "save" ? "Saving" : "Save Catalog"}</button>
+      {busy === "preview-rr" && <span className="settings-message">Fetching talkgroups...</span>}
     </div>
     {message && <div className={messageClass}>{message}</div>}
     {preview && <TalkgroupPreviewTable preview={preview} updateRow={updateTalkgroupRow} />}
