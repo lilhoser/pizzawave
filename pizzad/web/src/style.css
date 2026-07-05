@@ -6208,10 +6208,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .tr-config-review-row {
   display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(280px, 1.1fr);
+  grid-template-columns: minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(180px, 0.7fr) minmax(260px, 1fr);
   gap: 8px;
   align-items: center;
-  min-width: 760px;
+  min-width: 900px;
   padding: 7px 8px;
   background: #161d24;
 }

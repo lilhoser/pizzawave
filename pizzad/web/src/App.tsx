@@ -10365,10 +10365,18 @@ function TrConfigReviewCoverage({ systems, sources }: { systems: any[]; sources:
       <span>A source is an SDR tuning window. One source can cover multiple systems when their control channels are inside the same sampled span.</span>
     </div>
     <div className="tr-config-review-table">
-      <div className="tr-config-review-row header"><span>System</span><span>Control channels</span><span>Covered by source</span></div>
+      <div className="tr-config-review-row header"><span>System</span><span>Control channels</span><span>Source center</span><span>Covered by source</span></div>
       {rows.map(row => <div className={row.uncovered.length ? "tr-config-review-row warning" : "tr-config-review-row"} key={row.shortName}>
         <span><strong>{row.shortName}</strong></span>
         <span>{row.channels.length ? row.channels.map(formatRfHz).join(", ") : "--"}</span>
+        <span>
+          {row.covered.length
+            ? row.covered.map(index => {
+              const source = sourceWindows[index];
+              return <code key={index}>#{index} {formatRfHz(source.center)}</code>;
+            })
+            : "--"}
+        </span>
         <span>
           {row.covered.length
             ? row.covered.map(index => {
