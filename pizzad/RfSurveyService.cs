@@ -12,6 +12,7 @@ namespace pizzad;
 public sealed class RfSurveyService
 {
     private const double TrUsableHalfBandwidthFactor = 0.46875;
+    private const int MinUsableTranscriptionGateChars = 12;
     private static readonly TimeSpan WaterfallConsumeTimeout = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExperimentCancellations = new();
     private readonly ConcurrentDictionary<string, WaterfallRuntime> _activeWaterfalls = new();
@@ -7547,7 +7548,7 @@ public sealed class RfSurveyService
             string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(c.Transcription) &&
-            c.Transcription.Trim().Length >= 40);
+            c.Transcription.Trim().Length >= MinUsableTranscriptionGateChars);
 
     private async Task<TranscriptionProviderReadiness> CheckTranscriptionProviderReadinessAsync(CancellationToken ct)
     {
