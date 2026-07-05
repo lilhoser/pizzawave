@@ -16,6 +16,7 @@ public sealed class EngineConfig
     public EmbeddingsConfig Embeddings { get; set; } = new();
     public TrunkRecorderConfig TrunkRecorder { get; set; } = new();
     public RfSurveyConfig RfSurvey { get; set; } = new();
+    public SiteSetupConfig SiteSetup { get; set; } = new();
     public AlertConfig Alerts { get; set; } = new();
     public ProfileConfig Profiles { get; set; } = new();
     public LocationConfig Locations { get; set; } = new();
@@ -189,6 +190,17 @@ public sealed class EngineConfig
         if (RfSurvey.P25ProbeDurationSeconds <= 0) RfSurvey.P25ProbeDurationSeconds = 45;
         RfSurvey.P25ProbeDurationSeconds = Math.Clamp(RfSurvey.P25ProbeDurationSeconds, 10, 300);
         if (RfSurvey.P25ProbeTimeoutSeconds <= 0) RfSurvey.P25ProbeTimeoutSeconds = Math.Max(30, RfSurvey.P25ProbeDurationSeconds + 15);
+        SiteSetup.SiteLabel = SiteSetup.SiteLabel?.Trim() ?? string.Empty;
+        SiteSetup.LocationNotes = SiteSetup.LocationNotes?.Trim() ?? string.Empty;
+        SiteSetup.RadioReferenceSid = SiteSetup.RadioReferenceSid?.Trim() ?? string.Empty;
+        SiteSetup.SourcePlanMode = string.IsNullOrWhiteSpace(SiteSetup.SourcePlanMode) ? "full" : SiteSetup.SourcePlanMode.Trim();
+        SiteSetup.SystemShortNames ??= new();
+        SiteSetup.SourcePlanSystemShortNames ??= new();
+        SiteSetup.Systems ??= new();
+        SiteSetup.SelectedSourceIndexes ??= new();
+        SiteSetup.Sources ??= new();
+        SiteSetup.RfPath ??= new();
+        if (SiteSetup.DesiredVersion <= 0) SiteSetup.DesiredVersion = 1;
         Auth.Mode = string.IsNullOrWhiteSpace(Auth.Mode) ? "token" : Auth.Mode.Trim();
         Alerts.EmailProvider = string.IsNullOrWhiteSpace(Alerts.EmailProvider) ? "gmail" : Alerts.EmailProvider.Trim();
         Alerts.EmailUser ??= string.Empty;
@@ -377,6 +389,24 @@ public sealed class TrunkRecorderConfig
     public string TalkgroupsPath { get; set; } = "/etc/trunk-recorder/talkgroups.csv";
     public string LogServiceName { get; set; } = "trunk-recorder";
     public int HealthWindowMinutes { get; set; } = 5;
+}
+
+public sealed class SiteSetupConfig
+{
+    public long DesiredVersion { get; set; } = 1;
+    public string SiteLabel { get; set; } = string.Empty;
+    public string LocationNotes { get; set; } = string.Empty;
+    public string RadioReferenceSid { get; set; } = string.Empty;
+    public List<string> SystemShortNames { get; set; } = new();
+    public List<string> SourcePlanSystemShortNames { get; set; } = new();
+    public string SourcePlanMode { get; set; } = "full";
+    public List<RfSurveySystemDto> Systems { get; set; } = new();
+    public List<int> SelectedSourceIndexes { get; set; } = new();
+    public List<RfSurveySourceDto> Sources { get; set; } = new();
+    public RfSurveyPathProfileDto RfPath { get; set; } = new();
+    public DateTime? UpdatedAtUtc { get; set; }
+    public DateTime? LastAppliedAtUtc { get; set; }
+    public string LastAppliedConfigHash { get; set; } = string.Empty;
 }
 
 public sealed class RfSurveyConfig

@@ -676,6 +676,58 @@ public sealed class EngineDatabase
         return rows;
     }
 
+    public async Task AddSiteSetupActivityAsync(SiteSetupActivityDto entry, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO site_setup_activity (
+                timestamp_utc, category, action, summary, details_json, desired_version, applied_config_hash, monitoring_state, source)
+            VALUES (
+                $timestamp_utc, $category, $action, $summary, $details_json, $desired_version, $applied_config_hash, $monitoring_state, $source);
+            """;
+        Add(command, "$timestamp_utc", entry.TimestampUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$category", entry.Category);
+        Add(command, "$action", entry.Action);
+        Add(command, "$summary", entry.Summary);
+        Add(command, "$details_json", entry.DetailsJson);
+        Add(command, "$desired_version", entry.DesiredVersion);
+        Add(command, "$applied_config_hash", entry.AppliedConfigHash);
+        Add(command, "$monitoring_state", entry.MonitoringState);
+        Add(command, "$source", entry.Source);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<SiteSetupActivityDto>> ListSiteSetupActivityAsync(int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, timestamp_utc, category, action, summary, details_json, desired_version, applied_config_hash, monitoring_state, source
+            FROM site_setup_activity
+            ORDER BY timestamp_utc DESC, id DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$limit", Math.Clamp(limit, 1, 500));
+        var rows = new List<SiteSetupActivityDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new SiteSetupActivityDto(
+                reader.GetInt64(reader.GetOrdinal("id")),
+                DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc")), null, System.Globalization.DateTimeStyles.RoundtripKind).ToUniversalTime(),
+                reader.GetString(reader.GetOrdinal("category")),
+                reader.GetString(reader.GetOrdinal("action")),
+                reader.GetString(reader.GetOrdinal("summary")),
+                reader.GetString(reader.GetOrdinal("details_json")),
+                reader.GetInt64(reader.GetOrdinal("desired_version")),
+                reader.GetString(reader.GetOrdinal("applied_config_hash")),
+                reader.GetString(reader.GetOrdinal("monitoring_state")),
+                reader.GetString(reader.GetOrdinal("source"))));
+        }
+        return rows;
+    }
+
     public async Task<GeocodeCacheDto?> GetGeocodeCacheAsync(string cacheKey, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -3328,6 +3380,21 @@ public sealed class EngineDatabase
             CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_time ON incident_operation_audit(timestamp_utc DESC);
             CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_key ON incident_operation_audit(incident_key, timestamp_utc DESC);
 
+            CREATE TABLE IF NOT EXISTS site_setup_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp_utc TEXT NOT NULL,
+                category TEXT NOT NULL,
+                action TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                details_json TEXT NOT NULL DEFAULT '{}',
+                desired_version INTEGER NOT NULL DEFAULT 0,
+                applied_config_hash TEXT NOT NULL DEFAULT '',
+                monitoring_state TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_site_setup_activity_time ON site_setup_activity(timestamp_utc DESC);
+            CREATE INDEX IF NOT EXISTS idx_site_setup_activity_category ON site_setup_activity(category, timestamp_utc DESC);
+
             CREATE TABLE IF NOT EXISTS call_embedding_jobs (
                 call_id INTEGER PRIMARY KEY,
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -3626,6 +3693,21 @@ public sealed class EngineDatabase
         );
         CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_time ON incident_operation_audit(timestamp_utc DESC);
         CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_key ON incident_operation_audit(incident_key, timestamp_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS site_setup_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_utc TEXT NOT NULL,
+            category TEXT NOT NULL,
+            action TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            details_json TEXT NOT NULL DEFAULT '{}',
+            desired_version INTEGER NOT NULL DEFAULT 0,
+            applied_config_hash TEXT NOT NULL DEFAULT '',
+            monitoring_state TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_site_setup_activity_time ON site_setup_activity(timestamp_utc DESC);
+        CREATE INDEX IF NOT EXISTS idx_site_setup_activity_category ON site_setup_activity(category, timestamp_utc DESC);
 
         CREATE TABLE IF NOT EXISTS call_embedding_jobs (
             call_id INTEGER PRIMARY KEY,

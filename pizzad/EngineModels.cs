@@ -1031,6 +1031,62 @@ public sealed record SetupSaveRequest(JsonElement Values);
 
 public sealed record SetupValidationResult(bool Ok, string Message, object? Detail = null);
 
+public sealed record SiteSetupDto(
+    SiteSetupConfig Desired,
+    SiteSetupAppliedConfigDto Applied,
+    SiteSetupStatusDto Status,
+    IReadOnlyList<SiteSetupPendingChangeDto> PendingChanges,
+    IReadOnlyList<SiteSetupActivityDto> RecentActivity);
+
+public sealed record SiteSetupStatusDto(
+    string MonitoringState,
+    string Message,
+    bool PendingApply,
+    long DesiredVersion,
+    string AppliedConfigHash,
+    DateTime? LastAppliedAtUtc);
+
+public sealed record SiteSetupAppliedConfigDto(
+    string ConfigPath,
+    bool ConfigExists,
+    string ConfigHash,
+    DateTime? ConfigUpdatedAtUtc,
+    IReadOnlyList<string> SystemShortNames,
+    IReadOnlyList<long> ControlChannelsHz,
+    IReadOnlyList<SiteSetupAppliedSourceDto> Sources);
+
+public sealed record SiteSetupAppliedSourceDto(
+    int Index,
+    string Device,
+    string Serial,
+    long CenterHz,
+    int SampleRate,
+    int ErrorHz,
+    string Gain);
+
+public sealed record SiteSetupPendingChangeDto(string Category, string Summary);
+
+public sealed record SiteSetupUpdateRequest(SiteSetupConfig Desired, string Source = "ui");
+
+public sealed record SiteSetupActivityRequest(
+    string Category,
+    string Action,
+    string Summary,
+    JsonElement? Details = null,
+    string Source = "ui");
+
+public sealed record SiteSetupActivityDto(
+    long Id,
+    DateTime TimestampUtc,
+    string Category,
+    string Action,
+    string Summary,
+    string DetailsJson,
+    long DesiredVersion,
+    string AppliedConfigHash,
+    string MonitoringState,
+    string Source);
+
 public sealed record RfSurveyListDto(
     IReadOnlyList<RfSurveySessionDto> Sessions,
     string ArtifactRoot);

@@ -57,6 +57,7 @@ builder.Services.AddSingleton<SystemCpuSnapshotService>();
 builder.Services.AddSingleton<BackupRestoreService>();
 builder.Services.AddSingleton<MigrationService>();
 builder.Services.AddSingleton<SetupService>();
+builder.Services.AddSingleton<SiteSetupService>();
 builder.Services.AddSingleton<SetupJobService>();
 builder.Services.AddHttpClient<SetupTalkgroupService>();
 builder.Services.AddHttpClient<SetupTrConfigBuilderService>();
@@ -222,6 +223,52 @@ app.MapPost("/api/v1/setup/save", async (SetupSaveRequest request, SetupService 
     }
 })
 .WithName("SetupSave")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site", async (HttpContext context, AuthService authService, SiteSetupService siteSetup) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await siteSetup.GetAsync(context.RequestAborted));
+})
+.WithName("SiteSetupGet")
+.WithOpenApi();
+
+app.MapPatch("/api/v1/setup/site", async (HttpContext context, SiteSetupUpdateRequest request, AuthService authService, SiteSetupService siteSetup) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await siteSetup.UpdateDesiredAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupUpdate")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/activity", async (HttpContext context, int? limit, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await database.ListSiteSetupActivityAsync(limit ?? 100, context.RequestAborted));
+})
+.WithName("SiteSetupActivityList")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/activity", async (HttpContext context, SiteSetupActivityRequest request, AuthService authService, SiteSetupService siteSetup) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await siteSetup.AddActivityAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupActivityAdd")
 .WithOpenApi();
 
 app.MapPost("/api/v1/setup/validate/{section}", async (string section, SetupService setup, HttpContext context, AuthService authService) =>
