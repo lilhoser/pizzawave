@@ -3961,11 +3961,14 @@ function RfPathRefinementStep({
   ];
   return <div className="rf-step-stack">
     <div className="rf-subpage-tabs" aria-label="RF path and error/gain sub-pages">
-      {pages.map(page => <button key={page.id} className={subPage === page.id ? "active" : measurementDone(page.status) ? "done" : ""} onClick={() => setSubPage(page.id)}>
-        <span>{measurementDone(page.status) ? <CheckCircle2 size={12} /> : page.optional ? "Opt" : ""}</span>
-        <strong>{page.title}</strong>
-        <small>{page.status ? label(page.status) : page.optional ? "Optional" : "Pending"}</small>
-      </button>)}
+      {pages.map(page => {
+        const partial = page.status === "partial";
+        return <button key={page.id} className={subPage === page.id ? "active" : measurementDone(page.status) ? "done" : partial ? "partial" : ""} onClick={() => setSubPage(page.id)}>
+          <span>{measurementDone(page.status) ? <CheckCircle2 size={12} /> : partial ? "Part" : page.optional ? "Opt" : ""}</span>
+          <strong>{page.title}</strong>
+          <small>{page.status ? label(page.status) : page.optional ? "Optional" : "Pending"}</small>
+        </button>;
+      })}
     </div>
     {subPage === "path"
       ? <RfPathStep path={path} setPath={setPath} onTouched={onRfPathTouched} onLoadPrevious={onLoadPreviousRfPath} busy={props.busy} />
@@ -7895,10 +7898,14 @@ function rfValidationEffectiveStatus(experiment?: RfSurveyExperiment, systems: R
   const groups = rfValidationSiteReadiness(candidates, systems);
   if (groups.length > 0 && groups.every(group => group.best && rfValidationCandidatePassed(group.best)))
     return "passed";
+  if (groups.some(group => group.best && rfValidationCandidatePassed(group.best)))
+    return "partial";
   const evidence = parseExperimentJson<any>(experiment.evidenceJson);
   const siteReadiness = Array.isArray(evidence?.siteReadiness) ? evidence.siteReadiness : [];
   if (siteReadiness.length > 0 && siteReadiness.every((site: any) => site?.monitorable === true))
     return "passed";
+  if (siteReadiness.some((site: any) => site?.monitorable === true))
+    return "partial";
   return experiment.status;
 }
 

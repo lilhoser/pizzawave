@@ -3021,6 +3021,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .rf-subpage-tabs button.done {
   border-color: #54d68a;
 }
+.rf-subpage-tabs button.partial {
+  border-color: #f7c948;
+  background: rgba(247, 201, 72, 0.08);
+}
 .rf-subpage-tabs button > span {
   grid-row: 1 / span 2;
   color: #8e99a3;
