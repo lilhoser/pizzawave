@@ -1310,6 +1310,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
           <WaterfallStep
             apiBase={siteSetupRfApi}
             surveyId={detail.session.id}
+            visible={subPage === "waterfall"}
             locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
             sources={effectiveSources}
             selectedSources={selectedSourceIndexes}
@@ -4789,6 +4790,7 @@ function SiteValidationStep({
 function WaterfallStep({
   apiBase = siteSetupRfApi,
   surveyId,
+  visible = true,
   locked,
   sources,
   selectedSources,
@@ -4806,6 +4808,7 @@ function WaterfallStep({
 }: {
   apiBase?: string;
   surveyId: string;
+  visible?: boolean;
   locked: boolean;
   sources: RfSurveySource[];
   selectedSources: number[];
@@ -4952,7 +4955,30 @@ function WaterfallStep({
     spectrumScaleRef.current = null;
   }, [spectrumSpanDb]);
 
+  function resetWaterfallDrawingState(clearCanvases: boolean) {
+    lastFrameRef.current = "";
+    hasGoodWaterfallFrameRef.current = false;
+    smoothedSpectrumRef.current = [];
+    heldSpectrumRef.current = [];
+    peakHistoryRef.current.clear();
+    otherDetectedCcHistoryRef.current.clear();
+    ccSignalHistoryRef.current.clear();
+    visiblePeaksRef.current = [];
+    spectrumScaleRef.current = null;
+    waterfallScaleRef.current = null;
+    spectrumAxisRef.current = null;
+    setOtherDetectedCcRows([]);
+    setSpectrumHover(null);
+    setCcSignalRows([]);
+    if (clearCanvases) {
+      clearWaterfallCanvas(spectrumCanvasRef.current);
+      clearWaterfallCanvas(canvasRef.current);
+    }
+  }
+
   function renderWaterfallStatus(next: RfSurveyWaterfallStatus | null) {
+    if (!visible)
+      return;
     const frames = next?.frames?.length ? next.frames : next?.frame ? [next.frame] : [];
     for (const frame of frames) {
       const renderKey = `${frame.sequence}:${spectrumSpanDb}:${showControlChannelLines ? "cc" : "no-cc"}:${controlChannels.join(",")}`;
@@ -4995,12 +5021,20 @@ function WaterfallStep({
   }
 
   useEffect(() => {
+    if (!visible)
+      return;
     let stopped = false;
     async function loadStatus() {
       try {
         const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
         if (stopped) return;
-        window.requestAnimationFrame(() => renderWaterfallStatus(next));
+        resetWaterfallDrawingState(true);
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            if (!stopped)
+              renderWaterfallStatus(next);
+          });
+        });
         setStatus({ ...next, frames: null });
         if (next.active) {
           if (Number.isFinite(next.sourceIndex))
@@ -5022,10 +5056,10 @@ function WaterfallStep({
     return () => {
       stopped = true;
     };
-  }, [surveyId]);
+  }, [apiBase, surveyId, visible]);
 
   useEffect(() => {
-    if (!status?.active) return;
+    if (!visible || !status?.active) return;
     let stopped = false;
     async function poll() {
       try {
@@ -5045,11 +5079,13 @@ function WaterfallStep({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [surveyId, status?.active]);
+  }, [apiBase, surveyId, status?.active, visible]);
 
   useEffect(() => {
+    if (!visible)
+      return;
     renderWaterfallStatus(status);
-  }, [status?.frame?.sequence, spectrumSpanDb, showControlChannelLines, controlChannels.join(","), systems.map(system => `${system.shortName}:${system.controlChannelsHz.join("/")}`).join("|")]);
+  }, [visible, status?.frame?.sequence, spectrumSpanDb, showControlChannelLines, controlChannels.join(","), systems.map(system => `${system.shortName}:${system.controlChannelsHz.join("/")}`).join("|")]);
 
   async function startWaterfall() {
     if (!gainOk) {
@@ -5058,23 +5094,8 @@ function WaterfallStep({
     }
     setBusy("start");
     setMessage("");
-    lastFrameRef.current = "";
-    hasGoodWaterfallFrameRef.current = false;
-    smoothedSpectrumRef.current = [];
-    heldSpectrumRef.current = [];
-    peakHistoryRef.current.clear();
-    otherDetectedCcHistoryRef.current.clear();
-    ccSignalHistoryRef.current.clear();
-    visiblePeaksRef.current = [];
-    setOtherDetectedCcRows([]);
-    setSpectrumHover(null);
-    setCcSignalRows([]);
+    resetWaterfallDrawingState(true);
     setIdentifyOverlayMessage("");
-    spectrumScaleRef.current = null;
-    waterfallScaleRef.current = null;
-    spectrumAxisRef.current = null;
-    clearWaterfallCanvas(spectrumCanvasRef.current);
-    clearWaterfallCanvas(canvasRef.current);
     try {
       const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall/start`, {
         method: "POST",
