@@ -1117,13 +1117,13 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
     setMessage("");
   }, [setupSourceKey]);
   useEffect(() => {
-    const key = `normal:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
-    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key-v3") ?? "";
+    const key = `normal:${rrSources.map(row => row.radioReferenceSid.trim()).join("|")}`;
+    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key-v4") ?? "";
     if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoImportKeyRef.current === key || lastImportedKey === key)
       return;
     autoImportKeyRef.current = key;
     void importTalkgroups(key);
-  }, [rrSources.map(row => `${row.radioReferenceSid}:${row.catalogSystem}`).join("|")]);
+  }, [rrSources.map(row => row.radioReferenceSid).join("|")]);
 
   async function fetchTalkgroupPreview() {
     const activeSources = rrSources
@@ -1133,13 +1133,22 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
       setMessage("Enter at least one RR system ID first.");
       throw new Error("Enter at least one RR system ID first.");
     }
-    return combineTalkgroupPreviews(await Promise.all(activeSources.map(async row => {
+    const previewPairs = await Promise.all(activeSources.map(async row => {
       const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
         method: "POST",
         body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: false })
       });
-      return scopeTalkgroupPreviewToSystem(preview, row.catalogSystem);
-    })));
+      return { sid: row.radioReferenceSid, preview };
+    }));
+    const resolvedNames = new Map(previewPairs.map(pair => [
+      pair.sid,
+      pair.preview.rows.find(row => row.systemShortName)?.systemShortName ?? ""
+    ]));
+    setRrSources(current => current.map(row => {
+      const resolved = resolvedNames.get(row.radioReferenceSid);
+      return resolved ? { ...row, catalogSystem: resolved } : row;
+    }));
+    return combineTalkgroupPreviews(previewPairs.map(pair => pair.preview));
   }
 
   async function importTalkgroups(importKey: string) {
@@ -1151,7 +1160,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
         method: "POST",
         body: JSON.stringify({ rows: currentPreview.rows })
       });
-      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v3", importKey);
+      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v4", importKey);
       setMessage(`Loaded ${result.includedCount.toLocaleString()} talkgroup row(s) from RadioReference into the catalog.`);
       setCatalogReloadToken(value => value + 1);
       await api.request<unknown>(`${siteSetupApi}/activity`, {
