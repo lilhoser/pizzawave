@@ -1140,10 +1140,121 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
 }
 
 function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
-  const systems = setup.desired.systems.length
+  const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [activeControlChannelHz, setActiveControlChannelHz] = useState(0);
+  const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
+  const workspaceKey = "pizzawave-site-setup-rf-validation-workspace";
+  const systems = siteSetupSystems(setup);
+  const sources = siteSetupSources(setup);
+  const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
+    ? setup.desired.selectedSourceIndexes
+    : sources.map(source => source.index);
+  const controlChannels = normalizeControlChannelSelection(systems.flatMap(system => system.controlChannelsHz));
+  const signature = JSON.stringify({
+    siteLabel: setup.desired.siteLabel,
+    sid: setup.desired.radioReferenceSid,
+    systems,
+    sources,
+    selectedSourceIndexes,
+    rfPath: setup.desired.rfPath
+  });
+  useEffect(() => {
+    let stopped = false;
+    async function loadWorkspace() {
+      setBusy("workspace");
+      setMessage("");
+      try {
+        const existingId = localStorage.getItem(workspaceKey) ?? "";
+        let current: RfSurveyDetail | null = null;
+        if (existingId) {
+          try {
+            current = await api.request<RfSurveyDetail>(radioSetupDetailUrl(existingId));
+          } catch {
+            localStorage.removeItem(workspaceKey);
+          }
+        }
+        const request = siteSetupRfSurveyRequest(setup, systems, sources, selectedSourceIndexes);
+        current = current
+          ? await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(current.session.id)}/draft`, { method: "POST", body: JSON.stringify(request) })
+          : await api.request<RfSurveyDetail>(radioSetupApi, { method: "POST", body: JSON.stringify(request) });
+        localStorage.setItem(workspaceKey, current.session.id);
+        if (!stopped) {
+          setDetail(current);
+          const firstCc = normalizeControlChannelSelection(current.profile.systems.flatMap(system => system.controlChannelsHz))[0] ?? controlChannels[0] ?? 0;
+          setActiveControlChannelHz(currentValue => currentValue || firstCc);
+        }
+      } catch (error) {
+        if (!stopped)
+          setMessage(error instanceof Error ? error.message : "Unable to prepare RF validation workspace.");
+      } finally {
+        if (!stopped)
+          setBusy("");
+      }
+    }
+    void loadWorkspace();
+    return () => { stopped = true; };
+  }, [signature]);
+  async function refreshWorkspace() {
+    if (!detail) return;
+    const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(detail.session.id));
+    setDetail(next);
+  }
+  async function runExperiment(type: string, _estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) {
+    if (!detail) return undefined;
+    const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
+      method: "POST",
+      body: JSON.stringify({ type, durationSeconds: 45, controlChannelHz, ...extraRequest })
+    });
+    await refreshWorkspace();
+    return experiment;
+  }
+  async function adoptWaterfallSite(system: RfSurveySystem) {
+    setMessage(`${system.siteLabel || system.shortName} was detected. Add or remove sites on Systems & Sites.`);
+  }
+  const effectiveSystems = detail?.profile.systems?.length ? detail.profile.systems : systems;
+  const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
+  const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
+  const cachedSites = readCachedRadioReferenceSites(setup.desired.radioReferenceSid);
+  return <div className="site-setup-form site-setup-rf-validation">
+    {busy === "workspace" && <div className="setup-note">Preparing RF validation workspace...</div>}
+    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    {detail
+      ? <WaterfallStep
+        surveyId={detail.session.id}
+        locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
+        sources={effectiveSources}
+        selectedSources={selectedSourceIndexes}
+        systems={effectiveSystems}
+        radioReferenceSites={cachedSites}
+        controlChannels={effectiveControlChannels}
+        activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
+        waterfallSweepSelections={waterfallSweepSelections}
+        onWaterfallSweepSelections={setWaterfallSweepSelections}
+        onAdoptWaterfallSite={adoptWaterfallSite}
+        onRunExperiment={runExperiment}
+        onReload={refreshWorkspace}
+      />
+      : !busy && <div className="setup-warning-list"><div>RF Validation needs at least one selected site/control channel and one SDR source.</div></div>}
+  </div>;
+}
+
+function sdrTypeFromDeviceLabel(device: string) {
+  const value = (device || "").toLowerCase();
+  if (value.includes("airspy")) return "Airspy";
+  if (value.includes("rtl")) return "RTL-SDR";
+  return value ? "SDR" : "";
+}
+
+function siteSetupSystems(setup: SiteSetup): RfSurveySystem[] {
+  return setup.desired.systems.length
     ? setup.desired.systems
     : selectedSetupSystemNames(setup).map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
-  const sources = setup.desired.sources.length
+}
+
+function siteSetupSources(setup: SiteSetup): RfSurveySource[] {
+  return setup.desired.sources.length
     ? setup.desired.sources
     : setup.applied.sources.map(source => ({
       index: source.index,
@@ -1155,39 +1266,27 @@ function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
       errorHz: source.errorHz,
       gain: source.gain
     }));
-  const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
-    ? setup.desired.selectedSourceIndexes
-    : sources.map(source => source.index);
-  const selectedSources = sources.filter(source => selectedSourceIndexes.includes(source.index));
-  return <div className="site-setup-form site-setup-rf-validation">
-    <RfConditionOverview
-      path={normalizeSetupRfPath(setup.desired.rfPath)}
-      systemShortName={systems.map(system => system.shortName).join(", ")}
-      sources={sources}
-      selectedSources={selectedSourceIndexes}
-      controlChannels={systems.flatMap(system => system.controlChannelsHz)}
-    />
-    <div className="site-setup-site-table-wrap">
-      <table className="table compact-table site-setup-site-table">
-        <thead><tr><th>System</th><th>Control channels</th><th>Selected source</th></tr></thead>
-        <tbody>
-          {systems.map(system => <tr key={system.shortName || system.siteLabel}>
-            <td>{system.siteLabel || system.shortName}</td>
-            <td>{system.controlChannelsHz.length ? formatFrequencyList(system.controlChannelsHz) : "--"}</td>
-            <td>{selectedSources.length ? selectedSources.map(source => `#${source.index} ${source.sdrType || source.device} gain ${source.gain || "?"} error ${formatSignedHz(source.errorHz || 0)}`).join(" / ") : "--"}</td>
-          </tr>)}
-          {systems.length === 0 && <tr><td colSpan={3}>No systems selected.</td></tr>}
-        </tbody>
-      </table>
-    </div>
-  </div>;
 }
 
-function sdrTypeFromDeviceLabel(device: string) {
-  const value = (device || "").toLowerCase();
-  if (value.includes("airspy")) return "Airspy";
-  if (value.includes("rtl")) return "RTL-SDR";
-  return value ? "SDR" : "";
+function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], sources: RfSurveySource[], selectedSourceIndexes: number[]) {
+  const systemNames = systems.map(system => system.shortName).filter(Boolean);
+  return {
+    systemShortName: systemNames[0] || undefined,
+    systemShortNames: systemNames,
+    sourcePlanSystemShortNames: setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : systemNames,
+    sourcePlanMode: setup.desired.sourcePlanMode || "full",
+    systemDefinitions: systems,
+    siteLabel: setup.desired.siteLabel || "Site Setup",
+    radioReferenceSid: setup.desired.radioReferenceSid || undefined,
+    mode: "guided",
+    groundTruthSource: "site-setup",
+    rfPath: normalizeSetupRfPath(setup.desired.rfPath),
+    selectedSourceIndexes,
+    sdrSources: sources,
+    currentStep: 2,
+    measurementMode: "guided",
+    probeDurationSeconds: 45
+  };
 }
 
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
