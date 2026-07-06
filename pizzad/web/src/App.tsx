@@ -1018,23 +1018,29 @@ function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const selectedSystems = setup.desired.systems.length
     ? setup.desired.systems
     : systemNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
-  const rows = selectedSystems
-    .map((system, index) => {
-      const sid = radioReferenceSidForSetupSystem(system, sids);
-      const catalogSystem = system.shortName || system.siteLabel || fallbackSystem;
-      return catalogSystem
-        ? { key: `source-${sid || "unknown"}-${index}-${catalogSystem}`, radioReferenceSid: sid, catalogSystem }
-        : null;
-    })
-    .filter((row): row is SiteSetupTalkgroupSource => Boolean(row?.catalogSystem));
+  const sidMap = new Map<string, string>();
+  for (const system of selectedSystems) {
+    const sid = radioReferenceSidForSetupSystem(system, sids);
+    if (!sid || sidMap.has(sid)) continue;
+    sidMap.set(sid, catalogSystemForRadioReferenceSid(sid, system.shortName || system.siteLabel || fallbackSystem));
+  }
+  const rows = Array.from(sidMap, ([sid, catalogSystem]) => ({
+    key: `source-${sid}-${catalogSystem}`,
+    radioReferenceSid: sid,
+    catalogSystem
+  }));
   if (rows.length > 0)
     return rows;
-  const targetSystems = systemNames.length ? systemNames : [fallbackSystem || `rr-${sids[0]}`];
-  return targetSystems.map((system, index) => ({
-    key: `source-${sids.length === 1 ? sids[0] : "unknown"}-${index}-${system}`,
-    radioReferenceSid: sids.length === 1 ? sids[0] : "",
-    catalogSystem: system
+  return sids.map(sid => ({
+    key: `source-${sid}`,
+    radioReferenceSid: sid,
+    catalogSystem: catalogSystemForRadioReferenceSid(sid, fallbackSystem || `rr-${sid}`)
   }));
+}
+
+function catalogSystemForRadioReferenceSid(sid: string, fallback: string) {
+  const cached = readCachedRadioReferenceSites(sid);
+  return normalizeTalkgroupSystem(cached?.systemName || fallback || `rr-${sid}`);
 }
 
 function parseRadioReferenceSidList(value: string) {
