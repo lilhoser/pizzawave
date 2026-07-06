@@ -13,7 +13,7 @@ const siteSetupApi = "/api/v1/setup/site";
 const radioSetupDetailUrl = (id: string, compact = true) => `${radioSetupApi}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
 const waterfallStopUrl = (surveyId: string) => `${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`;
 const siteSetupRfWorkspaceKey = "pizzawave-site-setup-rf-validation-workspace";
-type Page = "dashboard" | "setup" | "tools" | "system" | "settings" | typeof categories[number];
+type Page = "dashboard" | "setup" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
 type CategorySortMode = "name" | "recent" | "frequent";
 type AuthPromptState = { request: AuthTokenRequest; resolve: (token: string | null) => void; token: string; message: string };
@@ -276,8 +276,6 @@ function App() {
     } else if (categories.includes(page as any)) {
       const search = globalSearch.trim();
       setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}${search ? `&q=${encodeURIComponent(search)}` : ""}`));
-    } else if (page === "tools") {
-      // Tool pages fetch their own focused data.
     } else if (page === "setup") {
       setSiteSetup(await api.request<SiteSetup>(siteSetupApi));
     } else if (page === "system") {
@@ -416,7 +414,7 @@ function App() {
     };
   }, []);
 
-  const nav = useMemo(() => ["dashboard", ...categories, "setup", "tools", "system", "settings"] as Page[], []);
+  const nav = useMemo(() => ["dashboard", ...categories, "setup", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
   const activeJobCount = jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length;
@@ -447,7 +445,7 @@ function App() {
   ].filter(Boolean).join(" ");
   const livePillText = trCoveragePaused ? "TR paused" : liveTrActivity?.stale ? "Live stale" : trIntentionallyStopped ? "TR stopped" : status;
   const livePillTitle = trCoveragePaused
-    ? radioSetupTrOperation || "trunk-recorder is temporarily paused or restarting while a Radio Setup job is running."
+    ? radioSetupTrOperation || "trunk-recorder is temporarily paused or restarting while Setup runs an RF validation job."
     : liveTrActivity?.stale || trIntentionallyStopped
     ? liveTrActivity.message
     : "Live means the browser is connected to pizzad and recent TR activity has not crossed the silence threshold.";
@@ -700,12 +698,11 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         ))}
       </aside>}
       <main className={`main ${inSetup ? "setup-main" : ""}`}>
-        {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("tools")} />}
+        {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
         {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={setRadioSetupTrOperation} />}
-        {setupStatus?.completed && page === "tools" && <ToolsView onTrOperationChange={setRadioSetupTrOperation} />}
-        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenRadioSetup={() => setPage("tools")} />}
+        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={() => setPage("setup")} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
       </main>
       {!inSetup && <footer className="statusbar">
@@ -3105,7 +3102,7 @@ function normalizeSystemTopTab(value: string | null): SystemTopTab {
     : "recommendations";
 }
 
-function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot, recommendations, setRecommendations, targetTab, clearTargetTab, onOpenRadioSetup }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; cpuSnapshot: SystemCpuSnapshot | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenRadioSetup?: () => void }) {
+function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot, recommendations, setRecommendations, targetTab, clearTargetTab, onOpenSetup }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; cpuSnapshot: SystemCpuSnapshot | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenSetup?: () => void }) {
   const [topTab, setTopTabState] = useState<SystemTopTab>(() => normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
   const [trTab, setTrTabState] = useState<SystemTrTab>(() => {
     const saved = localStorage.getItem("pizzawave-system-tr-tab");
@@ -3282,7 +3279,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Logs</button>
         </div>
         {trTab === "summary" && <TrHealthSummaryView data={data} />}
-        {trTab === "config" && <TrConfigReadOnlyPanel onOpenRadioSetup={onOpenRadioSetup} />}
+        {trTab === "config" && <TrConfigReadOnlyPanel onOpenSetup={onOpenSetup} />}
         {trTab === "restore" && <TrConfigRestorePanel />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
       </div>}
@@ -3308,23 +3305,18 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
   );
 }
 
-function TrConfigReadOnlyPanel({ onOpenRadioSetup }: { onOpenRadioSetup?: () => void }) {
+function TrConfigReadOnlyPanel({ onOpenSetup }: { onOpenSetup?: () => void }) {
   const [editor, setEditor] = useState<TrConfigEditor | null>(null);
-  const [surveys, setSurveys] = useState<RfSurveyList | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(true);
 
   useEffect(() => {
     let canceled = false;
     setBusy(true);
-    Promise.all([
-      api.request<TrConfigEditor>("/api/v1/system/tr-config/editor"),
-      api.request<RfSurveyList>(radioSetupApi).catch(() => null)
-    ])
-      .then(([editorResult, surveyResult]) => {
+    api.request<TrConfigEditor>("/api/v1/system/tr-config/editor")
+      .then(editorResult => {
         if (canceled) return;
         setEditor(editorResult);
-        setSurveys(surveyResult);
         setMessage("");
       })
       .catch(error => !canceled && setMessage(error instanceof Error ? error.message : "Unable to load TR config."))
@@ -3333,18 +3325,6 @@ function TrConfigReadOnlyPanel({ onOpenRadioSetup }: { onOpenRadioSetup?: () => 
   }, []);
 
   const liveConfig = editor?.liveConfigJson ?? "";
-  const matchingWorkspace = useMemo(() => chooseRadioSetupWorkspaceForConfig(editor, surveys), [editor, surveys]);
-  function editInRadioSetup() {
-    if (matchingWorkspace) {
-      localStorage.setItem("pizzawave-radio-setup-workspace", matchingWorkspace.id);
-      localStorage.setItem("pizzawave-radio-setup-wizard-open", "1");
-    } else {
-      localStorage.removeItem("pizzawave-radio-setup-workspace");
-      localStorage.removeItem("pizzawave-radio-setup-wizard-open");
-    }
-    localStorage.setItem("pizzawave-tools-tab", "radio-setup");
-    onOpenRadioSetup?.();
-  }
 
   if (busy && !editor) return <div className="card">Loading TR config...</div>;
   return <div className="tr-config-readonly">
@@ -3354,11 +3334,9 @@ function TrConfigReadOnlyPanel({ onOpenRadioSetup }: { onOpenRadioSetup?: () => 
         <p className="muted">Read-only view of the config currently installed at {editor?.livePath || "--"}.</p>
         {editor?.hasDraft && <p className="settings-message">A standalone editor draft exists at {editor.draftPath}, but this page is showing the live TR config.</p>}
       </div>
-      {onOpenRadioSetup && <button className="danger-button" onClick={editInRadioSetup}>Edit</button>}
+      {onOpenSetup && <button className="danger-button" onClick={onOpenSetup}>Open Setup</button>}
     </div>
-    <div className="setup-note">Edits are routed through Radio Setup so source coverage, RF validation, and call-quality evidence stay attached to the workspace that produced the TR config.</div>
-    {matchingWorkspace && <div className="settings-message ok">Edit will open workspace {matchingWorkspace.siteLabel || matchingWorkspace.systemShortName || matchingWorkspace.id}.</div>}
-    {!matchingWorkspace && <div className="settings-message">No matching workspace was found. Edit opens the Radio Setup workspace list.</div>}
+    <div className="setup-note">Use Setup for site changes, source planning, RF validation, and applying monitored TR configuration changes.</div>
     {message && <p className="settings-message error">{message}</p>}
     {editor && <div className="setup-review">
       <div><span>Systems</span><code>{editor.summary.systems.length.toLocaleString()}</code></div>
@@ -3374,14 +3352,6 @@ function TrConfigReadOnlyPanel({ onOpenRadioSetup }: { onOpenRadioSetup?: () => 
       </div>
     </div>
   </div>;
-}
-
-function chooseRadioSetupWorkspaceForConfig(editor: TrConfigEditor | null, surveys: RfSurveyList | null) {
-  const sessions = surveys?.sessions ?? [];
-  if (!sessions.length) return null;
-  const systemNames = new Set((editor?.summary.systems ?? []).map(system => system.shortName).filter(Boolean));
-  const sorted = [...sessions].sort((a, b) => b.updatedAtUtc.localeCompare(a.updatedAtUtc));
-  return sorted.find(session => systemNames.has(session.systemShortName)) ?? sorted[0] ?? null;
 }
 
 function MetricsOverviewPanel({ data, dashboard, engineHealth, tokenUsage, bandwidthUsage, navigate }: { data: TrTroubleshoot; dashboard: Dashboard | null; engineHealth: EngineHealth | null; tokenUsage: TokenUsageReport | null; bandwidthUsage: RemoteBandwidthReport | null; navigate: (top: SystemTopTab, sub?: string) => void }) {
@@ -11570,7 +11540,7 @@ function TrConfigEditorPanel({
     try {
       if (applyOverride) {
         await applyOverride(configText);
-        setMessage("Applied targeted Radio Setup source changes.");
+        setMessage("Applied targeted Setup source changes.");
         return;
       }
       const result = await api.request<TrConfigEditorApplyResult>("/api/v1/system/tr-config/editor/apply", {
@@ -11615,18 +11585,18 @@ function TrConfigEditorPanel({
         {editor?.hasDraft && <div className="settings-message">{rawOnly ? "Workspace draft" : "Draft"}: {editor.draftPath}</div>}
       </div>
       <div className="tr-config-editor-actions">
-        {onOpenRadioSetup && <button type="button" onClick={onOpenRadioSetup}>Open Radio Setup</button>}
+        {onOpenRadioSetup && <button type="button" onClick={onOpenRadioSetup}>Open Setup</button>}
         <button className="danger-button" disabled={busy === "save" || !!parseError} onClick={() => void saveAndRestart()}>{busy === "save" ? "Applying..." : applyLabel}</button>
       </div>
     </div>
-    {onOpenRadioSetup && <div className="setup-note">This is the expert config-draft surface. For new SDRs, site changes, RF path changes, or validation work, use the shared Radio Setup workspace.</div>}
+    {onOpenRadioSetup && <div className="setup-note">This is the expert config-draft surface. For new SDRs, site changes, RF path changes, or validation work, use Setup.</div>}
     {message && <p className={message.toLowerCase().includes("invalid") || message.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{message}</p>}
     {parseError && <p className="settings-message error">Raw JSON is invalid: {parseError}</p>}
     <div className="tr-config-editor-grid">
       <div className="tr-config-controls">
         <section className="card">
           <h3>Systems</h3>
-          <p className="muted">These site blocks drive Radio Setup ground truth, source planning, health checks, and troubleshooting.</p>
+          <p className="muted">These site blocks drive Setup ground truth, source planning, health checks, and troubleshooting.</p>
           <div className="tr-config-mini-table">
             <table className="table compact-table">
               <thead><tr><th>Short name</th><th>Mod</th><th>Control channels Hz</th><th>Voice channels Hz</th><th>Talkgroups</th><th></th></tr></thead>
@@ -11798,7 +11768,7 @@ function TrConfigRestorePanel() {
     <div className="settings-header">
       <div>
         <h3>Restore TR Config</h3>
-        <p className="muted">Timestamped config backups are created before Radio Setup applies source changes and before TR config editor saves.</p>
+        <p className="muted">Timestamped config backups are created before Setup applies source changes and before TR config editor saves.</p>
       </div>
       <button disabled={Boolean(busy)} onClick={() => void loadBackups()}>Refresh</button>
     </div>
@@ -12152,7 +12122,7 @@ type MigrationResetOptions = {
   preserveAiInsights: boolean;
   preserveEmbeddings: boolean;
   preserveAlerts: boolean;
-  preserveRfSurvey: boolean;
+  preserveRfDiagnostics: boolean;
 };
 
 const defaultMigrationResetOptions: MigrationResetOptions = {
@@ -12163,7 +12133,7 @@ const defaultMigrationResetOptions: MigrationResetOptions = {
   preserveAiInsights: true,
   preserveEmbeddings: true,
   preserveAlerts: true,
-  preserveRfSurvey: true
+  preserveRfDiagnostics: true
 };
 
 function setupWizardDraftKey(status: SetupStatus) {
@@ -12628,7 +12598,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
       migrationOptions.preserveAiInsights ? "AI Insights" : "",
       migrationOptions.preserveEmbeddings ? "embedding service settings" : "",
       migrationOptions.preserveAlerts ? "alert delivery/playback" : "",
-      migrationOptions.preserveRfSurvey ? "RF survey tooling" : ""
+      migrationOptions.preserveRfDiagnostics ? "RF diagnostics" : ""
     ].filter(Boolean);
     const backupText = migrationOptions.createBackup
       ? `A full backup with all recorded audio will be created first${migrationBackupEstimate ? `; estimated source size is ${formatBytes(migrationBackupEstimate.bytes)} across ${migrationBackupEstimate.fileCount.toLocaleString()} file(s)` : ""}. If backup creation fails, reset will stop.`
@@ -12729,7 +12699,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
         throw new Error("Complete the required setup checks before finishing.");
       await applyRestartAndValidateInline();
       const completed = await api.request<SetupStatus>("/api/v1/setup/complete", { method: "POST" });
-      setMessage("Setup complete. Opening Radio Setup...");
+      setMessage("Setup complete. Opening Site Setup...");
       await reload();
       onComplete?.();
       return completed;
@@ -13280,7 +13250,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     { id: "ai", title: "AI Insights" },
     { id: "embeddings", title: "Vector DB" },
     { id: "alerts", title: "Alerts" },
-    { id: "radio", title: "Radio Setup" },
+    { id: "radio", title: "RF Diagnostics" },
     { id: "finish", title: "Finish" }
   ];
   const setupSteps = baseSetupSteps.map(step => {
@@ -13557,7 +13527,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
             <SettingCheckbox label="AI Insights" description="Copy chat endpoint, model, limits, and enablement." checked={migrationOptions.preserveAiInsights} onChange={value => updateMigrationOption("preserveAiInsights", value)} />
             <SettingCheckbox label="Vector DB service" description="Copy embedding endpoint and Qdrant service settings. Existing vectors are deleted." checked={migrationOptions.preserveEmbeddings} onChange={value => updateMigrationOption("preserveEmbeddings", value)} />
             <SettingCheckbox label="Alert delivery" description="Copy email and playback settings. Alert rules are cleared." checked={migrationOptions.preserveAlerts} onChange={value => updateMigrationOption("preserveAlerts", value)} />
-            <SettingCheckbox label="RF survey tooling" description="Copy probe command and timing settings. Survey sessions and baselines are cleared." checked={migrationOptions.preserveRfSurvey} onChange={value => updateMigrationOption("preserveRfSurvey", value)} />
+            <SettingCheckbox label="RF diagnostics" description="Copy P25 probe command and timing settings. Prior RF validation runs are cleared." checked={migrationOptions.preserveRfDiagnostics} onChange={value => updateMigrationOption("preserveRfDiagnostics", value)} />
             <div className="maintenance-help">
               <p><strong>Always cleared</strong>: calls, recorded audio, incidents, old TR config, talkgroups, monitored areas, jobs, metrics, recommendations, alert rules, and Qdrant call vectors.</p>
             </div>
@@ -13768,8 +13738,8 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           <div className="setup-note">{alerts.emailEnabled ? "Click Next to validate email alert settings." : "Email alerts are disabled. Click Next to mark this optional step skipped."}</div>
         </SetupSection>}
 
-        {currentStep.id === "radio" && <SetupSection title="Radio Setup" description="First-run now hands radio validation to the common Radio Setup workspace instead of running a separate calibration workflow.">
-          <div className="setup-note">The TR config and talkgroups you just created become the starting point for Radio Setup. After Finish, PizzaWave opens Tools &gt; Radio Setup so the same workflow can be resumed later for new sites, new SDRs, RF path changes, or expert TR config experiments.</div>
+        {currentStep.id === "radio" && <SetupSection title="RF Diagnostics" description="Optional diagnostic tooling used by Site Setup RF validation.">
+          <div className="setup-note">The TR config and talkgroups you just created become the starting point for Site Setup. After Finish, PizzaWave opens Setup so the same workflow can be resumed later for new sites, new SDRs, RF path changes, or TR config updates.</div>
           <label className="setup-check option-row">
             <input
               type="checkbox"
@@ -13781,15 +13751,15 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
             />
             <span>
               <strong>Install optional diagnostic tools</strong>
-              <span> Installs OP25/P25 control-channel tooling plus SDR/audio diagnostics used by Radio Setup site validation. This can install OS packages and build OP25 from source, but it does not stop trunk-recorder by itself.</span>
+              <span> Installs OP25/P25 control-channel tooling plus SDR/audio diagnostics used by Setup RF validation. This can install OS packages and build OP25 from source, but it does not stop trunk-recorder by itself.</span>
             </span>
           </label>
           <div className="setup-review">
-            <div><span>Next workspace phase</span><code>Prerequisites</code></div>
-            <div><span>Then</span><code>Sites &gt; RF Path &amp; Error and Gain &gt; Call Quality</code></div>
-            <div><span>Config changes</span><code>Config Draft source planner</code></div>
+            <div><span>Next section</span><code>Setup</code></div>
+            <div><span>RF validation</span><code>Waterfall and RF Sweep</code></div>
+            <div><span>Config changes</span><code>Apply &amp; Resume source planner</code></div>
           </div>
-          <div className="setup-note">Click Next to save this handoff choice. Finish will restart/validate PizzaWave and open Radio Setup.</div>
+          <div className="setup-note">Click Next to save this tooling choice. Finish will restart/validate PizzaWave and open Setup.</div>
         </SetupSection>}
 
         {currentStep.id === "finish" && <SetupSection title="Finish" description="This applies the saved settings, restarts pizzad, re-validates the required checks, then exits setup mode so normal ingest and processing can start.">
@@ -15581,7 +15551,7 @@ function profileIncludes(profile: ProcessingProfile | undefined, item: string) {
 }
 
 function normalizePage(value: string | null): Page {
-  return value === "dashboard" || value === "setup" || value === "tools" || value === "system" || value === "settings" || categories.includes(value as any)
+  return value === "dashboard" || value === "setup" || value === "system" || value === "settings" || categories.includes(value as any)
     ? value as Page
     : "dashboard";
 }
@@ -15589,7 +15559,6 @@ function normalizePage(value: string | null): Page {
 function navIcon(item: Page) {
   if (item === "dashboard") return <Gauge size={15} />;
   if (item === "setup") return <Wrench size={15} />;
-  if (item === "tools") return <Wrench size={15} />;
   if (item === "settings") return <Settings size={15} />;
   if (item === "system") return <Activity size={15} />;
   return <Radio size={15} />;
@@ -15601,7 +15570,6 @@ function label(value: string) {
   if (value === "ems") return "EMS";
   if (value === "system") return "System";
   if (value === "setup") return "Setup";
-  if (value === "tools") return "Tools";
   return value[0].toUpperCase() + value.slice(1).replaceAll("_", " ");
 }
 

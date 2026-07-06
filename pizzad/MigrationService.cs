@@ -161,7 +161,7 @@ public sealed class MigrationService
             LogServiceName = current.TrunkRecorder.LogServiceName,
             HealthWindowMinutes = current.TrunkRecorder.HealthWindowMinutes
         };
-        _config.RfSurvey = request.PreserveRfSurvey ? CloneSection(current.RfSurvey) : new RfSurveyConfig();
+        _config.RfSurvey = request.PreserveRfDiagnostics && request.PreserveRfSurvey ? CloneSection(current.RfSurvey) : new RfSurveyConfig();
         _config.Alerts = request.PreserveAlerts ? CloneSection(current.Alerts) : new AlertConfig();
         _config.Alerts.Rules.Clear();
         _config.Profiles = new ProfileConfig();
@@ -338,6 +338,7 @@ public sealed class MigrationResetRequestDto
     public bool PreserveAiInsights { get; set; } = true;
     public bool PreserveEmbeddings { get; set; } = true;
     public bool PreserveAlerts { get; set; } = true;
+    public bool PreserveRfDiagnostics { get; set; } = true;
     public bool PreserveRfSurvey { get; set; } = true;
 }
 public sealed record MigrationResetResultDto(bool Ok, string Message, IReadOnlyList<string> Warnings, BackupCreateResultDto? Backup);
