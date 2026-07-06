@@ -4979,6 +4979,8 @@ function WaterfallStep({
   }
 
   function drawRetainedWaterfallNotice(next: RfSurveyWaterfallStatus | null) {
+    if (hasGoodWaterfallFrameRef.current)
+      return;
     const hasFrames = Boolean(next?.frame) || Boolean(next?.frames?.length);
     if (hasFrames)
       return;
@@ -4987,6 +4989,19 @@ function WaterfallStep({
       : "No retained waterfall frames. Click Start to begin a new capture.";
     drawWaterfallNotice(spectrumCanvasRef.current, text, true);
     drawWaterfallNotice(canvasRef.current, text, false);
+  }
+
+  function scheduleWaterfallPaint(next: RfSurveyWaterfallStatus | null, reset = false) {
+    if (!visible)
+      return;
+    if (reset)
+      resetWaterfallDrawingState(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        renderWaterfallStatus(next);
+        drawRetainedWaterfallNotice(next);
+      });
+    });
   }
 
   function renderWaterfallStatus(next: RfSurveyWaterfallStatus | null) {
@@ -5041,15 +5056,7 @@ function WaterfallStep({
       try {
         const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
         if (stopped) return;
-        resetWaterfallDrawingState(true);
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => {
-            if (!stopped) {
-              renderWaterfallStatus(next);
-              drawRetainedWaterfallNotice(next);
-            }
-          });
-        });
+        scheduleWaterfallPaint(next, true);
         setStatus({ ...next, frames: null });
         if (next.active) {
           if (Number.isFinite(next.sourceIndex))
@@ -5080,6 +5087,7 @@ function WaterfallStep({
       try {
         const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall`);
         if (!stopped) {
+          scheduleWaterfallPaint(next);
           setStatus(next);
           if (shouldShowWaterfallMessage(next.message, next))
             setMessage(next.message);
@@ -5125,6 +5133,7 @@ function WaterfallStep({
           refreshMilliseconds: 120
         })
       });
+      scheduleWaterfallPaint(next);
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
@@ -5139,6 +5148,8 @@ function WaterfallStep({
     setMessage("");
     try {
       const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(apiBase, surveyId), { method: "POST" });
+      lastFrameRef.current = "";
+      scheduleWaterfallPaint(next);
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
