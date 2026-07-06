@@ -702,7 +702,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("tools")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
-        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} />}
+        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={setRadioSetupTrOperation} />}
         {setupStatus?.completed && page === "tools" && <ToolsView onTrOperationChange={setRadioSetupTrOperation} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenRadioSetup={() => setPage("tools")} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
@@ -738,7 +738,7 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
   </div>;
 }
 
-function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void }) {
+function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrOperationChange }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void; onTrOperationChange: (value: string) => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
@@ -797,7 +797,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { s
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} />}
+          {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} onTrOperationChange={onTrOperationChange} />}
         </section>
       </div>
     </section>
@@ -1141,7 +1141,7 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
   </div>;
 }
 
-function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
+function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: SiteSetup; onTrOperationChange: (value: string) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1198,6 +1198,7 @@ function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
     void loadWorkspace();
     return () => { stopped = true; };
   }, [signature]);
+  useEffect(() => () => onTrOperationChange(""), [onTrOperationChange]);
   async function refreshWorkspace() {
     if (!detail) return;
     const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(detail.session.id));
@@ -1215,6 +1216,9 @@ function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
   async function adoptWaterfallSite(system: RfSurveySystem) {
     setMessage(`${system.siteLabel || system.shortName} was detected. Add or remove sites on Systems & Sites.`);
   }
+  const handleWaterfallStatusChange = useCallback((status: RfSurveyWaterfallStatus | null) => {
+    onTrOperationChange(waterfallTrOperationText(status));
+  }, [onTrOperationChange]);
   const effectiveSystems = detail?.profile.systems?.length ? detail.profile.systems : systems;
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
@@ -1237,6 +1241,8 @@ function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
         onAdoptWaterfallSite={adoptWaterfallSite}
         onRunExperiment={runExperiment}
         onReload={refreshWorkspace}
+        onStatusChange={handleWaterfallStatusChange}
+        showSweepSelection={false}
       />
       : !busy && <div className="setup-warning-list"><div>RF Validation needs at least one selected site/control channel and one SDR source.</div></div>}
   </div>;
@@ -1300,6 +1306,16 @@ function normalizeSetupWaterfallGain(source: Pick<RfSurveySource, "gain" | "sdrT
   if (!isAirspyRfSource(source))
     return gain;
   return validateAirspyLinearityGain(gain) ? gain : "15";
+}
+
+function waterfallTrOperationText(status: RfSurveyWaterfallStatus | null | undefined) {
+  if (!status)
+    return "";
+  if (status.trRestartError)
+    return `TR restart failed after waterfall: ${status.trRestartError}`;
+  if (status.active && status.trWasActive)
+    return "TR paused by Setup waterfall";
+  return "";
 }
 
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
@@ -5832,7 +5848,9 @@ function WaterfallStep({
   onWaterfallSweepSelections,
   onAdoptWaterfallSite,
   onRunExperiment,
-  onReload
+  onReload,
+  onStatusChange,
+  showSweepSelection = true
 }: {
   surveyId: string;
   locked: boolean;
@@ -5847,6 +5865,8 @@ function WaterfallStep({
   onAdoptWaterfallSite: (system: RfSurveySystem) => Promise<void>;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
   onReload: () => Promise<void>;
+  onStatusChange?: (status: RfSurveyWaterfallStatus | null) => void;
+  showSweepSelection?: boolean;
 }) {
   const effectiveSources = sources.filter(source => selectedSources.includes(source.index));
   const sourceOptions = effectiveSources.length ? effectiveSources : sources.slice(0, 1);
@@ -5899,6 +5919,11 @@ function WaterfallStep({
   const identifyRunning = busy === "identify";
   const controlsDisabled = identifyRunning;
   const canStart = !locked && !busy && sourceOptions.length > 0 && frequencyOk && sampleRateOk && gainOk;
+
+  useEffect(() => {
+    onStatusChange?.(status);
+    return () => onStatusChange?.(null);
+  }, [status?.active, status?.trWasActive, status?.trRestartError, status?.status, onStatusChange]);
 
   useEffect(() => {
     if (!selectedSource) return;
@@ -6197,6 +6222,8 @@ function WaterfallStep({
   }
 
   function toggleSweepControlChannel(row: WaterfallCandidateRow, selected: boolean) {
+    if (!showSweepSelection)
+      return;
     const frequencyHz = Math.round(row.sweepFrequencyHz);
     const current = normalizeWaterfallSweepSelections(waterfallSweepSelections);
     const remaining = current.filter(item => item.frequencyHz !== frequencyHz);
@@ -6362,6 +6389,8 @@ function WaterfallStep({
   }, [selectedSweepControlChannels.join(","), waterfallCandidates.map(row => `${row.sweepFrequencyHz}:${Math.round(row.offsetHz)}`).join("|")]);
 
   async function toggleCandidateForSweep(row: WaterfallCandidateRow, selected: boolean) {
+    if (!showSweepSelection)
+      return;
     if (selected && row.origin !== "selected" && row.system && !systems.some(system => system.shortName.toLowerCase() === row.system?.shortName.toLowerCase()))
       await onAdoptWaterfallSite(row.system);
     toggleSweepControlChannel(row, selected);
@@ -6415,17 +6444,17 @@ function WaterfallStep({
     <div className="rf-waterfall-cc-panel">
       <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by SNR. Observed error is measured from the matched selected-site control channel.</small></div>
       <div className="rf-waterfall-candidate-table">
-        <div className="rf-waterfall-candidate-row header">
-          <span>Use</span><span>Site</span><span>Matched CC</span><span>Detected</span><span>SNR</span><span>Observed error</span><span>Confidence</span><span>Source</span><span>Action</span>
+        <div className={showSweepSelection ? "rf-waterfall-candidate-row header" : "rf-waterfall-candidate-row header no-sweep-selection"}>
+          {showSweepSelection && <span>Use</span>}<span>Site</span><span>Matched CC</span><span>Detected</span><span>SNR</span><span>Observed error</span><span>Confidence</span><span>Source</span><span>Action</span>
         </div>
         {waterfallCandidates.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect selected and nearby RR control channels.</div> : waterfallCandidates.map(row => {
           const identify = identifyResults[row.identifyPeak.key];
           const selected = selectedSweepControlChannelSet.has(row.sweepFrequencyHz);
-          return <div className={`rf-waterfall-candidate-row ${row.origin} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
-            <label className="rf-waterfall-use-check">
+          return <div className={`${showSweepSelection ? "rf-waterfall-candidate-row" : "rf-waterfall-candidate-row no-sweep-selection"} ${row.origin} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
+            {showSweepSelection && <label className="rf-waterfall-use-check">
               <input type="checkbox" checked={selected} onChange={event => void toggleCandidateForSweep(row, event.target.checked)} aria-label={`Use ${formatRfHz(row.sweepFrequencyHz)} for RF Sweep`} />
               <span>{selected ? "Use" : ""}</span>
-            </label>
+            </label>}
             <span title={row.siteLabel}>{row.siteLabel}</span>
             <code>{row.targetFrequencyHz > 0 ? formatRfHz(row.targetFrequencyHz) : "--"}</code>
             <code>{row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--"}</code>

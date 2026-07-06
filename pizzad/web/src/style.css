@@ -4186,6 +4186,10 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-size: 12px;
 }
 
+.rf-waterfall-candidate-row.no-sweep-selection {
+  grid-template-columns: minmax(150px, 1.2fr) 112px 112px 78px 96px 78px 112px 86px;
+}
+
 .rf-waterfall-candidate-row.header {
   background: #151a1f;
   color: #9faab5;
