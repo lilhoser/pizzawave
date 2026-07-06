@@ -1054,6 +1054,7 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
         updateRfPath(next);
       }}
       busy=""
+      headerMode="actions"
     />
     {statusFor("rfPath")}
   </div>;
@@ -1061,6 +1062,7 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
 
 function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathProfile {
   const value = path ?? ({} as RfSurveyPathProfile);
+  const chain = (value.chain ?? []).map(normalizeRfChainItem);
   return {
     antenna: value.antenna ?? "",
     antennaType: value.antennaType ?? "",
@@ -1075,7 +1077,7 @@ function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathPr
     filters: value.filters ?? "",
     sdrNotes: value.sdrNotes ?? "",
     observations: value.observations ?? "",
-    chain: (value.chain ?? []).map(normalizeRfChainItem)
+    chain: chain.length ? chain : [newRfChainItem()]
   };
 }
 
@@ -4083,18 +4085,20 @@ function PrereqStep({
   </div>;
 }
 
-function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string }) {
+function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full" }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions" }) {
   const updateChain = (index: number, patch: Partial<RfSurveyPathProfile["chain"][number]>) => { onTouched(); setPath(current => ({ ...current, chain: current.chain.map((item, i) => i === index ? { ...item, ...patch } : item) })); };
-  const newChainItem = (): RfSurveyPathProfile["chain"][number] => ({ type: "lna", label: "", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorInType: "unknown", connectorInGender: "unknown", connectorOutType: "unknown", connectorOutGender: "unknown", powerMethod: "unknown" });
   return <div className="rf-step-stack">
-    <div className="rf-chain-head">
+    {headerMode === "full" && <div className="rf-chain-head">
       <div><strong>Ordered RF Chain</strong><span>Capture the exact hardware path from antenna to SDR. Order matters.</span></div>
       <div className="rf-primary-actions">
         <button disabled={busy === "load-rf-path"} onClick={() => void onLoadPrevious()}>{busy === "load-rf-path" ? "Loading..." : "Load Previous"}</button>
-        <button onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newChainItem()] })); }}>Add Chain Item</button>
+        <button onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add Chain Item</button>
       </div>
-    </div>
-    <div className="setup-note">Use RF Path to document the physical antenna/coax/filter/SDR chain. Use SDR Inventory to choose hardware. Use RF Sweep to prove which source, control channel, gain, and error settings can decode before Config Draft builds the monitoring plan.</div>
+    </div>}
+    {headerMode === "actions" && <div className="rf-primary-actions">
+      <button type="button" onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add Chain Item</button>
+    </div>}
+    {headerMode === "full" && <div className="setup-note">Use RF Path to document the physical antenna/coax/filter/SDR chain. Use SDR Inventory to choose hardware. Use RF Sweep to prove which source, control channel, gain, and error settings can decode before Config Draft builds the monitoring plan.</div>}
     <div className="rf-chain-list">
       <div className="rf-chain-column-header">
         <span>#</span>
@@ -4201,6 +4205,10 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
 
 const rfChainTypes = ["antenna", "coax", "splitter", "multicoupler", "lna", "filter", "sdr", "other"];
 const rfConnectorTypes = ["n/a", "unknown", "SMA", "RP-SMA", "BNC", "TNC", "N", "F", "PL-259/SO-239", "MCX", "MMCX", "UHF", "FME", "SMP", "bare wire", "other"];
+function newRfChainItem(): RfSurveyPathProfile["chain"][number] {
+  return { type: "lna", label: "", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorInType: "unknown", connectorInGender: "unknown", connectorOutType: "unknown", connectorOutGender: "unknown", powerMethod: "unknown" };
+}
+
 function normalizeRfChainItem(item: RfSurveyPathProfile["chain"][number]): RfSurveyPathProfile["chain"][number] {
   return {
     ...item,
