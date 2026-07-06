@@ -750,7 +750,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { s
   }, [targetSection, clearTargetSection]);
   if (!current) return <div className="pane">Loading Site Setup...</div>;
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
-  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path"]);
+  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation"]);
   async function refreshSiteSetup() {
     const next = await api.request<SiteSetup>(siteSetupApi);
     setCurrent(next);
@@ -795,6 +795,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { s
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
+          {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} />}
         </section>
       </div>
     </section>
@@ -805,22 +806,30 @@ function SiteSetupChangeStrip({ setup }: { setup: SiteSetup }) {
   const latest = setup.recentActivity[0];
   const changedCategories = setup.pendingChanges.map(change => label(change.category));
   return <div className="site-setup-change-strip" aria-label="Setup change summary">
-    <section>
+    <section className={setup.pendingChanges.length ? "warning" : "ok"}>
       <span>Config changes</span>
       <strong>{setup.pendingChanges.length ? `${setup.pendingChanges.length} pending` : "None"}</strong>
       <small>{changedCategories.join(", ") || "No unapplied setup changes"}</small>
     </section>
-    <section>
+    <section className={latest ? "info" : "neutral"}>
       <span>Last setup change</span>
       <strong>{latest ? label(latest.action) : "No activity"}</strong>
       <small>{latest ? `${latest.summary} / ${new Date(latest.timestampUtc).toLocaleString()}` : "No setup activity recorded"}</small>
     </section>
-    <section>
+    <section className={setup.status.pendingApply ? "warning" : siteSetupMonitoringTone(setup.status.monitoringState)}>
       <span>Apply state</span>
       <strong>{setup.status.pendingApply ? "Apply needed" : "Current"}</strong>
       <small>{setup.status.pendingApply ? "Desired setup differs from the running TR config" : "No pending TR config apply"}</small>
     </section>
   </div>;
+}
+
+function siteSetupMonitoringTone(state: string) {
+  const value = state.toLowerCase();
+  if (value === "active") return "ok";
+  if (value === "paused" || value === "stopped") return "warning";
+  if (value === "stale" || value === "failed" || value === "error") return "danger";
+  return "neutral";
 }
 
 function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
@@ -1006,6 +1015,9 @@ function selectedSetupSystemNames(setup: SiteSetup) {
 
 function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
   const [rfPath, setRfPath] = useState<RfSurveyPathProfile>(() => normalizeSetupRfPath(setup.desired.rfPath));
+  const [sdrDetection, setSdrDetection] = useState<SetupSdrDetection | null>(null);
+  const [sdrBusy, setSdrBusy] = useState(false);
+  const [sdrMessage, setSdrMessage] = useState("");
   const rfPathRef = useRef(rfPath);
   const saveTimerRef = useRef<number | null>(null);
   const onSaveRef = useRef(onSave);
@@ -1044,6 +1056,19 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     setRfPath(rfPathRef.current);
     queueRfPathSave(rfPathRef.current);
   }
+  async function runSdrInventory() {
+    setSdrBusy(true);
+    setSdrMessage("");
+    try {
+      const result = await api.request<SetupSdrDetection>("/api/v1/setup/sdrs");
+      setSdrDetection(result);
+      setSdrMessage(result.message);
+    } catch (error) {
+      setSdrMessage(error instanceof Error ? error.message : "SDR inventory failed.");
+    } finally {
+      setSdrBusy(false);
+    }
+  }
   return <div className="site-setup-form site-setup-hardware">
     <RfPathStep
       path={rfPath}
@@ -1057,6 +1082,13 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
       headerMode="actions"
     />
     {statusFor("rfPath")}
+    <div className="site-setup-hardware-inventory">
+      <div className="rf-primary-actions">
+        <button type="button" disabled={sdrBusy} onClick={() => void runSdrInventory()}>{sdrBusy ? "Running..." : sdrDetection ? "Rerun SDR Inventory" : "Run SDR Inventory"}</button>
+        {sdrMessage && <span className={sdrMessage.toLowerCase().includes("fail") || sdrMessage.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{sdrMessage}</span>}
+      </div>
+      {sdrDetection && <SetupSdrInventorySummary detection={sdrDetection} />}
+    </div>
   </div>;
 }
 
@@ -1082,6 +1114,81 @@ function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathPr
 }
 
 type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalogSystem: string };
+
+function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection }) {
+  const rows = detection.devices.map(device => ({
+    key: `${device.index}-${device.serial || device.usbLine}`,
+    title: `${device.type || "SDR"} ${device.serial || device.label || device.index}`,
+    detail: [device.deviceArgs, device.label || device.usbLine, device.defaultSampleRate ? `${device.defaultSampleRate} sps` : "", device.defaultGain ? `${device.defaultGain} ${device.gainMode}` : "", device.warning].filter(Boolean).join(" / ")
+  }));
+  return <div className={rows.length ? "rf-inventory-summary passed" : "rf-inventory-summary failed"}>
+    <div className="rf-inventory-head">
+      <div>
+        <strong>SDR Inventory: {rows.length ? "Ready" : "No devices"}</strong>
+        <span>{detection.message}</span>
+      </div>
+    </div>
+    <div className="rf-inventory-device-list">
+      {rows.map(row => <div className="rf-inventory-device-row" key={row.key}>
+        <strong>{row.title}</strong>
+        <span>{row.detail || "--"}</span>
+      </div>)}
+      {rows.length === 0 && <div className="setup-note">No SDR devices were reported in inventory evidence.</div>}
+    </div>
+    {detection.rawOutput && <details><summary>Raw SDR output</summary><pre className="log-box">{detection.rawOutput}</pre></details>}
+  </div>;
+}
+
+function SiteSetupRfValidationSection({ setup }: { setup: SiteSetup }) {
+  const systems = setup.desired.systems.length
+    ? setup.desired.systems
+    : selectedSetupSystemNames(setup).map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
+  const sources = setup.desired.sources.length
+    ? setup.desired.sources
+    : setup.applied.sources.map(source => ({
+      index: source.index,
+      device: source.device,
+      serial: source.serial,
+      sdrType: sdrTypeFromDeviceLabel(source.device),
+      centerHz: source.centerHz,
+      sampleRate: source.sampleRate,
+      errorHz: source.errorHz,
+      gain: source.gain
+    }));
+  const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
+    ? setup.desired.selectedSourceIndexes
+    : sources.map(source => source.index);
+  const selectedSources = sources.filter(source => selectedSourceIndexes.includes(source.index));
+  return <div className="site-setup-form site-setup-rf-validation">
+    <RfConditionOverview
+      path={normalizeSetupRfPath(setup.desired.rfPath)}
+      systemShortName={systems.map(system => system.shortName).join(", ")}
+      sources={sources}
+      selectedSources={selectedSourceIndexes}
+      controlChannels={systems.flatMap(system => system.controlChannelsHz)}
+    />
+    <div className="site-setup-site-table-wrap">
+      <table className="table compact-table site-setup-site-table">
+        <thead><tr><th>System</th><th>Control channels</th><th>Selected source</th></tr></thead>
+        <tbody>
+          {systems.map(system => <tr key={system.shortName || system.siteLabel}>
+            <td>{system.siteLabel || system.shortName}</td>
+            <td>{system.controlChannelsHz.length ? formatFrequencyList(system.controlChannelsHz) : "--"}</td>
+            <td>{selectedSources.length ? selectedSources.map(source => `#${source.index} ${source.sdrType || source.device} gain ${source.gain || "?"} error ${formatSignedHz(source.errorHz || 0)}`).join(" / ") : "--"}</td>
+          </tr>)}
+          {systems.length === 0 && <tr><td colSpan={3}>No systems selected.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function sdrTypeFromDeviceLabel(device: string) {
+  const value = (device || "").toLowerCase();
+  if (value.includes("airspy")) return "Airspy";
+  if (value.includes("rtl")) return "RTL-SDR";
+  return value ? "SDR" : "";
+}
 
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const systemNames = selectedSetupSystemNames(setup);

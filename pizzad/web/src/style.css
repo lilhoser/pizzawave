@@ -494,6 +494,26 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border: 1px solid #38414a;
   border-radius: 6px;
 }
+.site-setup-change-strip section.ok {
+  background: #14251d;
+  border-color: #2f7d52;
+}
+.site-setup-change-strip section.info {
+  background: #142230;
+  border-color: #356c9c;
+}
+.site-setup-change-strip section.warning {
+  background: #302716;
+  border-color: #aa7a22;
+}
+.site-setup-change-strip section.danger {
+  background: #341b1b;
+  border-color: #b94a48;
+}
+.site-setup-change-strip section.neutral {
+  background: #252b31;
+  border-color: #38414a;
+}
 .site-setup-change-strip span {
   color: #9faab5;
   font-size: 11px;
@@ -652,6 +672,17 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   max-width: none;
 }
 .site-setup-hardware {
+  max-width: none;
+}
+.site-setup-hardware-inventory {
+  display: grid;
+  gap: 8px;
+  max-width: 1120px;
+}
+.site-setup-hardware-inventory .rf-inventory-summary {
+  margin-top: 0;
+}
+.site-setup-rf-validation {
   max-width: none;
 }
 .site-setup-talkgroup-import {
