@@ -204,15 +204,18 @@ public sealed class SiteSetupService
     private IReadOnlyList<SiteSetupPendingChangeDto> BuildPendingChanges(SiteSetupConfig desired, SiteSetupAppliedConfigDto applied)
     {
         var rows = new List<SiteSetupPendingChangeDto>();
-        var desiredSystems = desired.SystemShortNames.Count > 0
-            ? desired.SystemShortNames
-            : desired.Systems.Select(system => system.ShortName).ToList();
+        var desiredSystems = DesiredMonitoredSystemNames(desired);
         if (!SetEquals(desiredSystems, applied.SystemShortNames))
             rows.Add(new SiteSetupPendingChangeDto("Systems/Sites", $"Desired systems ({desiredSystems.Count}) differ from applied systems ({applied.SystemShortNames.Count})."));
 
         var desiredControls = desired.RfSelections.Count > 0
             ? desired.RfSelections.Select(selection => selection.FrequencyHz).Where(value => value > 0).Distinct().Order().ToList()
-            : desired.Systems.SelectMany(system => system.ControlChannelsHz).Distinct().Order().ToList();
+            : desired.Systems
+                .Where(system => desiredSystems.Any(name => string.Equals(name, system.ShortName, StringComparison.OrdinalIgnoreCase)))
+                .SelectMany(system => system.ControlChannelsHz)
+                .Distinct()
+                .Order()
+                .ToList();
         if (desiredControls.Count > 0 && !desiredControls.SequenceEqual(applied.ControlChannelsHz))
             rows.Add(new SiteSetupPendingChangeDto("Control Channels", $"Desired CCs ({desiredControls.Count}) differ from applied CCs ({applied.ControlChannelsHz.Count})."));
 
@@ -224,6 +227,15 @@ public sealed class SiteSetupService
             rows.Add(new SiteSetupPendingChangeDto("Applied Config", "Live TR config has changed since Site Setup last applied it."));
 
         return rows;
+    }
+
+    private static List<string> DesiredMonitoredSystemNames(SiteSetupConfig desired)
+    {
+        if (desired.SourcePlanSystemShortNames.Count > 0)
+            return desired.SourcePlanSystemShortNames;
+        if (desired.SystemShortNames.Count > 0)
+            return desired.SystemShortNames;
+        return desired.Systems.Select(system => system.ShortName).Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
     }
 
     private (string State, string Message) MonitoringState()
