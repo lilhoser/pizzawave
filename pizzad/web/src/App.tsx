@@ -5552,7 +5552,7 @@ function WaterfallStep({
     y += 34;
     ctx.fillStyle = "#9faab5";
     ctx.font = "14px Segoe UI, Arial, sans-serif";
-    ctx.fillText(`${capturedAt} / Survey ${surveyId}`, margin, y + 18);
+    ctx.fillText(`${capturedAt} / Setup RF session ${surveyId}`, margin, y + 18);
     y += 34;
     drawReportStats(ctx, stats, margin, y, imageWidth);
     y += 108;
@@ -8021,7 +8021,7 @@ function RfPowerScanDetails({ experiment }: { experiment: RfSurveyExperiment }) 
     <details className="rf-calculation-note">
       <summary>How these RF scan results are calculated</summary>
       <div>
-        <p>PizzaWave runs the displayed SDR command against the selected control channel and writes a short IQ capture into the survey artifact folder. RTL-SDR captures are treated as unsigned 8-bit I/Q samples; Airspy captures are treated as signed 16-bit I/Q samples.</p>
+        <p>PizzaWave runs the displayed SDR command against the selected control channel and writes a short IQ capture into the Setup RF evidence folder. RTL-SDR captures are treated as unsigned 8-bit I/Q samples; Airspy captures are treated as signed 16-bit I/Q samples.</p>
         <p>The analyzer reads the first analysis window from that file, removes DC bias, applies a Hamming window, then computes a simple FFT. CC peak/SNR use the strongest bin inside the tuned control-channel window. Noise floor is the median of the lower 80% of FFT-bin power values. Strongest offset is the strongest bin anywhere in the capture. Clip percentage counts samples near the ADC rails, and a very high strongest peak flags overload risk.</p>
         <p>These are quick relative measurements for comparing RF path changes and SDR settings. They are not calibrated dBm/dBFS lab measurements, and decode/call quality still has to be proven by the later P25 and call-quality steps.</p>
       </div>

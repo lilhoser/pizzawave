@@ -184,10 +184,10 @@ public sealed class RfSurveyService
             .Where(requested => selectedSystemNames.All(selected => !string.Equals(selected, requested, StringComparison.OrdinalIgnoreCase)))
             .ToList();
         foreach (var name in unresolvedNames)
-            warnings.Add($"TR system '{name}' was not found in the current Radio Setup source plan.");
+            warnings.Add($"TR system '{name}' was not found in the current Setup source plan.");
 
         if (requestedSystemNames.Count > 0 && selectedDefinitions.Count == 0)
-            warnings.Add("No TR system was available. Complete setup/TR config before running Radio Setup.");
+            warnings.Add("No TR system was available. Complete setup/TR config before running RF validation.");
 
         var liveSources = plan.Sources.Select(source => new RfSurveySourceDto(
             source.Index,
@@ -208,7 +208,7 @@ public sealed class RfSurveyService
         return new RfSurveyProfileDto
         {
             SiteLabel = string.IsNullOrWhiteSpace(request.SiteLabel)
-                ? profileSystemNames.Count == 1 ? profileSystemNames[0] : profileSystemNames.Count > 1 ? string.Join(", ", profileSystemNames) : "Radio Setup"
+                ? profileSystemNames.Count == 1 ? profileSystemNames[0] : profileSystemNames.Count > 1 ? string.Join(", ", profileSystemNames) : "Site Setup"
                 : request.SiteLabel.Trim(),
             RadioReferenceSid = string.IsNullOrWhiteSpace(request.RadioReferenceSid) ? string.Empty : request.RadioReferenceSid.Trim(),
             SystemShortName = selectedSystem?.ShortName ?? profileSystemNames.FirstOrDefault() ?? request.SystemShortName?.Trim() ?? string.Empty,
@@ -664,7 +664,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveySweepProgressDto> GetSweepProgressAsync(string id, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var root = Path.Combine(row.Session.ArtifactPath, "rf-power-scans");
         if (!Directory.Exists(root))
             return new RfSurveySweepProgressDto(_activeExperimentCancellations.ContainsKey(id), string.Empty, []);
@@ -720,7 +720,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyDetailDto> UpdateDraftAsync(string id, RfSurveyDraftUpdateRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var current = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -841,7 +841,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyDetailDto> CompleteAsync(string id, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -877,13 +877,13 @@ public sealed class RfSurveyService
 
     public async Task<IReadOnlyList<RfSurveyExperimentPlanDto>> GetNextExperimentsAsync(string id, CancellationToken ct)
     {
-        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         return detail.NextExperiments;
     }
 
     public async Task<RfSurveyP25ProbePreviewDto> PreviewP25ProbeAsync(string id, long? controlChannelHz, int? durationSeconds, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -893,7 +893,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyExportPlanDto> ExportPlanAsync(string id, CancellationToken ct)
     {
-        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var (recommendations, blockers) = BuildExportContent(detail);
         var planPath = Path.Combine(detail.Session.ArtifactPath, "export-plan.json");
         var markdownPath = Path.Combine(detail.Session.ArtifactPath, "export-plan.md");
@@ -913,7 +913,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyExportDocumentDto> ExportPlanDocumentAsync(string id, CancellationToken ct)
     {
-        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var (recommendations, blockers) = BuildExportContent(detail);
         var label = string.IsNullOrWhiteSpace(detail.Session.SiteLabel) ? detail.Session.Id : detail.Session.SiteLabel;
         var fileName = $"radio-setup-{SanitizeFileToken(label)}-{DateTime.UtcNow:yyyyMMddHHmmss}.md";
@@ -922,19 +922,19 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyTrActionResultDto> StopTrForSurveyAsync(string id, RfSurveyTrActionRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         if (!request.Confirmed)
             throw new InvalidOperationException("Stopping trunk-recorder requires explicit confirmation.");
         var stopOutput = await RunServiceHelperAsync("stop-tr", ct);
         var startOutput = await RunServiceHelperAsync("start-tr", ct);
         var output = stopOutput + Environment.NewLine + startOutput;
         await WriteArtifactAsync(row.Session.ArtifactPath, $"tr-stop-{DateTime.UtcNow:yyyyMMddHHmmss}.json", new { stopOutput, startOutput, service = TrUnitName() }, ct);
-        return new RfSurveyTrActionResultDto(true, "stop-tr", "trunk-recorder was briefly paused and restarted. Radio Setup experiments now manage TR pauses automatically.", "", "", "", output);
+        return new RfSurveyTrActionResultDto(true, "stop-tr", "trunk-recorder was briefly paused and restarted. Setup RF validation jobs now manage TR pauses automatically.", "", "", "", output);
     }
 
     public async Task<RfSurveyTrActionResultDto> ApplyTempTrConfigAsync(string id, RfSurveyTrActionRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         if (!request.Confirmed)
             throw new InvalidOperationException("Applying a temporary TR config requires explicit confirmation.");
         var livePath = _config.TrunkRecorder.ConfigPath;
@@ -954,7 +954,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyTrActionResultDto> ApplySourceDraftAsync(string id, RfSurveyApplySourceDraftRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -969,7 +969,7 @@ public sealed class RfSurveyService
             ? profile.SelectedSourceIndexes
             : profile.Sources.Select(source => source.Index).ToList();
         if (selected.Count == 0)
-            throw new InvalidOperationException("Select at least one source before applying the Radio Setup config draft.");
+            throw new InvalidOperationException("Select at least one source before applying the Setup config draft.");
 
         var liveRoot = JsonNode.Parse(await File.ReadAllTextAsync(livePath, ct)) as JsonObject
             ?? throw new JsonException("Live TR config root must be a JSON object.");
@@ -1040,12 +1040,12 @@ public sealed class RfSurveyService
             await _database.UpdateRfSurveySessionAsync(appliedSession, refreshed.ProfileJson, row.ToolPrepJson, ct);
             await WriteArtifactAsync(appliedSession.ArtifactPath, "survey.json", appliedSession, ct);
         }
-        return new RfSurveyTrActionResultDto(true, "apply-source-draft", $"{sourcePlanSummary} Workspace TR system list applied.", candidatePath, backupPath, backupPath, serviceOutput);
+        return new RfSurveyTrActionResultDto(true, "apply-source-draft", $"{sourcePlanSummary} Setup TR system list applied.", candidatePath, backupPath, backupPath, serviceOutput);
     }
 
     public async Task<RfSurveyConfigDraftDto> BuildConfigDraftAsync(string id, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -1060,7 +1060,7 @@ public sealed class RfSurveyService
             ? profile.SelectedSourceIndexes.Distinct().Order().ToList()
             : profile.Sources.Select(source => source.Index).Distinct().Order().ToList();
         if (selected.Count == 0)
-            throw new InvalidOperationException("Select at least one source before reviewing the Radio Setup config draft.");
+            throw new InvalidOperationException("Select at least one source before reviewing the Setup config draft.");
         var liveJson = await File.ReadAllTextAsync(livePath, ct);
         var sourcePlanSystemNames = SourcePlanSystemNames(profile);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
@@ -1078,7 +1078,7 @@ public sealed class RfSurveyService
         var draftRoot = BuildCleanRadioSetupTrConfigRoot();
         var keptSystems = EnsureDraftWorkspaceSystems(draftRoot, draftSystems, draftSystemNames, [], changes, warnings);
         var draftSources = draftRoot["sources"] as JsonArray
-            ?? throw new JsonException("Radio Setup draft root does not contain a sources array.");
+            ?? throw new JsonException("Setup config draft root does not contain a sources array.");
 
         var frequencies = plannedSystems
             .SelectMany(system => controlOnlyPlan
@@ -1158,7 +1158,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyCandidateDto> GenerateCandidateTrConfigAsync(string id, RfSurveyCandidateRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -1198,25 +1198,25 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyTrActionResultDto> RestoreTrConfigAsync(string id, RfSurveyTrActionRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         if (!request.Confirmed)
             throw new InvalidOperationException("Restoring TR config requires explicit confirmation.");
         var pointerPath = Path.Combine(row.Session.ArtifactPath, "tr-config-restore-pointer.json");
         if (!File.Exists(pointerPath))
-            throw new InvalidOperationException("No Radio Setup TR restore pointer was found.");
+            throw new InvalidOperationException("No Setup TR restore pointer was found.");
         using var pointerDoc = JsonDocument.Parse(await File.ReadAllTextAsync(pointerPath, ct));
         var backupPath = pointerDoc.RootElement.TryGetProperty("backupPath", out var backup) ? backup.GetString() ?? string.Empty : string.Empty;
         var livePath = pointerDoc.RootElement.TryGetProperty("livePath", out var live) ? live.GetString() ?? _config.TrunkRecorder.ConfigPath : _config.TrunkRecorder.ConfigPath;
         if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath))
-            throw new InvalidOperationException("Radio Setup TR backup file was not found.");
+            throw new InvalidOperationException("Setup TR backup file was not found.");
         await InstallTrFileAsync(backupPath, livePath, ct);
         var serviceOutput = request.RestartTr ? await RunServiceHelperAsync("restart-tr", ct) : "Restart TR manually before resuming coverage.";
-        return new RfSurveyTrActionResultDto(true, "restore-config", "Original TR config was restored from the Radio Setup backup.", "", backupPath, backupPath, serviceOutput);
+        return new RfSurveyTrActionResultDto(true, "restore-config", "Original TR config was restored from the Setup backup.", "", backupPath, backupPath, serviceOutput);
     }
 
     public async Task<RfSurveyToolPrepDto> RunToolPrepAsync(string id, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -1235,9 +1235,9 @@ public sealed class RfSurveyService
         };
         var warnings = new List<string>();
         if (profile.Mode == "guided" && !_config.AiInsights.Enabled)
-            warnings.Add("AI Insights is disabled. Guided Radio Setup requires AI; switch to manual mode or enable AI Insights.");
+            warnings.Add("AI Insights is disabled. Guided RF validation requires AI; switch to manual mode or enable AI Insights.");
         if (string.Equals(_config.Transcription.Provider, "none", StringComparison.OrdinalIgnoreCase))
-            warnings.Add("Transcription provider is disabled. A survey cannot pass without usable captured-call transcription.");
+            warnings.Add("Transcription provider is disabled. RF validation cannot pass without usable captured-call transcription.");
         if (!tools.Any(t => t.Category == "p25" && t.Installed))
             warnings.Add("No validated P25 control-channel tool was found. Control-channel experiments are blocked until P25 tooling is installed.");
         if (generatedP25Template)
@@ -1264,7 +1264,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyNoteDto> AddNoteAsync(string id, string text, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         text = (text ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Note text is required.");
@@ -1278,7 +1278,7 @@ public sealed class RfSurveyService
     public async Task<RfSurveyWaterfallStatusDto> StartWaterfallAsync(string id, RfSurveyWaterfallStartRequest request, CancellationToken ct)
     {
         await StopWaterfallAsync(id, CancellationToken.None);
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -1504,7 +1504,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyExperimentDto> RunExperimentAsync(string id, RfSurveyRunExperimentRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
@@ -1554,7 +1554,7 @@ public sealed class RfSurveyService
                     "voice_capture_trial" => await RunVoiceCaptureTrialAsync(sessionForRun, profile, request, runCt),
                     "transcription_gate" => await RunTranscriptionGateAsync(sessionForRun, profile, request, runCt),
                     "stability_verdict" => await RunStabilityVerdictAsync(sessionForRun, profile, request, runCt),
-                    _ => throw new InvalidOperationException("Unsupported Radio Setup experiment type.")
+                    _ => throw new InvalidOperationException("Unsupported Setup RF validation job type.")
                 };
             }
             catch (OperationCanceledException) when (cancellable && runCt.IsCancellationRequested)
@@ -1563,7 +1563,7 @@ public sealed class RfSurveyService
                 outcome = new ExperimentOutcome(
                     "canceled",
                     $"{displayType} was canceled before all planned checks completed.",
-                    "Cancellation requested from Radio Setup.",
+                    "Cancellation requested from Setup RF validation.",
                     $"{displayType} was canceled.",
                     "",
                     new { canceled = true, type, artifactPath = sessionForRun.ArtifactPath },
@@ -1617,8 +1617,8 @@ public sealed class RfSurveyService
         }
         var cleanup = await CleanupStaleP25ProcessesAsync(ct);
         var message = canceled
-            ? "Cancel requested for the active Radio Setup experiment."
-            : "No active cancellable Radio Setup experiment was registered; stale P25 cleanup was still checked.";
+            ? "Cancel requested for the active Setup RF validation job."
+            : "No active cancellable Setup RF validation job was registered; stale P25 cleanup was still checked.";
         if (!string.IsNullOrWhiteSpace(cleanup.BlockingIssue))
             message += " " + cleanup.BlockingIssue;
         return new RfSurveyCancelExperimentResultDto(canceled, message, cleanup.Output);
@@ -1642,7 +1642,7 @@ public sealed class RfSurveyService
         var trCoverageReady = trCoverage?.Ok != false;
         var combinedSweepReady = p25ProbeConfigured && trCoverageReady;
         var combinedSweepBlocker = !p25ProbeConfigured
-            ? "RF Sweep is blocked until the Radio Setup P25 probe command template is configured."
+            ? "RF Sweep is blocked until the Setup P25 probe command template is configured."
             : !trCoverageReady
                 ? "RF Sweep is blocked until the TR config source plan can cover the selected control channels: " + string.Join(" ", trCoverage?.Blockers ?? [])
                 : "";
@@ -1652,20 +1652,20 @@ public sealed class RfSurveyService
         if (!completed.Contains("ground_truth_review"))
             plans.Add(new("ground_truth_review", "Review ground truth", "Verify the setup-derived control channels, voice frequencies, SDR sources, and RF path facts before RF tests.", true, "", "Completed setup wizard or imported TR/RR data."));
         if (!completed.Contains("tr_stopped_check"))
-            plans.Add(new("tr_stopped_check", "Check TR service state", "Radio Setup needs to know whether trunk-recorder is active before bounded SDR/P25 measurements.", true, "", "Radio Setup will pause and restart trunk-recorder automatically when exclusive SDR access is required."));
+            plans.Add(new("tr_stopped_check", "Check TR service state", "Setup needs to know whether trunk-recorder is active before bounded SDR/P25 measurements.", true, "", "Setup will pause and restart trunk-recorder automatically when exclusive SDR access is required."));
         if (!completed.Contains("sdr_inventory"))
-            plans.Add(new("sdr_inventory", "Inventory SDRs", "Run the installed Airspy/RTL-SDR inventory tools and capture factual device output.", voiceReady || toolPrep?.Tools.Any(t => t.Category == "sdr" && t.Installed) == true, voiceReady ? "" : "Install SDR tools so the SDR can be claimed during a bounded TR pause.", "Radio Setup pauses TR if needed, runs rtl_test and/or airspy_info, then restarts TR."));
+            plans.Add(new("sdr_inventory", "Inventory SDRs", "Run the installed Airspy/RTL-SDR inventory tools and capture factual device output.", voiceReady || toolPrep?.Tools.Any(t => t.Category == "sdr" && t.Installed) == true, voiceReady ? "" : "Install SDR tools so the SDR can be claimed during a bounded TR pause.", "Setup pauses TR if needed, runs rtl_test and/or airspy_info, then restarts TR."));
         var combinedRfPassed = completed.Contains("rf_validation_sweep");
         if (!combinedRfPassed && !completed.Contains("rf_power_scan"))
-            plans.Add(new("rf_power_scan", "Measure RF power", "Capture a short IQ window at the selected control channel and estimate peak power, noise floor, SNR, overload risk, and frequency offset.", true, "", "Radio Setup pauses TR if needed, runs rtl_sdr or airspy_rx, then restarts TR."));
+            plans.Add(new("rf_power_scan", "Measure RF power", "Capture a short IQ window at the selected control channel and estimate peak power, noise floor, SNR, overload risk, and frequency offset.", true, "", "Setup pauses TR if needed, runs rtl_sdr or airspy_rx, then restarts TR."));
         if (!completed.Contains("rf_validation_sweep"))
             plans.Add(new("rf_validation_sweep", "Run RF validation sweep", "Rank control-channel/source/gain/error candidates with a short RF screen, P25 probe, and TR CC metrics on only the best candidates.", combinedSweepReady, combinedSweepBlocker, "Known control channels, selected SDR source, configured P25 probe command, valid TR source coverage, and trunk-recorder service control."));
         if (!combinedRfPassed && !completed.Contains("control_channel_quality"))
             plans.Add(new("control_channel_quality", "Measure CC quality", "Measure per-control-channel decode rate, zero-decode, continuity, retunes, and call events from a fresh TR journal window.", trCoverageReady, trCoverageReady ? "" : "TR CC Metrics are blocked until the TR config source plan can cover the selected control channels: " + string.Join(" ", trCoverage?.Blockers ?? []), "trunk-recorder running on the current TR config; known control channel list."));
         if (!combinedRfPassed && !completed.Contains("control_channel_p25_probe"))
-            plans.Add(new("control_channel_p25_probe", "Probe P25 control channel", "Capture control-channel evidence with validated P25 tooling before voice-call trials.", p25Ready, p25Ready ? "" : "P25 probe is blocked until P25 and SDR tooling are installed.", "Radio Setup pauses TR if needed, runs the validated OP25/P25 command, then restarts TR."));
+            plans.Add(new("control_channel_p25_probe", "Probe P25 control channel", "Capture control-channel evidence with validated P25 tooling before voice-call trials.", p25Ready, p25Ready ? "" : "P25 probe is blocked until P25 and SDR tooling are installed.", "Setup pauses TR if needed, runs the validated OP25/P25 command, then restarts TR."));
         if (!completed.Contains("error_gain_sweep"))
-            plans.Add(new("error_gain_sweep", "Run error/gain sweep", "Run controlled tr_tune measurements through the Radio Setup experiment API.", true, "", "The sweep runner manages temporary TR configs and restarts TR after cleanup."));
+            plans.Add(new("error_gain_sweep", "Run error/gain sweep", "Run controlled tr_tune measurements through the Setup RF validation API.", true, "", "The sweep runner manages temporary TR configs and restarts TR after cleanup."));
         var latestP25 = experiments
             .Where(e => e.Type == "control_channel_p25_probe")
             .OrderBy(e => e.CreatedAtUtc)
@@ -1724,7 +1724,7 @@ public sealed class RfSurveyService
             {
                 recommendation = issues.Count == 0
                     ? "Proceed to TR service state check and SDR inventory."
-                    : "Fix setup/RR ground truth before treating Radio Setup measurements as conclusive.",
+                    : "Fix setup/RR ground truth before treating RF validation measurements as conclusive.",
                 followUps = issues
             });
     }
@@ -1741,14 +1741,14 @@ public sealed class RfSurveyService
         var blocking = unknown ? "Unable to query trunk-recorder service state on this host." : string.Empty;
         return new ExperimentOutcome(
             status,
-            "Radio Setup should know whether trunk-recorder is active before scoped SDR/P25 measurements.",
+            "Setup should know whether trunk-recorder is active before scoped SDR/P25 measurements.",
             $"Check systemd unit {service}.",
             unknown ? blocking : active ? "trunk-recorder is active; SDR/P25 experiments will pause and restart it automatically." : $"trunk-recorder is not active ({result.Stdout.Trim()}).",
             blocking,
             new { service, result.ExitCode, output = TrimOutput(result.Stdout) },
             new
             {
-                recommendation = unknown ? "Run this survey on the target Linux host or use expert mode with external evidence." : "Proceed to SDR inventory; Radio Setup will manage short TR pauses.",
+                recommendation = unknown ? "Run this RF validation on the target Linux host or use expert mode with external evidence." : "Proceed to SDR inventory; Setup will manage short TR pauses.",
                 trMustRemainStopped = false
             });
     }
@@ -1769,7 +1769,7 @@ public sealed class RfSurveyService
                 return BlockedOutcome(
                     "sdr_inventory",
                     "SDR inventory needs exclusive access to the configured Airspy/RTL-SDR devices.",
-                    "Radio Setup can pause trunk-recorder through the service helper.",
+                    "Setup can pause trunk-recorder through the service helper.",
                     "trunk-recorder remained active after the stop request.",
                     new { trState, trStopOutput });
             }
@@ -1816,7 +1816,7 @@ public sealed class RfSurveyService
         }
 
         if (outputs.Count == 0)
-            return BlockedOutcome("sdr_inventory", "The survey needs at least one configured SDR source.", "Complete setup/TR source configuration.", "No SDR sources are configured.", new { sourceCount = profile.Sources.Count });
+            return BlockedOutcome("sdr_inventory", "Setup RF validation needs at least one configured SDR source.", "Complete setup/TR source configuration.", "No SDR sources are configured.", new { sourceCount = profile.Sources.Count });
 
         var outputText = JsonSerializer.Serialize(outputs, EngineConfig.JsonOptions());
         var missing = outputText.Contains("\"missing\"", StringComparison.OrdinalIgnoreCase);
@@ -1826,13 +1826,13 @@ public sealed class RfSurveyService
         return new ExperimentOutcome(
             restartFailed ? "failed" : missing ? "blocked" : visible ? "passed" : "failed",
             "Configured SDR devices should be visible to host tools while TR is stopped.",
-            "Radio Setup temporarily paused TR if needed; configured SDR host tools installed.",
+            "Setup temporarily paused TR if needed; configured SDR host tools installed.",
             restartFailed ? "SDR inventory ran, but trunk-recorder did not restart afterward." : missing ? "One or more configured SDR toolchains are missing." : visible ? "SDR inventory found compatible hardware." : "SDR inventory did not find compatible hardware.",
             restartFailed ? $"trunk-recorder did not restart after SDR inventory: {trRestartError}" : missing ? "Install the missing SDR host tools before RF measurements." : "",
             new { trState, trWasActive, trStopOutput, trRestartOutput, trRestartError, configuredSources = profile.Sources, serialNotes, detection, outputs },
             new
             {
-                recommendation = restartFailed ? "Restart trunk-recorder before continuing Radio Setup." : missing ? "Run tool prep/install for missing SDR host tools." : visible ? "Proceed to RF power scan before P25 probing." : "Check USB, permissions, drivers, and whether another process is using the SDR.",
+                recommendation = restartFailed ? "Restart trunk-recorder before continuing Setup RF validation." : missing ? "Run tool prep/install for missing SDR host tools." : visible ? "Proceed to RF power scan before P25 probing." : "Check USB, permissions, drivers, and whether another process is using the SDR.",
                 followUps = missing ? new[] { "Install missing SDR toolchain.", "Re-run Tool Prep.", "Re-run SDR inventory." } : Array.Empty<string>()
             });
     }
@@ -1854,7 +1854,7 @@ public sealed class RfSurveyService
         return sources
             .Select(source => FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device), ExtractRtlSerial(source.Device)))
             .Where(serial => !string.IsNullOrWhiteSpace(serial) && !normalizedOutput.Contains(NormalizeInventorySerialText(serial), StringComparison.OrdinalIgnoreCase))
-            .Select(serial => $"Saved source serial {serial} was not reported by inventory; Radio Setup will bind by SDR type for single-device workflows.")
+            .Select(serial => $"Saved source serial {serial} was not reported by inventory; Setup will bind by SDR type for single-device workflows.")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -1926,7 +1926,7 @@ public sealed class RfSurveyService
                 return new ExperimentOutcome(
                     "failed",
                     "RF Sweep should automatically pause trunk-recorder before claiming SDR hardware.",
-                    "Radio Setup can pause trunk-recorder through the service helper.",
+                    "Setup can pause trunk-recorder through the service helper.",
                     "trunk-recorder remained active after the stop request.",
                     "trunk-recorder remained active after the stop request.",
                     new { trState, trStopOutput },
@@ -2087,7 +2087,7 @@ public sealed class RfSurveyService
         return new ExperimentOutcome(
             status,
             "A usable control channel should stand above the local noise floor without SDR overload before P25 decoding is expected to work.",
-            "Radio Setup paused TR if needed; selected SDR available; known control channels; rtl_sdr or airspy_rx installed.",
+            "Setup paused TR if needed; selected SDR available; known control channels; rtl_sdr or airspy_rx installed.",
             summary,
             blocker,
             evidence,
@@ -2203,7 +2203,7 @@ public sealed class RfSurveyService
             return BlockedOutcome(
                 "rf_validation_sweep",
                 "RF Sweep requires a configured P25 probe before RF candidates can be ranked for decode.",
-                "Configure Radio Setup P25 probe command template.",
+                "Configure the Setup P25 probe command template.",
                 p25Preview.BlockingIssue,
                 new
                 {
@@ -2340,7 +2340,7 @@ public sealed class RfSurveyService
                 p25BlockedEvidence,
                 new
                 {
-                    recommendation = "Configure the Radio Setup P25 probe command template, then rerun the combined RF sweep. Do not change antenna or gain based only on this blocked decode step.",
+                    recommendation = "Configure the Setup P25 probe command template, then rerun the combined RF sweep. Do not change antenna or gain based only on this blocked decode step.",
                     candidates,
                     followUps = new[] { "Configure P25 probe command template.", "Rerun combined RF sweep.", "Review the RF-ranked candidates only as preliminary signal evidence." }
                 });
@@ -3591,7 +3591,7 @@ public sealed class RfSurveyService
                 return new ExperimentOutcome(
                     "failed",
                     "CC quality is measured from live trunk-recorder decode summaries.",
-                    "Radio Setup can start trunk-recorder before measuring CC quality.",
+                    "Setup can start trunk-recorder before measuring CC quality.",
                     "trunk-recorder did not become active after the start request.",
                     "trunk-recorder did not become active after the start request.",
                     new { trState, trStartOutput },
@@ -4876,7 +4876,7 @@ public sealed class RfSurveyService
             return BlockedOutcome(
                 "control_channel_p25_probe",
                 "P25 probing requires exclusive SDR access and no stale OP25 process may already hold the device.",
-                "Radio Setup should clean up abandoned OP25 probes before starting a new P25 probe.",
+                "Setup should clean up abandoned OP25 probes before starting a new P25 probe.",
                 staleP25Cleanup.BlockingIssue,
                 new { staleP25Cleanup.Before, staleP25Cleanup.After, staleP25Cleanup.Output });
 
@@ -4891,7 +4891,7 @@ public sealed class RfSurveyService
             return BlockedOutcome(
                 "control_channel_p25_probe",
                 "P25 frames must be measured with a configured command profile.",
-                "Configure Radio Setup P25 probe command template.",
+                "Configure the Setup P25 probe command template.",
                 preview.BlockingIssue,
                 new { preview, toolPrep.Tools });
 
@@ -4907,7 +4907,7 @@ public sealed class RfSurveyService
                 return BlockedOutcome(
                     "control_channel_p25_probe",
                     "P25 probing needs exclusive SDR access.",
-                    "Radio Setup can pause trunk-recorder through the service helper.",
+                    "Setup can pause trunk-recorder through the service helper.",
                     "trunk-recorder remained active after the stop request.",
                     new { trState, trStopOutput });
         }
@@ -4957,14 +4957,14 @@ public sealed class RfSurveyService
         return new ExperimentOutcome(
             status,
             "A known control channel should produce P25 frame/sync evidence when the SDR path is viable.",
-            "Radio Setup temporarily paused TR if needed; configured P25 probe command; SDR available; known control channel.",
+            "Setup temporarily paused TR if needed; configured P25 probe command; SDR available; known control channel.",
             restartFailed ? "P25 probe ran, but trunk-recorder did not restart afterward." : hasFrames ? "P25 probe output contained frame/sync evidence." : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "P25 probe ran but did not contain recognizable P25 frame/sync evidence.",
             restartFailed ? $"trunk-recorder did not restart after P25 probe: {trRestartError}" : hasFrames ? "" : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "No recognizable P25 frame/sync evidence was captured.",
             new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, demod, probeOverrides = ReadP25ProbeOverrides(request), staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
             new
             {
                 recommendation = restartFailed
-                    ? "Restart trunk-recorder before continuing Radio Setup."
+                    ? "Restart trunk-recorder before continuing Setup RF validation."
                     : hasFrames
                     ? "Proceed to a longer stability probe or voice capture trial."
                     : toolFailure
@@ -5062,7 +5062,7 @@ public sealed class RfSurveyService
             blockers.Count == 0 ? "passed" : "blocked",
             "Temporary TR config trials should be explicit, backed up, and restart-gated.",
             "Known control channels and configured SDR sources.",
-            blockers.Count == 0 ? "Temporary TR config plan was written to the survey artifact folder." : string.Join(" ", blockers),
+            blockers.Count == 0 ? "Temporary TR config plan was written to the Setup RF evidence folder." : string.Join(" ", blockers),
             string.Join(" ", blockers),
             plan,
             new
@@ -5096,7 +5096,7 @@ public sealed class RfSurveyService
                 },
                 new
                 {
-                    recommendation = "Apply the selected RF recommendation through Radio Setup, restart TR, then rerun Call Quality."
+                    recommendation = "Apply the selected RF recommendation through Setup, restart TR, then rerun Call Quality."
                 });
         }
 
@@ -5663,9 +5663,9 @@ public sealed class RfSurveyService
                 .Where(name => liveSystems.All(live => !string.Equals(live, name, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
             if (requestedSystems.Count == 0)
-                blockers.Add("Workspace has no selected systems; return to Sites before Call Quality.");
+                blockers.Add("Setup has no selected systems; return to Systems & Sites before Call Quality.");
             if (missingSystems.Count > 0)
-                blockers.Add("Live TR config is not running the applied workspace system list. Missing: " + string.Join(", ", missingSystems) + ".");
+                blockers.Add("Live TR config is not running the applied Setup system list. Missing: " + string.Join(", ", missingSystems) + ".");
 
             var selected = profile.SelectedSourceIndexes.Count > 0
                 ? profile.SelectedSourceIndexes.Distinct().Order().ToList()
@@ -5674,7 +5674,7 @@ public sealed class RfSurveyService
                 .Where(index => coverage.Sources.All(source => source.Index != index))
                 .ToList();
             if (selected.Count == 0)
-                blockers.Add("Workspace has no selected SDR sources; return to Config Draft before Call Quality.");
+                blockers.Add("Setup has no selected SDR sources; return to Apply & Resume before Call Quality.");
             if (missingSources.Count > 0)
                 blockers.Add("Live TR config is not running the selected source indexes: " + string.Join(", ", missingSources) + ".");
 
@@ -6062,7 +6062,7 @@ public sealed class RfSurveyService
             new
             {
                 recommendation = status == "passed"
-                    ? string.IsNullOrWhiteSpace(noTrafficCaveat) ? "Survey can be marked as a stable RF path candidate. Export or apply the plan." : "Proceed with the no-traffic caveat; rerun Call Quality during busier traffic if call-based stability proof is required."
+                    ? string.IsNullOrWhiteSpace(noTrafficCaveat) ? "RF path can be marked as a stable candidate. Export or apply the plan." : "Proceed with the no-traffic caveat; rerun Call Quality during busier traffic if call-based stability proof is required."
                     : "Continue controlled experiments; include longer capture windows because short pass/fail swings were observed in MS testing."
             });
     }
@@ -6202,7 +6202,7 @@ public sealed class RfSurveyService
             provider,
             provider,
             "Runs the captured-call transcription acceptance gate.",
-            "Configure and test transcription settings before Radio Setup.");
+            "Configure and test transcription settings before Setup RF validation.");
     }
 
     private async Task<(RfSurveyToolPrepDto? Prep, string Json)> EnsureReusableToolPrepAsync(
@@ -6289,7 +6289,7 @@ public sealed class RfSurveyService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Unable to copy TR config into Radio Setup artifact folder");
+            _logger.LogWarning(ex, "Unable to copy TR config into Setup RF evidence folder");
         }
     }
 
@@ -6311,7 +6311,7 @@ public sealed class RfSurveyService
         var target = Path.GetFullPath(artifactPath);
         if (!target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Refusing to delete Radio Setup artifact path outside root: {ArtifactPath}", artifactPath);
+            _logger.LogWarning("Refusing to delete Setup RF evidence path outside root: {ArtifactPath}", artifactPath);
             return;
         }
 
@@ -6324,7 +6324,7 @@ public sealed class RfSurveyService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(ex, "Deleted Radio Setup database row but could not remove artifact path {ArtifactPath}", target);
+            _logger.LogWarning(ex, "Deleted Setup RF database row but could not remove evidence path {ArtifactPath}", target);
         }
     }
 
@@ -6805,7 +6805,7 @@ public sealed class RfSurveyService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (requested.Count == 0)
         {
-            warnings.Add("Workspace system short names are missing; TR systems were left unchanged.");
+            warnings.Add("Setup system short names are missing; TR systems were left unchanged.");
             return systems
                 .OfType<JsonObject>()
                 .Select(system => system["shortName"]?.GetValue<string>() ?? string.Empty)
@@ -6832,14 +6832,14 @@ public sealed class RfSurveyService
 
         if (kept.Count == 0)
         {
-            warnings.Add($"Workspace systems '{string.Join(", ", requested)}' were not found in the live TR config; Radio Setup will add them from workspace ground truth if available.");
+            warnings.Add($"Setup systems '{string.Join(", ", requested)}' were not found in the live TR config; Setup will add them from selected site definitions if available.");
             root["systems"] = kept;
             return [];
         }
 
         root["systems"] = kept;
         if (removed.Count > 0)
-            changes.Add($"systems: kept {string.Join(", ", keptNames)}; removed {string.Join(", ", removed)} from the active TR config for this workspace draft");
+            changes.Add($"systems: kept {string.Join(", ", keptNames)}; removed {string.Join(", ", removed)} from the active TR config for this Setup draft");
         return keptNames;
     }
 
@@ -6861,7 +6861,7 @@ public sealed class RfSurveyService
             var definition = definitions.FirstOrDefault(row => string.Equals(row.ShortName, requested, StringComparison.OrdinalIgnoreCase));
             if (definition == null)
             {
-                warnings.Add($"Workspace system '{requested}' has no frequency definition; it was not added to the TR config draft.");
+                warnings.Add($"Setup system '{requested}' has no frequency definition; it was not added to the TR config draft.");
                 continue;
             }
             JsonObject system = [];
@@ -6875,7 +6875,7 @@ public sealed class RfSurveyService
                 system["channels"] = new JsonArray(definition.VoiceFrequenciesHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
             systems.Add(system);
             names.Add(definition.ShortName);
-            changes.Add($"systems: added {definition.ShortName} from Radio Setup workspace ground truth");
+            changes.Add($"systems: added {definition.ShortName} from selected Setup site definitions");
         }
         return names;
     }
@@ -6913,7 +6913,7 @@ public sealed class RfSurveyService
         }).ToArray());
         var after = callstream["streams"]?.ToJsonString() ?? "null";
         if (!string.Equals(before, after, StringComparison.Ordinal))
-            changes.Add("callstream streams updated for workspace system list");
+            changes.Add("callstream streams updated for Setup system list");
     }
 
     private static void NormalizeRadioSetupTrConfig(JsonObject root, List<string> changes, string talkgroupsPath)
@@ -7189,7 +7189,7 @@ public sealed class RfSurveyService
             "source_center" => PatchSourceNumber(root, profile, request.SourceIndex, "center", request.CenterHz, warnings),
             "source_gain" => PatchSourceGain(root, profile, request.SourceIndex, request.Gain, warnings),
             "sample_rate" => PatchSourceNumber(root, profile, request.SourceIndex, "rate", request.SampleRate, warnings),
-            _ => throw new InvalidOperationException("Unsupported Radio Setup candidate trial type.")
+            _ => throw new InvalidOperationException("Unsupported Setup RF validation candidate trial type.")
         };
     }
 
@@ -7294,7 +7294,7 @@ public sealed class RfSurveyService
         var controlChannel = controlChannelHz ?? profile.ControlChannelsHz.FirstOrDefault();
         var blocking = string.Empty;
         if (!configured)
-            blocking = "Radio Setup P25 probe command template is not configured.";
+            blocking = "Setup P25 probe command template is not configured.";
         else if (controlChannel <= 0)
             blocking = "No control channel is available from setup/RR ground truth.";
         else if (profile.Sources.Count == 0)
@@ -7424,7 +7424,7 @@ public sealed class RfSurveyService
 
         if (sources.Count == 0)
         {
-            var missing = sourceIndex.HasValue ? $"Source {sourceIndex.Value} is not present in the Radio Setup profile." : "No SDR source is present in the Radio Setup profile.";
+            var missing = sourceIndex.HasValue ? $"Source {sourceIndex.Value} is not present in the Setup RF profile." : "No SDR source is present in the Setup RF profile.";
             return new TrSourceCoverageCheck(false, $"{missing} Select or generate a TR config source before running TR CC Metrics.", rows);
         }
 
@@ -8091,7 +8091,7 @@ public sealed class RfSurveyService
         if (LatestStatus(detail.Experiments, "stability_verdict") != "passed")
             rows.Add("Run a longer stability window when traffic exists, or carry the no-traffic caveat from healthy TR metrics.");
         if (rows.Count == 0)
-            rows.Add("Radio Setup evidence supports applying the plan, subject to operator review.");
+            rows.Add("Setup RF evidence supports applying the plan, subject to operator review.");
         return rows;
     }
 
@@ -8117,7 +8117,7 @@ public sealed class RfSurveyService
     {
         var lines = new List<string>
         {
-            $"# Radio Setup Export: {detail.Session.SiteLabel}",
+            $"# Setup RF Export: {detail.Session.SiteLabel}",
             "",
             $"- Survey: {detail.Session.Id}",
             $"- Verdict: {detail.Session.Verdict}",

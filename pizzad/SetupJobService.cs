@@ -325,10 +325,10 @@ public sealed class SetupJobService
 
     private async Task RunStopTrForCalibrationAsync(long jobId, CancellationToken ct)
     {
-        await LogAsync(jobId, "warn", "Leaving trunk-recorder stopped from the web UI is no longer supported. Radio Setup experiments now pause and restart TR inside each bounded measurement.", ct);
+        await LogAsync(jobId, "warn", "Leaving trunk-recorder stopped from the web UI is no longer supported. Setup RF validation jobs now pause and restart TR inside each bounded measurement.", ct);
         await RunAdminHelperAsync(jobId, "stop-tr", ct);
         await RunAdminHelperAsync(jobId, "start-tr", CancellationToken.None);
-        await LogAsync(jobId, "info", "trunk-recorder was briefly paused and restarted to verify service control. Use Radio Setup experiment buttons for bounded SDR measurements.", ct);
+        await LogAsync(jobId, "info", "trunk-recorder was briefly paused and restarted to verify service control. Use Setup RF validation buttons for bounded SDR measurements.", ct);
         await _database.UpdateJobAsync(jobId, "completed", 1, 1, 0, "TR service-control check completed; trunk-recorder was restarted.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
@@ -588,7 +588,7 @@ public sealed class SetupJobService
         await RunCommandAsync(jobId, "bash", "-lc \"timeout 8 rtl_test -t || true\"", ct);
         await _database.UpdateJobAsync(jobId, "running", 5, ++completed, 0, "RTL-SDR diagnostic smoke check complete.", false, false, ct);
         await RunCommandAsync(jobId, "bash", "-lc \"cd /opt/pizzawave/diagnostics/op25/op25/gr-op25_repeater/apps && ./rx.py --help >/tmp/pizzawave-op25-rx-help.txt 2>&1 || true; head -40 /tmp/pizzawave-op25-rx-help.txt\"", ct);
-        await _database.UpdateJobAsync(jobId, "completed", 5, ++completed, 0, "Optional RF diagnostic tools are installed. Configure Radio Setup with an OP25 command template before control-channel probing.", false, true, ct);
+        await _database.UpdateJobAsync(jobId, "completed", 5, ++completed, 0, "Optional RF diagnostic tools are installed. Configure Setup RF validation with an OP25 command template before control-channel probing.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 

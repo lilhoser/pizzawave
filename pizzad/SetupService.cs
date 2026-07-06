@@ -274,8 +274,8 @@ public sealed class SetupService
         new("ai-insights", "AI insights skipped or tested", false, _config.Setup.AiInsightsSkippedOrValidated, "Optional."),
         new("embeddings", "Vector search/Qdrant skipped or tested", false, _config.Setup.EmbeddingsSkippedOrValidated, "Optional, but recommended when AI incidents are enabled."),
         new("alerts", "Alerts skipped or tested", false, _config.Setup.AlertsSkippedOrValidated, "Optional."),
-        new("diagnostic-tools", "Optional RF diagnostic tools skipped or installed", false, _config.Setup.DiagnosticToolsSkippedOrInstalled, "Optional. Installs OP25/P25 and SDR diagnostics used by Radio Setup."),
-        new("calibration", "Radio Setup handoff acknowledged", false, _config.Setup.CalibrationSkippedOrCompleted, "Optional. First-run hands RF validation to Tools > Radio Setup.")
+        new("diagnostic-tools", "Optional RF diagnostic tools skipped or installed", false, _config.Setup.DiagnosticToolsSkippedOrInstalled, "Optional. Installs OP25/P25 and SDR diagnostics used by Setup RF validation."),
+        new("calibration", "Setup RF validation handoff acknowledged", false, _config.Setup.CalibrationSkippedOrCompleted, "Optional. First-run hands RF validation to Setup.")
     ];
 
     private SetupValidationResult ValidateTr()
