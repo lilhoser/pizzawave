@@ -6700,6 +6700,8 @@ public sealed class RfSurveyService
             system["shortName"] = definition.ShortName;
             system["type"] = "p25";
             system["modulation"] = "qpsk";
+            if (!string.IsNullOrWhiteSpace(definition.TalkgroupSystemShortName))
+                system["talkgroupSystemShortName"] = TalkgroupCatalogService.NormalizeSystemShortName(definition.TalkgroupSystemShortName);
             system["control_channels"] = new JsonArray(definition.ControlChannelsHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
             if (definition.VoiceFrequenciesHz.Count > 0)
                 system["channels"] = new JsonArray(definition.VoiceFrequenciesHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
@@ -6796,7 +6798,15 @@ public sealed class RfSurveyService
         SetObjectValue(system, "system", "talkgroupDisplayFormat", "id_tag", changes);
         SetObjectValue(system, "system", "multiSite", true, changes);
         var shortName = system["shortName"]?.GetValue<string>() ?? system["short_name"]?.GetValue<string>() ?? system["name"]?.GetValue<string>() ?? string.Empty;
-        SetObjectValue(system, "system", "talkgroupsFile", TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, shortName), changes);
+        var talkgroupSystem = system["talkgroupSystemShortName"]?.GetValue<string>() ?? string.Empty;
+        var existingTalkgroupsFile = system["talkgroupsFile"]?.GetValue<string>() ?? string.Empty;
+        var resolvedTalkgroupsFile = !string.IsNullOrWhiteSpace(talkgroupSystem)
+            ? TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, talkgroupSystem)
+            : !string.IsNullOrWhiteSpace(existingTalkgroupsFile)
+                ? existingTalkgroupsFile
+                : TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, shortName);
+        SetObjectValue(system, "system", "talkgroupsFile", resolvedTalkgroupsFile, changes);
+        system.Remove("talkgroupSystemShortName");
 
         var postprocess = system["audio_postprocess"] as JsonObject;
         if (postprocess == null)

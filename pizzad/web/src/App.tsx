@@ -1695,14 +1695,14 @@ function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
   if (sids.length === 0)
     return [{ key: "source-0", radioReferenceSid: "", catalogSystem: fallbackSystem }];
-  const selectedSystems = setup.desired.systems.length
+  const selectedSystems: RfSurveySystem[] = setup.desired.systems.length
     ? setup.desired.systems
     : systemNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
   const sidMap = new Map<string, string>();
   for (const system of selectedSystems) {
     const sid = radioReferenceSidForSetupSystem(system, sids);
     if (!sid || sidMap.has(sid)) continue;
-    sidMap.set(sid, catalogSystemForRadioReferenceSid(sid, system.shortName || system.siteLabel || fallbackSystem));
+    sidMap.set(sid, system.talkgroupSystemShortName || catalogSystemForRadioReferenceSid(sid, system.shortName || system.siteLabel || fallbackSystem));
   }
   const rows = Array.from(sidMap, ([sid, catalogSystem]) => ({
     key: `source-${sid}-${catalogSystem}`,
@@ -1824,22 +1824,47 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
       pair.sid,
       pair.preview.rows.find(row => row.systemShortName)?.systemShortName ?? ""
     ]));
-    setRrSources(current => current.map(row => {
+    const nextSources = rrSources.map(row => {
       const resolved = resolvedNames.get(row.radioReferenceSid);
       return resolved ? { ...row, catalogSystem: resolved } : row;
-    }));
-    return combineTalkgroupPreviews(previewPairs.map(pair => pair.preview));
+    });
+    setRrSources(nextSources);
+    return { preview: combineTalkgroupPreviews(previewPairs.map(pair => pair.preview)), sources: nextSources };
+  }
+
+  async function saveTalkgroupSystemMapping(sources: SiteSetupTalkgroupSource[]) {
+    const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
+    if (!setup.desired.systems.length || !sids.length) return;
+    const bySid = new Map(sources
+      .map(row => [row.radioReferenceSid.trim(), normalizeTalkgroupSystem(row.catalogSystem)] as const)
+      .filter(([sid, system]) => sid && system));
+    if (bySid.size === 0) return;
+    let changed = false;
+    const systems = setup.desired.systems.map(system => {
+      const sid = radioReferenceSidForSetupSystem(system, sids);
+      const talkgroupSystemShortName = sid ? bySid.get(sid) || "" : "";
+      if (!talkgroupSystemShortName || stringEqualsIgnoreCase(system.talkgroupSystemShortName, talkgroupSystemShortName))
+        return system;
+      changed = true;
+      return { ...system, talkgroupSystemShortName };
+    });
+    if (!changed) return;
+    await api.request<SiteSetup>(siteSetupApi, {
+      method: "PATCH",
+      body: JSON.stringify({ desired: { ...setup.desired, systems }, source: "ui" })
+    });
   }
 
   async function importTalkgroups(importKey: string) {
     setBusy("import-rr");
     setMessage("");
     try {
-      const currentPreview = await fetchTalkgroupPreview();
+      const current = await fetchTalkgroupPreview();
       const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
         method: "POST",
-        body: JSON.stringify({ rows: currentPreview.rows })
+        body: JSON.stringify({ rows: current.preview.rows })
       });
+      await saveTalkgroupSystemMapping(current.sources);
       sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v4", importKey);
       setMessage(`Loaded ${result.includedCount.toLocaleString()} talkgroup row(s) from RadioReference into the catalog.`);
       setCatalogReloadToken(value => value + 1);
