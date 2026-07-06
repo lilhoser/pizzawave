@@ -791,10 +791,6 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { s
         </section>
 
         <section className="site-setup-panel">
-          <div className="site-setup-panel-head">
-            <h3>{section}</h3>
-            <span className={current.status.pendingApply ? "pill live-status-warning" : "pill live-status-ok"}>{current.status.pendingApply ? "Pending apply" : "Applied"}</span>
-          </div>
           {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
@@ -1013,22 +1009,6 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
   const rfPathRef = useRef(rfPath);
   const saveTimerRef = useRef<number | null>(null);
   const onSaveRef = useRef(onSave);
-  const desiredSources = setup.desired.sources.length
-    ? setup.desired.sources
-    : setup.applied.sources.map(source => ({
-      index: source.index,
-      device: source.device,
-      serial: source.serial,
-      sdrType: sdrTypeFromDeviceLabel(source.device),
-      centerHz: source.centerHz,
-      sampleRate: source.sampleRate,
-      errorHz: source.errorHz,
-      gain: source.gain
-    }));
-  const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
-    ? setup.desired.selectedSourceIndexes
-    : desiredSources.map(source => source.index);
-  const selectedSourceSet = new Set(selectedSourceIndexes);
   useEffect(() => {
     const next = normalizeSetupRfPath(setup.desired.rfPath);
     rfPathRef.current = next;
@@ -1067,93 +1047,19 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
   function patchRfPath(patch: Partial<RfSurveyPathProfile>) {
     updateRfPath(current => ({ ...current, ...patch }));
   }
-  async function toggleSource(sourceIndex: number, checked: boolean) {
-    const next = checked
-      ? Array.from(new Set([...selectedSourceIndexes, sourceIndex])).sort((a, b) => a - b)
-      : selectedSourceIndexes.filter(index => index !== sourceIndex);
-    await onSave({ selectedSourceIndexes: next, sources: desiredSources }, "selectedSourceIndexes");
-  }
 
   return <div className="site-setup-form site-setup-hardware">
-    <section className="site-setup-hardware-block">
-      <div className="site-setup-subhead">
-        <h4>SDR Sources</h4>
-        <span>{desiredSources.length.toLocaleString()} source{desiredSources.length === 1 ? "" : "s"} from desired/live config</span>
-      </div>
-      <div className="site-setup-source-table-wrap">
-        <table className="table compact-table site-setup-source-table">
-          <thead><tr><th>Use</th><th>Source</th><th>Device</th><th>Center</th><th>Rate</th><th>Error</th><th>Gain</th></tr></thead>
-          <tbody>
-            {desiredSources.map(source => <tr key={source.index} className={selectedSourceSet.has(source.index) ? "selected" : ""}>
-              <td><input type="checkbox" checked={selectedSourceSet.has(source.index)} onChange={event => void toggleSource(source.index, event.currentTarget.checked)} aria-label={`Use source ${source.index}`} /></td>
-              <td>#{source.index}</td>
-              <td>{source.sdrType || sdrTypeFromDeviceLabel(source.device)} {source.serial || source.device || "--"}</td>
-              <td>{formatRfHz(source.centerHz)}</td>
-              <td>{source.sampleRate ? `${formatMhzInput(source.sampleRate)} MS/s` : "--"}</td>
-              <td>{formatSignedHz(source.errorHz)}</td>
-              <td>{source.gain || "--"}</td>
-            </tr>)}
-            {desiredSources.length === 0 && <tr><td colSpan={7}>No SDR sources are available from Site Setup or the live TR config.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      {statusFor("selectedSourceIndexes")}
-    </section>
-
-    <section className="site-setup-hardware-block">
-      <div className="site-setup-subhead">
-        <h4>RF Path</h4>
-        <span>Changes are saved to Setup history after a short pause.</span>
-      </div>
-      <div className="rf-form-grid site-setup-rf-fields">
-        <label className="setting-field"><span>Antenna</span><input value={rfPath.antenna} onChange={event => patchRfPath({ antenna: event.target.value })} /></label>
-        <label className="setting-field"><span>Antenna type</span><input value={rfPath.antennaType} onChange={event => patchRfPath({ antennaType: event.target.value })} placeholder="omni, yagi, mag-mount" /></label>
-        <label className="setting-field"><span>Mount</span><input value={rfPath.antennaMount} onChange={event => patchRfPath({ antennaMount: event.target.value })} /></label>
-        <label className="setting-field"><span>Polarization</span><input value={rfPath.antennaPolarization} onChange={event => patchRfPath({ antennaPolarization: event.target.value })} /></label>
-        <label className="setting-field"><span>Aimed at</span><input value={rfPath.aimedAtSite} onChange={event => patchRfPath({ aimedAtSite: event.target.value })} /></label>
-        <label className="setting-field"><span>Position notes</span><input value={rfPath.positionNotes} onChange={event => patchRfPath({ positionNotes: event.target.value })} /></label>
-      </div>
-      <SiteSetupRfChainEditor path={rfPath} updatePath={updateRfPath} />
-      <label className="setting-field site-setup-wide-field">
-        <span>Observations</span>
-        <textarea rows={3} value={rfPath.observations} onChange={event => patchRfPath({ observations: event.target.value })} />
-      </label>
-      {statusFor("rfPath")}
-    </section>
-  </div>;
-}
-
-function SiteSetupRfChainEditor({ path, updatePath }: { path: RfSurveyPathProfile; updatePath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>> }) {
-  const updateChain = (index: number, patch: Partial<RfSurveyPathProfile["chain"][number]>) => updatePath(current => ({
-    ...current,
-    chain: current.chain.map((item, i) => i === index ? { ...item, ...patch } : item)
-  }));
-  return <div className="site-setup-rf-chain">
-    <div className="rf-chain-head">
-      <div><strong>Ordered RF Chain</strong><span>Antenna to SDR.</span></div>
-      <div className="rf-primary-actions">
-        <button type="button" onClick={() => updatePath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] }))}>Add Chain Item</button>
-      </div>
+    <div className="settings-fields site-setup-rsw-rf-path">
+      <SettingInput label="Antenna" description="Brand/model. Yagi is the expected first path, but this remains location agnostic." value={rfPath.antenna} onChange={v => patchRfPath({ antenna: v })} />
+      <SettingInput label="Antenna type" description="Examples: yagi, omni, whip, discone." value={rfPath.antennaType} onChange={v => patchRfPath({ antennaType: v })} />
+      <SettingInput label="Position notes" description="Aim, bearing, polarization, height, indoor/outdoor, room/window, or other repeatability notes." value={rfPath.positionNotes} onChange={v => patchRfPath({ positionNotes: v })} />
+      <SettingInput label="Connectors/adapters" description="Connector and adapter chain from antenna to SDR." value={rfPath.connectorChain} onChange={v => patchRfPath({ connectorChain: v })} />
+      <SettingInput label="Coax" description="Type and length." value={rfPath.coax} onChange={v => patchRfPath({ coax: v })} />
+      <SettingInput label="Splitter/multicoupler" description="Passive splitter, active multicoupler, or direct path." value={rfPath.splitterOrMulticoupler} onChange={v => patchRfPath({ splitterOrMulticoupler: v })} />
+      <SettingInput label="LNA" description="Model, placement, power method, and bias tee state." value={rfPath.lna} onChange={v => patchRfPath({ lna: v })} />
+      <SettingInput label="Filters" description="Band-pass or other filtering in the path." value={rfPath.filters} onChange={v => patchRfPath({ filters: v })} />
     </div>
-    <div className="rf-chain-list">
-      <div className="rf-chain-column-header">
-        <span>#</span>
-        <span>Type</span>
-        <span>Description / model</span>
-        <span>Connector In</span>
-        <span>Connector Out</span>
-        <span>Details</span>
-        <span></span>
-      </div>
-      {path.chain.map((item, index) => <RfChainItemEditor
-        item={normalizeRfChainItem(item)}
-        index={index}
-        key={index}
-        update={patch => updateChain(index, patch)}
-        remove={() => updatePath(current => ({ ...current, chain: current.chain.filter((_, i) => i !== index) }))}
-      />)}
-      {path.chain.length === 0 && <div className="setup-note">Add the physical components in order, starting with the antenna and ending at the SDR.</div>}
-    </div>
+    {statusFor("rfPath")}
   </div>;
 }
 
@@ -4306,10 +4212,6 @@ function ScopeStep({ detail, scopePlan, radioReferenceSid, setRadioReferenceSid,
 
 const rfChainTypes = ["antenna", "coax", "splitter", "multicoupler", "lna", "filter", "sdr", "other"];
 const rfConnectorTypes = ["n/a", "unknown", "SMA", "RP-SMA", "BNC", "TNC", "N", "F", "PL-259/SO-239", "MCX", "MMCX", "UHF", "FME", "SMP", "bare wire", "other"];
-function newRfChainItem(): RfSurveyPathProfile["chain"][number] {
-  return { type: "lna", label: "", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorInType: "unknown", connectorInGender: "unknown", connectorOutType: "unknown", connectorOutGender: "unknown", powerMethod: "unknown" };
-}
-
 function normalizeRfChainItem(item: RfSurveyPathProfile["chain"][number]): RfSurveyPathProfile["chain"][number] {
   return {
     ...item,
