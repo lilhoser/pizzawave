@@ -453,6 +453,89 @@ public sealed class RfSurveyService
         return new RfSurveyDetailDto(session, profile, [], [], toolPrep, PlanNextExperiments(session, profile, toolPrep, []));
     }
 
+    public async Task<RfSurveyDetailDto> UpsertSiteSetupAsync(SiteSetupConfig desired, CancellationToken ct)
+    {
+        const string id = "site-setup";
+        Directory.CreateDirectory(ArtifactRoot);
+        var artifactPath = Path.Combine(ArtifactRoot, id);
+        Directory.CreateDirectory(artifactPath);
+
+        var request = BuildSiteSetupRequest(desired);
+        var row = await _database.GetRfSurveySessionAsync(id, ct);
+        if (row != null)
+            return await UpdateDraftAsync(id, ToDraftUpdate(request), ct);
+
+        var now = DateTime.UtcNow;
+        var profile = BuildProfile(request);
+        var session = new RfSurveySessionDto
+        {
+            Id = id,
+            Status = "draft",
+            Mode = profile.Mode,
+            SiteLabel = profile.SiteLabel,
+            SystemShortName = profile.SystemShortName,
+            SdrSummary = SummarizeSdrs(profile.Sources),
+            RfPathSummary = SummarizeRfPath(profile.RfPath),
+            ArtifactPath = artifactPath,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        var toolPrep = await LatestReusableToolPrepAsync(null, ct) ?? EmptyToolPrep();
+        await WriteArtifactAsync(artifactPath, "survey.json", session, ct);
+        await WriteArtifactAsync(artifactPath, "input-profile.json", profile, ct);
+        await WriteArtifactAsync(artifactPath, "tool-prep.json", toolPrep, ct);
+        await TryCopyTrConfigAsync(artifactPath, ct);
+
+        await _database.AddRfSurveySessionAsync(
+            session,
+            JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+            JsonSerializer.Serialize(toolPrep, EngineConfig.JsonOptions()),
+            ct);
+
+        return new RfSurveyDetailDto(session, profile, [], [], toolPrep, PlanNextExperiments(session, profile, toolPrep, []));
+    }
+
+    private static RfSurveyCreateRequest BuildSiteSetupRequest(SiteSetupConfig desired)
+    {
+        var systemNames = desired.Systems.Count > 0
+            ? desired.Systems.Select(system => system.ShortName).Where(name => !string.IsNullOrWhiteSpace(name)).ToList()
+            : desired.SystemShortNames;
+        return new RfSurveyCreateRequest(
+            SystemShortName: systemNames.FirstOrDefault(),
+            SiteLabel: string.IsNullOrWhiteSpace(desired.SiteLabel) ? "Site Setup" : desired.SiteLabel,
+            Mode: "guided",
+            RadioReferenceSid: string.IsNullOrWhiteSpace(desired.RadioReferenceSid) ? null : desired.RadioReferenceSid,
+            SystemShortNames: systemNames,
+            SourcePlanSystemShortNames: desired.SourcePlanSystemShortNames.Count > 0 ? desired.SourcePlanSystemShortNames : systemNames,
+            SourcePlanMode: string.IsNullOrWhiteSpace(desired.SourcePlanMode) ? "full" : desired.SourcePlanMode,
+            RfPath: desired.RfPath,
+            SelectedSourceIndexes: desired.SelectedSourceIndexes,
+            CurrentStep: 2,
+            MeasurementMode: "guided",
+            ProbeDurationSeconds: 45,
+            GroundTruthSource: "site-setup",
+            SystemDefinitions: desired.Systems,
+            SdrSources: desired.Sources);
+    }
+
+    private static RfSurveyDraftUpdateRequest ToDraftUpdate(RfSurveyCreateRequest request) => new(
+        SystemShortName: request.SystemShortName,
+        SiteLabel: request.SiteLabel,
+        Mode: request.Mode,
+        RadioReferenceSid: request.RadioReferenceSid,
+        SystemShortNames: request.SystemShortNames,
+        SourcePlanSystemShortNames: request.SourcePlanSystemShortNames,
+        SourcePlanMode: request.SourcePlanMode,
+        RfPath: request.RfPath,
+        SelectedSourceIndexes: request.SelectedSourceIndexes,
+        CurrentStep: request.CurrentStep,
+        MeasurementMode: request.MeasurementMode,
+        ProbeDurationSeconds: request.ProbeDurationSeconds,
+        GroundTruthSource: request.GroundTruthSource,
+        SystemDefinitions: request.SystemDefinitions,
+        SdrSources: request.SdrSources);
+
     public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct, bool compactExperiments = false)
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct);

@@ -286,6 +286,155 @@ app.MapPost("/api/v1/setup/site/mark-applied", async (HttpContext context, SiteS
 .WithName("SiteSetupMarkApplied")
 .WithOpenApi();
 
+app.MapGet("/api/v1/setup/site/rf", async (HttpContext context, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    return Results.Ok(await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted));
+})
+.WithName("SiteSetupRfGet")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/rf/{id}", async (HttpContext context, string id, bool? compact, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+    return compact == true
+        ? Results.Ok(await surveys.GetAsync(detail.Session.Id, context.RequestAborted, compactExperiments: true) ?? detail)
+        : Results.Ok(detail);
+})
+.WithName("SiteSetupRfGetById")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/experiments/run", async (HttpContext context, string id, RfSurveyRunExperimentRequest request, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        return Results.Ok(await surveys.RunExperimentAsync(detail.Session.Id, request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupRfRunExperiment")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/experiments/cancel", async (HttpContext context, string id, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+    return Results.Ok(await surveys.CancelActiveExperimentAsync(detail.Session.Id, context.RequestAborted));
+})
+.WithName("SiteSetupRfCancelExperiment")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/rf/{id}/sweep-progress", async (HttpContext context, string id, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+    return Results.Ok(await surveys.GetSweepProgressAsync(detail.Session.Id, context.RequestAborted));
+})
+.WithName("SiteSetupRfSweepProgress")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/sweep-insights", async (HttpContext context, string id, RfSweepInsightRequest request, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys, RfSurveyInsightService insights) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        var effective = request with { SurveyId = detail.Session.Id };
+        return Results.Ok(await insights.AnalyzeSweepAsync(effective, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupRfSweepInsights")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/waterfall/start", async (HttpContext context, string id, RfSurveyWaterfallStartRequest request, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        return Results.Ok(await surveys.StartWaterfallAsync(detail.Session.Id, request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupRfWaterfallStart")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/rf/{id}/waterfall", async (HttpContext context, string id, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys, bool history = false) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+    return Results.Ok(await surveys.GetWaterfallAsync(detail.Session.Id, history, context.RequestAborted));
+})
+.WithName("SiteSetupRfWaterfall")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/waterfall/stop", async (HttpContext context, string id, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+    return Results.Ok(await surveys.StopWaterfallAsync(detail.Session.Id, context.RequestAborted));
+})
+.WithName("SiteSetupRfWaterfallStop")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/rf/{id}/config-draft", async (HttpContext context, string id, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        return Results.Ok(await surveys.BuildConfigDraftAsync(detail.Session.Id, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+.WithName("SiteSetupRfConfigDraft")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/tr/apply-source-draft", async (HttpContext context, string id, RfSurveyApplySourceDraftRequest request, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys, TrConfigService trConfig) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        var result = await surveys.ApplySourceDraftAsync(detail.Session.Id, request, context.RequestAborted);
+        await trConfig.ClearEditorDraftAsync(context.RequestAborted);
+        return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+.WithName("SiteSetupRfApplySourceDraft")
+.WithOpenApi();
+
 app.MapPost("/api/v1/setup/validate/{section}", async (string section, SetupService setup, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

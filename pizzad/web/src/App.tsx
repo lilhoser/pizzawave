@@ -10,9 +10,10 @@ import "./style.css";
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
 const radioSetupApi = "/api/v1/system/radio-setup";
 const siteSetupApi = "/api/v1/setup/site";
+const siteSetupRfApi = `${siteSetupApi}/rf`;
 const radioSetupDetailUrl = (id: string, compact = true) => `${radioSetupApi}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
-const waterfallStopUrl = (surveyId: string) => `${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`;
-const siteSetupRfWorkspaceKey = "pizzawave-site-setup-rf-validation-workspace";
+const rfDetailUrl = (apiBase: string, id: string, compact = true) => `${apiBase}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
+const waterfallStopUrl = (apiBase: string, surveyId: string) => `${apiBase}/${encodeURIComponent(surveyId)}/waterfall/stop`;
 type Page = "dashboard" | "setup" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
 type CategorySortMode = "name" | "recent" | "frequent";
@@ -1249,7 +1250,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
       setBusy("workspace");
       setMessage("");
       try {
-        const current = await prepareSiteSetupRfWorkspace(setup, systems, sources, selectedSourceIndexes);
+        const current = await prepareSiteSetupRfWorkspace();
         if (!stopped) {
           setDetail(current);
           const firstCc = normalizeControlChannelSelection(current.profile.systems.flatMap(system => system.controlChannelsHz))[0] ?? controlChannels[0] ?? 0;
@@ -1269,7 +1270,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
   useEffect(() => () => onTrOperationChange(""), [onTrOperationChange]);
   async function refreshWorkspace() {
     if (!detail) return;
-    const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(detail.session.id));
+    const next = await api.request<RfSurveyDetail>(rfDetailUrl(siteSetupRfApi, detail.session.id));
     setDetail(next);
   }
   async function runExperiment(type: string, _estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) {
@@ -1279,7 +1280,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
     if (type === "rf_power_scan" || type === "rf_validation_sweep")
       onTrOperationChange("trunk-recorder is temporarily paused while Setup runs RF validation.");
     try {
-      const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
+      const experiment = await api.request<RfSurveyExperiment>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
         method: "POST",
         body: JSON.stringify({ type, durationSeconds: type === "rf_validation_sweep" ? 300 : 45, controlChannelHz, ...extraRequest })
       });
@@ -1337,6 +1338,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
       ? <>
         <div style={subPage === "waterfall" ? undefined : { display: "none" }} aria-hidden={subPage === "waterfall" ? undefined : "true"}>
           <WaterfallStep
+            apiBase={siteSetupRfApi}
             surveyId={detail.session.id}
             locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
             sources={effectiveSources}
@@ -1354,6 +1356,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
           />
         </div>
         {subPage === "sweep" && <SiteValidationStep
+          apiBase={siteSetupRfApi}
           activeOperation="power"
           busy={busy}
           ccQuality={ccQuality}
@@ -1399,22 +1402,8 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
   </div>;
 }
 
-async function prepareSiteSetupRfWorkspace(setup: SiteSetup, systems: RfSurveySystem[], sources: RfSurveySource[], selectedSourceIndexes: number[]) {
-  const existingId = localStorage.getItem(siteSetupRfWorkspaceKey) ?? "";
-  let current: RfSurveyDetail | null = null;
-  if (existingId) {
-    try {
-      current = await api.request<RfSurveyDetail>(radioSetupDetailUrl(existingId));
-    } catch {
-      localStorage.removeItem(siteSetupRfWorkspaceKey);
-    }
-  }
-  const request = siteSetupRfSurveyRequest(setup, systems, sources, selectedSourceIndexes);
-  current = current
-    ? await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(current.session.id)}/draft`, { method: "POST", body: JSON.stringify(request) })
-    : await api.request<RfSurveyDetail>(radioSetupApi, { method: "POST", body: JSON.stringify(request) });
-  localStorage.setItem(siteSetupRfWorkspaceKey, current.session.id);
-  return current;
+async function prepareSiteSetupRfWorkspace() {
+  return api.request<RfSurveyDetail>(siteSetupRfApi);
 }
 
 function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onApplied }: { setup: SiteSetup; subPage: "source" | "review"; setSubPage: (value: "source" | "review") => void; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
@@ -1470,11 +1459,11 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       setBusy("load");
       setMessage("");
       try {
-        const workspace = await prepareSiteSetupRfWorkspace(setup, systems, sdrSources ?? sources, selectedSourceIndexes);
+        const workspace = await prepareSiteSetupRfWorkspace();
         if (!stopped) {
           setDetail(workspace);
           if (subPage === "review") {
-            const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+            const nextDraft = await api.request<RfSurveyConfigDraft>(`${siteSetupRfApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
             if (!stopped)
               setDraft(nextDraft);
           }
@@ -1523,12 +1512,9 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     setBusy("load");
     setMessage("");
     try {
-      const nextSetup = await saveSourcePlan();
-      const nextSystems = siteSetupSystems(nextSetup);
-      const nextSources = siteSetupSources(nextSetup);
-      const nextSelected = nextSetup.desired.selectedSourceIndexes.length ? nextSetup.desired.selectedSourceIndexes : nextSources.map(source => source.index);
-      const workspace = await prepareSiteSetupRfWorkspace(nextSetup, nextSystems, nextSources, nextSelected);
-      const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+      await saveSourcePlan();
+      const workspace = await prepareSiteSetupRfWorkspace();
+      const nextDraft = await api.request<RfSurveyConfigDraft>(`${siteSetupRfApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
       setDetail(workspace);
       setDraft(nextDraft);
     } catch (error) {
@@ -1553,12 +1539,9 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     setBusy("save-plan");
     setMessage("");
     try {
-      const nextSetup = await saveSourcePlan(plan);
-      const nextSystems = siteSetupSystems(nextSetup);
-      const nextSources = siteSetupSources(nextSetup);
-      const nextSelected = nextSetup.desired.selectedSourceIndexes.length ? nextSetup.desired.selectedSourceIndexes : nextSources.map(source => source.index);
-      const workspace = await prepareSiteSetupRfWorkspace(nextSetup, nextSystems, nextSources, nextSelected);
-      const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+      await saveSourcePlan(plan);
+      const workspace = await prepareSiteSetupRfWorkspace();
+      const nextDraft = await api.request<RfSurveyConfigDraft>(`${siteSetupRfApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
       setDetail(workspace);
       setDraft(nextDraft);
       setSubPage("review");
@@ -1575,7 +1558,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     setBusy("apply");
     setMessage("");
     try {
-      const result = await api.request<RfSurveyTrActionResult>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
+      const result = await api.request<RfSurveyTrActionResult>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
         method: "POST",
         body: JSON.stringify({
           configJson: draft.configJson,
@@ -5386,6 +5369,7 @@ function summarizeRfChain(path: RfSurveyPathProfile) {
 }
 
 function SiteValidationStep({
+  apiBase = radioSetupApi,
   activeOperation,
   busy,
   ccQuality,
@@ -5425,6 +5409,7 @@ function SiteValidationStep({
   onSweepRecovered,
   inventoryRequired = true
 }: {
+  apiBase?: string;
   activeOperation: Exclude<RfRefinementSubpage, "path">;
   busy: string;
   ccQuality?: RfSurveyExperiment;
@@ -5671,7 +5656,7 @@ function SiteValidationStep({
     let stopped = false;
     async function refresh() {
       try {
-        const progress = await api.request<RfSurveySweepProgress>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/sweep-progress`);
+        const progress = await api.request<RfSurveySweepProgress>(`${apiBase}/${encodeURIComponent(surveyId)}/sweep-progress`);
         if (!stopped)
           setValidationProgress(progress);
       } catch {
@@ -5774,14 +5759,14 @@ function SiteValidationStep({
     return onRunExperiment("rf_validation_sweep", `about ${formatElapsed(siteEstimateSeconds)}`, undefined, validationSweepRequest(system));
   };
   async function loadValidationProgress() {
-    const progress = await api.request<RfSurveySweepProgress>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/sweep-progress`);
+    const progress = await api.request<RfSurveySweepProgress>(`${apiBase}/${encodeURIComponent(surveyId)}/sweep-progress`);
     setValidationProgress(progress);
   }
   async function cancelValidationSweep() {
     setSweepBusy("cancel-validation");
     setValidationCancelMessage("");
     try {
-      const result = await api.request<RfSurveyCancelExperimentResult>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/experiments/cancel`, { method: "POST" });
+      const result = await api.request<RfSurveyCancelExperimentResult>(`${apiBase}/${encodeURIComponent(surveyId)}/experiments/cancel`, { method: "POST" });
       setValidationCancelMessage(result.message);
       await loadValidationProgress();
       await onReload();
@@ -5887,7 +5872,7 @@ function SiteValidationStep({
         })),
         selectedCcNumber,
       );
-      const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/experiments/run`, {
+      const experiment = await api.request<RfSurveyExperiment>(`${apiBase}/${encodeURIComponent(surveyId)}/experiments/run`, {
         method: "POST",
         body: JSON.stringify({ type: "error_gain_sweep", durationSeconds: sweepEstimateSeconds, controlChannelHz: selectedCcNumber, parameters })
       });
@@ -5911,7 +5896,7 @@ function SiteValidationStep({
     setSweepBusy("cancel");
     setSweepMessage("");
     try {
-      const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/experiments/run`, {
+      const experiment = await api.request<RfSurveyExperiment>(`${apiBase}/${encodeURIComponent(surveyId)}/experiments/run`, {
         method: "POST",
         body: JSON.stringify({ type: "error_gain_sweep_cancel" })
       });
@@ -5954,7 +5939,7 @@ function SiteValidationStep({
     setSweepBusy(`ai-${source.index}`);
     setSweepMessage("");
     try {
-      const insight = await api.request<SweepInsight>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/sweep-insights`, {
+      const insight = await api.request<SweepInsight>(`${apiBase}/${encodeURIComponent(surveyId)}/sweep-insights`, {
         method: "POST",
         body: JSON.stringify({
           surveyId,
@@ -6018,6 +6003,7 @@ function SiteValidationStep({
       begin: undefined,
       result: undefined,
       body: <WaterfallStep
+        apiBase={apiBase}
         surveyId={surveyId}
         locked={!inventorySatisfied}
         sources={sources}
@@ -6288,6 +6274,7 @@ function SiteValidationStep({
 }
 
 function WaterfallStep({
+  apiBase = radioSetupApi,
   surveyId,
   locked,
   sources,
@@ -6304,6 +6291,7 @@ function WaterfallStep({
   onStatusChange,
   showSweepSelection = true
 }: {
+  apiBase?: string;
   surveyId: string;
   locked: boolean;
   sources: RfSurveySource[];
@@ -6497,7 +6485,7 @@ function WaterfallStep({
     let stopped = false;
     async function loadStatus() {
       try {
-        const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
+        const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
         if (stopped) return;
         window.requestAnimationFrame(() => renderWaterfallStatus(next));
         setStatus({ ...next, frames: null });
@@ -6528,7 +6516,7 @@ function WaterfallStep({
     let stopped = false;
     async function poll() {
       try {
-        const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall`);
+        const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall`);
         if (!stopped) {
           setStatus(next);
           if (shouldShowWaterfallMessage(next.message, next))
@@ -6575,7 +6563,7 @@ function WaterfallStep({
     clearWaterfallCanvas(spectrumCanvasRef.current);
     clearWaterfallCanvas(canvasRef.current);
     try {
-      const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/start`, {
+      const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall/start`, {
         method: "POST",
         body: JSON.stringify({
           sourceIndex,
@@ -6600,7 +6588,7 @@ function WaterfallStep({
     setBusy("stop");
     setMessage("");
     try {
-      const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(surveyId), { method: "POST" });
+      const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(apiBase, surveyId), { method: "POST" });
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
@@ -6643,7 +6631,7 @@ function WaterfallStep({
     setIdentifyOverlayMessage(`Stopping waterfall and probing ${formatRfHz(tuneFrequency)}...`);
     try {
       if (resumeWaterfall) {
-        const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(surveyId), { method: "POST" });
+        const next = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(apiBase, surveyId), { method: "POST" });
         setStatus(next);
       }
       const identifyDemods = ["fsk4", "cqpsk"];
@@ -6691,7 +6679,7 @@ function WaterfallStep({
       if (resumeWaterfall) {
         setIdentifyOverlayMessage("Restarting waterfall...");
         try {
-          const next = await api.request<RfSurveyWaterfallStatus>(`${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/start`, {
+          const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall/start`, {
             method: "POST",
             body: JSON.stringify({
               sourceIndex,
