@@ -41,6 +41,10 @@ unless it creates a current regression test or follow-up.
   mutation endpoints for transcription retries, manual incident
   generation/rebuild, recommendation auto-apply, and standalone TR CSV
   generation.
+- Reintroduce a dedicated talkgroup enable/disable interface outside Setup.
+  Setup should keep loading the catalog from selected RadioReference systems;
+  operator policy such as disabling noisy TGs, incident eligibility, and future
+  profile-specific TG rules needs its own catalog/policy surface.
 
 ## RF Path Survey
 
