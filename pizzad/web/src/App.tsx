@@ -5982,18 +5982,26 @@ function WaterfallStep({
   onStatusChange?: (status: RfSurveyWaterfallStatus | null) => void;
   showSweepSelection?: boolean;
 }) {
+  const controlStorageKey = `pizzawave-radio-setup-waterfall-controls-${surveyId}`;
+  const savedControls = loadJsonStorage<Record<string, unknown>>(controlStorageKey, {});
   const effectiveSources = sources.filter(source => selectedSources.includes(source.index));
   const sourceOptions = effectiveSources.length ? effectiveSources : sources.slice(0, 1);
   const defaultSource = sourceOptions[0] ?? sources[0];
-  const [sourceIndex, setSourceIndex] = useState(() => defaultSource?.index ?? 0);
+  const [sourceIndex, setSourceIndex] = useState(() => {
+    const saved = Number(savedControls.sourceIndex);
+    return Number.isFinite(saved) && sources.some(source => source.index === saved) ? saved : defaultSource?.index ?? 0;
+  });
   const selectedSource = sources.find(source => source.index === sourceIndex) ?? defaultSource;
   const selectedSourceIsAirspy = selectedSource ? isAirspyRfSource(selectedSource) : false;
   const defaultFrequency = activeControlChannelHz || controlChannels[0] || selectedSource?.centerHz || 0;
-  const [frequencyMhz, setFrequencyMhz] = useState(() => defaultFrequency ? formatMhzInput(defaultFrequency) : "");
-  const [sampleRateMhz, setSampleRateMhz] = useState(() => formatMhzInput(defaultWaterfallSampleRate(selectedSource)));
-  const [gain, setGain] = useState(() => selectedSource?.gain || "15");
-  const [spectrumSpanDb, setSpectrumSpanDb] = useState(35);
-  const [showControlChannelLines, setShowControlChannelLines] = useState(true);
+  const [frequencyMhz, setFrequencyMhz] = useState(() => typeof savedControls.frequencyMhz === "string" && savedControls.frequencyMhz.trim() ? savedControls.frequencyMhz : defaultFrequency ? formatMhzInput(defaultFrequency) : "");
+  const [sampleRateMhz, setSampleRateMhz] = useState(() => typeof savedControls.sampleRateMhz === "string" && savedControls.sampleRateMhz.trim() ? savedControls.sampleRateMhz : formatMhzInput(defaultWaterfallSampleRate(selectedSource)));
+  const [gain, setGain] = useState(() => typeof savedControls.gain === "string" && savedControls.gain.trim() ? savedControls.gain : selectedSource?.gain || "15");
+  const [spectrumSpanDb, setSpectrumSpanDb] = useState(() => {
+    const saved = Number(savedControls.spectrumSpanDb);
+    return [20, 35, 50, 70].includes(saved) ? saved : 35;
+  });
+  const [showControlChannelLines, setShowControlChannelLines] = useState(() => typeof savedControls.showControlChannelLines === "boolean" ? savedControls.showControlChannelLines : true);
   const [spectrumHover, setSpectrumHover] = useState<SpectrumHover | null>(null);
   const [ccSignalRows, setCcSignalRows] = useState<WaterfallCcSignalRow[]>([]);
   const [otherDetectedCcRows, setOtherDetectedCcRows] = useState<WaterfallDetectedCcTrack[]>([]);
@@ -6033,6 +6041,29 @@ function WaterfallStep({
   const identifyRunning = busy === "identify";
   const controlsDisabled = identifyRunning;
   const canStart = !locked && !busy && sourceOptions.length > 0 && frequencyOk && sampleRateOk && gainOk;
+
+  useEffect(() => {
+    const saved = loadJsonStorage<Record<string, unknown>>(controlStorageKey, {});
+    const savedSourceIndex = Number(saved.sourceIndex);
+    setSourceIndex(Number.isFinite(savedSourceIndex) && sources.some(source => source.index === savedSourceIndex) ? savedSourceIndex : defaultSource?.index ?? 0);
+    setFrequencyMhz(typeof saved.frequencyMhz === "string" && saved.frequencyMhz.trim() ? saved.frequencyMhz : defaultFrequency ? formatMhzInput(defaultFrequency) : "");
+    setSampleRateMhz(typeof saved.sampleRateMhz === "string" && saved.sampleRateMhz.trim() ? saved.sampleRateMhz : formatMhzInput(defaultWaterfallSampleRate(selectedSource)));
+    setGain(typeof saved.gain === "string" && saved.gain.trim() ? saved.gain : selectedSource?.gain || "15");
+    const savedSpan = Number(saved.spectrumSpanDb);
+    setSpectrumSpanDb([20, 35, 50, 70].includes(savedSpan) ? savedSpan : 35);
+    setShowControlChannelLines(typeof saved.showControlChannelLines === "boolean" ? saved.showControlChannelLines : true);
+  }, [controlStorageKey]);
+
+  useEffect(() => {
+    localStorage.setItem(controlStorageKey, JSON.stringify({
+      sourceIndex,
+      frequencyMhz,
+      sampleRateMhz,
+      gain,
+      spectrumSpanDb,
+      showControlChannelLines
+    }));
+  }, [controlStorageKey, sourceIndex, frequencyMhz, sampleRateMhz, gain, spectrumSpanDb, showControlChannelLines]);
 
   useEffect(() => {
     onStatusChange?.(status);
@@ -6132,6 +6163,16 @@ function WaterfallStep({
         if (stopped) return;
         window.requestAnimationFrame(() => renderWaterfallStatus(next));
         setStatus({ ...next, frames: null });
+        if (next.active) {
+          if (Number.isFinite(next.sourceIndex))
+            setSourceIndex(next.sourceIndex);
+          if (next.centerHz > 0)
+            setFrequencyMhz(formatMhzInput(next.centerHz));
+          if (next.sampleRate > 0)
+            setSampleRateMhz(formatMhzInput(next.sampleRate));
+          if (next.gain?.trim())
+            setGain(next.gain);
+        }
         setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
       } catch (error) {
         if (!stopped)
