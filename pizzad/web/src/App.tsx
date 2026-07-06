@@ -756,9 +756,6 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
         <div>
           <h2>Site Setup</h2>
         </div>
-        <div className="site-setup-actions">
-          <button type="button" className="danger-button" onClick={() => setSection("Apply & Resume")}>Apply Config</button>
-        </div>
       </div>
       <SiteSetupChangeStrip setup={current} />
 
