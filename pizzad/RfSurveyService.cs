@@ -1037,12 +1037,15 @@ public sealed class RfSurveyService
         if (selected.Count == 0)
             throw new InvalidOperationException("Select at least one source before reviewing the Radio Setup config draft.");
         var liveJson = await File.ReadAllTextAsync(livePath, ct);
+        var liveRoot = JsonNode.Parse(liveJson) as JsonObject ?? [];
+        var liveSources = liveRoot["sources"] as JsonArray;
+        var liveControlChannelsBySystem = BuildLiveControlChannelsBySystem(liveRoot);
         var sourcePlanSystemNames = SourcePlanSystemNames(profile);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
         var rfSourceCandidates = BuildRfValidationSourceCandidates(profile, experiments);
         var observedFrequencies = await BuildObservedVoiceFrequenciesBySystemAsync(ct);
         var plannedSystems = AddObservedVoiceFrequencies(
-            BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, warnings),
+            BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, liveControlChannelsBySystem, warnings),
             observedFrequencies,
             warnings);
         var controlOnlyPlan = string.Equals(profile.SourcePlanMode, "control", StringComparison.OrdinalIgnoreCase);
@@ -1104,7 +1107,7 @@ public sealed class RfSurveyService
             var error = rfCandidate?.ErrorHz ?? profileSource?.ErrorHz;
             if (error is int errorHz)
                 PatchSourceField(source, "error", errorHz, changes, sourceIndex);
-            var gain = !string.IsNullOrWhiteSpace(rfCandidate?.Gain) ? rfCandidate.Gain : profileSource?.Gain;
+            var gain = SelectDraftSourceGain(profileSource, liveSources, sourceIndex, rfCandidate);
             PatchSourceGainFields(source, profileSource, gain, changes, sourceIndex);
         }
         PatchCallstreamStreams(draftRoot, keptSystems, changes);
@@ -3489,6 +3492,85 @@ public sealed class RfSurveyService
         return element.ValueKind == JsonValueKind.String && long.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var textValue)
             ? textValue
             : 0;
+    }
+
+    private static string JsonNodeString(JsonObject root, string propertyName)
+    {
+        return root.TryGetPropertyValue(propertyName, out var node) ? JsonNodeText(node) : string.Empty;
+    }
+
+    private static int JsonNodeInt(JsonObject root, string propertyName)
+    {
+        var value = JsonNodeLong(root, propertyName);
+        return value > int.MaxValue || value < int.MinValue ? 0 : (int)value;
+    }
+
+    private static long JsonNodeLong(JsonObject root, string propertyName)
+    {
+        if (!root.TryGetPropertyValue(propertyName, out var node) || node == null)
+            return 0;
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<long>(out var longValue))
+                return longValue;
+            if (value.TryGetValue<int>(out var intValue))
+                return intValue;
+            if (value.TryGetValue<string>(out var textValue) && long.TryParse(textValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+        }
+        return 0;
+    }
+
+    private static IReadOnlyList<long> JsonNodeLongArray(JsonObject root, string propertyName)
+    {
+        if (!root.TryGetPropertyValue(propertyName, out var node) || node is not JsonArray array)
+            return [];
+        return array
+            .Select(JsonNodeFrequencyHz)
+            .Where(value => value > 0)
+            .ToList();
+    }
+
+    private static long JsonNodeFrequencyHz(JsonNode? node)
+    {
+        if (node is not JsonValue value)
+            return 0;
+        if (value.TryGetValue<long>(out var longValue))
+            return NormalizeTrFrequencyHz(longValue);
+        if (value.TryGetValue<int>(out var intValue))
+            return NormalizeTrFrequencyHz(intValue);
+        if (value.TryGetValue<double>(out var doubleValue))
+            return NormalizeTrFrequencyHz(doubleValue);
+        return value.TryGetValue<string>(out var textValue) && double.TryParse(textValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? NormalizeTrFrequencyHz(parsed)
+            : 0;
+    }
+
+    private static long NormalizeTrFrequencyHz(double value)
+    {
+        if (!double.IsFinite(value) || value <= 0)
+            return 0;
+        return (long)Math.Round(value > 0 && value < 1_000_000 ? value * 1_000_000d : value);
+    }
+
+    private static string JsonNodeText(JsonNode? node)
+    {
+        if (node == null)
+            return string.Empty;
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<string>(out var text))
+                return text ?? string.Empty;
+            if (value.TryGetValue<long>(out var longValue))
+                return longValue.ToString(CultureInfo.InvariantCulture);
+            if (value.TryGetValue<int>(out var intValue))
+                return intValue.ToString(CultureInfo.InvariantCulture);
+            if (value.TryGetValue<double>(out var doubleValue))
+                return doubleValue.ToString(CultureInfo.InvariantCulture);
+            if (value.TryGetValue<bool>(out var boolValue))
+                return boolValue.ToString(CultureInfo.InvariantCulture);
+        }
+        return node.ToJsonString(EngineConfig.JsonOptions());
     }
 
     private static double JsonDouble(JsonElement root, string propertyName)
@@ -6348,6 +6430,7 @@ public sealed class RfSurveyService
         RfSurveyProfileDto profile,
         IReadOnlyList<string> sourcePlanSystemNames,
         IReadOnlyList<RfSurveyExperimentDto> experiments,
+        IReadOnlyDictionary<string, IReadOnlyList<long>> liveControlChannelsBySystem,
         List<string> warnings)
     {
         var systems = profile.Systems
@@ -6359,7 +6442,7 @@ public sealed class RfSurveyService
             .FirstOrDefault();
         var candidates = ReadRfValidationCandidates(latestSweep?.EvidenceJson);
         if (candidates.Count == 0)
-            return systems;
+            return systems.Select(system => PreserveLiveControlChannels(system, liveControlChannelsBySystem)).ToList();
 
         var planned = new List<RfSurveySystemDto>();
         foreach (var system in systems)
@@ -6369,7 +6452,7 @@ public sealed class RfSurveyService
                 .ToList();
             if (siteCandidates.Count == 0)
             {
-                planned.Add(system);
+                planned.Add(PreserveLiveControlChannels(system, liveControlChannelsBySystem));
                 continue;
             }
 
@@ -6386,6 +6469,43 @@ public sealed class RfSurveyService
             planned.Add(system with { ControlChannelsHz = [passing.ControlChannelHz] });
         }
         return planned;
+    }
+
+    private static RfSurveySystemDto PreserveLiveControlChannels(
+        RfSurveySystemDto system,
+        IReadOnlyDictionary<string, IReadOnlyList<long>> liveControlChannelsBySystem)
+    {
+        if (!liveControlChannelsBySystem.TryGetValue(system.ShortName, out var liveChannels) || liveChannels.Count == 0)
+            return system;
+        var liveSet = liveChannels.ToHashSet();
+        var selected = system.ControlChannelsHz
+            .Where(liveSet.Contains)
+            .Distinct()
+            .Order()
+            .ToList();
+        return selected.Count > 0 ? system with { ControlChannelsHz = selected } : system;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<long>> BuildLiveControlChannelsBySystem(JsonObject liveRoot)
+    {
+        var result = new Dictionary<string, IReadOnlyList<long>>(StringComparer.OrdinalIgnoreCase);
+        if (liveRoot["systems"] is not JsonArray systems)
+            return result;
+
+        foreach (var node in systems.OfType<JsonObject>())
+        {
+            var shortName = JsonNodeString(node, "shortName");
+            if (string.IsNullOrWhiteSpace(shortName))
+                continue;
+            var channels = JsonNodeLongArray(node, "control_channels")
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (channels.Count > 0)
+                result[shortName] = channels;
+        }
+        return result;
     }
 
     private static IReadOnlyList<RfSurveySystemDto> AddObservedVoiceFrequencies(
@@ -6983,6 +7103,53 @@ public sealed class RfSurveyService
         if (source.Remove("ifGain"))
             changes.Add($"source {sourceIndex} ifGain removed for generic gain");
         PatchSourceField(source, "gain", ParseJsonValue(gain), changes, sourceIndex);
+    }
+
+    private static string? SelectDraftSourceGain(
+        RfSurveySourceDto? profileSource,
+        JsonArray? liveSources,
+        int sourceIndex,
+        RfValidationCandidate? rfCandidate)
+    {
+        var profileGain = (profileSource?.Gain ?? string.Empty).Trim();
+        var liveGain = ReadTrSourceGain(liveSources?.ElementAtOrDefault(sourceIndex) as JsonObject);
+        var candidateGain = (rfCandidate?.Gain ?? string.Empty).Trim();
+
+        if (!IsAirspySource(profileSource))
+            return FirstNonEmpty(profileGain, candidateGain, liveGain);
+
+        profileGain = NormalizeAirspyRxGain(true, profileGain);
+        candidateGain = NormalizeAirspyRxGain(true, candidateGain);
+        liveGain = NormalizeAirspyRxGain(true, liveGain);
+
+        if (!string.IsNullOrWhiteSpace(profileGain) && !string.Equals(profileGain, "15", StringComparison.OrdinalIgnoreCase))
+            return profileGain;
+        if (!string.IsNullOrWhiteSpace(liveGain))
+            return liveGain;
+        return FirstNonEmpty(profileGain, candidateGain);
+    }
+
+    private static string ReadTrSourceGain(JsonObject? source)
+    {
+        if (source == null)
+            return string.Empty;
+        var gain = JsonNodeString(source, "gain");
+        if (!string.IsNullOrWhiteSpace(gain))
+            return gain.Trim();
+        var lna = JsonNodeInt(source, "lnaGain");
+        var mix = JsonNodeInt(source, "mixGain");
+        var ifGain = JsonNodeInt(source, "ifGain");
+        if (lna <= 0 && mix <= 0 && ifGain <= 0)
+            return string.Empty;
+        if (lna >= 15 && mix >= 12 && ifGain >= 8)
+            return "21";
+        if (lna >= 12 && mix >= 10 && ifGain >= 6)
+            return "19";
+        if (lna >= 8 && mix >= 6 && ifGain >= 4)
+            return "13";
+        if (lna >= 4 && mix >= 4 && ifGain >= 2)
+            return "7";
+        return "0";
     }
 
     private static bool HasAirspyStageGains(JsonObject source) =>
