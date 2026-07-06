@@ -5261,8 +5261,14 @@ public sealed class RfSurveyService
         var candidateControlChannels = candidateSystem?.ControlChannelsHz is { Count: > 0 }
             ? candidateSystem.ControlChannelsHz
             : candidate.ControlChannelHz > 0 ? [candidate.ControlChannelHz] : profile.ControlChannelsHz;
-        if (candidateControlChannels.Count > 0)
-            source["center"] = CenterForCandidateControlChannels(candidateControlChannels, ReadIntNode(source["rate"]));
+        var runtimeSampleRate = ReadIntNode(source["rate"]);
+        var currentCenter = profileSource?.CenterHz > 0 ? profileSource.CenterHz : ReadLongNode(source["center"]);
+        if (candidate.ControlChannelHz > 0 && SourceWindowCovers(currentCenter, runtimeSampleRate, candidate.ControlChannelHz))
+            source["center"] = currentCenter;
+        else if (candidate.ControlChannelHz > 0)
+            source["center"] = candidate.ControlChannelHz;
+        else if (candidateControlChannels.Count > 0)
+            source["center"] = CenterForCandidateControlChannels(candidateControlChannels, runtimeSampleRate);
 
         var systemName = candidateSystem?.ShortName ?? profile.SystemShortName;
         var changes = new List<string>();
@@ -5314,6 +5320,14 @@ public sealed class RfSurveyService
         if (half > 0 && max - min <= half * 2)
             return (long)Math.Round((min + max) / 2.0, MidpointRounding.AwayFromZero);
         return channels[0];
+    }
+
+    private static bool SourceWindowCovers(long centerHz, int sampleRate, long frequencyHz)
+    {
+        if (centerHz <= 0 || frequencyHz <= 0)
+            return false;
+        var half = TrUsableHalfBandwidthHz(sampleRate);
+        return half > 0 && frequencyHz >= centerHz - half && frequencyHz <= centerHz + half;
     }
 
     private static void PatchPluginStreamShortNames(JsonObject root, string oldShortName, string newShortName)
