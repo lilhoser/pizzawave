@@ -60,24 +60,20 @@ public sealed class SetupTalkgroupService
         if (rows.Count == 0)
             throw new InvalidOperationException("No included talkgroup rows were provided.");
 
-        var sync = SyncIntoExistingCatalog(rows);
+        var sync = MergeImportedRowsWithExistingPolicy(rows);
         var document = sync.Document;
         var result = await _catalog.SaveAsync(document, generateTrCsv: true, ct);
         var preview = new TalkgroupCatalogPreview(
             rows,
             [],
             rows.GroupBy(r => r.OpsCategory).OrderBy(g => g.Key).ToDictionary(g => g.Key, g => g.Count()),
-            $"Synced {rows.Count:N0} setup row(s) into the PizzaWave talkgroup catalog: {sync.Added:N0} added, {sync.Refreshed:N0} refreshed, {sync.Retained:N0} existing row(s) retained. Preserved matching operator policy and regenerated {result.GeneratedCsvPath}.");
+            $"Loaded {rows.Count:N0} RadioReference talkgroup row(s) into the PizzaWave talkgroup catalog: {sync.Added:N0} added, {sync.Refreshed:N0} refreshed. Replaced unrelated catalog rows, preserved matching operator policy, and regenerated {result.GeneratedCsvPath}.");
         return ToSetupPreview(preview, includeExcluded: false);
     }
 
-    private (TalkgroupCatalogDocument Document, int Added, int Refreshed, int Retained) SyncIntoExistingCatalog(List<TalkgroupCatalogItem> rows)
+    private (TalkgroupCatalogDocument Document, int Added, int Refreshed) MergeImportedRowsWithExistingPolicy(List<TalkgroupCatalogItem> rows)
     {
         var existing = _catalog.Load();
-        var importedByKey = rows.ToDictionary(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase);
-        var retained = existing.Items
-            .Where(row => !importedByKey.ContainsKey(TalkgroupCatalogService.ItemKey(row)))
-            .ToList();
         var added = 0;
         var refreshed = 0;
         var synced = rows.Select(row =>
@@ -105,7 +101,7 @@ public sealed class SetupTalkgroupService
                 UpdatedAtUtc = DateTime.UtcNow
             };
         });
-        return (existing with { Items = retained.Concat(synced).ToList() }, added, refreshed, retained.Count);
+        return (existing with { Items = synced.ToList() }, added, refreshed);
     }
 
     private static SetupTalkgroupPreviewDto ToSetupPreview(TalkgroupCatalogPreview preview, bool includeExcluded)

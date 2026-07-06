@@ -1105,7 +1105,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
   }, [setupSourceKey]);
   useEffect(() => {
     const key = `normal:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
-    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key") ?? "";
+    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key-v2") ?? "";
     if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoImportKeyRef.current === key || lastImportedKey === key)
       return;
     autoImportKeyRef.current = key;
@@ -1138,7 +1138,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
         method: "POST",
         body: JSON.stringify({ rows: currentPreview.rows })
       });
-      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key", importKey);
+      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v2", importKey);
       setMessage(`Loaded ${result.includedCount.toLocaleString()} talkgroup row(s) from RadioReference into the catalog.`);
       setCatalogReloadToken(value => value + 1);
       await api.request<unknown>(`${siteSetupApi}/activity`, {
