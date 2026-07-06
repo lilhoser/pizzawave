@@ -1040,7 +1040,14 @@ function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
 
 function catalogSystemForRadioReferenceSid(sid: string, fallback: string) {
   const cached = readCachedRadioReferenceSites(sid);
-  return normalizeTalkgroupSystem(cached?.systemName || fallback || `rr-${sid}`);
+  const cachedName = cached?.systemName || "";
+  if (cachedName && !/^RadioReference\s+SID\s+\d+$/i.test(cachedName.trim()))
+    return normalizeTalkgroupSystem(cachedName);
+  return `rr-${sid}`;
+}
+
+function talkgroupSourceLabel(row: SiteSetupTalkgroupSource) {
+  return /^rr-\d+$/i.test(row.catalogSystem) ? `RR ${row.radioReferenceSid}` : row.catalogSystem;
 }
 
 function parseRadioReferenceSidList(value: string) {
@@ -1111,7 +1118,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
   }, [setupSourceKey]);
   useEffect(() => {
     const key = `normal:${rrSources.map(row => `${row.radioReferenceSid.trim()}:${row.catalogSystem.trim()}`).join("|")}`;
-    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key-v2") ?? "";
+    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key-v3") ?? "";
     if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoImportKeyRef.current === key || lastImportedKey === key)
       return;
     autoImportKeyRef.current = key;
@@ -1144,7 +1151,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
         method: "POST",
         body: JSON.stringify({ rows: currentPreview.rows })
       });
-      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v2", importKey);
+      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v3", importKey);
       setMessage(`Loaded ${result.includedCount.toLocaleString()} talkgroup row(s) from RadioReference into the catalog.`);
       setCatalogReloadToken(value => value + 1);
       await api.request<unknown>(`${siteSetupApi}/activity`, {
@@ -1187,7 +1194,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
           onClick={() => removeSource(index)}
           title={rrSources.length <= 1 ? "At least one talkgroup source is required." : "Remove this talkgroup source"}
           key={row.key}>
-          <span>{row.catalogSystem || "Unmapped system"}</span>
+          <span>{talkgroupSourceLabel(row) || "Unmapped system"}</span>
           <small>RR {row.radioReferenceSid || "--"}</small>
           {rrSources.length > 1 && <b aria-hidden="true">x</b>}
         </button>)}

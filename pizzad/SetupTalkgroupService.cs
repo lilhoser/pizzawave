@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Net;
 
 namespace pizzad;
 
@@ -20,8 +21,9 @@ public sealed class SetupTalkgroupService
         {
             var url = BuildRadioReferenceUrl(request);
             var html = await _http.GetStringAsync(url, ct);
-            preview = TalkgroupCatalogService.PreviewRadioReferenceHtml(html, request.SystemShortName);
-            preview = preview with { Diagnostics = $"Fetched {url}. {preview.Diagnostics}" };
+            var systemShortName = EffectiveRadioReferenceSystemShortName(html, request.SystemShortName, request.RadioReferenceSid);
+            preview = TalkgroupCatalogService.PreviewRadioReferenceHtml(html, systemShortName);
+            preview = preview with { Diagnostics = $"Fetched {url} for {systemShortName}. {preview.Diagnostics}" };
         }
         else
         {
@@ -140,5 +142,73 @@ public sealed class SetupTalkgroupService
         if (string.IsNullOrWhiteSpace(sid))
             throw new InvalidOperationException("RadioReference SID is required.");
         return $"https://www.radioreference.com/db/sid/{sid}";
+    }
+
+    private static string EffectiveRadioReferenceSystemShortName(string html, string? requestedSystemShortName, string? sid)
+    {
+        var requested = TalkgroupCatalogService.NormalizeSystemShortName(requestedSystemShortName);
+        if (!IsGenericRadioReferenceName(requested, sid))
+            return requested;
+
+        var name = ExtractRadioReferenceSystemName(html);
+        var acronym = ExtractParentheticalAcronym(name);
+        return TalkgroupCatalogService.NormalizeSystemShortName(acronym ?? name ?? requested);
+    }
+
+    private static bool IsGenericRadioReferenceName(string value, string? sid)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+        if (Regex.IsMatch(value, @"^radioreference-sid-\d+$", RegexOptions.IgnoreCase))
+            return true;
+        var digits = Regex.Replace(sid ?? string.Empty, @"[^\d]", "");
+        return !string.IsNullOrWhiteSpace(digits) && string.Equals(value, $"rr-{digits}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ExtractRadioReferenceSystemName(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+            return null;
+
+        var plain = HtmlToText(html);
+        var systemName = Regex.Match(plain, @"System\s+Name:\s*(?<name>.*?)(?:\s+Location:|\s+County:|\s+System\s+Type:)", RegexOptions.IgnoreCase);
+        if (systemName.Success)
+            return CleanName(systemName.Groups["name"].Value);
+
+        var title = Regex.Match(html, @"<title[^>]*>(?<title>[\s\S]*?)</title>", RegexOptions.IgnoreCase);
+        if (title.Success)
+        {
+            var titleText = HtmlToText(title.Groups["title"].Value);
+            titleText = Regex.Replace(titleText, @"\s+Trunking\s+System[\s\S]*$", string.Empty, RegexOptions.IgnoreCase);
+            var firstSegment = titleText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+            var cleaned = CleanName(firstSegment ?? titleText);
+            if (!string.IsNullOrWhiteSpace(cleaned))
+                return cleaned;
+        }
+
+        return null;
+    }
+
+    private static string? ExtractParentheticalAcronym(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return null;
+        var match = Regex.Match(name, @"\((?<acronym>[A-Z0-9]{2,12})\)");
+        return match.Success ? match.Groups["acronym"].Value : null;
+    }
+
+    private static string HtmlToText(string html)
+    {
+        var text = Regex.Replace(html, "<script[\\s\\S]*?</script>", " ", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<style[\\s\\S]*?</style>", " ", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<[^>]+>", " ");
+        text = WebUtility.HtmlDecode(text);
+        return Regex.Replace(text, "\\s+", " ").Trim();
+    }
+
+    private static string? CleanName(string? value)
+    {
+        var text = Regex.Replace(value ?? string.Empty, "\\s+", " ").Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 }
