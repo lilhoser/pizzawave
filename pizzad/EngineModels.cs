@@ -1079,6 +1079,11 @@ public sealed record SiteSetupActivityRequest(
     JsonElement? Details = null,
     string Source = "ui");
 
+public sealed record SiteSetupMarkAppliedRequest(
+    string Summary = "",
+    JsonElement? Details = null,
+    string Source = "ui");
+
 public sealed record SiteSetupActivityDto(
     long Id,
     DateTime TimestampUtc,

@@ -271,6 +271,21 @@ app.MapPost("/api/v1/setup/site/activity", async (HttpContext context, SiteSetup
 .WithName("SiteSetupActivityAdd")
 .WithOpenApi();
 
+app.MapPost("/api/v1/setup/site/mark-applied", async (HttpContext context, SiteSetupMarkAppliedRequest request, AuthService authService, SiteSetupService siteSetup) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await siteSetup.MarkAppliedAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupMarkApplied")
+.WithOpenApi();
+
 app.MapPost("/api/v1/setup/validate/{section}", async (string section, SetupService setup, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

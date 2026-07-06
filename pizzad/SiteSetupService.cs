@@ -84,6 +84,25 @@ public sealed class SiteSetupService
         return await AddActivityAsync(request.Category, request.Action, request.Summary, details, request.Source, ct);
     }
 
+    public async Task<SiteSetupDto> MarkAppliedAsync(SiteSetupMarkAppliedRequest request, CancellationToken ct)
+    {
+        var applied = await BuildAppliedConfigAsync(ct);
+        var next = Normalize(_config.SiteSetup);
+        next.LastAppliedAtUtc = DateTime.UtcNow;
+        next.LastAppliedConfigHash = applied.ConfigHash;
+        _config.SiteSetup = next;
+        _config.Save();
+
+        var details = request.Details.HasValue
+            ? request.Details.Value.GetRawText()
+            : "{}";
+        var summary = string.IsNullOrWhiteSpace(request.Summary)
+            ? "Applied Site Setup TR config and resumed monitoring."
+            : request.Summary.Trim();
+        await AddActivityAsync("apply", "setup_config_applied", summary, details, request.Source, ct);
+        return await GetAsync(ct);
+    }
+
     private async Task<SiteSetupActivityDto> AddActivityAsync(string category, string action, string summary, object details, string source, CancellationToken ct) =>
         await AddActivityAsync(category, action, summary, JsonSerializer.Serialize(details, EngineConfig.JsonOptions()), source, ct);
 

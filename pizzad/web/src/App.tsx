@@ -12,6 +12,7 @@ const radioSetupApi = "/api/v1/system/radio-setup";
 const siteSetupApi = "/api/v1/setup/site";
 const radioSetupDetailUrl = (id: string, compact = true) => `${radioSetupApi}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
 const waterfallStopUrl = (surveyId: string) => `${radioSetupApi}/${encodeURIComponent(surveyId)}/waterfall/stop`;
+const siteSetupRfWorkspaceKey = "pizzawave-site-setup-rf-validation-workspace";
 type Page = "dashboard" | "setup" | "tools" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
 type CategorySortMode = "name" | "recent" | "frequent";
@@ -742,7 +743,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
-  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation"]);
+  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume"]);
   const [section, setSectionState] = useState(() => {
     const saved = localStorage.getItem("pizzawave-site-setup-section") || "Location";
     return enabledSections.has(saved) ? saved : "Location";
@@ -778,7 +779,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           <h2>Site Setup</h2>
         </div>
         <div className="site-setup-actions">
-          <button type="button" className="danger-button" disabled title="Apply Config will move here when the RF/config sections are migrated.">Apply Config</button>
+          <button type="button" className="danger-button" onClick={() => setSection("Apply & Resume")}>Apply Config</button>
         </div>
       </div>
       <SiteSetupChangeStrip setup={current} />
@@ -798,6 +799,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} onTrOperationChange={onTrOperationChange} />}
+          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} onApplied={(next) => { setCurrent(next); void reload(); }} />}
         </section>
       </div>
     </section>
@@ -1150,7 +1152,6 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
   const [subPage, setSubPage] = useState<"waterfall" | "sweep">(() => localStorage.getItem("pizzawave-site-setup-rf-validation-subpage") === "sweep" ? "sweep" : "waterfall");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
   const [details, setDetails] = useState<{ title: string; body: React.ReactNode } | null>(null);
-  const workspaceKey = "pizzawave-site-setup-rf-validation-workspace";
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
   const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
@@ -1171,20 +1172,7 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
       setBusy("workspace");
       setMessage("");
       try {
-        const existingId = localStorage.getItem(workspaceKey) ?? "";
-        let current: RfSurveyDetail | null = null;
-        if (existingId) {
-          try {
-            current = await api.request<RfSurveyDetail>(radioSetupDetailUrl(existingId));
-          } catch {
-            localStorage.removeItem(workspaceKey);
-          }
-        }
-        const request = siteSetupRfSurveyRequest(setup, systems, sources, selectedSourceIndexes);
-        current = current
-          ? await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(current.session.id)}/draft`, { method: "POST", body: JSON.stringify(request) })
-          : await api.request<RfSurveyDetail>(radioSetupApi, { method: "POST", body: JSON.stringify(request) });
-        localStorage.setItem(workspaceKey, current.session.id);
+        const current = await prepareSiteSetupRfWorkspace(setup, systems, sources, selectedSourceIndexes);
         if (!stopped) {
           setDetail(current);
           const firstCc = normalizeControlChannelSelection(current.profile.systems.flatMap(system => system.controlChannelsHz))[0] ?? controlChannels[0] ?? 0;
@@ -1338,6 +1326,167 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
         </div>}
       </>
       : !busy && <div className="setup-warning-list"><div>RF Validation needs at least one selected site/control channel and one SDR source.</div></div>}
+  </div>;
+}
+
+async function prepareSiteSetupRfWorkspace(setup: SiteSetup, systems: RfSurveySystem[], sources: RfSurveySource[], selectedSourceIndexes: number[]) {
+  const existingId = localStorage.getItem(siteSetupRfWorkspaceKey) ?? "";
+  let current: RfSurveyDetail | null = null;
+  if (existingId) {
+    try {
+      current = await api.request<RfSurveyDetail>(radioSetupDetailUrl(existingId));
+    } catch {
+      localStorage.removeItem(siteSetupRfWorkspaceKey);
+    }
+  }
+  const request = siteSetupRfSurveyRequest(setup, systems, sources, selectedSourceIndexes);
+  current = current
+    ? await api.request<RfSurveyDetail>(`${radioSetupApi}/${encodeURIComponent(current.session.id)}/draft`, { method: "POST", body: JSON.stringify(request) })
+    : await api.request<RfSurveyDetail>(radioSetupApi, { method: "POST", body: JSON.stringify(request) });
+  localStorage.setItem(siteSetupRfWorkspaceKey, current.session.id);
+  return current;
+}
+
+function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onApplied: (next: SiteSetup) => void }) {
+  const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
+  const [draft, setDraft] = useState<RfSurveyConfigDraft | null>(null);
+  const [busy, setBusy] = useState<"" | "load" | "apply">("load");
+  const [message, setMessage] = useState("");
+  const systems = siteSetupSystems(setup);
+  const sources = siteSetupSources(setup);
+  const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
+    ? setup.desired.selectedSourceIndexes
+    : sources.map(source => source.index);
+  const signature = JSON.stringify({
+    siteLabel: setup.desired.siteLabel,
+    sid: setup.desired.radioReferenceSid,
+    systems,
+    sources,
+    selectedSourceIndexes,
+    rfPath: setup.desired.rfPath,
+    desiredVersion: setup.desired.desiredVersion
+  });
+  const parsedDraft = useMemo(() => {
+    try {
+      return draft?.configJson ? JSON.parse(draft.configJson) : null;
+    } catch {
+      return null;
+    }
+  }, [draft?.configJson]);
+  const draftSystems = Array.isArray(parsedDraft?.systems) ? parsedDraft.systems : [];
+  const draftSources = Array.isArray(parsedDraft?.sources) ? parsedDraft.sources : [];
+
+  useEffect(() => {
+    let stopped = false;
+    async function loadDraft() {
+      setBusy("load");
+      setMessage("");
+      try {
+        const workspace = await prepareSiteSetupRfWorkspace(setup, systems, sources, selectedSourceIndexes);
+        const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+        if (!stopped) {
+          setDetail(workspace);
+          setDraft(nextDraft);
+        }
+      } catch (error) {
+        if (!stopped)
+          setMessage(error instanceof Error ? error.message : "Unable to prepare Setup config draft.");
+      } finally {
+        if (!stopped)
+          setBusy("");
+      }
+    }
+    void loadDraft();
+    return () => { stopped = true; };
+  }, [signature]);
+
+  async function reloadDraft() {
+    setBusy("load");
+    setMessage("");
+    try {
+      const workspace = await prepareSiteSetupRfWorkspace(setup, systems, sources, selectedSourceIndexes);
+      const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+      setDetail(workspace);
+      setDraft(nextDraft);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to refresh Setup config draft.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyDraft() {
+    if (!detail || !draft) return;
+    if (!confirmAction("Apply Site Setup config?", "This writes the reviewed TR config, creates the normal backup, restarts trunk-recorder, and records a Setup audit event.")) return;
+    setBusy("apply");
+    setMessage("");
+    try {
+      const result = await api.request<RfSurveyTrActionResult>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
+        method: "POST",
+        body: JSON.stringify({
+          configJson: draft.configJson,
+          restartTr: true,
+          preserveRfValidationEvidence: true
+        })
+      });
+      const next = await api.request<SiteSetup>(`${siteSetupApi}/mark-applied`, {
+        method: "POST",
+        body: JSON.stringify({
+          summary: result.message || "Applied Site Setup TR config and resumed monitoring.",
+          details: {
+            surveyId: detail.session.id,
+            candidatePath: result.candidatePath,
+            backupPath: result.backupPath,
+            restorePath: result.restorePath,
+            serviceOutput: result.serviceOutput,
+            draftSummary: draft.summary
+          },
+          source: "ui"
+        })
+      });
+      onApplied(next);
+      setMessage(`${result.message}${result.serviceOutput ? ` ${result.serviceOutput.trim()}` : ""}`);
+      await reloadDraft();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to apply Site Setup config.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return <div className="site-setup-form site-setup-apply">
+    <div className="site-setup-apply-toolbar">
+      <button type="button" onClick={() => void reloadDraft()} disabled={busy !== ""}>{busy === "load" ? "Refreshing..." : "Refresh Draft"}</button>
+      <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>
+    </div>
+    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") || message.toLowerCase().includes("denied") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    <div className="site-setup-apply-grid">
+      <section className="site-setup-apply-card">
+        <span>Pending Changes</span>
+        <strong>{setup.pendingChanges.length ? `${setup.pendingChanges.length} pending` : "None"}</strong>
+        <small>{setup.pendingChanges.map(change => `${label(change.category)}: ${change.summary}`).join(" ") || "Desired setup already matches the tracked live state."}</small>
+      </section>
+      <section className="site-setup-apply-card">
+        <span>Workspace</span>
+        <strong>{detail?.session.id || "Preparing"}</strong>
+        <small>{detail?.session.siteLabel || setup.desired.siteLabel || "Site Setup"}</small>
+      </section>
+      <section className="site-setup-apply-card">
+        <span>Monitoring</span>
+        <strong>{label(setup.status.monitoringState)}</strong>
+        <small>{setup.status.message || "No status message"}</small>
+      </section>
+    </div>
+    {draft && <>
+      {draft.summary.warnings.length > 0 && <div className="setup-warning-list">{draft.summary.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+      {draft.summary.changes.length > 0 && <div className="setup-note">{draft.summary.changes.join(" ")}</div>}
+      {parsedDraft && <TrConfigReviewCoverage systems={draftSystems} sources={draftSources} />}
+      <details className="site-setup-config-json">
+        <summary>TR config JSON</summary>
+        <pre className="log-box">{draft.configJson}</pre>
+      </details>
+    </>}
+    {!draft && busy !== "load" && <div className="setup-warning-list"><div>Setup needs selected systems, control channels, and SDR source information before it can build a TR config draft.</div></div>}
   </div>;
 }
 
