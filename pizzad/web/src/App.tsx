@@ -1245,6 +1245,17 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
   const cachedSites = readCachedRadioReferenceSites(setup.desired.radioReferenceSid);
+  const sweepSelectionStorageKey = detail ? `pizzawave-site-setup-waterfall-sweep-selections-${detail.session.id}` : "";
+  useEffect(() => {
+    if (!sweepSelectionStorageKey) return;
+    setWaterfallSweepSelections(normalizeWaterfallSweepSelections(loadJsonStorage<unknown>(sweepSelectionStorageKey, [])));
+  }, [sweepSelectionStorageKey]);
+  const updateWaterfallSweepSelections = (values: WaterfallSweepSelection[]) => {
+    const normalized = normalizeWaterfallSweepSelections(values);
+    setWaterfallSweepSelections(normalized);
+    if (sweepSelectionStorageKey)
+      localStorage.setItem(sweepSelectionStorageKey, JSON.stringify(normalized));
+  };
   const latestExperiment = (type: string) => [...(detail?.experiments ?? [])]
     .filter(experiment => experiment.type === type)
     .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""))[0];
@@ -1277,7 +1288,7 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
             controlChannels={effectiveControlChannels}
             activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
             waterfallSweepSelections={waterfallSweepSelections}
-            onWaterfallSweepSelections={setWaterfallSweepSelections}
+            onWaterfallSweepSelections={updateWaterfallSweepSelections}
             onAdoptWaterfallSite={adoptWaterfallSite}
             onRunExperiment={runExperiment}
             onReload={refreshWorkspace}
@@ -1316,7 +1327,7 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
           onShowDetails={setDetails}
           onOpenRunLog={() => undefined}
           waterfallSweepSelections={waterfallSweepSelections}
-          onWaterfallSweepSelections={setWaterfallSweepSelections}
+          onWaterfallSweepSelections={updateWaterfallSweepSelections}
           inventoryRequired={false}
         />}
         {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
@@ -5170,22 +5181,23 @@ function SiteValidationStep({
     : validationPowerSources.length === 1 ? validationPowerSources[0] : undefined;
   const validationErrorBaseHz = validationErrorBaseSource?.errorHz ?? 0;
   const handoffValidationOffsets = waterfallRecommendedError ? [Math.round(waterfallRecommendedError.errorHz - validationErrorBaseHz)] : [];
-  const validationOffsets = handoffValidationOffsets.length ? handoffValidationOffsets : parseIntegerSequence(validationErrorOffsets, [-300, 0, 300]);
-  const validationAutoError = !waterfallRecommendedError && validationErrorOffsets.trim().toLowerCase() === "auto";
-  const validationFormErrorSearch = waterfallRecommendedError
-    ? formatSignedHzInput(waterfallRecommendedError.errorHz)
-    : validationErrorOffsets;
+  const handoffValidationOffsetText = handoffValidationOffsets.length ? handoffValidationOffsets.map(formatSignedHzInput).join(",") : "";
+  const validationOffsets = parseIntegerSequence(validationErrorOffsets, [-300, 0, 300]);
+  const validationAutoError = validationErrorOffsets.trim().toLowerCase() === "auto";
+  const validationFormErrorSearch = validationErrorOffsets;
   const validationRecommendedErrorText = waterfallRecommendedError
     ? `${formatSignedHz(waterfallRecommendedError.errorHz)}${waterfallRecommendedError.conflict ? ` (selected peaks range ${formatSignedHz(waterfallRecommendedError.minErrorHz)} to ${formatSignedHz(waterfallRecommendedError.maxErrorHz)})` : ""}`
     : "";
   const selectedWaterfallGains = uniqueCaseInsensitive(selectedWaterfallSweepSelections.map(row => row.gain ?? ""));
-  const validationPowerGains = selectedWaterfallGains.length ? effectivePowerGainSequence(selectedWaterfallGains, validationPowerSources) : effectivePowerGains;
+  const waterfallSeedGainSequence = selectedWaterfallGains.length ? effectivePowerGainSequence(selectedWaterfallGains, validationPowerSources).join(",") : "";
+  const validationPowerGains = effectivePowerGainSequence(parseGainSequence(powerGainSequence), validationPowerSources);
   const selectedWaterfallSampleRates = uniqueSortedFrequencies(selectedWaterfallSweepSelections.map(row => row.sampleRateHz ?? 0));
   const waterfallSampleRateHz = selectedWaterfallSampleRates.length === 1 ? selectedWaterfallSampleRates[0] : 0;
-  const validationRequestSampleRateHz = waterfallSampleRateHz || (validationSampleRateOk ? parsedValidationSampleRateHz : 0);
-  const validationRequestSampleRateOk = waterfallSampleRateHz > 0 || validationSampleRateOk;
-  const validationFormSampleRateMhz = waterfallSampleRateHz ? formatMhzInput(waterfallSampleRateHz) : validationSampleRateMhz;
-  const validationFormGainSequence = hasWaterfallSweepHandoff ? validationPowerGains.join(",") : powerGainSequence;
+  const waterfallSeedSampleRateMhz = waterfallSampleRateHz ? formatMhzInput(waterfallSampleRateHz) : "";
+  const validationRequestSampleRateHz = validationSampleRateOk ? parsedValidationSampleRateHz : 0;
+  const validationRequestSampleRateOk = validationSampleRateOk;
+  const validationFormSampleRateMhz = validationSampleRateMhz;
+  const validationFormGainSequence = powerGainSequence;
   const validationPowerGainInvalid = validationPowerSources.some(isAirspyRfSource) && validationPowerGains.some(gain => !validateAirspyLinearityGain(gain));
   const powerSweepPasses = Math.max(1, validationPowerSources.length) * Math.max(1, validationRunControlChannels.length) * Math.max(1, validationPowerGains.length);
   const validationP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, powerSweepPasses, validationRunControlChannels.length + (systems.length || 1)));
@@ -5222,6 +5234,7 @@ function SiteValidationStep({
   const sweepInsightStorageKey = `pizzawave-radio-setup-sweep-insights-${surveyId}`;
   const sweepHistoryStorageKey = `pizzawave-radio-setup-sweep-history-${surveyId}`;
   const sweepRecoveryKey = useRef("");
+  const validationHandoffSeedKey = useRef("");
   const inventorySatisfied = inventoryRequired === false || Boolean(inventory);
   useEffect(() => {
     if (controlChannels.length && !controlChannels.includes(activeControlChannelHz))
@@ -5238,6 +5251,22 @@ function SiteValidationStep({
   useEffect(() => {
     setValidationSampleRateMhz(sweepSampleRatesSame ? formatMhzInput(defaultSweepSampleRate) : "");
   }, [effectiveSweepSources.map(source => `${source.index}:${source.sampleRate}`).join("|")]);
+  useEffect(() => {
+    if (!hasWaterfallSweepHandoff)
+      return;
+    const seedKey = selectedWaterfallSweepSelections
+      .map(row => `${row.frequencyHz}:${row.sourceIndex ?? ""}:${row.gain ?? ""}:${row.sampleRateHz ?? ""}:${row.errorHz ?? ""}:${row.snrDb ?? ""}`)
+      .join("|");
+    if (!seedKey || validationHandoffSeedKey.current === seedKey)
+      return;
+    validationHandoffSeedKey.current = seedKey;
+    if (waterfallSeedGainSequence)
+      setPowerGainSequence(waterfallSeedGainSequence);
+    if (waterfallSeedSampleRateMhz)
+      setValidationSampleRateMhz(waterfallSeedSampleRateMhz);
+    if (handoffValidationOffsetText)
+      setValidationErrorOffsets(handoffValidationOffsetText);
+  }, [hasWaterfallSweepHandoff, selectedWaterfallSweepSelections.map(row => `${row.frequencyHz}:${row.sourceIndex ?? ""}:${row.gain ?? ""}:${row.sampleRateHz ?? ""}:${row.errorHz ?? ""}:${row.snrDb ?? ""}`).join("|"), waterfallSeedGainSequence, waterfallSeedSampleRateMhz, handoffValidationOffsetText]);
   useEffect(() => {
     const saved = Number(localStorage.getItem(sweepStorageKey));
     const evidenceJobId = sweep?.evidenceJson ? Number(parseExperimentJson<any>(sweep.evidenceJson)?.job?.id) : 0;
@@ -5680,9 +5709,9 @@ function SiteValidationStep({
         <div className="rf-sweep-compact">
           <div className="rf-sweep-form">
             <div className="rf-cc-runline compact">
-              <label><span>Sample rate MHz</span><input className={validationRequestSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" disabled={waterfallSampleRateHz > 0} value={validationFormSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
-              <label><span>Gain sequence</span><input className={validationPowerGainInvalid ? "invalid" : ""} disabled={hasWaterfallSweepHandoff} value={validationFormGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
-              <label><span>Error</span><input className="rf-short-input" size={6} disabled={Boolean(waterfallRecommendedError)} value={validationFormErrorSearch} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
+              <label><span>Sample rate MHz</span><input className={validationRequestSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" value={validationFormSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
+              <label><span>Gain sequence</span><input className={validationPowerGainInvalid ? "invalid" : ""} value={validationFormGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
+              <label><span>Error offset</span><input className="rf-short-input" size={6} value={validationFormErrorSearch} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
               <label><span>Metric candidates</span><input className="rf-short-input" size={6} inputMode="numeric" value={validationMetricsCandidates} onChange={event => setValidationMetricsCandidates(event.target.value)} /></label>
               <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationRequestSampleRateOk || validationPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
               {(validationRunning || validationProgress?.active) && <button disabled={sweepBusy === "cancel-validation"} onClick={() => void cancelValidationSweep()}>{sweepBusy === "cancel-validation" ? "Canceling..." : "Cancel"}</button>}
