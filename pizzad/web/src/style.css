@@ -651,6 +651,49 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-talkgroups {
   max-width: none;
 }
+.site-setup-hardware {
+  max-width: none;
+}
+.site-setup-hardware-block {
+  display: grid;
+  gap: 10px;
+  max-width: 1320px;
+}
+.site-setup-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.site-setup-subhead span {
+  color: #9faab5;
+  font-size: 12px;
+}
+.site-setup-source-table-wrap {
+  overflow: auto;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+.site-setup-source-table {
+  margin: 0;
+  min-width: 860px;
+}
+.site-setup-source-table tr.selected td {
+  background: rgba(90, 167, 255, 0.1);
+}
+.site-setup-source-table td:first-child,
+.site-setup-source-table th:first-child {
+  width: 42px;
+  text-align: center;
+}
+.site-setup-rf-fields {
+  max-width: 1180px;
+}
+.site-setup-rf-chain {
+  display: grid;
+  gap: 8px;
+}
 .site-setup-talkgroup-import {
   display: grid;
   gap: 10px;
