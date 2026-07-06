@@ -741,7 +741,16 @@ function RadioSetupCalibrationBanner({ onOpen }: { onOpen: () => void }) {
 function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
-  const [section, setSection] = useState("Location");
+  const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
+  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation"]);
+  const [section, setSectionState] = useState(() => {
+    const saved = localStorage.getItem("pizzawave-site-setup-section") || "Location";
+    return enabledSections.has(saved) ? saved : "Location";
+  });
+  const setSection = (value: string) => {
+    setSectionState(value);
+    localStorage.setItem("pizzawave-site-setup-section", value);
+  };
   useEffect(() => setCurrent(setup), [setup]);
   useEffect(() => {
     if (!targetSection) return;
@@ -749,12 +758,6 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { s
     clearTargetSection?.();
   }, [targetSection, clearTargetSection]);
   if (!current) return <div className="pane">Loading Site Setup...</div>;
-  const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
-  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation"]);
-  async function refreshSiteSetup() {
-    const next = await api.request<SiteSetup>(siteSetupApi);
-    setCurrent(next);
-  }
   async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
     if (!current) return;
     const desired = { ...current.desired, ...patch };
@@ -775,7 +778,6 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection }: { s
           <h2>Site Setup</h2>
         </div>
         <div className="site-setup-actions">
-          <button type="button" onClick={() => void reload()}><RefreshCw size={14} /> Refresh</button>
           <button type="button" className="danger-button" disabled title="Apply Config will move here when the RF/config sections are migrated.">Apply Config</button>
         </div>
       </div>
@@ -1254,7 +1256,7 @@ function siteSetupSystems(setup: SiteSetup): RfSurveySystem[] {
 }
 
 function siteSetupSources(setup: SiteSetup): RfSurveySource[] {
-  return setup.desired.sources.length
+  const sources = setup.desired.sources.length
     ? setup.desired.sources
     : setup.applied.sources.map(source => ({
       index: source.index,
@@ -1266,6 +1268,10 @@ function siteSetupSources(setup: SiteSetup): RfSurveySource[] {
       errorHz: source.errorHz,
       gain: source.gain
     }));
+  return sources.map(source => ({
+    ...source,
+    gain: normalizeSetupWaterfallGain(source)
+  }));
 }
 
 function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], sources: RfSurveySource[], selectedSourceIndexes: number[]) {
@@ -1287,6 +1293,13 @@ function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], s
     measurementMode: "guided",
     probeDurationSeconds: 45
   };
+}
+
+function normalizeSetupWaterfallGain(source: Pick<RfSurveySource, "gain" | "sdrType" | "device">) {
+  const gain = String(source.gain ?? "").trim();
+  if (!isAirspyRfSource(source))
+    return gain;
+  return validateAirspyLinearityGain(gain) ? gain : "15";
 }
 
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
