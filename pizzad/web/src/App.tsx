@@ -14033,6 +14033,13 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { r
   const endRow = Math.min(rows.length, currentPage * pageSize);
   const enabledCount = effectiveItems.filter(item => item.enabled).length;
   const hasSystemScopedRows = effectiveItems.some(item => item.systemShortName);
+  const topCategoryCounts = Array.from(rows.reduce<Map<string, number>>((counts, item) => {
+    const category = item.opsCategory || "other";
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+    return counts;
+  }, new Map()))
+    .sort(([aCategory, aCount], [bCategory, bCount]) => bCount - aCount || aCategory.localeCompare(bCategory))
+    .slice(0, 5);
   return <div className={`${embedded ? "site-setup-catalog-editor" : "card settings-card wide"} talkgroups-settings-card`}>
     <div className="settings-fields">
       {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
@@ -14049,6 +14056,9 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { r
             {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
           </select>
           <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} enabled</span>
+          {topCategoryCounts.length > 0 && <span className="talkgroup-category-pills">
+            {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
+          </span>}
           <button disabled={currentPage <= 1} onClick={() => setPage(1)}>First</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
           <span>{currentPage} / {pageCount}</span>

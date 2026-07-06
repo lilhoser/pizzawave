@@ -2261,6 +2261,20 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   padding: 4px 8px;
   white-space: nowrap;
 }
+.talkgroup-category-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.talkgroup-category-pill {
+  margin: 0;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.25;
+  border-color: var(--category-border, #46515c);
+  color: var(--category-color, #cbd5de);
+  background: var(--category-bg, #111820);
+}
 .talkgroup-catalog-table .table {
   min-width: 1180px;
   table-layout: fixed;
