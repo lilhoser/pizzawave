@@ -696,35 +696,17 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-apply-toolbar button {
   margin: 0;
 }
-.site-setup-apply-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-.site-setup-apply-card {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px;
-  background: #171a1d;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-}
-.site-setup-apply-card span {
-  color: #9faab5;
-  font-size: 11px;
+.site-setup-draft-notes summary {
+  cursor: pointer;
   font-weight: 800;
-  text-transform: uppercase;
 }
-.site-setup-apply-card strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.site-setup-draft-notes ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
-.site-setup-apply-card small {
-  color: #cbd5de;
-  line-height: 1.25;
+.site-setup-draft-notes li {
+  margin-bottom: 5px;
+  line-height: 1.35;
 }
 .site-setup-config-json summary {
   cursor: pointer;

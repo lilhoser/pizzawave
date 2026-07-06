@@ -1000,7 +1000,7 @@ public sealed class RfSurveyService
             : [];
         var windows = BuildSourceWindows(frequencies, defaultRate, priorityFrequencies);
         if (windows.Count > selected.Count)
-            warnings.Add($"The selected site needs {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
+            warnings.Add($"The selected systems need {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
 
         for (var planIndex = 0; planIndex < selected.Count; planIndex++)
         {

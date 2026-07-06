@@ -1375,6 +1375,10 @@ function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onAppli
   }, [draft?.configJson]);
   const draftSystems = Array.isArray(parsedDraft?.systems) ? parsedDraft.systems : [];
   const draftSources = Array.isArray(parsedDraft?.sources) ? parsedDraft.sources : [];
+  const draftWarnings = useMemo(() => siteSetupDraftWarningGroups(draft?.summary.warnings ?? []), [draft?.summary.warnings]);
+  const draftChangeSummary = draft?.summary.changes.length
+    ? `${draft.summary.changes.length} generated config update${draft.summary.changes.length === 1 ? "" : "s"}`
+    : "";
 
   useEffect(() => {
     let stopped = false;
@@ -1460,26 +1464,20 @@ function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onAppli
       <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>
     </div>
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") || message.toLowerCase().includes("denied") ? "settings-message error" : "settings-message ok"}>{message}</div>}
-    <div className="site-setup-apply-grid">
-      <section className="site-setup-apply-card">
-        <span>Pending Changes</span>
-        <strong>{setup.pendingChanges.length ? `${setup.pendingChanges.length} pending` : "None"}</strong>
-        <small>{setup.pendingChanges.map(change => `${label(change.category)}: ${change.summary}`).join(" ") || "Desired setup already matches the tracked live state."}</small>
-      </section>
-      <section className="site-setup-apply-card">
-        <span>Workspace</span>
-        <strong>{detail?.session.id || "Preparing"}</strong>
-        <small>{detail?.session.siteLabel || setup.desired.siteLabel || "Site Setup"}</small>
-      </section>
-      <section className="site-setup-apply-card">
-        <span>Monitoring</span>
-        <strong>{label(setup.status.monitoringState)}</strong>
-        <small>{setup.status.message || "No status message"}</small>
-      </section>
-    </div>
     {draft && <>
-      {draft.summary.warnings.length > 0 && <div className="setup-warning-list">{draft.summary.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
-      {draft.summary.changes.length > 0 && <div className="setup-note">{draft.summary.changes.join(" ")}</div>}
+      {draftWarnings.coverage.length > 0 && <div className="setup-warning-list site-setup-draft-notes">{draftWarnings.coverage.map(warning => <div key={warning}>{warning}</div>)}</div>}
+      {draftWarnings.planning.length > 0 && <details className="setup-note site-setup-draft-notes">
+        <summary>Planning notes ({draftWarnings.planning.length})</summary>
+        <ul>{draftWarnings.planning.map(warning => <li key={warning}>{warning}</li>)}</ul>
+      </details>}
+      {draftWarnings.other.length > 0 && <details className="setup-note site-setup-draft-notes">
+        <summary>Other draft warnings ({draftWarnings.other.length})</summary>
+        <ul>{draftWarnings.other.map(warning => <li key={warning}>{warning}</li>)}</ul>
+      </details>}
+      {draftChangeSummary && <details className="setup-note site-setup-draft-notes">
+        <summary>{draftChangeSummary}</summary>
+        <ul>{draft.summary.changes.map(change => <li key={change}>{change}</li>)}</ul>
+      </details>}
       {parsedDraft && <TrConfigReviewCoverage systems={draftSystems} sources={draftSources} />}
       <details className="site-setup-config-json">
         <summary>TR config JSON</summary>
@@ -1488,6 +1486,30 @@ function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onAppli
     </>}
     {!draft && busy !== "load" && <div className="setup-warning-list"><div>Setup needs selected systems, control channels, and SDR source information before it can build a TR config draft.</div></div>}
   </div>;
+}
+
+function siteSetupDraftWarningGroups(warnings: string[]) {
+  const coverage: string[] = [];
+  const planning: string[] = [];
+  const other: string[] = [];
+  for (const warning of warnings) {
+    const voice = /^(.+): no imported voice channel list was available; Config Draft is using (\d+) observed PizzaWave call frequenc/.exec(warning);
+    if (voice) {
+      planning.push(`${voice[1]}: no RadioReference voice-channel list is stored, so Setup is estimating source coverage from ${voice[2]} recently observed call frequenc${voice[2] === "1" ? "y" : "ies"}.`);
+      continue;
+    }
+    const windows = /^The selected (?:site|systems) need[s]? (\d+) source window\(s\) at (\d+) sps, but only (\d+) source\(s\) are selected\./.exec(warning);
+    if (windows) {
+      coverage.push(`Source coverage warning: the selected systems span ${windows[1]} SDR tuning window${windows[1] === "1" ? "" : "s"} at ${formatHz(Number(windows[2]))}, but Setup has ${windows[3]} selected source${windows[3] === "1" ? "" : "s"}. Add/select another source, reduce the selected systems, or use control-channel-only planning if full voice-frequency coverage is not the goal.`);
+      continue;
+    }
+    if (warning.includes("Control-channel source plan selected")) {
+      planning.push("Control-channel-only planning is selected. Setup will center sources around validated control channels; voice traffic may still need a wider full-coverage plan later.");
+      continue;
+    }
+    other.push(warning);
+  }
+  return { coverage, planning, other };
 }
 
 function sdrTypeFromDeviceLabel(device: string) {
