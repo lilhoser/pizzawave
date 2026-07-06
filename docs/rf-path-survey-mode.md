@@ -1,7 +1,8 @@
-# Radio Setup Workspace
+# Site Setup RF Validation
 
-Radio Setup is the unified setup, calibration, TR config, and RF validation
-workspace. Its RF path validation phase answers a field question:
+Setup is the unified site/location setup, calibration, TR config, talkgroup
+import, and RF validation workflow. Its RF validation phase answers a field
+question:
 
 > Given this exact antenna, coax, connectors, splitter/multicoupler, LNA,
 > filters, SDR, location, gain, error, sample rate, source plan, and site, will
@@ -14,15 +15,15 @@ memory.
 
 ## Product Shape
 
-Radio Setup is available from multiple entry points:
+Setup is available from the main navigation as `Setup`. It is re-entrant:
+entering Setup does not stop live monitoring by itself. Disruptive steps such as
+waterfall, RF sweep, and applying config stop or restart trunk-recorder only for
+the bounded operation that needs exclusive SDR/TR access.
 
-- the one-time setup wizard handoff;
-- Tools > Radio Setup for normal operator use;
-- System > Trunk Recorder > Config as an expert shortcut into config drafting.
-
-The MVP is web/API-first. CLI is not required for MVP, but the backend API
-should expose workspace profiles, sessions, experiments, reports, and artifacts in
-a way that a future CLI can call cleanly.
+Setup owns the live desired site state, RF path, RF validation evidence, source
+planning, config draft, apply/resume, and activity log. RF validation evidence is
+stored against the current Setup session rather than as operator-managed saved
+profiles.
 
 For agent and operator work, the PizzaWave API is the primary diagnostic
 surface. Do not treat old user-local Codex skills or standalone RF scripts as
@@ -33,33 +34,44 @@ AI Insights is a prerequisite for guided mode. Manual/expert mode may run the
 same deterministic tests without AI interpretation, but the product-quality
 flow is AI-guided.
 
-External RF/P25 tooling is also a first-class requirement. Radio Setup should have
-a prep stage that explains which tools are needed for the selected exercises,
+External RF/P25 tooling is also a first-class requirement. Setup should have a
+prep stage that explains which tools are needed for the selected exercises,
 detects what is already installed, and installs or guides installation of
 missing dependencies through guarded setup jobs.
 
 ## Implemented API Workflow
 
-Use these endpoints for current Radio Setup and RF diagnostic work.
+Use these endpoints for current Setup and RF diagnostic work.
 
-Discovery and workspace state:
+Setup desired/applied state:
 
-- `GET /api/v1/system/radio-setup/source-plan`: discover TR systems, control
-  channels, voice frequencies, source windows, and proposed source indexes.
-- `GET /api/v1/system/radio-setup`: list saved Radio Setup workspaces.
-- `GET /api/v1/system/radio-setup/{id}`: load a workspace, profile,
-  experiments, notes, tool prep, and next experiment recommendations.
-- `POST /api/v1/system/radio-setup`: create a workspace.
-- `POST /api/v1/system/radio-setup/{id}/draft`: update selected system, source
-  indexes, RF path profile, mode, and probe duration.
-- `POST /api/v1/system/radio-setup/{id}/notes`: add operator notes.
-- `POST /api/v1/system/radio-setup/{id}/export-plan`: write the workspace
-  export artifacts.
+- `GET /api/v1/setup/site`: load current Setup desired/applied state.
+- `PATCH /api/v1/setup/site`: update desired location, systems/sites,
+  talkgroups, hardware/RF path, selected source plan, or operator evidence.
+- `POST /api/v1/setup/site/mark-applied`: record that reviewed changes were
+  applied to the live monitoring configuration.
+- `GET /api/v1/setup/site/activity`: load Setup activity/audit log.
+
+RF validation state:
+
+- `GET /api/v1/setup/site/rf`: load or create the current Setup RF validation
+  session from desired Setup state.
+- `GET /api/v1/setup/site/rf/{id}`: load RF profile, experiments, tool prep,
+  and next experiment recommendations for the current Setup RF session.
+- `GET /api/v1/setup/site/rf/{id}/config-draft`: build the TR config draft from
+  Setup source planning and validated RF evidence.
+- `POST /api/v1/setup/site/rf/{id}/tr/apply-source-draft`: apply the reviewed
+  Setup TR config and clear the expert config editor draft.
 
 Experiment execution:
 
-- `POST /api/v1/system/radio-setup/{id}/tool-prep`
-- `POST /api/v1/system/radio-setup/{id}/experiments/run`
+- `POST /api/v1/setup/site/rf/{id}/experiments/run`
+- `POST /api/v1/setup/site/rf/{id}/experiments/cancel`
+- `GET /api/v1/setup/site/rf/{id}/sweep-progress`
+- `POST /api/v1/setup/site/rf/{id}/sweep-insights`
+- `POST /api/v1/setup/site/rf/{id}/waterfall/start`
+- `GET /api/v1/setup/site/rf/{id}/waterfall`
+- `POST /api/v1/setup/site/rf/{id}/waterfall/stop`
 
 Supported experiment `type` values:
 
@@ -76,16 +88,6 @@ Supported experiment `type` values:
 - `transcription_gate`
 - `stability_verdict`
 
-Config and capture trials:
-
-- `GET /api/v1/system/radio-setup/{id}/p25-probe-preview`
-- `POST /api/v1/system/radio-setup/{id}/tr/candidate`
-- `POST /api/v1/system/radio-setup/{id}/tr/apply-temp-config`
-- `POST /api/v1/system/radio-setup/{id}/tr/run-capture-trial`
-- `POST /api/v1/system/radio-setup/{id}/tr/restore-config`
-- `GET /api/v1/system/radio-setup/{id}/config-draft`
-- `POST /api/v1/system/radio-setup/{id}/tr/apply-source-draft`
-
 Troubleshooting and field comparisons:
 
 - `GET /api/v1/troubleshoot?start=<unix>&end=<unix>&bySystem=true`
@@ -95,8 +97,8 @@ Troubleshooting and field comparisons:
 For 30-minute antenna A/B baselines, record exact Unix start/end timestamps and
 use the troubleshooting/RF-analysis endpoints for the fixed window. Do not use
 `control_channel_quality` as the sole 30-minute A/B evidence path because that
-Radio Setup experiment is capped at 900 seconds by design. It is still useful
-inside the interactive workspace for shorter bounded CC checks.
+Setup RF experiment is capped at 900 seconds by design. It is still useful
+inside the interactive workflow for shorter bounded CC checks.
 
 ## Inputs
 
@@ -147,10 +149,10 @@ and System integration:
 - decode/capture/transcription scores;
 - recommendation state.
 
-Each completed or in-progress session also writes an artifact folder:
+Each completed or in-progress Setup RF session also writes an artifact folder:
 
 ```text
-/var/lib/pizzawave/rf-surveys/<survey-id>/
+/var/lib/pizzawave/rf-surveys/site-setup/
   survey.json
   input-profile.json
   tr-config-before.json
@@ -172,7 +174,8 @@ remain preserved as-run.
 
 ## Experiment Loop
 
-Radio Setup is not a strictly linear wizard. It is a wizard-like experiment loop.
+Setup RF validation is not a strictly linear wizard. It is a wizard-like
+experiment loop inside Setup.
 
 Each experiment records:
 
@@ -203,17 +206,17 @@ exists for a verdict, or the user chooses to move on.
 
 ## Tool Prep
 
-Radio Setup needs tooling before it can run credible experiments. The prep stage
+Setup needs tooling before it can run credible experiments. The prep stage
 should be explicit in the UI and should run before the first measurement.
 
 The prep stage should:
 
 - inspect the host OS, CPU architecture, attached SDRs, and current setup state;
-- show required and optional tools for the selected workspace path;
+- show required and optional tools for the selected Setup RF path;
 - explain why each tool is needed;
 - detect installed versions and missing dependencies;
 - install or update missing tools through bounded, guarded setup jobs;
-- record tool versions in the workspace artifact folder;
+- record tool versions in the Setup RF artifact folder;
 - refuse experiments whose required tooling is unavailable.
 
 Likely tool categories:
@@ -232,14 +235,14 @@ grant evidence on the target architecture.
 
 trunk-recorder remains the acceptance path for source plans and voice capture,
 but lower-level P25 tooling is expected to be necessary before voice trials. It
-lets the workspace distinguish "no P25 frames here" from "TR config/source plan is
+lets Setup distinguish "no P25 frames here" from "TR config/source plan is
 wrong" earlier in the exercise loop.
 
 ## TR Ownership And Temporary Configs
 
-The workspace must make clear that trunk-recorder can be briefly paused during
-Radio Setup measurements and normal coverage will pause during that bounded
-measurement window. No Radio Setup step should leave trunk-recorder stopped when
+Setup must make clear that trunk-recorder can be briefly paused during
+RF validation measurements and normal coverage will pause during that bounded
+measurement window. No Setup RF step should leave trunk-recorder stopped when
 the step finishes, fails, or is canceled; the service must be restarted as part
 of cleanup when PizzaWave paused it.
 
@@ -255,10 +258,9 @@ change requires a TR restart. Every such experiment must:
 
 The final "apply now" action is separate from running temporary experiments.
 Apply must be guarded, create a backup, explain the coverage impact, and then
-restart TR. "Export plan" writes the recommended source plan/config artifact
-without changing the live rig.
+restart TR.
 
-## Workspace Phases
+## Setup RF Phases
 
 ### 1. Preflight
 
@@ -275,7 +277,7 @@ without changing the live rig.
   tooling.
 - Show missing tools and what each one will be used for.
 - Install or update missing dependencies through setup jobs when supported.
-- Persist tool versions and prep results with the workspace.
+- Persist tool versions and prep results with the Setup RF session.
 - Block only the experiments whose required tools are missing; allow unrelated
   profile/review work to continue.
 
@@ -310,7 +312,7 @@ coverage result as unknown/incomplete.
 
 ### 5. Voice Capture And Transcription Exercises
 
-A workspace verdict cannot pass until real calls are captured and transcribed.
+A Setup RF verdict cannot pass until real calls are captured and transcribed.
 
 For bounded capture trials:
 
@@ -329,7 +331,7 @@ declare a passing verdict on control-channel evidence alone.
 
 AI receives bounded evidence packets:
 
-- workspace profile and physical RF path;
+- Setup RF profile and physical RF path;
 - setup-derived site/source data;
 - ground-truth frequency data when available;
 - current experiment measurements;
@@ -346,16 +348,15 @@ AI returns structured JSON:
 - source-plan recommendation if enough evidence exists;
 - RF-path recommendations.
 
-Workspace-local recommendations are shown inside the Radio Setup UI throughout the
-exercise.
+Session-local recommendations are shown inside Setup throughout the exercise.
 
-When the user exits a workspace, System recommendations should learn from the
-completed Radio Setup evidence. If the workspace produced applicable
-recommendations that were not completed in-workspace, add System recommendation
-cards. If the user clicked "apply" and all applicable recommendations were
-applied during Radio Setup, no System card is needed.
+When the user exits Setup, System recommendations should learn from the completed
+Setup RF evidence. If the session produced applicable recommendations that were
+not completed in Setup, add System recommendation cards. If the user clicked
+"apply" and all applicable recommendations were applied during Setup, no System
+card is needed.
 
-AI-driven System recommendations must cite the workspace/session evidence they are
+AI-driven System recommendations must cite the Setup RF session evidence they are
 based on.
 
 ## Verdicts

@@ -62,13 +62,13 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 - `scripts/`: deployment, setup, diagnostics, and replay helpers.
 - `docs/`: operator docs, status docs, architecture notes, and field notes.
 
-## Radio Setup And RF Diagnostics
+## Setup And RF Diagnostics
 
 - Treat [docs/rf-path-survey-mode.md](docs/rf-path-survey-mode.md) as the
-  canonical Radio Setup workflow reference.
+  canonical Setup RF validation workflow reference.
 - For field antenna comparisons, use the relevant log under `docs/field-tests/`
   as the run book and evidence record.
-- Prefer PizzaWave API endpoints for Radio Setup, TR health, and RF analysis.
+- Prefer PizzaWave API endpoints for Setup, TR health, and RF analysis.
   Do not use old user-local Codex RF diagnostic skills or standalone scripts as
   the primary workflow.
 - For 30-minute antenna A/B baselines, record exact Unix start/end timestamps
