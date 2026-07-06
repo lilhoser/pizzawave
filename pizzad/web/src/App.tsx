@@ -680,6 +680,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             }}>
               {navIcon(item)} {label(item)}
               {item === "dashboard" && activeAlertCount > 0 && <span className="nav-badge high">{activeAlertCount}</span>}
+              {item === "setup" && (siteSetup?.pendingChanges.length ?? 0) > 0 && <span className="nav-badge medium">{siteSetup?.pendingChanges.length}</span>}
               {item === "system" && recommendations && recommendations.openCount > 0 && <span className={`nav-badge ${recommendations.highCount > 0 ? "high" : recommendations.mediumCount > 0 ? "medium" : "low"}`}>{recommendations.openCount}</span>}
             </button>
           </React.Fragment>
