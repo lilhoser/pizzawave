@@ -785,7 +785,9 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} subPage={rfValidationSubPage} onTrOperationChange={onTrOperationChange} />}
+          <div style={section === "RF Validation" ? undefined : { display: "none" }} aria-hidden={section === "RF Validation" ? undefined : "true"}>
+            <SiteSetupRfValidationSection setup={current} active={section === "RF Validation"} subPage={rfValidationSubPage} onTrOperationChange={onTrOperationChange} />
+          </div>
           {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
           {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
         </section>
@@ -1192,7 +1194,7 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
   </div>;
 }
 
-function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: { setup: SiteSetup; subPage: "waterfall" | "sweep"; onTrOperationChange: (value: string) => void }) {
+function SiteSetupRfValidationSection({ setup, active, subPage, onTrOperationChange }: { setup: SiteSetup; active: boolean; subPage: "waterfall" | "sweep"; onTrOperationChange: (value: string) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1310,7 +1312,7 @@ function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: {
           <WaterfallStep
             apiBase={siteSetupRfApi}
             surveyId={detail.session.id}
-            visible={subPage === "waterfall"}
+            visible={active && subPage === "waterfall"}
             locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
             sources={effectiveSources}
             selectedSources={selectedSourceIndexes}
@@ -4976,6 +4978,17 @@ function WaterfallStep({
     }
   }
 
+  function drawRetainedWaterfallNotice(next: RfSurveyWaterfallStatus | null) {
+    const hasFrames = Boolean(next?.frame) || Boolean(next?.frames?.length);
+    if (hasFrames)
+      return;
+    const text = next?.active
+      ? "Waiting for waterfall samples..."
+      : "No retained waterfall frames. Click Start to begin a new capture.";
+    drawWaterfallNotice(spectrumCanvasRef.current, text, true);
+    drawWaterfallNotice(canvasRef.current, text, false);
+  }
+
   function renderWaterfallStatus(next: RfSurveyWaterfallStatus | null) {
     if (!visible)
       return;
@@ -5031,8 +5044,10 @@ function WaterfallStep({
         resetWaterfallDrawingState(true);
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => {
-            if (!stopped)
+            if (!stopped) {
               renderWaterfallStatus(next);
+              drawRetainedWaterfallNotice(next);
+            }
           });
         });
         setStatus({ ...next, frames: null });
@@ -5085,6 +5100,7 @@ function WaterfallStep({
     if (!visible)
       return;
     renderWaterfallStatus(status);
+    drawRetainedWaterfallNotice(status);
   }, [visible, status?.frame?.sequence, spectrumSpanDb, showControlChannelLines, controlChannels.join(","), systems.map(system => `${system.shortName}:${system.controlChannelsHz.join("/")}`).join("|")]);
 
   async function startWaterfall() {
