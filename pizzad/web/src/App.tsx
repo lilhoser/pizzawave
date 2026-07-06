@@ -1044,21 +1044,17 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     setRfPath(rfPathRef.current);
     queueRfPathSave(rfPathRef.current);
   }
-  function patchRfPath(patch: Partial<RfSurveyPathProfile>) {
-    updateRfPath(current => ({ ...current, ...patch }));
-  }
-
   return <div className="site-setup-form site-setup-hardware">
-    <div className="settings-fields site-setup-rsw-rf-path">
-      <SettingInput label="Antenna" description="Brand/model. Yagi is the expected first path, but this remains location agnostic." value={rfPath.antenna} onChange={v => patchRfPath({ antenna: v })} />
-      <SettingInput label="Antenna type" description="Examples: yagi, omni, whip, discone." value={rfPath.antennaType} onChange={v => patchRfPath({ antennaType: v })} />
-      <SettingInput label="Position notes" description="Aim, bearing, polarization, height, indoor/outdoor, room/window, or other repeatability notes." value={rfPath.positionNotes} onChange={v => patchRfPath({ positionNotes: v })} />
-      <SettingInput label="Connectors/adapters" description="Connector and adapter chain from antenna to SDR." value={rfPath.connectorChain} onChange={v => patchRfPath({ connectorChain: v })} />
-      <SettingInput label="Coax" description="Type and length." value={rfPath.coax} onChange={v => patchRfPath({ coax: v })} />
-      <SettingInput label="Splitter/multicoupler" description="Passive splitter, active multicoupler, or direct path." value={rfPath.splitterOrMulticoupler} onChange={v => patchRfPath({ splitterOrMulticoupler: v })} />
-      <SettingInput label="LNA" description="Model, placement, power method, and bias tee state." value={rfPath.lna} onChange={v => patchRfPath({ lna: v })} />
-      <SettingInput label="Filters" description="Band-pass or other filtering in the path." value={rfPath.filters} onChange={v => patchRfPath({ filters: v })} />
-    </div>
+    <RfPathStep
+      path={rfPath}
+      setPath={updateRfPath}
+      onTouched={() => undefined}
+      onLoadPrevious={async () => {
+        const next = normalizeSetupRfPath(setup.desired.rfPath);
+        updateRfPath(next);
+      }}
+      busy=""
+    />
     {statusFor("rfPath")}
   </div>;
 }
@@ -1081,13 +1077,6 @@ function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathPr
     observations: value.observations ?? "",
     chain: (value.chain ?? []).map(normalizeRfChainItem)
   };
-}
-
-function sdrTypeFromDeviceLabel(device: string) {
-  const value = (device || "").toLowerCase();
-  if (value.includes("airspy")) return "Airspy";
-  if (value.includes("rtl")) return "RTL-SDR";
-  return value ? "SDR" : "";
 }
 
 type SiteSetupTalkgroupSource = { key: string; radioReferenceSid: string; catalogSystem: string };

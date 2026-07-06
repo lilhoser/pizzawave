@@ -654,9 +654,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-hardware {
   max-width: none;
 }
-.site-setup-rsw-rf-path {
-  max-width: 960px;
-}
 .site-setup-talkgroup-import {
   display: grid;
   gap: 10px;
