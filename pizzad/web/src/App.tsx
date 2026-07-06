@@ -1146,7 +1146,10 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [activeControlChannelHz, setActiveControlChannelHz] = useState(0);
+  const [duration, setDuration] = useState("45");
+  const [subPage, setSubPage] = useState<"waterfall" | "sweep">(() => localStorage.getItem("pizzawave-site-setup-rf-validation-subpage") === "sweep" ? "sweep" : "waterfall");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
+  const [details, setDetails] = useState<{ title: string; body: React.ReactNode } | null>(null);
   const workspaceKey = "pizzawave-site-setup-rf-validation-workspace";
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
@@ -1199,6 +1202,9 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
     return () => { stopped = true; };
   }, [signature]);
   useEffect(() => () => onTrOperationChange(""), [onTrOperationChange]);
+  useEffect(() => {
+    localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", subPage);
+  }, [subPage]);
   async function refreshWorkspace() {
     if (!detail) return;
     const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(detail.session.id));
@@ -1206,12 +1212,28 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
   }
   async function runExperiment(type: string, _estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) {
     if (!detail) return undefined;
-    const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
-      method: "POST",
-      body: JSON.stringify({ type, durationSeconds: 45, controlChannelHz, ...extraRequest })
-    });
-    await refreshWorkspace();
-    return experiment;
+    setBusy(type);
+    setMessage("");
+    if (type === "rf_power_scan" || type === "rf_validation_sweep")
+      onTrOperationChange("trunk-recorder is temporarily paused while Setup runs RF validation.");
+    try {
+      const experiment = await api.request<RfSurveyExperiment>(`${radioSetupApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
+        method: "POST",
+        body: JSON.stringify({ type, durationSeconds: type === "rf_validation_sweep" ? 300 : 45, controlChannelHz, ...extraRequest })
+      });
+      await refreshWorkspace();
+      return experiment;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : `${label(type)} failed.`);
+      return undefined;
+    } finally {
+      if (type === "rf_power_scan" || type === "rf_validation_sweep")
+        onTrOperationChange("");
+      setBusy("");
+    }
+  }
+  async function runP25(controlChannelHz?: number) {
+    await runExperiment("control_channel_p25_probe", "45 seconds", controlChannelHz);
   }
   async function adoptWaterfallSite(system: RfSurveySystem) {
     setMessage(`${system.siteLabel || system.shortName} was detected. Add or remove sites on Systems & Sites.`);
@@ -1223,27 +1245,87 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
   const cachedSites = readCachedRadioReferenceSites(setup.desired.radioReferenceSid);
+  const latestExperiment = (type: string) => [...(detail?.experiments ?? [])]
+    .filter(experiment => experiment.type === type)
+    .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""))[0];
+  const ccQualityRuns = (detail?.experiments ?? [])
+    .filter(experiment => experiment.type === "control_channel_quality")
+    .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""));
+  const ccQuality = latestExperiment("control_channel_quality");
+  const inventory = latestExperiment("sdr_inventory");
+  const powerScan = latestExperiment("rf_power_scan");
+  const validationSweep = latestExperiment("rf_validation_sweep");
+  const p25 = latestExperiment("control_channel_p25_probe");
+  const sweep = latestExperiment("error_gain_sweep");
   return <div className="site-setup-form site-setup-rf-validation">
     {busy === "workspace" && <div className="setup-note">Preparing RF validation workspace...</div>}
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
     {detail
-      ? <WaterfallStep
-        surveyId={detail.session.id}
-        locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
-        sources={effectiveSources}
-        selectedSources={selectedSourceIndexes}
-        systems={effectiveSystems}
-        radioReferenceSites={cachedSites}
-        controlChannels={effectiveControlChannels}
-        activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
-        waterfallSweepSelections={waterfallSweepSelections}
-        onWaterfallSweepSelections={setWaterfallSweepSelections}
-        onAdoptWaterfallSite={adoptWaterfallSite}
-        onRunExperiment={runExperiment}
-        onReload={refreshWorkspace}
-        onStatusChange={handleWaterfallStatusChange}
-        showSweepSelection={false}
-      />
+      ? <>
+        <div className="rf-subpage-tabs site-setup-rf-tabs" aria-label="RF validation sections">
+          <button className={subPage === "waterfall" ? "active" : ""} onClick={() => setSubPage("waterfall")}><span></span><strong>Waterfall</strong><small>Find usable CCs</small></button>
+          <button className={subPage === "sweep" ? "active" : ""} onClick={() => setSubPage("sweep")}><span></span><strong>RF Sweep</strong><small>Validate selected CCs</small></button>
+        </div>
+        <div style={subPage === "waterfall" ? undefined : { display: "none" }} aria-hidden={subPage === "waterfall" ? undefined : "true"}>
+          <WaterfallStep
+            surveyId={detail.session.id}
+            locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
+            sources={effectiveSources}
+            selectedSources={selectedSourceIndexes}
+            systems={effectiveSystems}
+            radioReferenceSites={cachedSites}
+            controlChannels={effectiveControlChannels}
+            activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
+            waterfallSweepSelections={waterfallSweepSelections}
+            onWaterfallSweepSelections={setWaterfallSweepSelections}
+            onAdoptWaterfallSite={adoptWaterfallSite}
+            onRunExperiment={runExperiment}
+            onReload={refreshWorkspace}
+            onStatusChange={handleWaterfallStatusChange}
+          />
+        </div>
+        {subPage === "sweep" && <SiteValidationStep
+          activeOperation="power"
+          busy={busy}
+          ccQuality={ccQuality}
+          ccQualityRuns={ccQualityRuns}
+          inventory={inventory}
+          powerScan={powerScan}
+          validationSweep={validationSweep}
+          p25={p25}
+          sweep={sweep}
+          nextExperiments={detail.nextExperiments ?? []}
+          surveyId={detail.session.id}
+          systemShortName={effectiveSystems[0]?.shortName ?? ""}
+          systems={effectiveSystems}
+          radioReferenceSites={cachedSites}
+          sources={effectiveSources}
+          controlChannels={effectiveControlChannels}
+          activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
+          setActiveControlChannelHz={setActiveControlChannelHz}
+          duration={duration}
+          setDuration={setDuration}
+          selectedSources={selectedSourceIndexes}
+          setSdrSources={() => undefined}
+          onSdrTouched={() => undefined}
+          onStopAndInventory={async () => { await runExperiment("sdr_inventory", "about 15 seconds"); }}
+          onRunP25={runP25}
+          onRunExperiment={runExperiment}
+          onAdoptWaterfallSite={adoptWaterfallSite}
+          onReload={refreshWorkspace}
+          onShowDetails={setDetails}
+          onOpenRunLog={() => undefined}
+          waterfallSweepSelections={waterfallSweepSelections}
+          onWaterfallSweepSelections={setWaterfallSweepSelections}
+          inventoryRequired={false}
+        />}
+        {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
+          <div className="rf-details-modal" onClick={event => event.stopPropagation()}>
+            <div className="settings-header"><h3>{details.title}</h3><button onClick={() => setDetails(null)}>Close</button></div>
+            {details.body}
+          </div>
+        </div>}
+      </>
       : !busy && <div className="setup-warning-list"><div>RF Validation needs at least one selected site/control channel and one SDR source.</div></div>}
   </div>;
 }
@@ -4994,7 +5076,8 @@ function SiteValidationStep({
   onOpenRunLog,
   waterfallSweepSelections,
   onWaterfallSweepSelections,
-  onSweepRecovered
+  onSweepRecovered,
+  inventoryRequired = true
 }: {
   activeOperation: Exclude<RfRefinementSubpage, "path">;
   busy: string;
@@ -5033,6 +5116,7 @@ function SiteValidationStep({
   waterfallSweepSelections?: WaterfallSweepSelection[];
   onWaterfallSweepSelections?: (values: WaterfallSweepSelection[]) => void;
   onSweepRecovered?: (status: string) => void;
+  inventoryRequired?: boolean;
 }) {
   const [sweepBusy, setSweepBusy] = useState("");
   const [sweepJob, setSweepJob] = useState<Job | null>(null);
@@ -5138,6 +5222,7 @@ function SiteValidationStep({
   const sweepInsightStorageKey = `pizzawave-radio-setup-sweep-insights-${surveyId}`;
   const sweepHistoryStorageKey = `pizzawave-radio-setup-sweep-history-${surveyId}`;
   const sweepRecoveryKey = useRef("");
+  const inventorySatisfied = inventoryRequired === false || Boolean(inventory);
   useEffect(() => {
     if (controlChannels.length && !controlChannels.includes(activeControlChannelHz))
       setActiveControlChannelHz(controlChannels[0]);
@@ -5560,14 +5645,14 @@ function SiteValidationStep({
       title: "Waterfall",
       status: undefined,
       estimate: "live",
-      locked: !inventory,
+      locked: !inventorySatisfied,
       action: "Start",
       busyKey: "waterfall",
       begin: undefined,
       result: undefined,
       body: <WaterfallStep
         surveyId={surveyId}
-        locked={!inventory}
+        locked={!inventorySatisfied}
         sources={sources}
         selectedSources={selectedSources}
         systems={systems}
@@ -5586,7 +5671,7 @@ function SiteValidationStep({
       title: "RF Sweep",
       status: validationSweepStatus,
       estimate: `about ${formatElapsed(validationEstimateSeconds)}`,
-      locked: !inventory,
+      locked: !inventorySatisfied,
       action: "Run",
       busyKey: "rf_validation_sweep",
       begin: runValidationSweep,
@@ -5793,7 +5878,7 @@ function SiteValidationStep({
       </div>
     }
   ];
-  const requiredSteps = substeps.filter(item => item.id === "inventory" || item.id === "power");
+  const requiredSteps = substeps.filter(item => item.id === "power" || (inventoryRequired !== false && item.id === "inventory"));
   const nextRequired = requiredSteps.find(item => !measurementDone(item.status)) ?? requiredSteps.at(-1)!;
   const actionLabelFor = (item: typeof substeps[number]) =>
     busy === item.busyKey || (item.busyKey === "sweep" && sweepBusy === "start")
