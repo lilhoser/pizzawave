@@ -799,7 +799,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} onTrOperationChange={onTrOperationChange} />}
-          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} onApplied={(next) => { setCurrent(next); void reload(); }} />}
+          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
         </section>
       </div>
     </section>
@@ -1347,22 +1347,31 @@ async function prepareSiteSetupRfWorkspace(setup: SiteSetup, systems: RfSurveySy
   return current;
 }
 
-function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onApplied: (next: SiteSetup) => void }) {
+function SiteSetupApplySection({ setup, onSetupChanged, onApplied }: { setup: SiteSetup; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [draft, setDraft] = useState<RfSurveyConfigDraft | null>(null);
-  const [busy, setBusy] = useState<"" | "load" | "apply">("load");
+  const [busy, setBusy] = useState<"" | "load" | "save-plan" | "apply">("load");
   const [message, setMessage] = useState("");
+  const [subPage, setSubPage] = useState<"source" | "review">(() => localStorage.getItem("pizzawave-site-setup-apply-subpage") === "review" ? "review" : "source");
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
-  const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
-    ? setup.desired.selectedSourceIndexes
-    : sources.map(source => source.index);
+  const defaultSelectedSources = setup.desired.selectedSourceIndexes.length ? setup.desired.selectedSourceIndexes : sources.map(source => source.index);
+  const defaultSourcePlanSystems = setup.desired.sourcePlanSystemShortNames.length
+    ? setup.desired.sourcePlanSystemShortNames
+    : selectedSetupSystemNames(setup);
+  const [selectedSourceIndexes, setSelectedSourceIndexes] = useState<number[]>(defaultSelectedSources);
+  const [sourcePlanSystems, setSourcePlanSystems] = useState<string[]>(defaultSourcePlanSystems);
+  const [sourcePlanMode, setSourcePlanMode] = useState<"full" | "control">(setup.desired.sourcePlanMode === "control" ? "control" : "full");
+  const [sdrSources, setSdrSources] = useState<RfSurveySource[] | null>(null);
   const signature = JSON.stringify({
     siteLabel: setup.desired.siteLabel,
     sid: setup.desired.radioReferenceSid,
     systems,
     sources,
     selectedSourceIndexes,
+    sourcePlanSystems,
+    sourcePlanMode,
+    sdrSources,
     rfPath: setup.desired.rfPath,
     desiredVersion: setup.desired.desiredVersion
   });
@@ -1381,39 +1390,110 @@ function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onAppli
     : "";
 
   useEffect(() => {
+    setSelectedSourceIndexes(defaultSelectedSources);
+    setSourcePlanSystems(defaultSourcePlanSystems);
+    setSourcePlanMode(setup.desired.sourcePlanMode === "control" ? "control" : "full");
+    setSdrSources(null);
+  }, [setup.desired.desiredVersion]);
+  useEffect(() => {
+    localStorage.setItem("pizzawave-site-setup-apply-subpage", subPage);
+  }, [subPage]);
+
+  useEffect(() => {
     let stopped = false;
-    async function loadDraft() {
+    async function loadWorkspace() {
       setBusy("load");
       setMessage("");
       try {
-        const workspace = await prepareSiteSetupRfWorkspace(setup, systems, sources, selectedSourceIndexes);
-        const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+        const workspace = await prepareSiteSetupRfWorkspace(setup, systems, sdrSources ?? sources, selectedSourceIndexes);
         if (!stopped) {
           setDetail(workspace);
-          setDraft(nextDraft);
+          if (subPage === "review") {
+            const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+            if (!stopped)
+              setDraft(nextDraft);
+          }
         }
       } catch (error) {
         if (!stopped)
-          setMessage(error instanceof Error ? error.message : "Unable to prepare Setup config draft.");
+          setMessage(error instanceof Error ? error.message : "Unable to prepare Setup source planner.");
       } finally {
         if (!stopped)
           setBusy("");
       }
     }
-    void loadDraft();
+    void loadWorkspace();
     return () => { stopped = true; };
   }, [signature]);
+
+  type SetupSourcePlanState = {
+    sourcePlanSystemShortNames: string[];
+    sourcePlanMode: "full" | "control";
+    selectedSourceIndexes: number[];
+    sources: RfSurveySource[];
+  };
+
+  async function saveSourcePlan(overrides?: SetupSourcePlanState) {
+    const desired = {
+      ...setup.desired,
+      sourcePlanSystemShortNames: overrides?.sourcePlanSystemShortNames ?? (sourcePlanSystems.length ? sourcePlanSystems : selectedSetupSystemNames(setup)),
+      sourcePlanMode: overrides?.sourcePlanMode ?? sourcePlanMode,
+      selectedSourceIndexes: overrides?.selectedSourceIndexes ?? (selectedSourceIndexes.length ? selectedSourceIndexes : sources.map(source => source.index)),
+      sources: overrides?.sources ?? (sdrSources ?? sources)
+    };
+    const next = await api.request<SiteSetup>(siteSetupApi, {
+      method: "PATCH",
+      body: JSON.stringify({ desired, source: "ui" })
+    });
+    onSetupChanged(next);
+    return next;
+  }
 
   async function reloadDraft() {
     setBusy("load");
     setMessage("");
     try {
-      const workspace = await prepareSiteSetupRfWorkspace(setup, systems, sources, selectedSourceIndexes);
+      const nextSetup = await saveSourcePlan();
+      const nextSystems = siteSetupSystems(nextSetup);
+      const nextSources = siteSetupSources(nextSetup);
+      const nextSelected = nextSetup.desired.selectedSourceIndexes.length ? nextSetup.desired.selectedSourceIndexes : nextSources.map(source => source.index);
+      const workspace = await prepareSiteSetupRfWorkspace(nextSetup, nextSystems, nextSources, nextSelected);
       const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
       setDetail(workspace);
       setDraft(nextDraft);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to refresh Setup config draft.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function reviewSourcePlan() {
+    setBusy("save-plan");
+    setMessage("");
+    try {
+      await reloadDraft();
+      setSubPage("review");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function reviewAppliedSourcePlan(plan: SetupSourcePlanState) {
+    setBusy("save-plan");
+    setMessage("");
+    try {
+      const nextSetup = await saveSourcePlan(plan);
+      const nextSystems = siteSetupSystems(nextSetup);
+      const nextSources = siteSetupSources(nextSetup);
+      const nextSelected = nextSetup.desired.selectedSourceIndexes.length ? nextSetup.desired.selectedSourceIndexes : nextSources.map(source => source.index);
+      const workspace = await prepareSiteSetupRfWorkspace(nextSetup, nextSystems, nextSources, nextSelected);
+      const nextDraft = await api.request<RfSurveyConfigDraft>(`${radioSetupApi}/${encodeURIComponent(workspace.session.id)}/config-draft`);
+      setDetail(workspace);
+      setDraft(nextDraft);
+      setSubPage("review");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save source plan.");
     } finally {
       setBusy("");
     }
@@ -1459,12 +1539,32 @@ function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onAppli
   }
 
   return <div className="site-setup-form site-setup-apply">
+    <div className="rf-subpage-tabs site-setup-apply-tabs" aria-label="Apply and resume sections">
+      <button className={subPage === "source" ? "active" : ""} onClick={() => setSubPage("source")}><span>1</span><strong>Sources</strong><small>{selectedSourceIndexes.length ? "Intent" : "Select"}</small></button>
+      <button className={subPage === "review" ? "active" : ""} onClick={() => void reviewSourcePlan()}><span>2</span><strong>Review</strong><small>{draft ? "Ready" : "Draft"}</small></button>
+    </div>
     <div className="site-setup-apply-toolbar">
-      <button type="button" onClick={() => void reloadDraft()} disabled={busy !== ""}>{busy === "load" ? "Refreshing..." : "Refresh Draft"}</button>
-      <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>
+      {subPage === "source" && <button type="button" onClick={() => void reviewSourcePlan()} disabled={busy !== "" || !detail}>{busy === "save-plan" || busy === "load" ? "Preparing..." : "Review Draft"}</button>}
+      {subPage === "review" && <button type="button" onClick={() => void reloadDraft()} disabled={busy !== ""}>{busy === "load" ? "Refreshing..." : "Refresh Draft"}</button>}
+      {subPage === "review" && <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>}
     </div>
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") || message.toLowerCase().includes("denied") ? "settings-message error" : "settings-message ok"}>{message}</div>}
-    {draft && <>
+    {subPage === "source" && detail && <SourcePlannerStep
+      profile={detail.profile}
+      experiments={detail.experiments}
+      selectedSources={selectedSourceIndexes}
+      setSelectedSources={setSelectedSourceIndexes}
+      sourcePlanSystems={sourcePlanSystems}
+      setSourcePlanSystems={setSourcePlanSystems}
+      sourcePlanMode={sourcePlanMode}
+      setSourcePlanMode={setSourcePlanMode}
+      setSdrSources={setSdrSources}
+      onSdrTouched={() => undefined}
+      onPlanApplied={plan => void reviewAppliedSourcePlan(plan)}
+      onPlanSelected={() => undefined}
+    />}
+    {subPage === "source" && !detail && busy !== "load" && <div className="setup-warning-list"><div>Setup needs selected systems, control channels, and SDR source information before it can plan sources.</div></div>}
+    {subPage === "review" && draft && <>
       {draftWarnings.coverage.length > 0 && <div className="setup-warning-list site-setup-draft-notes">{draftWarnings.coverage.map(warning => <div key={warning}>{warning}</div>)}</div>}
       {draftWarnings.planning.length > 0 && <details className="setup-note site-setup-draft-notes">
         <summary>Planning notes ({draftWarnings.planning.length})</summary>
@@ -1484,7 +1584,7 @@ function SiteSetupApplySection({ setup, onApplied }: { setup: SiteSetup; onAppli
         <pre className="log-box">{draft.configJson}</pre>
       </details>
     </>}
-    {!draft && busy !== "load" && <div className="setup-warning-list"><div>Setup needs selected systems, control channels, and SDR source information before it can build a TR config draft.</div></div>}
+    {subPage === "review" && !draft && busy !== "load" && <div className="setup-warning-list"><div>Setup needs selected systems, control channels, and SDR source information before it can build a TR config draft.</div></div>}
   </div>;
 }
 
@@ -8011,6 +8111,7 @@ function SourcePlannerStep({
   setSourcePlanMode,
   setSdrSources,
   onSdrTouched,
+  onPlanApplied,
   onPlanSelected
 }: {
   profile: RfSurveyProfile;
@@ -8023,6 +8124,7 @@ function SourcePlannerStep({
   setSourcePlanMode: React.Dispatch<React.SetStateAction<"full" | "control">>;
   setSdrSources: React.Dispatch<React.SetStateAction<RfSurveySource[] | null>>;
   onSdrTouched: () => void;
+  onPlanApplied?: (plan: { sourcePlanSystemShortNames: string[]; sourcePlanMode: "full" | "control"; selectedSourceIndexes: number[]; sources: RfSurveySource[] }) => void;
   onPlanSelected: () => void;
 }) {
   const supportedRateOptions = useMemo(() => sourcePlannerSupportedSampleRates(profile, experiments), [profile.sources, experiments]);
@@ -8059,9 +8161,19 @@ function SourcePlannerStep({
   const applyOption = (option: SourcePlanOption) => {
     if (!option.fits) return;
     applySourcePlanSystems(option.systems, option.mode);
+    const nextSources = rateValidation.ok
+      ? profile.sources.map(source => ({ ...source, sampleRate: effectiveSampleRateHz }))
+      : profile.sources;
+    const nextSelected = profile.sources.slice(0, Math.max(1, option.windows.length)).map(source => source.index);
     if (rateValidation.ok)
-      setSdrSources(profile.sources.map(source => ({ ...source, sampleRate: effectiveSampleRateHz })));
-    setSelectedSources(profile.sources.slice(0, Math.max(1, option.windows.length)).map(source => source.index));
+      setSdrSources(nextSources);
+    setSelectedSources(nextSelected);
+    onPlanApplied?.({
+      sourcePlanSystemShortNames: option.systems,
+      sourcePlanMode: option.mode,
+      selectedSourceIndexes: nextSelected,
+      sources: nextSources
+    });
     onPlanSelected();
   };
   const updateSampleRate = (value: string) => {
