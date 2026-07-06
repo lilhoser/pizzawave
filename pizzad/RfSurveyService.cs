@@ -1230,16 +1230,25 @@ public sealed class RfSurveyService
         return runtime.ToDto(true);
     }
 
-    public Task<RfSurveyWaterfallStatusDto> GetWaterfallAsync(string id, bool includeHistory, CancellationToken ct)
+    public async Task<RfSurveyWaterfallStatusDto> GetWaterfallAsync(string id, bool includeHistory, CancellationToken ct)
     {
         if (_activeWaterfalls.TryGetValue(id, out var runtime))
         {
             runtime.MarkConsumed();
-            return Task.FromResult(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory));
+            return runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory);
         }
         if (_lastWaterfalls.TryGetValue(id, out var last))
-            return Task.FromResult(includeHistory ? last : last with { Frames = null });
-        return Task.FromResult(new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false));
+            return includeHistory ? last : last with { Frames = null };
+        if (includeHistory)
+        {
+            var persisted = await LoadPersistedWaterfallAsync(id, ct);
+            if (persisted != null)
+            {
+                _lastWaterfalls[id] = persisted;
+                return persisted;
+            }
+        }
+        return new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false);
     }
 
     public async Task<string> StopActiveWaterfallsBeforeTrStartAsync(CancellationToken ct)
@@ -1280,7 +1289,8 @@ public sealed class RfSurveyService
         runtime.Cancellation.Dispose();
         var stopped = runtime.ToDto(false, true) with { Status = "stopped", Message = "Waterfall stopped." };
         _lastWaterfalls[id] = stopped;
-        return stopped with { Frames = null };
+        await PersistWaterfallAsync(id, stopped, ct);
+        return stopped;
     }
 
     private async Task RunWaterfallLoopAsync(WaterfallRuntime runtime)
@@ -1327,13 +1337,61 @@ public sealed class RfSurveyService
             }
             if (_activeWaterfalls.TryGetValue(runtime.SurveyId, out var current) && ReferenceEquals(current, runtime))
                 _activeWaterfalls.TryRemove(runtime.SurveyId, out _);
-            RememberWaterfall(runtime, active: false);
+            await RememberWaterfallAsync(runtime, active: false, CancellationToken.None);
         }
     }
 
     private void RememberWaterfall(WaterfallRuntime runtime, bool active)
     {
         _lastWaterfalls[runtime.SurveyId] = runtime.ToDto(active, includeHistory: true);
+    }
+
+    private async Task RememberWaterfallAsync(WaterfallRuntime runtime, bool active, CancellationToken ct)
+    {
+        var dto = runtime.ToDto(active, includeHistory: true);
+        _lastWaterfalls[runtime.SurveyId] = dto;
+        await PersistWaterfallAsync(runtime.SurveyId, dto, ct);
+    }
+
+    private async Task PersistWaterfallAsync(string id, RfSurveyWaterfallStatusDto status, CancellationToken ct)
+    {
+        if (status.Frame == null && status.Frames?.Count is not > 0)
+            return;
+        try
+        {
+            var row = await _database.GetRfSurveySessionAsync(id, ct);
+            if (row == null)
+                return;
+            await WriteArtifactAsync(row.Value.Session.ArtifactPath, "waterfall-last.json", status, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to persist waterfall snapshot for survey {SurveyId}.", id);
+        }
+    }
+
+    private async Task<RfSurveyWaterfallStatusDto?> LoadPersistedWaterfallAsync(string id, CancellationToken ct)
+    {
+        try
+        {
+            var row = await _database.GetRfSurveySessionAsync(id, ct);
+            if (row == null)
+                return null;
+            var path = Path.Combine(row.Value.Session.ArtifactPath, "waterfall-last.json");
+            if (!File.Exists(path))
+                return null;
+            var status = JsonSerializer.Deserialize<RfSurveyWaterfallStatusDto>(
+                await File.ReadAllTextAsync(path, ct),
+                EngineConfig.JsonOptions());
+            return status?.Frame == null && status?.Frames?.Count is not > 0
+                ? null
+                : status with { Active = false, Status = "stopped" };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to load persisted waterfall snapshot for survey {SurveyId}.", id);
+            return null;
+        }
     }
 
     public async Task<RfSurveyExperimentDto> RunExperimentAsync(string id, RfSurveyRunExperimentRequest request, CancellationToken ct)

@@ -743,7 +743,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
-  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume"]);
+  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"]);
   const [section, setSectionState] = useState(() => {
     const saved = localStorage.getItem("pizzawave-site-setup-section") || "Location";
     return enabledSections.has(saved) ? saved : "Location";
@@ -819,6 +819,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} subPage={rfValidationSubPage} onTrOperationChange={onTrOperationChange} />}
           {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
+          {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
         </section>
       </div>
     </section>
@@ -853,6 +854,67 @@ function siteSetupMonitoringTone(state: string) {
   if (value === "paused" || value === "stopped") return "warning";
   if (value === "stale" || value === "failed" || value === "error") return "danger";
   return "neutral";
+}
+
+function SiteSetupActivityLogSection({ setup }: { setup: SiteSetup }) {
+  const [rows, setRows] = useState(setup.recentActivity);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => setRows(setup.recentActivity), [setup.recentActivity]);
+  useEffect(() => { void loadActivity(); }, []);
+
+  async function loadActivity() {
+    setBusy(true);
+    setMessage("");
+    try {
+      setRows(await api.request<SiteSetup["recentActivity"]>(`${siteSetupApi}/activity?limit=100`));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load Setup activity.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="site-setup-form site-setup-activity">
+    <div className="site-setup-activity-toolbar">
+      <span>{rows.length.toLocaleString()} event{rows.length === 1 ? "" : "s"}</span>
+      <button type="button" onClick={() => void loadActivity()} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
+    </div>
+    {message && <div className="settings-message error">{message}</div>}
+    <div className="site-setup-activity-table">
+      <table className="table compact-table">
+        <thead><tr><th>Time</th><th>Category</th><th>Action</th><th>Summary</th><th>State</th><th>Details</th></tr></thead>
+        <tbody>
+          {rows.map(row => <tr key={row.id || `${row.timestampUtc}-${row.action}`}>
+            <td>{formatActivityDate(row.timestampUtc)}</td>
+            <td>{label(row.category)}</td>
+            <td>{label(row.action)}</td>
+            <td>{row.summary || "--"}</td>
+            <td><span className={`section-status ${siteSetupMonitoringTone(row.monitoringState)}`}>{label(row.monitoringState)}</span></td>
+            <td>{activityDetails(row.detailsJson)}</td>
+          </tr>)}
+          {rows.length === 0 && <tr><td colSpan={6}>No setup activity has been recorded yet.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function formatActivityDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function activityDetails(detailsJson: string) {
+  const text = (detailsJson || "").trim();
+  if (!text || text === "{}") return <span className="muted">--</span>;
+  let pretty = text;
+  try {
+    pretty = JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    // Keep raw detail if it is not JSON.
+  }
+  return <details className="site-setup-activity-details"><summary>View</summary><pre>{pretty}</pre></details>;
 }
 
 function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {

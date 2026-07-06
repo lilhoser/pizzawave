@@ -711,6 +711,9 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-apply {
   max-width: none;
 }
+.site-setup-activity {
+  max-width: none;
+}
 .site-setup-apply-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -718,6 +721,41 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .site-setup-apply-toolbar button {
   margin: 0;
+}
+.site-setup-activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.site-setup-activity-toolbar button {
+  margin: 0;
+}
+.site-setup-activity-table {
+  max-height: min(64vh, 720px);
+  overflow: auto;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+.site-setup-activity-table table {
+  margin: 0;
+}
+.site-setup-activity-table td:nth-child(4) {
+  min-width: 280px;
+}
+.site-setup-activity-details summary {
+  cursor: pointer;
+}
+.site-setup-activity-details pre {
+  max-width: 560px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  background: #12161a;
+  border: 1px solid #30363d;
+  border-radius: 5px;
+  white-space: pre-wrap;
 }
 .site-setup-draft-notes summary {
   cursor: pointer;
