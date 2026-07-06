@@ -748,9 +748,19 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
     const saved = localStorage.getItem("pizzawave-site-setup-section") || "Location";
     return enabledSections.has(saved) ? saved : "Location";
   });
+  const [rfValidationSubPage, setRfValidationSubPageState] = useState<"waterfall" | "sweep">(() => localStorage.getItem("pizzawave-site-setup-rf-validation-subpage") === "sweep" ? "sweep" : "waterfall");
+  const [applySubPage, setApplySubPageState] = useState<"source" | "review">(() => localStorage.getItem("pizzawave-site-setup-apply-subpage") === "review" ? "review" : "source");
   const setSection = (value: string) => {
     setSectionState(value);
     localStorage.setItem("pizzawave-site-setup-section", value);
+  };
+  const setRfValidationSubPage = (value: "waterfall" | "sweep") => {
+    setRfValidationSubPageState(value);
+    localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", value);
+  };
+  const setApplySubPage = (value: "source" | "review") => {
+    setApplySubPageState(value);
+    localStorage.setItem("pizzawave-site-setup-apply-subpage", value);
   };
   useEffect(() => setCurrent(setup), [setup]);
   useEffect(() => {
@@ -786,11 +796,20 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
 
       <div className="site-setup-layout">
         <section className="site-setup-section-nav" aria-label="Site Setup sections">
-          {sections.map((item, index) =>
-            <button type="button" key={item} className={item === section ? "active" : ""} disabled={!enabledSections.has(item)} onClick={() => setSection(item)}>
+          {sections.map((item, index) => <div className="site-setup-nav-group" key={item}>
+            <button type="button" className={item === section ? "active" : ""} disabled={!enabledSections.has(item)} onClick={() => setSection(item)}>
               <span>{index + 1}</span>
               <strong>{item}</strong>
-            </button>)}
+            </button>
+            {item === "RF Validation" && <div className="site-setup-subnav">
+              <button type="button" className={section === item && rfValidationSubPage === "waterfall" ? "active" : ""} onClick={() => { setSection(item); setRfValidationSubPage("waterfall"); }}>Waterfall</button>
+              <button type="button" className={section === item && rfValidationSubPage === "sweep" ? "active" : ""} onClick={() => { setSection(item); setRfValidationSubPage("sweep"); }}>RF Sweep</button>
+            </div>}
+            {item === "Apply & Resume" && <div className="site-setup-subnav">
+              <button type="button" className={section === item && applySubPage === "source" ? "active" : ""} onClick={() => { setSection(item); setApplySubPage("source"); }}>Sources</button>
+              <button type="button" className={section === item && applySubPage === "review" ? "active" : ""} onClick={() => { setSection(item); setApplySubPage("review"); }}>Review</button>
+            </div>}
+          </div>)}
         </section>
 
         <section className="site-setup-panel">
@@ -798,8 +817,8 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} onTrOperationChange={onTrOperationChange} />}
-          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
+          {section === "RF Validation" && <SiteSetupRfValidationSection setup={current} subPage={rfValidationSubPage} onTrOperationChange={onTrOperationChange} />}
+          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
         </section>
       </div>
     </section>
@@ -1143,13 +1162,12 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
   </div>;
 }
 
-function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: SiteSetup; onTrOperationChange: (value: string) => void }) {
+function SiteSetupRfValidationSection({ setup, subPage, onTrOperationChange }: { setup: SiteSetup; subPage: "waterfall" | "sweep"; onTrOperationChange: (value: string) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [activeControlChannelHz, setActiveControlChannelHz] = useState(0);
   const [duration, setDuration] = useState("45");
-  const [subPage, setSubPage] = useState<"waterfall" | "sweep">(() => localStorage.getItem("pizzawave-site-setup-rf-validation-subpage") === "sweep" ? "sweep" : "waterfall");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
   const [details, setDetails] = useState<{ title: string; body: React.ReactNode } | null>(null);
   const systems = siteSetupSystems(setup);
@@ -1190,9 +1208,6 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
     return () => { stopped = true; };
   }, [signature]);
   useEffect(() => () => onTrOperationChange(""), [onTrOperationChange]);
-  useEffect(() => {
-    localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", subPage);
-  }, [subPage]);
   async function refreshWorkspace() {
     if (!detail) return;
     const next = await api.request<RfSurveyDetail>(radioSetupDetailUrl(detail.session.id));
@@ -1261,10 +1276,6 @@ function SiteSetupRfValidationSection({ setup, onTrOperationChange }: { setup: S
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
     {detail
       ? <>
-        <div className="rf-subpage-tabs site-setup-rf-tabs" aria-label="RF validation sections">
-          <button className={subPage === "waterfall" ? "active" : ""} onClick={() => setSubPage("waterfall")}><span></span><strong>Waterfall</strong><small>Find usable CCs</small></button>
-          <button className={subPage === "sweep" ? "active" : ""} onClick={() => setSubPage("sweep")}><span></span><strong>RF Sweep</strong><small>Validate selected CCs</small></button>
-        </div>
         <div style={subPage === "waterfall" ? undefined : { display: "none" }} aria-hidden={subPage === "waterfall" ? undefined : "true"}>
           <WaterfallStep
             surveyId={detail.session.id}
@@ -1347,12 +1358,11 @@ async function prepareSiteSetupRfWorkspace(setup: SiteSetup, systems: RfSurveySy
   return current;
 }
 
-function SiteSetupApplySection({ setup, onSetupChanged, onApplied }: { setup: SiteSetup; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
+function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onApplied }: { setup: SiteSetup; subPage: "source" | "review"; setSubPage: (value: "source" | "review") => void; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [draft, setDraft] = useState<RfSurveyConfigDraft | null>(null);
   const [busy, setBusy] = useState<"" | "load" | "save-plan" | "apply">("load");
   const [message, setMessage] = useState("");
-  const [subPage, setSubPage] = useState<"source" | "review">(() => localStorage.getItem("pizzawave-site-setup-apply-subpage") === "review" ? "review" : "source");
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
   const defaultSelectedSources = setup.desired.selectedSourceIndexes.length ? setup.desired.selectedSourceIndexes : sources.map(source => source.index);
@@ -1396,10 +1406,6 @@ function SiteSetupApplySection({ setup, onSetupChanged, onApplied }: { setup: Si
     setSdrSources(null);
   }, [setup.desired.desiredVersion]);
   useEffect(() => {
-    localStorage.setItem("pizzawave-site-setup-apply-subpage", subPage);
-  }, [subPage]);
-
-  useEffect(() => {
     let stopped = false;
     async function loadWorkspace() {
       setBusy("load");
@@ -1424,7 +1430,12 @@ function SiteSetupApplySection({ setup, onSetupChanged, onApplied }: { setup: Si
     }
     void loadWorkspace();
     return () => { stopped = true; };
-  }, [signature]);
+  }, [signature, subPage]);
+
+  useEffect(() => {
+    if (subPage !== "review" || draft || busy !== "") return;
+    void reloadDraft();
+  }, [subPage]);
 
   type SetupSourcePlanState = {
     sourcePlanSystemShortNames: string[];
@@ -1539,12 +1550,7 @@ function SiteSetupApplySection({ setup, onSetupChanged, onApplied }: { setup: Si
   }
 
   return <div className="site-setup-form site-setup-apply">
-    <div className="rf-subpage-tabs site-setup-apply-tabs" aria-label="Apply and resume sections">
-      <button className={subPage === "source" ? "active" : ""} onClick={() => setSubPage("source")}><span>1</span><strong>Sources</strong><small>{selectedSourceIndexes.length ? "Intent" : "Select"}</small></button>
-      <button className={subPage === "review" ? "active" : ""} onClick={() => void reviewSourcePlan()}><span>2</span><strong>Review</strong><small>{draft ? "Ready" : "Draft"}</small></button>
-    </div>
     <div className="site-setup-apply-toolbar">
-      {subPage === "source" && <button type="button" onClick={() => void reviewSourcePlan()} disabled={busy !== "" || !detail}>{busy === "save-plan" || busy === "load" ? "Preparing..." : "Review Draft"}</button>}
       {subPage === "review" && <button type="button" onClick={() => void reloadDraft()} disabled={busy !== ""}>{busy === "load" ? "Refreshing..." : "Refresh Draft"}</button>}
       {subPage === "review" && <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>}
     </div>
@@ -1560,6 +1566,7 @@ function SiteSetupApplySection({ setup, onSetupChanged, onApplied }: { setup: Si
       setSourcePlanMode={setSourcePlanMode}
       setSdrSources={setSdrSources}
       onSdrTouched={() => undefined}
+      showSampleRateControl={false}
       onPlanApplied={plan => void reviewAppliedSourcePlan(plan)}
       onPlanSelected={() => undefined}
     />}
@@ -8111,6 +8118,7 @@ function SourcePlannerStep({
   setSourcePlanMode,
   setSdrSources,
   onSdrTouched,
+  showSampleRateControl = true,
   onPlanApplied,
   onPlanSelected
 }: {
@@ -8124,6 +8132,7 @@ function SourcePlannerStep({
   setSourcePlanMode: React.Dispatch<React.SetStateAction<"full" | "control">>;
   setSdrSources: React.Dispatch<React.SetStateAction<RfSurveySource[] | null>>;
   onSdrTouched: () => void;
+  showSampleRateControl?: boolean;
   onPlanApplied?: (plan: { sourcePlanSystemShortNames: string[]; sourcePlanMode: "full" | "control"; selectedSourceIndexes: number[]; sources: RfSurveySource[] }) => void;
   onPlanSelected: () => void;
 }) {
@@ -8185,7 +8194,7 @@ function SourcePlannerStep({
   };
   return <div className="rf-step-stack">
     <div className="rf-source-planner-plain">
-      <div className="rf-source-calculator">
+      {showSampleRateControl && <div className="rf-source-calculator">
         <label>Sample rate (MHz)<input className={rateValidation.ok ? "" : "invalid"} inputMode="decimal" value={sampleRateMhz} onChange={event => updateSampleRate(event.target.value)} /></label>
         <div className={rateValidation.ok ? "setup-note" : "settings-message error"}>
           {rateValidation.ok
@@ -8193,7 +8202,7 @@ function SourcePlannerStep({
             : rateValidation.message}
           {supportedRateOptions.length > 0 && <small>Supported by detected SDR inventory: {supportedRateOptions.map((rate: number) => (rate / 1_000_000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")).join(", ")} MHz.</small>}
         </div>
-      </div>
+      </div>}
       <SelectedSourceCenterTable
         sources={profile.sources}
         selectedSources={selectedSources}
