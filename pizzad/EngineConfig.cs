@@ -411,10 +411,22 @@ public sealed class SiteSetupConfig
     public List<RfSurveySystemDto> Systems { get; set; } = new();
     public List<int> SelectedSourceIndexes { get; set; } = new();
     public List<RfSurveySourceDto> Sources { get; set; } = new();
+    public List<SiteSetupRfSelection> RfSelections { get; set; } = new();
     public RfSurveyPathProfileDto RfPath { get; set; } = new();
     public DateTime? UpdatedAtUtc { get; set; }
     public DateTime? LastAppliedAtUtc { get; set; }
     public string LastAppliedConfigHash { get; set; } = string.Empty;
+}
+
+public sealed class SiteSetupRfSelection
+{
+    public long FrequencyHz { get; set; }
+    public int? SourceIndex { get; set; }
+    public string Gain { get; set; } = string.Empty;
+    public int? SampleRateHz { get; set; }
+    public int? ErrorHz { get; set; }
+    public double? SnrDb { get; set; }
+    public double? Confidence { get; set; }
 }
 
 public sealed class RfSurveyConfig

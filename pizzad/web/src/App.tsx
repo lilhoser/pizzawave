@@ -786,7 +786,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
           <div style={section === "RF Validation" ? undefined : { display: "none" }} aria-hidden={section === "RF Validation" ? undefined : "true"}>
-            <SiteSetupRfValidationSection setup={current} active={section === "RF Validation"} subPage={rfValidationSubPage} onTrOperationChange={onTrOperationChange} />
+            <SiteSetupRfValidationSection setup={current} active={section === "RF Validation"} subPage={rfValidationSubPage} onSave={saveDesired} onTrOperationChange={onTrOperationChange} />
           </div>
           {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
           {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
@@ -1194,7 +1194,7 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
   </div>;
 }
 
-function SiteSetupRfValidationSection({ setup, active, subPage, onTrOperationChange }: { setup: SiteSetup; active: boolean; subPage: "waterfall" | "sweep"; onTrOperationChange: (value: string) => void }) {
+function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOperationChange }: { setup: SiteSetup; active: boolean; subPage: "waterfall" | "sweep"; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onTrOperationChange: (value: string) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1202,6 +1202,8 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onTrOperationCha
   const [duration, setDuration] = useState("45");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
   const [details, setDetails] = useState<{ title: string; body: React.ReactNode } | null>(null);
+  const rfSelectionSaveTimer = useRef<number | null>(null);
+  const lastSavedRfSelectionSignature = useRef("");
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
   const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
@@ -1283,13 +1285,36 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onTrOperationCha
   const sweepSelectionStorageKey = detail ? `pizzawave-site-setup-waterfall-sweep-selections-${detail.session.id}` : "";
   useEffect(() => {
     if (!sweepSelectionStorageKey) return;
-    setWaterfallSweepSelections(normalizeWaterfallSweepSelections(loadJsonStorage<unknown>(sweepSelectionStorageKey, [])));
-  }, [sweepSelectionStorageKey]);
+    const desiredSelections = normalizeWaterfallSweepSelections(setup.desired.rfSelections ?? []);
+    const storedSelections = normalizeWaterfallSweepSelections(loadJsonStorage<unknown>(sweepSelectionStorageKey, []));
+    const normalized = desiredSelections.length ? desiredSelections : storedSelections;
+    setWaterfallSweepSelections(normalized);
+    lastSavedRfSelectionSignature.current = stableWaterfallSweepSelectionSignature(desiredSelections);
+    if (!desiredSelections.length && storedSelections.length)
+      scheduleSaveWaterfallSweepSelections(storedSelections);
+  }, [sweepSelectionStorageKey, setup.desired.desiredVersion]);
+  useEffect(() => () => {
+    if (rfSelectionSaveTimer.current)
+      window.clearTimeout(rfSelectionSaveTimer.current);
+  }, []);
+  function scheduleSaveWaterfallSweepSelections(normalized: WaterfallSweepSelection[]) {
+    const signature = stableWaterfallSweepSelectionSignature(normalized);
+    if (signature === lastSavedRfSelectionSignature.current)
+      return;
+    if (rfSelectionSaveTimer.current)
+      window.clearTimeout(rfSelectionSaveTimer.current);
+    rfSelectionSaveTimer.current = window.setTimeout(() => {
+      lastSavedRfSelectionSignature.current = signature;
+      const nextSources = mergeWaterfallSelectionsIntoSetupSources(setup, normalized, sources);
+      void onSave({ rfSelections: normalized.map(toSiteSetupRfSelectionPayload), sources: nextSources }, "rfSelections");
+    }, 800);
+  }
   const updateWaterfallSweepSelections = (values: WaterfallSweepSelection[]) => {
     const normalized = normalizeWaterfallSweepSelections(values);
     setWaterfallSweepSelections(normalized);
     if (sweepSelectionStorageKey)
       localStorage.setItem(sweepSelectionStorageKey, JSON.stringify(normalized));
+    scheduleSaveWaterfallSweepSelections(normalized);
   };
   const latestExperiment = (type: string) => [...(detail?.experiments ?? [])]
     .filter(experiment => experiment.type === type)
@@ -3969,6 +3994,50 @@ function normalizeWaterfallSweepSelections(values: unknown): WaterfallSweepSelec
     });
   }
   return [...selections.values()].sort((left, right) => left.frequencyHz - right.frequencyHz);
+}
+
+function toSiteSetupRfSelectionPayload(row: WaterfallSweepSelection) {
+  return {
+    frequencyHz: row.frequencyHz,
+    ...(row.sourceIndex != null ? { sourceIndex: row.sourceIndex } : {}),
+    gain: row.gain ?? "",
+    ...(row.sampleRateHz != null ? { sampleRateHz: row.sampleRateHz } : {}),
+    ...(row.errorHz != null ? { errorHz: row.errorHz } : {}),
+    ...(row.snrDb != null ? { snrDb: row.snrDb } : {}),
+    ...(row.confidence != null ? { confidence: row.confidence } : {})
+  };
+}
+
+function stableWaterfallSweepSelectionSignature(values: WaterfallSweepSelection[]) {
+  return JSON.stringify(normalizeWaterfallSweepSelections(values).map(row => ({
+    frequencyHz: row.frequencyHz,
+    sourceIndex: row.sourceIndex ?? null,
+    gain: row.gain ?? "",
+    sampleRateHz: row.sampleRateHz ?? null,
+    errorHz: row.errorHz ?? null
+  })));
+}
+
+function mergeWaterfallSelectionsIntoSetupSources(setup: SiteSetup, selections: WaterfallSweepSelection[], fallbackSources: RfSurveySource[]) {
+  const sources = fallbackSources.length ? fallbackSources : siteSetupSources(setup);
+  if (!selections.length || !sources.length)
+    return sources;
+  const defaultSourceIndex = setup.desired.selectedSourceIndexes[0] ?? sources[0]?.index ?? 0;
+  return sources.map(source => {
+    const rows = selections.filter(row => (row.sourceIndex ?? defaultSourceIndex) === source.index);
+    if (!rows.length)
+      return source;
+    const latestWithGain = [...rows].reverse().find(row => row.gain && row.gain.trim());
+    const latestWithSampleRate = [...rows].reverse().find(row => Number.isFinite(row.sampleRateHz) && (row.sampleRateHz ?? 0) > 0);
+    const recommendedError = recommendedWaterfallError(rows);
+    const latestWithError = [...rows].reverse().find(row => Number.isFinite(row.errorHz));
+    return {
+      ...source,
+      gain: latestWithGain?.gain?.trim() || source.gain,
+      sampleRate: latestWithSampleRate?.sampleRateHz ?? source.sampleRate,
+      errorHz: recommendedError?.errorHz ?? latestWithError?.errorHz ?? source.errorHz
+    };
+  });
 }
 
 function recommendedWaterfallError(selections: WaterfallSweepSelection[]): RecommendedWaterfallError | null {

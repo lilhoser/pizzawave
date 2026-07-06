@@ -210,7 +210,9 @@ public sealed class SiteSetupService
         if (!SetEquals(desiredSystems, applied.SystemShortNames))
             rows.Add(new SiteSetupPendingChangeDto("Systems/Sites", $"Desired systems ({desiredSystems.Count}) differ from applied systems ({applied.SystemShortNames.Count})."));
 
-        var desiredControls = desired.Systems.SelectMany(system => system.ControlChannelsHz).Distinct().Order().ToList();
+        var desiredControls = desired.RfSelections.Count > 0
+            ? desired.RfSelections.Select(selection => selection.FrequencyHz).Where(value => value > 0).Distinct().Order().ToList()
+            : desired.Systems.SelectMany(system => system.ControlChannelsHz).Distinct().Order().ToList();
         if (desiredControls.Count > 0 && !desiredControls.SequenceEqual(applied.ControlChannelsHz))
             rows.Add(new SiteSetupPendingChangeDto("Control Channels", $"Desired CCs ({desiredControls.Count}) differ from applied CCs ({applied.ControlChannelsHz.Count})."));
 
@@ -249,6 +251,7 @@ public sealed class SiteSetupService
         Systems = value.Systems?.ToList() ?? [],
         SelectedSourceIndexes = value.SelectedSourceIndexes?.Distinct().Order().ToList() ?? [],
         Sources = value.Sources?.ToList() ?? [],
+        RfSelections = NormalizeRfSelections(value.RfSelections),
         RfPath = value.RfPath ?? new RfSurveyPathProfileDto(),
         UpdatedAtUtc = value.UpdatedAtUtc,
         LastAppliedAtUtc = value.LastAppliedAtUtc,
@@ -266,6 +269,7 @@ public sealed class SiteSetupService
         AddIfChanged(changes, "selected sources", string.Join(",", before.SelectedSourceIndexes), string.Join(",", after.SelectedSourceIndexes));
         AddIfChanged(changes, "RF path", RfPathSummary(before.RfPath), RfPathSummary(after.RfPath));
         AddIfChanged(changes, "desired sources", SourceSummary(before.Sources), SourceSummary(after.Sources));
+        AddIfChanged(changes, "RF selections", RfSelectionSummary(before.RfSelections), RfSelectionSummary(after.RfSelections));
         return changes;
     }
 
@@ -280,8 +284,32 @@ public sealed class SiteSetupService
         value.SelectedSourceIndexes,
         value.SourcePlanMode,
         rfPath = RfPathSummary(value.RfPath),
+        rfSelections = RfSelectionSummary(value.RfSelections),
         sources = SourceSummary(value.Sources)
     };
+
+    private static List<SiteSetupRfSelection> NormalizeRfSelections(IEnumerable<SiteSetupRfSelection>? values) =>
+        (values ?? [])
+            .Where(value => value != null && value.FrequencyHz > 0)
+            .GroupBy(value => value.FrequencyHz)
+            .Select(group =>
+            {
+                var value = group.Last();
+                return new SiteSetupRfSelection
+                {
+                    FrequencyHz = value.FrequencyHz,
+                    SourceIndex = value.SourceIndex >= 0 ? value.SourceIndex : null,
+                    Gain = value.Gain?.Trim() ?? string.Empty,
+                    SampleRateHz = value.SampleRateHz > 0 ? value.SampleRateHz : null,
+                    ErrorHz = value.ErrorHz,
+                    SnrDb = value.SnrDb is double snr && double.IsFinite(snr) ? snr : null,
+                    Confidence = value.Confidence is double confidence && double.IsFinite(confidence)
+                        ? Math.Clamp(confidence, 0, 1)
+                        : null
+                };
+            })
+            .OrderBy(value => value.FrequencyHz)
+            .ToList();
 
     private static List<string> NormalizeStrings(IEnumerable<string>? values) =>
         (values ?? [])
@@ -309,6 +337,11 @@ public sealed class SiteSetupService
 
     private static string SourceSummary(IEnumerable<RfSurveySourceDto>? sources) =>
         string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}:{source.Gain}"));
+
+    private static string RfSelectionSummary(IEnumerable<SiteSetupRfSelection>? selections) =>
+        string.Join("|", (selections ?? [])
+            .Select(selection => $"{selection.FrequencyHz}:{selection.SourceIndex}:{selection.Gain}:{selection.SampleRateHz}:{selection.ErrorHz}")
+            .Order(StringComparer.Ordinal));
 
     private static IReadOnlyList<long> ReadFrequencyArray(JsonElement element, string property)
     {
