@@ -1413,12 +1413,17 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       return null;
     }
   }, [draft?.configJson]);
+  const parsedLiveDraft = useMemo(() => {
+    try {
+      return draft?.liveConfigJson ? JSON.parse(draft.liveConfigJson) : null;
+    } catch {
+      return null;
+    }
+  }, [draft?.liveConfigJson]);
   const draftSystems = Array.isArray(parsedDraft?.systems) ? parsedDraft.systems : [];
   const draftSources = Array.isArray(parsedDraft?.sources) ? parsedDraft.sources : [];
   const draftWarnings = useMemo(() => siteSetupDraftWarningGroups(draft?.summary.warnings ?? []), [draft?.summary.warnings]);
-  const draftChangeSummary = draft?.summary.changes.length
-    ? `${draft.summary.changes.length} generated config update${draft.summary.changes.length === 1 ? "" : "s"}`
-    : "";
+  const draftReviewRows = useMemo(() => buildSiteSetupConfigReviewRows(parsedLiveDraft, parsedDraft), [parsedLiveDraft, parsedDraft]);
 
   useEffect(() => {
     setSelectedSourceIndexes(defaultSelectedSources);
@@ -1588,18 +1593,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     {subPage === "source" && !detail && busy !== "load" && <div className="setup-warning-list"><div>Setup needs selected systems, control channels, and SDR source information before it can plan sources.</div></div>}
     {subPage === "review" && draft && <>
       {draftWarnings.coverage.length > 0 && <div className="setup-warning-list site-setup-draft-notes">{draftWarnings.coverage.map(warning => <div key={warning}>{warning}</div>)}</div>}
-      {draftWarnings.planning.length > 0 && <details className="setup-note site-setup-draft-notes">
-        <summary>Planning notes ({draftWarnings.planning.length})</summary>
-        <ul>{draftWarnings.planning.map(warning => <li key={warning}>{warning}</li>)}</ul>
-      </details>}
-      {draftWarnings.other.length > 0 && <details className="setup-note site-setup-draft-notes">
-        <summary>Other draft warnings ({draftWarnings.other.length})</summary>
-        <ul>{draftWarnings.other.map(warning => <li key={warning}>{warning}</li>)}</ul>
-      </details>}
-      {draftChangeSummary && <details className="setup-note site-setup-draft-notes">
-        <summary>{draftChangeSummary}</summary>
-        <ul>{draft.summary.changes.map(change => <li key={change}>{change}</li>)}</ul>
-      </details>}
+      <SiteSetupConfigReviewTable rows={draftReviewRows} />
       {parsedDraft && <TrConfigReviewCoverage systems={draftSystems} sources={draftSources} />}
       <details className="site-setup-config-json">
         <summary>TR config JSON</summary>
@@ -1632,6 +1626,149 @@ function siteSetupDraftWarningGroups(warnings: string[]) {
     other.push(warning);
   }
   return { coverage, planning, other };
+}
+
+type SiteSetupConfigReviewRow = {
+  area: string;
+  setting: string;
+  current: string;
+  next: string;
+  tone?: "added" | "removed" | "changed";
+};
+
+function SiteSetupConfigReviewTable({ rows }: { rows: SiteSetupConfigReviewRow[] }) {
+  return <div className="site-setup-config-review-table">
+    <table className="table compact-table">
+      <thead><tr><th>Area</th><th>Setting</th><th>Current</th><th>Will apply</th></tr></thead>
+      <tbody>
+        {rows.length
+          ? rows.map((row, index) => <tr className={row.tone ?? "changed"} key={`${row.area}-${row.setting}-${index}`}>
+            <td>{row.area}</td>
+            <td>{row.setting}</td>
+            <td><code>{row.current}</code></td>
+            <td><code>{row.next}</code></td>
+          </tr>)
+          : <tr><td colSpan={4}>No TR config changes detected.</td></tr>}
+      </tbody>
+    </table>
+  </div>;
+}
+
+function buildSiteSetupConfigReviewRows(current: any, next: any): SiteSetupConfigReviewRow[] {
+  if (!current || !next)
+    return [];
+  const rows: SiteSetupConfigReviewRow[] = [];
+  const add = (area: string, setting: string, before: unknown, after: unknown, kind?: SiteSetupConfigReviewRow["tone"]) => {
+    const currentText = formatSiteSetupConfigValue(setting, before);
+    const nextText = formatSiteSetupConfigValue(setting, after);
+    if (currentText !== nextText)
+      rows.push({ area, setting, current: currentText, next: nextText, tone: kind ?? "changed" });
+  };
+
+  for (const field of ["ver", "defaultMode", "logLevel", "frequencyFormat", "statusAsString", "broadcastSignals", "audioStreaming", "controlRetuneLimit", "controlWarnRate", "logFile", "logDir", "tempDir"])
+    add("Root", field, current[field], next[field]);
+
+  const currentSources = Array.isArray(current.sources) ? current.sources : [];
+  const nextSources = Array.isArray(next.sources) ? next.sources : [];
+  for (let index = 0; index < Math.max(currentSources.length, nextSources.length); index++) {
+    const before = currentSources[index];
+    const after = nextSources[index];
+    const area = `Source #${index}`;
+    if (!before && after) {
+      rows.push({ area, setting: "Source", current: "Not present", next: formatSiteSetupSourceSummary(after), tone: "added" });
+      continue;
+    }
+    if (before && !after) {
+      rows.push({ area, setting: "Source", current: formatSiteSetupSourceSummary(before), next: "Removed", tone: "removed" });
+      continue;
+    }
+    if (!before || !after)
+      continue;
+    for (const field of ["device", "driver", "rate", "center", "error", "gain", "lnaGain", "mixGain", "ifGain", "digitalRecorders", "analogRecorders", "agc"])
+      add(area, field, before[field], after[field]);
+  }
+
+  const currentSystems = mapByShortName(current.systems);
+  const nextSystems = mapByShortName(next.systems);
+  for (const key of sortedUnion(Object.keys(currentSystems), Object.keys(nextSystems))) {
+    const before = currentSystems[key];
+    const after = nextSystems[key];
+    const area = `System ${key}`;
+    if (!before && after) {
+      rows.push({ area, setting: "System", current: "Not present", next: "Added", tone: "added" });
+      add(area, "control channels", [], after.control_channels);
+      add(area, "voice channels", [], after.channels);
+      add(area, "talkgroups file", undefined, after.talkgroupsFile);
+      continue;
+    }
+    if (before && !after) {
+      rows.push({ area, setting: "System", current: "Present", next: "Removed", tone: "removed" });
+      continue;
+    }
+    if (!before || !after)
+      continue;
+    add(area, "control channels", before.control_channels, after.control_channels);
+    add(area, "voice channels", before.channels, after.channels);
+    for (const field of ["type", "modulation", "talkgroupsFile", "multiSite", "recordUnknown", "recordUUVCalls", "hideEncrypted", "hideUnknownTalkgroups", "minDuration", "minTransmissionDuration", "talkgroupDisplayFormat"])
+      add(area, field, before[field], after[field]);
+  }
+
+  add("Plugins", "callstream streams", siteSetupCallstreamStreams(current), siteSetupCallstreamStreams(next));
+  return rows;
+}
+
+function formatSiteSetupSourceSummary(source: any) {
+  const parts = [
+    source?.device || "source",
+    source?.center ? `center ${formatRfHz(readTrFrequencyHz(source.center))}` : "",
+    source?.rate ? `rate ${formatHz(Number(source.rate))}` : "",
+    source?.error !== undefined ? `error ${source.error} Hz` : "",
+    siteSetupSourceGainText(source)
+  ].filter(Boolean);
+  return parts.join(" / ") || "Source";
+}
+
+function siteSetupSourceGainText(source: any) {
+  if (source?.gain !== undefined && source?.gain !== null && String(source.gain).trim())
+    return `gain ${source.gain}`;
+  const stage = ["lnaGain", "mixGain", "ifGain"]
+    .filter(field => source?.[field] !== undefined && source?.[field] !== null)
+    .map(field => `${field.replace("Gain", "")} ${source[field]}`);
+  return stage.length ? `gain ${stage.join(", ")}` : "";
+}
+
+function siteSetupCallstreamStreams(root: any) {
+  const plugins = Array.isArray(root?.plugins) ? root.plugins : [];
+  const callstream = plugins.find((plugin: any) => String(plugin?.name ?? "").toLowerCase() === "callstream");
+  const streams = Array.isArray(callstream?.streams) ? callstream.streams : [];
+  return streams.map((stream: any) => `${stream?.shortName ?? "unknown"}:${stream?.TGID ?? 0}`).sort();
+}
+
+function formatSiteSetupConfigValue(setting: string, value: unknown): string {
+  if (value === undefined || value === null || value === "")
+    return "Not set";
+  if (Array.isArray(value)) {
+    if (value.length === 0)
+      return "None";
+    if (setting.toLowerCase().includes("channel"))
+      return value.map(item => formatRfHz(readTrFrequencyHz(item))).join(", ");
+    return value.map(item => formatSiteSetupConfigValue(setting, item)).join(", ");
+  }
+  if (typeof value === "boolean")
+    return value ? "Yes" : "No";
+  if (typeof value === "number") {
+    const lower = setting.toLowerCase();
+    if (lower.includes("center") || lower.includes("channel"))
+      return formatRfHz(readTrFrequencyHz(value));
+    if (lower === "rate")
+      return formatHz(value);
+    if (lower.includes("error"))
+      return `${value >= 0 ? "+" : ""}${value} Hz`;
+    return String(value);
+  }
+  if (typeof value === "object")
+    return JSON.stringify(value);
+  return String(value);
 }
 
 function sdrTypeFromDeviceLabel(device: string) {
