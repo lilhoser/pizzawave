@@ -5185,8 +5185,11 @@ function SiteValidationStep({
   const validationOffsets = parseIntegerSequence(validationErrorOffsets, [-300, 0, 300]);
   const validationAutoError = validationErrorOffsets.trim().toLowerCase() === "auto";
   const validationFormErrorSearch = validationErrorOffsets;
+  const validationRecommendedOffsetText = handoffValidationOffsets.length
+    ? `${handoffValidationOffsets.map(formatSignedHz).join(", ")}${validationErrorBaseSource ? ` from source ${formatSignedHz(validationErrorBaseHz)}` : ""}`
+    : "";
   const validationRecommendedErrorText = waterfallRecommendedError
-    ? `${formatSignedHz(waterfallRecommendedError.errorHz)}${waterfallRecommendedError.conflict ? ` (selected peaks range ${formatSignedHz(waterfallRecommendedError.minErrorHz)} to ${formatSignedHz(waterfallRecommendedError.maxErrorHz)})` : ""}`
+    ? `target error ${formatSignedHz(waterfallRecommendedError.errorHz)}${validationRecommendedOffsetText ? ` / offset ${validationRecommendedOffsetText}` : ""}${waterfallRecommendedError.conflict ? ` (selected peaks range ${formatSignedHz(waterfallRecommendedError.minErrorHz)} to ${formatSignedHz(waterfallRecommendedError.maxErrorHz)})` : ""}`
     : "";
   const selectedWaterfallGains = uniqueCaseInsensitive(selectedWaterfallSweepSelections.map(row => row.gain ?? ""));
   const waterfallSeedGainSequence = selectedWaterfallGains.length ? effectivePowerGainSequence(selectedWaterfallGains, validationPowerSources).join(",") : "";
