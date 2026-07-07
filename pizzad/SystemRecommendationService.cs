@@ -1,7 +1,14 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text.RegularExpressions;
+
 namespace pizzad;
 
 public sealed class SystemRecommendationService
 {
+    private static readonly Regex RetuneTargetRegex = new(
+        @"\[(?<scope>[^\]]+)\]\s+Retuning to Control Channel:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly string[] BaselineEligibleRecommendationIds =
     [
         "tr-decode-zero",
@@ -227,7 +234,7 @@ public sealed class SystemRecommendationService
         var health = await _database.ListHealthSamplesAsync(healthStart, new DateTimeOffset(now).ToUnixTimeSeconds(), ct);
         var global = health.Where(h => string.Equals(h.Scope, "global", StringComparison.OrdinalIgnoreCase)).ToList();
         var currentGlobal = global.Where(h => h.WindowEndUtc.ToUniversalTime() >= rfCurrentStart).ToList();
-        var bySystem = health
+        var bySystemAll = health
             .Where(h => !string.Equals(h.Scope, "global", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(h.Scope))
             .GroupBy(h => h.Scope)
             .Select(g =>
@@ -246,11 +253,13 @@ public sealed class SystemRecommendationService
                     NoTxRecorded = g.Sum(h => h.NoTxRecorded)
                 };
             })
+            .ToList();
+        var bySystem = bySystemAll
             .OrderByDescending(s => s.DecodeZeroPct)
             .ThenByDescending(s => s.Retunes)
             .Take(5)
             .ToList();
-        var currentBySystem = health
+        var currentBySystemAll = health
             .Where(h => h.WindowEndUtc.ToUniversalTime() >= rfCurrentStart)
             .Where(h => !string.Equals(h.Scope, "global", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(h.Scope))
             .GroupBy(h => h.Scope)
@@ -270,6 +279,8 @@ public sealed class SystemRecommendationService
                     NoTxRecorded = g.Sum(h => h.NoTxRecorded)
                 };
             })
+            .ToList();
+        var currentBySystem = currentBySystemAll
             .OrderByDescending(s => s.DecodeZeroPct)
             .ThenByDescending(s => s.Retunes)
             .Take(5)
@@ -353,16 +364,44 @@ public sealed class SystemRecommendationService
         }
         if (currentRetunes >= 5)
         {
+            var worstCurrentRetuneSystem = currentBySystemAll
+                .OrderByDescending(s => s.Retunes)
+                .ThenByDescending(s => s.DecodeZeroPct)
+                .FirstOrDefault(s => s.Retunes > 0);
+            var worstTwoHourRetuneSystem = bySystemAll
+                .OrderByDescending(s => s.Retunes)
+                .ThenByDescending(s => s.DecodeZeroPct)
+                .FirstOrDefault(s => s.Retunes > 0);
+            var retuneTargets = await BuildRetuneTargetDiagnosticsAsync(rfCurrentStart, now, ct);
+            var scopedRetuneTargets = worstCurrentRetuneSystem == null
+                ? retuneTargets
+                : retuneTargets.Where(t => string.Equals(t.Scope, worstCurrentRetuneSystem.Scope, StringComparison.OrdinalIgnoreCase)).ToList();
+            var retuneTargetText = FormatRetuneTargetSummary(scopedRetuneTargets.Count > 0 ? scopedRetuneTargets : retuneTargets);
+            var retuneDetail = worstCurrentRetuneSystem == null
+                ? $"Observed {currentRetunes:N0} control-channel retunes over the last {rfCurrentWindowMinutes} minutes. The two-hour context is {retunes:N0} retunes."
+                : $"Observed {currentRetunes:N0} control-channel retunes over the last {rfCurrentWindowMinutes} minutes; {worstCurrentRetuneSystem.Scope} accounts for {worstCurrentRetuneSystem.Retunes:N0} of them. The two-hour context is {retunes:N0} retunes"
+                    + (worstTwoHourRetuneSystem == null ? "." : $", led by {worstTwoHourRetuneSystem.Scope} with {worstTwoHourRetuneSystem.Retunes:N0}.")
+                    + (string.IsNullOrWhiteSpace(retuneTargetText) ? string.Empty : $" Recent retune targets: {retuneTargetText}.");
+            var retuneAction = worstCurrentRetuneSystem == null
+                ? "Compare retunes with decode-zero rate and recent gain/error changes before locking control channels."
+                : $"Focus on {worstCurrentRetuneSystem.Scope}: validate the listed control-channel targets and source RF settings before changing healthy systems.";
+            var retuneDiagnostics = retuneTargets.Count == 0
+                ? trDiagnostics
+                : trDiagnostics.Concat(retuneTargets.Select(t => new RecommendationDiagnosticDto(
+                    $"Retune target {t.Scope}",
+                    $"{t.FrequencyMHz} MHz x {t.Count:N0}",
+                    t.Scope.Equals(worstCurrentRetuneSystem?.Scope ?? string.Empty, StringComparison.OrdinalIgnoreCase) ? "issue" : "info",
+                    $"Observed in the last {rfCurrentWindowMinutes} minutes of trunk-recorder journald."))).ToList();
             rows.Add(new SystemRecommendationDto(
                 "tr-retunes",
                 "trunk-recorder",
                 "medium",
-                "TR control-channel retunes are elevated",
-                $"Observed {currentRetunes:N0} control-channel retunes over the last {rfCurrentWindowMinutes} minutes. The two-hour context is {retunes:N0} retunes.",
-                "Compare retunes with decode-zero rate and recent gain/error changes before locking control channels.",
+                worstCurrentRetuneSystem == null ? "TR control-channel retunes are elevated" : $"{worstCurrentRetuneSystem.Scope} control-channel retunes are elevated",
+                retuneDetail,
+                retuneAction,
                 new RecommendationTargetDto("tr", "metrics", ""),
                 [])
-                { Runbook = BuildRunbook("tr-retunes") with { Diagnostics = trDiagnostics } });
+                { Runbook = BuildRunbook("tr-retunes") with { Diagnostics = retuneDiagnostics } });
         }
         var currentResourcePressure = hasFreshResourceSample && (currentTrCpuHostPct >= 75
             || currentTrRssMb >= 1536
@@ -653,6 +692,66 @@ public sealed class SystemRecommendationService
             && int.TryParse(flags[2..], System.Globalization.NumberStyles.HexNumber, null, out value))
             return true;
         return int.TryParse(flags, out value);
+    }
+
+    private async Task<IReadOnlyList<RetuneTargetSummary>> BuildRetuneTargetDiagnosticsAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        if (OperatingSystem.IsWindows())
+            return [];
+
+        var psi = new ProcessStartInfo("journalctl")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        psi.ArgumentList.Add("-u");
+        psi.ArgumentList.Add(_config.TrunkRecorder.LogServiceName);
+        psi.ArgumentList.Add("--utc");
+        psi.ArgumentList.Add("--since");
+        psi.ArgumentList.Add(startUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC");
+        psi.ArgumentList.Add("--until");
+        psi.ArgumentList.Add(endUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " UTC");
+        psi.ArgumentList.Add("--no-pager");
+
+        try
+        {
+            using var process = Process.Start(psi);
+            if (process == null)
+                return [];
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            if (process.ExitCode != 0)
+                return [];
+
+            var output = await outputTask;
+            return RetuneTargetRegex.Matches(output)
+                .Select(match => new
+                {
+                    Scope = match.Groups["scope"].Value.Trim(),
+                    Frequency = match.Groups["freq"].Value.Trim()
+                })
+                .Where(row => !string.IsNullOrWhiteSpace(row.Scope) && !string.IsNullOrWhiteSpace(row.Frequency))
+                .GroupBy(row => new { row.Scope, row.Frequency })
+                .Select(group => new RetuneTargetSummary(group.Key.Scope, group.Key.Frequency, group.Count()))
+                .OrderByDescending(row => row.Count)
+                .ThenBy(row => row.Scope, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => row.FrequencyMHz, StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string FormatRetuneTargetSummary(IReadOnlyList<RetuneTargetSummary> targets)
+    {
+        if (targets.Count == 0)
+            return string.Empty;
+        return string.Join(", ", targets.Take(4).Select(t => $"{t.FrequencyMHz} MHz x {t.Count:N0}"));
     }
 
     private IReadOnlyList<RecommendationTalkgroupCandidateDto> BuildTalkgroupNoiseCandidates(IEnumerable<QueueTalkgroupLoadDto> rows)
@@ -960,6 +1059,11 @@ public sealed record RecommendationDiagnosticDto(
     string Value,
     string Status,
     string Detail);
+
+public sealed record RetuneTargetSummary(
+    string Scope,
+    string FrequencyMHz,
+    int Count);
 
 public sealed record SystemRecommendationsDto(
     int OpenCount,
