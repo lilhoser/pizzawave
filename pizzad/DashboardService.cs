@@ -6,14 +6,19 @@ public sealed class DashboardService
 {
     private static readonly TimeSpan DashboardCacheTtl = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DashboardBuildTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan StatusCacheTtl = TimeSpan.FromSeconds(10);
     private readonly EngineDatabase _database;
     private readonly EngineConfig _config;
     private readonly GeocodingService _geocoding;
     private readonly TalkgroupCatalogService _catalog;
     private readonly SemaphoreSlim _dashboardCacheGate = new(1, 1);
+    private readonly SemaphoreSlim _statusCacheGate = new(1, 1);
     private DashboardCacheEntry? _dashboardCache;
     private Task<DashboardDto>? _dashboardBuildTask;
     private string _dashboardBuildKey = string.Empty;
+    private StatusSummaryCacheEntry? _statusCache;
+    private Task<StatusSummaryDto>? _statusBuildTask;
+    private string _statusBuildKey = string.Empty;
 
     public DashboardService(
         EngineDatabase database,
@@ -234,6 +239,51 @@ public sealed class DashboardService
 
     public async Task<StatusSummaryDto> BuildStatusSummaryAsync(long start, long end, CancellationToken ct)
     {
+        var cacheKey = StatusCacheKey(start, end);
+        var now = DateTimeOffset.UtcNow;
+        Task<StatusSummaryDto>? buildTask = null;
+        await _statusCacheGate.WaitAsync(ct);
+        try
+        {
+            if (_statusCache is { } cached &&
+                cached.Key == cacheKey &&
+                now - cached.CreatedAt <= StatusCacheTtl)
+                return cached.Value;
+
+            if (_statusBuildTask is { IsCompleted: false } running && _statusBuildKey == cacheKey)
+                buildTask = running;
+            else
+            {
+                var normalized = NormalizeStatusRange(start, end);
+                _statusBuildKey = cacheKey;
+                _statusBuildTask = BuildStatusSummaryCoreAsync(normalized.Start, normalized.End, CancellationToken.None);
+                buildTask = _statusBuildTask;
+            }
+        }
+        finally
+        {
+            _statusCacheGate.Release();
+        }
+
+        var result = await buildTask.WaitAsync(ct);
+        await _statusCacheGate.WaitAsync(ct);
+        try
+        {
+            if (_statusBuildKey == cacheKey)
+            {
+                _statusCache = new StatusSummaryCacheEntry(cacheKey, DateTimeOffset.UtcNow, result);
+                _statusBuildTask = null;
+            }
+        }
+        finally
+        {
+            _statusCacheGate.Release();
+        }
+        return result;
+    }
+
+    private async Task<StatusSummaryDto> BuildStatusSummaryCoreAsync(long start, long end, CancellationToken ct)
+    {
         var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct));
         var allowedCallIds = calls.Select(c => c.Id).ToHashSet();
         var alerts = await ListAlertMatchesAsync(start, end, ct);
@@ -247,6 +297,17 @@ public sealed class DashboardService
         var tokens = await _database.GetTokenUsageAsync(start, end, ct);
         return new StatusSummaryDto(calls.Count, incidents, hiddenIncidents, alerts.Count, tokens.Summary.TotalTokens);
     }
+
+    private static (long Start, long End) NormalizeStatusRange(long start, long end) =>
+        (RoundDownStatusBucket(start), RoundDownStatusBucket(end));
+
+    private static string StatusCacheKey(long start, long end)
+    {
+        var normalized = NormalizeStatusRange(start, end);
+        return $"{normalized.Start}:{normalized.End}";
+    }
+
+    private static long RoundDownStatusBucket(long value) => value - value % 10;
 
     private List<EngineCall> ApplyProfile(IEnumerable<EngineCall> calls) => calls.Where(c => Allows(c.Category, c.SystemShortName, c.Talkgroup)).ToList();
 
@@ -855,6 +916,8 @@ public sealed class DashboardService
     }
 
     private sealed record DashboardCacheEntry(string Key, DateTimeOffset CreatedAt, DashboardDto Value);
+
+    private sealed record StatusSummaryCacheEntry(string Key, DateTimeOffset CreatedAt, StatusSummaryDto Value);
 
     private sealed record LocationGroup(
         string AreaId,

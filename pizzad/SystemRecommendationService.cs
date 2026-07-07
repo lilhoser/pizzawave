@@ -16,6 +16,7 @@ public sealed class SystemRecommendationService
         "tr-resource-pressure"
     ];
     private static readonly TimeSpan BaselineDemotionAge = TimeSpan.FromHours(24);
+    private static readonly TimeSpan RecommendationCacheTtl = TimeSpan.FromSeconds(30);
     private const long CriticalRemoteBandwidthBytesPerDay = 1_000_000_000;
 
     private readonly EngineConfig _config;
@@ -25,6 +26,10 @@ public sealed class SystemRecommendationService
     private readonly LiveTrActivityMonitor _liveTrActivity;
     private readonly TalkgroupCatalogService _catalog;
     private readonly RemoteBandwidthEstimatorService _bandwidth;
+    private readonly SemaphoreSlim _cacheGate = new(1, 1);
+    private SystemRecommendationsDto? _cachedRecommendations;
+    private DateTimeOffset _cachedRecommendationsAt = DateTimeOffset.MinValue;
+    private Task<SystemRecommendationsDto>? _recommendationBuildTask;
 
     public SystemRecommendationService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline, IngestControlService ingestControl, LiveTrActivityMonitor liveTrActivity, TalkgroupCatalogService catalog, RemoteBandwidthEstimatorService bandwidth)
     {
@@ -38,6 +43,50 @@ public sealed class SystemRecommendationService
     }
 
     public async Task<SystemRecommendationsDto> BuildAsync(CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        Task<SystemRecommendationsDto> buildTask;
+        await _cacheGate.WaitAsync(ct);
+        try
+        {
+            if (_cachedRecommendations != null && now - _cachedRecommendationsAt <= RecommendationCacheTtl)
+                return _cachedRecommendations;
+
+            if (_recommendationBuildTask is { IsCompleted: false } running)
+            {
+                buildTask = running;
+            }
+            else
+            {
+                _recommendationBuildTask = BuildCoreAsync(CancellationToken.None);
+                buildTask = _recommendationBuildTask;
+            }
+        }
+        finally
+        {
+            _cacheGate.Release();
+        }
+
+        var result = await buildTask.WaitAsync(ct);
+        await _cacheGate.WaitAsync(ct);
+        try
+        {
+            if (ReferenceEquals(_recommendationBuildTask, buildTask))
+            {
+                _cachedRecommendations = result;
+                _cachedRecommendationsAt = DateTimeOffset.UtcNow;
+                _recommendationBuildTask = null;
+            }
+        }
+        finally
+        {
+            _cacheGate.Release();
+        }
+
+        return result;
+    }
+
+    private async Task<SystemRecommendationsDto> BuildCoreAsync(CancellationToken ct)
     {
         var now = DateTime.UtcNow;
         const int windowMinutes = 60;
