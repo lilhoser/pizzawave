@@ -306,6 +306,10 @@ export type QueueTalkgroupLoad = {
   averageAudioSeconds: number;
   pendingCalls: number;
   pendingAudioSeconds: number;
+  weakCalls: number;
+  failedCalls: number;
+  repetitiveCalls: number;
+  incidentCalls: number;
 };
 export type SystemRecommendation = {
   id: string;
@@ -349,6 +353,15 @@ export type SystemRecommendation = {
       pendingAudioSeconds: number;
       alreadyDeferred: boolean;
       reason: string;
+      score: number;
+      weakCalls: number;
+      weakPct: number;
+      failedCalls: number;
+      failedPct: number;
+      repetitiveCalls: number;
+      repetitivePct: number;
+      incidentCalls: number;
+      incidentYieldPct: number;
     }[];
   } | null;
 };

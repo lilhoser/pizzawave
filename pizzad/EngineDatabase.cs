@@ -405,7 +405,17 @@ public sealed class EngineDatabase
                 COALESCE(SUM(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0) AS audio_seconds,
                 COALESCE(AVG(CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE NULL END), 0) AS average_audio_seconds,
                 COALESCE(SUM(CASE WHEN transcription_status='pending' THEN 1 ELSE 0 END), 0) AS pending_calls,
-                COALESCE(SUM(CASE WHEN transcription_status='pending' AND stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0) AS pending_audio_seconds
+                COALESCE(SUM(CASE WHEN transcription_status='pending' AND stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0) AS pending_audio_seconds,
+                COALESCE(SUM(CASE WHEN quality_reason <> 'ok' THEN 1 ELSE 0 END), 0) AS weak_calls,
+                COALESCE(SUM(CASE WHEN transcription_status='failed' OR quality_reason='transcription_error' THEN 1 ELSE 0 END), 0) AS failed_calls,
+                COALESCE(SUM(CASE
+                    WHEN lower(COALESCE(transcription, '')) GLOB '*yeah yeah yeah*'
+                      OR lower(COALESCE(transcription, '')) GLOB '*okay okay okay*'
+                      OR lower(COALESCE(transcription, '')) GLOB '*copy copy copy*'
+                      OR lower(COALESCE(transcription, '')) GLOB '*thank you thank you thank you*'
+                      OR lower(COALESCE(transcription, '')) GLOB '*inaudible inaudible*'
+                    THEN 1 ELSE 0 END), 0) AS repetitive_calls,
+                COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM incident_calls ic WHERE ic.call_id = calls.id) THEN 1 ELSE 0 END), 0) AS incident_calls
             FROM calls
             WHERE start_time >= $start
             GROUP BY system_short_name, talkgroup, talkgroup_name, category
@@ -427,7 +437,11 @@ public sealed class EngineDatabase
                 reader.GetInt64(5),
                 reader.GetDouble(6),
                 reader.GetInt64(7),
-                reader.GetInt64(8)));
+                reader.GetInt64(8),
+                reader.GetInt64(9),
+                reader.GetInt64(10),
+                reader.GetInt64(11),
+                reader.GetInt64(12)));
         }
         return rows;
     }

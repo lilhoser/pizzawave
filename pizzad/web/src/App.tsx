@@ -706,7 +706,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           }}
         />}
         {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={setSetupTrOperation} />}
-        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={() => setPage("setup")} />}
+        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} />}
       </main>
       {!inSetup && <footer className="statusbar">
@@ -3357,7 +3357,7 @@ function normalizeSystemTopTab(value: string | null): SystemTopTab {
     : "recommendations";
 }
 
-function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot, recommendations, setRecommendations, targetTab, clearTargetTab, onOpenSetup }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; cpuSnapshot: SystemCpuSnapshot | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenSetup?: () => void }) {
+function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot, recommendations, setRecommendations, targetTab, clearTargetTab, onOpenSetup }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; cpuSnapshot: SystemCpuSnapshot | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenSetup?: (section?: string) => void }) {
   const [topTab, setTopTabState] = useState<SystemTopTab>(() => normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
   const [trTab, setTrTabState] = useState<SystemTrTab>(() => {
     const saved = localStorage.getItem("pizzawave-system-tr-tab");
@@ -3478,6 +3478,10 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
   }
   function openRecommendationTarget(target: { topTab: string; subTab: string }) {
     if (target.topTab === "recommendations") setTopTab("recommendations");
+    if (target.topTab === "setup") {
+      onOpenSetup?.(target.subTab === "talkgroups" ? "Talkgroups" : target.subTab);
+      return;
+    }
     if (target.topTab === "cpu") setTopTab("cpu");
     if (target.topTab === "pizzad") {
       if (target.subTab === "storage") setTopTab("storage");
@@ -8584,7 +8588,7 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
   </div>;
 }
 
-function RecommendationsPanel({ recommendations, busy, message, onOpen, onState }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void> }) {
+function RecommendationsPanel({ recommendations, busy, message, onOpen, onState }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void> }) {
   const [activeRunbookId, setActiveRunbookId] = useState<string | null>(null);
   if (!recommendations) return <div className="card">Loading recommendations...</div>;
   const ignoredItems = recommendations.ignoredItems ?? [];
@@ -8647,7 +8651,7 @@ function RecommendationBaseline({ item, busy, onReset }: { item: NonNullable<Sys
   </div>;
 }
 
-function RunbookDetail({ item, busy, onClose, onOpen, onState }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onClose: () => void; onOpen: (target: { topTab: string; subTab: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void> }) {
+function RunbookDetail({ item, busy, onClose, onOpen, onState }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onClose: () => void; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void> }) {
   const runbook = item.runbook;
   if (!runbook) return null;
   const issueDiagnostics = (runbook.diagnostics ?? []).filter(row => row.status === "issue");
@@ -8695,18 +8699,23 @@ function RunbookDetail({ item, busy, onClose, onOpen, onState }: { item: NonNull
     {runbook.talkgroupCandidates?.length > 0 && <div className="runbook-workbench">
       <div className="recommendation-head">
         <div>
-          <h3>Talkgroup Priority Workbench</h3>
-          <p className="muted">Review high-load talkgroups here, then manage disables and category policy in Settings &gt; Talkgroup Catalog.</p>
+          <h3>Talkgroup Noise Candidates</h3>
+          <p className="muted">Ranked by recent volume, weak-call rate, transcription failures, repetition hints, pending load, category, and incident yield. Make global TR exclusions only in Setup.</p>
         </div>
       </div>
       <table className="table runbook-tg-table">
-        <thead><tr><th>Talkgroup</th><th>Category</th><th>Recent Load</th><th>Pending</th><th>Reason</th></tr></thead>
+        <thead><tr><th>Talkgroup</th><th>Score</th><th>Recent Load</th><th>Quality</th><th>Incident Yield</th><th>Reason</th><th>Action</th></tr></thead>
         <tbody>{runbook.talkgroupCandidates.map(row => <tr key={`${row.systemShortName}-${row.talkgroup}`}>
           <td>{row.talkgroupName || `TG ${row.talkgroup}`}<br /><span className="muted">{row.systemShortName} / {row.talkgroup}{row.alreadyDeferred ? " / already deferred" : ""}</span></td>
-          <td><span className={`category-chip category-${row.category}`}>{label(row.category)}</span></td>
-          <td>{formatDurationMinutes(row.audioSeconds / 60)}<br /><span className="muted">{row.calls.toLocaleString()} calls, {row.averageAudioSeconds.toFixed(1)}s avg</span></td>
-          <td>{row.pendingCalls.toLocaleString()} calls<br /><span className="muted">{formatDurationMinutes(row.pendingAudioSeconds / 60)}</span></td>
+          <td><strong>{(row.score ?? 0).toFixed(0)}</strong><br /><span className={`category-chip category-${row.category}`}>{label(row.category)}</span></td>
+          <td>{formatDurationMinutes(row.audioSeconds / 60)}<br /><span className="muted">{row.calls.toLocaleString()} calls, {row.averageAudioSeconds.toFixed(1)}s avg</span>{row.pendingCalls > 0 && <><br /><span className="muted">{row.pendingCalls.toLocaleString()} pending / {formatDurationMinutes(row.pendingAudioSeconds / 60)}</span></>}</td>
+          <td>{(row.weakPct ?? 0).toFixed(0)}% weak<br /><span className="muted">{(row.failedPct ?? 0).toFixed(0)}% failed, {(row.repetitivePct ?? 0).toFixed(0)}% repetitive</span></td>
+          <td>{(row.incidentYieldPct ?? 0).toFixed(0)}%<br /><span className="muted">{(row.incidentCalls ?? 0).toLocaleString()} incident calls</span></td>
           <td>{row.reason}</td>
+          <td><button type="button" onClick={() => {
+            localStorage.setItem("pizzawave-setup-talkgroup-filter", `${row.systemShortName} ${row.talkgroup}`);
+            onOpen({ topTab: "setup", subTab: "talkgroups", anchor: String(row.talkgroup) });
+          }}>Review in Setup</button></td>
         </tr>)}</tbody>
       </table>
     </div>}
@@ -13314,7 +13323,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
 
 function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allowSystemExclusions = false }: { reloadToken?: number; embedded?: boolean; allowSystemExclusions?: boolean }) {
   const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilterState] = useState(() => embedded ? localStorage.getItem("pizzawave-setup-talkgroup-filter") || "" : "");
   const [enabledFilter, setEnabledFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sortKey, setSortKey] = useState<"state" | "id" | "name" | "category">("id");
@@ -13325,6 +13334,12 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
 
   useEffect(() => { void loadCatalog(); }, [reloadToken]);
   useEffect(() => setPage(1), [filter, enabledFilter, categoryFilter, sortKey, sortDir]);
+
+  function setFilter(value: string) {
+    setFilterState(value);
+    if (embedded)
+      localStorage.setItem("pizzawave-setup-talkgroup-filter", value);
+  }
 
   async function loadCatalog() {
     setBusy("load");

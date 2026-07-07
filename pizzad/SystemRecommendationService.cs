@@ -15,14 +15,16 @@ public sealed class SystemRecommendationService
     private readonly EnginePipeline _pipeline;
     private readonly IngestControlService _ingestControl;
     private readonly LiveTrActivityMonitor _liveTrActivity;
+    private readonly TalkgroupCatalogService _catalog;
 
-    public SystemRecommendationService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline, IngestControlService ingestControl, LiveTrActivityMonitor liveTrActivity)
+    public SystemRecommendationService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline, IngestControlService ingestControl, LiveTrActivityMonitor liveTrActivity, TalkgroupCatalogService catalog)
     {
         _config = config;
         _database = database;
         _pipeline = pipeline;
         _ingestControl = ingestControl;
         _liveTrActivity = liveTrActivity;
+        _catalog = catalog;
     }
 
     public async Task<SystemRecommendationsDto> BuildAsync(CancellationToken ct)
@@ -150,22 +152,22 @@ public sealed class SystemRecommendationService
                 []));
         }
 
-        var topAudio = await _database.ListTopAudioTalkgroupsAsync(startUnix, 20, ct);
-        var lowValue = topAudio
-            .Where(t => t.Category is "other" or "traffic" && t.AudioSeconds >= 5 * 60)
-            .Take(5)
+        var topAudio = await _database.ListTopAudioTalkgroupsAsync(startUnix, 50, ct);
+        var noisyTalkgroups = BuildTalkgroupNoiseCandidates(topAudio)
+            .Where(t => _catalog.IsGloballyEnabled(t.SystemShortName, t.Talkgroup))
+            .Take(8)
             .ToList();
-        if (hasActiveQueuePressure && lowValue.Count > 0)
+        if (noisyTalkgroups.Count > 0)
         {
-            var detail = string.Join("; ", lowValue.Select(t => $"{t.TalkgroupName} ({t.AudioSeconds / 60d:F1} min, {t.Calls:N0} calls)"));
+            var detail = string.Join("; ", noisyTalkgroups.Take(4).Select(t => $"{t.TalkgroupName} (score {t.Score:F0}, {t.Calls:N0} calls, weak {t.WeakPct:F0}%)"));
             rows.Add(new SystemRecommendationDto(
                 "priority-low-value-audio",
                 "pizzad",
-                "medium",
-                "Candidate talkgroups for defer/ignore priority",
+                hasActiveQueuePressure ? "medium" : "low",
+                "Talkgroup noise candidates need review",
                 detail,
-                "Review these talkgroups in Setup > Talkgroups, then disable noisy profile participation if they are not operationally useful.",
-                new RecommendationTargetDto("pizzad", "jobs", ""),
+                "Review these candidates in System Recommendations, then open Setup > Talkgroups for any global TR exclusion decision.",
+                new RecommendationTargetDto("system", "recommendations", "talkgroup-noise"),
                 [])
                 {
                     Runbook = BuildRunbook("priority-low-value-audio") with
@@ -173,21 +175,11 @@ public sealed class SystemRecommendationService
                         Diagnostics =
                         [
                             new("Candidate window", $"{windowMinutes} min", "info", "Recent audio-load window used to find candidates."),
-                            new("Candidate count", $"{lowValue.Count:N0}", lowValue.Count > 0 ? "issue" : "ok", "Talkgroups matching the current defer-first heuristic."),
-                            new("Already deferred", $"{lowValue.Count(t => _config.Transcription.DeferredTalkgroups.Contains(t.Talkgroup)):N0}", "info", "Candidates already present in the deferred queue policy.")
+                            new("Candidate count", $"{noisyTalkgroups.Count:N0}", noisyTalkgroups.Count > 0 ? "issue" : "ok", "Talkgroups matching the current noisy/low-yield heuristic."),
+                            new("Already deferred", $"{noisyTalkgroups.Count(t => t.AlreadyDeferred):N0}", "info", "Candidates already present in the deferred queue policy."),
+                            new("Queue pressure", hasActiveQueuePressure ? "active" : "not active", hasActiveQueuePressure ? "issue" : "info", "Queue pressure raises the priority, but candidates can be reviewed proactively.")
                         ],
-                        TalkgroupCandidates = lowValue.Select(t => new RecommendationTalkgroupCandidateDto(
-                            t.SystemShortName,
-                            t.Talkgroup,
-                            t.TalkgroupName,
-                            t.Category,
-                            t.Calls,
-                            t.AudioSeconds,
-                            t.AverageAudioSeconds,
-                            t.PendingCalls,
-                            t.PendingAudioSeconds,
-                            _config.Transcription.DeferredTalkgroups.Contains(t.Talkgroup),
-                            $"High recent audio load in {t.Category}; low-priority category candidate for defer-first policy.")).ToList()
+                        TalkgroupCandidates = noisyTalkgroups
                     }
                 });
         }
@@ -625,6 +617,72 @@ public sealed class SystemRecommendationService
         return int.TryParse(flags, out value);
     }
 
+    private IReadOnlyList<RecommendationTalkgroupCandidateDto> BuildTalkgroupNoiseCandidates(IEnumerable<QueueTalkgroupLoadDto> rows)
+    {
+        return rows
+            .Select(row =>
+            {
+                var calls = Math.Max(1d, row.Calls);
+                var weakPct = row.WeakCalls / calls * 100d;
+                var failedPct = row.FailedCalls / calls * 100d;
+                var repetitivePct = row.RepetitiveCalls / calls * 100d;
+                var incidentYieldPct = row.IncidentCalls / calls * 100d;
+                var category = NormalizeCategory(row.Category);
+                var lowValueCategory = category is "other" or "traffic";
+                var lowYieldPenalty = Math.Max(0, 25 - incidentYieldPct) / 25d;
+                var score =
+                    Math.Min(40, row.AudioSeconds / 60d * 1.25)
+                    + Math.Min(30, weakPct * 0.45)
+                    + Math.Min(20, failedPct * 0.7)
+                    + Math.Min(20, repetitivePct * 1.2)
+                    + Math.Min(15, row.PendingAudioSeconds / 60d)
+                    + (lowValueCategory ? 10 : 0)
+                    + lowYieldPenalty * 10;
+                var reasonParts = new List<string>();
+                if (row.AudioSeconds >= 5 * 60) reasonParts.Add($"{FormatDuration(row.AudioSeconds)} recent audio");
+                if (weakPct >= 20) reasonParts.Add($"{weakPct:F0}% weak/filtered calls");
+                if (failedPct >= 10) reasonParts.Add($"{failedPct:F0}% transcription failures");
+                if (repetitivePct >= 5) reasonParts.Add($"{repetitivePct:F0}% repetitive transcripts");
+                if (incidentYieldPct <= 5) reasonParts.Add($"{incidentYieldPct:F0}% incident yield");
+                if (lowValueCategory) reasonParts.Add($"{category} category");
+                var reason = reasonParts.Count > 0
+                    ? string.Join("; ", reasonParts)
+                    : "Recent call pattern is worth operator review.";
+
+                return new RecommendationTalkgroupCandidateDto(
+                    row.SystemShortName,
+                    row.Talkgroup,
+                    row.TalkgroupName,
+                    category,
+                    row.Calls,
+                    row.AudioSeconds,
+                    row.AverageAudioSeconds,
+                    row.PendingCalls,
+                    row.PendingAudioSeconds,
+                    _config.Transcription.DeferredTalkgroups.Contains(row.Talkgroup),
+                    reason,
+                    score,
+                    row.WeakCalls,
+                    weakPct,
+                    row.FailedCalls,
+                    failedPct,
+                    row.RepetitiveCalls,
+                    repetitivePct,
+                    row.IncidentCalls,
+                    incidentYieldPct);
+            })
+            .Where(row => row.Calls >= 3 && row.Score >= 18)
+            .OrderByDescending(row => row.Score)
+            .ThenByDescending(row => row.AudioSeconds)
+            .ToList();
+    }
+
+    private static string NormalizeCategory(string category)
+    {
+        category = (category ?? string.Empty).Trim().ToLowerInvariant();
+        return category is "police" or "fire" or "ems" or "traffic" ? category : "other";
+    }
+
     private static string FormatDuration(long seconds)
     {
         if (seconds < 60) return $"{seconds}s";
@@ -691,16 +749,16 @@ public sealed class SystemRecommendationService
             ],
             "This is usually temporary after traffic spikes or service restarts."),
         "priority-low-value-audio" => new RecommendationRunbookDto(
-            "Create A Talkgroup Priority Policy",
-            "Reduce queue pressure by deferring high-audio, low-priority talkgroups while preserving public-safety calls.",
-            ["Start with defer, not ignore.", "Use audio duration and category as the first heuristic.", "Later add self-learning based on alert/incident yield."],
+            "Review Talkgroup Noise Candidates",
+            "Identify high-volume or low-yield talkgroups that may deserve a Setup-level TR exclusion.",
+            ["Recommendations ranks candidates only; it does not change TR capture.", "Setup > Talkgroups is the only place for global TR exclusion.", "Use volume, weak-call rate, repetition, failure rate, and incident yield together."],
             [
-                new RecommendationRunbookStepDto("Review candidates", "Review the candidate table on this page. Candidates are generated from the running system's recent audio load, category, and current deferred state.", new RecommendationTargetDto("recommendations", "", "")),
-                new RecommendationRunbookStepDto("Apply defer rule", "Use Defer These Talkgroups to add current candidates to the deferred queue list. New calls on those TGs run after normal live calls.", new RecommendationTargetDto("pizzad", "jobs", "")),
-                new RecommendationRunbookStepDto("Monitor outcome", "Watch whether normal public-safety calls catch up faster and whether deferred TGs still get processed during quieter periods.", new RecommendationTargetDto("pizzad", "jobs", "")),
-                new RecommendationRunbookStepDto("Future self-learning policy", "The engine should eventually suggest priority using audio share, alert matches, incident contribution, category, and user overrides.", new RecommendationTargetDto("settings", "profiles", ""))
+                new RecommendationRunbookStepDto("Review candidates", "Review the candidate table on this page. Candidates are generated from recent audio volume, weak-call rate, transcription failure rate, repetition hints, and incident yield.", new RecommendationTargetDto("system", "recommendations", "talkgroup-noise")),
+                new RecommendationRunbookStepDto("Open Setup for policy changes", "Use Review in Setup on a candidate row to open Setup > Talkgroups. Apply global TR exclusion there only if the TG is noisy or useless for every profile.", new RecommendationTargetDto("setup", "talkgroups", "")),
+                new RecommendationRunbookStepDto("Apply and restart capture when needed", "Changing TR exclusion regenerates talkgroup CSV policy. Apply the Setup plan so trunk-recorder reloads the generated talkgroup list.", new RecommendationTargetDto("setup", "apply", "")),
+                new RecommendationRunbookStepDto("Monitor outcome", "After exclusion, watch transcription queue, incident yield, and category pages for expected volume reduction without losing useful operational traffic.", new RecommendationTargetDto("pizzad", "jobs", ""))
             ],
-            "The current automatic action only defers. It does not delete, skip, or ignore calls."),
+            "A high score is not an automatic block decision. It is an operator review queue for Setup."),
         "ingest-paused" => new RecommendationRunbookDto(
             "Resolve Paused Ingest",
             "Decide whether to resume live callstream intake or keep dropping new calls until the transcription queue clears.",
@@ -822,7 +880,16 @@ public sealed record RecommendationTalkgroupCandidateDto(
     long PendingCalls,
     long PendingAudioSeconds,
     bool AlreadyDeferred,
-    string Reason);
+    string Reason,
+    double Score = 0,
+    long WeakCalls = 0,
+    double WeakPct = 0,
+    long FailedCalls = 0,
+    double FailedPct = 0,
+    long RepetitiveCalls = 0,
+    double RepetitivePct = 0,
+    long IncidentCalls = 0,
+    double IncidentYieldPct = 0);
 
 public sealed record RecommendationDiagnosticDto(
     string Label,

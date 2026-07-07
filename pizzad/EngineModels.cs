@@ -619,7 +619,11 @@ public sealed record QueueTalkgroupLoadDto(
     long AudioSeconds,
     double AverageAudioSeconds,
     long PendingCalls,
-    long PendingAudioSeconds);
+    long PendingAudioSeconds,
+    long WeakCalls = 0,
+    long FailedCalls = 0,
+    long RepetitiveCalls = 0,
+    long IncidentCalls = 0);
 
 public sealed record StatusSummaryDto(int Calls, int Incidents, int HiddenIncidents, int Alerts, long Tokens);
 
