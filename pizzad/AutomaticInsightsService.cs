@@ -77,7 +77,7 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     public void Enqueue(EngineCall call)
     {
-        if (!_config.Setup.Completed || !IsEnabled() || !DownstreamProfilePolicy.Allows(_config, call))
+        if (!_config.Setup.Completed || !IsEnabled() || !DownstreamProfilePolicy.Allows(_config, _catalog, call))
             return;
         _queue.Enqueue(call);
     }
@@ -96,7 +96,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         calls = calls
             .Where(c => string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
-                        DownstreamProfilePolicy.Allows(_config, c) &&
+                        DownstreamProfilePolicy.Allows(_config, _catalog, c) &&
                         !string.IsNullOrWhiteSpace(c.Transcription))
             .OrderBy(c => c.StartTime)
             .ToList();
@@ -253,7 +253,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     {
         var recent = (await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase))
-            .Where(c => DownstreamProfilePolicy.Allows(_config, c))
+            .Where(c => DownstreamProfilePolicy.Allows(_config, _catalog, c))
             .Where(IsIncidentEligibleCall)
             .Where(IsCatalogIncidentEligibleOrStrongSignal)
             .OrderBy(c => c.StartTime)
@@ -5146,7 +5146,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private IncidentDto? FilterIncidentForActiveProfile(IncidentDto incident)
     {
         var visibleCalls = incident.Calls
-            .Where(c => DownstreamProfilePolicy.Allows(_config, c.Category, c.SystemShortName, c.Talkgroup))
+            .Where(c => DownstreamProfilePolicy.Allows(_config, _catalog, c.Category, c.SystemShortName, c.Talkgroup))
             .ToList();
         if (visibleCalls.Count == 0)
             return null;

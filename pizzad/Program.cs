@@ -759,21 +759,21 @@ app.MapGet("/api/v1/categories/{category}/talkgroup-keys/{talkgroupKey}/calls", 
 .WithName("CategoryTalkgroupKeyCalls")
 .WithOpenApi();
 
-app.MapGet("/api/v1/calls/{id:long}", async (HttpContext context, long id, AuthService authService, EngineDatabase database, EngineConfig cfg) =>
+app.MapGet("/api/v1/calls/{id:long}", async (HttpContext context, long id, AuthService authService, EngineDatabase database, EngineConfig cfg, TalkgroupCatalogService catalog) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var call = await database.GetCallAsync(id, context.RequestAborted);
-    if (call != null && !DownstreamProfilePolicy.Allows(cfg, call)) return Results.NotFound();
+    if (call != null && !DownstreamProfilePolicy.Allows(cfg, catalog, call)) return Results.NotFound();
     return call == null ? Results.NotFound() : Results.Ok(call);
 })
 .WithName("CallById")
 .WithOpenApi();
 
-app.MapGet("/api/v1/calls/{id:long}/audio", async (HttpContext context, long id, AuthService authService, EngineDatabase database, EngineConfig cfg) =>
+app.MapGet("/api/v1/calls/{id:long}/audio", async (HttpContext context, long id, AuthService authService, EngineDatabase database, EngineConfig cfg, TalkgroupCatalogService catalog) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var call = await database.GetCallAsync(id, context.RequestAborted);
-    if (call != null && !DownstreamProfilePolicy.Allows(cfg, call)) return Results.NotFound();
+    if (call != null && !DownstreamProfilePolicy.Allows(cfg, catalog, call)) return Results.NotFound();
     if (call == null || string.IsNullOrWhiteSpace(call.AudioPath)) return Results.NotFound();
     var path = Path.GetFullPath(Path.Combine(cfg.Storage.AudioRoot, call.AudioPath));
     var root = Path.GetFullPath(cfg.Storage.AudioRoot);

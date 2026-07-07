@@ -9,6 +9,7 @@ public sealed class DashboardService
     private readonly EngineDatabase _database;
     private readonly EngineConfig _config;
     private readonly GeocodingService _geocoding;
+    private readonly TalkgroupCatalogService _catalog;
     private readonly SemaphoreSlim _dashboardCacheGate = new(1, 1);
     private DashboardCacheEntry? _dashboardCache;
     private Task<DashboardDto>? _dashboardBuildTask;
@@ -17,11 +18,13 @@ public sealed class DashboardService
     public DashboardService(
         EngineDatabase database,
         EngineConfig config,
-        GeocodingService geocoding)
+        GeocodingService geocoding,
+        TalkgroupCatalogService catalog)
     {
         _database = database;
         _config = config;
         _geocoding = geocoding;
+        _catalog = catalog;
     }
 
     public async Task<DashboardDto> BuildDashboardAsync(long start, long end, CancellationToken ct)
@@ -260,6 +263,7 @@ public sealed class DashboardService
 
     private bool Allows(string category, string? systemShortName, long talkgroup)
     {
+        if (!_catalog.IsGloballyEnabled(systemShortName, talkgroup)) return false;
         var profile = _config.Profiles.Items.FirstOrDefault(p => p.Id == _config.Profiles.ActiveProfileId);
         if (profile == null) return true;
         var setting = FindSetting(profile, systemShortName, talkgroup);

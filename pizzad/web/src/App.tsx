@@ -2706,6 +2706,8 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
   const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
   const [selectionOrderKeys, setSelectionOrderKeys] = useState<string[]>([]);
   const [hidingSelected, setHidingSelected] = useState(false);
+  const [excludingSelected, setExcludingSelected] = useState(false);
+  const [selectionMessage, setSelectionMessage] = useState("");
   const activeProfile = profileState?.profiles.find(profile => profile.id === profileState.activeProfileId);
   function setSortMode(value: CategorySortMode) {
     setSortModeState(value);
@@ -2726,10 +2728,12 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
       return next;
     });
   }
-  function clearSelection() {
+  function clearSelection(clearMessage = true) {
     setSelectionMode(false);
     setSelectedTalkgroupKeys(new Set());
     setSelectionOrderKeys([]);
+    if (clearMessage)
+      setSelectionMessage("");
   }
   function toggleSelectionMode(sortedGroups: CategoryPage["groups"]) {
     if (selectionMode) {
@@ -2737,6 +2741,7 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
       return;
     }
     setSelectionOrderKeys(sortedGroups.map(categoryGroupKey));
+    setSelectionMessage("");
     setSelectionMode(true);
   }
   async function hideSelectedTalkgroups(groups: CategoryPage["groups"]) {
@@ -2779,6 +2784,52 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
       setHidingSelected(false);
     }
   }
+  async function excludeSelectedTalkgroups(groups: CategoryPage["groups"]) {
+    const selectedGroups = groups.filter(group => selectedTalkgroupKeys.has(categoryGroupKey(group)));
+    if (!selectedGroups.length)
+      return;
+    if (!confirmAction("Exclude selected talkgroups from TR?", `Exclude ${selectedGroups.length.toLocaleString()} selected talkgroup${selectedGroups.length === 1 ? "" : "s"} from the generated TR talkgroup CSV for all profiles? This also hides matching historical calls from dashboard, AI, incidents, and category pages. Running TR must be restarted or reapplied before capture changes take effect.`))
+      return;
+    setExcludingSelected(true);
+    setSelectionMessage("");
+    try {
+      const loaded = await api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog");
+      const selectedKeys = new Set(selectedGroups.map(categoryGroupKey));
+      const selectedFallbacks = selectedGroups.map(group => ({
+        system: normalizeTalkgroupSystem(group.systemShortName || ""),
+        id: group.talkgroup
+      }));
+      let changed = 0;
+      const updatedAtUtc = new Date().toISOString();
+      const next: TalkgroupCatalogDocument = {
+        ...loaded.document,
+        updatedAtUtc,
+        items: loaded.document.items.map(row => {
+          const rowKey = talkgroupCatalogKey(row);
+          const rowSystem = normalizeTalkgroupSystem(row.systemShortName || "");
+          const matched = selectedKeys.has(rowKey) || selectedFallbacks.some(fallback => fallback.id === row.id && (!fallback.system || !rowSystem || fallback.system === rowSystem));
+          if (!matched || row.enabled === false)
+            return row;
+          changed += 1;
+          return { ...row, enabled: false, updatedAtUtc };
+        })
+      };
+      if (!changed) {
+        setSelectionMessage("No matching catalog rows were found for the selected TGs.");
+        return;
+      }
+      await api.request("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(next) });
+      setSelectionMode(false);
+      setSelectedTalkgroupKeys(new Set());
+      setSelectionOrderKeys([]);
+      await reload();
+      setSelectionMessage(`${changed.toLocaleString()} TG${changed === 1 ? "" : "s"} excluded from TR catalog. Restart or reapply TR before capture changes take effect.`);
+    } catch (error) {
+      setSelectionMessage(error instanceof Error ? error.message : "Unable to exclude selected TGs from TR.");
+    } finally {
+      setExcludingSelected(false);
+    }
+  }
   if (!data) return <div className="category-page">Loading...</div>;
   const totalCallCount = data.groups.reduce((sum, group) => sum + group.count, 0);
   const strongCallCount = data.groups.reduce((sum, group) => sum + group.strongCount, 0);
@@ -2811,14 +2862,16 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
               <span>Hide weak calls</span>
             </label>
             <button type="button" className={selectionMode ? "active" : ""} onClick={() => toggleSelectionMode(autoSortedGroups)}>{selectionMode ? "Selecting TGs" : "Select TGs"}</button>
-            {selectionMode && <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected} onClick={() => void hideSelectedTalkgroups(filteredGroups)}>{hidingSelected ? "Hiding..." : `Hide selected (${selectedCount})`}</button>}
-            {selectionMode && <button type="button" disabled={hidingSelected} onClick={clearSelection}>Clear</button>}
+            {selectionMode && <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected || excludingSelected} onClick={() => void hideSelectedTalkgroups(filteredGroups)}>{hidingSelected ? "Hiding..." : `Hide selected (${selectedCount})`}</button>}
+            {selectionMode && <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected || excludingSelected} onClick={() => void excludeSelectedTalkgroups(filteredGroups)}>{excludingSelected ? "Excluding..." : `Exclude from TR (${selectedCount})`}</button>}
+            {selectionMode && <button type="button" disabled={hidingSelected || excludingSelected} onClick={() => clearSelection()}>Clear</button>}
           </div>
           <span className="muted category-counts">
             {displayCallCount.toLocaleString()} of {totalCallCount.toLocaleString()} call{totalCallCount === 1 ? "" : "s"} shown / {filteredGroups.length.toLocaleString()} shown / {data.groups.length.toLocaleString()} profile TG{data.groups.length === 1 ? "" : "s"}
             {profileHiddenTalkgroupCount > 0 ? ` / ${profileHiddenTalkgroupCount.toLocaleString()} hidden by profile` : ""}
             {weakHiddenTalkgroupCount > 0 ? ` / ${weakHiddenTalkgroupCount.toLocaleString()} hidden by weak-call filter` : ""}
           </span>
+          {selectionMessage && <span className="muted category-counts">{selectionMessage}</span>}
         </div>
       </div>
       <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} selectionMode={selectionMode} selectedTalkgroupKeys={selectedTalkgroupKeys} onToggleSelected={setTalkgroupSelected} />

@@ -12,6 +12,7 @@ public sealed class EnginePipeline
     private readonly EventStream _events;
     private readonly EngineAlertService _alerts;
     private readonly TalkgroupResolver _talkgroups;
+    private readonly TalkgroupCatalogService _catalog;
     private readonly AutomaticInsightsService _insights;
     private readonly EmbeddingService _embeddings;
     private readonly CallAudioService _audio;
@@ -49,6 +50,7 @@ public sealed class EnginePipeline
         EventStream events,
         EngineAlertService alerts,
         TalkgroupResolver talkgroups,
+        TalkgroupCatalogService catalog,
         AutomaticInsightsService insights,
         EmbeddingService embeddings,
         CallAudioService audio,
@@ -61,6 +63,7 @@ public sealed class EnginePipeline
         _events = events;
         _alerts = alerts;
         _talkgroups = talkgroups;
+        _catalog = catalog;
         _insights = insights;
         _embeddings = embeddings;
         _audio = audio;
@@ -340,7 +343,7 @@ public sealed class EnginePipeline
 
             var audioSeconds = Math.Max(0, call.StopTime - call.StartTime);
             var quality = TranscriptionQualityClassifier.Classify(result.Text, audioSeconds: audioSeconds);
-            var profileAllowsDownstream = DownstreamProfilePolicy.Allows(_config, call);
+            var profileAllowsDownstream = DownstreamProfilePolicy.Allows(_config, _catalog, call);
             var suppressDownstream = item.Imported || item.SuppressDownstream || !profileAllowsDownstream;
             var alert = suppressDownstream
                 ? new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty)

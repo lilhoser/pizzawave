@@ -239,6 +239,12 @@ public sealed class TalkgroupCatalogService
             .Select(i => new TalkgroupOptionDto(ItemKey(i), i.SystemShortName, i.Id, BuildLabel(i), i.OpsCategory))
             .ToList();
 
+    public bool IsGloballyEnabled(string? systemShortName, long id)
+    {
+        var row = FindBestMatch(Load().Items, systemShortName, id);
+        return row?.Enabled ?? true;
+    }
+
     public IReadOnlyList<TalkgroupCatalogItem> EffectiveItemsForActiveProfile(TalkgroupCatalogDocument document)
     {
         var profile = _config.Profiles.Items.FirstOrDefault(p => p.Id == _config.Profiles.ActiveProfileId);
@@ -254,7 +260,7 @@ public sealed class TalkgroupCatalogService
         foreach (var row in document.Items)
         {
             var setting = FirstSettingMatch(overrides, row);
-            var enabled = setting?.Enabled ?? row.Enabled;
+            var enabled = row.Enabled && (setting?.Enabled ?? true);
             var category = NormalizeCategoryValue(string.IsNullOrWhiteSpace(setting?.Category) ? row.OpsCategory : setting!.Category);
             var label = setting?.Label?.Trim() ?? string.Empty;
             yield return row with

@@ -2,13 +2,27 @@ namespace pizzad;
 
 public static class DownstreamProfilePolicy
 {
+    public static bool Allows(EngineConfig config, TalkgroupCatalogService catalog, EngineCall call) =>
+        Allows(config, catalog, call.Category, call.SystemShortName, call.Talkgroup);
+
+    public static bool Allows(EngineConfig config, TalkgroupCatalogService catalog, string category, string? systemShortName, long talkgroup)
+    {
+        if (!catalog.IsGloballyEnabled(systemShortName, talkgroup))
+            return false;
+
+        return AllowsProfile(config, category, systemShortName, talkgroup);
+    }
+
     public static bool Allows(EngineConfig config, EngineCall call) =>
-        Allows(config, call.Category, call.SystemShortName, call.Talkgroup);
+        AllowsProfile(config, call.Category, call.SystemShortName, call.Talkgroup);
 
     public static bool Allows(EngineConfig config, string category, long talkgroup)
-        => Allows(config, category, string.Empty, talkgroup);
+        => AllowsProfile(config, category, string.Empty, talkgroup);
 
     public static bool Allows(EngineConfig config, string category, string? systemShortName, long talkgroup)
+        => AllowsProfile(config, category, systemShortName, talkgroup);
+
+    private static bool AllowsProfile(EngineConfig config, string category, string? systemShortName, long talkgroup)
     {
         var profile = config.Profiles.Items.FirstOrDefault(p => p.Id == config.Profiles.ActiveProfileId);
         if (profile == null)

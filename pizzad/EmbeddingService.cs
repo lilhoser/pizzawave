@@ -12,6 +12,7 @@ public sealed class EmbeddingService : BackgroundService
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
+    private readonly TalkgroupCatalogService _catalog;
     private readonly ILogger<EmbeddingService> _logger;
     private readonly ConcurrentQueue<long> _queue = new();
     private readonly SemaphoreSlim _signal = new(0);
@@ -26,11 +27,12 @@ public sealed class EmbeddingService : BackgroundService
     private bool _lastEmbeddingEndpointOk;
     private static readonly TimeSpan HealthProbeInterval = TimeSpan.FromMinutes(1);
 
-    public EmbeddingService(EngineConfig config, EngineDatabase database, EventStream events, ILogger<EmbeddingService> logger)
+    public EmbeddingService(EngineConfig config, EngineDatabase database, EventStream events, TalkgroupCatalogService catalog, ILogger<EmbeddingService> logger)
     {
         _config = config;
         _database = database;
         _events = events;
+        _catalog = catalog;
         _logger = logger;
     }
 
@@ -402,7 +404,7 @@ public sealed class EmbeddingService : BackgroundService
         string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
         !call.IsImported &&
-        DownstreamProfilePolicy.Allows(_config, call) &&
+        DownstreamProfilePolicy.Allows(_config, _catalog, call) &&
         !string.IsNullOrWhiteSpace(call.Transcription) &&
         call.Transcription.Trim().Length >= 12;
 
