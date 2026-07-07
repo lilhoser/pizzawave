@@ -734,7 +734,11 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             setPage("settings");
           }}
         />}
-        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={setSetupTrOperation} />}
+        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={value => {
+          setSetupTrOperation(value);
+          if (!value)
+            void refreshStatusRef.current();
+        }} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} />}
       </main>
@@ -4703,7 +4707,7 @@ function SiteValidationStep({
   const validationSampleRateOk = !validationSampleRateMessage;
   const validationMetricCount = Math.max(1, Math.min(3, Number(validationMetricsCandidates) || 2));
   const validationRfCandidateLimit = 3;
-  const selectedWaterfallSweepSelections = normalizeWaterfallSweepSelections(waterfallSweepSelections).filter(row => controlChannels.includes(row.frequencyHz));
+  const selectedWaterfallSweepSelections = normalizeWaterfallSweepSelections(waterfallSweepSelections);
   const selectedWaterfallSweepControlChannels = normalizeControlChannelSelection(selectedWaterfallSweepSelections.map(row => row.frequencyHz));
   const hasWaterfallSweepHandoff = selectedWaterfallSweepSelections.length > 0;
   const validationRunControlChannels = selectedWaterfallSweepControlChannels.length ? selectedWaterfallSweepControlChannels : controlChannels;
@@ -5578,7 +5582,7 @@ function WaterfallStep({
     ...systems.flatMap(system => system.controlChannelsHz),
     activeControlChannelHz
   ]);
-  const selectedSweepSelections = normalizeWaterfallSweepSelections(waterfallSweepSelections).filter(row => controlChannelOptions.includes(row.frequencyHz));
+  const selectedSweepSelections = normalizeWaterfallSweepSelections(waterfallSweepSelections);
   const selectedSweepControlChannels = normalizeControlChannelSelection(selectedSweepSelections.map(row => row.frequencyHz));
   const selectedSweepControlChannelSet = new Set(selectedSweepControlChannels);
   const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
