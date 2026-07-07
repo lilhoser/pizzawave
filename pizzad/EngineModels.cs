@@ -1500,6 +1500,8 @@ public sealed record SaveProfilesRequest(Guid ActiveProfileId, IReadOnlyList<Pro
 
 public sealed record SetActiveProfileRequest(Guid ActiveProfileId);
 
+public sealed record HideProfileTalkgroupsRequest(IReadOnlyList<ProfileTalkgroupSetting> Talkgroups);
+
 public sealed record TalkgroupOptionDto(string Key, string SystemShortName, long Talkgroup, string Label, string Category);
 
 public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);

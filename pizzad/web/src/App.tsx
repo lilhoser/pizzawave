@@ -2861,22 +2861,11 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
     }
     if (!confirmAction("Hide selected talkgroups from profile?", `Hide ${selectedGroups.length.toLocaleString()} talkgroup${selectedGroups.length === 1 ? "" : "s"} from ${activeProfile.name}? Calls remain captured and transcribed, but this profile will not see those TGs in user-facing views or downstream processing.`))
       return;
-    const settingKeys = new Set(settings.map(profileSettingKey));
-    const nextProfiles = profileState.profiles.map(profile => {
-      if (profile.id !== activeProfile.id)
-        return profile;
-      const without = (profile.talkgroups ?? []).filter(row => !settingKeys.has(profileSettingKey(row)));
-      return {
-        ...profile,
-        talkgroups: [...without, ...settings],
-        updatedAtUtc: new Date().toISOString()
-      };
-    });
     setHidingSelected(true);
     try {
-      const saved = await api.request<ProfileState>("/api/v1/profiles", {
+      const saved = await api.request<ProfileState>(`/api/v1/profiles/${encodeURIComponent(activeProfile.id)}/talkgroups/hide`, {
         method: "POST",
-        body: JSON.stringify({ activeProfileId: profileState.activeProfileId, profiles: nextProfiles })
+        body: JSON.stringify({ talkgroups: settings })
       });
       setProfileState(saved);
       clearSelection();

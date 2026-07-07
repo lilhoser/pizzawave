@@ -803,7 +803,7 @@ app.MapGet("/api/v1/incidents", async (HttpContext context, long? start, long? e
 
 app.MapPost("/api/v1/incidents/{id:long}/alerts/dismiss", async (HttpContext context, long id, AuthService authService, EngineDatabase database, DashboardService dashboard, EventStream events) =>
 {
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var dismissed = await database.DismissIncidentAlertsAsync(id, context.RequestAborted);
     await dashboard.InvalidateCacheAsync(context.RequestAborted);
     await events.PublishAsync("alert_matched", new { incidentId = id, dismissed }, context.RequestAborted);
@@ -814,7 +814,7 @@ app.MapPost("/api/v1/incidents/{id:long}/alerts/dismiss", async (HttpContext con
 
 app.MapPost("/api/v1/alerts/{id:long}/dismiss", async (HttpContext context, long id, AuthService authService, EngineDatabase database, DashboardService dashboard, EventStream events) =>
 {
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var dismissed = await database.DismissAlertMatchAsync(id, context.RequestAborted);
     await dashboard.InvalidateCacheAsync(context.RequestAborted);
     await events.PublishAsync("alert_matched", new { alertId = id, dismissed }, context.RequestAborted);
@@ -1356,6 +1356,65 @@ app.MapPost("/api/v1/profiles/active", async (HttpContext context, SetActiveProf
     return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, cfg.Profiles.Items ?? [], false, string.Empty, $"Profile active: {selected?.Name ?? active.Name}."));
 })
 .WithName("ProfilesSetActive")
+.WithOpenApi();
+
+app.MapPost("/api/v1/profiles/{profileId:guid}/talkgroups/hide", async (HttpContext context, Guid profileId, HideProfileTalkgroupsRequest request, AuthService authService, EngineConfig cfg) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var profiles = cfg.Profiles.Items?.ToList() ?? [];
+    var target = profiles.FirstOrDefault(p => p.Id == profileId);
+    if (target == null)
+        return Results.BadRequest(new { error = "Unknown profile." });
+    if (IsDefaultProfile(target))
+        return Results.BadRequest(new { error = "Default profile is read-only. Create or select another profile before hiding talkgroups." });
+
+    var settings = (request.Talkgroups ?? [])
+        .Where(t => t.Id > 0)
+        .Select(t =>
+        {
+            var system = TalkgroupCatalogService.SystemFromKeyOrValue(t.Key, t.SystemShortName, t.Id);
+            return new ProfileTalkgroupSetting
+            {
+                Key = TalkgroupCatalogService.CatalogKey(system, t.Id),
+                SystemShortName = system,
+                Id = t.Id,
+                Enabled = false,
+                Label = (t.Label ?? string.Empty).Trim(),
+                Category = TalkgroupCatalogService.NormalizeOpsCategory(t.Category),
+                IncidentEligible = t.IncidentEligible
+            };
+        })
+        .GroupBy(TalkgroupCatalogService.SettingKey, StringComparer.OrdinalIgnoreCase)
+        .Select(g => g.Last())
+        .ToList();
+    if (settings.Count == 0)
+        return Results.BadRequest(new { error = "At least one talkgroup is required." });
+
+    var settingKeys = settings.Select(TalkgroupCatalogService.SettingKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var candidate = cfg.Clone();
+    var candidateTarget = candidate.Profiles.Items.FirstOrDefault(p => p.Id == profileId);
+    if (candidateTarget == null)
+        return Results.BadRequest(new { error = "Unknown profile." });
+    candidateTarget.Talkgroups = (candidateTarget.Talkgroups ?? [])
+        .Where(t => !settingKeys.Contains(TalkgroupCatalogService.SettingKey(t)))
+        .Concat(settings)
+        .ToList();
+    candidateTarget.UpdatedAtUtc = DateTime.UtcNow;
+    candidate.ApplyDefaults();
+    try
+    {
+        await SaveConfigAsync(candidate, context.RequestAborted);
+        cfg.Profiles = candidate.Profiles;
+        cfg.ApplyDefaults();
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
+    {
+        return Results.BadRequest(new { error = $"Unable to save profile rules to {cfg.ConfigPath}.", detail = ex.Message });
+    }
+
+    return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, cfg.Profiles.Items ?? [], false, string.Empty, $"{settings.Count:N0} talkgroup rule(s) hidden in {candidateTarget.Name}."));
+})
+.WithName("ProfilesHideTalkgroups")
 .WithOpenApi();
 
 app.MapGet("/api/v1/talkgroups", (HttpContext context, AuthService authService, TalkgroupResolver talkgroups) =>
