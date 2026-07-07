@@ -148,10 +148,16 @@ function App() {
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
   const refreshStatusRef = useRef<() => Promise<void>>(async () => { });
   const refreshVisiblePageRef = useRef<() => Promise<void>>(async () => { });
+  const statusRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const visibleRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const visibleRefreshQueuedRef = useRef(false);
+  const statusRefreshHadSuccessRef = useRef(false);
   const pageRef = useRef<Page>(page);
   const rangeHoursRef = useRef(rangeHours);
   const globalSearchRef = useRef(globalSearch);
   const categoryRequestIdRef = useRef(0);
+  const lastStatusRefreshAtRef = useRef(0);
+  const lastPageRefreshAtRef = useRef(0);
   const lastDashboardRefreshRef = useRef(0);
   const playedAudioRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<Set<HTMLAudioElement>>(new Set());
@@ -270,6 +276,7 @@ function App() {
     if (!setup.completed) {
       const healthStatus = await api.request<EngineHealth>("/api/v1/health");
       setEngineHealth(healthStatus);
+      statusRefreshHadSuccessRef.current = true;
       setStatus("Setup");
       return;
     }
@@ -293,6 +300,7 @@ function App() {
     const latestActiveAlert = alertRows.find(alert => alert.active !== false);
     if (latestActiveAlert && autoplayAllows(alertConfig.values ?? alertConfig, "alert"))
       playCallAudio(latestActiveAlert.callId, "alert", undefined, alertPlaybackLabel(latestActiveAlert));
+    statusRefreshHadSuccessRef.current = true;
     setStatus("Live");
     void api.request<SystemRecommendations>("/api/v1/system/recommendations")
       .then(setRecommendations)
@@ -324,15 +332,48 @@ function App() {
     }
   }, [page, rangeHours, globalSearch]);
 
-  const load = useCallback(async () => {
-    void refreshStatusData()
-      .catch(error => setStatus(error instanceof Error ? error.message : "Error"));
-    try {
-      await refreshVisiblePage();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Error");
+  const reportRefreshError = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : "Error";
+    setStatus(statusRefreshHadSuccessRef.current && message === "Failed to fetch" ? "Reconnecting" : message);
+  }, []);
+
+  const runStatusRefresh = useCallback(() => {
+    if (statusRefreshInFlightRef.current)
+      return statusRefreshInFlightRef.current;
+    lastStatusRefreshAtRef.current = Date.now();
+    const task = refreshStatusData()
+      .catch(reportRefreshError)
+      .finally(() => {
+        statusRefreshInFlightRef.current = null;
+      });
+    statusRefreshInFlightRef.current = task;
+    return task;
+  }, [refreshStatusData, reportRefreshError]);
+
+  const runVisibleRefresh = useCallback(() => {
+    if (visibleRefreshInFlightRef.current) {
+      visibleRefreshQueuedRef.current = true;
+      return visibleRefreshInFlightRef.current;
     }
-  }, [refreshStatusData, refreshVisiblePage]);
+    const task = (async () => {
+      do {
+        visibleRefreshQueuedRef.current = false;
+        lastPageRefreshAtRef.current = Date.now();
+        await refreshVisiblePageRef.current();
+      } while (visibleRefreshQueuedRef.current);
+    })()
+      .catch(reportRefreshError)
+      .finally(() => {
+        visibleRefreshInFlightRef.current = null;
+      });
+    visibleRefreshInFlightRef.current = task;
+    return task;
+  }, [reportRefreshError]);
+
+  const load = useCallback(async () => {
+    void runStatusRefresh();
+    await runVisibleRefresh();
+  }, [runStatusRefresh, runVisibleRefresh]);
 
   useEffect(() => { refreshStatusRef.current = refreshStatusData; }, [refreshStatusData]);
   useEffect(() => { refreshVisiblePageRef.current = refreshVisiblePage; }, [refreshVisiblePage]);
@@ -396,20 +437,21 @@ function App() {
     let pageTimer = 0;
     const scheduleStatus = (delayMs: number) => {
       window.clearTimeout(statusTimer);
+      const elapsed = Date.now() - lastStatusRefreshAtRef.current;
+      delayMs = Math.max(delayMs, elapsed >= 5_000 ? 0 : 5_000 - elapsed);
       statusTimer = window.setTimeout(() => {
-        void refreshStatusRef.current().catch(error => setStatus(error instanceof Error ? error.message : "Error"));
+        void runStatusRefresh();
       }, delayMs);
     };
     const schedulePage = (delayMs: number) => {
       window.clearTimeout(pageTimer);
-      if (pageRef.current === "dashboard") {
-        const elapsed = Date.now() - lastDashboardRefreshRef.current;
-        delayMs = Math.max(delayMs, elapsed >= 30_000 ? 0 : 30_000 - elapsed);
-      }
+      const minIntervalMs = pageRef.current === "dashboard" ? 30_000 : 5_000;
+      const elapsed = Date.now() - lastPageRefreshAtRef.current;
+      delayMs = Math.max(delayMs, elapsed >= minIntervalMs ? 0 : minIntervalMs - elapsed);
       pageTimer = window.setTimeout(() => {
         if (pageRef.current === "dashboard")
           lastDashboardRefreshRef.current = Date.now();
-        void refreshVisiblePageRef.current().catch(error => setStatus(error instanceof Error ? error.message : "Error"));
+        void runVisibleRefresh();
       }, delayMs);
     };
     const refreshCurrentView = () => {
@@ -449,7 +491,7 @@ function App() {
       window.clearTimeout(pageTimer);
       events.close();
     };
-  }, []);
+  }, [runStatusRefresh, runVisibleRefresh]);
 
   const nav = useMemo(() => ["dashboard", ...categories, "setup", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
