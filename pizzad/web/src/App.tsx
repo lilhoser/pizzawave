@@ -285,12 +285,16 @@ function App() {
   }, [page, rangeHours, globalSearch]);
 
   const load = useCallback(async () => {
+    const statusPromise = refreshStatusData()
+      .catch(error => setStatus(error instanceof Error ? error.message : "Error"));
     try {
-      await Promise.all([refreshStatusData(), refreshVisiblePage()]);
+      await refreshVisiblePage();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Error");
     }
-  }, [refreshStatusData, refreshVisiblePage]);
+    if (!setupStatus)
+      await statusPromise;
+  }, [refreshStatusData, refreshVisiblePage, setupStatus]);
 
   useEffect(() => { refreshStatusRef.current = refreshStatusData; }, [refreshStatusData]);
   useEffect(() => { refreshVisiblePageRef.current = refreshVisiblePage; }, [refreshVisiblePage]);
@@ -340,6 +344,10 @@ function App() {
   }, [autoplayMuted]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (categories.includes(page as any))
+      setCategory(null);
+  }, [page, rangeHours]);
   useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
