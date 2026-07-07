@@ -88,7 +88,10 @@ public sealed class SiteSetupService
     {
         var applied = await BuildAppliedConfigAsync(ct);
         var next = Normalize(_config.SiteSetup);
-        next.LastAppliedAtUtc = DateTime.UtcNow;
+        var appliedAt = DateTime.UtcNow;
+        next.Sources = ReconcileDesiredSourcesWithApplied(next.Sources, applied.Sources);
+        next.UpdatedAtUtc = appliedAt;
+        next.LastAppliedAtUtc = appliedAt;
         next.LastAppliedConfigHash = applied.ConfigHash;
         _config.SiteSetup = next;
         _config.Save();
@@ -219,7 +222,7 @@ public sealed class SiteSetupService
         if (desiredControls.Count > 0 && !desiredControls.SequenceEqual(applied.ControlChannelsHz))
             rows.Add(new SiteSetupPendingChangeDto("Control Channels", $"Desired CCs ({desiredControls.Count}) differ from applied CCs ({applied.ControlChannelsHz.Count})."));
 
-        if (desired.Sources.Count > 0 && !string.Equals(SourceSummary(desired.Sources), AppliedSourceSummary(applied.Sources), StringComparison.Ordinal))
+        if (desired.Sources.Count > 0 && !string.Equals(SourceConfigSummary(desired.Sources), AppliedSourceConfigSummary(applied.Sources), StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("TR Sources", $"Desired sources ({desired.Sources.Count}) differ from applied sources ({applied.Sources.Count})."));
 
         if (desired.SourceAssignments.Count > 0 &&
@@ -410,8 +413,35 @@ public sealed class SiteSetupService
     private static string SourceSummary(IEnumerable<RfSurveySourceDto>? sources) =>
         string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}:{source.Gain}"));
 
-    private static string AppliedSourceSummary(IEnumerable<SiteSetupAppliedSourceDto>? sources) =>
-        string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}:{source.Gain}"));
+    private static string SourceConfigSummary(IEnumerable<RfSurveySourceDto>? sources) =>
+        string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}"));
+
+    private static string AppliedSourceConfigSummary(IEnumerable<SiteSetupAppliedSourceDto>? sources) =>
+        string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}"));
+
+    private static List<RfSurveySourceDto> ReconcileDesiredSourcesWithApplied(
+        IReadOnlyList<RfSurveySourceDto> desired,
+        IReadOnlyList<SiteSetupAppliedSourceDto> applied)
+    {
+        if (desired.Count == 0 || applied.Count == 0)
+            return desired.ToList();
+        return desired.Select(source =>
+        {
+            var live = applied.FirstOrDefault(row => row.Index == source.Index);
+            return live == null
+                ? source
+                : source with
+                {
+                    Device = live.Device,
+                    Serial = string.IsNullOrWhiteSpace(source.Serial) ? live.Serial : source.Serial,
+                    SdrType = string.IsNullOrWhiteSpace(source.SdrType) ? SdrTypeFromDevice(live.Device) : source.SdrType,
+                    CenterHz = live.CenterHz,
+                    SampleRate = live.SampleRate,
+                    ErrorHz = live.ErrorHz,
+                    Gain = string.IsNullOrWhiteSpace(live.Gain) ? source.Gain : live.Gain
+                };
+        }).ToList();
+    }
 
     private static string SourceAssignmentSummary(IReadOnlyDictionary<string, int>? values) =>
         string.Join("|", NormalizeSourceAssignments(values)

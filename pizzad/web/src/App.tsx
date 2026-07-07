@@ -1639,7 +1639,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       });
       onApplied(next);
       setMessage(`${result.message}${result.serviceOutput ? ` ${result.serviceOutput.trim()}` : ""}`);
-      await reloadDraft();
+      setDraft(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to apply Site Setup config.");
     } finally {
