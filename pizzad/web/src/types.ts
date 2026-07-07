@@ -616,6 +616,7 @@ export type SiteSetupConfig = {
   sourcePlanMode: string;
   systems: RfSurveySystem[];
   selectedSourceIndexes: number[];
+  sourceAssignments: Record<string, number>;
   sources: RfSurveySource[];
   rfSelections: SiteSetupRfSelection[];
   rfPath: RfSurveyPathProfile;
@@ -679,6 +680,7 @@ export type RfSurveyProfile = {
   devices: RfSurveyDevice[];
   sourceOverride: boolean;
   selectedSourceIndexes: number[];
+  sourceAssignments?: Record<string, number>;
   rfPath: RfSurveyPathProfile;
   currentStep: number;
   measurementMode: string;

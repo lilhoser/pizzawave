@@ -222,6 +222,11 @@ public sealed class SiteSetupService
         if (desired.Sources.Count > 0 && !string.Equals(SourceSummary(desired.Sources), AppliedSourceSummary(applied.Sources), StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("TR Sources", $"Desired sources ({desired.Sources.Count}) differ from applied sources ({applied.Sources.Count})."));
 
+        if (desired.SourceAssignments.Count > 0 &&
+            (!desired.LastAppliedAtUtc.HasValue ||
+             (desired.UpdatedAtUtc.HasValue && desired.UpdatedAtUtc.Value > desired.LastAppliedAtUtc.Value)))
+            rows.Add(new SiteSetupPendingChangeDto("Source Assignments", "Site-to-source assignments changed after the last Site Setup apply."));
+
         if (HasRfPathDetails(desired.RfPath) &&
             (!desired.LastAppliedAtUtc.HasValue ||
              (desired.UpdatedAtUtc.HasValue && desired.UpdatedAtUtc.Value > desired.LastAppliedAtUtc.Value)))
@@ -267,6 +272,7 @@ public sealed class SiteSetupService
         SourcePlanMode = string.IsNullOrWhiteSpace(value.SourcePlanMode) ? "full" : value.SourcePlanMode.Trim(),
         Systems = value.Systems?.ToList() ?? [],
         SelectedSourceIndexes = value.SelectedSourceIndexes?.Distinct().Order().ToList() ?? [],
+        SourceAssignments = NormalizeSourceAssignments(value.SourceAssignments),
         Sources = value.Sources?.ToList() ?? [],
         RfSelections = NormalizeRfSelections(value.RfSelections),
         RfPath = value.RfPath ?? new RfSurveyPathProfileDto(),
@@ -284,6 +290,7 @@ public sealed class SiteSetupService
         AddIfChanged(changes, "systems/sites", string.Join(",", before.SystemShortNames), string.Join(",", after.SystemShortNames));
         AddIfChanged(changes, "source-plan systems", string.Join(",", before.SourcePlanSystemShortNames), string.Join(",", after.SourcePlanSystemShortNames));
         AddIfChanged(changes, "selected sources", string.Join(",", before.SelectedSourceIndexes), string.Join(",", after.SelectedSourceIndexes));
+        AddIfChanged(changes, "source assignments", SourceAssignmentSummary(before.SourceAssignments), SourceAssignmentSummary(after.SourceAssignments));
         AddIfChanged(changes, "RF path", RfPathSummary(before.RfPath), RfPathSummary(after.RfPath));
         AddIfChanged(changes, "desired sources", SourceSummary(before.Sources), SourceSummary(after.Sources));
         AddIfChanged(changes, "RF selections", RfSelectionSummary(before.RfSelections), RfSelectionSummary(after.RfSelections));
@@ -299,6 +306,7 @@ public sealed class SiteSetupService
         value.SystemShortNames,
         value.SourcePlanSystemShortNames,
         value.SelectedSourceIndexes,
+        sourceAssignments = SourceAssignmentSummary(value.SourceAssignments),
         value.SourcePlanMode,
         rfPath = RfPathSummary(value.RfPath),
         rfSelections = RfSelectionSummary(value.RfSelections),
@@ -327,6 +335,12 @@ public sealed class SiteSetupService
             })
             .OrderBy(value => value.FrequencyHz)
             .ToList();
+
+    private static Dictionary<string, int> NormalizeSourceAssignments(IReadOnlyDictionary<string, int>? values) =>
+        (values ?? new Dictionary<string, int>())
+            .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Key) && kvp.Value >= 0)
+            .GroupBy(kvp => kvp.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
 
     private static List<string> NormalizeStrings(IEnumerable<string>? values) =>
         (values ?? [])
@@ -398,6 +412,11 @@ public sealed class SiteSetupService
 
     private static string AppliedSourceSummary(IEnumerable<SiteSetupAppliedSourceDto>? sources) =>
         string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}:{source.Gain}"));
+
+    private static string SourceAssignmentSummary(IReadOnlyDictionary<string, int>? values) =>
+        string.Join("|", NormalizeSourceAssignments(values)
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kvp => $"{kvp.Key}:{kvp.Value}"));
 
     private static string RfSelectionSummary(IEnumerable<SiteSetupRfSelection>? selections) =>
         string.Join("|", (selections ?? [])

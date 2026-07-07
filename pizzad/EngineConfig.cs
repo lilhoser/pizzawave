@@ -410,6 +410,7 @@ public sealed class SiteSetupConfig
     public string SourcePlanMode { get; set; } = "full";
     public List<RfSurveySystemDto> Systems { get; set; } = new();
     public List<int> SelectedSourceIndexes { get; set; } = new();
+    public Dictionary<string, int> SourceAssignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<RfSurveySourceDto> Sources { get; set; } = new();
     public List<SiteSetupRfSelection> RfSelections { get; set; } = new();
     public RfSurveyPathProfileDto RfPath { get; set; } = new();

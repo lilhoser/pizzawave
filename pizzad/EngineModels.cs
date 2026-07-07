@@ -1166,6 +1166,7 @@ public sealed record RfSurveyProfileDto
     public IReadOnlyList<RfSurveySdrDeviceDto> Devices { get; init; } = [];
     public bool SourceOverride { get; init; }
     public IReadOnlyList<int> SelectedSourceIndexes { get; init; } = [];
+    public IReadOnlyDictionary<string, int> SourceAssignments { get; init; } = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     public RfSurveyPathProfileDto RfPath { get; init; } = new();
     public int CurrentStep { get; init; }
     public string MeasurementMode { get; init; } = "guided";
@@ -1468,7 +1469,8 @@ public sealed record RfSurveyCreateRequest(
     string? SourcePlanMode = null,
     IReadOnlyList<RfSurveySystemDto>? SystemDefinitions = null,
     IReadOnlyList<RfSurveySourceDto>? SdrSources = null,
-    string? RadioReferenceSid = null);
+    string? RadioReferenceSid = null,
+    IReadOnlyDictionary<string, int>? SourceAssignments = null);
 
 public sealed record RfSurveyDraftUpdateRequest(
     string? SystemShortName = null,
@@ -1485,7 +1487,8 @@ public sealed record RfSurveyDraftUpdateRequest(
     string? SourcePlanMode = null,
     IReadOnlyList<RfSurveySystemDto>? SystemDefinitions = null,
     IReadOnlyList<RfSurveySourceDto>? SdrSources = null,
-    string? RadioReferenceSid = null);
+    string? RadioReferenceSid = null,
+    IReadOnlyDictionary<string, int>? SourceAssignments = null);
 
 public sealed record RfSurveyNoteRequest(string Text);
 

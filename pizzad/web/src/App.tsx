@@ -1466,6 +1466,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
   const [selectedSourceIndexes, setSelectedSourceIndexes] = useState<number[]>(defaultSelectedSources);
   const [sourcePlanSystems, setSourcePlanSystems] = useState<string[]>(defaultSourcePlanSystems);
   const [sourcePlanMode, setSourcePlanMode] = useState<"full" | "control">(setup.desired.sourcePlanMode === "control" ? "control" : "full");
+  const [sourceAssignments, setSourceAssignments] = useState<Record<string, number>>(() => normalizeSourceAssignmentsForUi(setup.desired.sourceAssignments, systems, sources));
   const [sdrSources, setSdrSources] = useState<RfSurveySource[] | null>(null);
   const signature = JSON.stringify({
     siteLabel: setup.desired.siteLabel,
@@ -1473,6 +1474,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     systems,
     sources,
     selectedSourceIndexes,
+    sourceAssignments,
     sourcePlanSystems,
     sourcePlanMode,
     sdrSources,
@@ -1502,6 +1504,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     setSelectedSourceIndexes(defaultSelectedSources);
     setSourcePlanSystems(defaultSourcePlanSystems);
     setSourcePlanMode(setup.desired.sourcePlanMode === "control" ? "control" : "full");
+    setSourceAssignments(normalizeSourceAssignmentsForUi(setup.desired.sourceAssignments, systems, sources));
     setSdrSources(null);
   }, [setup.desired.desiredVersion]);
   useEffect(() => {
@@ -1540,6 +1543,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     sourcePlanSystemShortNames: string[];
     sourcePlanMode: "full" | "control";
     selectedSourceIndexes: number[];
+    sourceAssignments: Record<string, number>;
     sources: RfSurveySource[];
   };
 
@@ -1549,6 +1553,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       sourcePlanSystemShortNames: overrides?.sourcePlanSystemShortNames ?? (sourcePlanSystems.length ? sourcePlanSystems : selectedSetupSystemNames(setup)),
       sourcePlanMode: overrides?.sourcePlanMode ?? sourcePlanMode,
       selectedSourceIndexes: overrides?.selectedSourceIndexes ?? (selectedSourceIndexes.length ? selectedSourceIndexes : sources.map(source => source.index)),
+      sourceAssignments: overrides?.sourceAssignments ?? sourceAssignments,
       sources: overrides?.sources ?? (sdrSources ?? sources)
     };
     const next = await api.request<SiteSetup>(siteSetupApi, {
@@ -1657,6 +1662,8 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       setSourcePlanSystems={setSourcePlanSystems}
       sourcePlanMode={sourcePlanMode}
       setSourcePlanMode={setSourcePlanMode}
+      sourceAssignments={sourceAssignments}
+      setSourceAssignments={setSourceAssignments}
       setSdrSources={setSdrSources}
       onSdrTouched={() => undefined}
       showSampleRateControl={false}
@@ -1967,6 +1974,7 @@ function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], s
     groundTruthSource: "site-setup",
     rfPath: normalizeSetupRfPath(setup.desired.rfPath),
     selectedSourceIndexes,
+    sourceAssignments: setup.desired.sourceAssignments ?? {},
     sdrSources: sources,
     currentStep: 2,
     measurementMode: "guided",
@@ -7169,6 +7177,8 @@ function SourcePlannerStep({
   setSourcePlanSystems,
   sourcePlanMode,
   setSourcePlanMode,
+  sourceAssignments,
+  setSourceAssignments,
   setSdrSources,
   onSdrTouched,
   showSampleRateControl = true,
@@ -7183,10 +7193,12 @@ function SourcePlannerStep({
   setSourcePlanSystems: React.Dispatch<React.SetStateAction<string[]>>;
   sourcePlanMode: "full" | "control";
   setSourcePlanMode: React.Dispatch<React.SetStateAction<"full" | "control">>;
+  sourceAssignments: Record<string, number>;
+  setSourceAssignments: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   setSdrSources: React.Dispatch<React.SetStateAction<RfSurveySource[] | null>>;
   onSdrTouched: () => void;
   showSampleRateControl?: boolean;
-  onPlanApplied?: (plan: { sourcePlanSystemShortNames: string[]; sourcePlanMode: "full" | "control"; selectedSourceIndexes: number[]; sources: RfSurveySource[] }) => void;
+  onPlanApplied?: (plan: { sourcePlanSystemShortNames: string[]; sourcePlanMode: "full" | "control"; selectedSourceIndexes: number[]; sourceAssignments: Record<string, number>; sources: RfSurveySource[] }) => void;
   onPlanSelected: () => void;
 }) {
   const supportedRateOptions = useMemo(() => sourcePlannerSupportedSampleRates(profile, experiments), [profile.sources, experiments]);
@@ -7208,6 +7220,7 @@ function SourcePlannerStep({
   const alternatives = useMemo(() => buildSourcePlanAlternatives(plannerSystems, effectiveSampleRateHz, profile.sources.length), [plannerSystems, effectiveSampleRateHz, profile.sources.length]);
   const currentCustom = useMemo(() => buildCustomSourcePlanOption(plannerSystems, effectiveCustomSystems, customMode, effectiveSampleRateHz, profile.sources.length), [plannerSystems, effectiveCustomSystems.join("|"), customMode, effectiveSampleRateHz, profile.sources.length]);
   const activePlan = useMemo(() => buildCustomSourcePlanOption(plannerSystems, activeSourcePlanSystems, sourcePlanMode, effectiveSampleRateHz, profile.sources.length), [plannerSystems, activeSourcePlanSystems.join("|"), sourcePlanMode, effectiveSampleRateHz, profile.sources.length]);
+  const normalizedAssignments = useMemo(() => normalizeSourceAssignmentsForUi(sourceAssignments, plannerSystems, profile.sources), [JSON.stringify(sourceAssignments), plannerSystems.map(system => system.shortName).join("|"), profile.sources.map(source => source.index).join("|")]);
   useEffect(() => {
     if (!customSeedKey || customSeedRef.current === customSeedKey) return;
     customSeedRef.current = customSeedKey;
@@ -7234,6 +7247,7 @@ function SourcePlannerStep({
       sourcePlanSystemShortNames: option.systems,
       sourcePlanMode: option.mode,
       selectedSourceIndexes: nextSelected,
+      sourceAssignments: normalizedAssignments,
       sources: nextSources
     });
     onPlanSelected();
@@ -7244,6 +7258,24 @@ function SourcePlannerStep({
     if (!validateSourcePlannerSampleRate(hz, supportedRateOptions).ok) return;
     onSdrTouched();
     setSdrSources(profile.sources.map(source => ({ ...source, sampleRate: hz })));
+  };
+  const reviewAssignedPlan = () => {
+    const assignedSources = Object.values(normalizedAssignments).filter(value => Number.isFinite(value));
+    const nextSelected = Array.from(new Set([...selectedSources, ...assignedSources])).filter(index => profile.sources.some(source => source.index === index)).sort((a, b) => a - b);
+    const nextSources = rateValidation.ok
+      ? profile.sources.map(source => ({ ...source, sampleRate: effectiveSampleRateHz }))
+      : profile.sources;
+    if (rateValidation.ok)
+      setSdrSources(nextSources);
+    setSelectedSources(nextSelected.length ? nextSelected : selectedSources);
+    onPlanApplied?.({
+      sourcePlanSystemShortNames: activeSourcePlanSystems,
+      sourcePlanMode,
+      selectedSourceIndexes: nextSelected.length ? nextSelected : selectedSources,
+      sourceAssignments: normalizedAssignments,
+      sources: nextSources
+    });
+    onPlanSelected();
   };
   return <div className="rf-step-stack">
     <div className="rf-source-planner-plain">
@@ -7261,6 +7293,14 @@ function SourcePlannerStep({
         selectedSources={selectedSources}
         plan={activePlan}
         sampleRateHz={effectiveSampleRateHz}
+      />
+      <SiteSourceAssignmentTable
+        systems={plannerSystems}
+        sources={profile.sources}
+        selectedSystems={activeSourcePlanSystems}
+        assignments={normalizedAssignments}
+        setAssignments={setSourceAssignments}
+        onReview={reviewAssignedPlan}
       />
       <div className="rf-source-validation-summary">
         {validationSummaries.map(row => <div key={row.shortName} className={row.validated.length ? "" : "warning"}>
@@ -7282,6 +7322,83 @@ function SourcePlannerStep({
         detectedSources={profile.sources.length}
         onApply={applyOption}
       />
+    </div>
+  </div>;
+}
+
+function normalizeSourceAssignmentsForUi(assignments: Record<string, number> | undefined, systems: RfSurveySystem[], sources: RfSurveySource[]) {
+  const validSystems = new Set(systems.map(system => system.shortName.toLowerCase()));
+  const validSources = new Set(sources.map(source => source.index));
+  const normalized: Record<string, number> = {};
+  for (const [key, value] of Object.entries(assignments ?? {})) {
+    const system = systems.find(row => row.shortName.toLowerCase() === key.toLowerCase());
+    const sourceIndex = Number(value);
+    if (!system || !validSystems.has(system.shortName.toLowerCase()) || !validSources.has(sourceIndex))
+      continue;
+    normalized[system.shortName] = sourceIndex;
+  }
+  return normalized;
+}
+
+function SiteSourceAssignmentTable({
+  systems,
+  sources,
+  selectedSystems,
+  assignments,
+  setAssignments,
+  onReview
+}: {
+  systems: RfSurveySystem[];
+  sources: RfSurveySource[];
+  selectedSystems: string[];
+  assignments: Record<string, number>;
+  setAssignments: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  onReview: () => void;
+}) {
+  const activeSystems = systems.filter(system => selectedSystems.includes(system.shortName));
+  const assign = (systemShortName: string, value: string) => {
+    setAssignments(current => {
+      const next = normalizeSourceAssignmentsForUi(current, systems, sources);
+      if (value === "") {
+        delete next[systemShortName];
+        return next;
+      }
+      const sourceIndex = Number(value);
+      return Number.isFinite(sourceIndex)
+        ? { ...next, [systemShortName]: sourceIndex }
+        : next;
+    });
+  };
+  if (activeSystems.length === 0 || sources.length === 0)
+    return null;
+  return <div className="rf-selected-source-table">
+    <div className="rf-selected-source-row header">
+      <span>Site</span>
+      <span>Control channels</span>
+      <span>Assigned source</span>
+      <span>Source device</span>
+      <span>Action</span>
+    </div>
+    {activeSystems.map(system => {
+      const assigned = assignments[system.shortName];
+      const source = sources.find(row => row.index === assigned);
+      return <div className="rf-selected-source-row" key={system.shortName}>
+        <span><strong>{system.siteLabel || system.shortName}</strong></span>
+        <span>{system.controlChannelsHz.length ? system.controlChannelsHz.map(formatRfHz).join(", ") : "--"}</span>
+        <span><select value={assigned ?? ""} onChange={event => assign(system.shortName, event.target.value)}>
+          <option value="">Auto</option>
+          {sources.map(row => <option value={row.index} key={row.index}>Source {row.index}</option>)}
+        </select></span>
+        <span>{source ? `${source.sdrType || "SDR"} ${source.serial || source.device || source.index}` : "Planner chooses"}</span>
+        <span>{assigned == null ? "Auto" : `Source ${assigned}`}</span>
+      </div>;
+    })}
+    <div className="rf-selected-source-row">
+      <span><strong>Review</strong></span>
+      <span>{Object.keys(assignments).length} assignment{Object.keys(assignments).length === 1 ? "" : "s"}</span>
+      <span>--</span>
+      <span>--</span>
+      <span><button type="button" className="primary" onClick={onReview}>Review Assigned Plan</button></span>
     </div>
   </div>;
 }

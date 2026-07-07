@@ -202,6 +202,7 @@ public sealed class RfSurveyService
         var sources = sourceOverride
             ? NormalizeRfSurveySources(request.SdrSources!)
             : requestedSystemNames.Count > 0 ? liveSources : [];
+        var sourceAssignments = NormalizeSourceAssignments(request.SourceAssignments, selectedDefinitions, sources);
 
         var devices = BuildSdrDevices(sources);
 
@@ -225,6 +226,7 @@ public sealed class RfSurveyService
             Sources = sources,
             Devices = devices,
             SelectedSourceIndexes = NormalizeSelectedSourceIndexes(request.SelectedSourceIndexes, sources, selectedSystems),
+            SourceAssignments = sourceAssignments,
             SourceOverride = sourceOverride,
             RfPath = request.RfPath ?? new RfSurveyPathProfileDto(),
             CurrentStep = Math.Clamp(request.CurrentStep, 0, 8),
@@ -251,7 +253,8 @@ public sealed class RfSurveyService
             current.SourcePlanMode,
             current.Systems,
             current.Sources,
-            current.RadioReferenceSid));
+            current.RadioReferenceSid,
+            current.SourceAssignments));
         return rebuilt with
         {
             SiteLabel = string.IsNullOrWhiteSpace(current.SiteLabel) ? rebuilt.SiteLabel : current.SiteLabel,
@@ -261,7 +264,8 @@ public sealed class RfSurveyService
             CurrentStep = current.CurrentStep,
             MeasurementMode = string.IsNullOrWhiteSpace(current.MeasurementMode) ? rebuilt.MeasurementMode : current.MeasurementMode,
             ProbeDurationSeconds = current.ProbeDurationSeconds <= 0 ? rebuilt.ProbeDurationSeconds : current.ProbeDurationSeconds,
-            SelectedSourceIndexes = NormalizeSelectedSourceIndexes(current.SelectedSourceIndexes, rebuilt.Sources, null)
+            SelectedSourceIndexes = NormalizeSelectedSourceIndexes(current.SelectedSourceIndexes, rebuilt.Sources, null),
+            SourceAssignments = NormalizeSourceAssignments(current.SourceAssignments, rebuilt.Systems, rebuilt.Sources)
         };
     }
 
@@ -411,6 +415,7 @@ public sealed class RfSurveyService
             && left.Sources.SequenceEqual(right.Sources)
             && left.Devices.SequenceEqual(right.Devices)
             && left.SelectedSourceIndexes.SequenceEqual(right.SelectedSourceIndexes)
+            && SameSourceAssignments(left.SourceAssignments, right.SourceAssignments)
             && left.SourceOverride == right.SourceOverride
             && left.Warnings.SequenceEqual(right.Warnings);
     }
@@ -517,7 +522,8 @@ public sealed class RfSurveyService
             ProbeDurationSeconds: 45,
             GroundTruthSource: "site-setup",
             SystemDefinitions: systems,
-            SdrSources: desired.Sources);
+            SdrSources: desired.Sources,
+            SourceAssignments: desired.SourceAssignments);
     }
 
     private static IReadOnlyList<RfSurveySystemDto> ApplyExplicitRfSelections(
@@ -559,7 +565,8 @@ public sealed class RfSurveyService
         ProbeDurationSeconds: request.ProbeDurationSeconds,
         GroundTruthSource: request.GroundTruthSource,
         SystemDefinitions: request.SystemDefinitions,
-        SdrSources: request.SdrSources);
+        SdrSources: request.SdrSources,
+        SourceAssignments: request.SourceAssignments);
 
     public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct, bool compactExperiments = false)
     {
@@ -740,8 +747,10 @@ public sealed class RfSurveyService
         var effectiveSourcePlanMode = NormalizeSourcePlanMode(request.SourcePlanMode ?? current.SourcePlanMode);
         var incomingDefinitions = request.SystemDefinitions ?? current.Systems;
         var incomingSources = request.SdrSources ?? current.Sources;
+        var incomingSourceAssignments = request.SourceAssignments ?? current.SourceAssignments;
         var definitionsChanged = request.SystemDefinitions != null && !NormalizeSystemDefinitions(request.SystemDefinitions).SequenceEqual(current.Systems);
         var sourcesChanged = request.SdrSources != null && !NormalizeRfSurveySources(request.SdrSources).SequenceEqual(current.Sources);
+        var sourceAssignmentsChanged = request.SourceAssignments != null && !SameSourceAssignments(NormalizeSourceAssignments(request.SourceAssignments, incomingDefinitions, incomingSources), current.SourceAssignments);
         var sourcePlanAppliedBeforeDraft = HasAppliedSourcePlan(row.Session);
         var staleAppliedEmptySelectionAutosave = sourcePlanAppliedBeforeDraft &&
             (request.CurrentStep ?? current.CurrentStep) >= 3 &&
@@ -759,6 +768,7 @@ public sealed class RfSurveyService
             current.SourcePlanSystemShortNames.All(name => sourcePlanSystems.Any(incoming => string.Equals(incoming, name, StringComparison.OrdinalIgnoreCase))) &&
             sourcePlanSystems.Count > current.SourcePlanSystemShortNames.Count &&
             !sourcesChanged &&
+            !sourceAssignmentsChanged &&
             SameIntSet(effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, current.SelectedSourceIndexes);
         if (staleStepFourSupersetAutosave)
         {
@@ -769,16 +779,17 @@ public sealed class RfSurveyService
         var sourcePlanModeChanged = !string.Equals(effectiveSourcePlanMode, NormalizeSourcePlanMode(current.SourcePlanMode), StringComparison.OrdinalIgnoreCase);
         var staleAppliedSamePlanAutosave = sourcePlanAppliedBeforeDraft &&
             !sourcesChanged &&
+            !sourceAssignmentsChanged &&
             !sourcePlanChanged &&
             !sourcePlanModeChanged &&
             SameStringSet(effectiveSystems, currentSystems) &&
             SameIntSet(effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, current.SelectedSourceIndexes);
         var effectiveDefinitionsChanged = staleStepFourSupersetAutosave || staleAppliedEmptySelectionAutosave || staleAppliedSamePlanAutosave ? false : definitionsChanged;
-        var systemChanged = !SameStringSet(effectiveSystems, currentSystems) || sourcePlanChanged || sourcePlanModeChanged || effectiveDefinitionsChanged || sourcesChanged;
+        var systemChanged = !SameStringSet(effectiveSystems, currentSystems) || sourcePlanChanged || sourcePlanModeChanged || effectiveDefinitionsChanged || sourcesChanged || sourceAssignmentsChanged;
         var radioFactsChanged = false;
         var effectiveRadioReferenceSid = string.IsNullOrWhiteSpace(request.RadioReferenceSid) ? current.RadioReferenceSid : request.RadioReferenceSid.Trim();
         var rebuilt = systemChanged
-            ? BuildProfile(new RfSurveyCreateRequest(systemShortName, request.SiteLabel ?? string.Join(", ", effectiveSystems), request.Mode ?? current.Mode, request.GroundTruthSource ?? current.GroundTruthSource, request.RfPath ?? current.RfPath, effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, request.CurrentStep ?? current.CurrentStep, request.MeasurementMode ?? current.MeasurementMode, request.ProbeDurationSeconds ?? current.ProbeDurationSeconds, effectiveSystems, effectiveSourcePlanSystems, effectiveSourcePlanMode, incomingDefinitions, incomingSources, effectiveRadioReferenceSid))
+            ? BuildProfile(new RfSurveyCreateRequest(systemShortName, request.SiteLabel ?? string.Join(", ", effectiveSystems), request.Mode ?? current.Mode, request.GroundTruthSource ?? current.GroundTruthSource, request.RfPath ?? current.RfPath, effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, request.CurrentStep ?? current.CurrentStep, request.MeasurementMode ?? current.MeasurementMode, request.ProbeDurationSeconds ?? current.ProbeDurationSeconds, effectiveSystems, effectiveSourcePlanSystems, effectiveSourcePlanMode, incomingDefinitions, incomingSources, effectiveRadioReferenceSid, incomingSourceAssignments))
             : current;
 
         var sources = rebuilt.Sources;
@@ -798,6 +809,7 @@ public sealed class RfSurveyService
             GroundTruthSource = string.IsNullOrWhiteSpace(request.GroundTruthSource) ? rebuilt.GroundTruthSource : request.GroundTruthSource.Trim(),
             RfPath = rfPath,
             SelectedSourceIndexes = selected,
+            SourceAssignments = NormalizeSourceAssignments(incomingSourceAssignments, rebuilt.Systems, sources),
             CurrentStep = Math.Clamp(request.CurrentStep ?? rebuilt.CurrentStep, 0, 8),
             MeasurementMode = NormalizeMode(request.MeasurementMode ?? rebuilt.MeasurementMode),
             ProbeDurationSeconds = Math.Clamp(request.ProbeDurationSeconds ?? rebuilt.ProbeDurationSeconds, 5, 3600),
@@ -810,6 +822,7 @@ public sealed class RfSurveyService
             !definitionsChanged &&
             !sourcePlanChanged &&
             !sourcePlanModeChanged &&
+            !sourceAssignmentsChanged &&
             SameStringSet(effectiveSystems, currentSystems) &&
             !radioFactsChanged &&
             SameIntSet(selected, current.SelectedSourceIndexes);
@@ -1107,6 +1120,7 @@ public sealed class RfSurveyService
                 .ToList()
             : [];
         var windows = BuildSourceWindows(frequencies, defaultRate, priorityFrequencies);
+        var assignedWindows = BuildAssignedSourceWindows(profile, draftSystems, selected, controlOnlyPlan, defaultRate, warnings);
         if (windows.Count > selected.Count)
             warnings.Add($"The selected systems need {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
 
@@ -1119,6 +1133,8 @@ public sealed class RfSurveyService
             SourceWindow? window = windows.Count == 0
                 ? null
                 : windows[Math.Min(planIndex, windows.Count - 1)];
+            if (assignedWindows.Count > 0)
+                window = assignedWindows.TryGetValue(sourceIndex, out var assigned) ? assigned : null;
 
             PatchSourceField(source, "device", NormalizeTrSourceDeviceArgs(profile, profileSource), changes, sourceIndex);
             var plannedRate = profileSource?.SampleRate > 0 ? profileSource.SampleRate : defaultRate;
@@ -6413,6 +6429,60 @@ public sealed class RfSurveyService
         return planned;
     }
 
+    private static IReadOnlyDictionary<int, SourceWindow> BuildAssignedSourceWindows(
+        RfSurveyProfileDto profile,
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyList<int> selectedSourceIndexes,
+        bool controlOnlyPlan,
+        int defaultRate,
+        List<string> warnings)
+    {
+        var selected = selectedSourceIndexes.ToHashSet();
+        var assignments = NormalizeSourceAssignments(profile.SourceAssignments, systems, profile.Sources)
+            .Where(kvp => systems.Any(system => string.Equals(system.ShortName, kvp.Key, StringComparison.OrdinalIgnoreCase)))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+        if (assignments.Count == 0)
+            return new Dictionary<int, SourceWindow>();
+
+        foreach (var assignment in assignments.Where(kvp => !selected.Contains(kvp.Value)))
+            warnings.Add($"{assignment.Key} is assigned to Source {assignment.Value}, but that source is not selected for Config Draft.");
+
+        var assignedNames = assignments.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var system in systems.Where(system => !assignedNames.Contains(system.ShortName)))
+            warnings.Add($"{system.SiteLabel}: no explicit source assignment; Config Draft will not move an assigned source window for this site.");
+
+        var result = new Dictionary<int, SourceWindow>();
+        foreach (var sourceIndex in selectedSourceIndexes)
+        {
+            var source = profile.Sources.FirstOrDefault(row => row.Index == sourceIndex);
+            var sampleRate = source?.SampleRate > 0 ? source.SampleRate : defaultRate;
+            var assignedSystems = systems
+                .Where(system => assignments.TryGetValue(system.ShortName, out var assignedSource) && assignedSource == sourceIndex)
+                .ToList();
+            if (assignedSystems.Count == 0)
+                continue;
+
+            var frequencies = assignedSystems
+                .SelectMany(system => controlOnlyPlan ? system.ControlChannelsHz : system.ControlChannelsHz.Concat(system.VoiceFrequenciesHz))
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (frequencies.Count == 0)
+                continue;
+
+            IReadOnlyList<long> priority = controlOnlyPlan
+                ? assignedSystems.SelectMany(system => system.ControlChannelsHz).Where(value => value > 0).Distinct().Order().ToList()
+                : [];
+            var windows = BuildSourceWindows(frequencies, sampleRate, priority);
+            if (windows.Count > 1)
+                warnings.Add($"{string.Join(", ", assignedSystems.Select(system => system.SiteLabel))} assigned to Source {sourceIndex} needs {windows.Count} source windows at {sampleRate} sps; only the first can be used on this source.");
+            if (windows.Count > 0)
+                result[sourceIndex] = windows[0];
+        }
+        return result;
+    }
+
     private static IReadOnlyList<RfSurveySystemDto> AddObservedVoiceFrequencies(
         IReadOnlyList<RfSurveySystemDto> systems,
         IReadOnlyDictionary<string, IReadOnlyList<long>> observedFrequencies,
@@ -6607,6 +6677,21 @@ public sealed class RfSurveyService
         .OrderBy(source => source.Index)
         .ToList();
 
+    private static IReadOnlyDictionary<string, int> NormalizeSourceAssignments(
+        IReadOnlyDictionary<string, int>? assignments,
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyList<RfSurveySourceDto> sources)
+    {
+        var sourceIndexes = sources.Select(source => source.Index).ToHashSet();
+        var systemNames = systems.Select(system => system.ShortName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (assignments ?? new Dictionary<string, int>())
+            .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Key))
+            .Where(kvp => systemNames.Count == 0 || systemNames.Contains(kvp.Key))
+            .Where(kvp => sourceIndexes.Count == 0 || sourceIndexes.Contains(kvp.Value))
+            .GroupBy(kvp => kvp.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
+    }
+
     private static IReadOnlyList<RfSurveySystemDto> MergeSystemDefinitions(
         IReadOnlyList<RfSurveySystemDto> primaryDefinitions,
         IReadOnlyList<RfSurveySystemDto> fallbackDefinitions)
@@ -6695,6 +6780,16 @@ public sealed class RfSurveyService
 
     private static bool SameStringSet(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
         left.Count == right.Count && left.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(right.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+
+    private static bool SameSourceAssignments(IReadOnlyDictionary<string, int> left, IReadOnlyDictionary<string, int> right)
+    {
+        if (left.Count != right.Count)
+            return false;
+        foreach (var (key, value) in left)
+            if (!right.TryGetValue(key, out var other) || other != value)
+                return false;
+        return true;
+    }
 
     private static string SummarizeSdrs(IReadOnlyList<RfSurveySourceDto> sources)
     {
