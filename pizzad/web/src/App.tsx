@@ -89,13 +89,17 @@ function filenameFromContentDisposition(disposition: string): string {
   return plain ? plain.replaceAll(/[\\/]/g, "-") : "";
 }
 
+function categoryPageKey(page: Page, rangeHours: number, search: string) {
+  return `${page}|${rangeHours}|${search.trim()}`;
+}
+
 function App() {
   const [page, setPageState] = useState<Page>(() => normalizePage(localStorage.getItem("pizzawave-page")));
   const [rangeHours, setRangeHours] = useState(24);
   const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
   const [status, setStatus] = useState("Starting");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [category, setCategory] = useState<CategoryPage | null>(null);
+  const [category, setCategory] = useState<{ key: string; data: CategoryPage } | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null);
@@ -123,6 +127,9 @@ function App() {
   const refreshStatusRef = useRef<() => Promise<void>>(async () => { });
   const refreshVisiblePageRef = useRef<() => Promise<void>>(async () => { });
   const pageRef = useRef<Page>(page);
+  const rangeHoursRef = useRef(rangeHours);
+  const globalSearchRef = useRef(globalSearch);
+  const categoryRequestIdRef = useRef(0);
   const lastDashboardRefreshRef = useRef(0);
   const playedAudioRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<Set<HTMLAudioElement>>(new Set());
@@ -163,6 +170,8 @@ function App() {
     };
   }, []);
   function setPage(next: Page) {
+    if (categories.includes(next as any))
+      categoryRequestIdRef.current += 1;
     setPageState(next);
     localStorage.setItem("pizzawave-page", next);
   }
@@ -276,7 +285,16 @@ function App() {
       lastDashboardRefreshRef.current = Date.now();
     } else if (categories.includes(page as any)) {
       const search = globalSearch.trim();
-      setCategory(await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}${search ? `&q=${encodeURIComponent(search)}` : ""}`));
+      const key = categoryPageKey(page, rangeHours, search);
+      const requestId = ++categoryRequestIdRef.current;
+      const nextCategory = await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}${search ? `&q=${encodeURIComponent(search)}` : ""}`);
+      if (
+        requestId === categoryRequestIdRef.current &&
+        pageRef.current === page &&
+        key === categoryPageKey(pageRef.current, rangeHoursRef.current, globalSearchRef.current)
+      ) {
+        setCategory({ key, data: nextCategory });
+      }
     } else if (page === "setup") {
       setSiteSetup(await api.request<SiteSetup>(siteSetupApi));
     } else if (page === "system") {
@@ -285,20 +303,20 @@ function App() {
   }, [page, rangeHours, globalSearch]);
 
   const load = useCallback(async () => {
-    const statusPromise = refreshStatusData()
+    void refreshStatusData()
       .catch(error => setStatus(error instanceof Error ? error.message : "Error"));
     try {
       await refreshVisiblePage();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Error");
     }
-    if (!setupStatus)
-      await statusPromise;
-  }, [refreshStatusData, refreshVisiblePage, setupStatus]);
+  }, [refreshStatusData, refreshVisiblePage]);
 
   useEffect(() => { refreshStatusRef.current = refreshStatusData; }, [refreshStatusData]);
   useEffect(() => { refreshVisiblePageRef.current = refreshVisiblePage; }, [refreshVisiblePage]);
   useEffect(() => { pageRef.current = page; }, [page]);
+  useEffect(() => { rangeHoursRef.current = rangeHours; }, [rangeHours]);
+  useEffect(() => { globalSearchRef.current = globalSearch; }, [globalSearch]);
   useEffect(() => {
     api.setAuthTokenProvider(request => {
       if (pendingAuthPromptRef.current)
@@ -344,10 +362,6 @@ function App() {
   }, [autoplayMuted]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    if (categories.includes(page as any))
-      setCategory(null);
-  }, [page, rangeHours]);
   useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -706,7 +720,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView
-          data={category}
+          data={category?.key === categoryPageKey(page, rangeHours, globalSearch) ? category.data : null}
           rangeHours={rangeHours}
           searchQuery={globalSearch}
           profileState={profileState}
