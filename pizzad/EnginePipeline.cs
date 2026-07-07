@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace pizzad;
 
@@ -297,7 +298,20 @@ public sealed class EnginePipeline
             if (!_priorityLiveQueue.TryDequeue(out var item) && !_liveQueue.TryDequeue(out item) && !_deferredLiveQueue.TryDequeue(out item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: false, liveTranscriber: transcriber, backlogTranscribers: null, genericBacklogTranscriber: null, ct);
+            try
+            {
+                await ProcessTranscriptionItemAsync(item, backlog: false, liveTranscriber: transcriber, backlogTranscribers: null, genericBacklogTranscriber: null, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Live transcription worker recovered after an unhandled failure for call {CallId}; requeueing the call", item.CallId);
+                EnqueueTranscription(item);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
         }
     }
 
@@ -309,7 +323,20 @@ public sealed class EnginePipeline
             if (!_backlogQueue.TryDequeue(out var item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, backlogTranscribers: transcribers, genericBacklogTranscriber: null, ct);
+            try
+            {
+                await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, backlogTranscribers: transcribers, genericBacklogTranscriber: null, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Backlog transcription worker recovered after an unhandled failure for call {CallId}; requeueing the call", item.CallId);
+                EnqueueTranscription(item);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
         }
     }
 
@@ -321,7 +348,20 @@ public sealed class EnginePipeline
             if (!_backlogQueue.TryDequeue(out var item))
                 continue;
 
-            await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, backlogTranscribers: null, genericBacklogTranscriber: transcriber, ct);
+            try
+            {
+                await ProcessTranscriptionItemAsync(item, backlog: true, liveTranscriber: null, backlogTranscribers: null, genericBacklogTranscriber: transcriber, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Generic backlog transcription worker recovered after an unhandled failure for call {CallId}; requeueing the call", item.CallId);
+                EnqueueTranscription(item);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
         }
     }
 
@@ -356,7 +396,7 @@ public sealed class EnginePipeline
                 IsAlertMatch = alert.IsMatch,
                 RawMetadataJson = MergeTranscriptionMetadata(call.RawMetadataJson, result.Metadata)
             };
-            await _database.UpdateCallTranscriptionAsync(item.CallId, result.Text, quality.Status, quality.Reason, alert.IsMatch, updatedCall.RawMetadataJson, ct);
+            await UpdateCallTranscriptionWithRetryAsync(item.CallId, result.Text, quality.Status, quality.Reason, alert.IsMatch, updatedCall.RawMetadataJson, ct);
             await _postProcessing.ProcessAsync(updatedCall, ct);
             RecordTranscriptionPerformance(startedAt, stopwatch.Elapsed, audioSeconds, backlog);
 
@@ -393,9 +433,31 @@ public sealed class EnginePipeline
             _logger.LogError(ex, "Transcription failed for call {CallId}", item.CallId);
             var call = await _database.GetCallAsync(item.CallId, ct);
             var metadata = MergeTranscriptionMetadata(call?.RawMetadataJson ?? "{}", CreateTranscriptionFailureMetadata(ex));
-            await _database.UpdateCallTranscriptionAsync(item.CallId, string.Empty, "failed", "transcription_error", false, metadata, ct);
+            await UpdateCallTranscriptionWithRetryAsync(item.CallId, string.Empty, "failed", "transcription_error", false, metadata, ct);
         }
     }
+
+    private async Task UpdateCallTranscriptionWithRetryAsync(long callId, string transcription, string status, string qualityReason, bool isAlertMatch, string? rawMetadataJson, CancellationToken ct)
+    {
+        const int maxAttempts = 8;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await _database.UpdateCallTranscriptionAsync(callId, transcription, status, qualityReason, isAlertMatch, rawMetadataJson, ct);
+                return;
+            }
+            catch (SqliteException ex) when (IsTransientSqliteLock(ex) && attempt < maxAttempts && !ct.IsCancellationRequested)
+            {
+                var delay = TimeSpan.FromMilliseconds(Math.Min(2000, 100 * attempt * attempt));
+                _logger.LogWarning(ex, "SQLite was locked while updating transcription for call {CallId}; retrying attempt {Attempt}/{MaxAttempts} after {DelayMs}ms", callId, attempt, maxAttempts, delay.TotalMilliseconds);
+                await Task.Delay(delay, ct);
+            }
+        }
+    }
+
+    private static bool IsTransientSqliteLock(SqliteException ex) =>
+        ex.SqliteErrorCode is 5 or 6;
 
     public TranscriptionPerformanceSnapshot GetTranscriptionPerformance(TimeSpan window)
     {

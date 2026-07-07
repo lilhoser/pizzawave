@@ -16,8 +16,7 @@ public sealed class EngineDatabase
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _config.Storage.DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
+            Mode = SqliteOpenMode.ReadWriteCreate
         }.ToString();
     }
 
@@ -38,6 +37,9 @@ public sealed class EngineDatabase
     {
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA busy_timeout=5000;";
+        command.ExecuteNonQuery();
         return connection;
     }
 
