@@ -6321,7 +6321,7 @@ function buildWaterfallCandidateRows(
   })));
   const fallbackTargets = fallbackControlChannels.map(frequencyHz => ({ systemShortName: "", siteLabel: "Selected CC", frequencyHz, system: undefined as RfSurveySystem | undefined }));
   const matchableTargets = selectedTargets.length ? selectedTargets : fallbackTargets;
-  const rrTargets = buildRadioReferenceControlChannelTargets(radioReferenceSites);
+  const rrTargets = buildRadioReferenceControlChannelTargets(radioReferenceSites, selectedSystems);
   const otherCandidateRows: WaterfallCandidateRow[] = otherRows.map(row => {
     const fallbackTarget = nearestFrequencyTarget(row.frequencyHz, matchableTargets, 20_000);
     const matchedSelected = Boolean(fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase()));
@@ -6393,10 +6393,16 @@ function nearestFrequencyTarget<T extends { frequencyHz: number }>(frequencyHz: 
     .sort((left, right) => left.distance - right.distance)[0]?.target ?? null;
 }
 
-function buildRadioReferenceControlChannelTargets(radioReferenceSites: SetupTrConfigSites | null): WaterfallFrequencyTarget[] {
+function buildRadioReferenceControlChannelTargets(radioReferenceSites: SetupTrConfigSites | null, selectedSystems: RfSurveySystem[] = []): WaterfallFrequencyTarget[] {
   const rows: WaterfallFrequencyTarget[] = [];
+  const selectedStates = inferSelectedSetupStates(selectedSystems, radioReferenceSites);
   for (const site of radioReferenceSites?.sites ?? []) {
     const siteLabel = site.name || site.shortName || "RR site";
+    if (selectedStates.size > 0) {
+      const siteState = inferStateFromText([siteLabel, site.shortName, radioReferenceSites?.systemName]);
+      if (!siteState || !selectedStates.has(siteState))
+        continue;
+    }
     const systemShortName = site.shortName || site.name || "";
     for (const frequencyMhz of site.controlChannelsMhz ?? []) {
       const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
@@ -6412,6 +6418,131 @@ function buildRadioReferenceControlChannelTargets(radioReferenceSites: SetupTrCo
   }
   return rows;
 }
+
+function inferSelectedSetupStates(selectedSystems: RfSurveySystem[], radioReferenceSites: SetupTrConfigSites | null) {
+  const selectedNames = new Set(selectedSystems.map(system => system.shortName.toLowerCase()));
+  const values = selectedSystems.flatMap(system => [system.siteLabel, system.shortName]);
+  for (const site of radioReferenceSites?.sites ?? []) {
+    const siteKey = (site.shortName || site.name || "").toLowerCase();
+    if (selectedNames.has(siteKey))
+      values.push(site.name, site.shortName, radioReferenceSites?.systemName ?? "");
+  }
+  return new Set(values.map(value => inferStateFromText([value])).filter((value): value is string => Boolean(value)));
+}
+
+function inferStateFromText(values: Array<string | undefined | null>) {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+  if (!text.trim())
+    return "";
+  for (const [token, state] of Object.entries(radioReferenceStateTokens)) {
+    if (new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text))
+      return state;
+  }
+  return "";
+}
+
+const radioReferenceStateTokens: Record<string, string> = {
+  al: "alabama",
+  alabama: "alabama",
+  ak: "alaska",
+  alaska: "alaska",
+  az: "arizona",
+  arizona: "arizona",
+  ar: "arkansas",
+  arkansas: "arkansas",
+  ca: "california",
+  california: "california",
+  co: "colorado",
+  colorado: "colorado",
+  ct: "connecticut",
+  connecticut: "connecticut",
+  de: "delaware",
+  delaware: "delaware",
+  fl: "florida",
+  florida: "florida",
+  ga: "georgia",
+  georgia: "georgia",
+  hi: "hawaii",
+  hawaii: "hawaii",
+  id: "idaho",
+  idaho: "idaho",
+  il: "illinois",
+  illinois: "illinois",
+  in: "indiana",
+  indiana: "indiana",
+  ia: "iowa",
+  iowa: "iowa",
+  ks: "kansas",
+  kansas: "kansas",
+  ky: "kentucky",
+  kentucky: "kentucky",
+  la: "louisiana",
+  louisiana: "louisiana",
+  me: "maine",
+  maine: "maine",
+  md: "maryland",
+  maryland: "maryland",
+  ma: "massachusetts",
+  massachusetts: "massachusetts",
+  mi: "michigan",
+  michigan: "michigan",
+  mn: "minnesota",
+  minnesota: "minnesota",
+  ms: "mississippi",
+  mississippi: "mississippi",
+  mo: "missouri",
+  missouri: "missouri",
+  mt: "montana",
+  montana: "montana",
+  ne: "nebraska",
+  nebraska: "nebraska",
+  nv: "nevada",
+  nevada: "nevada",
+  nh: "new-hampshire",
+  "new hampshire": "new-hampshire",
+  nj: "new-jersey",
+  "new jersey": "new-jersey",
+  nm: "new-mexico",
+  "new mexico": "new-mexico",
+  ny: "new-york",
+  "new york": "new-york",
+  nc: "north-carolina",
+  "north carolina": "north-carolina",
+  nd: "north-dakota",
+  "north dakota": "north-dakota",
+  oh: "ohio",
+  ohio: "ohio",
+  ok: "oklahoma",
+  oklahoma: "oklahoma",
+  or: "oregon",
+  oregon: "oregon",
+  pa: "pennsylvania",
+  pennsylvania: "pennsylvania",
+  ri: "rhode-island",
+  "rhode island": "rhode-island",
+  sc: "south-carolina",
+  "south carolina": "south-carolina",
+  sd: "south-dakota",
+  "south dakota": "south-dakota",
+  tn: "tennessee",
+  tennessee: "tennessee",
+  tx: "texas",
+  texas: "texas",
+  ut: "utah",
+  utah: "utah",
+  vt: "vermont",
+  vermont: "vermont",
+  va: "virginia",
+  virginia: "virginia",
+  wa: "washington",
+  washington: "washington",
+  wv: "west-virginia",
+  "west virginia": "west-virginia",
+  wi: "wisconsin",
+  wisconsin: "wisconsin",
+  wy: "wyoming",
+  wyoming: "wyoming"
+};
 
 function waterfallCandidateSourceLabel(row: WaterfallCandidateRow, identify?: WaterfallIdentifyResult) {
   const prefix = row.origin === "selected" ? "Selected site" : row.origin === "rr" ? "RR cached site" : "Unknown CC";
