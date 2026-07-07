@@ -2482,8 +2482,55 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   background: var(--category-bg, #111820);
 }
 .talkgroup-catalog-table .table {
-  min-width: 820px;
-  table-layout: auto;
+  width: 100%;
+  min-width: 1040px;
+  table-layout: fixed;
+}
+.talkgroup-catalog-grid th,
+.talkgroup-catalog-grid td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.talkgroup-catalog-grid th:first-child,
+.talkgroup-catalog-grid td:first-child {
+  text-align: center;
+}
+.talkgroup-catalog-grid .tg-select-col {
+  width: 44px;
+}
+.talkgroup-catalog-grid .tg-policy-col {
+  width: 190px;
+}
+.talkgroup-catalog-grid .tg-system-col {
+  width: 135px;
+}
+.talkgroup-catalog-grid .tg-id-col {
+  width: 105px;
+}
+.talkgroup-catalog-grid .tg-category-col {
+  width: 128px;
+}
+.talkgroup-catalog-grid .tg-source-col {
+  width: 80px;
+}
+.talkgroup-policy-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.talkgroup-policy-cell > span:first-child {
+  flex: 0 0 66px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.talkgroup-policy-cell .tiny-button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+}
+.talkgroup-catalog-grid td select {
+  max-width: 100%;
 }
 .high-load-talkgroups {
   border: 1px solid #30363d;

@@ -14015,7 +14015,16 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
           <button disabled={currentPage >= pageCount} onClick={() => setPage(pageCount)}>Last</button>
           <button onClick={() => { setShowAllRows(current => !current); setPage(1); }}>{showAllRows ? "Paginate" : "Show all"}</button>
         </div>
-        <table className="table compact-table">
+        <table className="table compact-table talkgroup-catalog-grid">
+          <colgroup>
+            <col className="tg-select-col" />
+            <col className="tg-policy-col" />
+            {hasSystemScopedRows && <col className="tg-system-col" />}
+            <col className="tg-id-col" />
+            <col className="tg-name-col" />
+            <col className="tg-category-col" />
+            <col className="tg-source-col" />
+          </colgroup>
           <thead><tr>
             <th><input type="checkbox" aria-label="Select visible talkgroups" checked={allVisibleSelected} ref={input => { if (input) input.indeterminate = visibleSelectedCount > 0 && !allVisibleSelected; }} onChange={e => setVisibleTalkgroupsSelected(e.currentTarget.checked)} /></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("state")}>TR Policy {sortKey === "state" ? sortDir : ""}</button></th>
@@ -14030,13 +14039,13 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
             return <tr className={item.enabled ? "" : "excluded-row"} key={`${talkgroupCatalogKey(item)}-${index}`}>
               <td><input type="checkbox" aria-label={`Select TG ${item.id}`} checked={selectedTalkgroupKeys.has(key)} onChange={e => setTalkgroupSelected(key, e.currentTarget.checked)} /></td>
               <td>
-                <span>{item.enabled ? "Included" : "Excluded"}</span>
+                <span className="talkgroup-policy-cell"><span>{item.enabled ? "Included" : "Excluded"}</span>
                 {allowSystemExclusions && <button
                   type="button"
                   className={item.enabled ? "tiny-button" : "tiny-button danger-button"}
                   disabled={Boolean(busy)}
                   onClick={() => void setSystemExcluded(item, item.enabled)}
-                >{item.enabled ? "Exclude from TR" : "Restore"}</button>}
+                >{item.enabled ? "Exclude from TR" : "Restore"}</button>}</span>
               </td>
               {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
               <td>{item.id}</td>
