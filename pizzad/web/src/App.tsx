@@ -13804,9 +13804,10 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const [sortKey, setSortKey] = useState<"state" | "id" | "name" | "category">("id");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
+  const [showAllRows, setShowAllRows] = useState(false);
+  const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  const [bulkAction, setBulkAction] = useState("");
 
   useEffect(() => { void loadCatalog(); }, [reloadToken]);
   useEffect(() => setPage(1), [filter, enabledFilter, categoryFilter, sortKey, sortDir]);
@@ -13822,6 +13823,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     try {
       const loaded = await api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog");
       setDraft(cloneSettings(loaded.document));
+      setSelectedTalkgroupKeys(new Set());
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load talkgroup catalog.");
@@ -13874,30 +13876,29 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     }
   }
 
-  async function applyBulkCategoryAction() {
-    if (!draft || busy || !bulkAction) return;
-    if (bulkAction !== "entergy-utilities") return;
-    const targets = draft.items.filter(isEntergyTalkgroup);
-    if (!targets.length) {
-      setMessage("No Entergy talkgroups were found in the catalog.");
+  async function applySelectedCategory(category: string) {
+    if (!draft || busy || !category || selectedTalkgroupKeys.size === 0) return;
+    const targetKeys = new Set(selectedTalkgroupKeys);
+    const targetCount = draft.items.filter(row => targetKeys.has(talkgroupCatalogKey(row))).length;
+    if (!targetCount) {
+      setSelectedTalkgroupKeys(new Set());
       return;
     }
-    if (!confirmAction("Assign Entergy talkgroups to Utilities?", `This will update ${targets.length.toLocaleString()} catalog row(s), regenerate the TR talkgroups CSV, and affect new calls going forward.`))
+    if (!confirmAction(`Assign selected talkgroups to ${label(category)}?`, `This will update ${targetCount.toLocaleString()} catalog row(s), regenerate the TR talkgroups CSV, and affect new calls going forward.`))
       return;
-    setBusy("bulk-category");
+    setBusy("selected-category");
     setMessage("");
     try {
-      const targetKeys = new Set(targets.map(talkgroupCatalogKey));
       const now = new Date().toISOString();
       const next = {
         ...draft,
         updatedAtUtc: now,
-        items: draft.items.map(row => targetKeys.has(talkgroupCatalogKey(row)) ? { ...row, opsCategory: "utilities", updatedAtUtc: now } : row)
+        items: draft.items.map(row => targetKeys.has(talkgroupCatalogKey(row)) ? { ...row, opsCategory: category, updatedAtUtc: now } : row)
       };
-      await saveCatalogDocument(next, `Assigned ${targets.length.toLocaleString()} Entergy talkgroup row(s) to Utilities.`);
-      setBulkAction("");
+      await saveCatalogDocument(next, `Assigned ${targetCount.toLocaleString()} selected talkgroup row(s) to ${label(category)}.`);
+      setSelectedTalkgroupKeys(new Set());
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to bulk update talkgroup categories.");
+      setMessage(error instanceof Error ? error.message : "Unable to update selected talkgroup categories.");
     } finally {
       setBusy("");
     }
@@ -13939,12 +13940,15 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
       item.tag.toLowerCase().includes(needle) ||
       item.opsCategory.toLowerCase().includes(needle))
     .sort(compareRows);
-  const pageSize = 50;
+  const pageSize = showAllRows ? Math.max(1, rows.length) : 50;
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const startRow = rows.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const endRow = Math.min(rows.length, currentPage * pageSize);
+  const visibleKeys = visibleRows.map(talkgroupCatalogKey);
+  const visibleSelectedCount = visibleKeys.filter(key => selectedTalkgroupKeys.has(key)).length;
+  const allVisibleSelected = visibleKeys.length > 0 && visibleSelectedCount === visibleKeys.length;
   const enabledCount = effectiveItems.filter(item => item.enabled).length;
   const excludedCount = Math.max(0, effectiveItems.length - enabledCount);
   const hasSystemScopedRows = effectiveItems.some(item => item.systemShortName);
@@ -13955,10 +13959,35 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   }, new Map()))
     .sort(([aCategory, aCount], [bCategory, bCount]) => bCount - aCount || aCategory.localeCompare(bCategory))
     .slice(0, 5);
+  function setTalkgroupSelected(key: string, selected: boolean) {
+    setSelectedTalkgroupKeys(current => {
+      const next = new Set(current);
+      if (selected)
+        next.add(key);
+      else
+        next.delete(key);
+      return next;
+    });
+  }
+  function setVisibleTalkgroupsSelected(selected: boolean) {
+    setSelectedTalkgroupKeys(current => {
+      const next = new Set(current);
+      for (const key of visibleKeys) {
+        if (selected)
+          next.add(key);
+        else
+          next.delete(key);
+      }
+      return next;
+    });
+  }
   return <div className={`${embedded ? "site-setup-catalog-editor" : "card settings-card wide"} talkgroups-settings-card`}>
     <div className="settings-fields">
       {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
       <div className="talkgroup-catalog-table">
+        {topCategoryCounts.length > 0 && <div className="talkgroup-category-summary">
+          {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
+        </div>}
         <div className="table-top-pagination">
           <input placeholder="Filter TGs" value={filter} onChange={e => setFilter(e.target.value)} />
           <select value={enabledFilter} onChange={e => setEnabledFilter(e.target.value as "all" | "included" | "excluded")}>
@@ -13971,22 +14000,24 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
             {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
           </select>
           <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} included / {excludedCount} excluded</span>
-          {topCategoryCounts.length > 0 && <span className="talkgroup-category-pills">
-            {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
+          {selectedTalkgroupKeys.size > 0 && <span className="selected-category-action">
+            <span>{selectedTalkgroupKeys.size.toLocaleString()} selected</span>
+            <select value="" disabled={Boolean(busy)} onChange={e => { const value = e.target.value; if (value) void applySelectedCategory(value); }} aria-label="Set selected talkgroup category">
+              <option value="">Set category...</option>
+              {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
+            </select>
+            <button disabled={Boolean(busy)} onClick={() => setSelectedTalkgroupKeys(new Set())}>Clear</button>
           </span>}
-          <select value={bulkAction} onChange={e => setBulkAction(e.target.value)} aria-label="Bulk talkgroup action">
-            <option value="">Bulk actions</option>
-            <option value="entergy-utilities">Assign Entergy TGs to Utilities</option>
-          </select>
-          <button disabled={!bulkAction || Boolean(busy)} onClick={() => void applyBulkCategoryAction()}>Apply</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(1)}>First</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
           <span>{currentPage} / {pageCount}</span>
           <button disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
           <button disabled={currentPage >= pageCount} onClick={() => setPage(pageCount)}>Last</button>
+          <button onClick={() => { setShowAllRows(current => !current); setPage(1); }}>{showAllRows ? "Paginate" : "Show all"}</button>
         </div>
         <table className="table compact-table">
           <thead><tr>
+            <th><input type="checkbox" aria-label="Select visible talkgroups" checked={allVisibleSelected} ref={input => { if (input) input.indeterminate = visibleSelectedCount > 0 && !allVisibleSelected; }} onChange={e => setVisibleTalkgroupsSelected(e.currentTarget.checked)} /></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("state")}>TR Policy {sortKey === "state" ? sortDir : ""}</button></th>
             {hasSystemScopedRows && <th>System</th>}
             <th><button type="button" className="sort-header" onClick={() => sortBy("id")}>TG ID {sortKey === "id" ? sortDir : ""}</button></th>
@@ -13995,7 +14026,9 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
             <th>Source</th>
           </tr></thead>
           <tbody>{visibleRows.map((item, index) => {
+            const key = talkgroupCatalogKey(item);
             return <tr className={item.enabled ? "" : "excluded-row"} key={`${talkgroupCatalogKey(item)}-${index}`}>
+              <td><input type="checkbox" aria-label={`Select TG ${item.id}`} checked={selectedTalkgroupKeys.has(key)} onChange={e => setTalkgroupSelected(key, e.currentTarget.checked)} /></td>
               <td>
                 <span>{item.enabled ? "Included" : "Excluded"}</span>
                 {allowSystemExclusions && <button
@@ -14108,18 +14141,6 @@ function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemSho
   if (key) return key;
   const system = normalizeTalkgroupSystem(item.systemShortName);
   return system ? `${system}:${item.id}` : String(item.id);
-}
-
-function isEntergyTalkgroup(item: TalkgroupCatalogItem) {
-  return [
-    item.systemShortName,
-    item.alphaTag,
-    item.description,
-    item.tag,
-    item.sourceCategory,
-    item.source,
-    item.notes
-  ].some(value => String(value ?? "").toLowerCase().includes("entergy"));
 }
 
 function withSettingsDefaults(value: Record<string, any>) {

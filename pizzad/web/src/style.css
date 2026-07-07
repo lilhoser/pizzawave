@@ -2456,10 +2456,21 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   padding: 4px 8px;
   white-space: nowrap;
 }
-.talkgroup-category-pills {
+.talkgroup-category-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 6px;
+  background: #11161b;
+  border-bottom: 1px solid #30363d;
+}
+.selected-category-action {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  padding-left: 6px;
+  border-left: 1px solid #30363d;
 }
 .talkgroup-category-pill {
   margin: 0;
