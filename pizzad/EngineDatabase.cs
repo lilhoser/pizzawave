@@ -1207,7 +1207,7 @@ public sealed class EngineDatabase
               AND (SELECT COUNT(*) FROM incident_calls ic WHERE ic.incident_id = i.id) >= 2;
             """, start, end, ct);
         var tokens = await CountIsoAsync(connection, "SELECT COALESCE(SUM(CASE WHEN total_tokens > 0 THEN total_tokens ELSE prompt_tokens + completion_tokens END), 0) FROM lm_usage WHERE timestamp_utc >= $start AND timestamp_utc <= $end;", start, end, ct);
-        return new StatusSummaryDto((int)calls, (int)incidents, (int)alerts, tokens);
+        return new StatusSummaryDto((int)calls, (int)incidents, 0, (int)alerts, tokens);
     }
 
     public async Task<List<EngineCall>> ListCompletedCallsAfterAsync(long startExclusive, int limit, CancellationToken ct)
@@ -2850,7 +2850,7 @@ public sealed class EngineDatabase
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT c.id, c.start_time, c.transcription, COALESCE(c.category, 'other'), COALESCE(c.talkgroup_name, ''), COALESCE(c.system_short_name, ''),
+            SELECT c.id, c.start_time, c.transcription, COALESCE(c.category, 'other'), COALESCE(c.talkgroup_name, ''), COALESCE(c.system_short_name, ''), c.talkgroup,
                    COALESCE(MAX(CASE WHEN am.id IS NOT NULL THEN 1 ELSE 0 END), 0),
                    COALESCE(MAX(CASE WHEN am.id IS NOT NULL AND COALESCE(am.dismissed_at_utc, '') = '' THEN 1 ELSE 0 END), 0),
                    COALESCE(group_concat(DISTINCT am.rule_name), '')
@@ -2861,7 +2861,7 @@ public sealed class EngineDatabase
               AND c.transcription_status = 'complete'
               AND c.quality_reason = 'ok'
               AND length(trim(c.transcription)) > 0
-            GROUP BY c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name
+            GROUP BY c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name, c.talkgroup
             ORDER BY c.start_time ASC;
             """;
         Add(command, "$incident_id", incidentId);
@@ -2878,9 +2878,10 @@ public sealed class EngineDatabase
                 reader.GetString(3),
                 reader.GetString(4),
                 reader.GetString(5),
-                reader.GetInt64(6) != 0,
+                reader.GetInt64(6),
                 reader.GetInt64(7) != 0,
-                reader.GetString(8)));
+                reader.GetInt64(8) != 0,
+                reader.GetString(9)));
         }
         return calls;
     }
@@ -2893,7 +2894,7 @@ public sealed class EngineDatabase
         var parameters = callIds.Select((_, i) => $"$id{i}").ToArray();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT id, start_time, transcription, COALESCE(category, 'other'), COALESCE(talkgroup_name, ''), COALESCE(system_short_name, '')
+            SELECT id, start_time, transcription, COALESCE(category, 'other'), COALESCE(talkgroup_name, ''), COALESCE(system_short_name, ''), talkgroup
             FROM calls
             WHERE id IN ({string.Join(",", parameters)})
               AND transcription_status = 'complete'
@@ -2916,7 +2917,8 @@ public sealed class EngineDatabase
                 $"/api/v1/calls/{callId}/audio",
                 reader.GetString(3),
                 reader.GetString(4),
-                reader.GetString(5)));
+                reader.GetString(5),
+                reader.GetInt64(6)));
         }
         return calls;
     }

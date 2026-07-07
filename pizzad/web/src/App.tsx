@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -14,7 +14,7 @@ const rfDetailUrl = (apiBase: string, id: string, compact = true) => `${apiBase}
 const waterfallStopUrl = (apiBase: string, surveyId: string) => `${apiBase}/${encodeURIComponent(surveyId)}/waterfall/stop`;
 type Page = "dashboard" | "setup" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts";
-type CategorySortMode = "name" | "recent" | "frequent";
+type CategorySortMode = "name" | "tgid" | "recent" | "frequent";
 type AuthPromptState = { request: AuthTokenRequest; resolve: (token: string | null) => void; token: string; message: string };
 const categoryColors: Record<string, string> = {
   police: "#5aa7ff",
@@ -98,6 +98,7 @@ function App() {
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null);
   const [profileState, setProfileState] = useState<ProfileState | null>(null);
+  const [pendingProfileHides, setPendingProfileHides] = useState<ProfileTalkgroupSetting[]>([]);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [siteSetup, setSiteSetup] = useState<SiteSetup | null>(null);
   const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
@@ -689,16 +690,33 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
       <main className={`main ${inSetup ? "setup-main" : ""}`}>
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
         {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
-        {setupStatus?.completed && categories.includes(page as any) && <CategoryView data={category} rangeHours={rangeHours} searchQuery={globalSearch} />}
+        {setupStatus?.completed && categories.includes(page as any) && <CategoryView
+          data={category}
+          rangeHours={rangeHours}
+          searchQuery={globalSearch}
+          profileState={profileState}
+          setProfileState={setProfileState}
+          reload={load}
+          onOpenProfiles={(settings) => {
+            if (settings?.length) {
+              setPendingProfileHides(current => mergeProfileTalkgroupSettings(current, settings));
+            }
+            localStorage.setItem("pizzawave-settings-tab", "profiles");
+            setPage("settings");
+          }}
+        />}
         {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={setSetupTrOperation} />}
         {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={() => setPage("setup")} />}
-        {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} />}
+        {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} />}
       </main>
       {!inSetup && <footer className="statusbar">
         <button type="button" className="pill status-pill-button" onClick={() => goSetup("Talkgroups")}>Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</button>
         <span className="status-separator">|</span>
         <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
-        <button type="button" className="pill status-pill-button" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
+        <button type="button" className="pill status-pill-button incident-status-pill" onClick={() => goDashboard("incidents")}>
+          <span>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</span>
+          {(statusSummary?.hiddenIncidents ?? 0) > 0 && <small>{statusSummary?.hiddenIncidents?.toLocaleString()} hidden by TG policy</small>}
+        </button>
         <button type="button" className="pill status-pill-button" onClick={() => goDashboard("alerts")}>Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</button>
         <button type="button" className={`pill status-pill-button queue-health queue-${queueHealth}`} title={queueHealthTitle} onClick={() => goSystem("queue")}>{queueHealthText}</button>
         <button type="button" className={cpuPillClass} title={cpuPillTitle} onClick={() => goSystem("cpu")}>{cpuPillText}</button>
@@ -2094,6 +2112,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
     <TalkgroupCatalogSettingsCard
       reloadToken={catalogReloadToken}
       embedded
+      allowSystemExclusions
     />
   </div>;
 }
@@ -2680,9 +2699,14 @@ function LocationSourceCall({ call, searchQuery = "" }: { call: LocationHeat["so
   </div>;
 }
 
-function CategoryView({ data, rangeHours, searchQuery }: { data: CategoryPage | null; rangeHours: number; searchQuery: string }) {
+function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileState, reload, onOpenProfiles }: { data: CategoryPage | null; rangeHours: number; searchQuery: string; profileState: ProfileState | null; setProfileState: React.Dispatch<React.SetStateAction<ProfileState | null>>; reload: () => Promise<void>; onOpenProfiles: (settings?: ProfileTalkgroupSetting[]) => void }) {
   const [sortMode, setSortModeState] = useState<CategorySortMode>(() => normalizeCategorySort(localStorage.getItem("pizzawave-category-sort")));
   const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") !== "0");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
+  const [selectionOrderKeys, setSelectionOrderKeys] = useState<string[]>([]);
+  const [hidingSelected, setHidingSelected] = useState(false);
+  const activeProfile = profileState?.profiles.find(profile => profile.id === profileState.activeProfileId);
   function setSortMode(value: CategorySortMode) {
     setSortModeState(value);
     localStorage.setItem("pizzawave-category-sort", value);
@@ -2691,13 +2715,85 @@ function CategoryView({ data, rangeHours, searchQuery }: { data: CategoryPage | 
     setHideWeakCallsState(value);
     localStorage.setItem("pizzawave-hide-weak-category-calls", value ? "1" : "0");
   }
+  function setTalkgroupSelected(group: CategoryPage["groups"][number], selected: boolean) {
+    const key = categoryGroupKey(group);
+    setSelectedTalkgroupKeys(current => {
+      const next = new Set(current);
+      if (selected)
+        next.add(key);
+      else
+        next.delete(key);
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelectionMode(false);
+    setSelectedTalkgroupKeys(new Set());
+    setSelectionOrderKeys([]);
+  }
+  function toggleSelectionMode(sortedGroups: CategoryPage["groups"]) {
+    if (selectionMode) {
+      clearSelection();
+      return;
+    }
+    setSelectionOrderKeys(sortedGroups.map(categoryGroupKey));
+    setSelectionMode(true);
+  }
+  async function hideSelectedTalkgroups(groups: CategoryPage["groups"]) {
+    const selectedGroups = groups.filter(group => selectedTalkgroupKeys.has(categoryGroupKey(group)));
+    if (!selectedGroups.length)
+      return;
+    const settings = selectedGroups.map(group => profileSettingForGroup(group, data?.category ?? "other"));
+    if (!profileState || !activeProfile) {
+      onOpenProfiles(settings);
+      return;
+    }
+    if (isDefaultProfile(activeProfile)) {
+      if (confirmAction("Default profile is read-only", `Create a new profile to hide ${selectedGroups.length.toLocaleString()} selected talkgroup${selectedGroups.length === 1 ? "" : "s"}?`))
+        onOpenProfiles(settings);
+      return;
+    }
+    if (!confirmAction("Hide selected talkgroups from profile?", `Hide ${selectedGroups.length.toLocaleString()} talkgroup${selectedGroups.length === 1 ? "" : "s"} from ${activeProfile.name}? Calls remain captured and transcribed, but this profile will not see those TGs in user-facing views or downstream processing.`))
+      return;
+    const settingKeys = new Set(settings.map(profileSettingKey));
+    const nextProfiles = profileState.profiles.map(profile => {
+      if (profile.id !== activeProfile.id)
+        return profile;
+      const without = (profile.talkgroups ?? []).filter(row => !settingKeys.has(profileSettingKey(row)));
+      return {
+        ...profile,
+        talkgroups: [...without, ...settings],
+        updatedAtUtc: new Date().toISOString()
+      };
+    });
+    setHidingSelected(true);
+    try {
+      const saved = await api.request<ProfileState>("/api/v1/profiles", {
+        method: "POST",
+        body: JSON.stringify({ activeProfileId: profileState.activeProfileId, profiles: nextProfiles })
+      });
+      setProfileState(saved);
+      clearSelection();
+      await reload();
+    } finally {
+      setHidingSelected(false);
+    }
+  }
   if (!data) return <div className="category-page">Loading...</div>;
   const totalCallCount = data.groups.reduce((sum, group) => sum + group.count, 0);
   const strongCallCount = data.groups.reduce((sum, group) => sum + group.strongCount, 0);
   const displayCallCount = hideWeakCalls ? strongCallCount : totalCallCount;
   const visibleSourceGroups = hideWeakCalls ? data.groups.filter(group => group.strongCount > 0) : data.groups;
-  const sortedGroups = sortCategoryGroups(visibleSourceGroups, sortMode);
+  const weakHiddenTalkgroupCount = data.groups.length - visibleSourceGroups.length;
+  const profileHiddenTalkgroupCount = (activeProfile?.talkgroups ?? [])
+    .filter(setting => setting.enabled === false && normalizeUiCategory(setting.category || data.category) === data.category)
+    .length;
+  const autoSortedGroups = sortCategoryGroups(visibleSourceGroups, sortMode);
+  const sortedGroups = selectionMode && selectionOrderKeys.length
+    ? stableCategoryGroupOrder(visibleSourceGroups, selectionOrderKeys)
+    : autoSortedGroups;
   const filteredGroups = sortedGroups.filter(group => matchesCategoryGroupSearch(group, searchQuery));
+  const selectedCount = filteredGroups.filter(group => selectedTalkgroupKeys.has(categoryGroupKey(group))).length;
   return <div className="category-page category-mode-page" data-category={data.category}>
     <section className="pane category-pane raw-category">
       <div className="category-header">
@@ -2705,21 +2801,27 @@ function CategoryView({ data, rangeHours, searchQuery }: { data: CategoryPage | 
           <h2>{label(data.category)} Calls by Talkgroup</h2>
           <div className="category-actions">
             <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
-              <button type="button" className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
-              <button type="button" className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
-              <button type="button" className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
+              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
+              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "tgid" ? "active" : ""} onClick={() => setSortMode("tgid")}>TG ID</button>
+              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
+              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
             </div>
             <label className="category-quality-toggle">
               <input type="checkbox" checked={hideWeakCalls} onChange={event => setHideWeakCalls(event.currentTarget.checked)} />
               <span>Hide weak calls</span>
             </label>
+            <button type="button" className={selectionMode ? "active" : ""} onClick={() => toggleSelectionMode(autoSortedGroups)}>{selectionMode ? "Selecting TGs" : "Select TGs"}</button>
+            {selectionMode && <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected} onClick={() => void hideSelectedTalkgroups(filteredGroups)}>{hidingSelected ? "Hiding..." : `Hide selected (${selectedCount})`}</button>}
+            {selectionMode && <button type="button" disabled={hidingSelected} onClick={clearSelection}>Clear</button>}
           </div>
           <span className="muted category-counts">
-            {displayCallCount.toLocaleString()} of {totalCallCount.toLocaleString()} call{totalCallCount === 1 ? "" : "s"} shown / {filteredGroups.length.toLocaleString()} of {data.groups.length.toLocaleString()} talkgroup{data.groups.length === 1 ? "" : "s"}
+            {displayCallCount.toLocaleString()} of {totalCallCount.toLocaleString()} call{totalCallCount === 1 ? "" : "s"} shown / {filteredGroups.length.toLocaleString()} shown / {data.groups.length.toLocaleString()} profile TG{data.groups.length === 1 ? "" : "s"}
+            {profileHiddenTalkgroupCount > 0 ? ` / ${profileHiddenTalkgroupCount.toLocaleString()} hidden by profile` : ""}
+            {weakHiddenTalkgroupCount > 0 ? ` / ${weakHiddenTalkgroupCount.toLocaleString()} hidden by weak-call filter` : ""}
           </span>
         </div>
       </div>
-      <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} />
+      <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} selectionMode={selectionMode} selectedTalkgroupKeys={selectedTalkgroupKeys} onToggleSelected={setTalkgroupSelected} />
     </section>
   </div>;
 }
@@ -2979,12 +3081,12 @@ function IncidentSummary({ incident, linkedLocation, onShowLocation, stripeCateg
   </summary>;
 }
 
-function CategoryCallGroups({ groups, category, rangeHours, searchQuery, hideWeakCalls }: { groups: CategoryPage["groups"]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean }) {
+function CategoryCallGroups({ groups, category, rangeHours, searchQuery, hideWeakCalls, selectionMode, selectedTalkgroupKeys, onToggleSelected }: { groups: CategoryPage["groups"]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean; selectionMode: boolean; selectedTalkgroupKeys: Set<string>; onToggleSelected: (group: CategoryPage["groups"][number], selected: boolean) => void }) {
   if (!groups.length) return <div className="card"><p className="muted">No raw calls available for this category.</p></div>;
-  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} key={`${group.talkgroupKey || group.talkgroup}-${group.label}`} />)}</>;
+  return <>{groups.map(group => <CollapsibleCallGroup group={group} category={category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} selectionMode={selectionMode} selected={selectedTalkgroupKeys.has(categoryGroupKey(group))} onToggleSelected={onToggleSelected} key={`${group.talkgroupKey || group.talkgroup}-${group.label}`} />)}</>;
 }
 
-function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWeakCalls }: { group: CategoryPage["groups"][number]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean }) {
+function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWeakCalls, selectionMode, selected, onToggleSelected }: { group: CategoryPage["groups"][number]; category: string; rangeHours: number; searchQuery: string; hideWeakCalls: boolean; selectionMode: boolean; selected: boolean; onToggleSelected: (group: CategoryPage["groups"][number], selected: boolean) => void }) {
   const [open, setOpen] = useState(false);
   const [calls, setCalls] = useState<EngineCall[]>(group.calls ?? []);
   const [loading, setLoading] = useState(false);
@@ -3008,7 +3110,20 @@ function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWe
   }, [open, calls.length, loading, category, group.talkgroupKey, group.talkgroup, rangeHours]);
   const visibleCalls = calls.filter(call => (!hideWeakCalls || isStrongCall(call)) && matchesCallSearch(call, searchQuery));
   return <details className={`call-group category-${category}`} open={open} onToggle={e => setOpen(e.currentTarget.open)}>
-    <summary><span><HighlightedText text={group.label} query={searchQuery} /></span><span className="muted">{hideWeakCalls ? `${visibleCount.toLocaleString()} of ${count.toLocaleString()} calls shown` : `${count.toLocaleString()} calls`}{group.lastHeard ? `; latest ${relativeTime(group.lastHeard)}` : ""}</span></summary>
+    <summary>
+      <span className="call-group-title">
+        {selectionMode && <input
+          type="checkbox"
+          className="call-group-select"
+          checked={selected}
+          aria-label={`Select ${group.label}`}
+          onClick={event => event.stopPropagation()}
+          onChange={event => onToggleSelected(group, event.currentTarget.checked)}
+        />}
+        <HighlightedText text={group.label} query={searchQuery} />
+      </span>
+      <span className="muted">{hideWeakCalls ? `${visibleCount.toLocaleString()} of ${count.toLocaleString()} calls shown` : `${count.toLocaleString()} calls`}{group.lastHeard ? `; latest ${relativeTime(group.lastHeard)}` : ""}</span>
+    </summary>
     {open && loading && <div className="call-group-status">Loading calls...</div>}
     {open && error && <div className="call-group-status error">{error}</div>}
     {open && visibleCalls.map(c => <CallRow call={c} searchQuery={searchQuery} key={c.id} />)}
@@ -3081,16 +3196,40 @@ function sortIncidents(rows: Incident[]) {
 }
 
 function normalizeCategorySort(value: string | null): CategorySortMode {
-  return value === "name" || value === "recent" || value === "frequent" ? value : "recent";
+  return value === "name" || value === "tgid" || value === "recent" || value === "frequent" ? value : "recent";
 }
 
 function sortCategoryGroups(groups: CategoryPage["groups"], mode: CategorySortMode) {
   return [...groups].sort((a, b) => {
     if (mode === "name")
-      return (a.label || `TG ${a.talkgroup}`).localeCompare(b.label || `TG ${b.talkgroup}`, undefined, { sensitivity: "base", numeric: true });
+      return categoryGroupNameSortKey(a).localeCompare(categoryGroupNameSortKey(b), undefined, { sensitivity: "base", numeric: true }) || (a.talkgroup - b.talkgroup);
+    if (mode === "tgid")
+      return (a.talkgroup - b.talkgroup) || categoryGroupNameSortKey(a).localeCompare(categoryGroupNameSortKey(b), undefined, { sensitivity: "base", numeric: true });
     if (mode === "frequent")
-      return (b.count - a.count) || (b.lastHeard - a.lastHeard) || (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base", numeric: true });
-    return (b.lastHeard - a.lastHeard) || (b.count - a.count) || (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base", numeric: true });
+      return (b.count - a.count) || (b.lastHeard - a.lastHeard) || categoryGroupNameSortKey(a).localeCompare(categoryGroupNameSortKey(b), undefined, { sensitivity: "base", numeric: true });
+    return (b.lastHeard - a.lastHeard) || (b.count - a.count) || categoryGroupNameSortKey(a).localeCompare(categoryGroupNameSortKey(b), undefined, { sensitivity: "base", numeric: true });
+  });
+}
+
+function categoryGroupNameSortKey(group: CategoryPage["groups"][number]) {
+  const labelText = (group.label || `TG ${group.talkgroup}`).trim();
+  const escapedId = String(group.talkgroup).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return labelText
+    .replace(new RegExp(`^\\s*(?:tg\\s*)?${escapedId}\\s*(?:[-:|/]|\\s+-\\s+)?\\s*`, "i"), "")
+    .replace(/^\s*(?:tg\s*)?\d{2,8}\s*(?:[-:|/]|[.)])?\s*/i, "")
+    .trim()
+    .toLowerCase() || labelText.toLowerCase();
+}
+
+function stableCategoryGroupOrder(groups: CategoryPage["groups"], orderKeys: string[]) {
+  const order = new Map(orderKeys.map((key, index) => [key, index]));
+  return [...groups].sort((a, b) => {
+    const aRank = order.get(categoryGroupKey(a));
+    const bRank = order.get(categoryGroupKey(b));
+    if (aRank !== undefined && bRank !== undefined) return aRank - bRank;
+    if (aRank !== undefined) return -1;
+    if (bRank !== undefined) return 1;
+    return (a.label || `TG ${a.talkgroup}`).localeCompare(b.label || `TG ${b.talkgroup}`, undefined, { sensitivity: "base", numeric: true });
   });
 }
 
@@ -12258,12 +12397,13 @@ function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { previ
   </div>;
 }
 
-function SettingsView({ settingsSections, settingsLoadState, reload }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void> }) {
+function SettingsView({ settingsSections, settingsLoadState, reload, pendingProfileHides, setPendingProfileHides }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void>; pendingProfileHides: ProfileTalkgroupSetting[]; setPendingProfileHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>> }) {
   const settingsTabs = [
     ["transcription", "Transcription"],
     ["ai", "AI"],
     ["embeddings", "Embeddings"],
     ["alerts", "Alerts"],
+    ["profiles", "Profiles"],
     ["admin", "Security"],
     ["system", "System Info"]
   ] as const;
@@ -12591,6 +12731,8 @@ function SettingsView({ settingsSections, settingsLoadState, reload }: { setting
         <AlertRulesEditor rules={alerts.rules ?? []} baselineRules={baselineSections.alerts?.rules ?? []} onChange={rules => update("alerts", ["rules"], rules)} />
       </SettingsCard>}
 
+      {settingsTab === "profiles" && <ProfilesSettingsCard reload={reload} pendingHides={pendingProfileHides} setPendingHides={setPendingProfileHides} />}
+
       {settingsTab === "admin" && <SettingsCard title="Security" description="Protects write, setup, and service-control actions. Dashboard reads stay open unless read auth is enabled." busy={savingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")}>
         <SettingSelect label="Mode" description="Use token for normal deployments. None disables PizzaWave API authorization." value={auth.mode ?? "token"} options={["token", "none"]} onChange={v => update("auth", ["mode"], v)} />
         <SettingCheckbox label="Require token for writes" description="Recommended. Protects settings, setup, service restarts, and other admin actions." checked={!!auth.writeRequiresAuth} onChange={v => update("auth", ["writeRequiresAuth"], v)} />
@@ -12640,6 +12782,389 @@ function SettingsCard({ title, description, children, busy, testing, status, onS
     </div>
     <div className="settings-fields">{children}</div>
   </div>;
+}
+
+function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reload: () => Promise<void>; pendingHides: ProfileTalkgroupSetting[]; setPendingHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>> }) {
+  type ProfileTalkgroupSetting = NonNullable<ProcessingProfile["talkgroups"]>[number];
+  const [profileState, setProfileState] = useState<ProfileState | null>(null);
+  const [catalog, setCatalog] = useState<TalkgroupCatalogDocument | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [filter, setFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [visibilityFilter, setVisibilityFilter] = useState<"all" | "shown" | "hidden" | "tr-excluded">("all");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [draftProfileId, setDraftProfileId] = useState("");
+  const appliedPendingKeyRef = useRef("");
+
+  useEffect(() => { void loadProfiles(); }, []);
+  useEffect(() => {
+    if (!pendingHides.length || !profileState)
+      return;
+    const pendingKey = pendingHides.map(profileSettingKey).sort().join("|");
+    if (appliedPendingKeyRef.current === pendingKey && draftProfileId && profileState.profiles.some(profile => profile.id === draftProfileId))
+      return;
+    const base = profileState.profiles.find(profile => profile.id === profileState.activeProfileId) ?? profileState.profiles[0];
+    let targetId = draftProfileId;
+    let created = false;
+    const existingTarget = targetId ? profileState.profiles.find(profile => profile.id === targetId) : null;
+    const profiles = [...profileState.profiles];
+    if (!existingTarget || isDefaultProfile(existingTarget)) {
+      const profile: ProcessingProfile = {
+        ...(base ? cloneSettings(base) : {
+          includePolice: true,
+          includeFire: true,
+          includeEMS: true,
+          includeTraffic: true,
+          includeOther: true,
+          allowedTalkgroups: [],
+          talkgroups: []
+        }),
+        id: newClientGuid(),
+        name: uniqueProfileName(profileState.profiles, "New Profile"),
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString()
+      };
+      targetId = profile.id;
+      created = true;
+      profiles.push(profile);
+      setDraftProfileId(targetId);
+    }
+
+    const pendingKeys = new Set(pendingHides.map(profileSettingKey));
+    const nextProfiles = profiles.map(profile => {
+      if (profile.id !== targetId)
+        return profile;
+      const without = (profile.talkgroups ?? []).filter(setting => !pendingKeys.has(profileSettingKey(setting)));
+      return {
+        ...profile,
+        talkgroups: [...without, ...pendingHides],
+        updatedAtUtc: new Date().toISOString()
+      };
+    });
+    setProfileState({ ...profileState, profiles: nextProfiles });
+    setSelectedProfileId(targetId);
+    setVisibilityFilter("hidden");
+    setMessage(`${created ? "Created" : "Updated"} draft profile with ${pendingHides.length.toLocaleString()} selected TG${pendingHides.length === 1 ? "" : "s"} to hide. Rename it, then Save Profiles.`);
+    appliedPendingKeyRef.current = pendingKey;
+  }, [pendingHides, profileState, draftProfileId, setPendingHides]);
+
+  async function loadProfiles() {
+    setBusy("load");
+    try {
+      const [profiles, catalogResponse] = await Promise.all([
+        api.request<ProfileState>("/api/v1/profiles"),
+        api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog")
+      ]);
+      setProfileState(profiles);
+      setCatalog(catalogResponse.document);
+      setSelectedProfileId(profiles.activeProfileId || profiles.profiles[0]?.id || "");
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load profiles.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const profiles = profileState?.profiles ?? [];
+  const selectedProfile = profiles.find(profile => profile.id === selectedProfileId) ?? profiles[0];
+  const catalogItems = catalog?.items ?? [];
+  const categoryOptions = Array.from(new Set(catalogItems.map(item => item.opsCategory || "other"))).sort();
+  const rows = catalogItems
+    .filter(item => categoryFilter === "all" || (item.opsCategory || "other") === categoryFilter)
+    .filter(item => {
+      const hidden = isProfileHidden(selectedProfile, item);
+      if (visibilityFilter === "hidden") return hidden;
+      if (visibilityFilter === "shown") return !hidden && item.enabled;
+      if (visibilityFilter === "tr-excluded") return !item.enabled;
+      return true;
+    })
+    .filter(item => {
+      const needle = filter.trim().toLowerCase();
+      return !needle ||
+        String(item.id).includes(needle) ||
+        (item.alphaTag ?? "").toLowerCase().includes(needle) ||
+        (item.description ?? "").toLowerCase().includes(needle) ||
+        (item.systemShortName ?? "").toLowerCase().includes(needle) ||
+        (item.tag ?? "").toLowerCase().includes(needle) ||
+        (item.opsCategory ?? "").toLowerCase().includes(needle);
+    })
+    .sort((a, b) => (a.systemShortName || "").localeCompare(b.systemShortName || "", undefined, { sensitivity: "base" }) || a.id - b.id)
+    .slice(0, 500);
+  const hiddenCount = selectedProfile?.talkgroups?.filter(setting => setting.enabled === false).length ?? 0;
+  const trExcludedCount = catalogItems.filter(item => !item.enabled).length;
+  const defaultSelected = isDefaultProfile(selectedProfile);
+
+  function updateSelectedProfile(update: (profile: ProcessingProfile) => ProcessingProfile) {
+    if (!profileState || !selectedProfile || defaultSelected) return;
+    setProfileState({
+      ...profileState,
+      profiles: profileState.profiles.map(profile => profile.id === selectedProfile.id ? update(profile) : profile)
+    });
+  }
+
+  function createProfile() {
+    if (!profileState) return;
+    const base = selectedProfile ?? profileState.profiles[0];
+    const profile: ProcessingProfile = {
+      ...(base ? cloneSettings(base) : {
+        includePolice: true,
+        includeFire: true,
+        includeEMS: true,
+        includeTraffic: true,
+        includeOther: true,
+        allowedTalkgroups: [],
+        talkgroups: []
+      }),
+      id: newClientGuid(),
+      name: uniqueProfileName(profileState.profiles, base ? `${base.name} Copy` : "New Profile"),
+      createdAtUtc: new Date().toISOString(),
+      updatedAtUtc: new Date().toISOString()
+    };
+    setProfileState({ ...profileState, profiles: [...profileState.profiles, profile] });
+    setSelectedProfileId(profile.id);
+    setDraftProfileId(profile.id);
+  }
+
+  function deleteProfile() {
+    if (!profileState || !selectedProfile || defaultSelected || profileState.profiles.length <= 1) return;
+    if (!confirmAction("Delete profile?", `Delete ${selectedProfile.name}? Profile-local hidden talkgroup rules for this profile will be removed.`)) return;
+    const remaining = profileState.profiles.filter(profile => profile.id !== selectedProfile.id);
+    const activeProfileId = profileState.activeProfileId === selectedProfile.id ? remaining[0].id : profileState.activeProfileId;
+    setProfileState({ ...profileState, activeProfileId, profiles: remaining });
+    setSelectedProfileId(activeProfileId);
+  }
+
+  function renameProfile(name: string) {
+    updateSelectedProfile(profile => ({ ...profile, name, updatedAtUtc: new Date().toISOString() }));
+  }
+
+  function setProfileCategory(category: keyof Pick<ProcessingProfile, "includePolice" | "includeFire" | "includeEMS" | "includeTraffic" | "includeOther">, value: boolean) {
+    updateSelectedProfile(profile => ({ ...profile, [category]: value, updatedAtUtc: new Date().toISOString() }));
+  }
+
+  function setHidden(item: TalkgroupCatalogItem, hidden: boolean) {
+    const key = talkgroupCatalogKey(item);
+    if (!hidden)
+      setPendingHides(current => current.filter(setting => profileSettingKey(setting) !== key));
+    else if (selectedProfile?.id === draftProfileId)
+      setPendingHides(current => mergeProfileTalkgroupSettings(current, [{
+        key,
+        systemShortName: item.systemShortName,
+        id: item.id,
+        enabled: false,
+        label: item.alphaTag || item.description || "",
+        category: item.opsCategory || "other",
+        incidentEligible: null
+      }]));
+    updateSelectedProfile(profile => {
+      const existing = profile.talkgroups ?? [];
+      const without = existing.filter(setting => profileSettingKey(setting) !== key);
+      const nextSetting: ProfileTalkgroupSetting = {
+        key,
+        systemShortName: item.systemShortName,
+        id: item.id,
+        enabled: hidden ? false : null,
+        label: item.alphaTag || item.description || "",
+        category: item.opsCategory || "other",
+        incidentEligible: null
+      };
+      return {
+        ...profile,
+        talkgroups: hidden ? [...without, nextSetting] : without,
+        updatedAtUtc: new Date().toISOString()
+      };
+    });
+  }
+
+  async function saveProfiles() {
+    if (!profileState) return;
+    setBusy("save");
+    try {
+      const activeProfileId = selectedProfileId || profileState.activeProfileId || profileState.profiles[0]?.id;
+      const saved = await api.request<ProfileState>("/api/v1/profiles", {
+        method: "POST",
+        body: JSON.stringify({ activeProfileId, profiles: profileState.profiles })
+      });
+      setProfileState(saved);
+      setSelectedProfileId(saved.activeProfileId);
+      setDraftProfileId("");
+      appliedPendingKeyRef.current = "";
+      setPendingHides([]);
+      setMessage(saved.message || "Profiles saved.");
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save profiles.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return <section className="card settings-card wide profiles-settings-card">
+    <div className="settings-card-meta">
+      <h3>Profiles</h3>
+      <p>Profiles hide talkgroups from user-facing views and downstream processing without changing TR capture.</p>
+      <div className="settings-card-actions">
+        <button disabled={busy === "load"} onClick={() => void loadProfiles()}>{busy === "load" ? "Loading..." : "Reload"}</button>
+        <button className="danger-button" disabled={!profileState || busy === "save"} onClick={() => void saveProfiles()}>{busy === "save" ? "Saving..." : "Save Profiles"}</button>
+      </div>
+      {message && <span className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") ? "section-status error" : "section-status ok"}>{message}</span>}
+    </div>
+    {!selectedProfile ? <p className="muted">No profiles loaded.</p> : <div className="settings-fields">
+      <div className="profile-editor-grid">
+        <label className="setting-field"><span>Profile</span><div><select value={selectedProfile.id} onChange={event => setSelectedProfileId(event.target.value)}>{profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></div></label>
+        <label className={`setting-field profile-name-field ${!defaultSelected && selectedProfile.id === draftProfileId ? "needs-name" : ""}`}>
+          <span>Name<small>{defaultSelected ? "Default is read-only. Duplicate it to create an editable profile." : selectedProfile.id === draftProfileId ? "Type a name for this new profile before saving." : "Display name for this profile."}</small></span>
+          <div>
+            <input value={selectedProfile.name} disabled={defaultSelected} autoFocus={!defaultSelected && selectedProfile.id === draftProfileId} onChange={event => renameProfile(event.target.value)} />
+            {!defaultSelected && selectedProfile.id === draftProfileId && <span className="info-tip" tabIndex={0}>i<span>Rename this draft to describe what it hides, then save the profile.</span></span>}
+          </div>
+        </label>
+        <div className="setting-inline-actions">
+          <button type="button" onClick={createProfile}>Duplicate</button>
+          <button type="button" className="danger-button" disabled={defaultSelected || profiles.length <= 1} onClick={deleteProfile}>Delete</button>
+        </div>
+      </div>
+      {defaultSelected && <div className="settings-message info">Default is read-only and always shows all non-TR-excluded talkgroups. Duplicate it before hiding TGs or changing categories.</div>}
+      {!defaultSelected && <ProfileHiddenTalkgroupsReview profile={selectedProfile} catalogItems={catalogItems} onShow={setting => {
+        const key = profileSettingKey(setting);
+        setPendingHides(current => current.filter(row => profileSettingKey(row) !== key));
+        updateSelectedProfile(profile => ({
+          ...profile,
+          talkgroups: (profile.talkgroups ?? []).filter(row => profileSettingKey(row) !== key),
+          updatedAtUtc: new Date().toISOString()
+        }));
+      }} />}
+      <div className="settings-subsection profile-category-controls">
+        <h4>Category Visibility</h4>
+        <div className="alert-rule-checks">
+          <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includePolice} onChange={event => setProfileCategory("includePolice", event.currentTarget.checked)} /> Police</label>
+          <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeFire} onChange={event => setProfileCategory("includeFire", event.currentTarget.checked)} /> Fire</label>
+          <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeEMS} onChange={event => setProfileCategory("includeEMS", event.currentTarget.checked)} /> EMS</label>
+          <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeTraffic} onChange={event => setProfileCategory("includeTraffic", event.currentTarget.checked)} /> Traffic</label>
+          <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeOther} onChange={event => setProfileCategory("includeOther", event.currentTarget.checked)} /> Other</label>
+        </div>
+      </div>
+      <div className="talkgroup-catalog-table">
+        <div className="table-top-pagination">
+          <input placeholder="Search TGs" value={filter} onChange={event => setFilter(event.target.value)} />
+          <select value={categoryFilter} onChange={event => setCategoryFilter(event.target.value)}>
+            <option value="all">All categories</option>
+            {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
+          </select>
+          <select value={visibilityFilter} onChange={event => setVisibilityFilter(event.target.value as typeof visibilityFilter)}>
+            <option value="all">All TGs</option>
+            <option value="shown">Shown in profile</option>
+            <option value="hidden">Hidden in profile</option>
+            <option value="tr-excluded">TR excluded</option>
+          </select>
+          <span className="muted">{rows.length.toLocaleString()} shown / {hiddenCount.toLocaleString()} hidden / {trExcludedCount.toLocaleString()} TR excluded</span>
+        </div>
+        <table className="table compact-table">
+          <thead><tr><th>Name</th><th>TG ID</th><th>System</th><th>Category</th><th>Profile</th><th>TR</th></tr></thead>
+          <tbody>{rows.map(item => {
+            const hidden = isProfileHidden(selectedProfile, item);
+            return <tr className={!item.enabled || hidden ? "excluded-row" : ""} key={talkgroupCatalogKey(item)}>
+              <td className="tg-name-cell">{item.alphaTag || item.description || "--"}</td>
+              <td>{item.id}</td>
+              <td>{item.systemShortName || "--"}</td>
+              <td>{label(item.opsCategory || "other")}</td>
+              <td><button type="button" disabled={defaultSelected || !item.enabled} className={hidden ? "danger-button" : ""} title={defaultSelected ? "Default is read-only. Duplicate it to edit TG visibility." : undefined} onClick={() => setHidden(item, !hidden)}>{hidden ? "Show" : "Hide"}</button></td>
+              <td>{item.enabled ? "Included" : "Excluded"}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+    </div>}
+  </section>;
+}
+
+function isProfileHidden(profile: ProcessingProfile | undefined, item: TalkgroupCatalogItem) {
+  if (!profile) return false;
+  return (profile.talkgroups ?? []).some(setting => profileSettingKey(setting) === talkgroupCatalogKey(item) && setting.enabled === false);
+}
+
+function ProfileHiddenTalkgroupsReview({ profile, catalogItems, onShow }: { profile: ProcessingProfile; catalogItems: TalkgroupCatalogItem[]; onShow: (setting: ProfileTalkgroupSetting) => void }) {
+  const hidden = (profile.talkgroups ?? [])
+    .filter(setting => setting.enabled === false)
+    .sort((a, b) => (a.systemShortName || "").localeCompare(b.systemShortName || "", undefined, { sensitivity: "base" }) || a.id - b.id);
+  if (!hidden.length)
+    return <div className="settings-message info">No TGs are hidden in this profile yet.</div>;
+  const catalogByKey = new Map(catalogItems.map(item => [talkgroupCatalogKey(item), item]));
+  return <div className="profile-hidden-review">
+    <div className="profile-hidden-review-head">
+      <h4>TGs Hidden By This Profile</h4>
+      <span className="muted">{hidden.length.toLocaleString()} selected</span>
+    </div>
+    <div className="profile-hidden-pill-list">
+      {hidden.map(setting => {
+        const item = catalogByKey.get(profileSettingKey(setting));
+        const name = setting.label || item?.alphaTag || item?.description || `TG ${setting.id}`;
+        const category = setting.category || item?.opsCategory || "other";
+        return <span className="profile-hidden-pill" key={profileSettingKey(setting)}>
+          <strong>{name}</strong>
+          <small>{setting.systemShortName || item?.systemShortName || "--"} / TG {setting.id} / {label(category)}</small>
+          <button type="button" title="Show this TG in the profile" onClick={() => onShow(setting)}>x</button>
+        </span>;
+      })}
+    </div>
+  </div>;
+}
+
+function isDefaultProfile(profile?: Pick<ProcessingProfile, "name"> | null) {
+  return (profile?.name ?? "").trim().toLowerCase() === "default";
+}
+
+function profileSettingKey(setting: { key?: string; systemShortName?: string; id: number }) {
+  return setting.key?.trim().toLowerCase() || `${normalizeTalkgroupSystem(setting.systemShortName || "")}:${setting.id}`;
+}
+
+function mergeProfileTalkgroupSettings(current: ProfileTalkgroupSetting[], incoming: ProfileTalkgroupSetting[]) {
+  const byKey = new Map<string, ProfileTalkgroupSetting>();
+  for (const setting of current)
+    byKey.set(profileSettingKey(setting), setting);
+  for (const setting of incoming)
+    byKey.set(profileSettingKey(setting), setting);
+  return Array.from(byKey.values());
+}
+
+function categoryGroupKey(group: Pick<CategoryPage["groups"][number], "talkgroupKey" | "systemShortName" | "talkgroup">) {
+  const key = String(group.talkgroupKey ?? "").trim().toLowerCase();
+  if (key) return key;
+  const system = normalizeTalkgroupSystem(group.systemShortName || "");
+  return system ? `${system}:${group.talkgroup}` : String(group.talkgroup);
+}
+
+function profileSettingForGroup(group: CategoryPage["groups"][number], category: string): ProfileTalkgroupSetting {
+  const systemShortName = normalizeTalkgroupSystem(group.systemShortName || "");
+  const key = categoryGroupKey(group);
+  return {
+    key,
+    systemShortName,
+    id: group.talkgroup,
+    enabled: false,
+    label: group.label || `TG ${group.talkgroup}`,
+    category: category || "other",
+    incidentEligible: null
+  };
+}
+
+function newClientGuid() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, char =>
+      (Number(char) ^ Math.floor(Math.random() * 16) >> Number(char) / 4).toString(16));
+}
+
+function uniqueProfileName(profiles: ProcessingProfile[], base: string) {
+  const names = new Set(profiles.map(profile => profile.name.trim().toLowerCase()));
+  if (!names.has(base.trim().toLowerCase())) return base;
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${base} ${i}`;
+    if (!names.has(candidate.trim().toLowerCase())) return candidate;
+  }
+  return `${base} ${Date.now()}`;
 }
 
 function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; baselineRules: any[]; onChange: (rules: any[]) => void }) {
@@ -12787,7 +13312,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
   </div>;
 }
 
-function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { reloadToken?: number; embedded?: boolean }) {
+function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allowSystemExclusions = false }: { reloadToken?: number; embedded?: boolean; allowSystemExclusions?: boolean }) {
   const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
   const [filter, setFilter] = useState("");
   const [enabledFilter, setEnabledFilter] = useState<"all" | "enabled" | "disabled">("all");
@@ -12809,6 +13334,27 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { r
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load talkgroup catalog.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function setSystemExcluded(item: TalkgroupCatalogItem, excluded: boolean) {
+    if (!draft || busy) return;
+    setBusy(`catalog-${talkgroupCatalogKey(item)}`);
+    setMessage("");
+    try {
+      const key = talkgroupCatalogKey(item);
+      const next = {
+        ...draft,
+        updatedAtUtc: new Date().toISOString(),
+        items: draft.items.map(row => talkgroupCatalogKey(row) === key ? { ...row, enabled: !excluded, updatedAtUtc: new Date().toISOString() } : row)
+      };
+      await api.request("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(next) });
+      setDraft(next);
+      setMessage(excluded ? "Talkgroup excluded from generated TR CSV." : "Talkgroup restored to generated TR CSV.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update talkgroup catalog.");
     } finally {
       setBusy("");
     }
@@ -12892,7 +13438,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { r
         </div>
         <table className="table compact-table">
           <thead><tr>
-            <th><button type="button" className="sort-header" onClick={() => sortBy("state")}>State {sortKey === "state" ? sortDir : ""}</button></th>
+            <th><button type="button" className="sort-header" onClick={() => sortBy("state")}>TR Policy {sortKey === "state" ? sortDir : ""}</button></th>
             {hasSystemScopedRows && <th>System</th>}
             <th><button type="button" className="sort-header" onClick={() => sortBy("id")}>TG ID {sortKey === "id" ? sortDir : ""}</button></th>
             <th><button type="button" className="sort-header" onClick={() => sortBy("name")}>Name {sortKey === "name" ? sortDir : ""}</button></th>
@@ -12901,7 +13447,15 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { r
           </tr></thead>
           <tbody>{visibleRows.map((item, index) => {
             return <tr className={item.enabled ? "" : "excluded-row"} key={`${talkgroupCatalogKey(item)}-${index}`}>
-              <td>{item.enabled ? "Enabled" : "Disabled"}</td>
+              <td>
+                <span>{item.enabled ? "Included" : "Excluded"}</span>
+                {allowSystemExclusions && <button
+                  type="button"
+                  className={item.enabled ? "tiny-button" : "tiny-button danger-button"}
+                  disabled={Boolean(busy)}
+                  onClick={() => void setSystemExcluded(item, item.enabled)}
+                >{item.enabled ? "Exclude from TR" : "Restore"}</button>}
+              </td>
               {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
               <td>{item.id}</td>
               <td>{item.alphaTag || item.description || "--"}</td>
@@ -12915,10 +13469,10 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false }: { r
   </div>;
 }
 
-function SettingInput({ label: text, description, value, onChange, type = "text", className = "", inputMode }: { label: string; description: string; value: any; onChange: (value: string) => void; type?: string; className?: string; inputMode?: "text" | "decimal" | "numeric" | "search" | "email" | "tel" | "url" }) {
+function SettingInput({ label: text, description, value, onChange, type = "text", className = "", inputMode, disabled = false }: { label: string; description: string; value: any; onChange: (value: string) => void; type?: string; className?: string; inputMode?: "text" | "decimal" | "numeric" | "search" | "email" | "tel" | "url"; disabled?: boolean }) {
   return <label className="setting-field">
     <span>{text}<small>{description}</small></span>
-    <input className={className} type={type} inputMode={inputMode} value={value ?? ""} onChange={e => onChange(e.target.value)} />
+    <input className={className} type={type} inputMode={inputMode} value={value ?? ""} disabled={disabled} onChange={e => onChange(e.target.value)} />
   </label>;
 }
 

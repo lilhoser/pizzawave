@@ -410,6 +410,10 @@ public sealed partial class SetupTrConfigBuilderService
                 ["type"] = "p25",
                 ["shortName"] = system.ShortName,
                 ["control_channels"] = system.ControlChannelsMhz.Select(MhzToHz).ToList(),
+                ["recordUnknown"] = false,
+                ["recordUUVCalls"] = true,
+                ["hideEncrypted"] = true,
+                ["hideUnknownTalkgroups"] = false,
                 ["talkgroupsFile"] = TalkgroupCatalogService.TrCsvPathForSystem(_config.TrunkRecorder.TalkgroupsPath, system.ShortName)
             }).ToList(),
             ["plugins"] = new[]
@@ -500,6 +504,10 @@ public sealed partial class SetupTrConfigBuilderService
             system["shortName"] = draft.ShortName;
             system["talkgroupsFile"] = TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, draft.ShortName);
             system["control_channels"] = LongArray(draft.ControlChannelsMhz.Select(MhzToHz));
+            system["recordUnknown"] = false;
+            system["recordUUVCalls"] = true;
+            system["hideEncrypted"] = true;
+            system["hideUnknownTalkgroups"] = false;
             system.Remove("channels");
             patched.Add(system);
         }

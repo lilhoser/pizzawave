@@ -222,6 +222,7 @@ public sealed record IncidentCallDto(
     string Category = "other",
     string TalkgroupName = "",
     string SystemShortName = "",
+    long Talkgroup = 0,
     bool HasAlertMatch = false,
     bool HasActiveAlert = false,
     string AlertRules = "");
@@ -620,7 +621,7 @@ public sealed record QueueTalkgroupLoadDto(
     long PendingCalls,
     long PendingAudioSeconds);
 
-public sealed record StatusSummaryDto(int Calls, int Incidents, int Alerts, long Tokens);
+public sealed record StatusSummaryDto(int Calls, int Incidents, int HiddenIncidents, int Alerts, long Tokens);
 
 public sealed record AuthInitDto(string Mode, bool ReadRequiresAuth, bool WriteRequiresAuth);
 

@@ -90,9 +90,11 @@ public sealed class DashboardService
     private async Task<DashboardDto> BuildDashboardCoreAsync(long start, long end, CancellationToken ct)
     {
         var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct));
-        var alerts = (await _database.ListAlertMatchesAsync(start, end, ct)).Where(a => Allows(a.Category, a.SystemShortName, a.Talkgroup)).ToList();
+        var alerts = await ListAlertMatchesAsync(start, end, ct);
         var allowedCallIds = calls.Select(c => c.Id).ToHashSet();
-        var incidents = (await ListIncidentsAsync(start, end, ct)).Where(i => i.Calls.Any(c => allowedCallIds.Contains(c.CallId))).ToList();
+        var incidents = (await ListIncidentsAsync(start, end, ct))
+            .Where(i => i.Calls.Any(c => allowedCallIds.Contains(c.CallId)))
+            .ToList();
         var tokenUsage = await _database.GetTokenUsageAsync(start, end, ct);
         var total = calls.Count;
         var alertRate = total == 0 ? 0 : alerts.Select(a => a.CallId).Distinct().Count() * 100.0 / total;
@@ -185,12 +187,72 @@ public sealed class DashboardService
         return new CategoryGroupDto(label, calls, TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount);
     }
 
-    public Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct)
+    public async Task<List<IncidentDto>> ListIncidentsAsync(long start, long end, CancellationToken ct) =>
+        (await _database.ListIncidentsAsync(start, end, ct))
+        .Select(FilterIncidentForActiveProfile)
+        .Where(i => i is not null)
+        .Cast<IncidentDto>()
+        .ToList();
+
+    public async Task<List<AlertMatchDto>> ListAlertMatchesAsync(long start, long end, CancellationToken ct) =>
+        (await _database.ListAlertMatchesAsync(start, end, ct))
+        .Where(a => Allows(a.Category, a.SystemShortName, a.Talkgroup))
+        .ToList();
+
+    public async Task<StatusSummaryDto> BuildStatusSummaryAsync(long start, long end, CancellationToken ct)
     {
-        return _database.ListIncidentsAsync(start, end, ct);
+        var calls = ApplyProfile(await _database.ListCallsAsync(start, end, null, ct));
+        var allowedCallIds = calls.Select(c => c.Id).ToHashSet();
+        var alerts = await ListAlertMatchesAsync(start, end, ct);
+        var allIncidents = await _database.ListIncidentsAsync(start, end, ct);
+        var incidents = allIncidents
+            .Select(FilterIncidentForActiveProfile)
+            .Where(i => i is not null)
+            .Cast<IncidentDto>()
+            .Count(i => i.Calls.Any(c => allowedCallIds.Contains(c.CallId)));
+        var hiddenIncidents = Math.Max(0, allIncidents.Count - incidents);
+        var tokens = await _database.GetTokenUsageAsync(start, end, ct);
+        return new StatusSummaryDto(calls.Count, incidents, hiddenIncidents, alerts.Count, tokens.Summary.TotalTokens);
     }
 
     private List<EngineCall> ApplyProfile(IEnumerable<EngineCall> calls) => calls.Where(c => Allows(c.Category, c.SystemShortName, c.Talkgroup)).ToList();
+
+    private IncidentDto? FilterIncidentForActiveProfile(IncidentDto incident)
+    {
+        var visibleCalls = incident.Calls
+            .Where(c => Allows(c.Category, c.SystemShortName, c.Talkgroup))
+            .ToList();
+        if (visibleCalls.Count == 0)
+            return null;
+        if (visibleCalls.Count == incident.Calls.Count)
+            return incident;
+
+        var category = DominantIncidentCategory(visibleCalls);
+        return incident with
+        {
+            Title = $"{CategoryLabel(category)} incident",
+            Detail = $"This profile view includes {visibleCalls.Count:N0} of {incident.Calls.Count:N0} source call(s). Hidden talkgroups were removed from the displayed evidence.",
+            Category = category,
+            FirstSeen = visibleCalls.Min(c => c.RawTimestamp),
+            LastSeen = visibleCalls.Max(c => c.RawTimestamp),
+            Calls = visibleCalls
+        };
+    }
+
+    private static string DominantIncidentCategory(IReadOnlyList<IncidentCallDto> calls) =>
+        calls.GroupBy(c => string.IsNullOrWhiteSpace(c.Category) ? "other" : NormalizeCategory(c.Category))
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault()?.Key ?? "other";
+
+    private static string CategoryLabel(string category) => NormalizeCategory(category) switch
+    {
+        "ems" => "EMS",
+        "fire" => "Fire",
+        "police" => "Police",
+        "traffic" => "Traffic",
+        _ => "Radio"
+    };
 
     private static bool IsStrongCall(EngineCall call) =>
         string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&

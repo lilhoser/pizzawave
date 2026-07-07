@@ -29,7 +29,7 @@ export type Incident = {
   firstSeen: number;
   lastSeen: number;
   confidence: number;
-  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string; category: string; talkgroupName: string; systemShortName: string; hasAlertMatch?: boolean; hasActiveAlert?: boolean; alertRules?: string }[];
+  calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string; category: string; talkgroupName: string; systemShortName: string; talkgroup: number; hasAlertMatch?: boolean; hasActiveAlert?: boolean; alertRules?: string }[];
 };
 export type CategoryInsight = {
   id: number;
@@ -92,7 +92,7 @@ export type Dashboard = {
   incidents: Incident[];
   tokenUsage: TokenUsageSummary;
 };
-export type StatusSummary = { calls: number; incidents: number; alerts: number; tokens: number };
+export type StatusSummary = { calls: number; incidents: number; hiddenIncidents?: number; alerts: number; tokens: number };
 export type EngineCall = {
   id: number;
   startTime: number;

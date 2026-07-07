@@ -707,11 +707,11 @@ app.MapPost("/api/v1/system/tr-config/restore", async (TrConfigRestoreRequest re
 .WithName("SystemTrConfigRestore")
 .WithOpenApi();
 
-app.MapGet("/api/v1/status", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>
+app.MapGet("/api/v1/status", async (HttpContext context, long? start, long? end, AuthService authService, DashboardService dashboard) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
-    return Results.Ok(await database.BuildStatusSummaryAsync(range.Start, range.End, context.RequestAborted));
+    return Results.Ok(await dashboard.BuildStatusSummaryAsync(range.Start, range.End, context.RequestAborted));
 })
 .WithName("StatusSummary")
 .WithOpenApi();
@@ -759,10 +759,11 @@ app.MapGet("/api/v1/categories/{category}/talkgroup-keys/{talkgroupKey}/calls", 
 .WithName("CategoryTalkgroupKeyCalls")
 .WithOpenApi();
 
-app.MapGet("/api/v1/calls/{id:long}", async (HttpContext context, long id, AuthService authService, EngineDatabase database) =>
+app.MapGet("/api/v1/calls/{id:long}", async (HttpContext context, long id, AuthService authService, EngineDatabase database, EngineConfig cfg) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var call = await database.GetCallAsync(id, context.RequestAborted);
+    if (call != null && !DownstreamProfilePolicy.Allows(cfg, call)) return Results.NotFound();
     return call == null ? Results.NotFound() : Results.Ok(call);
 })
 .WithName("CallById")
@@ -772,6 +773,7 @@ app.MapGet("/api/v1/calls/{id:long}/audio", async (HttpContext context, long id,
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var call = await database.GetCallAsync(id, context.RequestAborted);
+    if (call != null && !DownstreamProfilePolicy.Allows(cfg, call)) return Results.NotFound();
     if (call == null || string.IsNullOrWhiteSpace(call.AudioPath)) return Results.NotFound();
     var path = Path.GetFullPath(Path.Combine(cfg.Storage.AudioRoot, call.AudioPath));
     var root = Path.GetFullPath(cfg.Storage.AudioRoot);
@@ -781,11 +783,11 @@ app.MapGet("/api/v1/calls/{id:long}/audio", async (HttpContext context, long id,
 .WithName("CallAudio")
 .WithOpenApi();
 
-app.MapGet("/api/v1/alerts", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>
+app.MapGet("/api/v1/alerts", async (HttpContext context, long? start, long? end, AuthService authService, DashboardService dashboard) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
-    return Results.Ok(await database.ListAlertMatchesAsync(range.Start, range.End, context.RequestAborted));
+    return Results.Ok(await dashboard.ListAlertMatchesAsync(range.Start, range.End, context.RequestAborted));
 })
 .WithName("Alerts")
 .WithOpenApi();
@@ -1280,10 +1282,17 @@ app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest 
     var profiles = request.Profiles?.ToList() ?? [];
     if (profiles.Count == 0)
         profiles.Add(new ProcessingProfile { Name = "Default" });
+    if (!profiles.Any(IsDefaultProfile))
+        profiles.Insert(0, new ProcessingProfile { Name = "Default" });
     foreach (var profile in profiles)
     {
         if (profile.Id == Guid.Empty) profile.Id = Guid.NewGuid();
         profile.Name = string.IsNullOrWhiteSpace(profile.Name) ? "Profile" : profile.Name.Trim();
+        if (IsDefaultProfile(profile))
+        {
+            NormalizeDefaultProfile(profile);
+            continue;
+        }
         profile.AllowedTalkgroups ??= new();
         profile.Talkgroups ??= new();
         profile.Talkgroups = profile.Talkgroups
@@ -1679,6 +1688,22 @@ static async Task<MigrationResetRequestDto> ReadMigrationResetRequestAsync(HttpC
         EngineConfig.JsonOptions(),
         context.RequestAborted);
     return request ?? new MigrationResetRequestDto();
+}
+
+static bool IsDefaultProfile(ProcessingProfile profile) =>
+    string.Equals((profile.Name ?? string.Empty).Trim(), "Default", StringComparison.OrdinalIgnoreCase);
+
+static void NormalizeDefaultProfile(ProcessingProfile profile)
+{
+    profile.Name = "Default";
+    profile.IncludePolice = true;
+    profile.IncludeFire = true;
+    profile.IncludeEMS = true;
+    profile.IncludeTraffic = true;
+    profile.IncludeOther = true;
+    profile.AllowedTalkgroups = new();
+    profile.Talkgroups = new();
+    profile.UpdatedAtUtc = DateTime.UtcNow;
 }
 
 static async Task SaveConfigAsync(EngineConfig cfg, CancellationToken ct)

@@ -264,6 +264,9 @@ public sealed class AutomaticInsightsService : BackgroundService
         var activeIncidents = (await _database.ListIncidentsAsync(start, end, ct))
             .Where(i => !string.Equals(i.Status, "concluded", StringComparison.OrdinalIgnoreCase))
             .Where(i => i.Calls.Any(c => string.Equals(c.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase)))
+            .Select(FilterIncidentForActiveProfile)
+            .Where(i => i is not null)
+            .Cast<IncidentDto>()
             .ToList();
         var locationRows = await _database.ListCallLocationsAsync(start, end, ct);
         var vectorMatches = await SearchVectorCandidatesAsync(systemShortName, activeIncidents, recent, newCallIds, start, end, ct);
@@ -755,7 +758,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     }
 
     private static IncidentCallDto ToIncidentCallDto(EngineCall call) =>
-        new(call.Id, call.StartTime, call.Transcription, $"/api/v1/calls/{call.Id}/audio", call.Category, call.TalkgroupName, call.SystemShortName);
+        new(call.Id, call.StartTime, call.Transcription, $"/api/v1/calls/{call.Id}/audio", call.Category, call.TalkgroupName, call.SystemShortName, call.Talkgroup);
 
     private static IncidentFrameCurrentIncidentV3 BuildIncidentV3CurrentIncident(
         IncidentStateItem incident,
@@ -1622,7 +1625,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 FirstSeen = callIds.Min(c => c.StartTime),
                 LastSeen = callIds.Max(c => c.StartTime),
                 Confidence = Math.Clamp(item.Confidence, 0, 1),
-                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName)).ToList()
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
             };
             var mergeIncidentIds = target.MergeIncidents.Select(i => i.Id).ToList();
             var id = mergeIncidentIds.Count == 0
@@ -1647,7 +1650,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 FirstSeen = callIds.Min(c => c.StartTime),
                 LastSeen = callIds.Max(c => c.StartTime),
                 Confidence = Math.Clamp(item.Confidence, 0, 1),
-                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName)).ToList()
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
             };
             var acceptedReason = existingIncident is null ? "accepted:create incident" : "accepted:update incident";
             if (!string.IsNullOrWhiteSpace(decision.Reason))
@@ -4626,7 +4629,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                     FirstSeen = calls.Min(c => c.StartTime),
                     LastSeen = calls.Max(c => c.StartTime),
                     Confidence = Math.Clamp(ev.Confidence, 0, 1),
-                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
+                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
                 };
             })
             .Where(e => e != null)
@@ -5138,6 +5141,32 @@ public sealed class AutomaticInsightsService : BackgroundService
             return false;
         var text = call.Transcription?.Trim() ?? string.Empty;
         return !call.IsImported && text.Length >= 12;
+    }
+
+    private IncidentDto? FilterIncidentForActiveProfile(IncidentDto incident)
+    {
+        var visibleCalls = incident.Calls
+            .Where(c => DownstreamProfilePolicy.Allows(_config, c.Category, c.SystemShortName, c.Talkgroup))
+            .ToList();
+        if (visibleCalls.Count == 0)
+            return null;
+        if (visibleCalls.Count == incident.Calls.Count)
+            return incident;
+
+        var category = visibleCalls
+            .GroupBy(c => string.IsNullOrWhiteSpace(c.Category) ? "other" : c.Category.Trim().ToLowerInvariant())
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault()?.Key ?? "other";
+        return incident with
+        {
+            Title = "Profile-visible active incident",
+            Detail = "Hidden talkgroup evidence was removed from this active incident context.",
+            Category = category,
+            FirstSeen = visibleCalls.Min(c => c.RawTimestamp),
+            LastSeen = visibleCalls.Max(c => c.RawTimestamp),
+            Calls = visibleCalls
+        };
     }
 
     private bool IsCatalogIncidentEligibleOrStrongSignal(EngineCall call)
