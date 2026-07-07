@@ -13393,7 +13393,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
 function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allowSystemExclusions = false }: { reloadToken?: number; embedded?: boolean; allowSystemExclusions?: boolean }) {
   const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
   const [filter, setFilterState] = useState(() => embedded ? localStorage.getItem("pizzawave-setup-talkgroup-filter") || "" : "");
-  const [enabledFilter, setEnabledFilter] = useState<"all" | "enabled" | "disabled">("all");
+  const [enabledFilter, setEnabledFilter] = useState<"all" | "included" | "excluded">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sortKey, setSortKey] = useState<"state" | "id" | "name" | "category">("id");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -13470,7 +13470,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     }
   }
   const rows = effectiveItems
-    .filter(item => enabledFilter === "all" || (enabledFilter === "enabled" ? item.enabled : !item.enabled))
+    .filter(item => enabledFilter === "all" || (enabledFilter === "included" ? item.enabled : !item.enabled))
     .filter(item => categoryFilter === "all" || item.opsCategory === categoryFilter)
     .filter(item => !needle ||
       String(item.id).includes(needle) ||
@@ -13487,6 +13487,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const startRow = rows.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const endRow = Math.min(rows.length, currentPage * pageSize);
   const enabledCount = effectiveItems.filter(item => item.enabled).length;
+  const excludedCount = Math.max(0, effectiveItems.length - enabledCount);
   const hasSystemScopedRows = effectiveItems.some(item => item.systemShortName);
   const topCategoryCounts = Array.from(rows.reduce<Map<string, number>>((counts, item) => {
     const category = item.opsCategory || "other";
@@ -13501,16 +13502,16 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
       <div className="talkgroup-catalog-table">
         <div className="table-top-pagination">
           <input placeholder="Filter TGs" value={filter} onChange={e => setFilter(e.target.value)} />
-          <select value={enabledFilter} onChange={e => setEnabledFilter(e.target.value as "all" | "enabled" | "disabled")}>
+          <select value={enabledFilter} onChange={e => setEnabledFilter(e.target.value as "all" | "included" | "excluded")}>
             <option value="all">All TGs</option>
-            <option value="enabled">Enabled only</option>
-            <option value="disabled">Disabled only</option>
+            <option value="included">Included only</option>
+            <option value="excluded">Excluded only</option>
           </select>
           <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
             <option value="all">All categories</option>
             {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
           </select>
-          <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} enabled</span>
+          <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} included / {excludedCount} excluded</span>
           {topCategoryCounts.length > 0 && <span className="talkgroup-category-pills">
             {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
           </span>}
