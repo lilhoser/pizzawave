@@ -424,7 +424,7 @@ function App() {
     localStorage.setItem("pizzawave-autoplay-muted", autoplayMuted ? "1" : "0");
   }, [autoplayMuted]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, page, rangeHours, globalSearch]);
   useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
