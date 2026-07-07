@@ -1425,10 +1425,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .runbook-workbench .recommendation-head {
   align-items: flex-start;
 }
-.runbook-tg-table td:first-child,
-.runbook-tg-table th:first-child {
-  width: 60px;
-  text-align: center;
+.runbook-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.runbook-row-actions button {
+  margin: 0;
 }
 .runbook-tg-table input[type="checkbox"] {
   width: 18px;

@@ -199,9 +199,13 @@ public sealed class SystemRecommendationService
                 hasActiveQueuePressure ? "medium" : "low",
                 "Talkgroup noise candidates need review",
                 detail,
-                "Review these candidates in System Recommendations, then open Setup > Talkgroups for any global TR exclusion decision.",
+                "Review these candidates in System Recommendations, then exclude the noisy talkgroups from the generated TR CSV if they are low value for every profile.",
                 new RecommendationTargetDto("system", "recommendations", "talkgroup-noise"),
-                [])
+                [new RecommendationActionDto(
+                    "exclude-talkgroups-from-tr",
+                    $"Exclude all ({noisyTalkgroups.Count:N0})",
+                    "Disable all current noise candidates in the talkgroup catalog so regenerated TR CSVs omit them.",
+                    noisyTalkgroups.Select(row => row.Talkgroup).Distinct().OrderBy(id => id).ToList())])
                 {
                     Runbook = BuildRunbook("priority-low-value-audio") with
                     {
@@ -800,10 +804,10 @@ public sealed class SystemRecommendationService
         "priority-low-value-audio" => new RecommendationRunbookDto(
             "Review Talkgroup Noise Candidates",
             "Identify high-volume or low-yield talkgroups that may deserve a Setup-level TR exclusion.",
-            ["Recommendations ranks candidates only; it does not change TR capture.", "Setup > Talkgroups is the only place for global TR exclusion.", "Use volume, weak-call rate, repetition, failure rate, and incident yield together."],
+            ["Recommendations ranks candidates only; the operator decides whether to exclude them.", "Exclude writes the talkgroup catalog and regenerates TR CSVs; TR must reload the CSV before capture policy changes.", "Use volume, weak-call rate, repetition, failure rate, and incident yield together."],
             [
                 new RecommendationRunbookStepDto("Review candidates", "Review the candidate table on this page. Candidates are generated from recent audio volume, weak-call rate, transcription failure rate, repetition hints, and incident yield.", new RecommendationTargetDto("system", "recommendations", "talkgroup-noise")),
-                new RecommendationRunbookStepDto("Open Setup for policy changes", "Use Review in Setup on a candidate row to open Setup > Talkgroups. Apply global TR exclusion there only if the TG is noisy or useless for every profile.", new RecommendationTargetDto("setup", "talkgroups", "")),
+                new RecommendationRunbookStepDto("Exclude only global noise", "Use Exclude on candidates that are noisy or useless for every profile. Use profile hiding instead when some users still need the TG.", new RecommendationTargetDto("system", "recommendations", "talkgroup-noise")),
                 new RecommendationRunbookStepDto("Apply and restart capture when needed", "Changing TR exclusion regenerates talkgroup CSV policy. Apply the Setup plan so trunk-recorder reloads the generated talkgroup list.", new RecommendationTargetDto("setup", "apply", "")),
                 new RecommendationRunbookStepDto("Monitor outcome", "After exclusion, watch transcription queue, incident yield, and category pages for expected volume reduction without losing useful operational traffic.", new RecommendationTargetDto("pizzad", "jobs", ""))
             ],

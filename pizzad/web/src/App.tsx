@@ -3509,6 +3509,63 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
       setRecommendationBusy(false);
     }
   }
+  async function excludeTalkgroupsFromTr(targets: { systemShortName?: string | null; talkgroup: number }[]) {
+    const normalizedTargets = targets
+      .map(target => ({ systemShortName: normalizeTalkgroupSystem(target.systemShortName || ""), talkgroup: Number(target.talkgroup) }))
+      .filter(target => Number.isFinite(target.talkgroup) && target.talkgroup > 0);
+    if (normalizedTargets.length === 0) return;
+    const targetLabel = normalizedTargets.length === 1 ? `TG ${normalizedTargets[0].talkgroup}` : `${normalizedTargets.length} noisy talkgroup candidates`;
+    if (!confirmAction(`Exclude ${targetLabel} from TR?`, "This disables matching talkgroup catalog rows and regenerates TR CSV files. Trunk Recorder must reload the generated CSV before live capture policy changes.")) return;
+
+    setRecommendationBusy(true);
+    setInsightText("");
+    try {
+      const loaded = await api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog");
+      const document = cloneSettings(loaded.document) as TalkgroupCatalogDocument;
+      const enabledItems = document.items.filter(item => item.enabled);
+      const exactTargets = normalizedTargets.filter(target => target.systemShortName);
+      const idOnlyTargets = normalizedTargets.filter(target => !target.systemShortName);
+      const exactKeys = new Set(exactTargets.map(target => `${target.systemShortName}:${target.talkgroup}`));
+      const idOnly = new Set(idOnlyTargets.map(target => target.talkgroup));
+      const fallbackKeys = new Set<string>();
+
+      for (const target of exactTargets) {
+        const exactKey = `${target.systemShortName}:${target.talkgroup}`;
+        if (enabledItems.some(item => talkgroupCatalogKey(item) === exactKey))
+          continue;
+        const sameIdRows = enabledItems.filter(item => item.id === target.talkgroup);
+        if (sameIdRows.length === 1)
+          fallbackKeys.add(talkgroupCatalogKey(sameIdRows[0]));
+      }
+
+      const updatedAtUtc = new Date().toISOString();
+      let changed = 0;
+      const items = document.items.map(item => {
+        if (!item.enabled) return item;
+        const key = talkgroupCatalogKey(item);
+        const shouldExclude = exactKeys.has(key) || fallbackKeys.has(key) || idOnly.has(item.id);
+        if (!shouldExclude) return item;
+        changed++;
+        return { ...item, enabled: false, updatedAtUtc };
+      });
+
+      if (changed === 0) {
+        setInsightText("No matching enabled talkgroup catalog rows were found for those noise candidates.");
+        return;
+      }
+
+      await api.request("/api/v1/talkgroups/catalog", {
+        method: "PUT",
+        body: JSON.stringify({ ...document, updatedAtUtc, items })
+      });
+      setInsightText(`${changed.toLocaleString()} talkgroup catalog row(s) excluded from generated TR CSVs. Apply/restart TR for capture policy to consume the change.`);
+      setRecommendations(await api.request<SystemRecommendations>("/api/v1/system/recommendations"));
+    } catch (error) {
+      setInsightText(error instanceof Error ? error.message : "Unable to exclude talkgroup candidates.");
+    } finally {
+      setRecommendationBusy(false);
+    }
+  }
   return (
     <div className="trouble-page">
       <div className="trouble-tabs">
@@ -3523,8 +3580,9 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
         <button className={topTab === "metrics" ? "active" : ""} onClick={() => setTopTab("metrics")}>Metrics</button>
         <button onClick={() => void reload()}>Refresh</button>
       </div>
-      {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onAction={async action => {
+      {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onExcludeTalkgroups={excludeTalkgroupsFromTr} onAction={async action => {
         if (action.kind === "pause-ingest") await setIngestPaused(true, false);
+        if (action.kind === "exclude-talkgroups-from-tr") await excludeTalkgroupsFromTr((action.talkgroups ?? []).map(talkgroup => ({ talkgroup })));
       }} />}
       {topTab === "services" && <div className="trouble-panel"><ServicesManager runtime={runtime} data={data} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} /></div>}
       {topTab === "cpu" && <CpuPanel snapshot={cpuSnapshot} reload={reload} />}
@@ -8590,14 +8648,14 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
   </div>;
 }
 
-function RecommendationsPanel({ recommendations, busy, message, onOpen, onState, onAction }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void>; onAction: (action: SystemRecommendations["items"][number]["actions"][number]) => Promise<void> }) {
+function RecommendationsPanel({ recommendations, busy, message, onOpen, onState, onAction, onExcludeTalkgroups }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void>; onAction: (action: SystemRecommendations["items"][number]["actions"][number]) => Promise<void>; onExcludeTalkgroups: (targets: { systemShortName?: string | null; talkgroup: number }[]) => Promise<void> }) {
   const [activeRunbookId, setActiveRunbookId] = useState<string | null>(null);
   if (!recommendations) return <div className="card">Loading recommendations...</div>;
   const ignoredItems = recommendations.ignoredItems ?? [];
   const activeRunbook = [...recommendations.items, ...ignoredItems].find(item => item.id === activeRunbookId);
   return <div className="trouble-panel recommendations-panel">
     {message && <div className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{message}</div>}
-    {activeRunbook?.runbook && <RunbookDetail item={activeRunbook} busy={busy} onClose={() => setActiveRunbookId(null)} onOpen={onOpen} onState={onState} />}
+    {activeRunbook?.runbook && <RunbookDetail item={activeRunbook} busy={busy} onClose={() => setActiveRunbookId(null)} onOpen={onOpen} onState={onState} onExcludeTalkgroups={onExcludeTalkgroups} />}
     {!activeRunbook && recommendations.items.length === 0 ? <div className="card"><h3>No Open Recommendations</h3><p className="muted">No system-level issues or priority candidates were detected.</p></div> :
       !activeRunbook &&
       <div className="recommendation-list">
@@ -8656,7 +8714,7 @@ function RecommendationBaseline({ item, busy, onReset }: { item: NonNullable<Sys
   </div>;
 }
 
-function RunbookDetail({ item, busy, onClose, onOpen, onState }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onClose: () => void; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void> }) {
+function RunbookDetail({ item, busy, onClose, onOpen, onState, onExcludeTalkgroups }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onClose: () => void; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void>; onExcludeTalkgroups: (targets: { systemShortName?: string | null; talkgroup: number }[]) => Promise<void> }) {
   const runbook = item.runbook;
   if (!runbook) return null;
   const issueDiagnostics = (runbook.diagnostics ?? []).filter(row => row.status === "issue");
@@ -8705,8 +8763,9 @@ function RunbookDetail({ item, busy, onClose, onOpen, onState }: { item: NonNull
       <div className="recommendation-head">
         <div>
           <h3>Talkgroup Noise Candidates</h3>
-          <p className="muted">Ranked by recent volume, weak-call rate, transcription failures, repetition hints, pending load, category, and incident yield. Make global TR exclusions only in Setup.</p>
+          <p className="muted">Ranked by recent volume, weak-call rate, transcription failures, repetition hints, pending load, category, and incident yield.</p>
         </div>
+        <button type="button" className="danger-button" disabled={busy} onClick={() => void onExcludeTalkgroups(runbook.talkgroupCandidates.map(row => ({ systemShortName: row.systemShortName, talkgroup: row.talkgroup })))}>Exclude all candidates</button>
       </div>
       <table className="table runbook-tg-table">
         <thead><tr><th>Talkgroup</th><th>Score</th><th>Recent Load</th><th>Quality</th><th>Incident Yield</th><th>Reason</th><th>Action</th></tr></thead>
@@ -8717,10 +8776,15 @@ function RunbookDetail({ item, busy, onClose, onOpen, onState }: { item: NonNull
           <td>{(row.weakPct ?? 0).toFixed(0)}% weak<br /><span className="muted">{(row.failedPct ?? 0).toFixed(0)}% failed, {(row.repetitivePct ?? 0).toFixed(0)}% repetitive</span></td>
           <td>{(row.incidentYieldPct ?? 0).toFixed(0)}%<br /><span className="muted">{(row.incidentCalls ?? 0).toLocaleString()} incident calls</span></td>
           <td>{row.reason}</td>
-          <td><button type="button" onClick={() => {
-            localStorage.setItem("pizzawave-setup-talkgroup-filter", `${row.systemShortName} ${row.talkgroup}`);
-            onOpen({ topTab: "setup", subTab: "talkgroups", anchor: String(row.talkgroup) });
-          }}>Review in Setup</button></td>
+          <td>
+            <div className="runbook-row-actions">
+              <button type="button" className="danger-button" disabled={busy} onClick={() => void onExcludeTalkgroups([{ systemShortName: row.systemShortName, talkgroup: row.talkgroup }])}>Exclude</button>
+              <button type="button" disabled={busy} onClick={() => {
+                localStorage.setItem("pizzawave-setup-talkgroup-filter", String(row.talkgroup));
+                onOpen({ topTab: "setup", subTab: "talkgroups", anchor: String(row.talkgroup) });
+              }}>Open TG</button>
+            </div>
+          </td>
         </tr>)}</tbody>
       </table>
     </div>}
