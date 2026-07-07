@@ -1328,6 +1328,36 @@ app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest 
 .WithName("ProfilesSave")
 .WithOpenApi();
 
+app.MapPost("/api/v1/profiles/active", async (HttpContext context, SetActiveProfileRequest request, AuthService authService, EngineConfig cfg) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var profiles = cfg.Profiles.Items?.ToList() ?? [];
+    var active = profiles.FirstOrDefault(p => p.Id == request.ActiveProfileId);
+    if (active == null)
+        return Results.BadRequest(new { error = "Unknown profile." });
+    if (cfg.Profiles.ActiveProfileId == request.ActiveProfileId)
+        return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, profiles, false, string.Empty, $"Profile already active: {active.Name}."));
+
+    var candidate = cfg.Clone();
+    candidate.Profiles.ActiveProfileId = request.ActiveProfileId;
+    candidate.ApplyDefaults();
+    try
+    {
+        await SaveConfigAsync(candidate, context.RequestAborted);
+        cfg.Profiles = candidate.Profiles;
+        cfg.ApplyDefaults();
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
+    {
+        return Results.BadRequest(new { error = $"Unable to save active profile to {cfg.ConfigPath}.", detail = ex.Message });
+    }
+
+    var selected = cfg.Profiles.Items.FirstOrDefault(p => p.Id == cfg.Profiles.ActiveProfileId);
+    return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, cfg.Profiles.Items ?? [], false, string.Empty, $"Profile active: {selected?.Name ?? active.Name}."));
+})
+.WithName("ProfilesSetActive")
+.WithOpenApi();
+
 app.MapGet("/api/v1/talkgroups", (HttpContext context, AuthService authService, TalkgroupResolver talkgroups) =>
 {
     if (!authService.IsReadAllowed(context))

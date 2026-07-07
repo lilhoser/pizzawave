@@ -1498,6 +1498,8 @@ public sealed record ProfileStateDto(
 
 public sealed record SaveProfilesRequest(Guid ActiveProfileId, IReadOnlyList<ProcessingProfile> Profiles);
 
+public sealed record SetActiveProfileRequest(Guid ActiveProfileId);
+
 public sealed record TalkgroupOptionDto(string Key, string SystemShortName, long Talkgroup, string Label, string Category);
 
 public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);

@@ -566,9 +566,14 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
     if (!confirmDiscardUnappliedSettings()) return;
     const next = { ...profileState, activeProfileId: profileId };
     setProfileState(next);
-    const saved = await api.request<ProfileState>("/api/v1/profiles", { method: "POST", body: JSON.stringify(next) });
-    setProfileState(saved);
-    await load();
+    try {
+      const saved = await api.request<ProfileState>("/api/v1/profiles/active", { method: "POST", body: JSON.stringify({ activeProfileId: profileId }) });
+      setProfileState(saved);
+      await load();
+    } catch (error) {
+      setProfileState(profileState);
+      setStatus(error instanceof Error ? error.message : "Unable to switch profile.");
+    }
   }
   function goDashboard(mode: DashboardMode) {
     if (page === "settings" && !confirmDiscardUnappliedSettings()) return;
