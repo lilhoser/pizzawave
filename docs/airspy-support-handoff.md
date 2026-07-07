@@ -4,7 +4,7 @@ Date: 2026-06-21
 
 ## Goal
 
-Add first-class Airspy Mini and Airspy R2 support throughout PizzaWave setup and Radio Setup Workspace, starting with the Airspy Mini on the RPI mobile Yagi rig.
+Add first-class Airspy Mini and Airspy R2 support throughout PizzaWave Setup, starting with the Airspy Mini on the RPI mobile Yagi rig.
 
 The operator wants to swap the current RTL-SDR for an Airspy Mini first. Airspy R2 may be tested later, but R2 may overload the Raspberry Pi due to higher bandwidth and CPU/USB pressure.
 
@@ -20,7 +20,7 @@ Recommended new worktree name:
 git worktree add C:\projects\pizzawave-airspy-support -b codex/airspy-support <base>
 ```
 
-Important: do not start from plain `main` unless the current Radio Setup / first-run wizard changes from `C:\projects\pizzawave-radio-setup-field-baselines` have first been committed, merged, or intentionally ported. The RPI is running code from that worktree, and several relevant setup/RF workflow paths are not represented by old `main`.
+Important: do not start from plain `main` unless the current Setup / first-run wizard changes from `C:\projects\pizzawave-radio-setup-field-baselines` have first been committed, merged, or intentionally ported. The RPI is running code from that worktree, and several relevant Setup/RF workflow paths are not represented by old `main`.
 
 ## Hard Constraints
 
@@ -73,7 +73,7 @@ airspy_rx -f frequency_MHz
 
 ### Already Partially Airspy-Aware
 
-Radio Setup has partial Airspy support:
+Setup RF validation has partial Airspy support:
 
 - `pizzad/RfSurveyService.cs`
   - Infers `SdrType = "Airspy"` when the TR source device string contains `airspy`.
@@ -203,7 +203,7 @@ Generate source definitions based on typed device:
 - Use Airspy-appropriate gain defaults and sample rates.
 - Keep `driver = osmosdr` unless testing proves a different TR driver is needed.
 
-### 5. Update Radio Setup Workspace
+### 5. Update Setup RF Validation
 
 Fix and harden:
 
@@ -213,7 +213,7 @@ Fix and harden:
 - Source/device labels.
 - Candidate ranking and source coverage display for wider Airspy windows.
 
-Avoid extending old `tr_tune.sh` flows. The combined RF sweep and Radio Setup APIs are the intended path.
+Avoid extending old `tr_tune.sh` flows. The combined RF sweep and Setup APIs are the intended path.
 
 ### 6. Update Tests
 
@@ -284,7 +284,7 @@ After Airspy Mini is attached:
 - run `/api/v1/setup/sdrs`;
 - run `airspy_info`;
 - verify the TR/osmosdr device string with a short controlled TR start;
-- run only the operator-requested Radio Setup steps;
+- run only the operator-requested Setup steps;
 - do not run full RF sweeps unless explicitly asked.
 
 ## Baseline Work Continuation

@@ -1,7 +1,7 @@
 # Agent Instructions
 
-This repository contains the PizzaWave engine, web UI, setup tooling, RF survey
-workflow, deployment scripts, and operational documentation.
+This repository contains the PizzaWave engine, web UI, Setup tooling, RF
+validation workflow, deployment scripts, and operational documentation.
 
 ## Worktree Rule
 
@@ -55,7 +55,7 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 
 ## Repo Map
 
-- `pizzad/`: engine, API server, AI incident logic, setup, RF survey, TR health,
+- `pizzad/`: engine, API server, AI incident logic, Setup, RF validation, TR health,
   transcription, embeddings, and web hosting.
 - `pizzad.Tests/`: .NET test suite.
 - `pizzad/web/`: React/Vite web UI source.

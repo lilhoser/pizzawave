@@ -33,7 +33,7 @@ should explain what is missing and whether it is safe to continue.
 source can handle. Too few recorders can cause missed or failed voice calls even
 when control-channel decode looks acceptable.
 
-PizzaWave-managed setup and Radio Setup Workspace configs size
+PizzaWave-managed Setup configs size
 `digitalRecorders` per source from the voice frequencies actually covered by
 that source window. The generated value uses the covered voice-channel count,
 adds two slots of burst headroom per covered system, rounds up to an even

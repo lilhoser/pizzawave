@@ -16,10 +16,10 @@ Start here in a new Codex session:
 4. `OT-DISCONE-01` is complete. The remaining OT fixed-site antenna baselines
    are skipped for now.
 5. Next setup path is the portable RPI/mobile-yagi rig. The operator will use
-   the Radio Setup Workspace wizard for a full setup first, then capture a
+   Site Setup for a full setup first, then capture a
    30-minute baseline through the PizzaWave API.
 6. Run `RPI-MOBILE-YAGI-RTLSDR-01` first with one RTL-SDR. Then switch only the
-   SDR hardware to an Airspy Mini, rerun the full Radio Setup Workspace setup,
+   SDR hardware to an Airspy Mini, rerun the full Site Setup flow,
    and collect `RPI-MOBILE-YAGI-AIRSPY-MINI-01`.
 
 The local `pizzawave-tr-rf-diagnostics` Codex skill was intentionally removed
@@ -36,7 +36,7 @@ Rules for comparable OT runs:
 
 Rules for mobile RPI/yagi runs:
 
-- Use the Radio Setup Workspace wizard for the full setup before each baseline.
+- Use Site Setup for the full setup before each baseline.
 - Record RF-path metadata from the wizard: antenna, bearing/aim, polarization,
   placement, coax, adapters, SDR model/serial, gain, error, sample rate, selected
   system/site, and source plan.
@@ -46,7 +46,7 @@ Rules for mobile RPI/yagi runs:
 - A one-SDR mobile setup is not directly comparable to the OT fixed-site
   multi-SDR discone baseline. Compare it as a separate portable-rig baseline.
 - If the selected system requires more RF bandwidth than one RTL-SDR can cover,
-  record the Radio Setup verdict as partial or coverage-limited instead of
+  record the Setup RF validation verdict as partial or coverage-limited instead of
   treating the failure as an antenna-only result.
 
 ## API Collection Procedure
@@ -90,9 +90,9 @@ Paste the raw JSON or a compact, lossless summary under the matching run below.
 If API authentication is enabled, use the PizzaWave bearer token from the rig's
 configured token path.
 
-Do not use the Radio Setup `control_channel_quality` experiment as the 30-minute
+Do not use the Setup RF validation `control_channel_quality` experiment as the 30-minute
 A/B evidence source. It is capped at 900 seconds and is intended for shorter
-interactive workspace checks.
+interactive validation checks.
 
 ## Planned Runs
 
@@ -292,7 +292,7 @@ Status: Complete
 Run: RPI-MOBILE-YAGI-RTLSDR-01
 RF path: Mobile yagi rig with one RTL-SDR
 Host: RPI PizzaWave API, http://192.168.2.42:8080
-Radio Setup workspace: rf-20260619190023-17be178afd6
+Setup RF validation session: rf-20260619190023-17be178afd6
 Started: 1781992965 / 2026-06-20T22:02:45Z / 2026-06-20 18:02:45 EDT
 Ended:   1781994765 / 2026-06-20T22:32:45Z / 2026-06-20 18:32:45 EDT
 Duration: 1800 seconds
@@ -354,7 +354,7 @@ Status: Complete
 Run: RPI-MOBILE-YAGI-AIRSPY-MINI-01
 RF path: Mobile yagi rig with Airspy Mini
 Host: RPI PizzaWave API, http://192.168.2.42:8080
-Radio Setup workspace: rf-20260621130654-dc2eae36859
+Setup RF validation session: rf-20260621130654-dc2eae36859
 Started: 1782161922 / 2026-06-22T20:58:42Z / 2026-06-22 16:58:42 EDT
 Ended:   1782163722 / 2026-06-22T21:28:42Z / 2026-06-22 17:28:42 EDT
 Duration: 1800 seconds
@@ -378,7 +378,7 @@ Raw API artifacts:
 - rpi-mobile-yagi-airspy-mini-status-1782161922-1782163722.json
 
 Source plan and RF path:
-- Radio Setup workspace rf-20260621130654-dc2eae36859: draft, guided, site label airspy-test-1, system chattanooga-simulcast-hamilton-t, source plan applied 1 source definition.
+- Setup RF validation session rf-20260621130654-dc2eae36859: draft, guided, site label airspy-test-1, system chattanooga-simulcast-hamilton-t, source plan applied 1 source definition.
 - Source 0: airspy=637862DC2E3A19D7, Airspy serial 637862DC2E3A19D7, center 853.131250 MHz, sample rate 6.000000 MS/s, gain 15, error 0 Hz.
 - Source window from troubleshoot: 850.131250-856.131250 MHz, digitalRecorders=4.
 - Source-plan systems:
@@ -427,7 +427,7 @@ Notes:
 - Control-channel decode was strong and stable for both systems: Chattanooga averaged 39.00 msg/sec with 0 retunes; Cleveland/Bradley averaged 37.00 msg/sec with 2 retunes.
 - Compared with the one-RTL mobile yagi run, the Airspy source can monitor both Chattanooga and Cleveland/Bradley control channels in one source, but the configured 6 MS/s source window still does not cover the high Chattanooga voice channels above 856.131250 MHz.
 - Recorder capacity was a clear bottleneck with both systems active on one source: global recorderExhausted=56 across the stored buckets.
-- The initial troubleshoot source-plan summary under-reported Chattanooga's observed voice range because it only considered calls inside the selected 30-minute window. This was fixed after the run: post-fix troubleshoot output reports Chattanooga 854.387500-858.437500 MHz as only partially covered by source 0, matching the no-source logs and the Radio Setup source-plan endpoint.
+- The initial troubleshoot source-plan summary under-reported Chattanooga's observed voice range because it only considered calls inside the selected 30-minute window. This was fixed after the run: post-fix troubleshoot output reports Chattanooga 854.387500-858.437500 MHz as only partially covered by source 0, matching the no-source logs and the Setup source-plan endpoint.
 ```
 
 ### RPI-MOBILE-YAGI-DUAL-AIRSPY-MINI-01
@@ -438,7 +438,7 @@ Status: Complete
 Run: RPI-MOBILE-YAGI-DUAL-AIRSPY-MINI-01
 RF path: Mobile yagi rig with two Airspy Minis
 Host: RPI PizzaWave API, http://192.168.2.42:8080
-Radio Setup workspace: rf-20260623125453-f5655f48c99
+Setup RF validation session: rf-20260623125453-f5655f48c99
 Started: 1782228246 / 2026-06-23T15:24:06Z / 2026-06-23 11:24:06 EDT
 Ended:   1782230046 / 2026-06-23T15:54:06Z / 2026-06-23 11:54:06 EDT
 Duration: 1800 seconds
@@ -464,7 +464,7 @@ Raw API artifacts:
 - rpi-mobile-yagi-dual-airspy-mini-status-1782228246-1782230046.json
 
 Source plan and RF path:
-- Radio Setup workspace rf-20260623125453-f5655f48c99: source_plan_applied, guided, site label two-airspy-minis, source plan applied 2 SDR source windows for 3 systems.
+- Setup RF validation session rf-20260623125453-f5655f48c99: source_plan_applied, guided, site label two-airspy-minis, source plan applied 2 SDR source windows for 3 systems.
 - Source 0: airspy=637862DC2E3A19D7, center 769.606250 MHz, sample rate 6.000000 MS/s, gain 15, error 0 Hz, covered systems: north-bradley-bradley-tn.
 - Source 1: airspy=637862DC2F5C0CD7, center 853.131250 MHz, sample rate 6.000000 MS/s, gain 15, error 0 Hz, covered systems: chattanooga-simulcast-hamilton-t and cleveland-bradley-tn.
 - Source windows from troubleshoot:
@@ -541,7 +541,7 @@ Status: Complete
 Run: RPI-MOBILE-YAGI-AIRSPY-R2-01
 RF path: Mobile yagi rig with one Airspy R2
 Host: RPI PizzaWave API, http://192.168.2.42:8080
-Radio Setup workspace: rf-20260623163819-30c714b9080
+Setup RF validation session: rf-20260623163819-30c714b9080
 Started: 1782246286 / 2026-06-23T20:24:46Z / 2026-06-23 16:24:46 EDT
 Ended:   1782248086 / 2026-06-23T20:54:46Z / 2026-06-23 16:54:46 EDT
 Duration: 1800 seconds
@@ -565,7 +565,7 @@ Raw API artifacts:
 - rpi-mobile-yagi-airspy-r2-status-1782246286-1782248086.json
 
 Source plan and RF path:
-- Radio Setup workspace rf-20260623163819-30c714b9080: source_plan_applied, guided, site label airspy-r2, source plan applied 1 SDR source window for 2 systems.
+- Setup RF validation session rf-20260623163819-30c714b9080: source_plan_applied, guided, site label airspy-r2, source plan applied 1 SDR source window for 2 systems.
 - Source 0: airspy=637862DC2E457DD7, center 854.743750 MHz, sample rate 10.000000 MS/s, gain 15, error 0 Hz, covered systems: chattanooga-simulcast-hamilton-t and cleveland-bradley-tn.
 - Source window from troubleshoot: 849.743750-859.743750 MHz, digitalRecorders=4, firstMatchCalls=200, coverableCalls=200, uniqueFrequencies=15.
 - Source-plan systems:
@@ -625,7 +625,7 @@ Status: Complete
 Run: RPI-MOBILE-YAGI-AIRSPY-R2-EXTENDED-01
 RF path: Mobile yagi rig with one Airspy R2
 Host: RPI PizzaWave API, http://192.168.2.42:8080
-Radio Setup workspace: rf-20260623163819-30c714b9080
+Setup RF validation session: rf-20260623163819-30c714b9080
 Started: 1782246286 / 2026-06-23T20:24:46Z / 2026-06-23 16:24:46 EDT
 Ended:   1782303711 / 2026-06-24T12:21:51Z / 2026-06-24 08:21:51 EDT
 Duration: 57425 seconds
@@ -649,7 +649,7 @@ Raw API artifacts:
 - rpi-mobile-yagi-airspy-r2-extended-status-1782246286-1782303711.json
 
 Source plan and RF path:
-- Radio Setup workspace rf-20260623163819-30c714b9080: source_plan_applied, guided, site label airspy-r2, source plan applied 1 SDR source window for 2 systems.
+- Setup RF validation session rf-20260623163819-30c714b9080: source_plan_applied, guided, site label airspy-r2, source plan applied 1 SDR source window for 2 systems.
 - Source 0: airspy=637862DC2E457DD7, center 854.743750 MHz, sample rate 10.000000 MS/s, gain 15, error 0 Hz, covered systems: chattanooga-simulcast-hamilton-t and cleveland-bradley-tn.
 - Source window from troubleshoot: 849.743750-859.743750 MHz, digitalRecorders=4, firstMatchCalls=4178, coverableCalls=4178, uniqueFrequencies=15.
 - Source-plan systems:

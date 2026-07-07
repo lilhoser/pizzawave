@@ -26,7 +26,7 @@ new-site setup:
 - AI Insights endpoint, model, limits, and enablement;
 - embedding endpoint and Qdrant service settings;
 - alert delivery and playback settings;
-- RF survey probe command and timing settings.
+- Setup RF validation probe command and timing settings.
 
 Unchecked sections reset to PizzaWave defaults. Runtime plumbing such as the
 current config path, database path, audio root, token path, HTTP listener, and

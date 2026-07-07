@@ -45,12 +45,12 @@ Current master TODO list:
 
 - 2026-05-24 Raymond/MS RF bring-up produced a new product follow-up:
   `docs/rf-path-survey-mode.md`. The setup/calibration flow needs a repeatable
-  RF Path Survey that records rig hardware variables, captures RF/waterfall
-  evidence, tests candidate P25 control channels, observes voice grants, checks
-  source coverage/audio capture, and produces an explicit pass/partial/fail
-  verdict plus recommended trunk-recorder source plan.
+  Setup RF validation path that records rig hardware variables, captures
+  RF/waterfall evidence, tests candidate P25 control channels, observes voice
+  grants, checks source coverage/audio capture, and produces an explicit
+  pass/partial/fail verdict plus recommended trunk-recorder source plan.
 - 2026-05-24 Raymond/MS diagnostic antenna rig plan:
-  - Purpose: temporary high-gain directional RF survey rig, not the portable or
+  - Purpose: temporary high-gain directional RF validation rig, not the portable or
     permanent PizzaWave antenna. Use it to determine which direction/side of a
     house or site has decodable 700/800 MHz public-safety signal, then use that
     evidence to place the portable or stationary rig.
