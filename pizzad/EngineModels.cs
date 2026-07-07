@@ -123,7 +123,8 @@ public sealed record CallLocationDashboardRow(
     string GeocodePrecision,
     double GeocodeConfidence,
     double Latitude,
-    double Longitude);
+    double Longitude,
+    string AudioPath = "");
 
 public sealed record GeocodeCacheDto
 {
@@ -226,6 +227,12 @@ public sealed record IncidentCallDto(
     bool HasAlertMatch = false,
     bool HasActiveAlert = false,
     string AlertRules = "");
+
+public static class CallAudioLinks
+{
+    public static string ForCall(long callId, string audioPath) =>
+        string.IsNullOrWhiteSpace(audioPath) ? string.Empty : $"/api/v1/calls/{callId}/audio";
+}
 
 public sealed record IncidentCallOwnerDto(
     long CallId,

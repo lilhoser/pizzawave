@@ -758,7 +758,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     }
 
     private static IncidentCallDto ToIncidentCallDto(EngineCall call) =>
-        new(call.Id, call.StartTime, call.Transcription, $"/api/v1/calls/{call.Id}/audio", call.Category, call.TalkgroupName, call.SystemShortName, call.Talkgroup);
+        new(call.Id, call.StartTime, call.Transcription, CallAudioLinks.ForCall(call.Id, call.AudioPath), call.Category, call.TalkgroupName, call.SystemShortName, call.Talkgroup);
 
     private static IncidentFrameCurrentIncidentV3 BuildIncidentV3CurrentIncident(
         IncidentStateItem incident,
@@ -1625,7 +1625,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 FirstSeen = callIds.Min(c => c.StartTime),
                 LastSeen = callIds.Max(c => c.StartTime),
                 Confidence = Math.Clamp(item.Confidence, 0, 1),
-                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, CallAudioLinks.ForCall(c.Id, c.AudioPath), c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
             };
             var mergeIncidentIds = target.MergeIncidents.Select(i => i.Id).ToList();
             var id = mergeIncidentIds.Count == 0
@@ -1650,7 +1650,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 FirstSeen = callIds.Min(c => c.StartTime),
                 LastSeen = callIds.Max(c => c.StartTime),
                 Confidence = Math.Clamp(item.Confidence, 0, 1),
-                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, CallAudioLinks.ForCall(c.Id, c.AudioPath), c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
             };
             var acceptedReason = existingIncident is null ? "accepted:create incident" : "accepted:update incident";
             if (!string.IsNullOrWhiteSpace(decision.Reason))
@@ -4629,7 +4629,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                     FirstSeen = calls.Min(c => c.StartTime),
                     LastSeen = calls.Max(c => c.StartTime),
                     Confidence = Math.Clamp(ev.Confidence, 0, 1),
-                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
+                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, CallAudioLinks.ForCall(c.Id, c.AudioPath), c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
                 };
             })
             .Where(e => e != null)

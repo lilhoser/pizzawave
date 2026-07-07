@@ -818,6 +818,7 @@ public sealed class EngineDatabase
                 COALESCE(NULLIF(c.talkgroup_name, ''), 'TG ' || c.talkgroup) AS talkgroup_name,
                 COALESCE(NULLIF(c.category, ''), 'other') AS category,
                 COALESCE(c.transcription, '') AS transcription,
+                COALESCE(c.audio_path, '') AS audio_path,
                 l.area_id,
                 l.area_label,
                 l.system_short_name AS area_system_short_name,
@@ -863,7 +864,8 @@ public sealed class EngineDatabase
                 reader.GetString(reader.GetOrdinal("geocode_precision")),
                 reader.GetDouble(reader.GetOrdinal("geocode_confidence")),
                 reader.GetDouble(reader.GetOrdinal("latitude")),
-                reader.GetDouble(reader.GetOrdinal("longitude"))));
+                reader.GetDouble(reader.GetOrdinal("longitude")),
+                reader.GetString(reader.GetOrdinal("audio_path"))));
         }
         return rows;
     }
@@ -1280,7 +1282,8 @@ public sealed class EngineDatabase
                    COALESCE(c.category, 'other'),
                    COALESCE(c.transcription, ''),
                    COALESCE(c.transcription_status, ''),
-                   COALESCE(c.quality_reason, '')
+                   COALESCE(c.quality_reason, ''),
+                   COALESCE(c.audio_path, '')
             FROM alert_matches am
             LEFT JOIN calls c ON c.id = am.call_id
             WHERE am.matched_at >= $start AND am.matched_at <= $end
@@ -1310,7 +1313,7 @@ public sealed class EngineDatabase
                 Transcription = reader.GetString(12),
                 TranscriptionStatus = reader.GetString(13),
                 QualityReason = reader.GetString(14),
-                AudioUrl = $"/api/v1/calls/{reader.GetInt64(1)}/audio"
+                AudioUrl = CallAudioLinks.ForCall(reader.GetInt64(1), reader.GetString(15))
             });
         }
         return rows;
@@ -2864,7 +2867,7 @@ public sealed class EngineDatabase
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT c.id, c.start_time, c.transcription, COALESCE(c.category, 'other'), COALESCE(c.talkgroup_name, ''), COALESCE(c.system_short_name, ''), c.talkgroup,
+            SELECT c.id, c.start_time, c.transcription, COALESCE(c.category, 'other'), COALESCE(c.talkgroup_name, ''), COALESCE(c.system_short_name, ''), c.talkgroup, COALESCE(c.audio_path, ''),
                    COALESCE(MAX(CASE WHEN am.id IS NOT NULL THEN 1 ELSE 0 END), 0),
                    COALESCE(MAX(CASE WHEN am.id IS NOT NULL AND COALESCE(am.dismissed_at_utc, '') = '' THEN 1 ELSE 0 END), 0),
                    COALESCE(group_concat(DISTINCT am.rule_name), '')
@@ -2875,7 +2878,7 @@ public sealed class EngineDatabase
               AND c.transcription_status = 'complete'
               AND c.quality_reason = 'ok'
               AND length(trim(c.transcription)) > 0
-            GROUP BY c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name, c.talkgroup
+            GROUP BY c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name, c.talkgroup, c.audio_path
             ORDER BY c.start_time ASC;
             """;
         Add(command, "$incident_id", incidentId);
@@ -2888,14 +2891,14 @@ public sealed class EngineDatabase
                 callId,
                 reader.GetInt64(1),
                 reader.GetString(2),
-                $"/api/v1/calls/{callId}/audio",
+                CallAudioLinks.ForCall(callId, reader.GetString(7)),
                 reader.GetString(3),
                 reader.GetString(4),
                 reader.GetString(5),
                 reader.GetInt64(6),
-                reader.GetInt64(7) != 0,
                 reader.GetInt64(8) != 0,
-                reader.GetString(9)));
+                reader.GetInt64(9) != 0,
+                reader.GetString(10)));
         }
         return calls;
     }
@@ -2908,7 +2911,7 @@ public sealed class EngineDatabase
         var parameters = callIds.Select((_, i) => $"$id{i}").ToArray();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT id, start_time, transcription, COALESCE(category, 'other'), COALESCE(talkgroup_name, ''), COALESCE(system_short_name, ''), talkgroup
+            SELECT id, start_time, transcription, COALESCE(category, 'other'), COALESCE(talkgroup_name, ''), COALESCE(system_short_name, ''), talkgroup, COALESCE(audio_path, '')
             FROM calls
             WHERE id IN ({string.Join(",", parameters)})
               AND transcription_status = 'complete'
@@ -2928,7 +2931,7 @@ public sealed class EngineDatabase
                 callId,
                 reader.GetInt64(1),
                 reader.GetString(2),
-                $"/api/v1/calls/{callId}/audio",
+                CallAudioLinks.ForCall(callId, reader.GetString(7)),
                 reader.GetString(3),
                 reader.GetString(4),
                 reader.GetString(5),

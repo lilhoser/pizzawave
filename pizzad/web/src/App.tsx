@@ -2276,6 +2276,13 @@ function Legend({ items }: { items: string[][] }) {
   return <div className="legend">{items.map(([name, color]) => <span key={name}><i style={{ background: color }} />{name}</span>)}</div>;
 }
 
+function PlayableAudio({ src }: { src?: string | null }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (!src || failed) return null;
+  return <audio controls preload="metadata" src={src} onError={() => setFailed(true)} />;
+}
+
 function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLocation, emptyText = "No geolocated incidents detected in the selected range." }: { rows: LocationHeat[]; incidents: Incident[]; focusedKey?: string | null; onFocusKey?: (key: string | null) => void; onSelectLocation?: (row: LocationHeat | null) => void; emptyText?: string }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
@@ -2307,12 +2314,6 @@ function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLoca
     const row = rows.find(r => locationKey(r) === focusedKey);
     if (row) focusLocation(row);
   }, [focusedKey, rows]);
-  useEffect(() => {
-    if (focusedKey) return;
-    setSelected(null);
-    setCenter(defaultCenter);
-    setZoom(defaultZoom);
-  }, [focusedKey, defaultCenter, defaultZoom]);
 
   if (!rows.length) {
     return <div className="card location-heat-card">
@@ -2333,6 +2334,7 @@ function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLoca
 
   function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
     event.preventDefault();
+    event.stopPropagation();
     setZoom(current => Math.max(8, Math.min(14, current + (event.deltaY < 0 ? 1 : -1))));
   }
 
@@ -2695,7 +2697,7 @@ function LocationSourceCall({ call, searchQuery = "" }: { call: LocationHeat["so
     </div>
     <div className="muted">Call {call.callId}</div>
     <p><HighlightedText text={call.transcript || "No transcript stored for this source call."} query={searchQuery} /></p>
-    {call.audioUrl && <audio controls preload="metadata" src={call.audioUrl} />}
+    <PlayableAudio src={call.audioUrl} />
   </div>;
 }
 
@@ -2872,7 +2874,7 @@ function StandaloneAlertCard({ alert, expanded, onDismissAlert, searchQuery = ""
         <span>{label(category)}</span>
       </div>
       <div className="transcript-block"><HighlightedText text={alert.transcription?.trim() || "No transcript stored for this alert match."} query={searchQuery} /></div>
-      {alert.audioUrl && <audio controls preload="metadata" src={alert.audioUrl} />}
+      <PlayableAudio src={alert.audioUrl} />
     </div>}
   </details>;
 }
@@ -3041,7 +3043,7 @@ function IncidentSourceCall({ call, incidentId, playing, searchQuery = "" }: { c
       <span>{new Date(call.rawTimestamp * 1000).toLocaleString()}</span>
     </div>
     <div className="transcript-block"><HighlightedText text={transcript || "No transcript stored for this source call."} query={searchQuery} /></div>
-    {call.audioUrl && <audio controls preload="metadata" src={call.audioUrl} />}
+    <PlayableAudio src={call.audioUrl} />
   </div>;
 }
 
@@ -3138,7 +3140,7 @@ function CallRow({ call, searchQuery = "" }: { call: EngineCall; searchQuery?: s
   const missingText = call.transcriptionStatus === "pending"
     ? "Pending transcription"
     : `No transcript available (${status || "not transcribed"}).`;
-  return <div id={`call-${call.id}`} className={`call category-${call.category}`}><div className="call-head"><strong><HighlightedText text={call.talkgroupName || `TG ${call.talkgroup}`} query={searchQuery} /> <CopyCardLink targetId={`call-${call.id}`} label="Copy call link" /></strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div><HighlightedText text={transcript || missingText} query={searchQuery} /></div>{call.audioPath && <audio controls preload="metadata" src={`/api/v1/calls/${call.id}/audio`} />}</div>;
+  return <div id={`call-${call.id}`} className={`call category-${call.category}`}><div className="call-head"><strong><HighlightedText text={call.talkgroupName || `TG ${call.talkgroup}`} query={searchQuery} /> <CopyCardLink targetId={`call-${call.id}`} label="Copy call link" /></strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div><HighlightedText text={transcript || missingText} query={searchQuery} /></div><PlayableAudio src={call.audioPath ? `/api/v1/calls/${call.id}/audio` : ""} /></div>;
 }
 
 function CopyCardLink({ targetId, hashTarget, label }: { targetId: string; hashTarget?: string; label: string }) {
@@ -3409,11 +3411,11 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
       .catch(() => setMetricsData(null));
   }, [topTab, metricsTab, bySystem, baseline, rangeHours]);
   useEffect(() => {
-    if (topTab !== "metrics" || !["overview", "ai"].includes(metricsTab)) return;
+    if (topTab !== "metrics" || metricsTab !== "ai") return;
     void api.request<TokenUsageReport>(`/api/v1/system/token-usage?${rangeQuery(rangeHours)}`).then(setTokenUsage).catch(() => setTokenUsage(null));
   }, [topTab, metricsTab, rangeHours]);
   useEffect(() => {
-    if (topTab !== "metrics" || !["overview", "bandwidth"].includes(metricsTab)) return;
+    if (topTab !== "metrics" || metricsTab !== "bandwidth") return;
     void api.request<RemoteBandwidthReport>(`/api/v1/system/remote-bandwidth?${rangeQuery(rangeHours)}`).then(setBandwidthUsage).catch(() => setBandwidthUsage(null));
   }, [topTab, metricsTab, rangeHours]);
   useEffect(() => {
@@ -3691,8 +3693,8 @@ function MetricsOverviewPanel({ data, dashboard, engineHealth, tokenUsage, bandw
       <Kpi label="Transcript Quality" value={`${audit.problemPercent.toFixed(1)}% problem`} status={audit.problemPercent > 25 ? "error" : audit.problemPercent > 10 ? "warning" : "ok"} subtext={`${audit.problemCalls.toLocaleString()} of ${audit.totalCalls.toLocaleString()} calls flagged`} onClick={() => navigate("metrics", "transcription")} />
       <Kpi label="RF Health" value={rfIssues > 0 ? "Watch" : "OK"} status={rfIssues > 0 ? "warning" : "ok"} subtext={`${rfIssues.toLocaleString()} health issue row(s)`} onClick={() => navigate("metrics", "rf")} />
       <Kpi label="Incidents" value={incidentCount.toLocaleString()} subtext="incident volume in selected range" onClick={() => navigate("metrics", "incidents")} />
-      <Kpi label="AI" value={aiFailures > 0 ? aiServiceFailures > 0 ? "Errors" : "Truncated" : tokenUsage ? "OK" : "Loading"} status={aiServiceFailures > 0 ? "error" : aiTruncated > 0 ? "warning" : tokenUsage ? "ok" : "neutral"} subtext={tokenUsage ? `${aiTimeoutFailures.toLocaleString()} timeout, ${aiNoValidFailures.toLocaleString()} no result, ${aiTruncated.toLocaleString()} truncated, ${formatCompact(tokenUsage.summary.totalTokens)} tokens` : "AI usage loading"} onClick={() => navigate("metrics", "ai")} />
-      <Kpi label="Bandwidth" value={bandwidthUsage ? formatBytes(bandwidthUsage.summary.totalBytes) : "Loading"} status={bandwidthUsage?.summary.missingAudioFiles ? "warning" : bandwidthUsage ? "ok" : "neutral"} subtext={bandwidthUsage ? `${bandwidthUsage.remoteHost || "no remote host"} - ${bandwidthUsage.summary.requests.toLocaleString()} estimated request(s)` : "remote usage loading"} onClick={() => navigate("metrics", "bandwidth")} />
+      <Kpi label="AI" value={aiFailures > 0 ? aiServiceFailures > 0 ? "Errors" : "Truncated" : tokenUsage ? "OK" : "Open"} status={aiServiceFailures > 0 ? "error" : aiTruncated > 0 ? "warning" : tokenUsage ? "ok" : "neutral"} subtext={tokenUsage ? `${aiTimeoutFailures.toLocaleString()} timeout, ${aiNoValidFailures.toLocaleString()} no result, ${aiTruncated.toLocaleString()} truncated, ${formatCompact(tokenUsage.summary.totalTokens)} tokens` : "Open AI metrics for usage details"} onClick={() => navigate("metrics", "ai")} />
+      <Kpi label="Bandwidth" value={bandwidthUsage ? formatBytes(bandwidthUsage.summary.totalBytes) : "Open"} status={bandwidthUsage?.summary.missingAudioFiles ? "warning" : bandwidthUsage ? "ok" : "neutral"} subtext={bandwidthUsage ? `${bandwidthUsage.remoteHost || "no remote host"} - ${bandwidthUsage.summary.requests.toLocaleString()} estimated request(s)` : "Open bandwidth metrics for the slow report"} onClick={() => navigate("metrics", "bandwidth")} />
     </div>
   </div>;
 }
@@ -10291,7 +10293,7 @@ function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
       <span>{formatDuration(sample.durationSeconds)}</span>
     </summary>
     <p>{sample.transcription || "No transcript available."}</p>
-    <audio controls preload="metadata" src={sample.audioUrl} />
+    <PlayableAudio src={sample.audioUrl} />
   </details>;
 }
 

@@ -367,7 +367,7 @@ public sealed class DashboardService
                             NormalizeCategory(r.Category),
                             string.IsNullOrWhiteSpace(r.TalkgroupName) ? $"TG {r.Talkgroup}" : r.TalkgroupName,
                             PreviewTranscript(r.Transcription),
-                            $"/api/v1/calls/{r.CallId}/audio"))
+                            CallAudioLinks.ForCall(r.CallId, r.AudioPath)))
                         .ToList());
             })
             .Where(r => r.Count > 0)
