@@ -156,14 +156,34 @@ public sealed class DashboardService
     public async Task<CategoryPageDto> BuildCategoryPageAsync(string category, string groupBy, long start, long end, string searchQuery, CancellationToken ct)
     {
         category = NormalizeCategory(category);
-        var groups = (await _database.ListCategoryTalkgroupsAsync(start, end, category, ct))
-            .Where(g => Allows(category, g.SystemShortName, g.Talkgroup))
+        var categoryCalls = (await _database.ListCallsAsync(start, end, null, ct))
+            .Select(ApplyDisplayCategory)
+            .Where(call => call.Category == category && Allows(call.Category, call.SystemShortName, call.Talkgroup))
+            .ToList();
+        var groups = categoryCalls
+            .GroupBy(call => TalkgroupCatalogService.CatalogKey(call.SystemShortName, call.Talkgroup), StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var ordered = g.OrderByDescending(call => call.StartTime).ThenByDescending(call => call.Id).ToList();
+                var first = ordered[0];
+                var strongCount = ordered.Count(IsStrongCall);
+                return new CategoryGroupDto(
+                    GetTalkgroupLabel(first),
+                    [],
+                    TalkgroupCatalogService.CatalogKey(first.SystemShortName, first.Talkgroup),
+                    first.SystemShortName,
+                    first.Talkgroup,
+                    ordered.Count,
+                    ordered[0].StartTime,
+                    strongCount,
+                    ordered.Count - strongCount);
+            })
+            .OrderBy(group => group.Label, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (!string.IsNullOrWhiteSpace(searchQuery))
         {
-            var matchingCalls = await _database.ListCategorySearchCallsAsync(start, end, category, searchQuery, ct);
+            var matchingCalls = SearchCalls(categoryCalls, searchQuery);
             var callsByTalkgroup = matchingCalls
-                .Where(call => Allows(category, call.SystemShortName, call.Talkgroup))
                 .GroupBy(call => TalkgroupCatalogService.CatalogKey(call.SystemShortName, call.Talkgroup))
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(call => call.StartTime).ThenByDescending(call => call.Id).ToList());
             groups = groups
@@ -185,7 +205,16 @@ public sealed class DashboardService
         if (!Allows(category, parsed.SystemShortName, parsed.Talkgroup))
             return new CategoryGroupDto($"TG {parsed.Talkgroup}", [], TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, 0, 0);
 
-        var calls = await _database.ListCategoryTalkgroupCallsAsync(start, end, category, parsed.SystemShortName, parsed.Talkgroup, limit, ct);
+        var calls = (await _database.ListCallsAsync(start, end, null, ct))
+            .Select(ApplyDisplayCategory)
+            .Where(call =>
+                call.Category == category &&
+                string.Equals(call.SystemShortName, parsed.SystemShortName, StringComparison.OrdinalIgnoreCase) &&
+                call.Talkgroup == parsed.Talkgroup)
+            .OrderByDescending(call => call.StartTime)
+            .ThenByDescending(call => call.Id)
+            .Take(Math.Clamp(limit, 1, 500))
+            .ToList();
         var label = calls.Count > 0 ? GetTalkgroupLabel(calls[0]) : $"TG {parsed.Talkgroup}";
         var strongCount = calls.Count(IsStrongCall);
         return new CategoryGroupDto(label, calls, TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount);
@@ -270,8 +299,7 @@ public sealed class DashboardService
         if (profile == null) return true;
         var setting = FindSetting(profile, systemShortName, talkgroup);
         if (setting?.Enabled == false) return false;
-        var effectiveCategory = string.IsNullOrWhiteSpace(setting?.Category) ? category : setting!.Category;
-        return NormalizeCategory(effectiveCategory) switch
+        return NormalizeCategory(string.IsNullOrWhiteSpace(setting?.Category) ? category : setting!.Category) switch
         {
             "police" => profile.IncludePolice,
             "fire" => profile.IncludeFire,
@@ -280,6 +308,43 @@ public sealed class DashboardService
             _ => profile.IncludeOther
         };
     }
+
+    private EngineCall ApplyDisplayCategory(EngineCall call) =>
+        call with { Category = EffectiveCategory(call.Category, call.SystemShortName, call.Talkgroup) };
+
+    private string EffectiveCategory(string storedCategory, string? systemShortName, long talkgroup)
+    {
+        var profile = _config.Profiles.Items.FirstOrDefault(p => p.Id == _config.Profiles.ActiveProfileId);
+        var setting = profile == null ? null : FindSetting(profile, systemShortName, talkgroup);
+        if (!string.IsNullOrWhiteSpace(setting?.Category))
+            return NormalizeCategory(setting!.Category);
+        var resolved = _catalog.Resolve(systemShortName, talkgroup);
+        return resolved.Found ? NormalizeCategory(resolved.Category) : NormalizeCategory(storedCategory);
+    }
+
+    private static List<EngineCall> SearchCalls(IEnumerable<EngineCall> calls, string searchQuery)
+    {
+        var tokens = searchQuery
+            .Trim()
+            .ToLowerInvariant()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.Length > 0)
+            .Take(8)
+            .ToList();
+        if (tokens.Count == 0)
+            return [];
+        return calls
+            .Where(call => tokens.All(token =>
+                ContainsSearchToken(call.TalkgroupName, token) ||
+                ContainsSearchToken(call.Transcription, token) ||
+                ContainsSearchToken(call.SystemShortName, token) ||
+                call.Id.ToString(CultureInfo.InvariantCulture).Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                call.Talkgroup.ToString(CultureInfo.InvariantCulture).Contains(token, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    private static bool ContainsSearchToken(string? value, string token) =>
+        !string.IsNullOrWhiteSpace(value) && value.Contains(token, StringComparison.OrdinalIgnoreCase);
 
     private static ProfileTalkgroupSetting? FindSetting(ProcessingProfile profile, string? systemShortName, long talkgroup)
     {
