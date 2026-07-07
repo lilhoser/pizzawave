@@ -3819,6 +3819,7 @@ function sourceCoversFrequency(source: Pick<RfSurveySource, "centerHz" | "sample
 
 function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full" }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions" }) {
   const updateChain = (index: number, patch: Partial<RfSurveyPathProfile["chain"][number]>) => { onTouched(); setPath(current => ({ ...current, chain: current.chain.map((item, i) => i === index ? { ...item, ...patch } : item) })); };
+  const updatePath = (patch: Partial<RfSurveyPathProfile>) => { onTouched(); setPath(current => ({ ...current, ...patch })); };
   return <div className="rf-step-stack">
     {headerMode === "full" && <div className="rf-chain-head">
       <div><strong>Ordered RF Chain</strong><span>Capture the exact hardware path from antenna to SDR. Order matters.</span></div>
@@ -3831,6 +3832,26 @@ function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode
       <button type="button" onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add Chain Item</button>
     </div>}
     {headerMode === "full" && <div className="setup-note">Use RF Path to document the physical antenna/coax/filter/SDR chain. Use SDR Inventory to choose hardware. Use RF Sweep to prove which source, control channel, gain, and error settings can decode before Config Draft builds the monitoring plan.</div>}
+    <div className="rf-path-notes-grid">
+      <label>
+        <span>Position notes</span>
+        <textarea
+          value={path.positionNotes || ""}
+          onChange={e => updatePath({ positionNotes: e.target.value })}
+          placeholder="Antenna placement, room, window/wall side, height, aim, or recent physical change"
+          rows={3}
+        />
+      </label>
+      <label>
+        <span>Observations</span>
+        <textarea
+          value={path.observations || ""}
+          onChange={e => updatePath({ observations: e.target.value })}
+          placeholder="What changed, why this validation was run, or what the operator saw"
+          rows={3}
+        />
+      </label>
+    </div>
     <div className="rf-chain-list">
       <div className="rf-chain-column-header">
         <span>#</span>

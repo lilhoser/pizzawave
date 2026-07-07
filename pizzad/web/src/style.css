@@ -5629,6 +5629,25 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .rf-chain-head span {
   display: block;
 }
+.rf-path-notes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+  max-width: 1040px;
+}
+.rf-path-notes-grid label {
+  display: grid;
+  gap: 4px;
+}
+.rf-path-notes-grid span {
+  color: #9faab5;
+  font-size: 12px;
+  font-weight: 700;
+}
+.rf-path-notes-grid textarea {
+  min-height: 72px;
+  resize: vertical;
+}
 .rf-chain-row {
   grid-template-columns: 28px 120px minmax(120px, 1fr) 80px 80px 120px auto;
 }
