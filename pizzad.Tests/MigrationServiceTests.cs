@@ -200,7 +200,8 @@ public sealed class MigrationServiceTests
         public MigrationService CreateService(EngineDatabase database)
         {
             var events = new EventStream();
-            var embeddings = new EmbeddingService(Config, database, events, NullLogger<EmbeddingService>.Instance);
+            var catalog = new TalkgroupCatalogService(Config, NullLogger<TalkgroupCatalogService>.Instance);
+            var embeddings = new EmbeddingService(Config, database, events, catalog, NullLogger<EmbeddingService>.Instance);
             var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
             var credentials = new CredentialStore(Config, NullLogger<CredentialStore>.Instance);
             var auth = new AuthService(Config, NullLogger<AuthService>.Instance);

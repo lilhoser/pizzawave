@@ -2285,6 +2285,8 @@ function PlayableAudio({ src }: { src?: string | null }) {
 
 function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLocation, emptyText = "No geolocated incidents detected in the selected range." }: { rows: LocationHeat[]; incidents: Incident[]; focusedKey?: string | null; onFocusKey?: (key: string | null) => void; onSelectLocation?: (row: LocationHeat | null) => void; emptyText?: string }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<MapDragState | null>(null);
+  const suppressClickRef = useRef(false);
   const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
   const defaultZoom = useMemo(() => defaultMapZoom(rows), [rows]);
   const areaKey = useMemo(() => Array.from(new Set(rows.map(row => row.areaId))).sort().join("|"), [rows]);
@@ -2293,6 +2295,7 @@ function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLoca
   const [zoom, setZoom] = useState(defaultZoom);
   const [center, setCenter] = useState(defaultCenter);
   const [selected, setSelected] = useState<LocationHeat | null>(null);
+  const [dragging, setDragging] = useState(false);
   useEffect(() => {
     const element = mapRef.current;
     if (!element) return;
@@ -2310,10 +2313,17 @@ function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLoca
     setSelected(null);
   }, [areaKey, rows]);
   useEffect(() => {
-    if (!focusedKey) return;
+    if (!focusedKey) {
+      if (selected) {
+        setSelected(null);
+        setCenter(defaultMapCenter(rows));
+        setZoom(defaultMapZoom(rows));
+      }
+      return;
+    }
     const row = rows.find(r => locationKey(r) === focusedKey);
     if (row) focusLocation(row);
-  }, [focusedKey, rows]);
+  }, [focusedKey]);
 
   if (!rows.length) {
     return <div className="card location-heat-card">
@@ -2338,10 +2348,76 @@ function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLoca
     setZoom(current => Math.max(8, Math.min(14, current + (event.deltaY < 0 ? 1 : -1))));
   }
 
+  function resetMapView() {
+    setSelected(null);
+    setCenter(defaultMapCenter(rows));
+    setZoom(defaultMapZoom(rows));
+    onFocusKey?.(null);
+    onSelectLocation?.(null);
+  }
+
+  function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (isMapControlTarget(event.target)) return;
+    const point = mapEventPoint(event);
+    if (!point) return;
+    setCenter(worldToLatLon(
+      viewport.centerWorldX - viewport.width / 2 + point.x,
+      viewport.centerWorldY - viewport.height / 2 + point.y,
+      zoom));
+    setZoom(current => Math.min(14, current + 1));
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || isMapControlTarget(event.target)) return;
+    const point = mapEventPoint(event);
+    if (!point) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      centerWorldX: viewport.centerWorldX,
+      centerWorldY: viewport.centerWorldY,
+      moved: false
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const point = mapEventPoint(event);
+    if (!point) return;
+    const dx = point.x - drag.startX;
+    const dy = point.y - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true;
+    suppressClickRef.current = true;
+    setDragging(true);
+    setCenter(worldToLatLon(drag.centerWorldX - dx, drag.centerWorldY - dy, zoom));
+  }
+
+  function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setDragging(false);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be gone if the browser canceled the drag.
+    }
+    if (drag.moved)
+      window.setTimeout(() => { suppressClickRef.current = false; }, 0);
+  }
+
   return <div className="card location-heat-card">
     <div className="location-map-shell">
-    <div className="location-map" ref={mapRef} role="img" aria-label="Geolocated incident map" onWheel={handleWheel}>
-      <div className="map-zoom-controls"><button onClick={() => setZoom(current => Math.min(14, current + 1))} aria-label="Zoom in">+</button><button onClick={() => setZoom(current => Math.max(8, current - 1))} aria-label="Zoom out">-</button><span>{zoom}</span></div>
+    <div className={`location-map${dragging ? " dragging" : ""}`} ref={mapRef} role="img" aria-label="Geolocated incident map" onWheel={handleWheel} onClick={handleMapClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}>
+      <div className="map-zoom-controls" onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}><button type="button" onClick={() => setZoom(current => Math.min(14, current + 1))} aria-label="Zoom in">+</button><button type="button" onClick={() => setZoom(current => Math.max(8, current - 1))} aria-label="Zoom out">-</button><button type="button" onClick={resetMapView} aria-label="Reset map view">Fit</button><span>{zoom}</span></div>
       {tiles.map(tile => <img
         src={`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`}
         style={{ left: tile.left, top: tile.top }}
@@ -2356,7 +2432,8 @@ function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLoca
           className={`heat-dot map-heat-dot category-${row.category || "other"} ${selected && locationKey(selected) === locationKey(row) ? "active" : ""}`}
           style={{ left: `${point.x}%`, top: `${point.y}%`, width: size, height: size }}
           title={`${locationDisplayName(row)}: ${locationNodeCountLabel(row, incidents)}; ${row.count} matched call${row.count === 1 ? "" : "s"}; latest ${new Date(row.lastHeard * 1000).toLocaleString()}; calls ${row.callIds.join(", ")}`}
-          onClick={() => focusLocation(row)}
+          onClick={event => { event.stopPropagation(); focusLocation(row); }}
+          onPointerDown={event => event.stopPropagation()}
           key={`${row.areaId}-${row.locationText}`}
         >
           <span>{nodeCount}</span>
@@ -2392,6 +2469,7 @@ function locationSourceText(row: LocationHeat) {
 
 type GeoPoint = { lat: number; lon: number };
 type MapViewport = { zoom: number; width: number; height: number; centerWorldX: number; centerWorldY: number };
+type MapDragState = { pointerId: number; startX: number; startY: number; centerWorldX: number; centerWorldY: number; moved: boolean };
 
 function defaultMapCenter(rows: LocationHeat[]): GeoPoint {
   const points = rows.filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
@@ -2468,6 +2546,29 @@ function latLonToWorld(lat: number, lon: number, zoom: number) {
   return {
     x: (lon + 180) / 360 * scale,
     y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale
+  };
+}
+
+function worldToLatLon(x: number, y: number, zoom: number): GeoPoint {
+  const scale = 256 * 2 ** zoom;
+  const wrappedX = ((x % scale) + scale) % scale;
+  const clampedY = Math.max(0, Math.min(scale, y));
+  const lon = wrappedX / scale * 360 - 180;
+  const n = Math.PI - 2 * Math.PI * clampedY / scale;
+  const lat = 180 / Math.PI * Math.atan(Math.sinh(n));
+  return { lat: Math.max(-85.0511, Math.min(85.0511, lat)), lon };
+}
+
+function isMapControlTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest(".map-zoom-controls, .map-heat-dot, .map-attribution"));
+}
+
+function mapEventPoint(event: { currentTarget: HTMLDivElement; clientX: number; clientY: number }) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
   };
 }
 

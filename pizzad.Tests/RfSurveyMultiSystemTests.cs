@@ -8,6 +8,15 @@ namespace pizzad.Tests;
 
 public sealed class RfSurveyMultiSystemTests
 {
+    private static RfSurveyService CreateService(EngineConfig config, EngineDatabase database, SetupCalibrationService calibration) =>
+        new(
+            config,
+            database,
+            calibration,
+            null!,
+            new TalkgroupCatalogService(config, NullLogger<TalkgroupCatalogService>.Instance),
+            NullLogger<RfSurveyService>.Instance);
+
     [Fact]
     public void BuildProfile_AggregatesSelectedSystems()
     {
@@ -34,7 +43,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SystemShortName: "raymond",
@@ -80,7 +89,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SiteLabel: "Radio Setup",
@@ -128,7 +137,7 @@ public sealed class RfSurveyMultiSystemTests
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             await database.InitializeAsync(CancellationToken.None);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SiteLabel = "airspy-test-1",
@@ -231,7 +240,7 @@ public sealed class RfSurveyMultiSystemTests
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             await database.InitializeAsync(CancellationToken.None);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SiteLabel = "raymond",
@@ -348,7 +357,7 @@ public sealed class RfSurveyMultiSystemTests
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             await database.InitializeAsync(CancellationToken.None);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SiteLabel = "airspyMini-Hinds-Simulcast2",
@@ -428,7 +437,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SystemShortName: "hinds-county-simulcast-2-hinds",
@@ -504,7 +513,7 @@ public sealed class RfSurveyMultiSystemTests
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             await database.InitializeAsync(CancellationToken.None);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var artifactPath = Path.Combine(root, "rf-raymond");
             Directory.CreateDirectory(artifactPath);
             var savedUpdatedAt = DateTime.UtcNow.AddHours(-1);
@@ -621,7 +630,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SystemShortName: "utica",
@@ -674,7 +683,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SystemShortName = "chattanooga",

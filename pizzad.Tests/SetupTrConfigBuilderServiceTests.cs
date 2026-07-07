@@ -1,9 +1,19 @@
 namespace pizzad.Tests;
 
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 
 public sealed class SetupTrConfigBuilderServiceTests
 {
+    private static SetupTrConfigBuilderService CreateService(EngineConfig? config = null)
+    {
+        var effectiveConfig = config ?? new EngineConfig();
+        return new SetupTrConfigBuilderService(
+            new HttpClient(),
+            effectiveConfig,
+            new TalkgroupCatalogService(effectiveConfig, NullLogger<TalkgroupCatalogService>.Instance));
+    }
+
     [Fact]
     public async Task ListSitesAsync_ReturnsSelectableRadioReferenceRows()
     {
@@ -13,7 +23,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 009 (9) Utica Hinds 769.58125 774.28125c 774.53125c
             2 (2) 013 (D) Jackson Hinds 769.16875 773.06875c 773.31875c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
         var result = await service.ListSitesAsync(new SetupTrConfigSitesRequest("4879", html), CancellationToken.None);
 
@@ -35,7 +45,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 013 (D) Jackson Hinds 769.16875 769.41875 773.06875c 773.31875c
             """;
         var config = new EngineConfig();
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
@@ -63,7 +73,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 009 (9) Utica Hinds 769.58125 769.83125 774.03125 774.28125c 774.53125c 774.78125c
             """;
         var config = new EngineConfig();
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
@@ -89,7 +99,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 008 (8) Site One County 770.08125 770.33125c 770.58125c
             2 (2) 009 (9) Site Two County 856.11250 856.36250c 856.61250c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
         var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
             RadioReferenceSid: "4879",
@@ -113,7 +123,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 001 (1) Clarksville Simulcast Montgomery, TN 851.47500 851.66250c 852.17500c
             2 (2) 002 (2) Other Site County, TN 856.11250 856.36250c 856.61250c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
         var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
             RadioReferenceSid: "6355",
@@ -134,7 +144,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             Sites and Frequencies
             2 (2) 011 (B) Chattanooga Simulcast Hamilton, TN 855.21250c 856.23750c 856.76250c 857.23750c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
         var narrow = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
             RadioReferenceSid: "6355",
@@ -163,7 +173,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             Sites and Frequencies
             2 (2) 011 (B) Chattanooga Simulcast Hamilton, TN 855.21250c 856.23750c 856.76250c 857.23750c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
         var airspy = new SetupSdrDeviceDto(
             0,
             "Airspy",
@@ -208,7 +218,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 001 (1) Site One County 770.08125 770.33125c 770.58125c
             2 (2) 002 (2) Site Two County 856.11250 856.36250c 856.61250c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
         var airspy = new SetupSdrDeviceDto(0, "Airspy", "26A464DC28793293", "Airspy Mini", "osmosdr", "airspy=26A464DC28793293", "", [3_000_000, 6_000_000], 3_000_000, "airspy-linearity", "15", "");
         var rtl = new SetupSdrDeviceDto(1, "RTL-SDR", "00000002", "RTL-SDR Blog V4", "osmosdr", "rtl=00000002,buflen=65536", "", [2_400_000], 2_400_000, "rtl-tuner-gain", "32", "");
 
@@ -232,7 +242,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 011 (B) Site One County 851.01250 855.21250c
             2 (2) 012 (C) Site Two County 859.98750 856.23750c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
         var airspy = new SetupSdrDeviceDto(0, "Airspy", "26A464DC28793293", "Airspy Mini", "osmosdr", "airspy=26A464DC28793293", "", [3_000_000, 6_000_000], 3_000_000, "airspy-linearity", "15", "");
 
         var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
@@ -257,7 +267,7 @@ public sealed class SetupTrConfigBuilderServiceTests
         Directory.CreateDirectory(root);
         var trConfigPath = Path.Combine(root, "config.json");
         var config = new EngineConfig { ConfigPath = Path.Combine(root, "appsettings.json"), TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
             {
@@ -286,7 +296,7 @@ public sealed class SetupTrConfigBuilderServiceTests
         Directory.CreateDirectory(root);
         var trConfigPath = Path.Combine(root, "config.json");
         var config = new EngineConfig { ConfigPath = Path.Combine(root, "appsettings.json"), TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
             {
@@ -356,7 +366,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 008 (8) ETV Raymond Hinds 770.08125 771.98125 773.03125c 773.28125c
             """;
         var config = new EngineConfig { TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",

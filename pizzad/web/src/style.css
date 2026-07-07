@@ -994,8 +994,12 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border-radius: 6px;
   overflow: hidden;
   background: #17212a;
-  cursor: zoom-in;
+  cursor: grab;
   contain: strict;
+  touch-action: none;
+}
+.location-map.dragging {
+  cursor: grabbing;
 }
 .location-map img {
   position: absolute;
@@ -1007,7 +1011,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   content: "";
   position: absolute;
   inset: 0;
-  pointer-events: auto;
+  pointer-events: none;
   background: rgba(10, 15, 20, 0.04);
 }
 .map-area-box {
@@ -1080,13 +1084,15 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-weight: 700;
 }
 .map-zoom-controls button {
-  width: 28px;
+  min-width: 28px;
   height: 28px;
+  padding: 0 8px;
   border: 1px solid rgba(17, 20, 23, 0.2);
   background: #fff;
   color: #17212a;
   border-radius: 999px;
-  font-size: 17px;
+  font-size: 13px;
+  font-weight: 800;
   line-height: 1;
 }
 .map-zoom-controls span {
