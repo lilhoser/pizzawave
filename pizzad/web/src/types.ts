@@ -623,6 +623,8 @@ export type SiteSetupConfig = {
   updatedAtUtc?: string | null;
   lastAppliedAtUtc?: string | null;
   lastAppliedConfigHash: string;
+  lastAppliedSourceAssignmentSummary: string;
+  lastAppliedRfPathSummary: string;
 };
 export type SiteSetup = { desired: SiteSetupConfig; applied: SiteSetupAppliedConfig; status: SiteSetupStatus; pendingChanges: SiteSetupPendingChange[]; recentActivity: SiteSetupActivity[] };
 export type RfSurveyRfChainItem = {

@@ -1249,6 +1249,8 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     rfPath: setup.desired.rfPath
   });
   useEffect(() => {
+    if (!active)
+      return;
     let stopped = false;
     async function loadWorkspace() {
       setBusy("workspace");
@@ -1270,7 +1272,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     }
     void loadWorkspace();
     return () => { stopped = true; };
-  }, [signature]);
+  }, [active, signature]);
   useEffect(() => () => onTrOperationChange(""), [onTrOperationChange]);
   async function refreshWorkspace() {
     if (!detail) return;
@@ -1323,6 +1325,8 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const cachedSites = readCachedRadioReferenceSites(setup.desired.radioReferenceSid);
   const sweepSelectionStorageKey = detail ? `pizzawave-site-setup-waterfall-sweep-selections-${detail.session.id}` : "";
   useEffect(() => {
+    if (!active)
+      return;
     const detection = latestSetupSdrDetection(detail?.experiments ?? []);
     if (!detection?.devices?.length || detection.devices.length <= sources.length)
       return;
@@ -1330,7 +1334,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     if (detectedSources.length <= sources.length)
       return;
     void onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
-  }, [detail?.session.id, detail?.experiments.map(experiment => `${experiment.id}:${experiment.type}:${experiment.createdAtUtc}`).join("|"), sources.length]);
+  }, [active, detail?.session.id, detail?.experiments.map(experiment => `${experiment.id}:${experiment.type}:${experiment.createdAtUtc}`).join("|"), sources.length]);
   useEffect(() => {
     if (!sweepSelectionStorageKey) return;
     const desiredSelections = normalizeWaterfallSweepSelections(setup.desired.rfSelections ?? []);
@@ -1338,8 +1342,6 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     const normalized = desiredSelections.length ? desiredSelections : storedSelections;
     setWaterfallSweepSelections(normalized);
     lastSavedRfSelectionSignature.current = stableWaterfallSweepSelectionSignature(desiredSelections);
-    if (!desiredSelections.length && storedSelections.length)
-      scheduleSaveWaterfallSweepSelections(storedSelections);
   }, [sweepSelectionStorageKey, setup.desired.desiredVersion]);
   useEffect(() => () => {
     if (rfSelectionSaveTimer.current)
@@ -1349,13 +1351,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     const signature = stableWaterfallSweepSelectionSignature(normalized);
     if (signature === lastSavedRfSelectionSignature.current)
       return;
-    if (rfSelectionSaveTimer.current)
-      window.clearTimeout(rfSelectionSaveTimer.current);
-    rfSelectionSaveTimer.current = window.setTimeout(() => {
-      lastSavedRfSelectionSignature.current = signature;
-      const nextSources = mergeWaterfallSelectionsIntoSetupSources(setup, normalized, sources);
-      void onSave({ rfSelections: normalized.map(toSiteSetupRfSelectionPayload), sources: nextSources }, "rfSelections");
-    }, 800);
+    lastSavedRfSelectionSignature.current = signature;
   }
   const updateWaterfallSweepSelections = (values: WaterfallSweepSelection[]) => {
     const normalized = normalizeWaterfallSweepSelections(values);
@@ -1548,13 +1544,25 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
   };
 
   async function saveSourcePlan(overrides?: SetupSourcePlanState) {
-    const desired = {
-      ...setup.desired,
+    const nextPlan = {
       sourcePlanSystemShortNames: overrides?.sourcePlanSystemShortNames ?? (sourcePlanSystems.length ? sourcePlanSystems : selectedSetupSystemNames(setup)),
       sourcePlanMode: overrides?.sourcePlanMode ?? sourcePlanMode,
       selectedSourceIndexes: overrides?.selectedSourceIndexes ?? (selectedSourceIndexes.length ? selectedSourceIndexes : sources.map(source => source.index)),
       sourceAssignments: overrides?.sourceAssignments ?? sourceAssignments,
       sources: overrides?.sources ?? (sdrSources ?? sources)
+    };
+    const currentPlan = {
+      sourcePlanSystemShortNames: setup.desired.sourcePlanSystemShortNames,
+      sourcePlanMode: setup.desired.sourcePlanMode,
+      selectedSourceIndexes: setup.desired.selectedSourceIndexes,
+      sourceAssignments: setup.desired.sourceAssignments,
+      sources: setup.desired.sources
+    };
+    if (JSON.stringify(nextPlan) === JSON.stringify(currentPlan))
+      return setup;
+    const desired = {
+      ...setup.desired,
+      ...nextPlan
     };
     const next = await api.request<SiteSetup>(siteSetupApi, {
       method: "PATCH",
@@ -6046,6 +6054,8 @@ function WaterfallStep({
   }
   const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, controlChannelOptions, identifyResults);
   useEffect(() => {
+    if (!visible)
+      return;
     if (!selectedSweepControlChannels.length || !waterfallCandidates.length)
       return;
     const candidatesByFrequency = new Map(waterfallCandidates.map(row => [Math.round(row.sweepFrequencyHz), row]));
@@ -6066,7 +6076,7 @@ function WaterfallStep({
     });
     if (JSON.stringify(next) !== JSON.stringify(current))
       onWaterfallSweepSelections?.(next);
-  }, [selectedSweepControlChannels.join(","), waterfallCandidates.map(row => `${row.sweepFrequencyHz}:${Math.round(row.offsetHz)}`).join("|")]);
+  }, [visible, selectedSweepControlChannels.join(","), waterfallCandidates.map(row => `${row.sweepFrequencyHz}:${Math.round(row.offsetHz)}`).join("|")]);
 
   async function toggleCandidateForSweep(row: WaterfallCandidateRow, selected: boolean) {
     if (!showSweepSelection)

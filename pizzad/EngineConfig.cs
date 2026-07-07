@@ -417,6 +417,8 @@ public sealed class SiteSetupConfig
     public DateTime? UpdatedAtUtc { get; set; }
     public DateTime? LastAppliedAtUtc { get; set; }
     public string LastAppliedConfigHash { get; set; } = string.Empty;
+    public string LastAppliedSourceAssignmentSummary { get; set; } = string.Empty;
+    public string LastAppliedRfPathSummary { get; set; } = string.Empty;
 }
 
 public sealed class SiteSetupRfSelection

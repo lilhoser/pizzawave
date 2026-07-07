@@ -56,6 +56,8 @@ public sealed class SiteSetupService
         next.UpdatedAtUtc = DateTime.UtcNow;
         next.LastAppliedAtUtc = _config.SiteSetup.LastAppliedAtUtc;
         next.LastAppliedConfigHash = _config.SiteSetup.LastAppliedConfigHash ?? string.Empty;
+        next.LastAppliedSourceAssignmentSummary = _config.SiteSetup.LastAppliedSourceAssignmentSummary ?? string.Empty;
+        next.LastAppliedRfPathSummary = _config.SiteSetup.LastAppliedRfPathSummary ?? string.Empty;
 
         var changes = DescribeChanges(before, next);
         _config.SiteSetup = next;
@@ -93,6 +95,8 @@ public sealed class SiteSetupService
         next.UpdatedAtUtc = appliedAt;
         next.LastAppliedAtUtc = appliedAt;
         next.LastAppliedConfigHash = applied.ConfigHash;
+        next.LastAppliedSourceAssignmentSummary = SourceAssignmentSummary(next.SourceAssignments);
+        next.LastAppliedRfPathSummary = RfPathSummary(next.RfPath);
         _config.SiteSetup = next;
         _config.Save();
 
@@ -226,13 +230,11 @@ public sealed class SiteSetupService
             rows.Add(new SiteSetupPendingChangeDto("TR Sources", $"Desired sources ({desired.Sources.Count}) differ from applied sources ({applied.Sources.Count})."));
 
         if (desired.SourceAssignments.Count > 0 &&
-            (!desired.LastAppliedAtUtc.HasValue ||
-             (desired.UpdatedAtUtc.HasValue && desired.UpdatedAtUtc.Value > desired.LastAppliedAtUtc.Value)))
+            !string.Equals(SourceAssignmentSummary(desired.SourceAssignments), desired.LastAppliedSourceAssignmentSummary, StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("Source Assignments", "Site-to-source assignments changed after the last Site Setup apply."));
 
         if (HasRfPathDetails(desired.RfPath) &&
-            (!desired.LastAppliedAtUtc.HasValue ||
-             (desired.UpdatedAtUtc.HasValue && desired.UpdatedAtUtc.Value > desired.LastAppliedAtUtc.Value)))
+            !string.Equals(RfPathSummary(desired.RfPath), desired.LastAppliedRfPathSummary, StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("RF Path", "RF path documentation changed after the last Site Setup apply."));
 
         if (!string.IsNullOrWhiteSpace(desired.LastAppliedConfigHash) &&
@@ -281,7 +283,9 @@ public sealed class SiteSetupService
         RfPath = value.RfPath ?? new RfSurveyPathProfileDto(),
         UpdatedAtUtc = value.UpdatedAtUtc,
         LastAppliedAtUtc = value.LastAppliedAtUtc,
-        LastAppliedConfigHash = value.LastAppliedConfigHash?.Trim() ?? string.Empty
+        LastAppliedConfigHash = value.LastAppliedConfigHash?.Trim() ?? string.Empty,
+        LastAppliedSourceAssignmentSummary = value.LastAppliedSourceAssignmentSummary?.Trim() ?? string.Empty,
+        LastAppliedRfPathSummary = value.LastAppliedRfPathSummary?.Trim() ?? string.Empty
     };
 
     private static List<string> DescribeChanges(SiteSetupConfig before, SiteSetupConfig after)
