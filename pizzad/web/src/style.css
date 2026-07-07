@@ -371,18 +371,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   margin: 0;
   line-height: 1.2;
 }
-.incident-status-pill {
-  display: inline-grid;
-  gap: 1px;
-  align-items: center;
-  text-align: left;
-}
-.incident-status-pill small {
-  color: #a9b3bd;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.05;
-}
 .statusbar .status-pill-button:hover,
 .statusbar .status-pill-button:focus {
   border-color: var(--accent);
@@ -1813,6 +1801,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+.dashboard-hidden-policy-note {
+  color: #a9b3bd;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  align-self: center;
 }
 .incident-toolbar-actions {
   display: inline-flex;

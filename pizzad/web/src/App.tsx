@@ -694,7 +694,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
       </aside>}
       <main className={`main ${inSetup ? "setup-main" : ""}`}>
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
-        {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} />}
+        {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />}
         {setupStatus?.completed && categories.includes(page as any) && <CategoryView
           data={category}
           rangeHours={rangeHours}
@@ -718,10 +718,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         <button type="button" className="pill status-pill-button" onClick={() => goSetup("Talkgroups")}>Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</button>
         <span className="status-separator">|</span>
         <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
-        <button type="button" className="pill status-pill-button incident-status-pill" onClick={() => goDashboard("incidents")}>
-          <span>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</span>
-          {(statusSummary?.hiddenIncidents ?? 0) > 0 && <small>{statusSummary?.hiddenIncidents?.toLocaleString()} hidden by TG policy</small>}
-        </button>
+        <button type="button" className="pill status-pill-button" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
         <button type="button" className="pill status-pill-button" onClick={() => goDashboard("alerts")}>Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</button>
         <button type="button" className={`pill status-pill-button queue-health queue-${queueHealth}`} title={queueHealthTitle} onClick={() => goSystem("queue")}>{queueHealthText}</button>
         <button type="button" className={cpuPillClass} title={cpuPillTitle} onClick={() => goSystem("cpu")}>{cpuPillText}</button>
@@ -2122,7 +2119,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
   </div>;
 }
 
-function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string }) {
+function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery, hiddenIncidentCount = 0 }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string; hiddenIncidentCount?: number }) {
   const [focusedLocationKey, setFocusedLocationKey] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationHeat | null>(null);
   useEffect(() => {
@@ -2158,8 +2155,8 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
               ? <LocationAlertPanel location={selectedLocation} alerts={selectedAlerts} onClose={() => { setSelectedLocation(null); setFocusedLocationKey(null); }} reload={reload} searchQuery={searchQuery} />
               : <LocationIncidentPanel location={selectedLocation} incidents={selectedIncidents} onClose={() => { setSelectedLocation(null); setFocusedLocationKey(null); }} searchQuery={searchQuery} />
             : mode === "alerts"
-              ? <AlertsPanel alerts={data.alerts} locationMap={alertLocationMap} reload={reload} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} />
-              : <Incidents rows={data.incidents} alerts={data.alerts} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} reload={reload} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={clearFocusedIncident} clearFocusedHashTarget={clearFocusedHashTarget} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} />}
+              ? <AlertsPanel alerts={data.alerts} locationMap={alertLocationMap} reload={reload} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />
+              : <Incidents rows={data.incidents} alerts={data.alerts} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} reload={reload} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={clearFocusedIncident} clearFocusedHashTarget={clearFocusedHashTarget} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />}
         </section>
       </div>
     </div>
@@ -2584,7 +2581,7 @@ function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {
 type DashboardIncidentListItem = { kind: "incident"; incident: Incident } | { kind: "alert"; alert: AlertMatch };
 type PendingCardFocus = CardHashTarget & { key: string; page: number };
 
-function Incidents({ rows, alerts = [], locationMap, onShowLocation, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, incidentCount, alertCount, searchQuery }: { rows: Incident[]; alerts?: AlertMatch[]; locationMap?: Map<number, LocationHeat>; onShowLocation?: (key: string) => void; reload?: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string }) {
+function Incidents({ rows, alerts = [], locationMap, onShowLocation, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, incidentCount, alertCount, searchQuery, hiddenIncidentCount = 0 }: { rows: Incident[]; alerts?: AlertMatch[]; locationMap?: Map<number, LocationHeat>; onShowLocation?: (key: string) => void; reload?: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
   const [expanded, setExpanded] = useState(false);
   const [geolocatedOnly, setGeolocatedOnlyState] = useState(() => readDashboardGeolocatedOnly("incidents"));
   const [page, setPage] = useState(1);
@@ -2653,7 +2650,7 @@ function Incidents({ rows, alerts = [], locationMap, onShowLocation, reload, foc
   return <div className="incident-explorer">
     <div className="incident-toolbar">
       <div className="incident-toolbar-left">
-        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} />
+        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} hiddenIncidentCount={hiddenIncidentCount} />
         <div className="incident-filter-row">
           <label className="compact-toggle"><input type="checkbox" checked={expanded} onChange={event => { clearFocusForManualNavigation(); setExpanded(event.currentTarget.checked); }} /> {expanded ? "Collapse all" : "Expand all"}</label>
           <label className="compact-toggle"><input type="checkbox" checked={geolocatedOnly} onChange={event => { clearFocusForManualNavigation(); setPage(1); setExpanded(false); setGeolocatedOnly(event.currentTarget.checked); }} /> Geolocated</label>
@@ -2724,7 +2721,7 @@ function LocationIncidentPanel({ location, incidents, onClose, searchQuery }: { 
   </div>;
 }
 
-function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount, alertCount, searchQuery }: { alerts: AlertMatch[]; locationMap: Map<number, LocationHeat>; reload?: () => Promise<void>; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string }) {
+function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount, alertCount, searchQuery, hiddenIncidentCount = 0 }: { alerts: AlertMatch[]; locationMap: Map<number, LocationHeat>; reload?: () => Promise<void>; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
   const [geolocatedOnly, setGeolocatedOnlyState] = useState(() => readDashboardGeolocatedOnly("alerts"));
   const [page, setPage] = useState(1);
   function setGeolocatedOnly(value: boolean) {
@@ -2747,7 +2744,7 @@ function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount
   return <div className="incident-explorer">
     <div className="incident-toolbar">
       <div className="incident-toolbar-left">
-        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} />
+        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} hiddenIncidentCount={hiddenIncidentCount} />
         <div className="incident-filter-row">
           <label className="compact-toggle"><input type="checkbox" checked={geolocatedOnly} onChange={event => { setPage(1); setGeolocatedOnly(event.currentTarget.checked); }} /> Geolocated</label>
         </div>
@@ -2767,9 +2764,10 @@ function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount
   </div>;
 }
 
-function DashboardModeToggle({ mode, setMode, incidentCount, alertCount }: { mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number }) {
+function DashboardModeToggle({ mode, setMode, incidentCount, alertCount, hiddenIncidentCount = 0 }: { mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; hiddenIncidentCount?: number }) {
   return <div className="dashboard-view-toggle compact" role="group" aria-label="Dashboard view">
     <button type="button" className={mode === "incidents" ? "active" : ""} onClick={() => setMode("incidents")}>Incidents ({incidentCount.toLocaleString()})</button>
+    {hiddenIncidentCount > 0 && <span className="dashboard-hidden-policy-note">{hiddenIncidentCount.toLocaleString()} hidden by TG policy</span>}
     <button type="button" className={mode === "alerts" ? "active" : ""} onClick={() => setMode("alerts")}>Alerts ({alertCount.toLocaleString()})</button>
   </div>;
 }
