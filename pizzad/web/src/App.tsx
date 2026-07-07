@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "other"] as const;
@@ -731,6 +731,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
 function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrOperationChange }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void; onTrOperationChange: (value: string) => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
+  const [localPendingChanges, setLocalPendingChanges] = useState<SiteSetupPendingChange[]>([]);
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
   const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"]);
   const [section, setSectionState] = useState(() => {
@@ -751,7 +752,10 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
     setApplySubPageState(value);
     localStorage.setItem("pizzawave-site-setup-apply-subpage", value);
   };
-  useEffect(() => setCurrent(setup), [setup]);
+  useEffect(() => {
+    setCurrent(setup);
+    setLocalPendingChanges([]);
+  }, [setup]);
   useEffect(() => {
     if (!targetSection) return;
     setSection(targetSection);
@@ -761,10 +765,12 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
     if (!current) return;
     const desired = { ...current.desired, ...patch };
+    setLocalPendingChanges(field === "rfPath" ? [{ category: "RF path", summary: "RF path edits are being saved." }] : []);
     setSaveState({ field, status: "saving", message: "Saving" });
     try {
       const next = await api.request<SiteSetup>(siteSetupApi, { method: "PATCH", body: JSON.stringify({ desired, source: "ui" }) });
       setCurrent(next);
+      setLocalPendingChanges([]);
       setSaveState({ field, status: "saved", message: "Saved" });
     } catch (error) {
       setSaveState({ field, status: "error", message: error instanceof Error ? error.message : "Save failed" });
@@ -778,7 +784,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           <h2>Site Setup</h2>
         </div>
       </div>
-      <SiteSetupChangeStrip setup={current} />
+      <SiteSetupChangeStrip setup={current} localPendingChanges={localPendingChanges} />
 
       <div className="site-setup-layout">
         <section className="site-setup-section-nav" aria-label="Site Setup sections">
@@ -814,13 +820,14 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   </div>;
 }
 
-function SiteSetupChangeStrip({ setup }: { setup: SiteSetup }) {
+function SiteSetupChangeStrip({ setup, localPendingChanges = [] }: { setup: SiteSetup; localPendingChanges?: SiteSetupPendingChange[] }) {
   const latest = setup.recentActivity[0];
-  const changedCategories = setup.pendingChanges.map(change => label(change.category));
+  const pendingChanges = setup.pendingChanges.length ? setup.pendingChanges : localPendingChanges;
+  const changedCategories = pendingChanges.map(change => label(change.category));
   return <div className="site-setup-change-strip" aria-label="Setup change summary">
-    <section className={setup.pendingChanges.length ? "warning" : "ok"}>
+    <section className={pendingChanges.length ? "warning" : "ok"}>
       <span>Config changes</span>
-      <strong>{setup.pendingChanges.length ? `${setup.pendingChanges.length} pending` : "None"}</strong>
+      <strong>{pendingChanges.length ? `${pendingChanges.length} pending` : "None"}</strong>
       <small>{changedCategories.join(", ") || "No unapplied setup changes"}</small>
     </section>
     <section className={latest ? "info" : "neutral"}>
@@ -1135,6 +1142,11 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     try {
       const result = await api.request<SetupSdrDetection>("/api/v1/setup/sdrs");
       setSdrDetection(result);
+      const detectedSources = setupSourcesFromSdrDetection(setup, result);
+      if (detectedSources.length) {
+        const selectedSourceIndexes = detectedSources.map(source => source.index);
+        await onSave({ sources: detectedSources, selectedSourceIndexes }, "sources");
+      }
       setSdrMessage(result.message);
     } catch (error) {
       setSdrMessage(error instanceof Error ? error.message : "SDR inventory failed.");
@@ -1290,6 +1302,15 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   async function runP25(controlChannelHz?: number) {
     await runExperiment("control_channel_p25_probe", "45 seconds", controlChannelHz);
   }
+  async function runSdrInventoryExperiment() {
+    const experiment = await runExperiment("sdr_inventory", "about 15 seconds");
+    const evidence = experiment ? parseExperimentJson<any>(experiment.evidenceJson) : null;
+    const detection = evidence?.detection as SetupSdrDetection | undefined;
+    if (detection?.devices?.length) {
+      const detectedSources = setupSourcesFromSdrDetection(setup, detection);
+      await onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
+    }
+  }
   async function adoptWaterfallSite(system: RfSurveySystem) {
     setMessage(`${system.siteLabel || system.shortName} was detected. Add or remove sites on Systems & Sites.`);
   }
@@ -1301,6 +1322,15 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
   const cachedSites = readCachedRadioReferenceSites(setup.desired.radioReferenceSid);
   const sweepSelectionStorageKey = detail ? `pizzawave-site-setup-waterfall-sweep-selections-${detail.session.id}` : "";
+  useEffect(() => {
+    const detection = latestSetupSdrDetection(detail?.experiments ?? []);
+    if (!detection?.devices?.length || detection.devices.length <= sources.length)
+      return;
+    const detectedSources = setupSourcesFromSdrDetection(setup, detection);
+    if (detectedSources.length <= sources.length)
+      return;
+    void onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
+  }, [detail?.session.id, detail?.experiments.map(experiment => `${experiment.id}:${experiment.type}:${experiment.createdAtUtc}`).join("|"), sources.length]);
   useEffect(() => {
     if (!sweepSelectionStorageKey) return;
     const desiredSelections = normalizeWaterfallSweepSelections(setup.desired.rfSelections ?? []);
@@ -1396,7 +1426,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
           selectedSources={selectedSourceIndexes}
           setSdrSources={() => undefined}
           onSdrTouched={() => undefined}
-          onStopAndInventory={async () => { await runExperiment("sdr_inventory", "about 15 seconds"); }}
+          onStopAndInventory={runSdrInventoryExperiment}
           onRunP25={runP25}
           onRunExperiment={runExperiment}
           onAdoptWaterfallSite={adoptWaterfallSite}
@@ -1844,6 +1874,83 @@ function siteSetupSources(setup: SiteSetup): RfSurveySource[] {
     ...source,
     gain: normalizeSetupWaterfallGain(source)
   }));
+}
+
+function setupSourcesFromSdrDetection(setup: SiteSetup, detection: SetupSdrDetection): RfSurveySource[] {
+  const devices = detection.devices ?? [];
+  if (!devices.length)
+    return siteSetupSources(setup);
+  const existing = siteSetupSources(setup);
+  const systems = siteSetupSystems(setup);
+  const fallbackCenterHz = existing.find(source => source.centerHz > 0)?.centerHz
+    ?? systems.flatMap(system => system.controlChannelsHz).find(frequency => frequency > 0)
+    ?? setup.applied.controlChannelsHz.find(frequency => frequency > 0)
+    ?? 0;
+  return devices.map(device => {
+    const sdrType = setupSdrTypeLabel(device.type, device.deviceArgs);
+    const matching = findExistingSetupSourceForDevice(existing, device, sdrType);
+    const deviceArgs = device.deviceArgs || matching?.device || defaultSetupSdrDeviceArgs(device, sdrType);
+    const defaultSampleRate = Number(device.defaultSampleRate) > 0 ? Number(device.defaultSampleRate) : isAirspyRfSource({ sdrType, device: deviceArgs }) ? 6_000_000 : 2_400_000;
+    const gain = matching?.gain || device.defaultGain || (isAirspyRfSource({ sdrType, device: deviceArgs }) ? "15" : "32");
+    return {
+      index: Number.isFinite(Number(device.index)) ? Number(device.index) : devices.indexOf(device),
+      device: deviceArgs,
+      serial: device.serial || matching?.serial || "",
+      sdrType,
+      centerHz: matching?.centerHz || fallbackCenterHz,
+      sampleRate: matching?.sampleRate || defaultSampleRate,
+      errorHz: matching?.errorHz ?? 0,
+      gain: normalizeSetupWaterfallGain({ gain, sdrType, device: deviceArgs })
+    };
+  }).sort((a, b) => a.index - b.index);
+}
+
+function latestSetupSdrDetection(experiments: RfSurveyExperiment[]): SetupSdrDetection | null {
+  const latest = [...experiments]
+    .filter(experiment => experiment.type === "sdr_inventory")
+    .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""))[0];
+  if (!latest)
+    return null;
+  const evidence = parseExperimentJson<any>(latest.evidenceJson);
+  const detection = evidence?.detection;
+  return detection && Array.isArray(detection.devices)
+    ? detection as SetupSdrDetection
+    : null;
+}
+
+function setupSdrTypeLabel(type: string, deviceArgs: string) {
+  const value = `${type || ""} ${deviceArgs || ""}`.toLowerCase();
+  if (value.includes("airspy")) return "Airspy";
+  if (value.includes("rtl")) return "RTL-SDR";
+  return type || "SDR";
+}
+
+function findExistingSetupSourceForDevice(sources: RfSurveySource[], device: SetupSdrDetection["devices"][number], sdrType: string) {
+  const serial = (device.serial || "").trim();
+  if (serial) {
+    const serialMatch = sources.find(source => source.serial && source.serial === serial);
+    if (serialMatch)
+      return serialMatch;
+    const deviceArgMatch = sources.find(source => source.device && source.device.includes(serial));
+    if (deviceArgMatch)
+      return deviceArgMatch;
+  }
+  const index = Number(device.index);
+  if (Number.isFinite(index)) {
+    const indexMatch = sources.find(source => source.index === index);
+    if (indexMatch)
+      return indexMatch;
+  }
+  return sources.find(source => setupSdrTypeLabel(source.sdrType, source.device) === sdrType);
+}
+
+function defaultSetupSdrDeviceArgs(device: SetupSdrDetection["devices"][number], sdrType: string) {
+  const serialOrIndex = device.serial || String(device.index ?? 0);
+  return sdrType === "Airspy"
+    ? `airspy=${serialOrIndex}`
+    : sdrType === "RTL-SDR"
+      ? `rtl=${serialOrIndex},buflen=65536`
+      : serialOrIndex;
 }
 
 function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], sources: RfSurveySource[], selectedSourceIndexes: number[]) {
@@ -5963,7 +6070,7 @@ function WaterfallStep({
   return <div className="rf-waterfall-panel">
     <div className="rf-waterfall-controls">
       <label><span>Source</span><select value={String(sourceIndex)} disabled={controlsDisabled || locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
-        {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}</option>)}
+        {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}{source.serial ? ` / ${source.serial}` : source.device ? ` / ${source.device}` : ""}</option>)}
       </select></label>
       <label className="rf-frequency-combo" ref={frequencyComboRef}><span>Frequency MHz</span><div className="rf-frequency-combo-input"><input className={frequencyOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} onFocus={() => setFrequencyMenuOpen(true)} /><button type="button" disabled={controlsDisabled} aria-label="Show saved control channels" title="Show saved control channels" onClick={() => setFrequencyMenuOpen(open => !open)}><ChevronDown size={14} aria-hidden="true" /></button></div>{frequencyMenuOpen && <div className="rf-frequency-menu" role="listbox" aria-label="Saved control channels">{controlChannelOptions.length === 0 ? <div className="rf-frequency-menu-empty">No saved CCs</div> : controlChannelOptions.map(value => <button type="button" role="option" aria-selected={formatMhzInput(value) === frequencyMhz} key={value} onMouseDown={event => event.preventDefault()} onClick={() => { setFrequencyMhz(formatMhzInput(value)); setFrequencyMenuOpen(false); }}>{formatMhzInput(value)}<span>{formatRfHz(value)}</span></button>)}</div>}</label>
       <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>

@@ -219,8 +219,13 @@ public sealed class SiteSetupService
         if (desiredControls.Count > 0 && !desiredControls.SequenceEqual(applied.ControlChannelsHz))
             rows.Add(new SiteSetupPendingChangeDto("Control Channels", $"Desired CCs ({desiredControls.Count}) differ from applied CCs ({applied.ControlChannelsHz.Count})."));
 
-        if (desired.Sources.Count > 0 && desired.Sources.Count != applied.Sources.Count)
+        if (desired.Sources.Count > 0 && !string.Equals(SourceSummary(desired.Sources), AppliedSourceSummary(applied.Sources), StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("TR Sources", $"Desired sources ({desired.Sources.Count}) differ from applied sources ({applied.Sources.Count})."));
+
+        if (HasRfPathDetails(desired.RfPath) &&
+            (!desired.LastAppliedAtUtc.HasValue ||
+             (desired.UpdatedAtUtc.HasValue && desired.UpdatedAtUtc.Value > desired.LastAppliedAtUtc.Value)))
+            rows.Add(new SiteSetupPendingChangeDto("RF Path", "RF path documentation changed after the last Site Setup apply."));
 
         if (!string.IsNullOrWhiteSpace(desired.LastAppliedConfigHash) &&
             !string.Equals(desired.LastAppliedConfigHash, applied.ConfigHash, StringComparison.OrdinalIgnoreCase))
@@ -344,10 +349,54 @@ public sealed class SiteSetupService
     {
         if (path == null)
             return "";
-        return string.Join("|", new[] { path.Antenna, path.AntennaType, path.AntennaMount, path.AimedAtSite, path.PositionNotes, path.Coax, path.Lna, path.Filters, path.SdrNotes }.Select(value => value?.Trim() ?? ""));
+        var chain = string.Join(";", (path.Chain ?? [])
+            .Select(item => string.Join(",", new[]
+            {
+                item.Type,
+                item.Label,
+                item.ConnectorIn,
+                item.ConnectorOut,
+                item.Length,
+                item.Loss,
+                item.Power,
+                item.Notes,
+                item.ConnectorInType,
+                item.ConnectorInGender,
+                item.ConnectorOutType,
+                item.ConnectorOutGender,
+                item.GainDb,
+                item.GroundPlane,
+                item.PortCount,
+                item.PowerPass,
+                item.PowerMethod,
+                item.Passband
+            }.Select(value => value?.Trim() ?? ""))));
+        return string.Join("|", new[]
+        {
+            path.Antenna,
+            path.AntennaType,
+            path.AntennaMount,
+            path.AntennaPolarization,
+            path.AimedAtSite,
+            path.PositionNotes,
+            path.ConnectorChain,
+            path.Coax,
+            path.SplitterOrMulticoupler,
+            path.Lna,
+            path.Filters,
+            path.SdrNotes,
+            path.Observations,
+            chain
+        }.Select(value => value?.Trim() ?? ""));
     }
 
+    private static bool HasRfPathDetails(RfSurveyPathProfileDto? path) =>
+        !string.IsNullOrWhiteSpace(RfPathSummary(path).Replace("|", "", StringComparison.Ordinal).Replace(";", "", StringComparison.Ordinal).Replace(",", "", StringComparison.Ordinal));
+
     private static string SourceSummary(IEnumerable<RfSurveySourceDto>? sources) =>
+        string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}:{source.Gain}"));
+
+    private static string AppliedSourceSummary(IEnumerable<SiteSetupAppliedSourceDto>? sources) =>
         string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}:{source.Gain}"));
 
     private static string RfSelectionSummary(IEnumerable<SiteSetupRfSelection>? selections) =>
