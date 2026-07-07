@@ -11,7 +11,7 @@ namespace pizzad;
 
 public sealed class TalkgroupCatalogService
 {
-    public static readonly string[] Categories = ["police", "fire", "ems", "traffic", "other"];
+    public static readonly string[] Categories = ["police", "fire", "ems", "traffic", "utilities", "other"];
     private readonly EngineConfig _config;
     private readonly ILogger<TalkgroupCatalogService> _logger;
     private readonly object _gate = new();
@@ -345,6 +345,12 @@ public sealed class TalkgroupCatalogService
             HasWord(text, "tdot") ||
             HasWord(text, "hwy"))
             return "traffic";
+        if (text.Contains("entergy", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("utility", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("utilities", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("electric", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("power", StringComparison.OrdinalIgnoreCase))
+            return "utilities";
         return Categories.Contains(text) ? text : "other";
     }
 

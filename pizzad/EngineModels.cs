@@ -57,6 +57,7 @@ public sealed record DashboardDto
 {
     public IReadOnlyList<KpiDto> Kpis { get; init; } = [];
     public IReadOnlyList<HourCategoryDto> VolumeByHourCategory { get; init; } = [];
+    public IReadOnlyList<SystemCallBreakdownDto> CallsBySystem { get; init; } = [];
     public IReadOnlyList<LocationHeatDto> LocationHeat { get; init; } = [];
     public IReadOnlyList<QualityHourDto> QualityByHour { get; init; } = [];
     public IReadOnlyList<BarStatDto> ProblemTalkgroups { get; init; } = [];
@@ -71,6 +72,21 @@ public sealed record DashboardDto
 public sealed record KpiDto(string Label, string Value, string Subtext);
 
 public sealed record HourCategoryDto(int Hour, string Category, int Count);
+
+public sealed record SystemCallBreakdownDto(
+    string SystemShortName,
+    int Calls,
+    int UniqueTalkgroups,
+    long FirstHeard,
+    long LastHeard,
+    IReadOnlyList<int> Sources,
+    double MinFrequency,
+    double MaxFrequency,
+    int CompleteCalls,
+    int PendingCalls,
+    int FailedCalls,
+    int ProblemCalls,
+    IReadOnlyDictionary<string, int> Categories);
 
 public sealed record LocationHeatDto(
     string AreaId,

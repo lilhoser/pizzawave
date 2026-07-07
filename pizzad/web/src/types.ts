@@ -57,6 +57,21 @@ export type TopTalkgroup = {
   trendEndLabel: string;
 };
 export type HourCategory = { hour: number; category: string; count: number };
+export type SystemCallBreakdown = {
+  systemShortName: string;
+  calls: number;
+  uniqueTalkgroups: number;
+  firstHeard: number;
+  lastHeard: number;
+  sources: number[];
+  minFrequency: number;
+  maxFrequency: number;
+  completeCalls: number;
+  pendingCalls: number;
+  failedCalls: number;
+  problemCalls: number;
+  categories: Record<string, number>;
+};
 export type LocationHeat = {
   areaId: string;
   areaLabel: string;
@@ -82,6 +97,7 @@ export type QualityHour = { hour: number; empty: number; failure: number; inaudi
 export type Dashboard = {
   kpis: Kpi[];
   volumeByHourCategory: HourCategory[];
+  callsBySystem: SystemCallBreakdown[];
   locationHeat: LocationHeat[];
   qualityByHour: QualityHour[];
   inaudibleBySystem: BarStat[];

@@ -7,7 +7,8 @@ import type { AuthTokenRequest } from "./api";
 import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
-const categories = ["police", "fire", "ems", "traffic", "other"] as const;
+const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
+const talkgroupCategoryOptions = [...categories];
 const siteSetupApi = "/api/v1/setup/site";
 const siteSetupRfApi = `${siteSetupApi}/rf`;
 const rfDetailUrl = (apiBase: string, id: string, compact = true) => `${apiBase}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
@@ -21,6 +22,7 @@ const categoryColors: Record<string, string> = {
   fire: "#ff6b5a",
   ems: "#54d68a",
   traffic: "#f7c948",
+  utilities: "#35c2a1",
   other: "#b58cff"
 };
 const qualityColors: Record<keyof Omit<QualityHour, "hour">, string> = {
@@ -2356,7 +2358,39 @@ function DashboardStatisticsPanel({ data }: { data: Dashboard | null }) {
   const visibleKpis = data.kpis.filter(k => !hiddenKpis.has(k.label.trim().toLowerCase()));
   return <div className="dashboard-stats-panel">
     <div className="section kpis">{visibleKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
+    <SystemCallBreakdownTable rows={data.callsBySystem ?? []} />
     <VolumeByHourChart rows={data.volumeByHourCategory} />
+  </div>;
+}
+
+function SystemCallBreakdownTable({ rows }: { rows: NonNullable<Dashboard["callsBySystem"]> }) {
+  return <div className="card">
+    <h4>Calls by Site/System</h4>
+    {rows.length ? <table className="table compact-table">
+      <thead><tr><th>Site/System</th><th>Calls</th><th>Talkgroups</th><th>Sources</th><th>Frequency span</th><th>Transcription</th><th>Categories</th><th>Last heard</th></tr></thead>
+      <tbody>{rows.map(row => {
+        const categoryText = Object.entries(row.categories ?? {})
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 4)
+          .map(([category, count]) => `${label(category)} ${count.toLocaleString()}`)
+          .join(", ");
+        const freqText = row.minFrequency > 0 && row.maxFrequency > 0
+          ? row.minFrequency === row.maxFrequency
+            ? formatRfHz(row.minFrequency)
+            : `${formatRfHz(row.minFrequency)}-${formatRfHz(row.maxFrequency)}`
+          : "--";
+        return <tr key={row.systemShortName || "unknown"}>
+          <td><strong>{row.systemShortName || "unknown"}</strong></td>
+          <td>{row.calls.toLocaleString()}</td>
+          <td>{row.uniqueTalkgroups.toLocaleString()}</td>
+          <td>{row.sources.length ? row.sources.map(source => `#${source}`).join(", ") : "--"}</td>
+          <td>{freqText}</td>
+          <td>{row.completeCalls.toLocaleString()} complete / {row.pendingCalls.toLocaleString()} pending / {row.failedCalls.toLocaleString()} failed{row.problemCalls ? ` / ${row.problemCalls.toLocaleString()} problem` : ""}</td>
+          <td>{categoryText || "--"}</td>
+          <td>{row.lastHeard ? relativeTime(row.lastHeard) : "--"}</td>
+        </tr>;
+      })}</tbody>
+    </table> : <span className="muted">No calls in the selected range.</span>}
   </div>;
 }
 
@@ -12787,9 +12821,9 @@ function SdrDetectionPanel({ detection }: { detection: SetupSdrDetection }) {
 }
 
 function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void; readOnly?: boolean }) {
-  const categories = ["police", "fire", "ems", "traffic", "other"];
+  const categories = talkgroupCategoryOptions;
   const hasSystem = preview.rows.some(row => row.systemShortName);
-  const categoryRank: Record<string, number> = { police: 0, fire: 1, ems: 2, traffic: 3, other: 4 };
+  const categoryRank: Record<string, number> = { police: 0, fire: 1, ems: 2, traffic: 3, utilities: 4, other: 5 };
   const visibleRows = preview.rows
     .map((row, index) => ({ row, index }))
     .sort((a, b) =>
@@ -13750,6 +13784,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [bulkAction, setBulkAction] = useState("");
 
   useEffect(() => { void loadCatalog(); }, [reloadToken]);
   useEffect(() => setPage(1), [filter, enabledFilter, categoryFilter, sortKey, sortDir]);
@@ -13773,6 +13808,12 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     }
   }
 
+  async function saveCatalogDocument(next: TalkgroupCatalogDocument, successMessage: string) {
+    await api.request("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(next) });
+    setDraft(next);
+    setMessage(successMessage);
+  }
+
   async function setSystemExcluded(item: TalkgroupCatalogItem, excluded: boolean) {
     if (!draft || busy) return;
     setBusy(`catalog-${talkgroupCatalogKey(item)}`);
@@ -13784,11 +13825,57 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
         updatedAtUtc: new Date().toISOString(),
         items: draft.items.map(row => talkgroupCatalogKey(row) === key ? { ...row, enabled: !excluded, updatedAtUtc: new Date().toISOString() } : row)
       };
-      await api.request("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(next) });
-      setDraft(next);
-      setMessage(excluded ? "Talkgroup excluded from generated TR CSV." : "Talkgroup restored to generated TR CSV.");
+      await saveCatalogDocument(next, excluded ? "Talkgroup excluded from generated TR CSV." : "Talkgroup restored to generated TR CSV.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update talkgroup catalog.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function setTalkgroupCategory(item: TalkgroupCatalogItem, category: string) {
+    if (!draft || busy) return;
+    const key = talkgroupCatalogKey(item);
+    setBusy(`category-${key}`);
+    setMessage("");
+    try {
+      const next = {
+        ...draft,
+        updatedAtUtc: new Date().toISOString(),
+        items: draft.items.map(row => talkgroupCatalogKey(row) === key ? { ...row, opsCategory: category, updatedAtUtc: new Date().toISOString() } : row)
+      };
+      await saveCatalogDocument(next, `Talkgroup category changed to ${label(category)}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update talkgroup category.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyBulkCategoryAction() {
+    if (!draft || busy || !bulkAction) return;
+    if (bulkAction !== "entergy-utilities") return;
+    const targets = draft.items.filter(isEntergyTalkgroup);
+    if (!targets.length) {
+      setMessage("No Entergy talkgroups were found in the catalog.");
+      return;
+    }
+    if (!confirmAction("Assign Entergy talkgroups to Utilities?", `This will update ${targets.length.toLocaleString()} catalog row(s), regenerate the TR talkgroups CSV, and affect new calls going forward.`))
+      return;
+    setBusy("bulk-category");
+    setMessage("");
+    try {
+      const targetKeys = new Set(targets.map(talkgroupCatalogKey));
+      const now = new Date().toISOString();
+      const next = {
+        ...draft,
+        updatedAtUtc: now,
+        items: draft.items.map(row => targetKeys.has(talkgroupCatalogKey(row)) ? { ...row, opsCategory: "utilities", updatedAtUtc: now } : row)
+      };
+      await saveCatalogDocument(next, `Assigned ${targets.length.toLocaleString()} Entergy talkgroup row(s) to Utilities.`);
+      setBulkAction("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to bulk update talkgroup categories.");
     } finally {
       setBusy("");
     }
@@ -13797,7 +13884,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const needle = filter.trim().toLowerCase();
   const catalogItems = draft?.items ?? [];
   const effectiveItems = catalogItems;
-  const categoryOptions = Array.from(new Set(effectiveItems.map(item => item.opsCategory).filter(Boolean))).sort();
+  const categoryOptions = Array.from(new Set([...talkgroupCategoryOptions, ...effectiveItems.map(item => item.opsCategory).filter(Boolean)]));
   function compareRows(a: TalkgroupCatalogItem, b: TalkgroupCatalogItem) {
     const direction = sortDir === "asc" ? 1 : -1;
     const value = (() => {
@@ -13865,6 +13952,11 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
           {topCategoryCounts.length > 0 && <span className="talkgroup-category-pills">
             {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
           </span>}
+          <select value={bulkAction} onChange={e => setBulkAction(e.target.value)} aria-label="Bulk talkgroup action">
+            <option value="">Bulk actions</option>
+            <option value="entergy-utilities">Assign Entergy TGs to Utilities</option>
+          </select>
+          <button disabled={!bulkAction || Boolean(busy)} onClick={() => void applyBulkCategoryAction()}>Apply</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(1)}>First</button>
           <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
           <span>{currentPage} / {pageCount}</span>
@@ -13894,7 +13986,9 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
               {hasSystemScopedRows && <td>{item.systemShortName || "--"}</td>}
               <td>{item.id}</td>
               <td>{item.alphaTag || item.description || "--"}</td>
-              <td>{label(item.opsCategory || "other")}</td>
+              <td><select value={item.opsCategory || "other"} disabled={Boolean(busy)} onChange={e => void setTalkgroupCategory(item, e.target.value)}>
+                {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
+              </select></td>
               <td>{item.source || "--"}</td>
             </tr>;
           })}</tbody>
@@ -13992,6 +14086,18 @@ function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemSho
   if (key) return key;
   const system = normalizeTalkgroupSystem(item.systemShortName);
   return system ? `${system}:${item.id}` : String(item.id);
+}
+
+function isEntergyTalkgroup(item: TalkgroupCatalogItem) {
+  return [
+    item.systemShortName,
+    item.alphaTag,
+    item.description,
+    item.tag,
+    item.sourceCategory,
+    item.source,
+    item.notes
+  ].some(value => String(value ?? "").toLowerCase().includes("entergy"));
 }
 
 function withSettingsDefaults(value: Record<string, any>) {

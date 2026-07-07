@@ -129,6 +129,7 @@ public sealed class DashboardService
                 new("Unique Talkgroups", calls.Select(c => c.Talkgroup).Distinct().Count().ToString("N0", CultureInfo.CurrentCulture), "Heard in selected range")
             ],
             VolumeByHourCategory = BuildVolume(calls),
+            CallsBySystem = BuildSystemCallBreakdown(calls),
             LocationHeat = await BuildLocationHeatAsync(calls, incidents, start, end, ct),
             QualityByHour = BuildQuality(calls),
             ProblemTalkgroups = BuildProblemTalkgroups(calls),
@@ -254,6 +255,7 @@ public sealed class DashboardService
         "fire" => "Fire",
         "police" => "Police",
         "traffic" => "Traffic",
+        "utilities" => "Utilities",
         _ => "Radio"
     };
 
@@ -310,6 +312,34 @@ public sealed class DashboardService
             .Select(g => new HourCategoryDto(g.Key.Hour, g.Key.Category, g.Count()))
             .OrderBy(r => r.Hour)
             .ThenBy(r => r.Category)
+            .ToList();
+
+    private static IReadOnlyList<SystemCallBreakdownDto> BuildSystemCallBreakdown(List<EngineCall> calls) =>
+        calls.GroupBy(call => string.IsNullOrWhiteSpace(call.SystemShortName) ? "unknown" : call.SystemShortName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var rows = group.ToList();
+                var frequencies = rows.Select(call => call.Frequency).Where(value => value > 0).ToList();
+                return new SystemCallBreakdownDto(
+                    group.Key,
+                    rows.Count,
+                    rows.Select(call => call.Talkgroup).Distinct().Count(),
+                    rows.Min(call => call.StartTime),
+                    rows.Max(call => call.StartTime),
+                    rows.Select(call => call.Source).Where(source => source >= 0).Distinct().Order().ToList(),
+                    frequencies.Count > 0 ? frequencies.Min() : 0,
+                    frequencies.Count > 0 ? frequencies.Max() : 0,
+                    rows.Count(call => string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase)),
+                    rows.Count(call => string.Equals(call.TranscriptionStatus, "pending", StringComparison.OrdinalIgnoreCase)),
+                    rows.Count(IsTranscriptFailureHint),
+                    rows.Count(IsProblemTranscript),
+                    rows.GroupBy(call => NormalizeCategory(call.Category))
+                        .OrderByDescending(category => category.Count())
+                        .ThenBy(category => category.Key, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(category => category.Key, category => category.Count()));
+            })
+            .OrderByDescending(row => row.Calls)
+            .ThenBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
     private async Task<IReadOnlyList<LocationHeatDto>> BuildLocationHeatAsync(List<EngineCall> calls, List<IncidentDto> incidents, long start, long end, CancellationToken ct)
@@ -627,7 +657,7 @@ public sealed class DashboardService
     public static string NormalizeCategory(string category)
     {
         category = (category ?? string.Empty).Trim().ToLowerInvariant();
-        return category is "police" or "fire" or "ems" or "traffic" ? category : "other";
+        return category is "police" or "fire" or "ems" or "traffic" or "utilities" ? category : "other";
     }
 
     public static bool IsProblemTranscript(EngineCall call) =>

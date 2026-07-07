@@ -1646,12 +1646,14 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .category-ems { --category-color: #54d68a; --category-bg: rgba(84, 214, 138, 0.12); --category-border: rgba(84, 214, 138, 0.52); }
 .category-fire { --category-color: #ff6b5a; --category-bg: rgba(255, 107, 90, 0.12); --category-border: rgba(255, 107, 90, 0.52); }
 .category-traffic { --category-color: #f7c948; --category-bg: rgba(247, 201, 72, 0.12); --category-border: rgba(247, 201, 72, 0.52); }
+.category-utilities { --category-color: #35c2a1; --category-bg: rgba(53, 194, 161, 0.12); --category-border: rgba(53, 194, 161, 0.52); }
 .category-mixed { --category-color: #f5f7fa; --category-bg: rgba(245, 247, 250, 0.10); --category-border: rgba(245, 247, 250, 0.58); }
 .category-other { --category-color: #b58cff; --category-bg: rgba(181, 140, 255, 0.12); --category-border: rgba(181, 140, 255, 0.52); }
 [data-category="police"], .category-police { --category-color: #5aa7ff; --category-bg: rgba(90, 167, 255, 0.12); --category-border: rgba(90, 167, 255, 0.52); }
 [data-category="ems"], .category-ems { --category-color: #54d68a; --category-bg: rgba(84, 214, 138, 0.12); --category-border: rgba(84, 214, 138, 0.52); }
 [data-category="fire"], .category-fire { --category-color: #ff6b5a; --category-bg: rgba(255, 107, 90, 0.12); --category-border: rgba(255, 107, 90, 0.52); }
 [data-category="traffic"], .category-traffic { --category-color: #f7c948; --category-bg: rgba(247, 201, 72, 0.12); --category-border: rgba(247, 201, 72, 0.52); }
+[data-category="utilities"], .category-utilities { --category-color: #35c2a1; --category-bg: rgba(53, 194, 161, 0.12); --category-border: rgba(53, 194, 161, 0.52); }
 [data-category="mixed"], .category-mixed { --category-color: #f5f7fa; --category-bg: rgba(245, 247, 250, 0.10); --category-border: rgba(245, 247, 250, 0.58); }
 [data-category="other"], .category-other { --category-color: #b58cff; --category-bg: rgba(181, 140, 255, 0.12); --category-border: rgba(181, 140, 255, 0.52); }
 .raw-category .call-group { max-width: 1180px; }
