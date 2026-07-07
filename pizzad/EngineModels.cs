@@ -903,6 +903,15 @@ public sealed record RemoteBandwidthReportDto(
     IReadOnlyList<RemoteBandwidthBucketDto> ByActivity,
     IReadOnlyList<RemoteBandwidthEntryDto> Entries);
 
+public sealed record RemoteBandwidthUsageSnapshotDto(
+    string RemoteHost,
+    string TranscriptionEndpoint,
+    string AiEndpoint,
+    bool TranscriptionIncluded,
+    string Notes,
+    RemoteBandwidthSummaryDto Summary,
+    IReadOnlyList<RemoteBandwidthBucketDto> ByActivity);
+
 public sealed record QualityCheckSnapshotDto(
     DateTime GeneratedAtUtc,
     long Start,

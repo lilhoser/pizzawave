@@ -50,6 +50,20 @@ public sealed class RemoteBandwidthEstimatorService
                 .ToList());
     }
 
+    public async Task<RemoteBandwidthUsageSnapshotDto> BuildUsageSnapshotAsync(long start, long end, CancellationToken ct)
+    {
+        var selectedEntries = await BuildEntriesAsync(start, end, ct);
+        var missingAudio = selectedEntries.Count(e => e.Basis.Contains("missing audio", StringComparison.OrdinalIgnoreCase));
+        return new RemoteBandwidthUsageSnapshotDto(
+            RemoteHost(),
+            TranscriptionEndpoint(),
+            AiEndpoint(),
+            ShouldIncludeRemoteTranscription(),
+            Notes(missingAudio),
+            Summary(selectedEntries),
+            BucketsByActivity(selectedEntries));
+    }
+
     private async Task<List<RemoteBandwidthEntryDto>> BuildEntriesAsync(long? start, long? end, CancellationToken ct)
     {
         var entries = new List<RemoteBandwidthEntryDto>();

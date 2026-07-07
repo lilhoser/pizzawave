@@ -3523,7 +3523,9 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
         <button className={topTab === "metrics" ? "active" : ""} onClick={() => setTopTab("metrics")}>Metrics</button>
         <button onClick={() => void reload()}>Refresh</button>
       </div>
-      {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} />}
+      {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onAction={async action => {
+        if (action.kind === "pause-ingest") await setIngestPaused(true, false);
+      }} />}
       {topTab === "services" && <div className="trouble-panel"><ServicesManager runtime={runtime} data={data} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} /></div>}
       {topTab === "cpu" && <CpuPanel snapshot={cpuSnapshot} reload={reload} />}
       {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} />}
@@ -8588,7 +8590,7 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
   </div>;
 }
 
-function RecommendationsPanel({ recommendations, busy, message, onOpen, onState }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void> }) {
+function RecommendationsPanel({ recommendations, busy, message, onOpen, onState, onAction }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void>; onAction: (action: SystemRecommendations["items"][number]["actions"][number]) => Promise<void> }) {
   const [activeRunbookId, setActiveRunbookId] = useState<string | null>(null);
   if (!recommendations) return <div className="card">Loading recommendations...</div>;
   const ignoredItems = recommendations.ignoredItems ?? [];
@@ -8608,6 +8610,9 @@ function RecommendationsPanel({ recommendations, busy, message, onOpen, onState 
           <p>{item.detail}</p>
           {item.baseline && <RecommendationBaseline item={item} busy={busy} onReset={() => onState(item.id, "reset-baseline")} />}
           <div className="recommendation-action">{item.action}</div>
+          {item.actions?.length > 0 && <div className="recommendation-buttons recommendation-primary-actions">
+            {item.actions.map(action => <button key={action.kind} className={action.kind === "pause-ingest" ? "danger-button" : ""} disabled={busy} title={action.description} onClick={() => void onAction(action)}>{action.label}</button>)}
+          </div>}
           {item.runbook && <div className="recommendation-buttons">
             {item.runbook && <button disabled={busy} onClick={() => setActiveRunbookId(item.id)}>Troubleshoot Now</button>}
           </div>}

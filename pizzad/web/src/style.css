@@ -1255,6 +1255,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .recommendation-card {
   border-left: 4px solid var(--border);
 }
+.recommendation-card.severity-critical { border-left-color: #ef4444; background: #2a1717; }
 .recommendation-card.severity-high { border-left-color: #ff6b5a; }
 .recommendation-card.severity-medium { border-left-color: #f7c948; }
 .recommendation-card.severity-low { border-left-color: #9faab5; }
@@ -1273,6 +1274,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   padding: 3px 7px;
   color: #111;
 }
+.recommendation-severity.critical { background: #ef4444; color: #fff; }
 .recommendation-severity.high { background: #ff6b5a; }
 .recommendation-severity.medium { background: #f7c948; }
 .recommendation-severity.low { background: #9faab5; }
@@ -1316,9 +1318,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border-color: var(--border);
   color: var(--muted);
 }
+.recommendation-primary-actions .danger-button {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.45);
+}
 .runbook-detail {
   border-left: 4px solid var(--accent);
 }
+.runbook-detail.severity-critical { border-left-color: #ef4444; }
 .runbook-detail.severity-high { border-left-color: #ff6b5a; }
 .runbook-detail.severity-medium { border-left-color: #f7c948; }
 .runbook-detail.severity-low { border-left-color: #9faab5; }

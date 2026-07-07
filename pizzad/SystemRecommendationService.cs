@@ -9,6 +9,7 @@ public sealed class SystemRecommendationService
         "tr-resource-pressure"
     ];
     private static readonly TimeSpan BaselineDemotionAge = TimeSpan.FromHours(24);
+    private const long CriticalRemoteBandwidthBytesPerDay = 1_000_000_000;
 
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
@@ -16,8 +17,9 @@ public sealed class SystemRecommendationService
     private readonly IngestControlService _ingestControl;
     private readonly LiveTrActivityMonitor _liveTrActivity;
     private readonly TalkgroupCatalogService _catalog;
+    private readonly RemoteBandwidthEstimatorService _bandwidth;
 
-    public SystemRecommendationService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline, IngestControlService ingestControl, LiveTrActivityMonitor liveTrActivity, TalkgroupCatalogService catalog)
+    public SystemRecommendationService(EngineConfig config, EngineDatabase database, EnginePipeline pipeline, IngestControlService ingestControl, LiveTrActivityMonitor liveTrActivity, TalkgroupCatalogService catalog, RemoteBandwidthEstimatorService bandwidth)
     {
         _config = config;
         _database = database;
@@ -25,6 +27,7 @@ public sealed class SystemRecommendationService
         _ingestControl = ingestControl;
         _liveTrActivity = liveTrActivity;
         _catalog = catalog;
+        _bandwidth = bandwidth;
     }
 
     public async Task<SystemRecommendationsDto> BuildAsync(CancellationToken ct)
@@ -106,6 +109,36 @@ public sealed class SystemRecommendationService
                         ]
                     }
                 });
+        }
+
+        var bandwidthEndUnix = new DateTimeOffset(now).ToUnixTimeSeconds();
+        var bandwidthStartUnix = new DateTimeOffset(now.AddHours(-24)).ToUnixTimeSeconds();
+        var bandwidth = await _bandwidth.BuildUsageSnapshotAsync(bandwidthStartUnix, bandwidthEndUnix, ct);
+        var remoteTranscription = bandwidth.ByActivity.FirstOrDefault(row => row.Activity.Equals("remote transcription", StringComparison.OrdinalIgnoreCase));
+        var remoteTranscriptionBytes = remoteTranscription?.TotalBytes ?? 0;
+        if (bandwidth.TranscriptionIncluded && remoteTranscriptionBytes >= CriticalRemoteBandwidthBytesPerDay)
+        {
+            var diagnostics = new List<RecommendationDiagnosticDto>
+            {
+                new("24h remote transcription", FormatBytes(remoteTranscriptionBytes), "issue", $"{remoteTranscription?.Requests ?? 0:N0} remote transcription upload(s) estimated in the last 24 hours."),
+                new("Request bytes", FormatBytes(remoteTranscription?.RequestBytes ?? 0), "issue", "Estimated outbound audio upload volume to the remote transcription endpoint."),
+                new("Response bytes", FormatBytes(remoteTranscription?.ResponseBytes ?? 0), "info", "Estimated response payload volume from the remote transcription endpoint."),
+                new("Endpoint", bandwidth.TranscriptionEndpoint, "issue", $"Remote host: {bandwidth.RemoteHost}."),
+                new("Estimate basis", "derived", "info", bandwidth.Notes)
+            };
+
+            rows.Add(new SystemRecommendationDto(
+                "remote-transcription-bandwidth-critical",
+                "network",
+                "critical",
+                "Remote transcription bandwidth is critically high",
+                $"Remote transcription is estimated at {FormatBytes(remoteTranscriptionBytes)} in the last 24 hours. On a metered or QoS-limited link, this can starve LM Link, remote transcription, and normal operator access.",
+                ingest.Paused ? "Live ingest is already paused. Remedy the transcription routing or bandwidth policy before resuming." : "Pause ingest indefinitely if the link is constrained, then switch transcription local/deferred or reduce captured call volume before resuming.",
+                new RecommendationTargetDto("metrics", "bandwidth", ""),
+                ingest.Paused
+                    ? []
+                    : [new RecommendationActionDto("pause-ingest", "Pause ingest indefinitely", "Drop new live callstream payloads until an operator manually resumes ingest.")])
+                { Runbook = BuildRunbook("remote-transcription-bandwidth-critical") with { Diagnostics = diagnostics } });
         }
 
         var fault = TrServiceFaultReader.ReadLatest();
@@ -472,8 +505,8 @@ public sealed class SystemRecommendationService
             .ToList();
 
         return new SystemRecommendationsDto(
-            active.Count(r => r.Severity is "high" or "medium"),
-            active.Count(r => r.Severity == "high"),
+            active.Count(r => r.Severity is "critical" or "high" or "medium"),
+            active.Count(r => r.Severity is "critical" or "high"),
             active.Count(r => r.Severity == "medium"),
             active.Count(r => r.Severity == "low"),
             active,
@@ -535,6 +568,7 @@ public sealed class SystemRecommendationService
 
     private static int SeverityRank(string severity) => severity switch
     {
+        "critical" => 4,
         "high" => 3,
         "medium" => 2,
         "low" => 1,
@@ -690,6 +724,21 @@ public sealed class SystemRecommendationService
         return minutes < 90 ? $"{minutes:F1} min" : $"{minutes / 60d:F1} hr";
     }
 
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        var value = Math.Max(0, bytes);
+        var unit = 0;
+        var display = (double)value;
+        while (display >= 1024 && unit < units.Length - 1)
+        {
+            display /= 1024;
+            unit++;
+        }
+
+        return unit == 0 ? $"{value:N0} {units[unit]}" : $"{display:N1} {units[unit]}";
+    }
+
     private static RecommendationRunbookDto BuildRunbook(string id) => id switch
     {
         "tr-decode-zero" => new RecommendationRunbookDto(
@@ -768,6 +817,17 @@ public sealed class SystemRecommendationService
                 new RecommendationRunbookStepDto("Check queue health", "Resume when queue pressure is acceptable or when live situational awareness matters more than backlog recovery.", new RecommendationTargetDto("pizzad", "jobs", ""))
             ],
             "Use pause sparingly on live systems."),
+        "remote-transcription-bandwidth-critical" => new RecommendationRunbookDto(
+            "Reduce Remote Transcription Bandwidth",
+            "Stop runaway remote audio upload volume before it destabilizes a constrained uplink or the remote LM/transcription path.",
+            ["The finding is based on estimated audio upload volume over the last 24 hours.", "Remote-faster-whisper sends audio files over the network for each completed call.", "Pausing ingest is a protective operator action; it drops new live payloads until manually resumed."],
+            [
+                new RecommendationRunbookStepDto("Pause ingest if the link is constrained", "Use Pause ingest indefinitely when Starlink/QoS throttling or remote transcription instability is more dangerous than dropping additional live calls.", new RecommendationTargetDto("system", "recommendations", "")),
+                new RecommendationRunbookStepDto("Open bandwidth metrics", "Review Metrics > Bandwidth for daily totals, request counts, and whether remote transcription is the dominant source.", new RecommendationTargetDto("metrics", "bandwidth", "")),
+                new RecommendationRunbookStepDto("Reduce the source of uploads", "Prefer local transcription, deferred/batch transcription, or Setup-level exclusion of noisy talkgroups before resuming live ingest on a constrained uplink.", new RecommendationTargetDto("setup", "talkgroups", "")),
+                new RecommendationRunbookStepDto("Resume only after policy is fixed", "Resume ingest after the transcription route or capture policy no longer pushes gigabytes per day across the remote link.", new RecommendationTargetDto("pizzad", "service", ""))
+            ],
+            "This recommendation uses derived estimates, not packet capture. Treat it as a critical operational warning when the order of magnitude is gigabytes per day."),
         "tr-live-silent" => new RecommendationRunbookDto(
             "Restore Live TR Data",
             "Determine whether trunk-recorder stopped, restart-looped, lost its SDR source, or is running but no longer sending callstream or health data to PizzaWave.",
