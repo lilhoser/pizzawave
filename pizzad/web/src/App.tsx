@@ -5936,7 +5936,21 @@ function WaterfallStep({
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Waterfall failed to start.");
+      const message = error instanceof Error ? error.message : "Waterfall failed to start.";
+      if (/failed to fetch/i.test(message)) {
+        try {
+          const recovered = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
+          if (recovered.active) {
+            scheduleWaterfallPaint(recovered);
+            setStatus(recovered);
+            setMessage(shouldShowWaterfallMessage(recovered.message, recovered) ? recovered.message : "");
+            return;
+          }
+        } catch {
+          // Keep the original fetch failure; it is the actionable browser-facing error.
+        }
+      }
+      setMessage(message);
     } finally {
       setBusy("");
     }
