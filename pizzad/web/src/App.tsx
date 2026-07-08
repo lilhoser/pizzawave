@@ -508,6 +508,30 @@ function App() {
       events.close();
     };
   }, [runStatusRefresh, runVisibleRefresh]);
+  useEffect(() => {
+    let stopped = false;
+    let inFlight = false;
+    async function refreshCpuSnapshot() {
+      if (inFlight)
+        return;
+      inFlight = true;
+      try {
+        const next = await api.request<SystemCpuSnapshot>("/api/v1/system/cpu");
+        if (!stopped)
+          setCpuSnapshot(next);
+      } catch {
+        // CPU status is advisory; the main health refresh still reports connection issues.
+      } finally {
+        inFlight = false;
+      }
+    }
+    void refreshCpuSnapshot();
+    const timer = window.setInterval(() => void refreshCpuSnapshot(), 10_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const nav = useMemo(() => ["dashboard", ...categories, "setup", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
@@ -548,8 +572,9 @@ function App() {
   const cpuHostPercent = cpuSnapshot?.latest
     ? Math.max(cpuSnapshot.latest.trCpuHostPercent, cpuSnapshot.latest.hostLoadHostPercent)
     : NaN;
+  const cpuPillUsesLoad = Boolean(cpuSnapshot?.latest && cpuSnapshot.latest.hostLoadHostPercent > cpuSnapshot.latest.trCpuHostPercent);
   const cpuPillText = cpuSnapshot?.latest
-    ? `CPU ${cpuHostPercent.toFixed(0)}% ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
+    ? `${cpuPillUsesLoad ? "Load" : "CPU"} ${cpuHostPercent.toFixed(0)}% ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
     : "CPU --";
   const cpuPillTitle = cpuSnapshot?.latest
     ? `${cpuSnapshot.summary} Display uses the higher of TR CPU and host load. TR CPU ${cpuSnapshot.latest.trCpuPercent.toFixed(0)}% (${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% of host), load ${cpuSnapshot.latest.hostLoad1.toFixed(2)} (${cpuSnapshot.latest.hostLoadHostPercent.toFixed(0)}% of host), temp ${cpuSnapshot.latest.hostTempC.toFixed(1)} C.`
