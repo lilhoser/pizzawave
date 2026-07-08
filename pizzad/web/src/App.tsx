@@ -545,11 +545,14 @@ function App() {
     ? liveTrActivity.message
     : "Live means the browser is connected to pizzad and recent TR activity has not crossed the silence threshold.";
   const cpuPillClass = ["pill", "status-pill-button", `cpu-health-${cpuSnapshot?.severity ?? "unknown"}`].join(" ");
+  const cpuHostPercent = cpuSnapshot?.latest
+    ? Math.max(cpuSnapshot.latest.trCpuHostPercent, cpuSnapshot.latest.hostLoadHostPercent)
+    : NaN;
   const cpuPillText = cpuSnapshot?.latest
-    ? `CPU ${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
+    ? `CPU ${cpuHostPercent.toFixed(0)}% ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
     : "CPU --";
   const cpuPillTitle = cpuSnapshot?.latest
-    ? `${cpuSnapshot.summary} TR CPU ${cpuSnapshot.latest.trCpuPercent.toFixed(0)}% (${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% of host), load ${cpuSnapshot.latest.hostLoad1.toFixed(2)}, temp ${cpuSnapshot.latest.hostTempC.toFixed(1)} C.`
+    ? `${cpuSnapshot.summary} Display uses the higher of TR CPU and host load. TR CPU ${cpuSnapshot.latest.trCpuPercent.toFixed(0)}% (${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% of host), load ${cpuSnapshot.latest.hostLoad1.toFixed(2)} (${cpuSnapshot.latest.hostLoadHostPercent.toFixed(0)}% of host), temp ${cpuSnapshot.latest.hostTempC.toFixed(1)} C.`
     : "No recent TR CPU/resource sample.";
   const queueHealthText = queueHealth === "blocked"
     ? `Queue blocked ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
@@ -1422,7 +1425,21 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     }
   }
   async function adoptWaterfallSite(system: RfSurveySystem) {
-    setMessage(`${system.siteLabel || system.shortName} was detected. Add or remove sites on Systems & Sites.`);
+    const existingNames = new Set(setup.desired.systems.map(item => item.shortName.toLowerCase()));
+    if (existingNames.has(system.shortName.toLowerCase()))
+      return;
+
+    const nextSystems = [...setup.desired.systems, system].sort((left, right) => left.shortName.localeCompare(right.shortName));
+    const nextNames = Array.from(new Set([...selectedSetupSystemNames(setup), system.shortName].filter(Boolean))).sort((left, right) => left.localeCompare(right));
+    const nextSourcePlanSystems = Array.from(new Set([
+      ...(setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : selectedSetupSystemNames(setup)),
+      system.shortName
+    ].filter(Boolean))).sort((left, right) => left.localeCompare(right));
+    await onSave({
+      systems: nextSystems,
+      systemShortNames: nextNames,
+      sourcePlanSystemShortNames: nextSourcePlanSystems
+    }, "systems");
   }
   const handleWaterfallStatusChange = useCallback((status: RfSurveyWaterfallStatus | null) => {
     onTrOperationChange(waterfallTrOperationText(status));
@@ -5883,7 +5900,7 @@ function WaterfallStep({
           setMessage(error instanceof Error ? error.message : "Waterfall status refresh failed.");
       }
     }
-    const timer = window.setInterval(() => void poll(), 500);
+    const timer = window.setInterval(() => void poll(), 160);
     return () => {
       stopped = true;
       window.clearInterval(timer);
@@ -6366,7 +6383,7 @@ function buildWaterfallCandidateRows(
       confidence: waterfallOtherDetectedConfidence(row),
       hits: row.displayHits,
       identifyPeak,
-      system: matchedSelected ? fallbackTarget?.system : undefined
+      system: matchedSelected ? fallbackTarget?.system : rrTarget?.system
     };
   });
   const rows: WaterfallCandidateRow[] = [...selectedRows, ...otherCandidateRows];
@@ -6395,7 +6412,7 @@ function buildWaterfallCandidateRows(
       confidence: clamp01(result.peak.hits / 30),
       hits: result.peak.hits,
       identifyPeak: result.peak,
-      system: matchedSelected ? fallbackTarget?.system : undefined
+      system: matchedSelected ? fallbackTarget?.system : rrTarget?.system
     });
   }
   return rows
@@ -6428,11 +6445,24 @@ function buildRadioReferenceControlChannelTargets(radioReferenceSites: SetupTrCo
         systemShortName,
         siteLabel,
         frequencyHz,
-        system: undefined
+        system: radioReferenceSiteToRfSurveySystem(site, radioReferenceSites?.systemName)
       });
     }
   }
   return rows;
+}
+
+function radioReferenceSiteToRfSurveySystem(site: SetupTrConfigSite, systemName?: string): RfSurveySystem {
+  const shortName = site.shortName || site.name || "rr-site";
+  return {
+    shortName,
+    siteLabel: site.name || shortName,
+    controlChannelsHz: uniqueSortedFrequencies((site.controlChannelsMhz ?? [])
+      .map(frequencyMhz => Math.round(Number(frequencyMhz) * 1_000_000))
+      .filter(frequencyHz => Number.isFinite(frequencyHz) && frequencyHz > 0)),
+    voiceFrequenciesHz: [],
+    talkgroupSystemShortName: systemName?.trim() || undefined
+  };
 }
 
 function inferSelectedSetupStates(selectedSystems: RfSurveySystem[], radioReferenceSites: SetupTrConfigSites | null) {
