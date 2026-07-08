@@ -150,7 +150,8 @@ function App() {
   const refreshVisiblePageRef = useRef<() => Promise<void>>(async () => { });
   const statusRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const visibleRefreshInFlightRef = useRef<Promise<void> | null>(null);
-  const visibleRefreshQueuedRef = useRef(false);
+  const visibleRefreshInFlightKeyRef = useRef("");
+  const visibleRefreshSerialRef = useRef(0);
   const statusRefreshHadSuccessRef = useRef(false);
   const pageRef = useRef<Page>(page);
   const rangeHoursRef = useRef(rangeHours);
@@ -362,7 +363,10 @@ function App() {
   const runStatusRefresh = useCallback(() => {
     if (statusRefreshInFlightRef.current)
       return statusRefreshInFlightRef.current;
-    lastStatusRefreshAtRef.current = Date.now();
+    const now = Date.now();
+    if (now - lastStatusRefreshAtRef.current < 5_000)
+      return Promise.resolve();
+    lastStatusRefreshAtRef.current = now;
     const task = refreshStatusData()
       .catch(reportRefreshError)
       .finally(() => {
@@ -373,20 +377,21 @@ function App() {
   }, [refreshStatusData, reportRefreshError]);
 
   const runVisibleRefresh = useCallback(() => {
-    if (visibleRefreshInFlightRef.current) {
-      visibleRefreshQueuedRef.current = true;
+    const key = categoryPageKey(pageRef.current, rangeHoursRef.current, globalSearchRef.current);
+    if (visibleRefreshInFlightRef.current && visibleRefreshInFlightKeyRef.current === key)
       return visibleRefreshInFlightRef.current;
-    }
+    const serial = ++visibleRefreshSerialRef.current;
+    visibleRefreshInFlightKeyRef.current = key;
     const task = (async () => {
-      do {
-        visibleRefreshQueuedRef.current = false;
-        lastPageRefreshAtRef.current = Date.now();
-        await refreshVisiblePageRef.current();
-      } while (visibleRefreshQueuedRef.current);
+      lastPageRefreshAtRef.current = Date.now();
+      await refreshVisiblePageRef.current();
     })()
       .catch(reportRefreshError)
       .finally(() => {
-        visibleRefreshInFlightRef.current = null;
+        if (visibleRefreshSerialRef.current === serial) {
+          visibleRefreshInFlightRef.current = null;
+          visibleRefreshInFlightKeyRef.current = "";
+        }
       });
     visibleRefreshInFlightRef.current = task;
     return task;
