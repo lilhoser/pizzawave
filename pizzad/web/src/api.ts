@@ -60,7 +60,44 @@ export class ApiClient {
     const token = localStorage.getItem("pizzawave-admin-token");
     if ((forceAuth || token) && token && !headers.has("Authorization"))
       headers.set("Authorization", `Bearer ${token}`);
-    return fetch(path, { ...init, headers });
+    try {
+      return await fetch(path, { ...init, headers });
+    } catch (error) {
+      if (init.signal)
+        throw error;
+      return this.xhrFallback(path, { ...init, headers });
+    }
+  }
+
+  private xhrFallback(path: string, init: RequestInit): Promise<Response> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(init.method || "GET", path, true);
+      const headers = new Headers(init.headers);
+      headers.forEach((value, key) => xhr.setRequestHeader(key, value));
+      xhr.onload = () => {
+        const responseHeaders = new Headers();
+        for (const line of xhr.getAllResponseHeaders().trim().split(/[\r\n]+/)) {
+          if (!line) continue;
+          const index = line.indexOf(":");
+          if (index > 0)
+            responseHeaders.append(line.slice(0, index), line.slice(index + 1).trim());
+        }
+        resolve(new Response(xhr.responseText, {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          headers: responseHeaders
+        }));
+      };
+      xhr.onerror = () => reject(new Error("Failed to fetch"));
+      xhr.ontimeout = () => reject(new Error("Failed to fetch"));
+      xhr.onabort = () => reject(new Error("Failed to fetch"));
+      if (typeof init.body === "string" || init.body instanceof FormData || init.body == null) {
+        xhr.send(init.body ?? null);
+      } else {
+        reject(new Error("Failed to fetch"));
+      }
+    });
   }
 
   private async throwResponse(response: Response): Promise<never> {
