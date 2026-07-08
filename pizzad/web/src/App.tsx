@@ -5896,7 +5896,7 @@ function WaterfallStep({
           setMessage(error instanceof Error ? error.message : "Waterfall status refresh failed.");
       }
     }
-    const timer = window.setInterval(() => void poll(), 160);
+    const timer = window.setInterval(() => void poll(), 500);
     return () => {
       stopped = true;
       window.clearInterval(timer);
@@ -5936,21 +5936,7 @@ function WaterfallStep({
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Waterfall failed to start.";
-      if (/failed to fetch/i.test(message)) {
-        try {
-          const recovered = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
-          if (recovered.active) {
-            scheduleWaterfallPaint(recovered);
-            setStatus(recovered);
-            setMessage(shouldShowWaterfallMessage(recovered.message, recovered) ? recovered.message : "");
-            return;
-          }
-        } catch {
-          // Keep the original fetch failure; it is the actionable browser-facing error.
-        }
-      }
-      setMessage(message);
+      setMessage(error instanceof Error ? error.message : "Waterfall failed to start.");
     } finally {
       setBusy("");
     }
@@ -5966,43 +5952,7 @@ function WaterfallStep({
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Waterfall failed to stop.";
-      if (/failed to fetch/i.test(message)) {
-        try {
-          const recovered = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
-          if (!recovered.active) {
-            lastFrameRef.current = "";
-            scheduleWaterfallPaint(recovered);
-            setStatus(recovered);
-            setMessage(shouldShowWaterfallMessage(recovered.message, recovered) ? recovered.message : "");
-            return;
-          }
-        } catch {
-          // Retry the stop below; the first request may have been interrupted before it reached the server.
-        }
-        try {
-          const retry = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(apiBase, surveyId), { method: "POST" });
-          lastFrameRef.current = "";
-          scheduleWaterfallPaint(retry);
-          setStatus(retry);
-          setMessage(shouldShowWaterfallMessage(retry.message, retry) ? retry.message : "");
-          return;
-        } catch {
-          try {
-            const afterRetry = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
-            scheduleWaterfallPaint(afterRetry);
-            setStatus(afterRetry);
-            if (!afterRetry.active) {
-              lastFrameRef.current = "";
-              setMessage(shouldShowWaterfallMessage(afterRetry.message, afterRetry) ? afterRetry.message : "");
-              return;
-            }
-          } catch {
-            // Keep the original fetch failure below.
-          }
-        }
-      }
-      setMessage(message);
+      setMessage(error instanceof Error ? error.message : "Waterfall failed to stop.");
     } finally {
       setBusy("");
     }
@@ -6303,8 +6253,8 @@ function WaterfallStep({
         <option value="70">70 dB</option>
       </select></label>
       <label className="rf-waterfall-check"><input type="checkbox" disabled={controlsDisabled} checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
-      <button type="button" className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
-      <button type="button" disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
+      <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
+      <button disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
       <button type="button" className="icon-button" disabled={controlsDisabled || !frame} aria-label="Download waterfall screen grab" title="Download waterfall screen grab" onClick={downloadWaterfallReport}><Camera size={16} aria-hidden="true" /></button>
     </div>
     {locked && <div className="setup-note">Run SDR Inventory first.</div>}
