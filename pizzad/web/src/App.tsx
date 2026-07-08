@@ -159,6 +159,8 @@ function App() {
   const lastStatusRefreshAtRef = useRef(0);
   const lastPageRefreshAtRef = useRef(0);
   const lastDashboardRefreshRef = useRef(0);
+  const lastSetupStatusRefreshAtRef = useRef(0);
+  const setupStatusRef = useRef<SetupStatus | null>(null);
   const playedAudioRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<Set<HTMLAudioElement>>(new Set());
   const knownIncidentIdsRef = useRef<Set<number>>(new Set());
@@ -271,8 +273,21 @@ function App() {
   }
 
   const refreshStatusData = useCallback(async () => {
-    const setup = await api.request<SetupStatus>("/api/v1/setup/status");
-    setSetupStatus(setup);
+    let setup = setupStatusRef.current;
+    const now = Date.now();
+    const shouldRefreshSetupStatus =
+      !setup ||
+      !setup.completed ||
+      pageRef.current === "setup" ||
+      now - lastSetupStatusRefreshAtRef.current >= 60_000;
+    if (shouldRefreshSetupStatus) {
+      setup = await api.request<SetupStatus>("/api/v1/setup/status");
+      setupStatusRef.current = setup;
+      lastSetupStatusRefreshAtRef.current = now;
+      setSetupStatus(setup);
+    }
+    if (!setup)
+      throw new Error("Setup status unavailable.");
     if (!setup.completed) {
       const healthStatus = await api.request<EngineHealth>("/api/v1/health");
       setEngineHealth(healthStatus);
@@ -380,6 +395,7 @@ function App() {
   useEffect(() => { pageRef.current = page; }, [page]);
   useEffect(() => { rangeHoursRef.current = rangeHours; }, [rangeHours]);
   useEffect(() => { globalSearchRef.current = globalSearch; }, [globalSearch]);
+  useEffect(() => { setupStatusRef.current = setupStatus; }, [setupStatus]);
   useEffect(() => {
     api.setAuthTokenProvider(request => {
       if (pendingAuthPromptRef.current)
@@ -5867,7 +5883,7 @@ function WaterfallStep({
           setMessage(error instanceof Error ? error.message : "Waterfall status refresh failed.");
       }
     }
-    const timer = window.setInterval(() => void poll(), 120);
+    const timer = window.setInterval(() => void poll(), 500);
     return () => {
       stopped = true;
       window.clearInterval(timer);

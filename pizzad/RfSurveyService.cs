@@ -13,6 +13,7 @@ public sealed class RfSurveyService
 {
     private const double TrUsableHalfBandwidthFactor = 0.46875;
     private const int MinUsableTranscriptionGateChars = 12;
+    private const int WaterfallHistoryFrameLimit = 4;
     private static readonly TimeSpan WaterfallConsumeTimeout = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExperimentCancellations = new();
     private readonly ConcurrentDictionary<string, WaterfallRuntime> _activeWaterfalls = new();
@@ -1359,15 +1360,16 @@ public sealed class RfSurveyService
         if (_activeWaterfalls.TryGetValue(id, out var runtime))
         {
             runtime.MarkConsumed();
-            return runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory);
+            return CompactWaterfallHistory(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory));
         }
         if (_lastWaterfalls.TryGetValue(id, out var last))
-            return includeHistory ? last : last with { Frames = null };
+            return includeHistory ? CompactWaterfallHistory(last) : last with { Frames = null };
         if (includeHistory)
         {
             var persisted = await LoadPersistedWaterfallAsync(id, ct);
             if (persisted != null)
             {
+                persisted = CompactWaterfallHistory(persisted);
                 _lastWaterfalls[id] = persisted;
                 return persisted;
             }
@@ -1411,7 +1413,7 @@ public sealed class RfSurveyService
             }
         }
         runtime.Cancellation.Dispose();
-        var stopped = runtime.ToDto(false, true) with { Status = "stopped", Message = "Waterfall stopped." };
+        var stopped = CompactWaterfallHistory(runtime.ToDto(false, true) with { Status = "stopped", Message = "Waterfall stopped." });
         _lastWaterfalls[id] = stopped;
         await PersistWaterfallAsync(id, stopped, ct);
         return stopped;
@@ -1467,12 +1469,12 @@ public sealed class RfSurveyService
 
     private void RememberWaterfall(WaterfallRuntime runtime, bool active)
     {
-        _lastWaterfalls[runtime.SurveyId] = runtime.ToDto(active, includeHistory: true);
+        _lastWaterfalls[runtime.SurveyId] = CompactWaterfallHistory(runtime.ToDto(active, includeHistory: true));
     }
 
     private async Task RememberWaterfallAsync(WaterfallRuntime runtime, bool active, CancellationToken ct)
     {
-        var dto = runtime.ToDto(active, includeHistory: true);
+        var dto = CompactWaterfallHistory(runtime.ToDto(active, includeHistory: true));
         _lastWaterfalls[runtime.SurveyId] = dto;
         await PersistWaterfallAsync(runtime.SurveyId, dto, ct);
     }
@@ -1507,15 +1509,31 @@ public sealed class RfSurveyService
             var status = JsonSerializer.Deserialize<RfSurveyWaterfallStatusDto>(
                 await File.ReadAllTextAsync(path, ct),
                 EngineConfig.JsonOptions());
-            return status?.Frame == null && status?.Frames?.Count is not > 0
+            var loaded = status?.Frame == null && status?.Frames?.Count is not > 0
                 ? null
                 : status with { Active = false, Status = "stopped" };
+            return loaded == null ? null : CompactWaterfallHistory(loaded);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Unable to load persisted waterfall snapshot for survey {SurveyId}.", id);
             return null;
         }
+    }
+
+    private static RfSurveyWaterfallStatusDto CompactWaterfallHistory(RfSurveyWaterfallStatusDto status)
+    {
+        if (status.Frames is not { Count: > WaterfallHistoryFrameLimit } frames)
+            return status;
+
+        var compactFrames = frames
+            .Skip(Math.Max(0, frames.Count - WaterfallHistoryFrameLimit))
+            .ToArray();
+        return status with
+        {
+            Frame = status.Frame ?? compactFrames.LastOrDefault(),
+            Frames = compactFrames
+        };
     }
 
     public async Task<RfSurveyExperimentDto> RunExperimentAsync(string id, RfSurveyRunExperimentRequest request, CancellationToken ct)
@@ -4046,7 +4064,7 @@ public sealed class RfSurveyService
 
     private sealed class WaterfallRuntime
     {
-        private const int MaxFrameHistory = 90;
+        private const int MaxFrameHistory = WaterfallHistoryFrameLimit;
         private readonly object _sync = new();
         private readonly Queue<RfSurveyWaterfallFrameDto> _frames = new();
         private DateTime _lastConsumedAtUtc = DateTime.UtcNow;

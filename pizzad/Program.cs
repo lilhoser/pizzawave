@@ -46,6 +46,7 @@ builder.Services.AddSingleton<RemoteBandwidthEstimatorService>();
 builder.Services.AddHttpClient<GeocodingService>();
 builder.Services.AddSingleton<AutomaticInsightsService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
+builder.Services.AddSingleton<HealthStatusService>();
 builder.Services.AddSingleton<EnginePipeline>();
 builder.Services.AddSingleton<DashboardService>();
 builder.Services.AddSingleton<TrConfigService>();
@@ -124,73 +125,7 @@ app.MapGet("/api/v1/app-version", () =>
 .WithName("AppVersion")
 .WithOpenApi();
 
-app.MapGet("/api/v1/health", async (EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, IngestControlService ingestControl, LiveTrActivityMonitor liveTrActivity, EmbeddingService embeddings, CancellationToken ct) =>
-{
-    var pendingTranscriptions = await database.CountPendingTranscriptionCallsAsync(ct);
-    const int throughputWindowMinutes = 10;
-    var now = DateTime.UtcNow;
-    var recentStartUnix = new DateTimeOffset(now.AddMinutes(-throughputWindowMinutes)).ToUnixTimeSeconds();
-    var recentCalls = await database.CountCallsStartedSinceAsync(recentStartUnix, ct);
-    var recentTranscribed = await database.CountTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
-    var recentAudioIngested = await database.SumAudioSecondsStartedSinceAsync(recentStartUnix, ct);
-    var recentAudioTranscribed = await database.SumAudioSecondsTranscriptionCompletionsSinceAsync(now.AddMinutes(-throughputWindowMinutes), ct);
-    var pendingAudioSeconds = await database.SumPendingTranscriptionAudioSecondsAsync(ct);
-    var transcriptionPerformance = pipeline.GetTranscriptionPerformance(TimeSpan.FromMinutes(throughputWindowMinutes));
-    var aiQueueLimit = cfg.AiInsights.MaxQueueDepthForManualSummary;
-    var aiBlockedReason = aiQueueLimit > 0 && pipeline.QueueDepth > aiQueueLimit
-        ? $"AI summary generation is paused while transcription queue depth is above the configured limit. Queue depth: {pipeline.QueueDepth:N0}; limit: {aiQueueLimit:N0}."
-        : null;
-    var aiCompletionHealth = await database.GetAiCompletionHealthAsync(30, ct);
-    var aiCompletionBlockedReason = !string.Equals(aiCompletionHealth.Status, "ok", StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(aiCompletionHealth.Status, "unknown", StringComparison.OrdinalIgnoreCase)
-        ? aiCompletionHealth.Message
-        : null;
-    var embeddingHealth = await embeddings.GetHealthAsync(ct);
-    var embeddingBlockedReason = EmbeddingBlockedReason(embeddingHealth);
-    var blockedReason = string.Join(" ", new[] { aiBlockedReason, aiCompletionBlockedReason, embeddingBlockedReason }.Where(s => !string.IsNullOrWhiteSpace(s)));
-    if (string.IsNullOrWhiteSpace(blockedReason))
-        blockedReason = null;
-    var trFault = TrServiceFaultReader.ReadLatest();
-    var trControlState = TrServiceControlStateReader.ReadLatest();
-    var liveTrStatus = liveTrActivity.GetStatus(now, trFault, trControlState);
-    return Results.Ok(new HealthDto(
-        aiCompletionBlockedReason is not null || embeddingBlockedReason is not null ? "degraded" : "ok",
-        Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev",
-        cfg.Branding.StackName,
-        cfg.Storage.DatabasePath,
-        cfg.Storage.AudioRoot,
-        pipeline.QueueDepth,
-        pipeline.LiveQueueDepth,
-        pipeline.PriorityLiveQueueDepth,
-        pipeline.BacklogQueueDepth,
-        pipeline.IsUnderLivePressure,
-        pipeline.LivePressureQueueDepth,
-        pendingTranscriptions,
-        pipeline.LiveTranscriptionWorkerCount,
-        pipeline.WhisperThreadsPerWorker,
-        throughputWindowMinutes,
-        pipeline.DeferredLiveQueueDepth,
-        recentCalls,
-        recentTranscribed,
-        recentCalls / (double)throughputWindowMinutes,
-        recentTranscribed / (double)throughputWindowMinutes,
-        recentAudioIngested,
-        recentAudioTranscribed,
-        recentAudioIngested / (double)throughputWindowMinutes,
-        recentAudioTranscribed / (double)throughputWindowMinutes,
-        pendingAudioSeconds,
-        transcriptionPerformance.Count,
-        transcriptionPerformance.AverageWallSeconds,
-        transcriptionPerformance.AverageAudioSeconds,
-        transcriptionPerformance.AverageRealtimeFactor,
-        ingestControl.GetStatus(pipeline.QueueDepth),
-        liveTrStatus,
-        aiBlockedReason,
-        aiCompletionHealth,
-        embeddingHealth,
-        blockedReason,
-        now));
-})
+app.MapGet("/api/v1/health", async (HealthStatusService health, CancellationToken ct) => Results.Ok(await health.GetAsync(ct)))
     .WithName("Health")
     .WithOpenApi();
 
@@ -1647,21 +1582,6 @@ app.MapFallback((HttpContext context) =>
 });
 
 app.Run();
-
-static string? EmbeddingBlockedReason(EmbeddingPipelineHealthDto health)
-{
-    if (!health.Enabled || string.Equals(health.Status, "ok", StringComparison.OrdinalIgnoreCase))
-        return null;
-
-    var detail = !string.IsNullOrWhiteSpace(health.LastError)
-        ? health.LastError
-        : !health.QdrantOk
-            ? "Qdrant health check failed."
-            : !health.EmbeddingEndpointOk
-                ? "Embedding endpoint health check failed."
-                : "Embedding pipeline health check failed.";
-    return $"Embedding/LMLink health is {health.Status}: {detail}";
-}
 
 static bool ApplySettingsSection(EngineConfig cfg, string section, JsonElement values, CredentialStore? credentials = null, bool persistSecrets = false)
 {

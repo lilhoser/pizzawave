@@ -12,6 +12,9 @@ public sealed class SetupService
     private readonly TrConfigService _trConfig;
     private readonly SettingsValidationService _settingsValidation;
     private readonly ILogger<SetupService> _logger;
+    private readonly SemaphoreSlim _statusCacheLock = new(1, 1);
+    private SetupStatusDto? _cachedStatus;
+    private DateTime _cachedStatusExpiresUtc = DateTime.MinValue;
 
     public SetupService(
         EngineConfig config,
@@ -30,6 +33,30 @@ public sealed class SetupService
     }
 
     public async Task<SetupStatusDto> GetStatusAsync(CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        if (_cachedStatus != null && now < _cachedStatusExpiresUtc)
+            return _cachedStatus;
+
+        await _statusCacheLock.WaitAsync(ct);
+        try
+        {
+            now = DateTime.UtcNow;
+            if (_cachedStatus != null && now < _cachedStatusExpiresUtc)
+                return _cachedStatus;
+
+            var status = await BuildStatusAsync(ct);
+            _cachedStatus = status;
+            _cachedStatusExpiresUtc = now.AddSeconds(15);
+            return status;
+        }
+        finally
+        {
+            _statusCacheLock.Release();
+        }
+    }
+
+    private async Task<SetupStatusDto> BuildStatusAsync(CancellationToken ct)
     {
         var detection = await DetectTrAsync(ct);
         RefreshChecksFromDisk(detection);
@@ -52,6 +79,12 @@ public sealed class SetupService
                 profiles = _config.Profiles,
                 setup = _config.Setup
             });
+    }
+
+    private void InvalidateStatusCache()
+    {
+        _cachedStatus = null;
+        _cachedStatusExpiresUtc = DateTime.MinValue;
     }
 
     public async Task<object> DetectTrAsync(CancellationToken ct)
@@ -187,6 +220,7 @@ public sealed class SetupService
 
         EnsureDefaultProfile();
         await SaveConfigAsync(ct);
+        InvalidateStatusCache();
         return await GetStatusAsync(ct);
     }
 
@@ -209,6 +243,7 @@ public sealed class SetupService
 
         ApplyValidation(section, result.Ok);
         await SaveConfigAsync(ct);
+        InvalidateStatusCache();
         return result;
     }
 
@@ -248,6 +283,7 @@ public sealed class SetupService
         _config.Setup.MigrationPreviousCurrentStep = string.Empty;
         _config.Setup.RestoreAppliedAtUtc = null;
         await SaveConfigAsync(ct);
+        InvalidateStatusCache();
         _logger.LogInformation("PizzaWave setup completed at {CompletedAt}", _config.Setup.CompletedAtUtc);
         return await GetStatusAsync(ct);
     }
