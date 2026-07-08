@@ -22,7 +22,6 @@ public sealed class SystemCpuSnapshotService
             .OrderBy(s => s.WindowEndUtc)
             .ToList();
         var latest = samples.OrderByDescending(s => s.WindowEndUtc).FirstOrDefault();
-        var live = ReadLiveHostSample(latest, processorCount);
         var peakCpu = samples.Select(s => s.TrCpuPercent).DefaultIfEmpty(0).Max();
         var peakLoad = samples.Select(s => s.HostLoad1).DefaultIfEmpty(0).Max();
         var peak = new SystemCpuSampleDto(
@@ -31,12 +30,12 @@ public sealed class SystemCpuSnapshotService
             HostPercent(peakCpu, processorCount),
             samples.Select(s => s.TrRssMb).DefaultIfEmpty(0).Max(),
             samples.Select(s => s.TrThreadCount).DefaultIfEmpty(0).Max(),
-            Math.Max(samples.Select(s => s.HostTempC).DefaultIfEmpty(0).Max(), live?.HostTempC ?? 0),
-            Math.Max(peakLoad, live?.HostLoad1 ?? 0),
-            Math.Max(HostPercent(peakLoad * 100d, processorCount), live?.HostLoadHostPercent ?? 0),
-            FirstNonEmpty(samples.Select(s => s.HostThrottledFlags).FirstOrDefault(HasHistoricalThrottleFlag), live?.HostThrottledFlags));
+            samples.Select(s => s.HostTempC).DefaultIfEmpty(0).Max(),
+            peakLoad,
+            HostPercent(peakLoad * 100d, processorCount),
+            samples.Select(s => s.HostThrottledFlags).FirstOrDefault(HasHistoricalThrottleFlag) ?? string.Empty);
 
-        var latestDto = live ?? (latest == null ? null : ToSample(latest, processorCount));
+        var latestDto = latest == null ? null : ToSample(latest, processorCount);
         var insights = BuildInsights(latestDto, peak, processorCount);
         var actionableInsights = insights.Where(i => i.Label != "TR threads").ToList();
         var severity = actionableInsights.Any(i => i.Status == "error") ? "error" : actionableInsights.Any(i => i.Status == "warning") ? "warning" : "ok";
@@ -88,70 +87,6 @@ public sealed class SystemCpuSnapshotService
     }
 
     private static double HostPercent(double cpuPercent, int processorCount) => cpuPercent / Math.Max(1, processorCount);
-
-    private static SystemCpuSampleDto? ReadLiveHostSample(TrHealthSampleDto? latest, int processorCount)
-    {
-        var load = ReadLoadAverage();
-        var temp = ReadTemperatureC();
-        var throttled = ReadThrottleFlags();
-        if (load <= 0 && temp <= 0 && string.IsNullOrWhiteSpace(throttled))
-            return null;
-
-        var latestDto = latest == null ? null : ToSample(latest, processorCount);
-        return new SystemCpuSampleDto(
-            DateTime.UtcNow,
-            latestDto?.TrCpuPercent ?? 0,
-            latestDto?.TrCpuHostPercent ?? 0,
-            latestDto?.TrRssMb ?? 0,
-            latestDto?.TrThreadCount ?? 0,
-            temp > 0 ? temp : latestDto?.HostTempC ?? 0,
-            load > 0 ? load : latestDto?.HostLoad1 ?? 0,
-            load > 0 ? HostPercent(load * 100d, processorCount) : latestDto?.HostLoadHostPercent ?? 0,
-            FirstNonEmpty(throttled, latestDto?.HostThrottledFlags));
-    }
-
-    private static double ReadLoadAverage()
-    {
-        try
-        {
-            var first = File.ReadAllText("/proc/loadavg").Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-            return double.TryParse(first, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : 0;
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static double ReadTemperatureC()
-    {
-        try
-        {
-            var raw = File.ReadAllText("/sys/class/thermal/thermal_zone0/temp").Trim();
-            return double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value / 1000d : 0;
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static string ReadThrottleFlags()
-    {
-        try
-        {
-            return File.Exists("/sys/devices/platform/soc/soc:firmware/get_throttled")
-                ? File.ReadAllText("/sys/devices/platform/soc/soc:firmware/get_throttled").Trim()
-                : string.Empty;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    private static string FirstNonEmpty(params string?[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 
     private static bool HasCurrentThrottleFlag(string flags)
     {
