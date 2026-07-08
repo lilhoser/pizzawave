@@ -304,7 +304,7 @@ app.MapPost("/api/v1/setup/site/rf/{id}/waterfall/start", async (HttpContext con
     {
         var setup = await siteSetup.GetAsync(context.RequestAborted);
         var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
-        return Results.Ok(await surveys.StartWaterfallAsync(detail.Session.Id, request, context.RequestAborted));
+        return Results.Ok(await surveys.StartWaterfallAsync(detail.Session.Id, request, CancellationToken.None));
     }
     catch (Exception ex)
     {
@@ -327,9 +327,16 @@ app.MapGet("/api/v1/setup/site/rf/{id}/waterfall", async (HttpContext context, s
 app.MapPost("/api/v1/setup/site/rf/{id}/waterfall/stop", async (HttpContext context, string id, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    var setup = await siteSetup.GetAsync(context.RequestAborted);
-    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
-    return Results.Ok(await surveys.StopWaterfallAsync(detail.Session.Id, context.RequestAborted));
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        return Results.Ok(await surveys.StopWaterfallAsync(detail.Session.Id, CancellationToken.None));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
 })
 .WithName("SiteSetupRfWaterfallStop")
 .WithOpenApi();

@@ -5966,7 +5966,43 @@ function WaterfallStep({
       setStatus(next);
       setMessage(shouldShowWaterfallMessage(next.message, next) ? next.message : "");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Waterfall failed to stop.");
+      const message = error instanceof Error ? error.message : "Waterfall failed to stop.";
+      if (/failed to fetch/i.test(message)) {
+        try {
+          const recovered = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
+          if (!recovered.active) {
+            lastFrameRef.current = "";
+            scheduleWaterfallPaint(recovered);
+            setStatus(recovered);
+            setMessage(shouldShowWaterfallMessage(recovered.message, recovered) ? recovered.message : "");
+            return;
+          }
+        } catch {
+          // Retry the stop below; the first request may have been interrupted before it reached the server.
+        }
+        try {
+          const retry = await api.request<RfSurveyWaterfallStatus>(waterfallStopUrl(apiBase, surveyId), { method: "POST" });
+          lastFrameRef.current = "";
+          scheduleWaterfallPaint(retry);
+          setStatus(retry);
+          setMessage(shouldShowWaterfallMessage(retry.message, retry) ? retry.message : "");
+          return;
+        } catch {
+          try {
+            const afterRetry = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall?history=true`);
+            scheduleWaterfallPaint(afterRetry);
+            setStatus(afterRetry);
+            if (!afterRetry.active) {
+              lastFrameRef.current = "";
+              setMessage(shouldShowWaterfallMessage(afterRetry.message, afterRetry) ? afterRetry.message : "");
+              return;
+            }
+          } catch {
+            // Keep the original fetch failure below.
+          }
+        }
+      }
+      setMessage(message);
     } finally {
       setBusy("");
     }

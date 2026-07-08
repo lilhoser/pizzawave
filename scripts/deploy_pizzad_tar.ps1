@@ -4,7 +4,7 @@ param(
 
     [string]$SshKey = "",
 
-    [string]$Rid = "linux-x64",
+    [string]$Rid = "",
 
     [string]$Configuration = "Release",
 
@@ -27,7 +27,7 @@ if ($WebOnly -and $BackendOnly) {
     throw "-WebOnly and -BackendOnly are mutually exclusive."
 }
 
-if (($HostName -match "(^|@)(192\.168\.1\.173|omicrontheta)(:|$)") -and $Rid -ne "linux-x64") {
+if (($HostName -match "(^|@)(192\.168\.1\.173|omicrontheta)(:|$)") -and $Rid -and $Rid -ne "linux-x64") {
     throw "Refusing to deploy RID '$Rid' to OT ($HostName). OT is x86_64; use -Rid linux-x64."
 }
 
@@ -81,6 +81,16 @@ if (-not $BackendOnly) {
 }
 
 $sshArgs = Get-SshArgs
+
+if (-not $Rid) {
+    $remoteMachine = (ssh @sshArgs $HostName "uname -m").Trim()
+    $Rid = switch -Regex ($remoteMachine) {
+        "^(aarch64|arm64)$" { "linux-arm64"; break }
+        "^(x86_64|amd64)$" { "linux-x64"; break }
+        default { throw "Unable to infer .NET RID from remote architecture '$remoteMachine'. Pass -Rid explicitly." }
+    }
+    Write-Host "Inferred RID '$Rid' from remote architecture '$remoteMachine'."
+}
 
 if ($WebOnly) {
     if (Test-Path $webTarPath) {
