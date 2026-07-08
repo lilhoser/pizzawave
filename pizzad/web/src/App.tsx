@@ -161,6 +161,7 @@ function App() {
   const lastDashboardRefreshRef = useRef(0);
   const lastSetupStatusRefreshAtRef = useRef(0);
   const setupStatusRef = useRef<SetupStatus | null>(null);
+  const setupWaterfallActiveRef = useRef(false);
   const playedAudioRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<Set<HTMLAudioElement>>(new Set());
   const knownIncidentIdsRef = useRef<Set<number>>(new Set());
@@ -273,6 +274,10 @@ function App() {
   }
 
   const refreshStatusData = useCallback(async () => {
+    if (pageRef.current === "setup" && setupWaterfallActiveRef.current) {
+      setStatus("Setup RF");
+      return;
+    }
     let setup = setupStatusRef.current;
     const now = Date.now();
     const shouldRefreshSetupStatus =
@@ -323,6 +328,8 @@ function App() {
   }, [rangeHours]);
 
   const refreshVisiblePage = useCallback(async () => {
+    if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
+      return;
     if (page === "dashboard") {
       const nextDashboard = await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`);
       setDashboard(nextDashboard);
@@ -452,6 +459,8 @@ function App() {
     let statusTimer = 0;
     let pageTimer = 0;
     const scheduleStatus = (delayMs: number) => {
+      if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
+        return;
       window.clearTimeout(statusTimer);
       const elapsed = Date.now() - lastStatusRefreshAtRef.current;
       delayMs = Math.max(delayMs, elapsed >= 5_000 ? 0 : 5_000 - elapsed);
@@ -460,6 +469,8 @@ function App() {
       }, delayMs);
     };
     const schedulePage = (delayMs: number) => {
+      if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
+        return;
       window.clearTimeout(pageTimer);
       const minIntervalMs = pageRef.current === "dashboard" ? 30_000 : 5_000;
       const elapsed = Date.now() - lastPageRefreshAtRef.current;
@@ -814,6 +825,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           }}
         />}
         {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={value => {
+          setupWaterfallActiveRef.current = value.toLowerCase().includes("waterfall");
           setSetupTrOperation(value);
           if (!value)
             void refreshStatusRef.current();
@@ -5667,6 +5679,8 @@ function WaterfallStep({
   const ccSignalHistoryRef = useRef<Map<string, WaterfallCcSignalTrack>>(new Map());
   const visiblePeaksRef = useRef<PositionedSpectrumPeak[]>([]);
   const lastFrameRef = useRef("");
+  const lastWaterfallStatusUiAtRef = useRef(0);
+  const lastWaterfallTableUiAtRef = useRef(0);
   const hasGoodWaterfallFrameRef = useRef(false);
   const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
   const sampleRateHz = Math.round(Number(sampleRateMhz) * 1_000_000);
@@ -5768,6 +5782,8 @@ function WaterfallStep({
     spectrumScaleRef.current = null;
     waterfallScaleRef.current = null;
     spectrumAxisRef.current = null;
+    lastWaterfallStatusUiAtRef.current = 0;
+    lastWaterfallTableUiAtRef.current = 0;
     setOtherDetectedCcRows([]);
     setSpectrumHover(null);
     setCcSignalRows([]);
@@ -5836,8 +5852,12 @@ function WaterfallStep({
       const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
       const nextOtherDetectedCcRows = updateVisibleOtherDetectedCcRows(otherDetectedCcHistoryRef.current, positionedPeaks, systems, controlChannelOptions);
       visiblePeaksRef.current = positionedPeaks;
-      setCcSignalRows(nextCcSignalRows);
-      setOtherDetectedCcRows(nextOtherDetectedCcRows);
+      const now = Date.now();
+      if (now - lastWaterfallTableUiAtRef.current >= 750) {
+        lastWaterfallTableUiAtRef.current = now;
+        setCcSignalRows(nextCcSignalRows);
+        setOtherDetectedCcRows(nextOtherDetectedCcRows);
+      }
       drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
         controlChannelsHz: controlChannelOptions,
         showControlChannels: showControlChannelLines,
@@ -5887,7 +5907,11 @@ function WaterfallStep({
         const next = await api.request<RfSurveyWaterfallStatus>(`${apiBase}/${encodeURIComponent(surveyId)}/waterfall`);
         if (!stopped) {
           scheduleWaterfallPaint(next);
-          setStatus(next);
+          const now = Date.now();
+          if (!next.active || now - lastWaterfallStatusUiAtRef.current >= 500) {
+            lastWaterfallStatusUiAtRef.current = now;
+            setStatus(next);
+          }
           if (shouldShowWaterfallMessage(next.message, next))
             setMessage(next.message);
         }
@@ -5896,7 +5920,7 @@ function WaterfallStep({
           setMessage(error instanceof Error ? error.message : "Waterfall status refresh failed.");
       }
     }
-    const timer = window.setInterval(() => void poll(), 500);
+    const timer = window.setInterval(() => void poll(), 160);
     return () => {
       stopped = true;
       window.clearInterval(timer);
@@ -5927,7 +5951,7 @@ function WaterfallStep({
           frequencyHz,
           sampleRateHz,
           gain,
-          binCount: 4096,
+          binCount: 2048,
           captureMilliseconds: 60,
           refreshMilliseconds: 120
         })
@@ -6046,7 +6070,7 @@ function WaterfallStep({
               frequencyHz,
               sampleRateHz,
               gain,
-              binCount: 4096,
+              binCount: 2048,
               captureMilliseconds: 60,
               refreshMilliseconds: 120
             })
@@ -6253,8 +6277,8 @@ function WaterfallStep({
         <option value="70">70 dB</option>
       </select></label>
       <label className="rf-waterfall-check"><input type="checkbox" disabled={controlsDisabled} checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
-      <button className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
-      <button disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
+      <button type="button" className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
+      <button type="button" disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
       <button type="button" className="icon-button" disabled={controlsDisabled || !frame} aria-label="Download waterfall screen grab" title="Download waterfall screen grab" onClick={downloadWaterfallReport}><Camera size={16} aria-hidden="true" /></button>
     </div>
     {locked && <div className="setup-note">Run SDR Inventory first.</div>}
