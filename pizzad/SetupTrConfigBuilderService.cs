@@ -30,7 +30,7 @@ public sealed partial class SetupTrConfigBuilderService
 
         var html = await LoadHtmlAsync(new SetupTrConfigDraftRequest(RadioReferenceSid: request.RadioReferenceSid, HtmlText: request.HtmlText), ct);
         var plain = HtmlToText(html);
-        var systemName = ExtractTitle(plain, request.RadioReferenceSid);
+        var systemName = ExtractTitle(html, request.RadioReferenceSid);
         var siteNames = InferSiteRows(plain);
         if (siteNames.Count == 0)
             siteNames = InferSiteNames(plain);
@@ -318,7 +318,7 @@ public sealed partial class SetupTrConfigBuilderService
     private static IEnumerable<SiteParseResult> ParseSites(string html, string? sid, IReadOnlyList<string> requestedSites)
     {
         var plain = HtmlToText(html);
-        var systemName = ExtractTitle(plain, sid);
+        var systemName = ExtractTitle(html, sid);
         if (!FrequencyRegex().IsMatch(plain))
             yield break;
 
@@ -723,12 +723,23 @@ public sealed partial class SetupTrConfigBuilderService
         return Regex.Replace(text, "\\s+", " ").Trim();
     }
 
-    private static string ExtractTitle(string plain, string? sid)
+    private static string ExtractTitle(string html, string? sid)
     {
-        if (!string.IsNullOrWhiteSpace(sid))
-            return $"RadioReference SID {sid.Trim()}";
-        var title = plain.Split("System", StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
-        return string.IsNullOrWhiteSpace(title) ? "Trunk Recorder System" : title[..Math.Min(title.Length, 60)];
+        var match = Regex.Match(html, "<title[^>]*>(?<title>.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (match.Success)
+        {
+            var title = WebUtility.HtmlDecode(match.Groups["title"].Value);
+            title = Regex.Replace(title, @"\s+", " ").Trim();
+            var marker = title.IndexOf(" Trunking System", StringComparison.OrdinalIgnoreCase);
+            if (marker > 0)
+                return title[..marker].Trim();
+            if (!string.IsNullOrWhiteSpace(title))
+                return title[..Math.Min(title.Length, 80)];
+        }
+
+        return !string.IsNullOrWhiteSpace(sid)
+            ? $"RadioReference SID {sid.Trim()}"
+            : "Trunk Recorder System";
     }
 
     private static string ShortName(string value)

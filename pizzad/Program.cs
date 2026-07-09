@@ -549,7 +549,7 @@ app.MapPost("/api/v1/setup/tr-config/draft", async (SetupTrConfigDraftRequest re
 
 app.MapPost("/api/v1/setup/tr-config/sites", async (SetupTrConfigSitesRequest request, SetupTrConfigBuilderService builder, HttpContext context, AuthService authService) =>
 {
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     try
     {
         return Results.Ok(await builder.ListSitesAsync(request, context.RequestAborted));
