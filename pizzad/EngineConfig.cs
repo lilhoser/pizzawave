@@ -246,7 +246,9 @@ public sealed class EngineConfig
             if (area.Aliases.Count == 0)
                 area.Aliases.Add(area.SystemShortName);
         }
-        Setup.CurrentStep = string.IsNullOrWhiteSpace(Setup.CurrentStep) ? "stack" : Setup.CurrentStep.Trim();
+        Setup.CurrentStep = string.IsNullOrWhiteSpace(Setup.CurrentStep) ? "tr" : Setup.CurrentStep.Trim();
+        if (Setup.CurrentStep == "stack")
+            Setup.CurrentStep = "tr";
     }
 
     public static JsonSerializerOptions JsonOptions() => new()
@@ -491,7 +493,7 @@ public sealed class SetupConfig
     public bool Completed { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     public int WizardVersion { get; set; } = 1;
-    public string CurrentStep { get; set; } = "stack";
+    public string CurrentStep { get; set; } = "tr";
     public string InstallMode { get; set; } = "reuseExistingTr";
     public string TrConfigMode { get; set; } = "radioReference";
     public string RadioReferenceSid { get; set; } = string.Empty;

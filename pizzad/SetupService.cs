@@ -229,7 +229,7 @@ public sealed class SetupService
         section = section.Trim().ToLowerInvariant();
         var result = section switch
         {
-            "tr" => ValidateTr(),
+            "tr" => await ValidateTrPrerequisiteAsync(ct),
             "talkgroups" => ValidateTalkgroups(),
             "callstream" => ValidateCallstream(),
             "transcription" => await ValidateTranscriptionAsync(ct),
@@ -249,7 +249,7 @@ public sealed class SetupService
 
     public async Task<SetupValidationResult> ValidateRequiredAsync(CancellationToken ct)
     {
-        var required = new[] { "tr", "talkgroups", "callstream", "transcription", "locations", "health" };
+        var required = new[] { "tr" };
         var failures = new List<string>();
         foreach (var section in required)
         {
@@ -258,7 +258,7 @@ public sealed class SetupService
                 failures.Add($"{section}: {result.Message}");
         }
         return failures.Count == 0
-            ? new SetupValidationResult(true, "All required setup sections passed after restart.")
+            ? new SetupValidationResult(true, "Required first-run prerequisite checks passed.")
             : new SetupValidationResult(false, "Required setup validation failed: " + string.Join("; ", failures));
     }
 
@@ -292,7 +292,7 @@ public sealed class SetupService
     {
         ReconcileMonitoredAreasWithTrSystems();
         _config.Setup.TrDetected = JsonSerializer.Serialize(detection).Contains("\"found\":true", StringComparison.OrdinalIgnoreCase);
-        _config.Setup.TrConfigured = ValidateTr().Ok;
+        _config.Setup.TrConfigured = ValidateTrConfig().Ok;
         _config.Setup.TalkgroupsValidated = ValidateTalkgroups().Ok;
         _config.Setup.CallstreamValidated = ValidateCallstream().Ok;
         _config.Setup.MonitoredAreasValidated = ValidateLocations().Ok;
@@ -301,20 +301,21 @@ public sealed class SetupService
 
     private IReadOnlyList<SetupCheckDto> BuildChecks() =>
     [
-        new("tr", "Trunk Recorder detected/configured", true, _config.Setup.TrDetected && _config.Setup.TrConfigured, "TR must be installed or detected and config must validate."),
-        new("talkgroups", "Talkgroup CSV valid", true, _config.Setup.TalkgroupsValidated, "A valid talkgroup CSV is required."),
-        new("callstream", "callstream configured", true, _config.Setup.CallstreamValidated, "TR config must load callstream and target pizzad's localhost listener."),
-        new("transcription", "Transcription provider tested", true, _config.Setup.TranscriptionValidated, "A transcription provider must pass a test."),
-        new("locations", "Monitored areas configured", true, _config.Setup.MonitoredAreasValidated, "Each TR system needs a monitored geographic area."),
-        new("health", "TR health access validated", true, _config.Setup.HealthValidated, "pizzad must be able to inspect TR config/logs."),
-        new("ai-insights", "AI insights skipped or tested", false, _config.Setup.AiInsightsSkippedOrValidated, "Optional."),
-        new("embeddings", "Vector search/Qdrant skipped or tested", false, _config.Setup.EmbeddingsSkippedOrValidated, "Optional, but recommended when AI incidents are enabled."),
-        new("alerts", "Alerts skipped or tested", false, _config.Setup.AlertsSkippedOrValidated, "Optional."),
-        new("diagnostic-tools", "Optional RF diagnostic tools skipped or installed", false, _config.Setup.DiagnosticToolsSkippedOrInstalled, "Optional. Installs OP25/P25 and SDR diagnostics used by Setup RF validation."),
-        new("calibration", "Setup RF validation handoff acknowledged", false, _config.Setup.CalibrationSkippedOrCompleted, "Optional. First-run hands RF validation to Setup.")
+        new("tr", "Trunk Recorder installed or reusable", true, _config.Setup.TrDetected, "First-run only needs a trunk-recorder binary, service, or reusable config to continue."),
+        new("lm-link", "LM Link prepared", false, true, "Optional. AI Insights can be configured later from Settings."),
+        new("qdrant", "Qdrant prepared", false, true, "Optional. Embeddings can be configured later from Settings.")
     ];
 
-    private SetupValidationResult ValidateTr()
+    private async Task<SetupValidationResult> ValidateTrPrerequisiteAsync(CancellationToken ct)
+    {
+        var detection = await DetectTrAsync(ct);
+        RefreshChecksFromDisk(detection);
+        return _config.Setup.TrDetected
+            ? new SetupValidationResult(true, "Trunk Recorder prerequisite is available.", detection)
+            : new SetupValidationResult(false, "Trunk Recorder was not detected. Reuse an existing install or build/install TR before finishing first-run.", detection);
+    }
+
+    private SetupValidationResult ValidateTrConfig()
     {
         var result = _trConfig.Validate();
         var json = JsonSerializer.Serialize(result);
@@ -381,7 +382,7 @@ public sealed class SetupService
 
     private SetupValidationResult ValidateCallstream()
     {
-        var tr = ValidateTr();
+        var tr = ValidateTrConfig();
         if (!tr.Ok)
             return tr;
         var json = JsonSerializer.Serialize(tr.Detail);

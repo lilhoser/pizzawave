@@ -11069,6 +11069,13 @@ function writeSetupWizardDraft(status: SetupStatus, patch: Record<string, any>) 
   }
 }
 
+function firstRunStepId(id?: string) {
+  const value = String(id || "").trim();
+  if (!value || value === "stack")
+    return "tr";
+  return ["tr", "lm-link", "qdrant", "finish"].includes(value) ? value : "tr";
+}
+
 function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; reload: () => Promise<void>; onComplete?: () => void }) {
   const [setupWizardDraft] = useState(() => readSetupWizardDraft(status));
   const [draft, setDraft] = useState<any>(() => setupDraftFromStatus(status));
@@ -11091,7 +11098,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   const [trDraft, setTrDraft] = useState<SetupTrConfigDraft | null>(null);
   const [trSourcePlan, setTrSourcePlan] = useState<SetupTrConfigSourcePlan | null>(null);
   const [trSourcePlanLoading, setTrSourcePlanLoading] = useState(false);
-  const [message, setMessage] = useState("Complete the required sections to unlock normal PizzaWave operation.");
+  const [message, setMessage] = useState("Complete the first-run prerequisites, then PizzaWave will open Site Setup for monitoring configuration.");
   const [busy, setBusy] = useState("");
   const [artifactReport, setArtifactReport] = useState<SetupArtifactReport | null>(null);
   const [setupJob, setSetupJob] = useState<Job | null>(null);
@@ -11103,8 +11110,8 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   const [aiModels, setAiModels] = useState<string[]>([]);
   const [modelBusy, setModelBusy] = useState("");
   const [restartVerified, setRestartVerified] = useState(status.completed);
-  const [wizardStep, setWizardStep] = useState(status.currentStep || "stack");
-  const [expandedSetupStep, setExpandedSetupStep] = useState(status.currentStep || "stack");
+  const [wizardStep, setWizardStep] = useState(firstRunStepId(status.currentStep));
+  const [expandedSetupStep, setExpandedSetupStep] = useState(firstRunStepId(status.currentStep));
   const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
   const [trInstallMode, setTrInstallMode] = useState((status.values?.setup?.installMode === "freshTr" ? "freshTr" : "reuseExistingTr") as "reuseExistingTr" | "freshTr");
   const [trConfigMode, setTrConfigMode] = useState((status.values?.setup?.trConfigMode === "pasteJson" ? "pasteJson" : "radioReference") as "radioReference" | "pasteJson");
@@ -11136,13 +11143,13 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
       setDraft(setupDraftFromStatus(status));
     setRestartVerified(status.completed);
     if (!setupJobRunning)
-      setWizardStep(current => current || status.currentStep || "stack");
+      setWizardStep(current => firstRunStepId(current || status.currentStep));
     setTrInstallMode(status.values?.setup?.installMode === "freshTr" ? "freshTr" : "reuseExistingTr");
     setTrConfigMode(status.values?.setup?.trConfigMode === "pasteJson" ? "pasteJson" : "radioReference");
   }, [status, setupJobRunning]);
   useEffect(() => {
     if (!setupJobRunning && status.currentStep)
-      setExpandedSetupStep(status.currentStep);
+      setExpandedSetupStep(firstRunStepId(status.currentStep));
   }, [status.currentStep, setupJobRunning]);
   useEffect(() => {
     if (setupJob)
@@ -11414,7 +11421,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   }
 
   function effectiveSetupStepId(id = wizardStep) {
-    return status.values?.setup?.restoreAppliedAtUtc && id === "stack" ? "tr" : id;
+    return firstRunStepId(id);
   }
 
   async function validateSetupSection(section: string, saveFirst = true) {
@@ -11607,14 +11614,16 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     try {
       if (requiredOpen.length > 0)
         throw new Error("Complete the required setup checks before finishing.");
-      await applyRestartAndValidateInline();
+      await saveSetupValues();
+      const validation = await api.request<SetupValidationResult>("/api/v1/setup/validate-required", { method: "POST" });
+      if (!validation.ok)
+        throw new Error(validation.message);
       const completed = await api.request<SetupStatus>("/api/v1/setup/complete", { method: "POST" });
       setMessage("Setup complete. Opening Site Setup...");
       await reload();
       onComplete?.();
       return completed;
     } catch (error) {
-      setRestartVerified(false);
       setMessage(error instanceof Error ? error.message : "Setup could not be completed.");
     } finally {
       setBusy("");
@@ -12138,29 +12147,13 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   }, [postRestoreValidation, wizardStep]);
   const checkStepMap: Record<string, string> = {
     tr: "tr",
-    callstream: "tr",
-    health: "tr",
-    talkgroups: "talkgroups",
-    transcription: "transcription",
-    locations: "areas",
-    "ai-insights": "ai",
-    embeddings: "embeddings",
-    alerts: "alerts",
-    "diagnostic-tools": "radio",
-    calibration: "radio"
+    "lm-link": "lm-link",
+    qdrant: "qdrant"
   };
   const baseSetupSteps = [
-    ...(status.currentStep === "restore" || status.values?.setup?.pendingRestorePath ? [{ id: "restore", title: "Restore" }] : []),
-    ...(migrationMode ? [{ id: "migration", title: "Migration" }] : []),
-    ...(!postRestoreValidation && !migrationMode ? [{ id: "stack", title: "Stack" }] : []),
-    { id: "tr", title: "TR Config" },
-    { id: "talkgroups", title: "Talkgroups" },
-    { id: "transcription", title: "Transcription" },
-    { id: "areas", title: "Areas" },
-    { id: "ai", title: "AI Insights" },
-    { id: "embeddings", title: "Vector DB" },
-    { id: "alerts", title: "Alerts" },
-    { id: "radio", title: "RF Diagnostics" },
+    { id: "tr", title: "Trunk Recorder" },
+    { id: "lm-link", title: "LM Link" },
+    { id: "qdrant", title: "Qdrant" },
     { id: "finish", title: "Finish" }
   ];
   const setupSteps = baseSetupSteps.map(step => {
@@ -12168,32 +12161,19 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     const requiredMissing = stepChecks.some(check => check.required && !check.ok);
     let ok = stepChecks.length > 0 && stepChecks.every(check => check.ok);
     let blocked = requiredMissing;
-    if (step.id === "stack") {
-      ok = Boolean(status.detection?.found) || trInstallMode === "freshTr";
-      blocked = !ok;
-    }
-    if (step.id === "restore") {
-      ok = restorePreview?.checks.every(check => check.ok) ?? false;
-      blocked = !ok;
-    }
-    if (step.id === "migration") {
-      ok = migrationResetApplied;
-      blocked = !ok;
-    }
-    if (step.id === "radio") {
-      ok = ok && !calibrationJobRunning;
-    }
+    if (step.id === "tr")
+      ok = Boolean(status.detection?.found);
+    if (step.id === "lm-link")
+      ok = lmStudioInstalled;
+    if (step.id === "qdrant")
+      ok = qdrantInstalled;
     if (step.id === "finish") {
-      ok = requiredOpen.length === 0 && restartVerified && !setupJobRunning;
+      ok = requiredOpen.length === 0 && !setupJobRunning;
       blocked = requiredOpen.length > 0 || setupJobRunning;
     }
     return { ...step, checks: stepChecks, ok, blocked };
   });
-  const effectiveWizardStep = migrationMode && !setupSteps.some(step => step.id === wizardStep)
-    ? "migration"
-    : postRestoreValidation && wizardStep === "stack"
-      ? "tr"
-      : wizardStep;
+  const effectiveWizardStep = firstRunStepId(wizardStep);
   const stepIndex = Math.max(0, setupSteps.findIndex(step => step.id === effectiveWizardStep));
   const currentStep = setupSteps[stepIndex] ?? setupSteps[0];
 
@@ -12220,38 +12200,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
 
   async function nextStep() {
     const nextId = setupSteps[Math.min(setupSteps.length - 1, stepIndex + 1)].id;
-    if (currentStep.id === "migration" && !migrationResetApplied) {
-      if (await resetForNewSite())
-        goStep(nextId);
-      return;
-    }
-    if (currentStep.id === "tr" && trInstallMode === "freshTr" && trConfigStage === "sites") {
-      if (!trSiteList) {
-        setMessage("Fetch RadioReference sites before continuing.");
-        return;
-      }
-      if (selectedTrSites.length === 0) {
-        setMessage("Select at least one RadioReference site before continuing.");
-        return;
-      }
-      if (trSourcePlanLoading) {
-        setMessage("Wait for the source plan preview to finish, then continue.");
-        return;
-      }
-      if (!trSourcePlan) {
-        setMessage("Source plan preview is not ready yet. Check the selected sites and SDR detection, then try again.");
-        return;
-      }
-      const blockers = trSourcePlanBlockingWarnings(trSourcePlan);
-      if (blockers.length > 0) {
-        setMessage(blockers.join(" "));
-        return;
-      }
-      setTrConfigStage("sdr");
-      setSdrDetectionAttempted(false);
-      setMessage(trSourcePlan.warnings.length > 0 ? trSourcePlan.warnings.join(" ") : "Review detected SDRs and sample rate, then click Next to create the TR config.");
-      return;
-    }
     setBusy(`advance-${currentStep.id}`);
     try {
       await performCurrentStepWork();
@@ -12264,96 +12212,18 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   }
 
   function previousStep() {
-    if (currentStep.id === "tr" && trInstallMode === "freshTr" && trConfigStage === "sdr") {
-      setTrConfigStage("sites");
-      return;
-    }
     goStep(setupSteps[Math.max(0, stepIndex - 1)].id);
   }
 
   async function performCurrentStepWork() {
-    if (currentStep.id === "migration") {
-      if (!migrationResetApplied)
-        throw new Error("Confirm the migration reset before continuing, or cancel migration mode.");
-      return;
-    }
-
-    if (currentStep.id === "restore") {
-      await applyPendingRestore();
-      return;
-    }
-
-    if (currentStep.id === "stack") {
-      await saveSetupValues();
-      setMessage("Backing up existing TR files before continuing...");
-      await runSetupJobToCompletion("backup-existing-tr", true);
-      if (trInstallMode === "freshTr")
-        await loadArtifacts();
-      setMessage("TR backup complete. Review the job output below.");
-      return;
-    }
-
     if (currentStep.id === "tr") {
-      if (trInstallMode === "freshTr")
-        await draftAndSaveSelectedTrConfigInline();
       await validateSetupSection("tr");
-      await patchCallstreamInline();
-      await validateSetupSection("health");
       return;
     }
 
-    if (currentStep.id === "talkgroups") {
-      await validateSetupSection("talkgroups");
-      return;
-    }
-
-    if (currentStep.id === "transcription") {
-      await validateSetupSection("transcription");
-      return;
-    }
-
-    if (currentStep.id === "areas") {
-      await validateSetupSection("locations");
-      return;
-    }
-
-    if (currentStep.id === "ai") {
-      let modelWasSaved = false;
-      if (ai.enabled && !ai.openAiModel && ai.openAiBaseUrl)
-        modelWasSaved = Boolean(await loadAiModelsInline());
-      await validateSetupSection("ai-insights", !modelWasSaved);
-      return;
-    }
-
-    if (currentStep.id === "embeddings") {
-      await validateSetupSection("embeddings");
-      return;
-    }
-
-    if (currentStep.id === "alerts") {
-      await validateSetupSection("alerts");
-      return;
-    }
-
-    if (currentStep.id === "radio") {
-      const values: any = cloneSettings(draft);
-      normalizeSetupLocationNumbers(values);
-      values.setup = {
-        ...(values.setup ?? {}),
-        currentStep: effectiveSetupStepId(),
-        installMode: trInstallMode,
-        trConfigMode: trInstallMode === "freshTr" ? "radioReference" : trConfigMode,
-        radioReferenceSid: trDraftSid.trim() || talkgroupSid.trim() || values.setup?.radioReferenceSid || "",
-        diagnosticToolsSkippedOrInstalled: true,
-        calibrationSkippedOrCompleted: true,
-        radioSetupHandoff: true
-      };
-      if (installOptionalDiagnosticTools) {
-        await runSetupJobToCompletion("diagnostic-tools-prime", true, "radio");
-      }
-      const saved = await api.request<SetupStatus>("/api/v1/setup/save", { method: "POST", body: JSON.stringify({ values }) });
-      setupDraftDirty.current = false;
-      setDraft(setupDraftFromStatus(saved));
+    if (currentStep.id === "lm-link" || currentStep.id === "qdrant") {
+      await saveSetupValues();
+      setMessage(`${currentStep.title} choice saved. You can configure and validate the feature later from Settings.`);
     }
   }
 
@@ -12361,7 +12231,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     <div className="setup-hero">
       <div>
         <h1>PizzaWave Setup</h1>
-        <p>First-run setup walks through one decision at a time. Progress saves automatically as you move through the wizard.</p>
+        <p>First-run setup prepares the host software. Site, talkgroup, RF, AI, and embedding configuration continue in Setup and Settings after this wizard.</p>
       </div>
       {migrationMode && !migrationResetApplied && <button className="danger-button setup-cancel-migration" disabled={Boolean(busy) || setupJobRunning} onClick={() => void cancelMigration()}>
         {busy === "migration-cancel" ? "Canceling..." : "Cancel Migration"}
@@ -12394,7 +12264,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
                   : <div className="setup-note">{step.id === "stack"
                     ? "Choose whether to reuse the existing TR install or build a fresh one."
                     : step.id === "finish"
-                      ? (requiredOpen.length > 0 ? `${requiredOpen.length} required check(s) still need validation.` : restartVerified ? "Restart verification has passed." : "Finish applies settings and verifies the restart.")
+                      ? (requiredOpen.length > 0 ? `${requiredOpen.length} required prerequisite check(s) still need validation.` : "Finish opens Site Setup.")
                       : "This step has no validation checks yet."}</div>}
               </div>}
             </div>;
@@ -12402,25 +12272,28 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
         </div>
       </div>
       <div className="setup-step-panel">
-        {currentStep.id === "stack" && <SetupSection title="Stack" description="Choose whether this machine already has a working trunk-recorder install or should be built fresh.">
-          <SettingInput label="PizzaWave name" description="Shown under the PizzaWave logo." value={branding.stackName} onChange={v => update(["branding", "stackName"], v)} />
+        {currentStep.id === "tr" && <SetupSection title="Trunk Recorder" description="Install trunk-recorder or confirm that an existing install can be reused. Monitoring sites, talkgroups, RF tuning, and generated TR config are handled later in Site Setup.">
           <div className="setup-choice-grid">
-            <ChoiceCard active={trInstallMode === "reuseExistingTr"} title="Reuse existing TR" description="Best for an existing Raspberry Pi rig. PizzaWave will validate the config, patch callstream, and leave your working TR install in place." onClick={() => { setTrInstallMode("reuseExistingTr"); update(["setup", "installMode"], "reuseExistingTr"); }} />
-            <ChoiceCard active={trInstallMode === "freshTr"} title="Fresh TR setup" description="Build trunk-recorder from source. Existing TR files are backed up automatically; blocking artifacts are listed before you proceed." onClick={() => { setTrInstallMode("freshTr"); update(["setup", "installMode"], "freshTr"); }} />
+            <ChoiceCard active={trInstallMode === "reuseExistingTr"} title="Reuse existing TR" description="Use a trunk-recorder install already present on this system." onClick={() => { setTrInstallMode("reuseExistingTr"); update(["setup", "installMode"], "reuseExistingTr"); }} />
+            <ChoiceCard active={trInstallMode === "freshTr"} title="Build TR" description="Build and install trunk-recorder from the bundled setup helper." onClick={() => { setTrInstallMode("freshTr"); update(["setup", "installMode"], "freshTr"); }} />
           </div>
           <div className="setup-detection-card">
-            <strong>{status.detection?.found ? "Existing trunk-recorder detected" : "No working trunk-recorder install detected yet"}</strong>
-            <small>Detection checks the configured TR config path and systemd service state; RF decoding is validated later.</small>
-            <small>{status.detection?.configExists ? `Config: ${status.detection.configPath}` : "Config file was not found at the configured path."}</small>
+            <strong>{status.detection?.found ? "Trunk Recorder is available" : "Trunk Recorder not detected yet"}</strong>
+            <small>Detection checks for the trunk-recorder binary, service, or a reusable configured TR path.</small>
+            <small>{status.detection?.binaryPath ? `Binary: ${status.detection.binaryPath}` : "Binary was not found on PATH."}</small>
+            <small>{status.detection?.configExists ? `Reusable config: ${status.detection.configPath}` : `Configured path: ${status.detection?.configPath ?? tr.configPath ?? "/etc/trunk-recorder/config.json"}`}</small>
             <small>{status.detection?.serviceActive ? "TR service is currently running." : "TR service is not active."}</small>
           </div>
           {trInstallMode === "freshTr" && <>
-            <div className="setup-note">Fresh setup will back up existing TR config/service files automatically before building. PizzaWave will not delete artifacts for you; if something blocks install, it will show what you need to remove.</div>
+            <div className="setup-note">The source build can install OS packages and service files. It does not create the final monitoring configuration; Site Setup handles that after first-run.</div>
             {artifactReport && <ArtifactReport report={artifactReport} />}
             {artifactReport?.hasBlockingArtifacts && <SettingCheckbox label="I reviewed the existing artifacts and want to source-build anyway" description="Use this only after removing or intentionally keeping the listed files." checked={confirmFreshBuild} onChange={setConfirmFreshBuild} />}
             <button disabled={Boolean(busy) || (artifactReport?.hasBlockingArtifacts && !confirmFreshBuild)} onClick={() => void startSetupJob("tr-source-build", confirmFreshBuild)}>{busy === "tr-source-build" ? "Building..." : "Build trunk-recorder from source"}</button>
           </>}
-          {trInstallMode === "reuseExistingTr" && <div className="setup-note">When you click Next, PizzaWave backs up TR files automatically and leaves trunk-recorder itself in place.</div>}
+          <div className="setup-button-row">
+            <button disabled={Boolean(busy)} onClick={() => void detect()}>{busy === "detect" ? "Detecting..." : "Detect TR"}</button>
+            <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void validate("tr")}>{busy === "tr" ? "Checking..." : "Check prerequisite"}</button>
+          </div>
         </SetupSection>}
 
         {currentStep.id === "migration" && <SetupSection title="Migration" description="Choose what to back up and which reusable settings to seed into the new site. Site data is never migrated.">
@@ -12464,7 +12337,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           </div>
         </SetupSection>}
 
-        {currentStep.id === "tr" && <SetupSection title="TR Config" description={trInstallMode === "reuseExistingTr" ? "Using the existing TR config." : trConfigStage === "sites" ? "Fetch RadioReference sites, then select one or more sites to monitor." : "Review detected SDRs and sample rate before PizzaWave creates the TR config."}>
+        {currentStep.id === "tr-config" && <SetupSection title="TR Config" description={trInstallMode === "reuseExistingTr" ? "Using the existing TR config." : trConfigStage === "sites" ? "Fetch RadioReference sites, then select one or more sites to monitor." : "Review detected SDRs and sample rate before PizzaWave creates the TR config."}>
           <div className="settings-subsection">
             <h4>Callstream</h4>
             <SettingInput label="Listener bind" description="PizzaWave callstream listener address. Use 127.0.0.1 when trunk-recorder runs on this Pi." value={ingest.callstreamBind ?? "127.0.0.1"} onChange={v => update(["ingest", "callstreamBind"], v)} />
@@ -12597,6 +12470,19 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           <div className="setup-note">PizzaWave fills exact Census TIGERweb matches automatically. If more than one boundary matches, select the intended candidate before clicking Next.</div>
         </SetupSection>}
 
+        {currentStep.id === "lm-link" && <SetupSection title="LM Link" description="Optional host support for AI Insights. Configure models and endpoints later from Settings.">
+          {lmStudioInstalled ? <div className="setup-detection-card">
+            <strong>{lmStudioDetection?.apiReachable ? "LM Studio API is reachable" : lmStudioDetection?.serviceActive ? "LM Link support is present" : "LM Studio tooling is installed"}</strong>
+            <small>Detection looks for LM Studio CLI/service support and probes the configured OpenAI-compatible API URL when available.</small>
+            <small>{lmStudioDetection?.serviceEnabled ? `${lmStudioDetection.service} is enabled for autostart.` : "LM Studio autostart service is not enabled."}</small>
+            <small>{lmStudioDetection?.binaryPath ? `CLI: ${lmStudioDetection.binaryPath}` : "LM Studio CLI path was not detected."}</small>
+            {lmStudioDetection?.apiBaseUrl && <small>{lmStudioDetection.apiReachable ? `API reachable at ${lmStudioDetection.apiBaseUrl}.` : `API not reachable at ${lmStudioDetection.apiBaseUrl}.`}</small>}
+          </div> : <>
+            <div className="setup-note">Prepare LM Link only if this system should expose or use LM Studio-compatible AI support. This does not enable AI Insights by itself.</div>
+            <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("lmstudio-prime")}>{busy === "lmstudio-prime" || (setupJobContext === "lm-link" && setupJobRunning) ? "Preparing..." : "Prepare LM Link support"}</button>
+          </>}
+        </SetupSection>}
+
         {currentStep.id === "ai" && <SetupSection title="AI Insights / LM Link" description="Optional. Required for summaries, incidents, evidence verification, and LLM troubleshooting suggestions. Use Remote/LM Link when the chat model should run on another host such as Paxan.">
           {lmStudioInstalled ? <div className="setup-detection-card">
             <strong>{lmStudioDetection?.apiReachable ? "LM Studio API is reachable" : lmStudioDetection?.serviceActive ? "LM Studio service is running" : "LM Studio is installed"}</strong>
@@ -12615,6 +12501,18 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
             ? <SettingSelect label="Insights model" description="Use the LM Studio model id, not a loaded runtime alias." value={ai.openAiModel} options={aiModels} onChange={v => update(["aiInsights", "openAiModel"], v)} />
             : <SettingInput label="Insights model" description="Chat model id for summaries/incidents." value={ai.openAiModel} onChange={v => update(["aiInsights", "openAiModel"], v)} />}
           <div className="setup-note">{ai.enabled ? "Click Next to load available models when needed and test AI insights." : "AI insights are disabled. Click Next to mark this optional step skipped."}</div>
+        </SetupSection>}
+
+        {currentStep.id === "qdrant" && <SetupSection title="Qdrant" description="Optional native vector database support. Configure embeddings later from Settings.">
+          {qdrantDetection && <div className="setup-detection-card">
+            <strong>{qdrantDetection.serviceActive ? "Qdrant service is running" : qdrantInstalled ? "Qdrant is installed" : "Qdrant not detected"}</strong>
+            <small>Detection checks for the Qdrant binary, systemd service state, and configured storage path.</small>
+            <small>{qdrantDetection.serviceEnabled ? `${qdrantDetection.service} is enabled for autostart.` : "Qdrant autostart service is not enabled."}</small>
+            <small>{qdrantDetection.binaryPath ? `Binary: ${qdrantDetection.binaryPath}` : "qdrant binary was not found on PATH."}</small>
+            <small>{qdrantDetection.storageExists ? `Storage: ${qdrantDetection.storagePath}` : `Storage will be created at ${embeddings.qdrantStoragePath ?? "/var/lib/pizzawave/qdrant"}`}</small>
+          </div>}
+          {!qdrantInstalled && <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("qdrant-prime")}>{busy === "qdrant-prime" || (setupJobContext === "qdrant" && setupJobRunning) ? "Installing..." : "Install native Qdrant"}</button>}
+          {qdrantInstalled && <div className="setup-note">Qdrant support is present. Embedding enablement, model, endpoint, collection, and vector size are configured in Settings.</div>}
         </SetupSection>}
 
         {currentStep.id === "embeddings" && <SetupSection title="Vector DB / Qdrant" description="Optional but recommended for AI incidents. Qdrant stores vectors locally on this rig; embedding inference may run locally or remotely.">
@@ -12672,7 +12570,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           <div className="setup-note">Click Next to save this tooling choice. Finish will restart/validate PizzaWave and open Setup.</div>
         </SetupSection>}
 
-        {currentStep.id === "finish" && <SetupSection title="Finish" description="This applies the saved settings, restarts pizzad, re-validates the required checks, then exits setup mode so normal ingest and processing can start.">
+        {currentStep.id === "finish" && <SetupSection title="Finish" description="This completes first-run prerequisites and opens Site Setup for monitoring configuration.">
           <SetupReview status={status} requiredOpen={requiredOpen} restartVerified={restartVerified} />
           <div className="setup-button-row"><button disabled={Boolean(busy) || setupJobRunning || requiredOpen.length > 0} onClick={() => void finishSetup()}>{busy === "finish-setup" ? "Finishing..." : "Finish setup"}</button></div>
         </SetupSection>}
@@ -12841,19 +12739,17 @@ function GuidedCalibrationPlan({
 function SetupReview({ status, requiredOpen, restartVerified }: { status: SetupStatus; requiredOpen: SetupStatus["checks"]; restartVerified: boolean }) {
   const values: any = status.values ?? {};
   const tr = values.trunkRecorder ?? {};
-  const transcription = values.transcription ?? {};
-  const ai = values.aiInsights ?? {};
+  const lmStudio = (status.detection as any)?.lmStudio;
+  const qdrant = (status.detection as any)?.qdrant;
   return <div className="setup-review">
-    <h4>Review Before Complete</h4>
-    <div><span>TR config</span><code>{tr.configPath ?? "/etc/trunk-recorder/config.json"}</code></div>
-    <div><span>Talkgroups</span><code>{tr.talkgroupsPath ?? "/etc/trunk-recorder/talkgroups.csv"}</code></div>
-    <div><span>Transcription</span><code>{transcription.provider ?? "none"}</code></div>
-    <div><span>AI insights</span><code>{ai.enabled ? ai.openAiModel || "enabled" : "disabled"}</code></div>
+    <h4>First-Run Prerequisites</h4>
+    <div><span>Trunk Recorder</span><code>{status.detection?.found ? "available" : "missing"}</code></div>
+    <div><span>TR config path</span><code>{tr.configPath ?? "/etc/trunk-recorder/config.json"}</code></div>
+    <div><span>LM Link</span><code>{lmStudio?.found || lmStudio?.serviceEnabled ? "present" : "optional"}</code></div>
+    <div><span>Qdrant</span><code>{qdrant?.found || qdrant?.serviceEnabled || qdrant?.storageExists ? "present" : "optional"}</code></div>
     {requiredOpen.length > 0
-      ? <small>{requiredOpen.length} required section{requiredOpen.length === 1 ? "" : "s"} still need validation.</small>
-      : restartVerified
-        ? <small>Restart verification passed. Completing setup enables normal operation.</small>
-        : <small>Run Apply & Restart before completing setup.</small>}
+      ? <small>{requiredOpen.length} required prerequisite{requiredOpen.length === 1 ? "" : "s"} still need validation.</small>
+      : <small>Completing first-run opens Site Setup for TR config, RF validation, talkgroups, and geolocation.</small>}
   </div>;
 }
 
