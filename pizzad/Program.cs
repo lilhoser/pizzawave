@@ -319,7 +319,27 @@ app.MapPost("/api/v1/setup/site/rf/{id}/waterfall/start", async (HttpContext con
     {
         var setup = await siteSetup.GetAsync(context.RequestAborted);
         var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
-        return Results.Ok(await surveys.StartWaterfallAsync(detail.Session.Id, request, context.RequestAborted));
+        var status = await surveys.StartWaterfallAsync(detail.Session.Id, request, context.RequestAborted);
+        await siteSetup.AddActivityAsync(new SiteSetupActivityRequest(
+            "rf",
+            "waterfall_started",
+            $"Waterfall started on source {status.SourceIndex} at {FormatFrequencyMhz(status.CenterHz)} MHz.",
+            JsonSerializer.SerializeToElement(new
+            {
+                surveyId = detail.Session.Id,
+                status.SourceIndex,
+                status.SdrType,
+                status.CenterHz,
+                status.SampleRate,
+                status.Gain,
+                status.BinCount,
+                status.TrWasActive,
+                status.TrStopOutput,
+                status.Message
+            }, EngineConfig.JsonOptions()),
+            "setup-waterfall"),
+            context.RequestAborted);
+        return Results.Ok(status);
     }
     catch (Exception ex)
     {
@@ -344,7 +364,29 @@ app.MapPost("/api/v1/setup/site/rf/{id}/waterfall/stop", async (HttpContext cont
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var setup = await siteSetup.GetAsync(context.RequestAborted);
     var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
-    return Results.Ok(await surveys.StopWaterfallAsync(detail.Session.Id, context.RequestAborted));
+    var status = await surveys.StopWaterfallAsync(detail.Session.Id, context.RequestAborted);
+    await siteSetup.AddActivityAsync(new SiteSetupActivityRequest(
+        "rf",
+        "waterfall_stopped",
+        $"Waterfall stopped for source {status.SourceIndex}.",
+        JsonSerializer.SerializeToElement(new
+        {
+            surveyId = detail.Session.Id,
+            status.SourceIndex,
+            status.SdrType,
+            status.CenterHz,
+            status.SampleRate,
+            status.Gain,
+            status.StartedAtUtc,
+            status.UpdatedAtUtc,
+            status.TrWasActive,
+            status.TrRestartOutput,
+            status.TrRestartError,
+            status.Message
+        }, EngineConfig.JsonOptions()),
+        "setup-waterfall"),
+        context.RequestAborted);
+    return Results.Ok(status);
 })
 .WithName("SiteSetupRfWaterfallStop")
 .WithOpenApi();
@@ -1739,5 +1781,8 @@ static string FindAdminHelper()
     var helper = candidates.FirstOrDefault(File.Exists);
     return helper ?? throw new InvalidOperationException("PizzaWave admin helper was not found.");
 }
+
+static string FormatFrequencyMhz(long hz) =>
+    hz > 0 ? (hz / 1_000_000.0).ToString("F6", CultureInfo.InvariantCulture) : "--";
 
 public partial class Program { }

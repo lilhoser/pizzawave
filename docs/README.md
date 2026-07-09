@@ -27,7 +27,7 @@ UI.
 
 - [Quickstart](quickstart.md): install, first-run prerequisites, Setup, and basic validation.
 - [Deployment](deployment.md): package flow, service operations, and updates.
-- [Backup and Restore](backup-restore.md): full-state backups and staged wizard restore.
+- [Backup and Restore](backup-restore.md): full-state backups and staged restore.
 - [Reset and Site Setup](reset-and-setup.md): clean data, reset site state, or return to first-run before rebuilding Setup.
 - [Building](building.md): local development, self-contained packages, and deploy helpers.
 - [Testing](testing.md): BVT and medium feature-test lanes.
@@ -40,7 +40,7 @@ UI.
 - [Operational Limits](operational-limits.md): queue pressure, AI limits, imports, and hardware notes.
 - [Insights Behavior](insights-behavior-matrix.md): AI summaries, incidents, and alerts.
 - [Config Examples](config-examples-explained.md): trunk-recorder/callstream examples.
-- [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by the wizard.
+- [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by Setup.
 - [Email Troubleshooting](email-smtp-troubleshooting.md): SMTP alert setup.
 - [Current Status](current-status.md): active development handoff notes.
 - [Open TODO](open-todo.md): working backlog.

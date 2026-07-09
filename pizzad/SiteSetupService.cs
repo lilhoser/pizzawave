@@ -58,9 +58,11 @@ public sealed class SiteSetupService
         next.LastAppliedConfigHash = _config.SiteSetup.LastAppliedConfigHash ?? string.Empty;
         next.LastAppliedSourceAssignmentSummary = _config.SiteSetup.LastAppliedSourceAssignmentSummary ?? string.Empty;
         next.LastAppliedRfPathSummary = _config.SiteSetup.LastAppliedRfPathSummary ?? string.Empty;
+        next.LastAppliedDesiredJson = _config.SiteSetup.LastAppliedDesiredJson ?? string.Empty;
 
         var changes = DescribeChanges(before, next);
         _config.SiteSetup = next;
+        _config.Locations.MonitoredAreas = CloneMonitoredAreas(next.MonitoredAreas);
         _config.Save();
 
         if (changes.Count > 0)
@@ -97,6 +99,7 @@ public sealed class SiteSetupService
         next.LastAppliedConfigHash = applied.ConfigHash;
         next.LastAppliedSourceAssignmentSummary = SourceAssignmentSummary(next.SourceAssignments);
         next.LastAppliedRfPathSummary = RfPathSummary(next.RfPath);
+        next.LastAppliedDesiredJson = SerializeAppliedDesiredSnapshot(next);
         _config.SiteSetup = next;
         _config.Save();
 
@@ -114,6 +117,31 @@ public sealed class SiteSetupService
     {
         var applied = await BuildAppliedConfigAsync(ct);
         var before = EffectiveDesired(applied);
+        if (TryReadAppliedDesiredSnapshot(before.LastAppliedDesiredJson, out var appliedDesiredSnapshot))
+        {
+            var restored = Normalize(appliedDesiredSnapshot);
+            restored.DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            restored.UpdatedAtUtc = DateTime.UtcNow;
+            restored.LastAppliedAtUtc = before.LastAppliedAtUtc;
+            restored.LastAppliedConfigHash = before.LastAppliedConfigHash;
+            restored.LastAppliedSourceAssignmentSummary = before.LastAppliedSourceAssignmentSummary;
+            restored.LastAppliedRfPathSummary = before.LastAppliedRfPathSummary;
+            restored.LastAppliedDesiredJson = before.LastAppliedDesiredJson;
+            _config.SiteSetup = restored;
+            _config.Locations.MonitoredAreas = CloneMonitoredAreas(restored.MonitoredAreas);
+            _config.Save();
+
+            var snapshotChanges = DescribeChanges(before, restored);
+            var snapshotDetails = request.Details.HasValue
+                ? request.Details.Value.GetRawText()
+                : JsonSerializer.Serialize(new { changes = snapshotChanges, before = ActivitySnapshot(before), after = ActivitySnapshot(restored), source = "last-applied-snapshot" }, EngineConfig.JsonOptions());
+            var snapshotSummary = string.IsNullOrWhiteSpace(request.Summary)
+                ? $"Discarded pending Site Setup changes and restored the last applied Setup snapshot{(snapshotChanges.Count > 0 ? $": {string.Join(", ", snapshotChanges.Take(4))}{(snapshotChanges.Count > 4 ? $" and {snapshotChanges.Count - 4} more" : "")}" : ".")}"
+                : request.Summary.Trim();
+            await AddActivityAsync("change", "pending_setup_discarded", snapshotSummary, snapshotDetails, request.Source, ct);
+            return await GetAsync(ct);
+        }
+
         var appliedSystems = await BuildAppliedSystemDefinitionsAsync(applied, before, ct);
         var appliedSources = applied.Sources
             .Select(source => new RfSurveySourceDto(
@@ -132,6 +160,7 @@ public sealed class SiteSetupService
             DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
             SiteLabel = before.SiteLabel,
             LocationNotes = before.LocationNotes,
+            MonitoredAreas = CloneMonitoredAreas(_config.Locations.MonitoredAreas),
             RadioReferenceSid = before.RadioReferenceSid,
             SystemShortNames = applied.SystemShortNames.ToList(),
             SourcePlanSystemShortNames = applied.SystemShortNames.ToList(),
@@ -146,7 +175,8 @@ public sealed class SiteSetupService
             LastAppliedAtUtc = before.LastAppliedAtUtc,
             LastAppliedConfigHash = applied.ConfigHash,
             LastAppliedSourceAssignmentSummary = SourceAssignmentSummary(sourceAssignments),
-            LastAppliedRfPathSummary = RfPathSummary(before.RfPath)
+            LastAppliedRfPathSummary = RfPathSummary(before.RfPath),
+            LastAppliedDesiredJson = before.LastAppliedDesiredJson
         });
 
         var changes = DescribeChanges(before, next);
@@ -189,7 +219,11 @@ public sealed class SiteSetupService
     {
         var configured = Normalize(_config.SiteSetup);
         if (configured.SystemShortNames.Count > 0 || configured.Systems.Count > 0 || configured.Sources.Count > 0)
+        {
+            if (configured.MonitoredAreas.Count == 0 && _config.Locations.MonitoredAreas.Count > 0)
+                configured.MonitoredAreas = CloneMonitoredAreas(_config.Locations.MonitoredAreas);
             return configured;
+        }
 
         var seededSystems = applied.SystemShortNames
             .Select(name => new RfSurveySystemDto(
@@ -201,6 +235,7 @@ public sealed class SiteSetupService
         configured.SystemShortNames = applied.SystemShortNames.ToList();
         configured.SourcePlanSystemShortNames = applied.SystemShortNames.ToList();
         configured.Systems = seededSystems;
+        configured.MonitoredAreas = CloneMonitoredAreas(_config.Locations.MonitoredAreas);
         configured.Sources = applied.Sources
             .Select(source => new RfSurveySourceDto(source.Index, source.Device, source.Serial, SdrTypeFromDevice(source.Device), source.CenterHz, source.SampleRate, source.ErrorHz, source.Gain))
             .ToList();
@@ -370,6 +405,7 @@ public sealed class SiteSetupService
         DesiredVersion = value.DesiredVersion <= 0 ? 1 : value.DesiredVersion,
         SiteLabel = value.SiteLabel?.Trim() ?? string.Empty,
         LocationNotes = value.LocationNotes?.Trim() ?? string.Empty,
+        MonitoredAreas = NormalizeMonitoredAreas(value.MonitoredAreas),
         RadioReferenceSid = value.RadioReferenceSid?.Trim() ?? string.Empty,
         SystemShortNames = NormalizeStrings(value.SystemShortNames),
         SourcePlanSystemShortNames = NormalizeStrings(value.SourcePlanSystemShortNames),
@@ -384,7 +420,8 @@ public sealed class SiteSetupService
         LastAppliedAtUtc = value.LastAppliedAtUtc,
         LastAppliedConfigHash = value.LastAppliedConfigHash?.Trim() ?? string.Empty,
         LastAppliedSourceAssignmentSummary = value.LastAppliedSourceAssignmentSummary?.Trim() ?? string.Empty,
-        LastAppliedRfPathSummary = value.LastAppliedRfPathSummary?.Trim() ?? string.Empty
+        LastAppliedRfPathSummary = value.LastAppliedRfPathSummary?.Trim() ?? string.Empty,
+        LastAppliedDesiredJson = value.LastAppliedDesiredJson?.Trim() ?? string.Empty
     };
 
     private static List<string> DescribeChanges(SiteSetupConfig before, SiteSetupConfig after)
@@ -392,6 +429,7 @@ public sealed class SiteSetupService
         var changes = new List<string>();
         AddIfChanged(changes, "site label", before.SiteLabel, after.SiteLabel);
         AddIfChanged(changes, "location notes", before.LocationNotes, after.LocationNotes);
+        AddIfChanged(changes, "monitored areas", MonitoredAreaSummary(before.MonitoredAreas), MonitoredAreaSummary(after.MonitoredAreas));
         AddIfChanged(changes, "RadioReference SID", before.RadioReferenceSid, after.RadioReferenceSid);
         AddIfChanged(changes, "systems/sites", string.Join(",", before.SystemShortNames), string.Join(",", after.SystemShortNames));
         AddIfChanged(changes, "source-plan systems", string.Join(",", before.SourcePlanSystemShortNames), string.Join(",", after.SourcePlanSystemShortNames));
@@ -408,6 +446,7 @@ public sealed class SiteSetupService
         value.DesiredVersion,
         value.SiteLabel,
         value.LocationNotes,
+        monitoredAreas = MonitoredAreaSummary(value.MonitoredAreas),
         value.RadioReferenceSid,
         value.SystemShortNames,
         value.SourcePlanSystemShortNames,
@@ -441,6 +480,56 @@ public sealed class SiteSetupService
             })
             .OrderBy(value => value.FrequencyHz)
             .ToList();
+
+    private static List<MonitoredAreaConfig> NormalizeMonitoredAreas(IEnumerable<MonitoredAreaConfig>? areas) =>
+        (areas ?? [])
+            .Where(area => area != null)
+            .Select(area => new MonitoredAreaConfig
+            {
+                AreaId = string.IsNullOrWhiteSpace(area.AreaId) ? Guid.NewGuid().ToString("N") : area.AreaId.Trim(),
+                AreaLabel = area.AreaLabel?.Trim() ?? string.Empty,
+                SystemShortName = area.SystemShortName?.Trim() ?? string.Empty,
+                North = area.North,
+                South = area.South,
+                East = area.East,
+                West = area.West,
+                Aliases = NormalizeStrings(area.Aliases)
+            })
+            .Where(area => !string.IsNullOrWhiteSpace(area.AreaLabel) || !string.IsNullOrWhiteSpace(area.SystemShortName))
+            .OrderBy(area => area.SystemShortName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(area => area.AreaLabel, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static List<MonitoredAreaConfig> CloneMonitoredAreas(IEnumerable<MonitoredAreaConfig>? areas) =>
+        NormalizeMonitoredAreas(areas);
+
+    private static string SerializeAppliedDesiredSnapshot(SiteSetupConfig value)
+    {
+        var snapshot = Normalize(value);
+        snapshot.LastAppliedDesiredJson = string.Empty;
+        return JsonSerializer.Serialize(snapshot, EngineConfig.JsonOptions());
+    }
+
+    private static bool TryReadAppliedDesiredSnapshot(string? json, out SiteSetupConfig snapshot)
+    {
+        snapshot = new SiteSetupConfig();
+        if (string.IsNullOrWhiteSpace(json))
+            return false;
+        try
+        {
+            snapshot = JsonSerializer.Deserialize<SiteSetupConfig>(json, EngineConfig.JsonOptions()) ?? new SiteSetupConfig();
+            return snapshot.SystemShortNames.Count > 0 || snapshot.Systems.Count > 0 || snapshot.Sources.Count > 0;
+        }
+        catch
+        {
+            snapshot = new SiteSetupConfig();
+            return false;
+        }
+    }
+
+    private static string MonitoredAreaSummary(IEnumerable<MonitoredAreaConfig>? areas) =>
+        string.Join("|", NormalizeMonitoredAreas(areas)
+            .Select(area => $"{area.SystemShortName}:{area.AreaLabel}:{area.North:F5},{area.South:F5},{area.East:F5},{area.West:F5}:{string.Join(",", area.Aliases.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))}"));
 
     private static Dictionary<string, int> NormalizeSourceAssignments(IReadOnlyDictionary<string, int>? values) =>
         (values ?? new Dictionary<string, int>())

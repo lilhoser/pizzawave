@@ -604,6 +604,7 @@ export type SetupTrConfigSites = { systemName: string; sites: SetupTrConfigSite[
 export type SetupTrConfigSourcePlan = { systemName: string; systems: SetupTrConfigSystem[]; sources: SetupTrConfigSource[]; requiredSourceCount: number; availableSourceCount: number; warnings: string[]; diagnostics: string };
 export type SetupAreaBoundaryCandidate = { label: string; kind: string; source: string; geoId: string; north: number; south: number; east: number; west: number };
 export type SetupAreaBoundaryResponse = { query: string; candidates: SetupAreaBoundaryCandidate[]; diagnostics: string };
+export type SiteSetupMonitoredArea = { areaId: string; areaLabel: string; systemShortName: string; north: number; south: number; east: number; west: number; aliases: string[] };
 export type TrConfigEditorSource = { index: number; device: string; serial: string; centerFrequency: number; sampleRate: number; error: number; gain: string };
 export type TrConfigEditorSystem = { shortName: string; type: string; modulation: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; talkgroupsFile: string };
 export type TrConfigEditorSummary = { systems: TrConfigEditorSystem[]; sources: TrConfigEditorSource[]; warnings: string[] };
@@ -625,6 +626,7 @@ export type SiteSetupConfig = {
   desiredVersion: number;
   siteLabel: string;
   locationNotes: string;
+  monitoredAreas: SiteSetupMonitoredArea[];
   radioReferenceSid: string;
   systemShortNames: string[];
   sourcePlanSystemShortNames: string[];
@@ -640,6 +642,7 @@ export type SiteSetupConfig = {
   lastAppliedConfigHash: string;
   lastAppliedSourceAssignmentSummary: string;
   lastAppliedRfPathSummary: string;
+  lastAppliedDesiredJson?: string;
 };
 export type SiteSetup = { desired: SiteSetupConfig; applied: SiteSetupAppliedConfig; status: SiteSetupStatus; pendingChanges: SiteSetupPendingChange[]; recentActivity: SiteSetupActivity[] };
 export type RfSurveyRfChainItem = {

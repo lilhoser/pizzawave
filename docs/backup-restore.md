@@ -72,7 +72,7 @@ points. Presets are multi-selectable:
   queue/job/metric history, and related operational data while preserving the
   current site/configuration. Audit/setup history can be preserved.
 - `Site Reset`: clears operational data plus site-specific state such as
-  monitored areas, talkgroup catalog/CSV, TR config, RF validation history, and
+  monitored areas, talkgroup catalog/CSV, TR config, RF validation activity, and
   Setup activity/evidence. Use this when the device is relocating or the
   monitored site plan should start clean.
 - `Full Reset`: performs a site reset and returns PizzaWave to the first-run

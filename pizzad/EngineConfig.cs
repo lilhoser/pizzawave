@@ -406,6 +406,7 @@ public sealed class SiteSetupConfig
     public long DesiredVersion { get; set; } = 1;
     public string SiteLabel { get; set; } = string.Empty;
     public string LocationNotes { get; set; } = string.Empty;
+    public List<MonitoredAreaConfig> MonitoredAreas { get; set; } = new();
     public string RadioReferenceSid { get; set; } = string.Empty;
     public List<string> SystemShortNames { get; set; } = new();
     public List<string> SourcePlanSystemShortNames { get; set; } = new();
@@ -421,6 +422,7 @@ public sealed class SiteSetupConfig
     public string LastAppliedConfigHash { get; set; } = string.Empty;
     public string LastAppliedSourceAssignmentSummary { get; set; } = string.Empty;
     public string LastAppliedRfPathSummary { get; set; } = string.Empty;
+    public string LastAppliedDesiredJson { get; set; } = string.Empty;
 }
 
 public sealed class SiteSetupRfSelection

@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -1039,10 +1039,20 @@ function activityDetails(detailsJson: string) {
 function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
   const [siteLabel, setSiteLabel] = useState(setup.desired.siteLabel);
   const [locationNotes, setLocationNotes] = useState(setup.desired.locationNotes);
+  const [areas, setAreas] = useState<SiteSetupMonitoredArea[]>(() => normalizeSiteSetupAreas(setup.desired.monitoredAreas));
+  const [areaBoundaryCandidates, setAreaBoundaryCandidates] = useState<Record<string, SetupAreaBoundaryCandidate[]>>({});
+  const [areaLookupBusy, setAreaLookupBusy] = useState("");
   useEffect(() => {
     setSiteLabel(setup.desired.siteLabel);
     setLocationNotes(setup.desired.locationNotes);
-  }, [setup.desired.siteLabel, setup.desired.locationNotes, setup.desired.desiredVersion]);
+    setAreas(normalizeSiteSetupAreas(setup.desired.monitoredAreas));
+  }, [setup.desired.siteLabel, setup.desired.locationNotes, setup.desired.monitoredAreas, setup.desired.desiredVersion]);
+
+  const selectedSystems = setup.desired.sourcePlanSystemShortNames.length
+    ? setup.desired.sourcePlanSystemShortNames
+    : setup.desired.systemShortNames.length
+      ? setup.desired.systemShortNames
+      : setup.desired.systems.map(system => system.shortName).filter(Boolean);
 
   function statusFor(field: string) {
     if (saveState.field !== field || saveState.status === "idle") return null;
@@ -1058,6 +1068,80 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
     if (value === setup.desired.locationNotes) return;
     void onSave({ locationNotes: value }, "locationNotes");
   }
+  function saveAreas(nextAreas = areas) {
+    void onSave({ monitoredAreas: normalizeSiteSetupAreas(nextAreas) }, "monitoredAreas");
+  }
+  function updateArea(index: number, patch: Partial<SiteSetupMonitoredArea>, save = false) {
+    setAreas(current => {
+      const next = current.map((area, i) => i === index ? { ...area, ...patch } : area);
+      if (save)
+        saveAreas(next);
+      return next;
+    });
+  }
+  function removeArea(index: number) {
+    const next = areas.filter((_, i) => i !== index);
+    setAreas(next);
+    saveAreas(next);
+  }
+  function seedAreasFromSelectedSystems() {
+    const existingBySystem = new Map(areas.map(area => [area.systemShortName.toLowerCase(), area]));
+    const next = selectedSystems.map(systemName => {
+      const existing = existingBySystem.get(systemName.toLowerCase());
+      if (existing) return existing;
+      const system = setup.desired.systems.find(item => item.shortName === systemName);
+      return normalizeSiteSetupArea({
+        areaId: createClientId(),
+        areaLabel: suggestAreaLabelFromSite(system?.siteLabel || systemName),
+        systemShortName: systemName,
+        north: 0,
+        south: 0,
+        east: 0,
+        west: 0,
+        aliases: [systemName]
+      });
+    });
+    setAreas(next);
+    saveAreas(next);
+  }
+  async function lookupAreaBoundary(index: number, key: string) {
+    const area = areas[index];
+    const query = String(area?.areaLabel || area?.systemShortName || "").trim();
+    if (!query)
+      return;
+    setAreaLookupBusy(key);
+    try {
+      const result = await api.request<SetupAreaBoundaryResponse>("/api/v1/setup/areas/boundaries", {
+        method: "POST",
+        body: JSON.stringify({ query })
+      });
+      if (result.candidates.length === 1) {
+        applyAreaBoundary(index, result.candidates[0]);
+        setAreaBoundaryCandidates(current => ({ ...current, [key]: [] }));
+      } else {
+        setAreaBoundaryCandidates(current => ({ ...current, [key]: result.candidates }));
+      }
+    } finally {
+      setAreaLookupBusy("");
+    }
+  }
+  function applyAreaBoundary(index: number, candidate: SetupAreaBoundaryCandidate) {
+    const area = areas[index];
+    if (!area) return;
+    const next = areas.map((item, i) => i === index
+      ? normalizeSiteSetupArea({
+        ...item,
+        areaLabel: candidate.label,
+        aliases: item.systemShortName ? Array.from(new Set([...(item.aliases ?? []), item.systemShortName])) : item.aliases,
+        north: candidate.north,
+        south: candidate.south,
+        east: candidate.east,
+        west: candidate.west
+      })
+      : item);
+    setAreas(next);
+    saveAreas(next);
+  }
 
   return <div className="site-setup-form">
     <label className="setting-field">
@@ -1070,6 +1154,49 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
       <textarea value={locationNotes} onChange={event => setLocationNotes(event.target.value)} onBlur={saveLocationNotes} rows={4} />
       {statusFor("locationNotes")}
     </label>
+    <div className="settings-subsection">
+      <div className="setup-job-head">
+        <strong>Monitored Areas</strong>
+        <button type="button" disabled={selectedSystems.length === 0} onClick={seedAreasFromSelectedSystems}>Sync from selected sites</button>
+        {statusFor("monitoredAreas")}
+      </div>
+      {areas.length === 0 && <div className="setup-note">No monitored areas are configured.</div>}
+      {areas.map((area, index) => {
+        const key = areaDraftKey(area, index);
+        const candidates = areaBoundaryCandidates[key] ?? [];
+        return <div className="setup-area" key={key}>
+          <div className="setup-area-head">
+            <div>
+              <span>System</span>
+              <code>{area.systemShortName || "--"}</code>
+            </div>
+            <button type="button" className="danger-button" onClick={() => removeArea(index)}>Remove</button>
+          </div>
+          <div className="area-label-row">
+            <SettingInput label="Area label" description="County or city boundary label." value={area.areaLabel} onChange={value => updateArea(index, { areaLabel: value })} />
+            <button type="button" disabled={Boolean(areaLookupBusy) || !String(area.areaLabel || area.systemShortName || "").trim()} onClick={() => void lookupAreaBoundary(index, key)}>
+              {areaLookupBusy === key ? "Finding..." : "Find boundary"}
+            </button>
+          </div>
+          {candidates.length > 0 && <div className="area-boundary-candidates">
+            {candidates.map(candidate => <button type="button" key={`${candidate.kind}-${candidate.geoId}`} onClick={() => applyAreaBoundary(index, candidate)}>
+              <strong>{candidate.label}</strong>
+              <small>{candidate.kind} / {candidate.source} / N {candidate.north.toFixed(4)}, S {candidate.south.toFixed(4)}, E {candidate.east.toFixed(4)}, W {candidate.west.toFixed(4)}</small>
+            </button>)}
+          </div>}
+          {hasUsableAreaBounds(area) ? <AreaMapPreview area={area} /> : <div className="setup-note">Boundary lookup is pending for this area.</div>}
+          <div className="area-coordinate-grid">
+            <SettingInput label="North" description="Northern latitude boundary." value={String(area.north ?? "")} onChange={value => updateArea(index, { north: numberOrZero(value) })} />
+            <SettingInput label="South" description="Southern latitude boundary." value={String(area.south ?? "")} onChange={value => updateArea(index, { south: numberOrZero(value) })} />
+            <SettingInput label="East" description="Eastern longitude boundary." value={String(area.east ?? "")} onChange={value => updateArea(index, { east: numberOrZero(value) })} />
+            <SettingInput label="West" description="Western longitude boundary." value={String(area.west ?? "")} onChange={value => updateArea(index, { west: numberOrZero(value) })} />
+          </div>
+          <div className="setup-button-row">
+            <button type="button" onClick={() => saveAreas()}>Save monitored area</button>
+          </div>
+        </div>;
+      })}
+    </div>
   </div>;
 }
 
@@ -10702,7 +10829,7 @@ function TrConfigEditorPanel({
         </section>
         <details className="card">
           <summary>RadioReference refresh</summary>
-          <p className="muted">Draft a replacement from RadioReference, then review the JSON before applying. This reuses the first-run TR config builder.</p>
+          <p className="muted">Draft a replacement from RadioReference, then review the JSON before applying. This reuses the Setup TR config builder.</p>
           <div className="tr-config-rr-grid">
             <label>SID <input value={rrSid} onChange={e => setRrSid(e.target.value)} /></label>
             <label>Site filters <input value={rrSites} onChange={e => setRrSites(e.target.value)} placeholder="Hamilton, Cleveland" /></label>
@@ -12356,151 +12483,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           </div>
         </SetupSection>}
 
-        {currentStep.id === "restore" && <SetupSection title="Restore Backup" description="Review the staged backup before applying it. Applying restore overwrites backed-up PizzaWave/TR files and restarts services, then setup checks must be run again.">
-          {!restorePreview ? <div className="setup-note">Loading staged restore...</div> : <BackupRestorePreviewCard preview={restorePreview} />}
-          {restorePreview && <div className="maintenance-help">
-            <p><strong>Included data</strong> covers the PizzaWave SQLite database, recorded audio, app data, Qdrant storage, TR config/talkgroups, PizzaWave config, and token when those files existed at backup time.</p>
-            <p><strong>After restore</strong> the wizard remains active so TR, talkgroups, callstream, transcription, monitored areas, Qdrant, and alerts can be sanity-checked before normal ingest resumes.</p>
-          </div>}
-          <div className="setup-button-row">
-            <button className="danger-button" disabled={busy === "apply-restore" || !restorePreview || restorePreview.checks.some(check => !check.ok)} onClick={() => void applyPendingRestore()}>{busy === "apply-restore" ? "Applying..." : "Apply Restore"}</button>
-            <button disabled={busy === "cancel-restore" || !restorePreview} onClick={() => void cancelPendingRestore()}>{busy === "cancel-restore" ? "Canceling..." : "Cancel Restore"}</button>
-          </div>
-        </SetupSection>}
-
-        {currentStep.id === "tr-config" && <SetupSection title="TR Config" description={trInstallMode === "reuseExistingTr" ? "Using the existing TR config." : trConfigStage === "sites" ? "Fetch RadioReference sites, then select one or more sites to monitor." : "Review detected SDRs and sample rate before PizzaWave creates the TR config."}>
-          <div className="settings-subsection">
-            <h4>Callstream</h4>
-            <SettingInput label="Listener bind" description="PizzaWave callstream listener address. Use 127.0.0.1 when trunk-recorder runs on this Pi." value={ingest.callstreamBind ?? "127.0.0.1"} onChange={v => update(["ingest", "callstreamBind"], v)} />
-            <SettingInput label="Listener port" description="PizzaWave callstream TCP port. The generated TR config targets this value." type="number" value={ingest.callstreamPort ?? 9123} onChange={v => update(["ingest", "callstreamPort"], numberOrZero(v))} />
-          </div>
-          {trInstallMode === "reuseExistingTr" && <>
-            <SettingInput label="TR config path" description="Existing trunk-recorder config.json." value={tr.configPath} onChange={v => update(["trunkRecorder", "configPath"], v)} />
-            <SettingInput label="TR log service" description="Systemd service name used for health collection." value={tr.logServiceName} onChange={v => update(["trunkRecorder", "logServiceName"], v)} />
-            <div className="setup-note">Click Next to validate the TR config, patch callstream, and verify health access.</div>
-          </>}
-          {trInstallMode === "freshTr" && trConfigStage === "sites" && <>
-            <div className="setup-fetch-row">
-              <SettingInput label="RadioReference SID" description="Enter the numeric RadioReference system ID." value={trDraftSid} onChange={updateTrRadioReferenceSid} inputMode="numeric" />
-              <button className="danger-button" disabled={Boolean(busy) || !trDraftSid.trim()} onClick={() => void fetchRadioReferenceSites()}>{busy === "tr-sites-fetch" ? "Fetching..." : "Fetch"}</button>
-            </div>
-            {trSiteList && <>
-              <SettingInput label="Search sites" description={`${trSiteList.sites.length.toLocaleString()} site(s) found. Select at least one.`} value={trSiteSearch} onChange={setTrSiteSearch} />
-              <div className="rr-site-list">
-                {visibleTrSites.map(site => <label className="rr-site-row" key={site.name}>
-                  <input type="checkbox" checked={selectedTrSites.includes(site.name)} onChange={event => toggleTrSite(site.name, event.currentTarget.checked)} />
-                  <span>
-                    <strong>{site.name}</strong>
-                    <small>{site.frequencyCount} frequencies / {site.controlChannelCount} control channels{site.controlChannelsMhz.length ? ` / CC ${site.controlChannelsMhz.map(formatMhz).join(", ")}` : ""}</small>
-                  </span>
-                </label>)}
-                {visibleTrSites.length === 0 && <div className="setup-note">No sites match the search.</div>}
-              </div>
-              <div className="setup-note">{selectedTrSites.length.toLocaleString()} selected. {sdrDetection ? `${sdrDetection.devices.length.toLocaleString()} SDR device(s) detected.` : sdrDetectionAttempted ? "SDR detection did not return devices yet." : "Detecting SDRs..."}</div>
-              {trSourcePlanLoading && <div className="setup-note">Planning selected sites against detected SDRs...</div>}
-              {trSourcePlan && <TrSourcePlanPreview plan={trSourcePlan} />}
-            </>}
-          </>}
-          {trInstallMode === "freshTr" && trConfigStage === "sdr" && <>
-            <div className="setup-button-row">
-              <button type="button" onClick={() => setTrConfigStage("sites")}>Edit Sites</button>
-            </div>
-            <div className="setup-review">
-              <h4>Selected Sites</h4>
-              {selectedTrSites.map(site => <div key={site}><span>Site</span><code>{site}</code></div>)}
-            </div>
-            {trSourcePlan && <TrSourcePlanPreview plan={trSourcePlan} />}
-            {busy === "sdr-detect" && <div className="setup-note">Detecting SDRs...</div>}
-            {sdrDetection && <SdrDetectionPanel detection={sdrDetection} />}
-            {!sdrDetection && sdrDetectionAttempted && <div className="setup-note">SDR detection did not complete. Click Back and return to this screen to retry, or continue if the device path can be inferred by index.</div>}
-            <SettingInput label="Sample rate" description="Default 2400000. Increase only if the selected site needs a wider tuning window." value={trDraftRate} onChange={setTrDraftRate} inputMode="numeric" />
-            <div className="setup-note">Click Next to create and save the TR config, patch callstream, remove captureDir, and verify TR health.</div>
-          </>}
-        </SetupSection>}
-
-        {currentStep.id === "talkgroups" && <SetupSection title="Talkgroups" description="Import talkgroups from RadioReference or an existing CSV. PizzaWave writes the catalog and regenerates the trunk-recorder CSV.">
-          <SettingInput label="Output CSV path" description="trunk-recorder talkgroups.csv generated by PizzaWave." value={tr.talkgroupsPath} onChange={v => update(["trunkRecorder", "talkgroupsPath"], v)} />
-          <div className="setup-fetch-row">
-            <SettingInput label="RadioReference SID" description="Pre-filled from TR Config when available." value={talkgroupSid} onChange={updateTalkgroupRadioReferenceSid} inputMode="numeric" />
-            <button className="danger-button" disabled={Boolean(busy) || !talkgroupSid.trim()} onClick={() => void importTalkgroups("rr")}>{busy === "talkgroups-rr" ? "Fetching..." : "Fetch"}</button>
-          </div>
-          <SettingCheckbox label="Include normally excluded rows" description="Include encrypted, deprecated, unknown, and other rows that PizzaWave normally skips during import." checked={includeExcludedTalkgroups} onChange={setIncludeExcludedTalkgroups} />
-          <label className="setting-field">
-            <span>Import existing CSV<small>Load a local RadioReference/PizzaWave talkgroup CSV and generate the configured trunk-recorder CSV.</small></span>
-            <input type="file" accept=".csv,text/csv,text/plain" disabled={Boolean(busy)} onChange={event => void importTalkgroupCsvFile(event.currentTarget.files?.[0] ?? null)} />
-          </label>
-          <div className="setup-note">{talkgroupPreview ? `${talkgroupPreview.includedCount.toLocaleString()} talkgroup row(s) imported. Click Next to continue.` : "Fetch from RadioReference or import a CSV before continuing."}</div>
-        </SetupSection>}
-
-        {currentStep.id === "transcription" && <SetupSection title="Transcription" description="Required. Choose a transcription engine and run an actual sample transcription test.">
-          <SettingSelect label="Engine" description="Required provider for turning calls into text." value={transcription.provider} options={["whisper", "faster-whisper", "remote-faster-whisper", "lmstudio", "openai"]} onChange={v => update(["transcription", "provider"], v)} />
-          {transcription.provider === "whisper" && <>
-            <SettingSelect label="Whisper model" description="Base or medium are the recommended setup choices." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update(["transcription", "whisperModelFile"], modelPath(models, v))} />
-            <ModelManager engine="whisper" rows={models} busy={modelBusy} selectedPath={transcription.whisperModelFile} onUse={path => update(["transcription", "whisperModelFile"], path)} onDownload={downloadModel} onDelete={deleteModel} />
-          </>}
-          {transcription.provider === "faster-whisper" && <>
-            <SettingSelect label="Model" description="Tiny/int8 is the safest first choice on Raspberry Pi." value={transcription.fasterWhisperModel ?? "tiny"} options={["tiny", "base", "small", "medium"]} onChange={v => update(["transcription", "fasterWhisperModel"], v)} />
-            <SettingSelect label="Compute type" description="CPU quantization mode." value={transcription.fasterWhisperComputeType ?? "int8"} options={["int8", "int8_float16", "float32"]} onChange={v => update(["transcription", "fasterWhisperComputeType"], v)} />
-            <SettingInput label="Python runtime" description="Managed optional runtime path." value={transcription.fasterWhisperPythonPath ?? "/opt/pizzawave/venv/faster-whisper/bin/python"} onChange={v => update(["transcription", "fasterWhisperPythonPath"], v)} />
-            <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("faster-whisper-prime")}>{busy === "faster-whisper-prime" ? "Installing..." : "Install faster-whisper support"}</button>
-          </>}
-          {(transcription.provider === "lmstudio" || transcription.provider === "openai" || transcription.provider === "remote-faster-whisper") && <>
-            <SettingInput label="Base URL" description="OpenAI-compatible audio transcription endpoint." value={transcription.openAiBaseUrl} onChange={v => update(["transcription", "openAiBaseUrl"], v)} />
-            <SettingInput label="Model" description="Audio transcription model name." value={transcription.openAiModel} onChange={v => update(["transcription", "openAiModel"], v)} />
-            <SettingInput label="API key" description="Optional bearer token." type="password" value={transcription.openAiApiKey} onChange={v => update(["transcription", "openAiApiKey"], v)} />
-          </>}
-          <div className="setup-note">Click Next to test the selected transcription provider. Fresh installs with no calls yet will validate the provider/model and skip the sample call.</div>
-        </SetupSection>}
-
-        {currentStep.id === "areas" && <SetupSection title="Monitored Areas" description="Required for geocoding/map context. Each TR system shortName needs one monitored area.">
-          {areaLookupBusy === "seed" && <div className="setup-note">Reading TR systems and creating monitored area rows...</div>}
-          {locations.length === 0 && areaLookupBusy !== "seed" && <div className="setup-note">Complete TR Config first, then PizzaWave can create one monitored area row per TR system.</div>}
-          {locations.map((area: any, i: number) => {
-            const key = areaDraftKey(area, i);
-            const candidates = areaBoundaryCandidates[key] ?? [];
-            return <div className="setup-area" key={key}>
-              <div className="setup-area-head">
-                <div>
-                  <span>System</span>
-                  <code>{area.systemShortName || "--"}</code>
-                </div>
-                {areaLookupBusy === key && <span className="setup-area-status">Finding boundary...</span>}
-                {hasUsableAreaBounds(area) && areaLookupBusy !== key && <span className="setup-area-status ok">Boundary set</span>}
-              </div>
-              <div className="area-label-row">
-                <SettingInput label="Area label" description="County or city label used to search Census TIGERweb boundaries." value={area.areaLabel} onChange={v => {
-                  update(["locations", "monitoredAreas", String(i), "areaLabel"], v);
-                  delete areaLookupHistory.current[key];
-                  setAreaLabelLookupNeeded(current => ({ ...current, [key]: true }));
-                  setAreaBoundaryCandidates(current => ({ ...current, [key]: [] }));
-                }} />
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={Boolean(busy) || Boolean(areaLookupBusy) || !String(area.areaLabel || area.systemShortName || "").trim()}
-                  onClick={() => void lookupAreaBoundary(i, key, true)}
-                >
-                  {areaLookupBusy === key ? "Regenerating..." : "Regenerate"}
-                </button>
-              </div>
-              {candidates.length > 0 && <div className="area-boundary-candidates">
-                {candidates.map(candidate => <button type="button" key={`${candidate.kind}-${candidate.geoId}`} onClick={() => applyAreaBoundary(i, candidate)}>
-                  <strong>{candidate.label}</strong>
-                  <small>{candidate.kind} / {candidate.source} / N {candidate.north.toFixed(4)}, S {candidate.south.toFixed(4)}, E {candidate.east.toFixed(4)}, W {candidate.west.toFixed(4)}</small>
-                </button>)}
-              </div>}
-              {hasUsableAreaBounds(area) ? <AreaMapPreview area={area} /> : <div className="setup-note">Boundary lookup is pending for this area.</div>}
-              <div className="area-coordinate-grid">
-                <SettingInput label="North" description="Northern latitude boundary." value={area.north ?? ""} onChange={v => update(["locations", "monitoredAreas", String(i), "north"], v)} />
-                <SettingInput label="South" description="Southern latitude boundary." value={area.south ?? ""} onChange={v => update(["locations", "monitoredAreas", String(i), "south"], v)} />
-                <SettingInput label="East" description="Eastern longitude boundary." value={area.east ?? ""} onChange={v => update(["locations", "monitoredAreas", String(i), "east"], v)} />
-                <SettingInput label="West" description="Western longitude boundary." value={area.west ?? ""} onChange={v => update(["locations", "monitoredAreas", String(i), "west"], v)} />
-              </div>
-            </div>;
-          })}
-          <div className="setup-note">PizzaWave fills exact Census TIGERweb matches automatically. If more than one boundary matches, select the intended candidate before clicking Next.</div>
-        </SetupSection>}
-
         {currentStep.id === "lm-link" && <SetupSection title="LM Link" description="Optional host support for AI Insights. Configure models and endpoints later from Settings.">
           {lmStudioInstalled ? <div className="setup-detection-card">
             <strong>{lmStudioDetection?.apiReachable ? "LM Studio API is reachable" : lmStudioDetection?.serviceActive ? "LM Link support is present" : "LM Studio tooling is installed"}</strong>
@@ -12514,26 +12496,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           </>}
         </SetupSection>}
 
-        {currentStep.id === "ai" && <SetupSection title="AI Insights / LM Link" description="Optional. Required for summaries, incidents, evidence verification, and LLM troubleshooting suggestions. Use Remote/LM Link when the chat model should run on another host such as Paxan.">
-          {lmStudioInstalled ? <div className="setup-detection-card">
-            <strong>{lmStudioDetection?.apiReachable ? "LM Studio API is reachable" : lmStudioDetection?.serviceActive ? "LM Studio service is running" : "LM Studio is installed"}</strong>
-            <small>Detection looks for the LM Studio CLI/service and probes the configured OpenAI-compatible API URL when available.</small>
-            <small>{lmStudioDetection?.serviceEnabled ? `${lmStudioDetection.service} is enabled for autostart.` : "LM Studio autostart service is not enabled."}</small>
-            <small>{lmStudioDetection?.binaryPath ? `CLI: ${lmStudioDetection.binaryPath}` : "LM Studio CLI path was not detected."}</small>
-            {lmStudioDetection?.apiBaseUrl && <small>{lmStudioDetection.apiReachable ? `API reachable at ${lmStudioDetection.apiBaseUrl}.` : `API not reachable at ${lmStudioDetection.apiBaseUrl}; Next will show the validation error.`}</small>}
-          </div> : <>
-            <div className="setup-note">The deb includes the LM Studio setup script but does not install/link LM Studio until you choose to prepare it here.</div>
-            <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("lmstudio-prime")}>{busy === "lmstudio-prime" || (setupJobContext === "ai" && setupJobRunning) ? "Preparing..." : "Prepare LM Link support"}</button>
-          </>}
-          <SettingCheckbox label="Enable AI insights" description="Used for summaries, incidents, and troubleshooting suggestions." checked={ai.enabled} onChange={v => update(["aiInsights", "enabled"], v)} />
-          <SettingSelect label="Execution" description="Operator intent. The base URL still decides which OpenAI-compatible server receives requests." value={ai.executionMode ?? "local"} options={["local", "remote", "lmlink"]} onChange={v => update(["aiInsights", "executionMode"], v)} />
-          <SettingInput label="Insights base URL" description="Chat /v1 endpoint. Use a remote host/Tailnet URL for GPU LLMs; avoid localhost unless this rig should run the LLM." value={ai.openAiBaseUrl} onChange={v => update(["aiInsights", "openAiBaseUrl"], v)} />
-          {aiModels.length > 0
-            ? <SettingSelect label="Insights model" description="Use the LM Studio model id, not a loaded runtime alias." value={ai.openAiModel} options={aiModels} onChange={v => update(["aiInsights", "openAiModel"], v)} />
-            : <SettingInput label="Insights model" description="Chat model id for summaries/incidents." value={ai.openAiModel} onChange={v => update(["aiInsights", "openAiModel"], v)} />}
-          <div className="setup-note">{ai.enabled ? "Click Next to load available models when needed and test AI insights." : "AI insights are disabled. Click Next to mark this optional step skipped."}</div>
-        </SetupSection>}
-
         {currentStep.id === "qdrant" && <SetupSection title="Qdrant" description="Optional native vector database support. Configure embeddings later from Settings.">
           {qdrantDetection && <div className="setup-detection-card">
             <strong>{qdrantDetection.serviceActive ? "Qdrant service is running" : qdrantInstalled ? "Qdrant is installed" : "Qdrant not detected"}</strong>
@@ -12544,61 +12506,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
           </div>}
           {!qdrantInstalled && <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("qdrant-prime")}>{busy === "qdrant-prime" || (setupJobContext === "qdrant" && setupJobRunning) ? "Installing..." : "Install native Qdrant"}</button>}
           {qdrantInstalled && <div className="setup-note">Qdrant support is present. Embedding enablement, model, endpoint, collection, and vector size are configured in Settings.</div>}
-        </SetupSection>}
-
-        {currentStep.id === "embeddings" && <SetupSection title="Vector DB / Qdrant" description="Optional but recommended for AI incidents. Qdrant stores vectors locally on this rig; embedding inference may run locally or remotely.">
-          {qdrantDetection && <div className="setup-detection-card">
-            <strong>{qdrantDetection.serviceActive ? "Qdrant service is running" : qdrantInstalled ? "Qdrant is installed" : "Qdrant not detected"}</strong>
-            <small>Detection checks for the Qdrant binary, systemd service state, and configured storage path.</small>
-            <small>{qdrantDetection.serviceEnabled ? `${qdrantDetection.service} is enabled for autostart.` : "Qdrant autostart service is not enabled."}</small>
-            <small>{qdrantDetection.binaryPath ? `Binary: ${qdrantDetection.binaryPath}` : "qdrant binary was not found on PATH."}</small>
-            <small>{qdrantDetection.storageExists ? `Storage: ${qdrantDetection.storagePath}` : `Storage will be created at ${embeddings.qdrantStoragePath ?? "/var/lib/pizzawave/qdrant"}`}</small>
-          </div>}
-          {!qdrantInstalled && <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void startSetupJob("qdrant-prime")}>{busy === "qdrant-prime" || (setupJobContext === "embeddings" && setupJobRunning) ? "Installing..." : "Install native Qdrant"}</button>}
-          <SettingCheckbox label="Enable embeddings" description="When enabled, good live transcripts are embedded and stored in local Qdrant for incident matching." checked={!!embeddings.enabled} onChange={v => update(["embeddings", "enabled"], v)} />
-          <SettingSelect label="Execution" description="Local keeps embedding generation on this rig; remote points embedding generation at another OpenAI-compatible endpoint." value={embeddings.executionMode ?? "local"} options={["local", "remote", "lmlink"]} onChange={v => update(["embeddings", "executionMode"], v)} />
-          <SettingInput label="Embedding base URL" description="OpenAI-compatible /embeddings endpoint. Local LM Studio normally uses http://localhost:1234/v1." value={embeddings.openAiBaseUrl ?? "http://localhost:1234/v1"} onChange={v => update(["embeddings", "openAiBaseUrl"], v)} />
-          <SettingInput label="Embedding model" description="Embedding model name. For local LM Studio, the setup service preloads this model only when execution is local." value={embeddings.openAiModel ?? "nomic-embed-text"} onChange={v => update(["embeddings", "openAiModel"], v)} />
-          <SettingInput label="Qdrant URL" description="Local Qdrant HTTP endpoint." value={embeddings.qdrantBaseUrl ?? "http://localhost:6333"} onChange={v => update(["embeddings", "qdrantBaseUrl"], v)} />
-          <SettingInput label="Qdrant service" description="Systemd service name for restart/status." value={embeddings.qdrantServiceName ?? "qdrant"} onChange={v => update(["embeddings", "qdrantServiceName"], v)} />
-          <SettingInput label="Qdrant storage" description="Native Qdrant data path on this rig." value={embeddings.qdrantStoragePath ?? "/var/lib/pizzawave/qdrant"} onChange={v => update(["embeddings", "qdrantStoragePath"], v)} />
-          <SettingInput label="Collection" description="Qdrant collection used for call vectors." value={embeddings.collection ?? "pizzawave_calls"} onChange={v => update(["embeddings", "collection"], v)} />
-          <SettingInput label="Vector size" description="Must match the embedding model output dimension." type="number" value={embeddings.vectorSize ?? 768} onChange={v => update(["embeddings", "vectorSize"], numberOrZero(v))} />
-          <div className="setup-note">{embeddings.enabled ? "Click Next to test the embedding endpoint and Qdrant. The worker creates the collection if needed." : "Embeddings are disabled. Click Next to mark this optional step skipped."}</div>
-        </SetupSection>}
-
-        {currentStep.id === "alerts" && <SetupSection title="Email Alerts" description="Optional. Live alert emails need an address and app password. Imported/historical alert matches never send email.">
-          <SettingCheckbox label="Enable email alerts" description="Optional live alert notifications." checked={alerts.emailEnabled} onChange={v => update(["alerts", "emailEnabled"], v)} />
-          {alerts.emailEnabled && <>
-            <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update(["alerts", "emailProvider"], v)} />
-            <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update(["alerts", "emailUser"], v)} />
-            <SettingInput label="App password" description="Provider-specific app password or SMTP credential." type="password" value={alerts.emailPassword} onChange={v => update(["alerts", "emailPassword"], v)} />
-          </>}
-          <div className="setup-note">{alerts.emailEnabled ? "Click Next to validate email alert settings." : "Email alerts are disabled. Click Next to mark this optional step skipped."}</div>
-        </SetupSection>}
-
-        {currentStep.id === "radio" && <SetupSection title="RF Diagnostics" description="Optional diagnostic tooling used by Site Setup RF validation.">
-          <div className="setup-note">The TR config and talkgroups you just created become the starting point for Site Setup. After Finish, PizzaWave opens Setup so the same workflow can be resumed later for new sites, new SDRs, RF path changes, or TR config updates.</div>
-          <label className="setup-check option-row">
-            <input
-              type="checkbox"
-              checked={installOptionalDiagnosticTools}
-              onChange={event => {
-                update(["setup", "installOptionalDiagnosticTools"], event.target.checked);
-                update(["setup", "diagnosticToolsSkippedOrInstalled"], false);
-              }}
-            />
-            <span>
-              <strong>Install optional diagnostic tools</strong>
-              <span> Installs OP25/P25 control-channel tooling plus SDR/audio diagnostics used by Setup RF validation. This can install OS packages and build OP25 from source, but it does not stop trunk-recorder by itself.</span>
-            </span>
-          </label>
-          <div className="setup-review">
-            <div><span>Next section</span><code>Setup</code></div>
-            <div><span>RF validation</span><code>Waterfall and RF Sweep</code></div>
-            <div><span>Config changes</span><code>Apply &amp; Resume source planner</code></div>
-          </div>
-          <div className="setup-note">Click Next to save this tooling choice. Finish will restart/validate PizzaWave and open Setup.</div>
         </SetupSection>}
 
         {currentStep.id === "finish" && <SetupSection title="Finish" description="This completes first-run prerequisites and opens Site Setup for monitoring configuration.">
@@ -12928,6 +12835,32 @@ function AreaMapPreview({ area }: { area: any }) {
 
 function areaDraftKey(area: any, index: number) {
   return String(area.areaId || `${area.systemShortName || "area"}-${index}`);
+}
+
+function normalizeSiteSetupAreas(areas?: SiteSetupMonitoredArea[] | null): SiteSetupMonitoredArea[] {
+  return (areas ?? [])
+    .map(normalizeSiteSetupArea)
+    .filter(area => area.areaLabel || area.systemShortName);
+}
+
+function normalizeSiteSetupArea(area: Partial<SiteSetupMonitoredArea>): SiteSetupMonitoredArea {
+  const systemShortName = String(area.systemShortName ?? "").trim();
+  const aliases = Array.from(new Set([...(area.aliases ?? []), systemShortName].map(value => String(value ?? "").trim()).filter(Boolean)));
+  return {
+    areaId: String(area.areaId || createClientId()),
+    areaLabel: String(area.areaLabel ?? "").trim(),
+    systemShortName,
+    north: finiteNumber(area.north),
+    south: finiteNumber(area.south),
+    east: finiteNumber(area.east),
+    west: finiteNumber(area.west),
+    aliases
+  };
+}
+
+function finiteNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function areaBounds(area: any) {
