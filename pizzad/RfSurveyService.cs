@@ -2020,6 +2020,10 @@ public sealed class RfSurveyService
                                 : await RunCaptureAsync("bash", "-lc " + Quote(command), retryLinked.Token);
                         }
                         var analysis = AnalyzeIqFile(rawPath, sampleRate, isAirspy);
+                        var captureBytes = File.Exists(rawPath) ? new FileInfo(rawPath).Length : 0;
+                        if (captureBytes > 0)
+                            DeleteRawRfCapture(rawPath);
+                        var retainedRawPath = File.Exists(rawPath) ? rawPath : string.Empty;
                         rows.Add(new RfPowerScanRow(
                             scanSource.Index,
                             scanSource.SdrType,
@@ -2035,8 +2039,8 @@ public sealed class RfSurveyService
                             command,
                             result.ExitCode,
                             TrimOutput(result.Stdout),
-                            rawPath,
-                            File.Exists(rawPath) ? new FileInfo(rawPath).Length : 0,
+                            retainedRawPath,
+                            captureBytes,
                             analysis.Completed ? "measured" : "failed",
                             analysis.Issue,
                             analysis.PeakDb,
@@ -4059,6 +4063,20 @@ public sealed class RfSurveyService
         string Sparkline,
         double? StrongestPeakDb,
         double? StrongestPeakOffsetHz);
+
+    private void DeleteRawRfCapture(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return;
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to delete temporary RF capture {Path}", path);
+        }
+    }
 
     private sealed record RtlDeviceSelector(string Argument, string Issue, string DeviceArgument = "");
 
