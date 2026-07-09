@@ -11,7 +11,7 @@ work so that progress does not depend on conversation history.
 - Active package: 1 - Setup state authority
 - Current milestone: Package 1 operator acceptance
 - Working branch: `codex/operator-ux-review`
-- Last deployed commit: `66603aa`
+- Last deployed commit: `9c48f30`
 - Operator verification: requested after live smoke verification
 - Next action: receive operator feedback on Package 1, address any defects, and
   close the package before beginning Talkgroups.
@@ -133,8 +133,9 @@ Status: pending
 ## Deployment Log
 
 - `d8e7ec9`: starting baseline; asynchronous auditable backup jobs.
-- `66603aa`: Package 1 deployed; versioned Setup mutations, per-site RR
-  identity, and Setup-owned RF handoff.
+- `9c48f30`: Package 1 deployed; versioned Setup mutations, per-site RR
+  identity, Setup-owned RF handoff, and explicit live baselining for previously
+  unspecified source gain.
 
 ## Verification Log
 
