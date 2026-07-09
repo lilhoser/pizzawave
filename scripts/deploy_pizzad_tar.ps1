@@ -39,6 +39,12 @@ function Get-SshArgs {
     return $args
 }
 
+function Assert-NativeCommand([string]$Name) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name failed with exit code $LASTEXITCODE."
+    }
+}
+
 function ConvertTo-BashSingleQuoted([string]$Value) {
     return "'" + $Value.Replace("'", "'""'""'") + "'"
 }
@@ -49,7 +55,9 @@ function Invoke-RemoteDeployScript([string]$ScriptBody) {
     try {
         [System.IO.File]::WriteAllText($remoteScriptPath, $ScriptBody.Replace("`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))
         scp @sshArgs $remoteScriptPath "${HostName}:/tmp/pizzad-direct-deploy.sh"
+        Assert-NativeCommand "scp deployment script"
         ssh @sshArgs $HostName "bash /tmp/pizzad-direct-deploy.sh"
+        Assert-NativeCommand "remote deployment script"
     }
     finally {
         if (Test-Path $remoteScriptPath) {
@@ -72,8 +80,10 @@ if (-not $BackendOnly) {
     try {
         if (-not $SkipNpmCi) {
             npm ci
+            Assert-NativeCommand "npm ci"
         }
         npm run build
+        Assert-NativeCommand "frontend build"
     }
     finally {
         Pop-Location
@@ -84,6 +94,7 @@ $sshArgs = Get-SshArgs
 
 if (-not $Rid) {
     $remoteMachine = (ssh @sshArgs $HostName "uname -m").Trim()
+    Assert-NativeCommand "remote architecture detection"
     $Rid = switch -Regex ($remoteMachine) {
         "^(aarch64|arm64)$" { "linux-arm64"; break }
         "^(x86_64|amd64)$" { "linux-x64"; break }
@@ -98,7 +109,9 @@ if ($WebOnly) {
     }
 
     tar -czf $webTarPath -C (Join-Path $root "pizzad") wwwroot
+    Assert-NativeCommand "web archive creation"
     scp @sshArgs $webTarPath "${HostName}:$RemoteTar"
+    Assert-NativeCommand "web archive upload"
 
     $remoteScript = @"
 REMOTE_TAR=$(ConvertTo-BashSingleQuoted $RemoteTar)
@@ -134,13 +147,16 @@ dotnet publish (Join-Path $root "pizzad\pizzad.csproj") `
     -p:SelfContained=true `
     -p:PublishSingleFile=false `
     -o $publishDir
+Assert-NativeCommand "backend publish"
 
 if (Test-Path $tarPath) {
     Remove-Item -LiteralPath $tarPath -Force
 }
 
 tar -czf $tarPath -C $publishDir .
+Assert-NativeCommand "backend archive creation"
 scp @sshArgs $tarPath "${HostName}:$RemoteTar"
+Assert-NativeCommand "backend archive upload"
 
 $restartPizzad = if ($NoRestart) { "0" } else { "1" }
 $remoteScript = @"
