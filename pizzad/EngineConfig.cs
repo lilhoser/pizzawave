@@ -420,6 +420,8 @@ public sealed class SiteSetupConfig
     public string LastAppliedConfigHash { get; set; } = string.Empty;
     public string LastAppliedSourceAssignmentSummary { get; set; } = string.Empty;
     public string LastAppliedRfPathSummary { get; set; } = string.Empty;
+    public string LastAppliedTalkgroupPolicyHash { get; set; } = string.Empty;
+    public string LastAppliedTalkgroupPolicyJson { get; set; } = string.Empty;
     public string LastAppliedDesiredJson { get; set; } = string.Empty;
 }
 

@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -2609,6 +2609,7 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
       reloadToken={catalogReloadToken}
       embedded
       allowSystemExclusions
+      onCatalogChanged={reload}
     />
   </div>;
 }
@@ -12006,45 +12007,6 @@ const stateNameByAbbreviation: Record<string, string> = {
   WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming"
 };
 
-function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void; readOnly?: boolean }) {
-  const categories = talkgroupCategoryOptions;
-  const hasSystem = preview.rows.some(row => row.systemShortName);
-  const categoryRank: Record<string, number> = { police: 0, fire: 1, ems: 2, traffic: 3, utilities: 4, other: 5 };
-  const visibleRows = preview.rows
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) =>
-      ((categoryRank[a.row.opsCategory || "other"] ?? 9) - (categoryRank[b.row.opsCategory || "other"] ?? 9)) ||
-      (a.row.systemShortName || "").localeCompare(b.row.systemShortName || "", undefined, { sensitivity: "base" }) ||
-      (a.row.id - b.row.id));
-  return <div className="talkgroup-preview">
-    <div className="setup-job-head">
-      <strong>{preview.includedCount.toLocaleString()} included / {preview.excludedCount.toLocaleString()} excluded</strong>
-      {Object.entries(preview.includedByCategory).map(([category, count]) => <span className={`pill category-${category}`} key={category}>{label(category)} {count}</span>)}
-    </div>
-    <div className="muted">{preview.diagnostics}</div>
-    <div className="talkgroup-preview-table">
-      <table className="table">
-        <thead><tr><th>Use</th>{hasSystem && <th>System</th>}<th>ID</th><th>Mode</th><th>Alpha</th><th>Description</th><th>Tag</th><th>Category</th><th>Reason</th></tr></thead>
-        <tbody>{visibleRows.slice(0, 500).map(({ row, index }) => <tr className={row.included ? "" : "excluded-row"} key={`${talkgroupCatalogKey(row)}-${index}`}>
-          <td><input type="checkbox" checked={row.included} disabled={readOnly} onChange={e => updateRow(index, { included: e.target.checked })} /></td>
-          {hasSystem && <td>{readOnly ? (row.systemShortName || "--") : <input value={row.systemShortName ?? ""} onChange={e => updateRow(index, { systemShortName: e.target.value, key: e.target.value.trim() ? `${normalizeTalkgroupSystem(e.target.value)}:${row.id}` : String(row.id) })} />}</td>}
-          <td>{readOnly ? row.id : <input type="number" value={row.id} onChange={e => {
-            const id = numberOrZero(e.target.value);
-            updateRow(index, { id, key: row.systemShortName ? `${normalizeTalkgroupSystem(row.systemShortName)}:${id}` : String(id) });
-          }} />}</td>
-          <td>{row.mode}</td>
-          <td>{readOnly ? row.alphaTag : <input value={row.alphaTag} onChange={e => updateRow(index, { alphaTag: e.target.value })} />}</td>
-          <td>{readOnly ? row.description : <input value={row.description} onChange={e => updateRow(index, { description: e.target.value })} />}</td>
-          <td>{readOnly ? row.tag : <input value={row.tag} onChange={e => updateRow(index, { tag: e.target.value })} />}</td>
-          <td>{readOnly ? label(row.opsCategory) : <select value={row.opsCategory} onChange={e => updateRow(index, { opsCategory: e.target.value })}>{categories.map(c => <option key={c} value={c}>{label(c)}</option>)}</select>}</td>
-          <td>{row.exclusionReason}</td>
-        </tr>)}</tbody>
-      </table>
-      {preview.rows.length > 500 && <div className="muted">Showing first 500 rows.</div>}
-    </div>
-  </div>;
-}
-
 function SettingsView({ settingsSections, settingsLoadState, reload, pendingProfileHides, setPendingProfileHides }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void>; pendingProfileHides: ProfileTalkgroupSetting[]; setPendingProfileHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>> }) {
   const settingsTabs = [
     ["transcription", "Transcription"],
@@ -12960,9 +12922,10 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
   </div>;
 }
 
-function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allowSystemExclusions = false }: { reloadToken?: number; embedded?: boolean; allowSystemExclusions?: boolean }) {
-  const [draft, setDraft] = useState<TalkgroupCatalogDocument | null>(null);
+function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allowSystemExclusions = false, onCatalogChanged }: { reloadToken?: number; embedded?: boolean; allowSystemExclusions?: boolean; onCatalogChanged?: () => Promise<void> }) {
+  const [catalogPage, setCatalogPage] = useState<TalkgroupCatalogPage | null>(null);
   const [filter, setFilterState] = useState(() => embedded ? localStorage.getItem("pizzawave-setup-talkgroup-filter") || "" : "");
+  const [debouncedFilter, setDebouncedFilter] = useState(filter);
   const [enabledFilter, setEnabledFilter] = useState<"all" | "included" | "excluded">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sortKey, setSortKey] = useState<"state" | "id" | "name" | "category">("id");
@@ -12972,9 +12935,15 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const loadSerialRef = useRef(0);
 
-  useEffect(() => { void loadCatalog(); }, [reloadToken]);
-  useEffect(() => setPage(1), [filter, enabledFilter, categoryFilter, sortKey, sortDir]);
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedFilter(filter), 250);
+    return () => window.clearTimeout(handle);
+  }, [filter]);
+  useEffect(() => { setPage(1); }, [debouncedFilter, enabledFilter, categoryFilter, sortKey, sortDir, showAllRows]);
+  useEffect(() => { setSelectedTalkgroupKeys(new Set()); }, [reloadToken]);
+  useEffect(() => { void loadCatalog(); }, [reloadToken, debouncedFilter, enabledFilter, categoryFilter, sortKey, sortDir, page, showAllRows]);
 
   function setFilter(value: string) {
     setFilterState(value);
@@ -12983,37 +12952,54 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   }
 
   async function loadCatalog() {
+    const serial = ++loadSerialRef.current;
     setBusy("load");
     try {
-      const loaded = await api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog");
-      setDraft(cloneSettings(loaded.document));
-      setSelectedTalkgroupKeys(new Set());
-      setMessage("");
+      const parameters = new URLSearchParams({
+        query: debouncedFilter,
+        state: enabledFilter,
+        category: categoryFilter,
+        sort: sortKey,
+        direction: sortDir,
+        page: String(page),
+        pageSize: String(showAllRows ? 10_000 : 50)
+      });
+      const loaded = await api.request<TalkgroupCatalogPage>(`/api/v1/talkgroups/catalog/page?${parameters}`);
+      if (serial === loadSerialRef.current) {
+        setCatalogPage(loaded);
+        setMessage("");
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load talkgroup catalog.");
+      if (serial === loadSerialRef.current)
+        setMessage(error instanceof Error ? error.message : "Unable to load talkgroup catalog.");
     } finally {
-      setBusy("");
+      if (serial === loadSerialRef.current)
+        setBusy("");
     }
   }
 
-  async function saveCatalogDocument(next: TalkgroupCatalogDocument, successMessage: string) {
-    await api.request("/api/v1/talkgroups/catalog", { method: "PUT", body: JSON.stringify(next) });
-    setDraft(next);
-    setMessage(successMessage);
+  async function updateCatalogPolicy(targetKeys: string[], patch: { enabled?: boolean; opsCategory?: string }, successMessage: string) {
+    const result = await api.request<{ updated: number; message: string }>("/api/v1/talkgroups/catalog/policy", {
+      method: "POST",
+      body: JSON.stringify({
+        targets: targetKeys.map(key => ({ key })),
+        ...patch,
+        source: "setup-talkgroups"
+      })
+    });
+    setMessage(result.updated > 0 ? successMessage : result.message);
+    await loadCatalog();
+    if (result.updated > 0)
+      await onCatalogChanged?.();
   }
 
   async function setSystemExcluded(item: TalkgroupCatalogItem, excluded: boolean) {
-    if (!draft || busy) return;
+    if (busy) return;
     setBusy(`catalog-${talkgroupCatalogKey(item)}`);
     setMessage("");
     try {
       const key = talkgroupCatalogKey(item);
-      const next = {
-        ...draft,
-        updatedAtUtc: new Date().toISOString(),
-        items: draft.items.map(row => talkgroupCatalogKey(row) === key ? { ...row, enabled: !excluded, updatedAtUtc: new Date().toISOString() } : row)
-      };
-      await saveCatalogDocument(next, excluded ? "Talkgroup excluded from generated TR CSV." : "Talkgroup restored to generated TR CSV.");
+      await updateCatalogPolicy([key], { enabled: !excluded }, excluded ? "Talkgroup excluded from generated TR CSV." : "Talkgroup restored to generated TR CSV.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update talkgroup catalog.");
     } finally {
@@ -13022,17 +13008,12 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   }
 
   async function setTalkgroupCategory(item: TalkgroupCatalogItem, category: string) {
-    if (!draft || busy) return;
+    if (busy) return;
     const key = talkgroupCatalogKey(item);
     setBusy(`category-${key}`);
     setMessage("");
     try {
-      const next = {
-        ...draft,
-        updatedAtUtc: new Date().toISOString(),
-        items: draft.items.map(row => talkgroupCatalogKey(row) === key ? { ...row, opsCategory: category, updatedAtUtc: new Date().toISOString() } : row)
-      };
-      await saveCatalogDocument(next, `Talkgroup category changed to ${label(category)}.`);
+      await updateCatalogPolicy([key], { opsCategory: category }, `Talkgroup category changed to ${label(category)}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update talkgroup category.");
     } finally {
@@ -13041,25 +13022,15 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   }
 
   async function applySelectedCategory(category: string) {
-    if (!draft || busy || !category || selectedTalkgroupKeys.size === 0) return;
-    const targetKeys = new Set(selectedTalkgroupKeys);
-    const targetCount = draft.items.filter(row => targetKeys.has(talkgroupCatalogKey(row))).length;
-    if (!targetCount) {
-      setSelectedTalkgroupKeys(new Set());
-      return;
-    }
-    if (!confirmAction(`Assign selected talkgroups to ${label(category)}?`, `This will update ${targetCount.toLocaleString()} catalog row(s), regenerate the TR talkgroups CSV, and affect new calls going forward.`))
+    if (busy || !category || selectedTalkgroupKeys.size === 0) return;
+    const targetKeys = [...selectedTalkgroupKeys];
+    const targetCount = targetKeys.length;
+    if (!confirmAction(`Assign selected talkgroups to ${label(category)}?`, `This will update ${targetCount.toLocaleString()} catalog row(s) and affect new calls going forward.`))
       return;
     setBusy("selected-category");
     setMessage("");
     try {
-      const now = new Date().toISOString();
-      const next = {
-        ...draft,
-        updatedAtUtc: now,
-        items: draft.items.map(row => targetKeys.has(talkgroupCatalogKey(row)) ? { ...row, opsCategory: category, updatedAtUtc: now } : row)
-      };
-      await saveCatalogDocument(next, `Assigned ${targetCount.toLocaleString()} selected talkgroup row(s) to ${label(category)}.`);
+      await updateCatalogPolicy(targetKeys, { opsCategory: category }, `Assigned ${targetCount.toLocaleString()} selected talkgroup row(s) to ${label(category)}.`);
       setSelectedTalkgroupKeys(new Set());
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update selected talkgroup categories.");
@@ -13068,23 +13039,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     }
   }
 
-  const needle = filter.trim().toLowerCase();
-  const catalogItems = draft?.items ?? [];
-  const effectiveItems = catalogItems;
-  const categoryOptions = Array.from(new Set([...talkgroupCategoryOptions, ...effectiveItems.map(item => item.opsCategory).filter(Boolean)]));
-  function compareRows(a: TalkgroupCatalogItem, b: TalkgroupCatalogItem) {
-    const direction = sortDir === "asc" ? 1 : -1;
-    const value = (() => {
-      switch (sortKey) {
-        case "state": return Number(a.enabled) - Number(b.enabled);
-        case "name": return a.alphaTag.localeCompare(b.alphaTag, undefined, { sensitivity: "base" });
-        case "category": return a.opsCategory.localeCompare(b.opsCategory, undefined, { sensitivity: "base" });
-        case "id":
-        default: return a.id - b.id;
-      }
-    })();
-    return value === 0 ? a.id - b.id : value * direction;
-  }
+  const categoryOptions = Array.from(new Set([...talkgroupCategoryOptions, ...Object.keys(catalogPage?.categoryCounts ?? {})]));
   function sortBy(key: typeof sortKey) {
     if (sortKey === key)
       setSortDir(current => current === "asc" ? "desc" : "asc");
@@ -13093,34 +13048,19 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
       setSortDir("asc");
     }
   }
-  const rows = effectiveItems
-    .filter(item => enabledFilter === "all" || (enabledFilter === "included" ? item.enabled : !item.enabled))
-    .filter(item => categoryFilter === "all" || item.opsCategory === categoryFilter)
-    .filter(item => !needle ||
-      String(item.id).includes(needle) ||
-      item.alphaTag.toLowerCase().includes(needle) ||
-      item.description.toLowerCase().includes(needle) ||
-      (item.systemShortName ?? "").toLowerCase().includes(needle) ||
-      item.tag.toLowerCase().includes(needle) ||
-      item.opsCategory.toLowerCase().includes(needle))
-    .sort(compareRows);
-  const pageSize = showAllRows ? Math.max(1, rows.length) : 50;
-  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const startRow = rows.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const endRow = Math.min(rows.length, currentPage * pageSize);
+  const visibleRows = catalogPage?.items ?? [];
+  const currentPage = catalogPage?.page ?? page;
+  const pageCount = catalogPage?.pageCount ?? 1;
+  const filteredRows = catalogPage?.filteredRows ?? 0;
+  const startRow = filteredRows === 0 ? 0 : (currentPage - 1) * (catalogPage?.pageSize ?? 50) + 1;
+  const endRow = filteredRows === 0 ? 0 : Math.min(filteredRows, startRow + visibleRows.length - 1);
   const visibleKeys = visibleRows.map(talkgroupCatalogKey);
   const visibleSelectedCount = visibleKeys.filter(key => selectedTalkgroupKeys.has(key)).length;
   const allVisibleSelected = visibleKeys.length > 0 && visibleSelectedCount === visibleKeys.length;
-  const enabledCount = effectiveItems.filter(item => item.enabled).length;
-  const excludedCount = Math.max(0, effectiveItems.length - enabledCount);
-  const hasSystemScopedRows = effectiveItems.some(item => item.systemShortName);
-  const topCategoryCounts = Array.from(rows.reduce<Map<string, number>>((counts, item) => {
-    const category = item.opsCategory || "other";
-    counts.set(category, (counts.get(category) ?? 0) + 1);
-    return counts;
-  }, new Map()))
+  const enabledCount = catalogPage?.enabledCount ?? 0;
+  const excludedCount = catalogPage?.excludedCount ?? 0;
+  const hasSystemScopedRows = visibleRows.some(item => item.systemShortName);
+  const topCategoryCounts = Object.entries(catalogPage?.categoryCounts ?? {})
     .sort(([aCategory, aCount], [bCategory, bCount]) => bCount - aCount || aCategory.localeCompare(bCategory))
     .slice(0, 5);
   function setTalkgroupSelected(key: string, selected: boolean) {
@@ -13163,7 +13103,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
             <option value="all">All categories</option>
             {categoryOptions.map(category => <option value={category} key={category}>{label(category)}</option>)}
           </select>
-          <span className="muted">{startRow}-{endRow} of {rows.length} rows / {enabledCount} included / {excludedCount} excluded</span>
+          <span className="muted">{startRow}-{endRow} of {filteredRows} rows / {enabledCount} included / {excludedCount} excluded</span>
           {selectedTalkgroupKeys.size > 0 && <span className="selected-category-action">
             <span>{selectedTalkgroupKeys.size.toLocaleString()} selected</span>
             <select value="" disabled={Boolean(busy)} onChange={e => { const value = e.target.value; if (value) void applySelectedCategory(value); }} aria-label="Set selected talkgroup category">
@@ -13309,7 +13249,7 @@ function normalizeTalkgroupSystem(value?: string | null) {
   return String(value ?? "").trim().replace(/\s+/g, "-").toLowerCase();
 }
 
-function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemShortName" | "id"> | Pick<SetupTalkgroupRow, "key" | "systemShortName" | "id">) {
+function talkgroupCatalogKey(item: Pick<TalkgroupCatalogItem, "key" | "systemShortName" | "id">) {
   const key = String(item.key ?? "").trim().toLowerCase();
   if (key) return key;
   const system = normalizeTalkgroupSystem(item.systemShortName);

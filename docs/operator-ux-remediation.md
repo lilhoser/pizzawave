@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 2 - Talkgroups
-- Current milestone: 2B - scoped, paged catalog operations
+- Current milestone: Package 2 deployment and operator verification
 - Working branch: `codex/operator-ux-review`
 - Last deployed commit: `9c48f30`
 - Operator verification: Package 1 accepted
-- Next action: replace full-catalog reads and writes in Setup with server-side
-  paging, filtering, and scoped talkgroup mutations.
+- Next action: deploy Package 2 to the RPI, verify import/paging/policy behavior,
+  and ask the operator to inspect the milestone.
 
 ## Working Rules
 
@@ -59,8 +59,8 @@ Acceptance:
 Status: in progress
 
 - [x] Move one-time RR import provenance to the server.
-- [ ] Replace full-catalog writes with scoped, paged mutations.
-- [ ] Route category and TR-exclusion changes through Setup activity and apply
+- [x] Replace full-catalog writes with scoped, paged mutations.
+- [x] Route category and TR-exclusion changes through Setup activity and apply
   state.
 - [ ] Deploy, verify, and obtain operator acceptance.
 
@@ -166,3 +166,10 @@ Status: pending
   frontend build. RR import provenance and refresh are now server-owned and
   auditable; the browser no longer sends parsed RR catalog rows or decides
   whether an import has already occurred.
+- 2026-07-09: Milestones 2B and 2C passed the existing backend test suite and
+  production frontend build. Setup catalog reads are server-paged and filtered;
+  category and TR policy mutations are scoped, serialized, audited, and only
+  TR-affecting changes create pending Apply & Resume work. Obsolete preview,
+  save, and full-catalog replacement endpoints were removed. The last applied
+  enabled-talkgroup set is retained so Discard can restore pending TR policy
+  changes without undoing immediate category edits.

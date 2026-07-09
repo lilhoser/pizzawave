@@ -548,6 +548,7 @@ export type TalkgroupCatalogItem = {
 };
 export type TalkgroupCatalogImport = { radioReferenceSid: string; systemShortName: string; rowCount: number; importedAtUtc: string };
 export type TalkgroupCatalogDocument = { schemaVersion: number; updatedAtUtc?: string; imports?: TalkgroupCatalogImport[]; items: TalkgroupCatalogItem[] };
+export type TalkgroupCatalogPage = { items: TalkgroupCatalogItem[]; page: number; pageSize: number; pageCount: number; totalRows: number; filteredRows: number; enabledCount: number; excludedCount: number; categoryCounts: Record<string, number>; imports: TalkgroupCatalogImport[]; updatedAtUtc: string };
 export type SetupTalkgroupSyncResult = { importedSystems: number; addedRows: number; refreshedRows: number; imports: TalkgroupCatalogImport[]; message: string };
 export type TalkgroupCatalogResponse = {
   catalogPath: string;
@@ -597,8 +598,6 @@ export type BackupRestoreApplyResult = { scheduled: boolean; message: string };
 export type BackupRestoreCancelResult = { canceled: boolean; message: string };
 export type SystemResetResult = { ok: boolean; message: string; warnings: string[]; backup?: BackupCreateResult | null; nextPage: string };
 export type SetupValidationResult = { ok: boolean; message: string; detail?: any };
-export type SetupTalkgroupRow = { key: string; systemShortName: string; id: number; mode: string; alphaTag: string; description: string; tag: string; category: string; opsCategory: string; included: boolean; exclusionReason: string };
-export type SetupTalkgroupPreview = { rows: SetupTalkgroupRow[]; includedByCategory: Record<string, number>; includedCount: number; excludedCount: number; diagnostics: string };
 export type SetupTrConfigSystem = { systemName: string; shortName: string; siteName: string; frequenciesMhz: number[]; controlChannelsMhz: number[]; centerFrequency: number; assignedSerial: string; warning: string };
 export type SetupTrConfigSource = { label: string; serial: string; type: string; driver: string; deviceArgs: string; centerFrequency: number; sampleRate: number; gain: string; gainMode: string; coveredFrequenciesMhz: number[]; omittedFrequenciesMhz: number[] };
 export type SetupTrConfigDraft = { configJson: string; systems: SetupTrConfigSystem[]; sources: SetupTrConfigSource[]; warnings: string[]; diagnostics: string };
@@ -643,6 +642,8 @@ export type SiteSetupConfig = {
   lastAppliedConfigHash: string;
   lastAppliedSourceAssignmentSummary: string;
   lastAppliedRfPathSummary: string;
+  lastAppliedTalkgroupPolicyHash: string;
+  lastAppliedTalkgroupPolicyJson: string;
   lastAppliedDesiredJson?: string;
 };
 export type SiteSetup = { desired: SiteSetupConfig; applied: SiteSetupAppliedConfig; status: SiteSetupStatus; pendingChanges: SiteSetupPendingChange[]; recentActivity: SiteSetupActivity[] };

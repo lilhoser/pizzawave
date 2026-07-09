@@ -15,6 +15,7 @@ public sealed class TalkgroupCatalogService
     private readonly EngineConfig _config;
     private readonly ILogger<TalkgroupCatalogService> _logger;
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private TalkgroupCatalogDocument? _cached;
     private DateTime _lastWriteUtc = DateTime.MinValue;
 
@@ -57,7 +58,76 @@ public sealed class TalkgroupCatalogService
         }
     }
 
-    public async Task<TalkgroupCatalogSaveResult> SaveAsync(TalkgroupCatalogDocument document, bool generateTrCsv, CancellationToken ct)
+    public TalkgroupCatalogPageResult QueryPage(
+        string? query,
+        string? state,
+        string? category,
+        string? sort,
+        string? direction,
+        int page,
+        int pageSize)
+    {
+        var document = Load();
+        var needle = (query ?? string.Empty).Trim();
+        var normalizedState = (state ?? "all").Trim().ToLowerInvariant();
+        var normalizedCategory = (category ?? "all").Trim().ToLowerInvariant();
+        var descending = string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase);
+        var rows = document.Items
+            .Where(item => normalizedState switch
+            {
+                "included" => item.Enabled,
+                "excluded" => !item.Enabled,
+                _ => true
+            })
+            .Where(item => normalizedCategory == "all" || string.Equals(item.OpsCategory, normalizedCategory, StringComparison.OrdinalIgnoreCase))
+            .Where(item => string.IsNullOrWhiteSpace(needle) ||
+                item.Id.ToString(CultureInfo.InvariantCulture).Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                item.AlphaTag.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                item.Description.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                item.SystemShortName.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                item.Tag.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                item.OpsCategory.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Comparison<TalkgroupCatalogItem> comparison = (left, right) => (sort ?? "id").Trim().ToLowerInvariant() switch
+        {
+            "state" => left.Enabled.CompareTo(right.Enabled),
+            "name" => string.Compare(left.AlphaTag, right.AlphaTag, StringComparison.CurrentCultureIgnoreCase),
+            "category" => string.Compare(left.OpsCategory, right.OpsCategory, StringComparison.CurrentCultureIgnoreCase),
+            "system" => string.Compare(left.SystemShortName, right.SystemShortName, StringComparison.CurrentCultureIgnoreCase),
+            _ => left.Id.CompareTo(right.Id)
+        };
+        rows.Sort((left, right) =>
+        {
+            var result = comparison(left, right);
+            if (descending) result *= -1;
+            if (result != 0) return result;
+            result = string.Compare(left.SystemShortName, right.SystemShortName, StringComparison.OrdinalIgnoreCase);
+            return result != 0 ? result : left.Id.CompareTo(right.Id);
+        });
+
+        var normalizedPageSize = Math.Clamp(pageSize <= 0 ? 50 : pageSize, 1, 10_000);
+        var pageCount = Math.Max(1, (int)Math.Ceiling(rows.Count / (double)normalizedPageSize));
+        var normalizedPage = Math.Clamp(page <= 0 ? 1 : page, 1, pageCount);
+        var items = rows.Skip((normalizedPage - 1) * normalizedPageSize).Take(normalizedPageSize).ToList();
+        var categoryCounts = rows
+            .GroupBy(item => item.OpsCategory, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        return new TalkgroupCatalogPageResult(
+            items,
+            normalizedPage,
+            normalizedPageSize,
+            pageCount,
+            document.Items.Count,
+            rows.Count,
+            document.Items.Count(item => item.Enabled),
+            document.Items.Count(item => !item.Enabled),
+            categoryCounts,
+            document.Imports,
+            document.UpdatedAtUtc);
+    }
+
+    private async Task<TalkgroupCatalogSaveResult> SaveDocumentAsync(TalkgroupCatalogDocument document, bool generateTrCsv, CancellationToken ct)
     {
         var normalized = NormalizeDocument(document);
         normalized = normalized with { UpdatedAtUtc = DateTime.UtcNow };
@@ -100,46 +170,164 @@ public sealed class TalkgroupCatalogService
         if (request.Enabled is null && category is null && request.IncidentEligible is null)
             throw new InvalidOperationException("At least one catalog policy value is required.");
 
-        var document = Load();
-        var targetKeys = ResolvePolicyTargetKeys(document, targets);
-        if (targetKeys.Count == 0)
+        await _mutationGate.WaitAsync(ct);
+        try
         {
-            var emptySave = new TalkgroupCatalogSaveResult(document.Items.Count, null, string.Empty, null, false);
-            return new TalkgroupCatalogPolicyUpdateResult(targets.Count, 0, emptySave, "No matching talkgroup catalog rows were found.");
+            var document = Load();
+            var targetKeys = ResolvePolicyTargetKeys(document, targets);
+            if (targetKeys.Count == 0)
+            {
+                var emptySave = new TalkgroupCatalogSaveResult(document.Items.Count, null, string.Empty, null, false);
+                return new TalkgroupCatalogPolicyUpdateResult(targets.Count, 0, emptySave, "No matching talkgroup catalog rows were found.");
+            }
+
+            var now = DateTime.UtcNow;
+            var updated = 0;
+            var items = document.Items.Select(item =>
+            {
+                if (!targetKeys.Contains(ItemKey(item)))
+                    return item;
+
+                var next = item;
+                if (request.Enabled is bool enabled)
+                    next = next with { Enabled = enabled };
+                if (category is not null)
+                    next = next with { OpsCategory = category };
+                if (request.IncidentEligible is bool incidentEligible)
+                    next = next with { IncidentEligible = incidentEligible };
+                next = next with { UpdatedAtUtc = now };
+                if (!CatalogPolicyEquivalent(item, next))
+                    updated++;
+                return next;
+            }).ToList();
+
+            if (updated == 0)
+            {
+                var unchangedSave = new TalkgroupCatalogSaveResult(document.Items.Count, null, string.Empty, null, false);
+                return new TalkgroupCatalogPolicyUpdateResult(targets.Count, 0, unchangedSave, "Matching talkgroup catalog rows already had that policy.");
+            }
+
+            var regenerateTrCsv = request.Enabled is not null;
+            var save = await SaveDocumentAsync(document with { Items = items, UpdatedAtUtc = now }, regenerateTrCsv, ct);
+            var effect = regenerateTrCsv ? " and TR CSVs regenerated" : string.Empty;
+            return new TalkgroupCatalogPolicyUpdateResult(
+                targets.Count,
+                updated,
+                save,
+                $"{updated:N0} talkgroup catalog row(s) updated{effect}.");
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
+    }
+
+    public async Task<TalkgroupCatalogImportMergeResult> MergeRadioReferenceImportsAsync(
+        IReadOnlyList<TalkgroupCatalogImportBatch> batches,
+        CancellationToken ct)
+    {
+        if (batches.Count == 0)
+            throw new InvalidOperationException("At least one RadioReference import batch is required.");
+
+        await _mutationGate.WaitAsync(ct);
+        try
+        {
+            var document = Load();
+            var items = document.Items.ToDictionary(ItemKey, StringComparer.OrdinalIgnoreCase);
+            var imports = (document.Imports ?? []).ToDictionary(row => row.RadioReferenceSid, StringComparer.OrdinalIgnoreCase);
+            var addedRows = 0;
+            var refreshedRows = 0;
+
+            foreach (var batch in batches)
+            {
+                foreach (var row in batch.Rows)
+                {
+                    var key = ItemKey(row);
+                    if (!items.TryGetValue(key, out var existing))
+                    {
+                        items[key] = row;
+                        addedRows++;
+                        continue;
+                    }
+
+                    var preserveManualFields = string.Equals(existing.Source, "manual", StringComparison.OrdinalIgnoreCase);
+                    items[key] = row with
+                    {
+                        Mode = preserveManualFields ? existing.Mode : row.Mode,
+                        AlphaTag = preserveManualFields ? existing.AlphaTag : row.AlphaTag,
+                        Description = preserveManualFields ? existing.Description : row.Description,
+                        Tag = preserveManualFields ? existing.Tag : row.Tag,
+                        SourceCategory = preserveManualFields ? existing.SourceCategory : row.SourceCategory,
+                        Enabled = existing.Enabled,
+                        OpsCategory = existing.OpsCategory,
+                        IncidentEligible = existing.IncidentEligible,
+                        Source = preserveManualFields ? existing.Source : row.Source,
+                        Notes = existing.Notes
+                    };
+                    refreshedRows++;
+                }
+
+                imports[batch.RadioReferenceSid] = new TalkgroupCatalogImport
+                {
+                    RadioReferenceSid = batch.RadioReferenceSid,
+                    SystemShortName = batch.SystemShortName,
+                    RowCount = batch.Rows.Count,
+                    ImportedAtUtc = batch.ImportedAtUtc
+                };
+            }
+
+            var next = document with
+            {
+                SchemaVersion = 2,
+                UpdatedAtUtc = batches.Max(batch => batch.ImportedAtUtc),
+                Imports = imports.Values.OrderBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase).ToList(),
+                Items = items.Values.OrderBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase).ThenBy(row => row.Id).ToList()
+            };
+            var save = await SaveDocumentAsync(next, generateTrCsv: true, ct);
+            return new TalkgroupCatalogImportMergeResult(next, addedRows, refreshedRows, save);
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
+    }
+
+    public async Task<int> RestoreEnabledPolicyAsync(string snapshotJson, CancellationToken ct)
+    {
+        List<string> enabledKeys;
+        try
+        {
+            enabledKeys = JsonSerializer.Deserialize<List<string>>(snapshotJson, EngineConfig.JsonOptions()) ?? [];
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("The last applied talkgroup policy snapshot is invalid.", ex);
         }
 
-        var now = DateTime.UtcNow;
-        var updated = 0;
-        var items = document.Items.Select(item =>
+        var enabled = enabledKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        await _mutationGate.WaitAsync(ct);
+        try
         {
-            if (!targetKeys.Contains(ItemKey(item)))
-                return item;
-
-            var next = item;
-            if (request.Enabled is bool enabled)
-                next = next with { Enabled = enabled };
-            if (category is not null)
-                next = next with { OpsCategory = category };
-            if (request.IncidentEligible is bool incidentEligible)
-                next = next with { IncidentEligible = incidentEligible };
-            next = next with { UpdatedAtUtc = now };
-            if (!CatalogPolicyEquivalent(item, next))
-                updated++;
-            return next;
-        }).ToList();
-
-        if (updated == 0)
-        {
-            var unchangedSave = new TalkgroupCatalogSaveResult(document.Items.Count, null, string.Empty, null, false);
-            return new TalkgroupCatalogPolicyUpdateResult(targets.Count, 0, unchangedSave, "Matching talkgroup catalog rows already had that policy.");
+            var document = Load();
+            var changed = 0;
+            var now = DateTime.UtcNow;
+            var items = document.Items.Select(item =>
+            {
+                var shouldEnable = enabled.Contains(ItemKey(item));
+                if (item.Enabled == shouldEnable)
+                    return item;
+                changed++;
+                return item with { Enabled = shouldEnable, UpdatedAtUtc = now };
+            }).ToList();
+            if (changed == 0)
+                return 0;
+            await SaveDocumentAsync(document with { Items = items, UpdatedAtUtc = now }, generateTrCsv: true, ct);
+            return changed;
         }
-
-        var save = await SaveAsync(document with { Items = items, UpdatedAtUtc = now }, generateTrCsv: true, ct);
-        return new TalkgroupCatalogPolicyUpdateResult(
-            targets.Count,
-            updated,
-            save,
-            $"{updated:N0} talkgroup catalog row(s) updated and TR CSVs regenerated.");
+        finally
+        {
+            _mutationGate.Release();
+        }
     }
 
     public async Task<TalkgroupTrCsvResult> GenerateTrCsvAsync(TalkgroupCatalogDocument document, CancellationToken ct)
@@ -854,3 +1042,17 @@ public sealed record TalkgroupCatalogPreview(
 public sealed record ResolvedCatalogTalkgroup(long Id, string Label, string Category, bool Found, bool IncidentEligible = true);
 public sealed record TalkgroupCatalogSaveResult(int Count, string? BackupPath, string GeneratedCsvPath, string? GeneratedCsvBackupPath, bool TrRestartRecommended);
 public sealed record TalkgroupTrCsvResult(string Path, string? BackupPath, int EnabledCount);
+public sealed record TalkgroupCatalogImportBatch(string RadioReferenceSid, string SystemShortName, IReadOnlyList<TalkgroupCatalogItem> Rows, DateTime ImportedAtUtc);
+public sealed record TalkgroupCatalogImportMergeResult(TalkgroupCatalogDocument Document, int AddedRows, int RefreshedRows, TalkgroupCatalogSaveResult Save);
+public sealed record TalkgroupCatalogPageResult(
+    IReadOnlyList<TalkgroupCatalogItem> Items,
+    int Page,
+    int PageSize,
+    int PageCount,
+    int TotalRows,
+    int FilteredRows,
+    int EnabledCount,
+    int ExcludedCount,
+    IReadOnlyDictionary<string, int> CategoryCounts,
+    IReadOnlyList<TalkgroupCatalogImport> Imports,
+    DateTime UpdatedAtUtc);

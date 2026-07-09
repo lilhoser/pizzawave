@@ -315,10 +315,6 @@ public sealed record SetupSdrDetectionDto(
     string RawOutput,
     string Message);
 
-public sealed record SetupTalkgroupParseRequest(string? CsvText = null, string? RadioReferenceSid = null, string? RadioReferenceUrl = null, bool IncludeNormallyExcluded = false, string? SystemShortName = null);
-
-public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows);
-
 public sealed record SetupTalkgroupImportSourceRequest(string RadioReferenceSid, string? SystemShortName = null);
 
 public sealed record SetupTalkgroupSyncRequest(
@@ -337,28 +333,6 @@ public sealed record SetupTalkgroupSyncResult(
     int RefreshedRows,
     IReadOnlyList<SetupTalkgroupImportDto> Imports,
     string Message);
-
-public sealed record SetupTalkgroupRowDto
-{
-    public string Key { get; init; } = string.Empty;
-    public string SystemShortName { get; init; } = string.Empty;
-    public long Id { get; init; }
-    public string Mode { get; init; } = string.Empty;
-    public string AlphaTag { get; init; } = string.Empty;
-    public string Description { get; init; } = string.Empty;
-    public string Tag { get; init; } = string.Empty;
-    public string Category { get; init; } = string.Empty;
-    public string OpsCategory { get; init; } = "other";
-    public bool Included { get; init; } = true;
-    public string ExclusionReason { get; init; } = string.Empty;
-}
-
-public sealed record SetupTalkgroupPreviewDto(
-    IReadOnlyList<SetupTalkgroupRowDto> Rows,
-    IReadOnlyDictionary<string, int> IncludedByCategory,
-    int IncludedCount,
-    int ExcludedCount,
-    string Diagnostics);
 
 public sealed record SetupTrConfigDraftRequest(
     string? RadioReferenceSid = null,
@@ -1578,7 +1552,8 @@ public sealed record TalkgroupCatalogPolicyUpdateRequest(
     IReadOnlyList<TalkgroupCatalogPolicyTarget> Targets,
     bool? Enabled = null,
     string? OpsCategory = null,
-    bool? IncidentEligible = null);
+    bool? IncidentEligible = null,
+    string Source = "api");
 
 public sealed record TalkgroupCatalogPolicyUpdateResult(
     int Requested,

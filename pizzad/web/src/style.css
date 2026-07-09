@@ -864,6 +864,13 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #9faab5;
   font-size: 11px;
 }
+.site-setup-source-chip button.icon-button {
+  width: 22px;
+  height: 22px;
+  margin: 0 -4px 0 1px;
+  border-color: transparent;
+  background: transparent;
+}
 .site-setup-source-chip b {
   color: #ffb4aa;
   font-size: 12px;

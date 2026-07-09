@@ -502,41 +502,12 @@ app.MapPost("/api/v1/setup/jobs", async (SetupJobRequest request, SetupJobServic
 .WithName("SetupJobStart")
 .WithOpenApi();
 
-app.MapPost("/api/v1/setup/talkgroups/preview", async (SetupTalkgroupParseRequest request, SetupTalkgroupService talkgroups, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await talkgroups.PreviewAsync(request, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SetupTalkgroupsPreview")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/talkgroups/save", async (SetupTalkgroupSaveRequest request, SetupTalkgroupService talkgroups, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await talkgroups.SaveAsync(request, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SetupTalkgroupsSave")
-.WithOpenApi();
-
 app.MapPost("/api/v1/setup/talkgroups/sync", async (SetupTalkgroupSyncRequest request, SetupTalkgroupService talkgroups, SiteSetupService siteSetup, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     try
     {
+        await siteSetup.EnsureTalkgroupPolicyBaselineAsync(context.RequestAborted);
         var result = await talkgroups.SyncAsync(request, context.RequestAborted);
         if (result.ImportedSystems > 0)
         {
@@ -1351,29 +1322,47 @@ app.MapGet("/api/v1/talkgroups/catalog", (HttpContext context, AuthService authS
 .WithName("TalkgroupCatalogRead")
 .WithOpenApi();
 
-app.MapPut("/api/v1/talkgroups/catalog", async (HttpContext context, TalkgroupCatalogDocument document, AuthService authService, TalkgroupCatalogService catalog) =>
+app.MapGet("/api/v1/talkgroups/catalog/page", (HttpContext context, string? query, string? state, string? category, string? sort, string? direction, int? page, int? pageSize, AuthService authService, TalkgroupCatalogService catalog) =>
 {
-    if (!authService.IsWriteAllowed(context))
+    if (!authService.IsReadAllowed(context))
         return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await catalog.SaveAsync(document, generateTrCsv: true, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
+    return Results.Ok(catalog.QueryPage(query, state, category, sort, direction, page ?? 1, pageSize ?? 50));
 })
-.WithName("TalkgroupCatalogReplace")
+.WithName("TalkgroupCatalogPage")
 .WithOpenApi();
 
-app.MapPost("/api/v1/talkgroups/catalog/policy", async (HttpContext context, TalkgroupCatalogPolicyUpdateRequest request, AuthService authService, TalkgroupCatalogService catalog) =>
+app.MapPost("/api/v1/talkgroups/catalog/policy", async (HttpContext context, TalkgroupCatalogPolicyUpdateRequest request, AuthService authService, TalkgroupCatalogService catalog, SiteSetupService siteSetup) =>
 {
     if (!authService.IsWriteAllowed(context))
         return Results.Unauthorized();
     try
     {
-        return Results.Ok(await catalog.UpdatePolicyAsync(request, context.RequestAborted));
+        await siteSetup.EnsureTalkgroupPolicyBaselineAsync(context.RequestAborted);
+        var result = await catalog.UpdatePolicyAsync(request, context.RequestAborted);
+        if (result.Updated > 0)
+        {
+            var action = request.Enabled switch
+            {
+                false => "talkgroups_excluded_from_tr",
+                true => "talkgroups_restored_to_tr",
+                _ when !string.IsNullOrWhiteSpace(request.OpsCategory) => "talkgroup_categories_changed",
+                _ => "talkgroup_policy_changed"
+            };
+            var summary = request.Enabled switch
+            {
+                false => $"Excluded {result.Updated:N0} talkgroup row(s) from TR capture policy.",
+                true => $"Restored {result.Updated:N0} talkgroup row(s) to TR capture policy.",
+                _ when !string.IsNullOrWhiteSpace(request.OpsCategory) => $"Assigned {result.Updated:N0} talkgroup row(s) to {request.OpsCategory}.",
+                _ => $"Updated policy for {result.Updated:N0} talkgroup row(s)."
+            };
+            await siteSetup.AddActivityAsync(new SiteSetupActivityRequest(
+                "talkgroups",
+                action,
+                summary,
+                JsonSerializer.SerializeToElement(new { request.Targets, request.Enabled, request.OpsCategory, request.IncidentEligible, result.Save }),
+                string.IsNullOrWhiteSpace(request.Source) ? "api" : request.Source), context.RequestAborted);
+        }
+        return Results.Ok(result);
     }
     catch (Exception ex)
     {

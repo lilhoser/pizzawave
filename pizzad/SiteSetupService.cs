@@ -10,6 +10,7 @@ public sealed class SiteSetupService
     private readonly EngineDatabase _database;
     private readonly IngestControlService _ingest;
     private readonly LiveTrActivityMonitor _liveTrActivity;
+    private readonly TalkgroupCatalogService _talkgroups;
     private readonly ILogger<SiteSetupService> _logger;
     private readonly SemaphoreSlim _updateGate = new(1, 1);
 
@@ -18,12 +19,14 @@ public sealed class SiteSetupService
         EngineDatabase database,
         IngestControlService ingest,
         LiveTrActivityMonitor liveTrActivity,
+        TalkgroupCatalogService talkgroups,
         ILogger<SiteSetupService> logger)
     {
         _config = config;
         _database = database;
         _ingest = ingest;
         _liveTrActivity = liveTrActivity;
+        _talkgroups = talkgroups;
         _logger = logger;
     }
 
@@ -48,6 +51,24 @@ public sealed class SiteSetupService
             activity);
     }
 
+    public async Task EnsureTalkgroupPolicyBaselineAsync(CancellationToken ct)
+    {
+        await _updateGate.WaitAsync(ct);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_config.SiteSetup.LastAppliedTalkgroupPolicyHash))
+                return;
+            var snapshot = TalkgroupPolicySnapshotJson();
+            _config.SiteSetup.LastAppliedTalkgroupPolicyJson = snapshot;
+            _config.SiteSetup.LastAppliedTalkgroupPolicyHash = Sha256(snapshot);
+            _config.Save();
+        }
+        finally
+        {
+            _updateGate.Release();
+        }
+    }
+
     public async Task<SiteSetupDto> UpdateDesiredAsync(SiteSetupUpdateRequest request, CancellationToken ct)
     {
         await _updateGate.WaitAsync(ct);
@@ -65,6 +86,8 @@ public sealed class SiteSetupService
             next.LastAppliedConfigHash = before.LastAppliedConfigHash;
             next.LastAppliedSourceAssignmentSummary = before.LastAppliedSourceAssignmentSummary;
             next.LastAppliedRfPathSummary = before.LastAppliedRfPathSummary;
+            next.LastAppliedTalkgroupPolicyHash = before.LastAppliedTalkgroupPolicyHash;
+            next.LastAppliedTalkgroupPolicyJson = before.LastAppliedTalkgroupPolicyJson;
             next.LastAppliedDesiredJson = before.LastAppliedDesiredJson;
 
             var changes = DescribeChanges(before, next);
@@ -112,6 +135,8 @@ public sealed class SiteSetupService
         LastAppliedConfigHash = before.LastAppliedConfigHash,
         LastAppliedSourceAssignmentSummary = before.LastAppliedSourceAssignmentSummary,
         LastAppliedRfPathSummary = before.LastAppliedRfPathSummary,
+        LastAppliedTalkgroupPolicyHash = before.LastAppliedTalkgroupPolicyHash,
+        LastAppliedTalkgroupPolicyJson = before.LastAppliedTalkgroupPolicyJson,
         LastAppliedDesiredJson = before.LastAppliedDesiredJson
     });
 
@@ -134,6 +159,8 @@ public sealed class SiteSetupService
         next.LastAppliedConfigHash = applied.ConfigHash;
         next.LastAppliedSourceAssignmentSummary = SourceAssignmentSummary(next.SourceAssignments);
         next.LastAppliedRfPathSummary = RfPathSummary(next.RfPath);
+        next.LastAppliedTalkgroupPolicyJson = TalkgroupPolicySnapshotJson();
+        next.LastAppliedTalkgroupPolicyHash = Sha256(next.LastAppliedTalkgroupPolicyJson);
         next.LastAppliedDesiredJson = SerializeAppliedDesiredSnapshot(next);
         _config.SiteSetup = next;
         _config.Save();
@@ -152,6 +179,12 @@ public sealed class SiteSetupService
     {
         var applied = await BuildAppliedConfigAsync(ct);
         var before = EffectiveDesired(applied);
+        var restoredTalkgroupRows = 0;
+        if (!string.IsNullOrWhiteSpace(before.LastAppliedTalkgroupPolicyJson) &&
+            !string.Equals(TalkgroupPolicyHash(), before.LastAppliedTalkgroupPolicyHash, StringComparison.OrdinalIgnoreCase))
+        {
+            restoredTalkgroupRows = await _talkgroups.RestoreEnabledPolicyAsync(before.LastAppliedTalkgroupPolicyJson, ct);
+        }
         if (TryReadAppliedDesiredSnapshot(before.LastAppliedDesiredJson, out var appliedDesiredSnapshot))
         {
             var restored = Normalize(appliedDesiredSnapshot);
@@ -161,15 +194,19 @@ public sealed class SiteSetupService
             restored.LastAppliedConfigHash = before.LastAppliedConfigHash;
             restored.LastAppliedSourceAssignmentSummary = before.LastAppliedSourceAssignmentSummary;
             restored.LastAppliedRfPathSummary = before.LastAppliedRfPathSummary;
+            restored.LastAppliedTalkgroupPolicyHash = before.LastAppliedTalkgroupPolicyHash;
+            restored.LastAppliedTalkgroupPolicyJson = before.LastAppliedTalkgroupPolicyJson;
             restored.LastAppliedDesiredJson = before.LastAppliedDesiredJson;
             _config.SiteSetup = restored;
             _config.Locations.MonitoredAreas = CloneMonitoredAreas(restored.MonitoredAreas);
             _config.Save();
 
             var snapshotChanges = DescribeChanges(before, restored);
+            if (restoredTalkgroupRows > 0)
+                snapshotChanges.Add("TR talkgroup policy");
             var snapshotDetails = request.Details.HasValue
                 ? request.Details.Value.GetRawText()
-                : JsonSerializer.Serialize(new { changes = snapshotChanges, before = ActivitySnapshot(before), after = ActivitySnapshot(restored), source = "last-applied-snapshot" }, EngineConfig.JsonOptions());
+                : JsonSerializer.Serialize(new { changes = snapshotChanges, restoredTalkgroupRows, before = ActivitySnapshot(before), after = ActivitySnapshot(restored), source = "last-applied-snapshot" }, EngineConfig.JsonOptions());
             var snapshotSummary = string.IsNullOrWhiteSpace(request.Summary)
                 ? $"Discarded pending Site Setup changes and restored the last applied Setup snapshot{(snapshotChanges.Count > 0 ? $": {string.Join(", ", snapshotChanges.Take(4))}{(snapshotChanges.Count > 4 ? $" and {snapshotChanges.Count - 4} more" : "")}" : ".")}"
                 : request.Summary.Trim();
@@ -210,16 +247,20 @@ public sealed class SiteSetupService
             LastAppliedConfigHash = applied.ConfigHash,
             LastAppliedSourceAssignmentSummary = SourceAssignmentSummary(sourceAssignments),
             LastAppliedRfPathSummary = RfPathSummary(before.RfPath),
+            LastAppliedTalkgroupPolicyHash = before.LastAppliedTalkgroupPolicyHash,
+            LastAppliedTalkgroupPolicyJson = before.LastAppliedTalkgroupPolicyJson,
             LastAppliedDesiredJson = before.LastAppliedDesiredJson
         });
 
         var changes = DescribeChanges(before, next);
+        if (restoredTalkgroupRows > 0)
+            changes.Add("TR talkgroup policy");
         _config.SiteSetup = next;
         _config.Save();
 
         var details = request.Details.HasValue
             ? request.Details.Value.GetRawText()
-            : JsonSerializer.Serialize(new { changes, before = ActivitySnapshot(before), after = ActivitySnapshot(next) }, EngineConfig.JsonOptions());
+            : JsonSerializer.Serialize(new { changes, restoredTalkgroupRows, before = ActivitySnapshot(before), after = ActivitySnapshot(next) }, EngineConfig.JsonOptions());
         var summary = string.IsNullOrWhiteSpace(request.Summary)
             ? $"Discarded pending Site Setup changes and reset desired state from live TR config{(changes.Count > 0 ? $": {string.Join(", ", changes.Take(4))}{(changes.Count > 4 ? $" and {changes.Count - 4} more" : "")}" : ".")}"
             : request.Summary.Trim();
@@ -257,6 +298,11 @@ public sealed class SiteSetupService
             if (configured.MonitoredAreas.Count == 0 && _config.Locations.MonitoredAreas.Count > 0)
                 configured.MonitoredAreas = CloneMonitoredAreas(_config.Locations.MonitoredAreas);
             configured.Sources = FillMissingDesiredSourceGains(configured.Sources, applied.Sources);
+            if (string.IsNullOrWhiteSpace(configured.LastAppliedTalkgroupPolicyHash))
+            {
+                configured.LastAppliedTalkgroupPolicyJson = TalkgroupPolicySnapshotJson();
+                configured.LastAppliedTalkgroupPolicyHash = Sha256(configured.LastAppliedTalkgroupPolicyJson);
+            }
             return configured;
         }
 
@@ -274,6 +320,8 @@ public sealed class SiteSetupService
         configured.Sources = applied.Sources
             .Select(source => new RfSurveySourceDto(source.Index, source.Device, source.Serial, SdrTypeFromDevice(source.Device), source.CenterHz, source.SampleRate, source.ErrorHz, source.Gain))
             .ToList();
+        configured.LastAppliedTalkgroupPolicyJson = TalkgroupPolicySnapshotJson();
+        configured.LastAppliedTalkgroupPolicyHash = Sha256(configured.LastAppliedTalkgroupPolicyJson);
         return Normalize(configured);
     }
 
@@ -412,6 +460,9 @@ public sealed class SiteSetupService
             !string.Equals(RfPathSummary(desired.RfPath), desired.LastAppliedRfPathSummary, StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("RF Path", "RF path documentation changed after the last Site Setup apply."));
 
+        if (!string.Equals(TalkgroupPolicyHash(), desired.LastAppliedTalkgroupPolicyHash, StringComparison.OrdinalIgnoreCase))
+            rows.Add(new SiteSetupPendingChangeDto("Talkgroups", "The imported or excluded TR talkgroup set changed after the last Site Setup apply."));
+
         if (!string.IsNullOrWhiteSpace(desired.LastAppliedConfigHash) &&
             !string.Equals(desired.LastAppliedConfigHash, applied.ConfigHash, StringComparison.OrdinalIgnoreCase))
             rows.Add(new SiteSetupPendingChangeDto("Applied Config", "Live TR config has changed since Site Setup last applied it."));
@@ -461,6 +512,8 @@ public sealed class SiteSetupService
         LastAppliedConfigHash = value.LastAppliedConfigHash?.Trim() ?? string.Empty,
         LastAppliedSourceAssignmentSummary = value.LastAppliedSourceAssignmentSummary?.Trim() ?? string.Empty,
         LastAppliedRfPathSummary = value.LastAppliedRfPathSummary?.Trim() ?? string.Empty,
+        LastAppliedTalkgroupPolicyHash = value.LastAppliedTalkgroupPolicyHash?.Trim() ?? string.Empty,
+        LastAppliedTalkgroupPolicyJson = value.LastAppliedTalkgroupPolicyJson?.Trim() ?? string.Empty,
         LastAppliedDesiredJson = value.LastAppliedDesiredJson?.Trim() ?? string.Empty
     };
 
@@ -493,7 +546,8 @@ public sealed class SiteSetupService
         value.SourcePlanMode,
         rfPath = RfPathSummary(value.RfPath),
         rfSelections = RfSelectionSummary(value.RfSelections),
-        sources = SourceSummary(value.Sources)
+        sources = SourceSummary(value.Sources),
+        talkgroupPolicyHash = value.LastAppliedTalkgroupPolicyHash
     };
 
     private static List<SiteSetupRfSelection> NormalizeRfSelections(IEnumerable<SiteSetupRfSelection>? values) =>
@@ -726,6 +780,14 @@ public sealed class SiteSetupService
         string.Join("|", (selections ?? [])
             .Select(selection => $"{selection.FrequencyHz}:{selection.SourceIndex}:{selection.Gain}:{selection.SampleRateHz}:{selection.ErrorHz}")
             .Order(StringComparer.Ordinal));
+
+    private string TalkgroupPolicySnapshotJson() => JsonSerializer.Serialize(_talkgroups.Load().Items
+        .Where(item => item.Enabled)
+        .Select(TalkgroupCatalogService.ItemKey)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToList(), EngineConfig.JsonOptions());
+
+    private string TalkgroupPolicyHash() => Sha256(TalkgroupPolicySnapshotJson());
 
     private static IReadOnlyList<long> ReadFrequencyArray(JsonElement element, string property)
     {
