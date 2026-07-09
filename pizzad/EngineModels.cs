@@ -1521,6 +1521,23 @@ public sealed record SetActiveProfileRequest(Guid ActiveProfileId);
 
 public sealed record HideProfileTalkgroupsRequest(IReadOnlyList<ProfileTalkgroupSetting> Talkgroups);
 
+public sealed record TalkgroupCatalogPolicyTarget(
+    string? Key = null,
+    string? SystemShortName = null,
+    long Talkgroup = 0);
+
+public sealed record TalkgroupCatalogPolicyUpdateRequest(
+    IReadOnlyList<TalkgroupCatalogPolicyTarget> Targets,
+    bool? Enabled = null,
+    string? OpsCategory = null,
+    bool? IncidentEligible = null);
+
+public sealed record TalkgroupCatalogPolicyUpdateResult(
+    int Requested,
+    int Updated,
+    TalkgroupCatalogSaveResult Save,
+    string Message);
+
 public sealed record TalkgroupOptionDto(string Key, string SystemShortName, long Talkgroup, string Label, string Category);
 
 public sealed record SseEvent([property: JsonPropertyName("type")] string Type, object Payload, long Id);

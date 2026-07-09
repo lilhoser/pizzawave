@@ -1347,6 +1347,22 @@ app.MapPut("/api/v1/talkgroups/catalog", async (HttpContext context, TalkgroupCa
 .WithName("TalkgroupCatalogReplace")
 .WithOpenApi();
 
+app.MapPost("/api/v1/talkgroups/catalog/policy", async (HttpContext context, TalkgroupCatalogPolicyUpdateRequest request, AuthService authService, TalkgroupCatalogService catalog) =>
+{
+    if (!authService.IsWriteAllowed(context))
+        return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await catalog.UpdatePolicyAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("TalkgroupCatalogPolicyUpdate")
+.WithOpenApi();
+
 app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();

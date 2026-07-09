@@ -86,6 +86,62 @@ public sealed class TalkgroupCatalogService
 
     public async Task<TalkgroupTrCsvResult> GenerateTrCsvAsync(CancellationToken ct) => await GenerateTrCsvAsync(Load(), ct);
 
+    public async Task<TalkgroupCatalogPolicyUpdateResult> UpdatePolicyAsync(TalkgroupCatalogPolicyUpdateRequest request, CancellationToken ct)
+    {
+        var targets = (request.Targets ?? [])
+            .Where(t => !string.IsNullOrWhiteSpace(t.Key) || t.Talkgroup > 0)
+            .ToList();
+        if (targets.Count == 0)
+            throw new InvalidOperationException("At least one talkgroup target is required.");
+
+        var category = string.IsNullOrWhiteSpace(request.OpsCategory)
+            ? null
+            : NormalizeCategoryValue(request.OpsCategory);
+        if (request.Enabled is null && category is null && request.IncidentEligible is null)
+            throw new InvalidOperationException("At least one catalog policy value is required.");
+
+        var document = Load();
+        var targetKeys = ResolvePolicyTargetKeys(document, targets);
+        if (targetKeys.Count == 0)
+        {
+            var emptySave = new TalkgroupCatalogSaveResult(document.Items.Count, null, string.Empty, null, false);
+            return new TalkgroupCatalogPolicyUpdateResult(targets.Count, 0, emptySave, "No matching talkgroup catalog rows were found.");
+        }
+
+        var now = DateTime.UtcNow;
+        var updated = 0;
+        var items = document.Items.Select(item =>
+        {
+            if (!targetKeys.Contains(ItemKey(item)))
+                return item;
+
+            var next = item;
+            if (request.Enabled is bool enabled)
+                next = next with { Enabled = enabled };
+            if (category is not null)
+                next = next with { OpsCategory = category };
+            if (request.IncidentEligible is bool incidentEligible)
+                next = next with { IncidentEligible = incidentEligible };
+            next = next with { UpdatedAtUtc = now };
+            if (!CatalogPolicyEquivalent(item, next))
+                updated++;
+            return next;
+        }).ToList();
+
+        if (updated == 0)
+        {
+            var unchangedSave = new TalkgroupCatalogSaveResult(document.Items.Count, null, string.Empty, null, false);
+            return new TalkgroupCatalogPolicyUpdateResult(targets.Count, 0, unchangedSave, "Matching talkgroup catalog rows already had that policy.");
+        }
+
+        var save = await SaveAsync(document with { Items = items, UpdatedAtUtc = now }, generateTrCsv: true, ct);
+        return new TalkgroupCatalogPolicyUpdateResult(
+            targets.Count,
+            updated,
+            save,
+            $"{updated:N0} talkgroup catalog row(s) updated and TR CSVs regenerated.");
+    }
+
     public async Task<TalkgroupTrCsvResult> GenerateTrCsvAsync(TalkgroupCatalogDocument document, CancellationToken ct)
     {
         var normalized = NormalizeDocument(document);
@@ -564,6 +620,42 @@ public sealed class TalkgroupCatalogService
             return legacy;
         return null;
     }
+
+    private static HashSet<string> ResolvePolicyTargetKeys(TalkgroupCatalogDocument document, IReadOnlyList<TalkgroupCatalogPolicyTarget> targets)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in targets)
+        {
+            var explicitKey = (target.Key ?? string.Empty).Trim().ToLowerInvariant();
+            if (!string.IsNullOrWhiteSpace(explicitKey))
+            {
+                foreach (var row in document.Items.Where(item => string.Equals(ItemKey(item), explicitKey, StringComparison.OrdinalIgnoreCase)))
+                    keys.Add(ItemKey(row));
+                continue;
+            }
+
+            if (target.Talkgroup <= 0)
+                continue;
+
+            var system = NormalizeSystemShortName(target.SystemShortName);
+            if (!string.IsNullOrWhiteSpace(system))
+            {
+                var exact = CatalogKey(system, target.Talkgroup);
+                foreach (var row in document.Items.Where(item => string.Equals(ItemKey(item), exact, StringComparison.OrdinalIgnoreCase)))
+                    keys.Add(ItemKey(row));
+                continue;
+            }
+
+            foreach (var row in document.Items.Where(item => item.Id == target.Talkgroup))
+                keys.Add(ItemKey(row));
+        }
+        return keys;
+    }
+
+    private static bool CatalogPolicyEquivalent(TalkgroupCatalogItem left, TalkgroupCatalogItem right) =>
+        left.Enabled == right.Enabled &&
+        string.Equals(left.OpsCategory, right.OpsCategory, StringComparison.OrdinalIgnoreCase) &&
+        left.IncidentEligible == right.IncidentEligible;
 
     private string CatalogPath() =>
         string.IsNullOrWhiteSpace(_config.TrunkRecorder.TalkgroupCatalogPath)

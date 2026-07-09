@@ -8,14 +8,14 @@ unless it creates a current regression test or follow-up.
 
 ## Current Priorities
 
-1. Clean rig setup and setup API audit.
-2. RF Path Survey setup/calibration mode.
+1. Clean rig setup field validation.
+2. RF Path Survey field validation.
 3. Hourly PizzaWave quality monitoring.
 4. Focused test coverage where it gives real signal.
 5. Incident/RAG/geocoding quality improvements.
 6. Incident/RAG/geocoding documentation and regression notes.
 
-## Clean Rig Setup And Setup API Audit
+## Clean Rig Setup Field Validation
 
 - Test the full installation/setup wizard on a clean rig or clean environment.
 - Include native Qdrant install/detection, embeddings validation, admin-token
@@ -30,22 +30,20 @@ unless it creates a current regression test or follow-up.
 - Keep backup/restore and Reset + Setup in the clean-rig regression test.
   Backup/restore field testing succeeded on the live RPI, so treat this as a
   regression scenario rather than an unknown feature spike.
-- Audit remaining calibration, service, and admin endpoints during the setup flow
-  for operator value, write-auth expectations, guardrails, bounded runtime/cost,
-  safe failure behavior, and absence of hidden backfill/import/transcription
-  flood behavior.
-- Continue the remaining calibration endpoint audit after the clean installer
-  test. Completed cleanup passes removed deprecated rig-side mutation endpoints,
-  old migration entry points, setup-owned restore endpoints, and standalone TR
-  CSV generation.
-- Reintroduce a dedicated talkgroup enable/disable interface outside Setup.
-  Setup should keep loading the catalog from selected RadioReference systems;
-  operator policy such as disabling noisy TGs, incident eligibility, and future
-  profile-specific TG rules needs its own catalog/policy surface.
+- Confirm the setup/admin endpoint audit conclusions in
+  `docs/api-surface-audit.md` during the clean-rig run. Implementation cleanup
+  has removed deprecated rig-side mutation endpoints, old migration entry
+  points, setup-owned restore endpoints, and standalone TR CSV generation.
+- Verify talkgroup policy ownership end to end:
+  - Setup imports RadioReference talkgroups and owns category/system-level TR
+    exclusions.
+  - Settings > Profiles owns profile-local hide/show policy.
+  - System recommendations can route noisy TG exclusions through scoped catalog
+    policy instead of raw catalog replacement.
 
 ## RF Path Survey
 
-- Add the RF Path Survey setup/calibration mode described in
+- Field-validate the RF Path Survey setup/calibration mode described in
   `docs/rf-path-survey-mode.md`.
 - The goal is a repeatable acceptance test for whether a specific
   antenna/coax/splitter/LNA/SDR/location can decode a target site.

@@ -3908,45 +3908,19 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
     setRecommendationBusy(true);
     setInsightText("");
     try {
-      const loaded = await api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog");
-      const document = cloneSettings(loaded.document) as TalkgroupCatalogDocument;
-      const enabledItems = document.items.filter(item => item.enabled);
-      const exactTargets = normalizedTargets.filter(target => target.systemShortName);
-      const idOnlyTargets = normalizedTargets.filter(target => !target.systemShortName);
-      const exactKeys = new Set(exactTargets.map(target => `${target.systemShortName}:${target.talkgroup}`));
-      const idOnly = new Set(idOnlyTargets.map(target => target.talkgroup));
-      const fallbackKeys = new Set<string>();
-
-      for (const target of exactTargets) {
-        const exactKey = `${target.systemShortName}:${target.talkgroup}`;
-        if (enabledItems.some(item => talkgroupCatalogKey(item) === exactKey))
-          continue;
-        const sameIdRows = enabledItems.filter(item => item.id === target.talkgroup);
-        if (sameIdRows.length === 1)
-          fallbackKeys.add(talkgroupCatalogKey(sameIdRows[0]));
-      }
-
-      const updatedAtUtc = new Date().toISOString();
-      let changed = 0;
-      const items = document.items.map(item => {
-        if (!item.enabled) return item;
-        const key = talkgroupCatalogKey(item);
-        const shouldExclude = exactKeys.has(key) || fallbackKeys.has(key) || idOnly.has(item.id);
-        if (!shouldExclude) return item;
-        changed++;
-        return { ...item, enabled: false, updatedAtUtc };
+      const result = await api.request<{ updated: number; message?: string; save?: { generatedCsvPath?: string } }>("/api/v1/talkgroups/catalog/policy", {
+        method: "POST",
+        body: JSON.stringify({
+          targets: normalizedTargets,
+          enabled: false
+        })
       });
-
-      if (changed === 0) {
-        setInsightText("No matching enabled talkgroup catalog rows were found for those noise candidates.");
+      if (!result.updated) {
+        setInsightText(result.message || "No matching enabled talkgroup catalog rows were found for those noise candidates.");
         return;
       }
-
-      await api.request("/api/v1/talkgroups/catalog", {
-        method: "PUT",
-        body: JSON.stringify({ ...document, updatedAtUtc, items })
-      });
-      setInsightText(`${changed.toLocaleString()} talkgroup catalog row(s) excluded from generated TR CSVs. Apply/restart TR for capture policy to consume the change.`);
+      const path = result.save?.generatedCsvPath ? ` (${result.save.generatedCsvPath})` : "";
+      setInsightText(`${result.updated.toLocaleString()} talkgroup catalog row(s) excluded from generated TR CSVs${path}. Apply/restart TR for capture policy to consume the change.`);
       setRecommendations(await api.request<SystemRecommendations>("/api/v1/system/recommendations"));
     } catch (error) {
       setInsightText(error instanceof Error ? error.message : "Unable to exclude talkgroup candidates.");
