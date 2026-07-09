@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 1 - Setup state authority
-- Current milestone: 1C - durable RF selection and calibration handoff
+- Current milestone: Package 1 deployment and operator verification
 - Working branch: `codex/operator-ux-review`
 - Last deployed commit: `d8e7ec9`
 - Operator verification: not requested yet
-- Next action: persist accepted waterfall/RF candidates into Setup and remove
-  the remaining standalone TR-editor draft write.
+- Next action: deploy Package 1 to the RPI, verify the Setup workflow, and ask
+  the operator to inspect the milestone.
 
 ## Working Rules
 
@@ -37,11 +37,11 @@ Status: in progress
   field-scoped mutations.
 - [x] 1B. Represent RadioReference identity per selected system/site and remove
   the global-SID selection assumption.
-- [ ] 1C. Persist waterfall/RF selections in Setup and replace the standalone
+- [x] 1C. Persist waterfall/RF selections in Setup and replace the standalone
   TR-editor draft handoff with a Setup-owned calibration action.
-- [ ] 1D. Confirm pending-change and activity records cover every resulting
+- [x] 1D. Confirm pending-change and activity records cover every resulting
   Setup mutation.
-- [ ] Build and test.
+- [x] Build and test.
 - [ ] Deploy and verify on the RPI.
 - [ ] Operator acceptance.
 
@@ -144,3 +144,7 @@ Status: pending
 - 2026-07-09: Milestone 1B passed the existing backend test suite and production
   frontend build. Systems & Sites now retains independent RR catalogs and
   stores RR identity on each selected site instead of a global Setup SID.
+- 2026-07-09: Milestones 1C and 1D passed the existing backend test suite and
+  production frontend build. Waterfall selections and accepted RF calibration
+  now mutate versioned Setup state, create pending/audit records, and no longer
+  write the standalone TR editor draft.

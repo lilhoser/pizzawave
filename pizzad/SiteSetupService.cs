@@ -314,7 +314,7 @@ public sealed class SiteSetupService
                     ReadLong(source, "center"),
                     (int)ReadLong(source, "rate"),
                     (int)ReadLong(source, "error"),
-                    ReadStringOrNumber(source, "gain")));
+                    ReadSourceGain(source)));
                 index++;
             }
         }
@@ -396,6 +396,12 @@ public sealed class SiteSetupService
 
         if (desired.Sources.Count > 0 && !string.Equals(SourceConfigSummary(desired.Sources), AppliedSourceConfigSummary(applied.Sources), StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("TR Sources", $"Desired sources ({desired.Sources.Count}) differ from applied sources ({applied.Sources.Count})."));
+
+        var appliedGainSummary = TryReadAppliedDesiredSnapshot(desired.LastAppliedDesiredJson, out var appliedDesired)
+            ? SourceGainSummary(appliedDesired.Sources)
+            : AppliedSourceGainSummary(applied.Sources);
+        if (desired.Sources.Count > 0 && !string.Equals(SourceGainSummary(desired.Sources), appliedGainSummary, StringComparison.Ordinal))
+            rows.Add(new SiteSetupPendingChangeDto("RF Calibration", "One or more desired source gain values changed after the last Site Setup apply."));
 
         if (desired.SourceAssignments.Count > 0 &&
             !string.Equals(SourceAssignmentSummary(desired.SourceAssignments), desired.LastAppliedSourceAssignmentSummary, StringComparison.Ordinal))
@@ -667,6 +673,12 @@ public sealed class SiteSetupService
     private static string AppliedSourceConfigSummary(IEnumerable<SiteSetupAppliedSourceDto>? sources) =>
         string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Device}:{source.CenterHz}:{source.SampleRate}:{source.ErrorHz}"));
 
+    private static string SourceGainSummary(IEnumerable<RfSurveySourceDto>? sources) =>
+        string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Gain}"));
+
+    private static string AppliedSourceGainSummary(IEnumerable<SiteSetupAppliedSourceDto>? sources) =>
+        string.Join("|", (sources ?? []).Select(source => $"{source.Index}:{source.Gain}"));
+
     private static List<RfSurveySourceDto> ReconcileDesiredSourcesWithApplied(
         IReadOnlyList<RfSurveySourceDto> desired,
         IReadOnlyList<SiteSetupAppliedSourceDto> applied)
@@ -758,6 +770,32 @@ public sealed class SiteSetupService
             JsonValueKind.Number => value.GetRawText(),
             _ => string.Empty
         };
+    }
+
+    private static string ReadSourceGain(JsonElement source)
+    {
+        var gain = ReadStringOrNumber(source, "gain");
+        if (!string.IsNullOrWhiteSpace(gain))
+            return gain.Trim();
+
+        var hasAirspyStages = source.TryGetProperty("lnaGain", out _) ||
+            source.TryGetProperty("mixGain", out _) ||
+            source.TryGetProperty("ifGain", out _);
+        if (!hasAirspyStages)
+            return string.Empty;
+
+        var lna = ReadLong(source, "lnaGain");
+        var mix = ReadLong(source, "mixGain");
+        var ifGain = ReadLong(source, "ifGain");
+        if (lna >= 15 && mix >= 12 && ifGain >= 8)
+            return "21";
+        if (lna >= 12 && mix >= 10 && ifGain >= 6)
+            return "19";
+        if (lna >= 8 && mix >= 6 && ifGain >= 4)
+            return "13";
+        if (lna >= 4 && mix >= 4 && ifGain >= 2)
+            return "7";
+        return "0";
     }
 
     private static string ExtractSerial(string device)

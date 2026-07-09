@@ -1572,8 +1572,6 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const [duration, setDuration] = useState("45");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
   const [details, setDetails] = useState<{ title: string; body: React.ReactNode } | null>(null);
-  const rfSelectionSaveTimer = useRef<number | null>(null);
-  const lastSavedRfSelectionSignature = useRef("");
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
   const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
@@ -1677,7 +1675,6 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
   const cachedSites = readCachedRadioReferenceSitesForSids(setupRadioReferenceSids(setup));
-  const sweepSelectionStorageKey = detail ? `pizzawave-site-setup-waterfall-sweep-selections-${detail.session.id}` : "";
   useEffect(() => {
     if (!active)
       return;
@@ -1690,30 +1687,34 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
     void onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
   }, [active, detail?.session.id, detail?.experiments.map(experiment => `${experiment.id}:${experiment.type}:${experiment.createdAtUtc}`).join("|"), sources.length]);
   useEffect(() => {
-    if (!sweepSelectionStorageKey) return;
     const desiredSelections = normalizeWaterfallSweepSelections(setup.desired.rfSelections ?? []);
-    const storedSelections = normalizeWaterfallSweepSelections(loadJsonStorage<unknown>(sweepSelectionStorageKey, []));
-    const normalized = desiredSelections.length ? desiredSelections : storedSelections;
-    setWaterfallSweepSelections(normalized);
-    lastSavedRfSelectionSignature.current = stableWaterfallSweepSelectionSignature(desiredSelections);
-  }, [sweepSelectionStorageKey, setup.desired.desiredVersion]);
-  useEffect(() => () => {
-    if (rfSelectionSaveTimer.current)
-      window.clearTimeout(rfSelectionSaveTimer.current);
-  }, []);
-  function scheduleSaveWaterfallSweepSelections(normalized: WaterfallSweepSelection[]) {
-    const signature = stableWaterfallSweepSelectionSignature(normalized);
-    if (signature === lastSavedRfSelectionSignature.current)
-      return;
-    lastSavedRfSelectionSignature.current = signature;
-  }
+    setWaterfallSweepSelections(desiredSelections);
+  }, [setup.desired.desiredVersion]);
   const updateWaterfallSweepSelections = (values: WaterfallSweepSelection[]) => {
     const normalized = normalizeWaterfallSweepSelections(values);
     setWaterfallSweepSelections(normalized);
-    if (sweepSelectionStorageKey)
-      localStorage.setItem(sweepSelectionStorageKey, JSON.stringify(normalized));
-    scheduleSaveWaterfallSweepSelections(normalized);
+    void onSave({ rfSelections: normalized.map(toSiteSetupRfSelectionPayload) }, "rfSelections");
   };
+  async function acceptSweepCandidate(source: RfSurveySource, result: SweepResult, candidate: SweepCandidate) {
+    const desiredSources = siteSetupSources(setup);
+    const sourcePosition = desiredSources.findIndex(row => row.index === source.index);
+    if (sourcePosition < 0)
+      throw new Error(`Source ${source.index} is no longer part of Setup. Refresh SDR Inventory before accepting this result.`);
+
+    const gain = result.gain.trim() || source.gain;
+    const defaultSourceIndex = setup.desired.selectedSourceIndexes[0] ?? desiredSources[0]?.index ?? source.index;
+    const nextSources = desiredSources.map(row => row.index === source.index
+      ? { ...row, errorHz: candidate.errorHz, gain }
+      : row);
+    const nextSelections = normalizeWaterfallSweepSelections(waterfallSweepSelections).map(row =>
+      (row.sourceIndex ?? defaultSourceIndex) === source.index
+        ? { ...row, sourceIndex: source.index, errorHz: candidate.errorHz, gain }
+        : row);
+    await onSave({
+      sources: nextSources,
+      rfSelections: nextSelections.map(toSiteSetupRfSelectionPayload)
+    }, "rfCalibration");
+  }
   const latestExperiment = (type: string) => [...(detail?.experiments ?? [])]
     .filter(experiment => experiment.type === type)
     .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""))[0];
@@ -1785,6 +1786,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
           onOpenRunLog={() => undefined}
           waterfallSweepSelections={waterfallSweepSelections}
           onWaterfallSweepSelections={updateWaterfallSweepSelections}
+          onAcceptSweepCandidate={acceptSweepCandidate}
           inventoryRequired={false}
         />}
         {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
@@ -4892,16 +4894,6 @@ function toSiteSetupRfSelectionPayload(row: WaterfallSweepSelection) {
   };
 }
 
-function stableWaterfallSweepSelectionSignature(values: WaterfallSweepSelection[]) {
-  return JSON.stringify(normalizeWaterfallSweepSelections(values).map(row => ({
-    frequencyHz: row.frequencyHz,
-    sourceIndex: row.sourceIndex ?? null,
-    gain: row.gain ?? "",
-    sampleRateHz: row.sampleRateHz ?? null,
-    errorHz: row.errorHz ?? null
-  })));
-}
-
 function mergeWaterfallSelectionsIntoSetupSources(setup: SiteSetup, selections: WaterfallSweepSelection[], fallbackSources: RfSurveySource[]) {
   const sources = fallbackSources.length ? fallbackSources : siteSetupSources(setup);
   if (!selections.length || !sources.length)
@@ -5012,6 +5004,7 @@ function SiteValidationStep({
   onOpenRunLog,
   waterfallSweepSelections,
   onWaterfallSweepSelections,
+  onAcceptSweepCandidate,
   onSweepRecovered,
   inventoryRequired = true
 }: {
@@ -5052,6 +5045,7 @@ function SiteValidationStep({
   onOpenRunLog: () => void;
   waterfallSweepSelections?: WaterfallSweepSelection[];
   onWaterfallSweepSelections?: (values: WaterfallSweepSelection[]) => void;
+  onAcceptSweepCandidate?: (source: RfSurveySource, result: SweepResult, candidate: SweepCandidate) => Promise<void>;
   onSweepRecovered?: (status: string) => void;
   inventoryRequired?: boolean;
 }) {
@@ -5518,25 +5512,12 @@ function SiteValidationStep({
     setSweepBusy(`apply-${source.index}`);
     setSweepMessage("");
     try {
-      const editor = await api.request<TrConfigEditor>("/api/v1/system/tr-config/editor");
-      const draft = JSON.parse(editor.configJson || "{}");
-      draft.sources = Array.isArray(draft.sources) ? draft.sources : [];
-      const sourceIndex = draft.sources.findIndex((row: any, index: number) =>
-        index === source.index ||
-        String(row?.device ?? "").includes(`rtl=${result.serial}`) ||
-        String(row?.device ?? "").includes(result.serial));
-      if (sourceIndex < 0)
-        throw new Error(`Unable to find TR source for rtl=${result.serial || source.serial || source.index}.`);
-      draft.sources[sourceIndex] = { ...draft.sources[sourceIndex], error: candidate.errorHz };
-      if (result.gain)
-        draft.sources[sourceIndex].gain = numericOrText(result.gain);
-      await api.request<TrConfigEditor>("/api/v1/system/tr-config/editor/draft", {
-        method: "POST",
-        body: JSON.stringify({ configJson: JSON.stringify(draft, null, 2) })
-      });
-      setSweepMessage(`Applied Source ${source.index} candidate error ${candidate.errorHz} Hz to Config Draft. After Save & Restart, rerun RF Power Scan, P25 Probe, TR CC Metrics, and Call Quality for this CC/source condition.`);
+      if (!onAcceptSweepCandidate)
+        throw new Error("This RF refinement view is not connected to Setup.");
+      await onAcceptSweepCandidate(source, result, candidate);
+      setSweepMessage(`Accepted Source ${source.index} gain ${result.gain || source.gain || "unchanged"} and error ${candidate.errorHz} Hz as pending Setup values. Live monitoring is unchanged until Apply & Resume.`);
     } catch (error) {
-      setSweepMessage(error instanceof Error ? error.message : "Unable to apply sweep candidate to Config Draft.");
+      setSweepMessage(error instanceof Error ? error.message : "Unable to accept the sweep candidate into Setup.");
     } finally {
       setSweepBusy("");
     }
@@ -5725,7 +5706,7 @@ function SiteValidationStep({
       result: undefined,
       body: <div className="rf-step-stack">
         <p>Searches nearby SDR frequency-error settings for steadier control-channel decoding after RF Sweep has found a usable CC/gain condition.</p>
-        <div className="setup-note">Applying a candidate changes the source condition. Rerun RF Sweep, P25 Probe, TR CC Metrics, and Call Quality after applying it.</div>
+        <div className="setup-note">Accepting a candidate updates the pending Setup source values. Apply & Resume remains the only action that changes live monitoring.</div>
         {!sweep && staleSweep && <StaleExperimentNotice experiment={staleSweep} activeControlChannelHz={selectedCcNumber} />}
         <div className="rf-sweep-table">
           <div className="rf-sweep-header">
@@ -5805,7 +5786,7 @@ function SiteValidationStep({
                 </label>)}
               </div>
               <div className="rf-inline-actions">
-                <button className="danger-button" disabled={!selectedCandidate || sweepBusy === `apply-${source.index}`} onClick={() => selectedCandidate && void applySweepCandidate(source, result, selectedCandidate)}>{sweepBusy === `apply-${source.index}` ? "Applying..." : "Apply"}</button>
+                <button disabled={!selectedCandidate || sweepBusy === `apply-${source.index}`} onClick={() => selectedCandidate && void applySweepCandidate(source, result, selectedCandidate)}>{sweepBusy === `apply-${source.index}` ? "Accepting..." : "Use in Setup"}</button>
                 {selectedCandidate && <button title="Uses the selected error value as the new center and reduces the range/step for a follow-up sweep. It does not run anything until you click Rerun." onClick={() => {
                   updateSweepInput(source.index, { precision: "custom", errorHz: String(selectedCandidate.errorHz), rangeHz: "300", stepHz: "100" });
                   setHighlightedSweepSource(source.index);
@@ -6509,31 +6490,6 @@ function WaterfallStep({
       });
   }
   const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
-  useEffect(() => {
-    if (!visible)
-      return;
-    if (!selectedSweepControlChannels.length || !waterfallCandidates.length)
-      return;
-    const candidatesByFrequency = new Map(waterfallCandidates.map(row => [Math.round(row.sweepFrequencyHz), row]));
-    const current = normalizeWaterfallSweepSelections(waterfallSweepSelections);
-    const selected = new Set(selectedSweepControlChannels);
-    const next = current.map(row => {
-      if (!selected.has(row.frequencyHz))
-        return row;
-      const candidate = candidatesByFrequency.get(row.frequencyHz);
-      if (!candidate || !Number.isFinite(candidate.offsetHz))
-        return row;
-      return {
-        ...row,
-        errorHz: Math.round(candidate.offsetHz),
-        snrDb: Number.isFinite(candidate.snrDb) ? candidate.snrDb : row.snrDb,
-        confidence: Number.isFinite(candidate.confidence) ? candidate.confidence : row.confidence
-      };
-    });
-    if (JSON.stringify(next) !== JSON.stringify(current))
-      onWaterfallSweepSelections?.(next);
-  }, [visible, selectedSweepControlChannels.join(","), waterfallCandidates.map(row => `${row.sweepFrequencyHz}:${Math.round(row.offsetHz)}`).join("|")]);
-
   async function toggleCandidateForSweep(row: WaterfallCandidateRow, selected: boolean) {
     if (!showSweepSelection)
       return;
