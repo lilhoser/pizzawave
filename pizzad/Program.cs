@@ -221,6 +221,21 @@ app.MapPost("/api/v1/setup/site/mark-applied", async (HttpContext context, SiteS
 .WithName("SiteSetupMarkApplied")
 .WithOpenApi();
 
+app.MapPost("/api/v1/setup/site/discard", async (HttpContext context, SiteSetupDiscardRequest request, AuthService authService, SiteSetupService siteSetup) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await siteSetup.DiscardPendingAsync(request, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupDiscard")
+.WithOpenApi();
+
 app.MapGet("/api/v1/setup/site/rf", async (HttpContext context, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

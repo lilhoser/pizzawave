@@ -110,6 +110,59 @@ public sealed class SiteSetupService
         return await GetAsync(ct);
     }
 
+    public async Task<SiteSetupDto> DiscardPendingAsync(SiteSetupDiscardRequest request, CancellationToken ct)
+    {
+        var applied = await BuildAppliedConfigAsync(ct);
+        var before = EffectiveDesired(applied);
+        var appliedSystems = await BuildAppliedSystemDefinitionsAsync(applied, before, ct);
+        var appliedSources = applied.Sources
+            .Select(source => new RfSurveySourceDto(
+                source.Index,
+                source.Device,
+                source.Serial,
+                SdrTypeFromDevice(source.Device),
+                source.CenterHz,
+                source.SampleRate,
+                source.ErrorHz,
+                source.Gain))
+            .ToList();
+        var sourceAssignments = BuildAppliedSourceAssignments(appliedSystems, appliedSources);
+        var next = Normalize(new SiteSetupConfig
+        {
+            DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
+            SiteLabel = before.SiteLabel,
+            LocationNotes = before.LocationNotes,
+            RadioReferenceSid = before.RadioReferenceSid,
+            SystemShortNames = applied.SystemShortNames.ToList(),
+            SourcePlanSystemShortNames = applied.SystemShortNames.ToList(),
+            SourcePlanMode = before.SourcePlanMode,
+            Systems = appliedSystems,
+            SelectedSourceIndexes = appliedSources.Select(source => source.Index).ToList(),
+            SourceAssignments = sourceAssignments,
+            Sources = appliedSources,
+            RfSelections = [],
+            RfPath = before.RfPath,
+            UpdatedAtUtc = DateTime.UtcNow,
+            LastAppliedAtUtc = before.LastAppliedAtUtc,
+            LastAppliedConfigHash = applied.ConfigHash,
+            LastAppliedSourceAssignmentSummary = SourceAssignmentSummary(sourceAssignments),
+            LastAppliedRfPathSummary = RfPathSummary(before.RfPath)
+        });
+
+        var changes = DescribeChanges(before, next);
+        _config.SiteSetup = next;
+        _config.Save();
+
+        var details = request.Details.HasValue
+            ? request.Details.Value.GetRawText()
+            : JsonSerializer.Serialize(new { changes, before = ActivitySnapshot(before), after = ActivitySnapshot(next) }, EngineConfig.JsonOptions());
+        var summary = string.IsNullOrWhiteSpace(request.Summary)
+            ? $"Discarded pending Site Setup changes and reset desired state from live TR config{(changes.Count > 0 ? $": {string.Join(", ", changes.Take(4))}{(changes.Count > 4 ? $" and {changes.Count - 4} more" : "")}" : ".")}"
+            : request.Summary.Trim();
+        await AddActivityAsync("change", "pending_setup_discarded", summary, details, request.Source, ct);
+        return await GetAsync(ct);
+    }
+
     private async Task<SiteSetupActivityDto> AddActivityAsync(string category, string action, string summary, object details, string source, CancellationToken ct) =>
         await AddActivityAsync(category, action, summary, JsonSerializer.Serialize(details, EngineConfig.JsonOptions()), source, ct);
 
@@ -206,6 +259,52 @@ public sealed class SiteSetupService
             systems.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList(),
             controlChannels.Distinct().Order().ToList(),
             sources);
+    }
+
+    private async Task<List<RfSurveySystemDto>> BuildAppliedSystemDefinitionsAsync(SiteSetupAppliedConfigDto applied, SiteSetupConfig previous, CancellationToken ct)
+    {
+        var path = _config.TrunkRecorder.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return [];
+
+        var json = await File.ReadAllTextAsync(path, ct);
+        using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+        var root = doc.RootElement;
+        var systems = new List<RfSurveySystemDto>();
+        if (root.TryGetProperty("systems", out var systemsElement) && systemsElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var system in systemsElement.EnumerateArray())
+            {
+                var shortName = ReadString(system, "shortName");
+                if (string.IsNullOrWhiteSpace(shortName))
+                    continue;
+                var previousSystem = previous.Systems.FirstOrDefault(row => string.Equals(row.ShortName, shortName, StringComparison.OrdinalIgnoreCase));
+                systems.Add(new RfSurveySystemDto(
+                    shortName,
+                    string.IsNullOrWhiteSpace(previousSystem?.SiteLabel) ? shortName : previousSystem.SiteLabel,
+                    ReadFrequencyArray(system, "control_channels"),
+                    ReadFrequencyArray(system, "channels"),
+                    previousSystem?.RadioReferenceSid ?? string.Empty,
+                    previousSystem?.TalkgroupSystemShortName ?? string.Empty));
+            }
+        }
+
+        if (systems.Count > 0)
+            return systems;
+
+        return applied.SystemShortNames
+            .Select(name =>
+            {
+                var previousSystem = previous.Systems.FirstOrDefault(row => string.Equals(row.ShortName, name, StringComparison.OrdinalIgnoreCase));
+                return new RfSurveySystemDto(
+                    name,
+                    string.IsNullOrWhiteSpace(previousSystem?.SiteLabel) ? name : previousSystem.SiteLabel,
+                    applied.ControlChannelsHz,
+                    previousSystem?.VoiceFrequenciesHz ?? [],
+                    previousSystem?.RadioReferenceSid ?? string.Empty,
+                    previousSystem?.TalkgroupSystemShortName ?? string.Empty);
+            })
+            .ToList();
     }
 
     private IReadOnlyList<SiteSetupPendingChangeDto> BuildPendingChanges(SiteSetupConfig desired, SiteSetupAppliedConfigDto applied)
@@ -348,6 +447,31 @@ public sealed class SiteSetupService
             .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Key) && kvp.Value >= 0)
             .GroupBy(kvp => kvp.Key.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, int> BuildAppliedSourceAssignments(
+        IEnumerable<RfSurveySystemDto> systems,
+        IReadOnlyList<RfSurveySourceDto> sources)
+    {
+        var assignments = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var system in systems)
+        {
+            var controlChannels = system.ControlChannelsHz.Where(value => value > 0).ToList();
+            if (controlChannels.Count == 0)
+                continue;
+            var exact = sources.FirstOrDefault(source => controlChannels.All(frequency => SourceCovers(source, frequency)));
+            var partial = exact ?? sources.FirstOrDefault(source => controlChannels.Any(frequency => SourceCovers(source, frequency)));
+            if (partial != null)
+                assignments[system.ShortName] = partial.Index;
+        }
+        return assignments;
+    }
+
+    private static bool SourceCovers(RfSurveySourceDto source, long frequencyHz)
+    {
+        var sampleRate = Math.Max(1, source.SampleRate);
+        var halfSpan = sampleRate / 2.0;
+        return frequencyHz >= source.CenterHz - halfSpan && frequencyHz <= source.CenterHz + halfSpan;
+    }
 
     private static List<string> NormalizeStrings(IEnumerable<string>? values) =>
         (values ?? [])

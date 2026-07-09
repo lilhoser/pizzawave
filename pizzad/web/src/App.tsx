@@ -1589,7 +1589,7 @@ async function prepareSiteSetupRfWorkspace() {
 function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onApplied }: { setup: SiteSetup; subPage: "source" | "review"; setSubPage: (value: "source" | "review") => void; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [draft, setDraft] = useState<RfSurveyConfigDraft | null>(null);
-  const [busy, setBusy] = useState<"" | "load" | "save-plan" | "apply">("load");
+  const [busy, setBusy] = useState<"" | "load" | "save-plan" | "apply" | "discard">("load");
   const [message, setMessage] = useState("");
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
@@ -1793,9 +1793,37 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     }
   }
 
+  async function discardPendingChanges() {
+    if (setup.pendingChanges.length === 0) {
+      setMessage("Setup has no pending changes to discard.");
+      return;
+    }
+    if (!confirmAction("Discard pending Setup changes?", "This resets Setup's desired state to the current live TR config. TR will not be restarted.")) return;
+    setBusy("discard");
+    setMessage("");
+    try {
+      const next = await api.request<SiteSetup>(`${siteSetupApi}/discard`, {
+        method: "POST",
+        body: JSON.stringify({
+          summary: "Discarded pending Site Setup changes and reset desired state from live TR config.",
+          source: "ui"
+        })
+      });
+      onSetupChanged(next);
+      setDraft(null);
+      setDetail(null);
+      setMessage("Discarded pending Setup changes.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to discard pending Setup changes.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return <div className="site-setup-form site-setup-apply">
     <div className="site-setup-apply-toolbar">
       {subPage === "review" && <button type="button" onClick={() => void reloadDraft()} disabled={busy !== ""}>{busy === "load" ? "Refreshing..." : "Refresh Draft"}</button>}
+      {subPage === "review" && <button type="button" onClick={() => void discardPendingChanges()} disabled={busy !== "" || setup.pendingChanges.length === 0}>{busy === "discard" ? "Discarding..." : "Discard"}</button>}
       {subPage === "review" && <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>}
     </div>
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") || message.toLowerCase().includes("denied") ? "settings-message error" : "settings-message ok"}>{message}</div>}

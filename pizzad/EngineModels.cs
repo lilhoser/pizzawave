@@ -1121,6 +1121,11 @@ public sealed record SiteSetupMarkAppliedRequest(
     JsonElement? Details = null,
     string Source = "ui");
 
+public sealed record SiteSetupDiscardRequest(
+    string Summary = "",
+    JsonElement? Details = null,
+    string Source = "ui");
+
 public sealed record SiteSetupActivityDto(
     long Id,
     DateTime TimestampUtc,
