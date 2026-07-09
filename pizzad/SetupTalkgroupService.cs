@@ -7,6 +7,7 @@ public sealed class SetupTalkgroupService
 {
     private readonly TalkgroupCatalogService _catalog;
     private readonly HttpClient _http;
+    private readonly SemaphoreSlim _syncGate = new(1, 1);
 
     public SetupTalkgroupService(TalkgroupCatalogService catalog, HttpClient http)
     {
@@ -72,6 +73,126 @@ public sealed class SetupTalkgroupService
             $"Loaded {rows.Count:N0} RadioReference talkgroup row(s) into the PizzaWave talkgroup catalog: {sync.Added:N0} added, {sync.Refreshed:N0} refreshed. Replaced unrelated catalog rows, preserved matching operator policy, and regenerated {result.GeneratedCsvPath}.");
         return ToSetupPreview(preview, includeExcluded: false);
     }
+
+    public async Task<SetupTalkgroupSyncResult> SyncAsync(SetupTalkgroupSyncRequest request, CancellationToken ct)
+    {
+        var sources = (request.Sources ?? [])
+            .Select(source => new SetupTalkgroupImportSourceRequest(
+                Regex.Replace(source.RadioReferenceSid ?? string.Empty, @"[^\d]", string.Empty),
+                TalkgroupCatalogService.NormalizeSystemShortName(source.SystemShortName)))
+            .Where(source => !string.IsNullOrWhiteSpace(source.RadioReferenceSid))
+            .GroupBy(source => source.RadioReferenceSid, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.FirstOrDefault(source => !IsGenericRadioReferenceName(source.SystemShortName ?? string.Empty, source.RadioReferenceSid)) ?? group.First())
+            .ToList();
+        if (sources.Count == 0)
+            throw new InvalidOperationException("At least one RadioReference system is required.");
+
+        var forceSid = Regex.Replace(request.ForceRadioReferenceSid ?? string.Empty, @"[^\d]", string.Empty);
+        await _syncGate.WaitAsync(ct);
+        try
+        {
+            var document = _catalog.Load();
+            var existingImports = (document.Imports ?? []).ToDictionary(row => row.RadioReferenceSid, StringComparer.OrdinalIgnoreCase);
+            var pending = sources
+                .Where(source => string.Equals(source.RadioReferenceSid, forceSid, StringComparison.OrdinalIgnoreCase) || !existingImports.ContainsKey(source.RadioReferenceSid))
+                .ToList();
+            if (pending.Count == 0)
+                return BuildSyncResult(document, 0, 0, 0, "RadioReference talkgroups are already loaded for the selected systems.");
+
+            var items = document.Items.ToDictionary(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase);
+            var imports = (document.Imports ?? []).ToDictionary(row => row.RadioReferenceSid, StringComparer.OrdinalIgnoreCase);
+            var importedSystems = 0;
+            var addedRows = 0;
+            var refreshedRows = 0;
+            var now = DateTime.UtcNow;
+
+            foreach (var source in pending)
+            {
+                var url = BuildRadioReferenceUrl(new SetupTalkgroupParseRequest(RadioReferenceSid: source.RadioReferenceSid));
+                var html = await _http.GetStringAsync(url, ct);
+                var systemShortName = EffectiveRadioReferenceSystemShortName(html, source.SystemShortName, source.RadioReferenceSid);
+                var preview = TalkgroupCatalogService.PreviewRadioReferenceHtml(html, systemShortName);
+                var incoming = preview.Included
+                    .Select(row => row with
+                    {
+                        SystemShortName = systemShortName,
+                        Key = TalkgroupCatalogService.CatalogKey(systemShortName, row.Id),
+                        Source = "radioreference",
+                        RadioReferenceSid = source.RadioReferenceSid,
+                        UpdatedAtUtc = now
+                    })
+                    .ToList();
+                if (incoming.Count == 0)
+                    throw new InvalidOperationException($"No talkgroups were found for RadioReference system {source.RadioReferenceSid}.");
+
+                foreach (var row in incoming)
+                {
+                    var key = TalkgroupCatalogService.ItemKey(row);
+                    if (!items.TryGetValue(key, out var existing))
+                    {
+                        items[key] = row;
+                        addedRows++;
+                        continue;
+                    }
+
+                    var preserveManualFields = string.Equals(existing.Source, "manual", StringComparison.OrdinalIgnoreCase);
+                    items[key] = row with
+                    {
+                        Mode = preserveManualFields ? existing.Mode : row.Mode,
+                        AlphaTag = preserveManualFields ? existing.AlphaTag : row.AlphaTag,
+                        Description = preserveManualFields ? existing.Description : row.Description,
+                        Tag = preserveManualFields ? existing.Tag : row.Tag,
+                        SourceCategory = preserveManualFields ? existing.SourceCategory : row.SourceCategory,
+                        Enabled = existing.Enabled,
+                        OpsCategory = existing.OpsCategory,
+                        IncidentEligible = existing.IncidentEligible,
+                        Source = preserveManualFields ? existing.Source : row.Source,
+                        Notes = existing.Notes
+                    };
+                    refreshedRows++;
+                }
+
+                imports[source.RadioReferenceSid] = new TalkgroupCatalogImport
+                {
+                    RadioReferenceSid = source.RadioReferenceSid,
+                    SystemShortName = systemShortName,
+                    RowCount = incoming.Count,
+                    ImportedAtUtc = now
+                };
+                importedSystems++;
+            }
+
+            var next = document with
+            {
+                SchemaVersion = 2,
+                UpdatedAtUtc = now,
+                Imports = imports.Values.OrderBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase).ToList(),
+                Items = items.Values.OrderBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase).ThenBy(row => row.Id).ToList()
+            };
+            await _catalog.SaveAsync(next, generateTrCsv: true, ct);
+            return BuildSyncResult(next, importedSystems, addedRows, refreshedRows,
+                $"Loaded {importedSystems:N0} RadioReference system(s): {addedRows:N0} talkgroups added and {refreshedRows:N0} refreshed.");
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    private static SetupTalkgroupSyncResult BuildSyncResult(
+        TalkgroupCatalogDocument document,
+        int importedSystems,
+        int addedRows,
+        int refreshedRows,
+        string message) => new(
+            importedSystems,
+            addedRows,
+            refreshedRows,
+            (document.Imports ?? [])
+                .OrderBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase)
+                .Select(row => new SetupTalkgroupImportDto(row.RadioReferenceSid, row.SystemShortName, row.RowCount, row.ImportedAtUtc))
+                .ToList(),
+            message);
 
     private (TalkgroupCatalogDocument Document, int Added, int Refreshed) MergeImportedRowsWithExistingPolicy(List<TalkgroupCatalogItem> rows)
     {

@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 2 - Talkgroups
-- Current milestone: 2A - server-owned RR import provenance
+- Current milestone: 2B - scoped, paged catalog operations
 - Working branch: `codex/operator-ux-review`
 - Last deployed commit: `9c48f30`
 - Operator verification: Package 1 accepted
-- Next action: replace browser-owned RR import state with a server-owned,
-  auditable import operation and durable provenance.
+- Next action: replace full-catalog reads and writes in Setup with server-side
+  paging, filtering, and scoped talkgroup mutations.
 
 ## Working Rules
 
@@ -58,7 +58,7 @@ Acceptance:
 
 Status: in progress
 
-- [ ] Move one-time RR import provenance to the server.
+- [x] Move one-time RR import provenance to the server.
 - [ ] Replace full-catalog writes with scoped, paged mutations.
 - [ ] Route category and TR-exclusion changes through Setup activity and apply
   state.
@@ -130,6 +130,9 @@ Status: pending
 - 2026-07-09: Major product and data-model decisions require operator review in
   chat; routine implementation decisions do not.
 - 2026-07-09: Operator accepted Package 1 after deployed verification.
+- 2026-07-09: RR talkgroups import automatically once per selected RR system.
+  Later updates require the operator to use that system's refresh control;
+  refresh preserves operator policy and manual fields.
 
 ## Deployment Log
 
@@ -159,3 +162,7 @@ Status: pending
 - 2026-07-09: Operator accepted Package 1. Package 2 discovery confirmed that
   RR import completion is browser-session state and Setup catalog edits still
   replace the full catalog document from the client.
+- 2026-07-09: Milestone 2A passed the existing backend test suite and production
+  frontend build. RR import provenance and refresh are now server-owned and
+  auditable; the browser no longer sends parsed RR catalog rows or decides
+  whether an import has already occurred.

@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -2479,44 +2479,6 @@ function radioReferenceSidForSetupSystem(system: Pick<RfSurveySystem, "shortName
   return "";
 }
 
-function combineTalkgroupPreviews(previews: SetupTalkgroupPreview[]): SetupTalkgroupPreview {
-  const includedByCategory: Record<string, number> = {};
-  for (const preview of previews) {
-    for (const [category, count] of Object.entries(preview.includedByCategory ?? {}))
-      includedByCategory[category] = (includedByCategory[category] ?? 0) + count;
-  }
-  return {
-    rows: previews.flatMap(preview => preview.rows),
-    includedByCategory,
-    includedCount: previews.reduce((sum, preview) => sum + preview.includedCount, 0),
-    excludedCount: previews.reduce((sum, preview) => sum + preview.excludedCount, 0),
-    diagnostics: previews.map(preview => preview.diagnostics).filter(Boolean).join(" ")
-  };
-}
-
-function scopeTalkgroupPreviewToSystem(preview: SetupTalkgroupPreview, catalogSystem: string): SetupTalkgroupPreview {
-  const system = normalizeTalkgroupSystem(catalogSystem);
-  if (!system)
-    return preview;
-  const rows = preview.rows.map(row => ({
-    ...row,
-    systemShortName: system,
-    key: `${system}:${row.id}`
-  }));
-  const included = rows.filter(row => row.included);
-  return {
-    ...preview,
-    rows,
-    includedCount: included.length,
-    excludedCount: rows.length - included.length,
-    includedByCategory: included.reduce<Record<string, number>>((acc, row) => {
-      const category = row.opsCategory || "other";
-      acc[category] = (acc[category] ?? 0) + 1;
-      return acc;
-    }, {})
-  };
-}
-
 function talkgroupSourceImportSignature(sources: SiteSetupTalkgroupSource[]) {
   return sources
     .map(row => `${row.siteShortName || row.siteLabel || row.key}:${row.radioReferenceSid.trim()}`)
@@ -2543,113 +2505,81 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [catalogReloadToken, setCatalogReloadToken] = useState(0);
-  const autoImportKeyRef = useRef("");
+  const synchronizedSourceKeyRef = useRef("");
   const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.siteShortName || row.siteLabel || row.key}:${row.radioReferenceSid}:${row.catalogSystem}`).join("|");
   useEffect(() => {
     const next = initialTalkgroupSources(setup);
     setRrSources(next);
     setMessage("");
+    synchronizedSourceKeyRef.current = "";
   }, [setupSourceKey]);
   useEffect(() => {
-    const key = `normal:${talkgroupSourceImportSignature(rrSources)}`;
-    const lastImportedKey = sessionStorage.getItem("pizzawave-site-setup-talkgroup-import-key-v4") ?? "";
-    if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || autoImportKeyRef.current === key || lastImportedKey === key)
+    const key = talkgroupSourceImportSignature(rrSources);
+    if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || synchronizedSourceKeyRef.current === key)
       return;
-    autoImportKeyRef.current = key;
-    void importTalkgroups(key);
+    synchronizedSourceKeyRef.current = key;
+    void synchronizeTalkgroups();
   }, [talkgroupSourceImportSignature(rrSources)]);
 
-  async function fetchTalkgroupPreview() {
-    const activeSources = rrSources
+  function synchronizationSources() {
+    return uniqueTalkgroupImportSources(rrSources
       .map(row => ({ ...row, radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() }))
-      .filter(row => row.radioReferenceSid && row.catalogSystem);
-    if (activeSources.length === 0) {
-      setMessage("Enter at least one RR system ID first.");
-      throw new Error("Enter at least one RR system ID first.");
-    }
-    const importSources = uniqueTalkgroupImportSources(activeSources);
-    const previewPairs = await Promise.all(importSources.map(async row => {
-      const systemShortName = isGenericTalkgroupSystemName(row.catalogSystem, row.radioReferenceSid) ? undefined : row.catalogSystem;
-      const preview = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-        method: "POST",
-        body: JSON.stringify({ radioReferenceSid: row.radioReferenceSid, includeNormallyExcluded: false, systemShortName })
-      });
-      return { sid: row.radioReferenceSid, preview };
-    }));
-    const resolvedNames = new Map(previewPairs.map(pair => [
-      pair.sid,
-      pair.preview.rows.find(row => row.systemShortName)?.systemShortName ?? ""
-    ]));
-    const nextSources = rrSources.map(row => {
-      if (!isGenericTalkgroupSystemName(row.catalogSystem, row.radioReferenceSid))
-        return row;
-      const resolved = resolvedNames.get(row.radioReferenceSid);
-      return resolved ? { ...row, catalogSystem: resolved } : row;
-    });
-    setRrSources(nextSources);
-    return { preview: combineTalkgroupPreviews(previewPairs.map(pair => pair.preview)), sources: nextSources };
+      .filter(row => row.radioReferenceSid && row.catalogSystem));
   }
 
-  async function saveTalkgroupSystemMapping(sources: SiteSetupTalkgroupSource[]) {
-    const sids = Array.from(new Set([
-      ...setupRadioReferenceSids(setup),
-      ...sources.map(row => row.radioReferenceSid.trim()).filter(Boolean)
-    ]));
-    if (!setup.desired.systems.length || !sids.length) return;
-    const bySid = new Map(sources
-      .map(row => [row.radioReferenceSid.trim(), normalizeTalkgroupSystem(row.catalogSystem)] as const)
-      .filter(([sid, system]) => sid && system));
-    if (bySid.size === 0) return;
+  async function saveTalkgroupSystemMapping(imports: TalkgroupCatalogImport[]) {
+    const bySid = new Map(imports.map(row => [row.radioReferenceSid.trim(), normalizeTalkgroupSystem(row.systemShortName)] as const));
+    if (!setup.desired.systems.length || bySid.size === 0) return;
     let changed = false;
     const systems = setup.desired.systems.map(system => {
-      const sid = radioReferenceSidForSetupSystem(system, sids);
+      const sid = String(system.radioReferenceSid || "").trim();
       const talkgroupSystemShortName = sid ? bySid.get(sid) || "" : "";
       if (!talkgroupSystemShortName || stringEqualsIgnoreCase(system.talkgroupSystemShortName, talkgroupSystemShortName))
         return system;
       changed = true;
       return { ...system, talkgroupSystemShortName };
     });
-    if (!changed) return;
-    await onSave({ systems }, "systems");
+    if (changed)
+      await onSave({ systems }, "systems");
   }
 
-  async function importTalkgroups(importKey: string) {
-    setBusy("import-rr");
+  async function synchronizeTalkgroups(forceRadioReferenceSid = "") {
+    const activeSources = synchronizationSources();
+    if (activeSources.length === 0) {
+      setMessage("Select at least one RadioReference system under Systems & Sites first.");
+      return;
+    }
+    const busyKey = forceRadioReferenceSid ? `refresh-${forceRadioReferenceSid}` : "import-rr";
+    setBusy(busyKey);
     setMessage("");
     try {
-      const current = await fetchTalkgroupPreview();
-      const result = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", {
-        method: "POST",
-        body: JSON.stringify({ rows: current.preview.rows })
-      });
-      await saveTalkgroupSystemMapping(current.sources);
-      sessionStorage.setItem("pizzawave-site-setup-talkgroup-import-key-v4", importKey);
-      setMessage(`Loaded ${result.includedCount.toLocaleString()} talkgroup row(s) from RadioReference into the catalog.`);
-      setCatalogReloadToken(value => value + 1);
-      await api.request<unknown>(`${siteSetupApi}/activity`, {
+      const result = await api.request<SetupTalkgroupSyncResult>("/api/v1/setup/talkgroups/sync", {
         method: "POST",
         body: JSON.stringify({
-          category: "talkgroups",
-          action: "rr_talkgroups_loaded",
-          summary: `RadioReference talkgroups loaded into catalog: ${result.includedCount.toLocaleString()} row(s).`,
-          details: {
-            rrSources: rrSources.map(row => ({ radioReferenceSid: row.radioReferenceSid.trim(), catalogSystem: row.catalogSystem.trim() })).filter(row => row.radioReferenceSid),
-            includeExcluded: false,
-            diagnostics: result.diagnostics
-          },
-          source: "ui"
+          sources: activeSources.map(row => ({
+            radioReferenceSid: row.radioReferenceSid,
+            systemShortName: isGenericTalkgroupSystemName(row.catalogSystem, row.radioReferenceSid) ? undefined : row.catalogSystem
+          })),
+          forceRadioReferenceSid: forceRadioReferenceSid || undefined
         })
       });
-      await reload();
+      const importNames = new Map(result.imports.map(row => [row.radioReferenceSid, row.systemShortName]));
+      setRrSources(current => current.map(row => {
+        const system = importNames.get(row.radioReferenceSid);
+        return system ? { ...row, catalogSystem: system } : row;
+      }));
+      await saveTalkgroupSystemMapping(result.imports);
+      if (result.importedSystems > 0)
+        setMessage(result.message);
+      setCatalogReloadToken(value => value + 1);
+      if (result.importedSystems > 0)
+        await reload();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup import failed.");
+      setMessage(error instanceof Error ? error.message : "RadioReference talkgroup synchronization failed.");
+      synchronizedSourceKeyRef.current = "";
     } finally {
       setBusy("");
     }
-  }
-
-  function removeSource(index: number) {
-    setRrSources(current => current.length <= 1 ? current : current.filter((_, i) => i !== index));
   }
 
   const messageClass = message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") || message.toLowerCase().includes("enter") || message.toLowerCase().includes("paste")
@@ -2659,17 +2589,18 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
   return <div className="site-setup-form site-setup-talkgroups">
     <div className="site-setup-talkgroup-import">
       <div className="site-setup-source-list">
-        {rrSources.map((row, index) => <button
-          type="button"
-          className="site-setup-source-chip"
-          disabled={rrSources.length <= 1 || Boolean(busy)}
-          onClick={() => removeSource(index)}
-          title={rrSources.length <= 1 ? "At least one talkgroup source is required." : "Remove this talkgroup source"}
-          key={row.key}>
+        {rrSources.map(row => <div className="site-setup-source-chip" key={row.key}>
           <span>{talkgroupSourceLabel(row) || "Unmapped system"}</span>
           <small>{talkgroupSourceDetail(row)}</small>
-          {rrSources.length > 1 && <b aria-hidden="true">x</b>}
-        </button>)}
+          <button
+            type="button"
+            className="icon-button"
+            disabled={Boolean(busy)}
+            aria-label={`Refresh talkgroups for RR ${row.radioReferenceSid}`}
+            title={`Fetch the latest talkgroups for RR ${row.radioReferenceSid}`}
+            onClick={() => void synchronizeTalkgroups(row.radioReferenceSid)}
+          ><RefreshCw size={14} aria-hidden="true" /></button>
+        </div>)}
         {busy === "import-rr" && <span className="settings-message">Loading talkgroups...</span>}
       </div>
       {message && <div className={messageClass}>{message}</div>}

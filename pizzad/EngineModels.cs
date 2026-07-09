@@ -319,6 +319,25 @@ public sealed record SetupTalkgroupParseRequest(string? CsvText = null, string? 
 
 public sealed record SetupTalkgroupSaveRequest(IReadOnlyList<SetupTalkgroupRowDto> Rows);
 
+public sealed record SetupTalkgroupImportSourceRequest(string RadioReferenceSid, string? SystemShortName = null);
+
+public sealed record SetupTalkgroupSyncRequest(
+    IReadOnlyList<SetupTalkgroupImportSourceRequest> Sources,
+    string? ForceRadioReferenceSid = null);
+
+public sealed record SetupTalkgroupImportDto(
+    string RadioReferenceSid,
+    string SystemShortName,
+    int RowCount,
+    DateTime ImportedAtUtc);
+
+public sealed record SetupTalkgroupSyncResult(
+    int ImportedSystems,
+    int AddedRows,
+    int RefreshedRows,
+    IReadOnlyList<SetupTalkgroupImportDto> Imports,
+    string Message);
+
 public sealed record SetupTalkgroupRowDto
 {
     public string Key { get; init; } = string.Empty;

@@ -562,8 +562,18 @@ public sealed class TalkgroupCatalogService
             .ToList();
         return document with
         {
-            SchemaVersion = document.SchemaVersion <= 0 ? 1 : document.SchemaVersion,
+            SchemaVersion = Math.Max(2, document.SchemaVersion),
             UpdatedAtUtc = document.UpdatedAtUtc == default ? DateTime.UtcNow : document.UpdatedAtUtc,
+            Imports = (document.Imports ?? [])
+                .Where(row => !string.IsNullOrWhiteSpace(row.RadioReferenceSid))
+                .GroupBy(row => row.RadioReferenceSid.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(row => row.ImportedAtUtc).First() with
+                {
+                    RadioReferenceSid = group.Key,
+                    SystemShortName = NormalizeSystemShortName(group.OrderByDescending(row => row.ImportedAtUtc).First().SystemShortName)
+                })
+                .OrderBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             Items = rows
         };
     }
@@ -582,6 +592,7 @@ public sealed class TalkgroupCatalogService
             SourceCategory = item.SourceCategory?.Trim() ?? string.Empty,
             OpsCategory = NormalizeCategoryValue(item.OpsCategory),
             Source = item.Source?.Trim() ?? string.Empty,
+            RadioReferenceSid = item.RadioReferenceSid?.Trim() ?? string.Empty,
             IncidentEligible = item.IncidentEligible && DefaultIncidentEligible(item),
             Notes = item.Notes?.Trim() ?? string.Empty,
             UpdatedAtUtc = item.UpdatedAtUtc == default ? DateTime.UtcNow : item.UpdatedAtUtc
@@ -801,9 +812,18 @@ public sealed class TalkgroupCatalogService
 
 public sealed record TalkgroupCatalogDocument
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
+    public List<TalkgroupCatalogImport> Imports { get; init; } = [];
     public List<TalkgroupCatalogItem> Items { get; init; } = [];
+}
+
+public sealed record TalkgroupCatalogImport
+{
+    public string RadioReferenceSid { get; init; } = string.Empty;
+    public string SystemShortName { get; init; } = string.Empty;
+    public int RowCount { get; init; }
+    public DateTime ImportedAtUtc { get; init; } = DateTime.UtcNow;
 }
 
 public sealed record TalkgroupCatalogItem
@@ -820,6 +840,7 @@ public sealed record TalkgroupCatalogItem
     public bool Enabled { get; init; } = true;
     public bool IncidentEligible { get; init; } = true;
     public string Source { get; init; } = string.Empty;
+    public string RadioReferenceSid { get; init; } = string.Empty;
     public string Notes { get; init; } = string.Empty;
     public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
 }

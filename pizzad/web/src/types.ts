@@ -542,10 +542,13 @@ export type TalkgroupCatalogItem = {
   enabled: boolean;
   incidentEligible: boolean;
   source: string;
+  radioReferenceSid?: string;
   notes: string;
   updatedAtUtc?: string;
 };
-export type TalkgroupCatalogDocument = { schemaVersion: number; updatedAtUtc?: string; items: TalkgroupCatalogItem[] };
+export type TalkgroupCatalogImport = { radioReferenceSid: string; systemShortName: string; rowCount: number; importedAtUtc: string };
+export type TalkgroupCatalogDocument = { schemaVersion: number; updatedAtUtc?: string; imports?: TalkgroupCatalogImport[]; items: TalkgroupCatalogItem[] };
+export type SetupTalkgroupSyncResult = { importedSystems: number; addedRows: number; refreshedRows: number; imports: TalkgroupCatalogImport[]; message: string };
 export type TalkgroupCatalogResponse = {
   catalogPath: string;
   generatedCsvPath: string;

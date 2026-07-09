@@ -532,6 +532,31 @@ app.MapPost("/api/v1/setup/talkgroups/save", async (SetupTalkgroupSaveRequest re
 .WithName("SetupTalkgroupsSave")
 .WithOpenApi();
 
+app.MapPost("/api/v1/setup/talkgroups/sync", async (SetupTalkgroupSyncRequest request, SetupTalkgroupService talkgroups, SiteSetupService siteSetup, HttpContext context, AuthService authService) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var result = await talkgroups.SyncAsync(request, context.RequestAborted);
+        if (result.ImportedSystems > 0)
+        {
+            await siteSetup.AddActivityAsync(new SiteSetupActivityRequest(
+                "talkgroups",
+                string.IsNullOrWhiteSpace(request.ForceRadioReferenceSid) ? "rr_talkgroups_imported" : "rr_talkgroups_refreshed",
+                result.Message,
+                JsonSerializer.SerializeToElement(new { request.Sources, request.ForceRadioReferenceSid, result.Imports, result.AddedRows, result.RefreshedRows }),
+                "setup"), context.RequestAborted);
+        }
+        return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SetupTalkgroupsSync")
+.WithOpenApi();
+
 app.MapPost("/api/v1/setup/tr-config/draft", async (SetupTrConfigDraftRequest request, SetupTrConfigBuilderService builder, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
