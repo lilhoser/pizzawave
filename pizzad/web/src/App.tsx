@@ -11309,28 +11309,6 @@ function formatHz(value: number) {
   return `${value} Hz`;
 }
 
-function setupWizardDraftKey(status: SetupStatus) {
-  return `pizzawave-setup-wizard-draft-v2-${status.completed ? "complete" : "first-run"}`;
-}
-
-function readSetupWizardDraft(status: SetupStatus): Record<string, any> {
-  try {
-    return JSON.parse(localStorage.getItem(setupWizardDraftKey(status)) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function writeSetupWizardDraft(status: SetupStatus, patch: Record<string, any>) {
-  try {
-    const key = setupWizardDraftKey(status);
-    const current = JSON.parse(localStorage.getItem(key) || "{}");
-    localStorage.setItem(key, JSON.stringify({ ...current, ...patch }));
-  } catch {
-    // Browser storage is best-effort; server-side setup save remains authoritative.
-  }
-}
-
 function firstRunStepId(id?: string) {
   const value = String(id || "").trim();
   if (!value || value === "stack")
@@ -11339,72 +11317,28 @@ function firstRunStepId(id?: string) {
 }
 
 function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; reload: () => Promise<void>; onComplete?: () => void }) {
-  const [setupWizardDraft] = useState(() => readSetupWizardDraft(status));
   const [draft, setDraft] = useState<any>(() => setupDraftFromStatus(status));
-  const [trConfigJson, setTrConfigJson] = useState("");
-  const [talkgroupsCsv, setTalkgroupsCsv] = useState(setupWizardDraft.talkgroupsCsv ?? "");
-  const [talkgroupSid, setTalkgroupSid] = useState(status.values?.setup?.radioReferenceSid || setupWizardDraft.radioReferenceSid || "");
-  const [talkgroupSidManuallyEdited, setTalkgroupSidManuallyEdited] = useState(Boolean(setupWizardDraft.talkgroupSidManuallyEdited));
-  const [includeExcludedTalkgroups, setIncludeExcludedTalkgroups] = useState(Boolean(setupWizardDraft.includeExcludedTalkgroups));
-  const [talkgroupPreview, setTalkgroupPreview] = useState<SetupTalkgroupPreview | null>(null);
-  const [trDraftSid, setTrDraftSid] = useState(status.values?.setup?.radioReferenceSid || setupWizardDraft.radioReferenceSid || "");
-  const [trDraftUrl, setTrDraftUrl] = useState("");
-  const [trDraftHtml, setTrDraftHtml] = useState("");
-  const [trDraftSites, setTrDraftSites] = useState("");
-  const [trSiteList, setTrSiteList] = useState<SetupTrConfigSites | null>(setupWizardDraft.trSiteList ?? null);
-  const [trSiteSearch, setTrSiteSearch] = useState(setupWizardDraft.trSiteSearch ?? "");
-  const [selectedTrSites, setSelectedTrSites] = useState<string[]>(Array.isArray(setupWizardDraft.selectedTrSites) ? setupWizardDraft.selectedTrSites : []);
-  const [trConfigStage, setTrConfigStage] = useState<"sites" | "sdr">(setupWizardDraft.trConfigStage === "sdr" ? "sdr" : "sites");
-  const [trDraftSerials, setTrDraftSerials] = useState(setupWizardDraft.trDraftSerials ?? "");
-  const [trDraftRate, setTrDraftRate] = useState(setupWizardDraft.trDraftRate && setupWizardDraft.trDraftRate !== "2048000" ? setupWizardDraft.trDraftRate : "2400000");
-  const [trDraft, setTrDraft] = useState<SetupTrConfigDraft | null>(null);
-  const [trSourcePlan, setTrSourcePlan] = useState<SetupTrConfigSourcePlan | null>(null);
-  const [trSourcePlanLoading, setTrSourcePlanLoading] = useState(false);
   const [message, setMessage] = useState("Complete the first-run prerequisites, then PizzaWave will open Site Setup for monitoring configuration.");
   const [busy, setBusy] = useState("");
   const [artifactReport, setArtifactReport] = useState<SetupArtifactReport | null>(null);
   const [setupJob, setSetupJob] = useState<Job | null>(null);
   const [setupJobContext, setSetupJobContext] = useState("");
   const [setupLogs, setSetupLogs] = useState<JobLog[]>([]);
-  const [sdrDetection, setSdrDetection] = useState<SetupSdrDetection | null>(null);
-  const [sdrDetectionAttempted, setSdrDetectionAttempted] = useState(false);
-  const [models, setModels] = useState<any[]>([]);
-  const [aiModels, setAiModels] = useState<string[]>([]);
-  const [modelBusy, setModelBusy] = useState("");
-  const [restartVerified, setRestartVerified] = useState(status.completed);
   const [wizardStep, setWizardStep] = useState(firstRunStepId(status.currentStep));
   const [expandedSetupStep, setExpandedSetupStep] = useState(firstRunStepId(status.currentStep));
   const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
   const [trInstallMode, setTrInstallMode] = useState((status.values?.setup?.installMode === "freshTr" ? "freshTr" : "reuseExistingTr") as "reuseExistingTr" | "freshTr");
-  const [trConfigMode, setTrConfigMode] = useState((status.values?.setup?.trConfigMode === "pasteJson" ? "pasteJson" : "radioReference") as "radioReference" | "pasteJson");
   const [confirmFreshBuild, setConfirmFreshBuild] = useState(false);
-  const [calibrationMode, setCalibrationMode] = useState<"skip" | "prepare">("skip");
-  const [calibrationPlan, setCalibrationPlan] = useState<SetupCalibrationPlan | null>(null);
-  const [calibrationInputs, setCalibrationInputs] = useState<Record<string, { gain: string; errorHz: string; ppm: string }>>({});
-  const [calibrationSweep, setCalibrationSweep] = useState({ rangeHz: "1200", stepHz: "300", warmupSec: "20", durationSec: "240" });
-  const [restorePreview, setRestorePreview] = useState<BackupRestorePreview | null>(null);
-  const [areaBoundaryCandidates, setAreaBoundaryCandidates] = useState<Record<string, SetupAreaBoundaryCandidate[]>>({});
-  const [areaLookupBusy, setAreaLookupBusy] = useState("");
-  const [areaAutoSeeded, setAreaAutoSeeded] = useState(false);
-  const [areaLabelLookupNeeded, setAreaLabelLookupNeeded] = useState<Record<string, boolean>>({});
-  const areaLookupHistory = useRef<Record<string, string>>({});
   const setupLogLastId = useRef(0);
   const setupDraftDirty = useRef(false);
   const setupJobRunning = Boolean(setupJob && ["queued", "running", "paused"].includes(setupJob.status));
-  const calibrationJobRunning = setupJobRunning && setupJobContext === "calibration";
-  const detectedSdrSerials = sdrDetection?.devices.map(device => device.serial).filter(Boolean).join(",") ?? "";
-  const selectedSdrDevices = sdrDetection && (!trDraftSerials.trim() || trDraftSerials.trim() === detectedSdrSerials)
-    ? sdrDetection.devices
-    : undefined;
 
   useEffect(() => {
     if (!setupDraftDirty.current)
       setDraft(setupDraftFromStatus(status));
-    setRestartVerified(status.completed);
     if (!setupJobRunning)
       setWizardStep(current => firstRunStepId(current || status.currentStep));
     setTrInstallMode(status.values?.setup?.installMode === "freshTr" ? "freshTr" : "reuseExistingTr");
-    setTrConfigMode(status.values?.setup?.trConfigMode === "pasteJson" ? "pasteJson" : "radioReference");
   }, [status, setupJobRunning]);
   useEffect(() => {
     if (!setupJobRunning && status.currentStep)
@@ -11414,12 +11348,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     if (setupJob)
       setJobDrawerOpen(true);
   }, [setupJob?.id]);
-  useEffect(() => { void loadModels(); }, []);
-  useEffect(() => {
-    if (!modelBusy) return;
-    const timer = window.setInterval(() => void loadModels(), 1500);
-    return () => window.clearInterval(timer);
-  }, [modelBusy]);
   useEffect(() => {
     if (trInstallMode === "freshTr" && !artifactReport && !busy) void loadArtifacts();
   }, [trInstallMode]);
@@ -11430,79 +11358,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     }, 1400);
     return () => window.clearInterval(timer);
   }, [setupJob]);
-  useEffect(() => {
-    if (wizardStep === "calibration") void loadCalibrationPlan();
-  }, [wizardStep, draft.trunkRecorder?.configPath]);
-  useEffect(() => {
-    if (wizardStep !== "areas") {
-      setAreaAutoSeeded(false);
-      return;
-    }
-    if (areaAutoSeeded)
-      return;
-    const existingAreas = draft.locations?.monitoredAreas;
-    if (Array.isArray(existingAreas) && existingAreas.length > 0) {
-      setAreaAutoSeeded(true);
-      return;
-    }
-    void seedAreasFromTrConfig();
-  }, [wizardStep, areaAutoSeeded, draft.locations?.monitoredAreas?.length, draft.trunkRecorder?.configPath]);
-  useEffect(() => {
-    if (wizardStep !== "restore" && !status.values?.setup?.pendingRestorePath) return;
-    void loadPendingRestore();
-  }, [wizardStep, status.values?.setup?.pendingRestorePath]);
-  useEffect(() => {
-    writeSetupWizardDraft(status, {
-      radioReferenceSid: trDraftSid.trim() || talkgroupSid.trim(),
-      talkgroupSid,
-      talkgroupSidManuallyEdited,
-      talkgroupsCsv,
-      includeExcludedTalkgroups,
-      trSiteList,
-      trSiteSearch,
-      selectedTrSites,
-      trConfigStage,
-      trDraftSerials,
-      trDraftRate
-    });
-  }, [status, trDraftSid, talkgroupSid, talkgroupSidManuallyEdited, talkgroupsCsv, includeExcludedTalkgroups, trSiteList, trSiteSearch, selectedTrSites, trConfigStage, trDraftSerials, trDraftRate]);
-  useEffect(() => {
-    if (wizardStep !== "talkgroups" || talkgroupSid.trim())
-      return;
-    const sid = String(draft.setup?.radioReferenceSid ?? trDraftSid ?? "").trim();
-    if (sid)
-      setTalkgroupSid(sid);
-  }, [wizardStep, talkgroupSid, draft.setup?.radioReferenceSid, trDraftSid]);
-  useEffect(() => {
-    if (wizardStep !== "tr" || trInstallMode !== "freshTr" || !trSiteList)
-      return;
-    if (!sdrDetection && !sdrDetectionAttempted && busy !== "sdr-detect")
-      void detectSdrs(true);
-  }, [wizardStep, trInstallMode, trSiteList, sdrDetection, sdrDetectionAttempted, busy]);
-  useEffect(() => {
-    if (wizardStep !== "tr" || trInstallMode !== "freshTr" || !trSiteList || selectedTrSites.length === 0) {
-      setTrSourcePlan(null);
-      setTrSourcePlanLoading(false);
-      return;
-    }
-    let canceled = false;
-    const serials = trDraftSerials.trim() || detectedSdrSerials || "";
-    setTrSourcePlanLoading(true);
-    api.request<SetupTrConfigSourcePlan>("/api/v1/setup/tr-config/source-plan", {
-      method: "POST",
-      body: JSON.stringify({
-        radioReferenceSid: trDraftSid.trim(),
-        siteNameList: selectedTrSites,
-        sdrSerials: serials,
-        sdrDevices: selectedSdrDevices,
-        sampleRate: Number(trDraftRate) || 2400000
-      })
-    })
-      .then(plan => { if (!canceled) setTrSourcePlan(plan); })
-      .catch(error => { if (!canceled) setMessage(error instanceof Error ? error.message : "Source plan preview failed."); })
-      .finally(() => { if (!canceled) setTrSourcePlanLoading(false); });
-    return () => { canceled = true; };
-  }, [wizardStep, trInstallMode, trSiteList, selectedTrSites, trDraftSid, trDraftSerials, sdrDetection, detectedSdrSerials, selectedSdrDevices, trDraftRate]);
 
   function update(path: string[], value: any) {
     setupDraftDirty.current = true;
@@ -11520,129 +11375,11 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     });
   }
 
-  function updateTrRadioReferenceSid(value: string) {
-    setTrDraftSid(value);
-    if (!talkgroupSidManuallyEdited)
-      setTalkgroupSid(value);
-    update(["setup", "radioReferenceSid"], value);
-    setTrSiteList(null);
-    setSelectedTrSites([]);
-    setTrSourcePlan(null);
-  }
-
-  function updateTalkgroupRadioReferenceSid(value: string) {
-    setTalkgroupSid(value);
-    setTalkgroupSidManuallyEdited(true);
-    update(["setup", "radioReferenceSid"], value);
-  }
-
-  async function seedAreasFromTrConfig() {
-    setAreaLookupBusy("seed");
-    try {
-      const plan = await api.request<SetupCalibrationPlan>("/api/v1/setup/calibration/plan");
-      const systems = plan.systems.map(system => system.shortName).filter(Boolean);
-      if (systems.length === 0) {
-        setMessage("No TR systems were found yet. Complete TR Config before setting monitored areas.");
-        setAreaAutoSeeded(true);
-        return;
-      }
-      setupDraftDirty.current = true;
-      setDraft((current: any) => {
-        const next = cloneSettings(current);
-        const existing = Array.isArray(next.locations?.monitoredAreas) ? next.locations.monitoredAreas : [];
-        if (existing.length > 0)
-          return next;
-        const sourceSystems = trSourcePlan?.systems ?? trDraft?.systems ?? [];
-        const rows = systems.map((shortName, index) => {
-          const matchingSystem = sourceSystems.find(system => system.shortName === shortName);
-          const selectedSite = selectedTrSites[index] ?? trSiteList?.sites.find(site => site.shortName === shortName)?.name ?? matchingSystem?.siteName ?? "";
-          const areaLabel = suggestAreaLabelFromSite(selectedSite || matchingSystem?.siteName || shortName);
-          return {
-            areaId: createClientId(),
-            areaLabel,
-            systemShortName: shortName,
-            aliases: [shortName],
-            north: 0,
-            south: 0,
-            east: 0,
-            west: 0
-          };
-        });
-        next.locations = { ...(next.locations ?? {}), monitoredAreas: rows };
-        return next;
-      });
-      setMessage(`Created ${systems.length.toLocaleString()} monitored area row(s) from the TR config. PizzaWave will look up Census TIGERweb boundaries automatically.`);
-      setAreaAutoSeeded(true);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not load TR systems for monitored areas.");
-      setAreaAutoSeeded(true);
-    } finally {
-      setAreaLookupBusy("");
-    }
-  }
-
-  async function lookupAreaBoundary(index: number, key: string, automatic = false) {
-    const area = draft.locations?.monitoredAreas?.[index];
-    const query = String(area?.areaLabel || area?.systemShortName || "").trim();
-    if (!query) {
-      setMessage("Enter an area label before searching for a boundary.");
-      return;
-    }
-    areaLookupHistory.current[key] = query;
-    setAreaLookupBusy(key);
-    try {
-      const result = await api.request<SetupAreaBoundaryResponse>("/api/v1/setup/areas/boundaries", {
-        method: "POST",
-        body: JSON.stringify({ query })
-      });
-      setAreaLabelLookupNeeded(current => ({ ...current, [key]: false }));
-      if (automatic && result.candidates.length === 1) {
-        setAreaBoundaryCandidates(current => ({ ...current, [key]: [] }));
-        applyAreaBoundary(index, result.candidates[0], false);
-        setMessage(`${result.candidates[0].label} boundary applied from Census TIGERweb.`);
-        return;
-      }
-      setAreaBoundaryCandidates(current => ({ ...current, [key]: result.candidates }));
-      setMessage(result.candidates.length
-        ? `${result.candidates.length.toLocaleString()} boundary candidate(s) found. Select one to fill the monitored area bounds.`
-        : result.diagnostics || "No boundary candidates found.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Boundary lookup failed.");
-    } finally {
-      setAreaLookupBusy("");
-    }
-  }
-
-  function applyAreaBoundary(index: number, candidate: SetupAreaBoundaryCandidate, showMessage = true) {
-    setupDraftDirty.current = true;
-    setDraft((current: any) => {
-      const next = cloneSettings(current);
-      const areas = Array.isArray(next.locations?.monitoredAreas) ? next.locations.monitoredAreas : [];
-      if (!areas[index])
-        return next;
-      const systemShortName = areas[index].systemShortName ?? "";
-      areas[index] = {
-        ...areas[index],
-        areaLabel: candidate.label,
-        aliases: systemShortName ? Array.from(new Set([...(areas[index].aliases ?? []), systemShortName])) : areas[index].aliases,
-        north: candidate.north,
-        south: candidate.south,
-        east: candidate.east,
-        west: candidate.west
-      };
-      next.locations = { ...(next.locations ?? {}), monitoredAreas: areas };
-      return next;
-    });
-    if (showMessage)
-      setMessage(`${candidate.label} applied to monitored area bounds.`);
-  }
-
   async function save() {
     setBusy("save");
     setMessage("Saving setup values...");
     try {
       await saveSetupValues();
-      setRestartVerified(false);
       setMessage("Setup values saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Save failed.");
@@ -11653,11 +11390,8 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
 
   async function saveSetupValues() {
     const values: any = cloneSettings(draft);
-    normalizeSetupLocationNumbers(values);
     const currentWizardStep = effectiveSetupStepId();
-    values.setup = { ...(values.setup ?? {}), currentStep: currentWizardStep, installMode: trInstallMode, trConfigMode: trInstallMode === "freshTr" ? "radioReference" : trConfigMode, radioReferenceSid: trDraftSid.trim() || talkgroupSid.trim() || values.setup?.radioReferenceSid || "" };
-    if (trConfigJson.trim()) values.trConfigJson = trConfigJson;
-    if (talkgroupsCsv.trim()) values.talkgroupsCsv = talkgroupsCsv;
+    values.setup = { ...(values.setup ?? {}), currentStep: currentWizardStep, installMode: trInstallMode };
     const saved = await api.request<SetupStatus>("/api/v1/setup/save", { method: "POST", body: JSON.stringify({ values }) });
     setupDraftDirty.current = false;
     setDraft(setupDraftFromStatus(saved));
@@ -11701,105 +11435,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     }
   }
 
-  async function loadPendingRestore() {
-    try {
-      setRestorePreview(await api.request<BackupRestorePreview>("/api/v1/system/backups/restore/pending"));
-    } catch {
-      setRestorePreview(null);
-    }
-  }
-
-  async function applyPendingRestore() {
-    if (!restorePreview)
-      throw new Error("No staged restore is available.");
-    if (!restorePreview.checks.every(check => check.ok))
-      throw new Error("Restore archive verification failed. Do not apply this backup.");
-    if (!confirmAction("Apply staged restore?", "This will overwrite PizzaWave/TR files from the backup and restart services. PizzaWave will reconnect, run the required restore checks automatically, and only keep the wizard open if something needs attention.")) return;
-    setBusy("apply-restore");
-    try {
-      const result = await api.request<BackupRestoreApplyResult>("/api/v1/system/backups/restore/apply", { method: "POST" });
-      setMessage(result.message || "Restore scheduled. Waiting for pizzad to restart...");
-      await waitForHealth();
-      setMessage("Restore applied. Running required checks...");
-      const validation = await api.request<SetupValidationResult>("/api/v1/setup/validate-required", { method: "POST" });
-      if (validation.ok) {
-        await api.request<SetupStatus>("/api/v1/setup/complete", { method: "POST" });
-        setMessage("Restore checks passed. Loading PizzaWave...");
-        await reload();
-        return;
-      }
-      setMessage(`Restore applied, but setup needs attention: ${validation.message}`);
-      await reload();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function cancelPendingRestore() {
-    if (!confirmAction("Cancel staged restore?", "This clears the staged restore and deletes its temporary files. No live PizzaWave, TR, database, or audio files will be changed.")) return;
-    setBusy("cancel-restore");
-    try {
-      const result = await api.request<BackupRestoreCancelResult>("/api/v1/system/backups/restore/cancel", { method: "POST" });
-      setRestorePreview(null);
-      setMessage(result.message || "Restore canceled.");
-      await reload();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function loadModels() {
-    try {
-      setModels(await api.request<any[]>("/api/v1/settings/transcription/models"));
-    } catch {
-      setModels([]);
-    }
-  }
-
-  async function downloadModel(model: string) {
-    setModelBusy(model);
-    try {
-      const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}/download`, { method: "POST" });
-      setMessage(result.message ?? "Model download completed.");
-      if (result.ok !== false && result.path && model.startsWith("whisper-"))
-        update(["transcription", "whisperModelFile"], result.path);
-      await loadModels();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Model download failed.");
-    } finally {
-      setModelBusy("");
-    }
-  }
-
-  async function deleteModel(model: string) {
-    setModelBusy(model);
-    try {
-      const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}`, { method: "DELETE" });
-      setMessage(result.message ?? "Model removed.");
-      await loadModels();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Model removal failed.");
-    } finally {
-      setModelBusy("");
-    }
-  }
-
-  async function complete() {
-    setBusy("complete");
-    try {
-      await save();
-      if (!restartVerified && !status.completed)
-        throw new Error("Run Apply & Restart first, then complete setup.");
-      await api.request<SetupStatus>("/api/v1/setup/complete", { method: "POST" });
-      setMessage("Setup complete. Loading PizzaWave...");
-      await reload();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Setup could not be completed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
   async function finishSetup() {
     setBusy("finish-setup");
     try {
@@ -11821,48 +11456,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     }
   }
 
-  async function applyRestartAndValidate() {
-    setBusy("restart-pizzad");
-    try {
-      await applyRestartAndValidateInline();
-    } catch (error) {
-      setRestartVerified(false);
-      setMessage(error instanceof Error ? error.message : "Restart validation failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function applyRestartAndValidateInline() {
-    await saveSetupValues();
-    setMessage("Applying settings and restarting pizzad...");
-    const job = await beginSetupJob("restart-pizzad", true, "finish");
-    await refreshSetupJob(job.id);
-    await waitForHealth();
-    setMessage("pizzad is back. Re-running required setup validations...");
-    const result = await api.request<SetupValidationResult>("/api/v1/setup/validate-required", { method: "POST" });
-    setRestartVerified(result.ok);
-    setMessage(result.message);
-    await reload();
-    if (!result.ok) throw new Error(result.message);
-    return result;
-  }
-
-  async function waitForHealth() {
-    await new Promise(resolve => window.setTimeout(resolve, 1800));
-    let lastError = "";
-    for (let i = 0; i < 45; i++) {
-      try {
-        await api.request<EngineHealth>("/api/v1/health");
-        return;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : "health check failed";
-        await new Promise(resolve => window.setTimeout(resolve, 1000));
-      }
-    }
-    throw new Error(`pizzad did not become healthy after restart: ${lastError}`);
-  }
-
   async function loadArtifacts() {
     setBusy("artifacts");
     try {
@@ -11871,81 +11464,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
       setMessage(report.hasBlockingArtifacts ? "TR artifacts found. Review them before starting a source-build install." : "No blocking TR install artifacts found.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Artifact check failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function detectSdrs(quiet = false) {
-    setBusy("sdr-detect");
-    setSdrDetectionAttempted(true);
-    try {
-      const result = await api.request<SetupSdrDetection>("/api/v1/setup/sdrs");
-      setSdrDetection(result);
-      if (result.devices.some(device => device.serial)) {
-        setTrDraftSerials(result.devices.map(device => device.serial).filter(Boolean).join(","));
-      }
-      const detectedRates = result.devices.map(device => device.defaultSampleRate).filter(rate => rate > 0);
-      if (detectedRates.length > 0 && new Set(detectedRates).size === 1)
-        setTrDraftRate(String(detectedRates[0]));
-      if (!quiet)
-        setMessage(result.message);
-    } catch (error) {
-      if (!quiet)
-        setMessage(error instanceof Error ? error.message : "SDR detection failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function fetchRadioReferenceSites() {
-    if (!trDraftSid.trim()) {
-      setMessage("Enter a RadioReference SID first.");
-      return;
-    }
-    setBusy("tr-sites-fetch");
-    try {
-      const result = await api.request<SetupTrConfigSites>("/api/v1/setup/tr-config/sites", {
-        method: "POST",
-        body: JSON.stringify({ radioReferenceSid: trDraftSid.trim() })
-      });
-      setTrSiteList(result);
-      setSelectedTrSites([]);
-      setTrSiteSearch("");
-      setTrConfigStage("sites");
-      setSdrDetection(null);
-      setSdrDetectionAttempted(false);
-      setTrSourcePlan(null);
-      setMessage(result.diagnostics);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "RadioReference site fetch failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function toggleTrSite(siteName: string, checked: boolean) {
-    setSelectedTrSites(current => checked
-      ? [...current, siteName].filter((value, index, values) => values.indexOf(value) === index)
-      : current.filter(value => value !== siteName));
-  }
-
-  async function loadCalibrationPlan() {
-    setBusy("calibration-plan");
-    try {
-      const plan = await api.request<SetupCalibrationPlan>("/api/v1/setup/calibration/plan");
-      setCalibrationPlan(plan);
-      setCalibrationInputs(current => {
-        const next = { ...current };
-        for (const source of plan.sources) {
-          const key = String(source.index);
-          const gain = source.gain && source.gain !== "0" ? source.gain : "32";
-          next[key] = next[key] ?? { gain, errorHz: source.errorHz ? String(source.errorHz) : "", ppm: "" };
-        }
-        return next;
-      });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Calibration plan could not be loaded.");
     } finally {
       setBusy("");
     }
@@ -11974,37 +11492,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     return job;
   }
 
-  async function runSetupJobToCompletion(action: string, confirmed = false, context = currentStep.id) {
-    const job = await beginSetupJob(action, confirmed, context);
-    setMessage(`Running ${label(action)}...`);
-    for (let i = 0; i < 180; i++) {
-      await refreshSetupJob(job.id);
-      const jobs = await api.request<Job[]>("/api/v1/jobs");
-      const current = jobs.find(row => row.id === job.id);
-      if (current) setSetupJob(current);
-      if (current?.status === "completed") return current;
-      if (current?.status === "failed" || current?.status === "canceled")
-        throw new Error(current.message || `${label(action)} failed.`);
-      await new Promise(resolve => window.setTimeout(resolve, 1000));
-    }
-    throw new Error(`${label(action)} did not finish in time. Check System > Jobs.`);
-  }
-
-  async function runCalibrationSweep(parameters: any) {
-    setBusy("tr-calibration-sweep");
-    try {
-      setWizardStep("calibration");
-      update(["setup", "currentStep"], "calibration");
-      const job = await beginSetupJob("tr-calibration-sweep", true, "calibration", parameters);
-      setMessage(`Started calibration sweep job ${job.id}. Watch the live output below; the wizard will keep buttons disabled while it runs.`);
-      await refreshSetupJob(job.id);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Calibration sweep failed to start.");
-    } finally {
-      setBusy("");
-    }
-  }
-
   async function stopCalibrationJob() {
     setBusy("tr-calibration-cancel");
     try {
@@ -12031,310 +11518,14 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     }
   }
 
-  async function previewTalkgroups(source: "csv" | "rr") {
-    setBusy(`talkgroups-${source}`);
-    try {
-      const preview = await previewTalkgroupsForSelectedSystems(source, source === "csv" ? talkgroupsCsv : undefined);
-      setTalkgroupPreview(preview);
-      setMessage(`Previewed ${preview.rows.length.toLocaleString()} talkgroups: ${preview.includedCount.toLocaleString()} included, ${preview.excludedCount.toLocaleString()} excluded.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup preview failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function importTalkgroups(source: "csv" | "rr", csvText = talkgroupsCsv) {
-    if (source === "rr" && !talkgroupSid.trim()) {
-      setMessage("Enter a RadioReference SID first.");
-      return;
-    }
-    if (source === "csv" && !csvText.trim()) {
-      setMessage("Choose a talkgroup CSV file first.");
-      return;
-    }
-    setBusy(`talkgroups-${source}`);
-    try {
-      const preview = await previewTalkgroupsForSelectedSystems(source, csvText);
-      const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", { method: "POST", body: JSON.stringify({ rows: preview.rows }) });
-      setTalkgroupPreview(saved);
-      if (source === "rr") {
-        update(["setup", "radioReferenceSid"], talkgroupSid.trim());
-        if (!trDraftSid.trim()) {
-          setTrDraftSid(talkgroupSid.trim());
-          setTalkgroupSidManuallyEdited(false);
-        }
-      }
-      setMessage(`${source === "rr" ? "Fetched" : "Imported"} ${saved.includedCount.toLocaleString()} talkgroup row(s). ${saved.diagnostics}`);
-      await validateSetupSection("talkgroups");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup import failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function selectedTalkgroupSystems() {
-    const draftSystems = (trDraft?.systems ?? [])
-      .filter(system => selectedTrSites.length === 0 || selectedTrSites.some(site => stringEqualsIgnoreCase(site, system.siteName) || stringEqualsIgnoreCase(site, system.shortName)))
-      .map(system => system.shortName)
-      .filter(Boolean);
-    const siteListSystems = selectedTrSites
-      .map(site => trSiteList?.sites.find(row => stringEqualsIgnoreCase(row.name, site) || stringEqualsIgnoreCase(row.shortName, site))?.shortName || site)
-      .filter(Boolean);
-    return Array.from(new Set((draftSystems.length ? draftSystems : siteListSystems).map(normalizeTalkgroupSystem).filter(Boolean)));
-  }
-
-  async function previewTalkgroupsForSelectedSystems(source: "csv" | "rr", csvText?: string) {
-    const systems = selectedTalkgroupSystems();
-    const scopes = systems.length ? systems : [""];
-    const previews = await Promise.all(scopes.map(systemShortName => api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/preview", {
-      method: "POST",
-      body: JSON.stringify(source === "rr"
-        ? { radioReferenceSid: talkgroupSid.trim(), includeNormallyExcluded: includeExcludedTalkgroups, systemShortName }
-        : { csvText: csvText ?? talkgroupsCsv, includeNormallyExcluded: includeExcludedTalkgroups, systemShortName })
-    })));
-    return combineTalkgroupPreviews(previews);
-  }
-
-  async function importTalkgroupCsvFile(file: File | null) {
-    if (!file)
-      return;
-    setBusy("talkgroups-csv");
-    try {
-      const text = await file.text();
-      setTalkgroupsCsv(text);
-      await importTalkgroups("csv", text);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup CSV import failed.");
-      setBusy("");
-    }
-  }
-
-  async function saveTalkgroupPreview() {
-    if (!talkgroupPreview) return;
-    setBusy("talkgroups-save");
-    try {
-      await saveTalkgroupPreviewInline();
-      await validateSetupSection("talkgroups");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Talkgroup save failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveTalkgroupPreviewInline() {
-    if (!talkgroupPreview) throw new Error("Preview or import talkgroups before continuing.");
-    const saved = await api.request<SetupTalkgroupPreview>("/api/v1/setup/talkgroups/save", { method: "POST", body: JSON.stringify({ rows: talkgroupPreview.rows }) });
-    setTalkgroupPreview(saved);
-    setMessage(saved.diagnostics);
-    return saved;
-  }
-
-  function updateTalkgroupRow(index: number, patch: Partial<SetupTalkgroupRow>) {
-    setTalkgroupPreview(current => {
-      if (!current) return current;
-      const rows = current.rows.map((row, i) => i === index ? { ...row, ...patch } : row);
-      const included = rows.filter(row => row.included);
-      const includedByCategory = included.reduce<Record<string, number>>((acc, row) => {
-        const key = row.opsCategory || "other";
-        acc[key] = (acc[key] ?? 0) + 1;
-        return acc;
-      }, {});
-      return { ...current, rows, includedCount: included.length, excludedCount: rows.length - included.length, includedByCategory };
-    });
-  }
-
-  function addTalkgroupRow() {
-    setTalkgroupPreview(current => {
-      const rows = current?.rows ?? [];
-      const nextId = rows.reduce((max, row) => Math.max(max, row.id), 0) + 1;
-      const nextRows = [...rows, { key: String(nextId), systemShortName: "", id: nextId, mode: "D", alphaTag: "", description: "", tag: "", category: "other", opsCategory: "other", included: true, exclusionReason: "" }];
-      return {
-        rows: nextRows,
-        includedByCategory: nextRows.filter(row => row.included).reduce<Record<string, number>>((acc, row) => {
-          const key = row.opsCategory || "other";
-          acc[key] = (acc[key] ?? 0) + 1;
-          return acc;
-        }, {}),
-        includedCount: nextRows.filter(row => row.included).length,
-        excludedCount: nextRows.filter(row => !row.included).length,
-        diagnostics: current?.diagnostics ?? "Manual talkgroup rows."
-      };
-    });
-  }
-
-  async function draftTrConfig() {
-    setBusy("tr-config-draft");
-    try {
-      const draftResult = await api.request<SetupTrConfigDraft>("/api/v1/setup/tr-config/draft", {
-        method: "POST",
-        body: JSON.stringify({
-          radioReferenceSid: trDraftSid,
-          radioReferenceUrl: trDraftUrl,
-          htmlText: trDraftHtml,
-          siteNames: trDraftSites,
-          sdrSerials: trDraftSerials,
-          sdrDevices: selectedSdrDevices,
-          sampleRate: Number(trDraftRate) || 2400000
-        })
-      });
-      setTrDraft(draftResult);
-      setTrConfigJson(draftResult.configJson);
-      setMessage(`${draftResult.diagnostics} Review the generated JSON before saving.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "TR config draft failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function draftAndSaveSelectedTrConfigInline() {
-    if (!trDraftSid.trim())
-      throw new Error("Enter a RadioReference SID before continuing.");
-    if (selectedTrSites.length === 0)
-      throw new Error("Select at least one RadioReference site before continuing.");
-    const blockers = trSourcePlanBlockingWarnings(trSourcePlan);
-    if (blockers.length > 0)
-      throw new Error(blockers.join(" "));
-    const serials = trDraftSerials.trim() || detectedSdrSerials || "";
-    const draftResult = await api.request<SetupTrConfigDraft>("/api/v1/setup/tr-config/draft", {
-      method: "POST",
-      body: JSON.stringify({
-        radioReferenceSid: trDraftSid.trim(),
-        siteNameList: selectedTrSites,
-        sdrSerials: serials,
-        sdrDevices: selectedSdrDevices,
-        sampleRate: Number(trDraftRate) || 2400000
-      })
-    });
-    setTrDraft(draftResult);
-    setTrConfigJson(draftResult.configJson);
-    const save = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/save", {
-      method: "POST",
-      body: JSON.stringify({ configJson: draftResult.configJson })
-    });
-    setMessage(`${draftResult.diagnostics} ${save.message}`);
-    return draftResult;
-  }
-
-  async function saveDraftTrConfig() {
-    const configJson = trConfigJson.trim() || trDraft?.configJson || "";
-    if (!configJson) return;
-    setBusy("tr-config-save");
-    try {
-      const result = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/save", { method: "POST", body: JSON.stringify({ configJson }) });
-      setMessage(result.message);
-      await validate("tr");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "TR config save failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function patchCallstream() {
-    setBusy("patch-callstream");
-    try {
-      await patchCallstreamInline();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Callstream patch failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function patchCallstreamInline() {
-    await saveSetupValues();
-    const result = await api.request<SetupValidationResult>("/api/v1/setup/tr-config/patch-callstream", { method: "POST", body: JSON.stringify({ restartTr: false, disableCaptureDir: trInstallMode === "freshTr" }) });
-    setMessage(result.message);
-    await validateSetupSection("callstream");
-    if (!result.ok) throw new Error(result.message);
-    return result;
-  }
-
-  async function loadAiModels() {
-    setBusy("ai-models");
-    try {
-      await loadAiModelsInline();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load AI model list.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function loadAiModelsInline() {
-    await saveSetupValues();
-    const result = await api.request<any>("/api/v1/settings/ai-insights/models");
-    const modelRows = result.models ?? [];
-    setAiModels(modelRows);
-    setMessage(result.message ?? "Model list loaded.");
-    let selectedModel = "";
-    if (modelRows.length > 0 && !ai.openAiModel) {
-      selectedModel = modelRows[0];
-      update(["aiInsights", "openAiModel"], modelRows[0]);
-      const values: any = cloneSettings(draft);
-      values.aiInsights = { ...(values.aiInsights ?? {}), openAiModel: modelRows[0] };
-      values.setup = { ...(values.setup ?? {}), currentStep: effectiveSetupStepId(), installMode: trInstallMode, trConfigMode: trInstallMode === "freshTr" ? "radioReference" : trConfigMode, radioReferenceSid: trDraftSid.trim() || talkgroupSid.trim() || values.setup?.radioReferenceSid || "" };
-      await api.request<SetupStatus>("/api/v1/setup/save", { method: "POST", body: JSON.stringify({ values }) });
-    }
-    return selectedModel;
-  }
-
-  function skipOptional(section: "ai-insights" | "embeddings" | "alerts" | "calibration") {
-    if (section === "ai-insights") update(["aiInsights", "enabled"], false);
-    if (section === "embeddings") update(["embeddings", "enabled"], false);
-    if (section === "alerts") update(["alerts", "emailEnabled"], false);
-    if (section === "calibration") update(["setup", "calibrationSkippedOrCompleted"], true);
-    setMessage(`${label(section)} skipped. Save progress to persist this choice.`);
-  }
-
   const checks = status.checks ?? [];
   const requiredOpen = checks.filter(c => c.required && !c.ok);
   const tr = draft.trunkRecorder ?? {};
-  const ingest = draft.ingest ?? {};
-  const transcription = draft.transcription ?? {};
-  const ai = draft.aiInsights ?? {};
   const embeddings = draft.embeddings ?? {};
-  const alerts = draft.alerts ?? {};
-  const branding = draft.branding ?? {};
-  const installOptionalDiagnosticTools = Boolean(draft.setup?.installOptionalDiagnosticTools);
-  const locations = draft.locations?.monitoredAreas ?? [];
-  const postRestoreValidation = Boolean(status.values?.setup?.restoreAppliedAtUtc);
   const lmStudioDetection = (status.detection as any)?.lmStudio;
   const qdrantDetection = (status.detection as any)?.qdrant;
   const lmStudioInstalled = Boolean(lmStudioDetection?.found || lmStudioDetection?.serviceEnabled || lmStudioDetection?.binaryPath);
   const qdrantInstalled = Boolean(qdrantDetection?.found || qdrantDetection?.serviceEnabled || qdrantDetection?.binaryPath || qdrantDetection?.storageExists);
-  const visibleTrSites = (trSiteList?.sites ?? []).filter(site => {
-    const query = trSiteSearch.trim().toLowerCase();
-    if (!query) return true;
-    return `${site.name} ${site.shortName} ${site.controlChannelsMhz.join(" ")}`.toLowerCase().includes(query);
-  });
-  const areaLookupSignature = locations
-    .map((area: any, index: number) => `${areaDraftKey(area, index)}:${area.areaLabel ?? ""}:${area.north ?? ""}:${area.south ?? ""}:${area.east ?? ""}:${area.west ?? ""}`)
-    .join("|");
-  useEffect(() => {
-    if (wizardStep !== "areas" || areaLookupBusy || locations.length === 0)
-      return;
-    const pending = locations
-      .map((area: any, index: number) => ({ area, index, key: areaDraftKey(area, index), query: String(area.areaLabel || area.systemShortName || "").trim() }))
-      .find((item: { area: any; index: number; key: string; query: string }) =>
-        item.query &&
-        (areaBoundaryCandidates[item.key]?.length ?? 0) === 0 &&
-        areaLookupHistory.current[item.key] !== item.query &&
-        (!hasUsableAreaBounds(item.area) || areaLabelLookupNeeded[item.key]));
-    if (!pending)
-      return;
-    const timer = window.setTimeout(() => void lookupAreaBoundary(pending.index, pending.key, true), 500);
-    return () => window.clearTimeout(timer);
-  }, [wizardStep, areaLookupBusy, areaLookupSignature, areaBoundaryCandidates, areaLabelLookupNeeded]);
-  useEffect(() => {
-    if (!postRestoreValidation || wizardStep !== "stack") return;
-    setWizardStep("tr");
-    setExpandedSetupStep("tr");
-  }, [postRestoreValidation, wizardStep]);
   const checkStepMap: Record<string, string> = {
     tr: "tr",
     "lm-link": "lm-link",
@@ -12372,8 +11563,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
       setMessage("A setup job is running. Stop or wait for it before changing steps.");
       return;
     }
-    if (id === "tr" && trInstallMode === "freshTr")
-      setTrConfigStage("sites");
     setWizardStep(id);
     update(["setup", "currentStep"], id);
     if (setupJobContext && setupJobContext !== id && !["queued", "running", "paused"].includes(setupJob?.status ?? "")) {
@@ -12428,7 +11617,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     <div className="setup-wizard-layout">
       <div className="card setup-checklist">
         <h3>Completion Gate</h3>
-        {postRestoreValidation && <div className="setup-note">Restore applied. Re-check the restored services and settings, then finish setup to resume normal operation.</div>}
         <div className="setup-step-list">
           {setupSteps.map((step, i) => {
             const expanded = expandedSetupStep === step.id;
@@ -12509,7 +11697,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
         </SetupSection>}
 
         {currentStep.id === "finish" && <SetupSection title="Finish" description="This completes first-run prerequisites and opens Site Setup for monitoring configuration.">
-          <SetupReview status={status} requiredOpen={requiredOpen} restartVerified={restartVerified} />
+          <SetupReview status={status} requiredOpen={requiredOpen} />
           <div className="setup-button-row"><button disabled={Boolean(busy) || setupJobRunning || requiredOpen.length > 0} onClick={() => void finishSetup()}>{busy === "finish-setup" ? "Finishing..." : "Finish setup"}</button></div>
         </SetupSection>}
 
@@ -12667,7 +11855,7 @@ function GuidedCalibrationPlan({
   </div>;
 }
 
-function SetupReview({ status, requiredOpen, restartVerified }: { status: SetupStatus; requiredOpen: SetupStatus["checks"]; restartVerified: boolean }) {
+function SetupReview({ status, requiredOpen }: { status: SetupStatus; requiredOpen: SetupStatus["checks"] }) {
   const values: any = status.values ?? {};
   const tr = values.trunkRecorder ?? {};
   const lmStudio = (status.detection as any)?.lmStudio;
