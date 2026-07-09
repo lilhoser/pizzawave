@@ -708,9 +708,8 @@ purged once the live pipeline is stable.
     Qdrant points about `1489`, failed embedding calls `0`.
   - RPI: `pizzad.service` active, `qdrant.service` active, embeddings `ok`,
     Qdrant points about `1037`, failed embedding calls `0`.
-- The setup wizard now includes a Vector DB/Qdrant step, native install action,
-  Qdrant detection, validation, settings fields, and System > Services Qdrant
-  service health/actions matching the pizzad/TR service pattern.
+- First-run now includes a Qdrant prerequisite step and native install action.
+  Qdrant settings and service health/actions live in Settings and System.
 - Read-only quality sample against 4 recent multi-call incidents found 4/4 with
   all known source calls retrieved in the top 20. Top extra matches were often
   semantically nearby EMS/fire calls, so the next study should focus on false

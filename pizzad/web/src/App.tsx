@@ -11143,7 +11143,7 @@ function SourcePlanTable({ rows }: { rows: NonNullable<TrTroubleshoot["health"][
   if (!rows.length) return null;
   return <div className="card">
     <h3>Suggested Source Plan</h3>
-    <p className="muted">Built from TR control channels, any configured voice frequencies, and observed call frequencies in the selected range. Ranges use the same 90% sample-rate windowing logic as the setup wizard.</p>
+    <p className="muted">Built from TR control channels, any configured voice frequencies, and observed call frequencies in the selected range. Ranges use the same 90% sample-rate windowing logic as Setup.</p>
     <table className="table">
       <thead><tr><th>System</th><th>Desired range</th><th>Center</th><th>Assigned source</th><th>Notes</th></tr></thead>
       <tbody>{rows.map((row, i) => <tr className={row.isIssue ? "issue-row" : ""} key={`${row.systemShortName}-${row.lowMhz}-${i}`}>
@@ -11844,10 +11844,10 @@ function GuidedCalibrationPlan({
               <SettingInput label="Error Hz" description={`Current config value: ${source.errorHz || 0}. Leave blank to sweep around current config.`} value={input.errorHz} onChange={v => setInput(String(source.index), "errorHz", v)} />
               <SettingInput label="PPM" description="Optional shortcut. Used only if Error Hz is blank." value={input.ppm} onChange={v => setInput(String(source.index), "ppm", v)} />
             </div>
-            {!canSweepControlChannel && <div className="setup-warning-list"><div>{templateSource ? `This source does not cover a control channel in normal service. The wizard can temporarily borrow Source ${templateSource.index}'s center/rate to calibrate rtl=${source.serial || source.index} against a control channel, then restore the baseline config after the sweep.` : "This source does not cover any configured control channel. Use the source-center GQRX launch for RF inspection, or temporarily test this SDR against a known control-channel-capable source later."}</div></div>}
+            {!canSweepControlChannel && <div className="setup-warning-list"><div>{templateSource ? `Setup can temporarily borrow Source ${templateSource.index}'s center/rate to calibrate rtl=${source.serial || source.index} against a control channel, then restore the baseline config after the sweep.` : "This source does not cover any configured control channel. Use the source-center GQRX launch for RF inspection, or temporarily test this SDR against a known control-channel-capable source later."}</div></div>}
             <strong>Planned sweep</strong>
             {canSweepControlChannel || templateSource ? <pre className="command-box">{command}</pre> : <pre className="command-box">No control channel falls inside this source window.</pre>}
-            <button disabled={busy || (!canSweepControlChannel && !templateSource)} onClick={() => void runSweep(parameters)}>{canSweepControlChannel ? "Run control-channel sweep in wizard" : "Run borrowed-window sweep in wizard"}</button>
+            <button disabled={busy || (!canSweepControlChannel && !templateSource)} onClick={() => void runSweep(parameters)}>{canSweepControlChannel ? "Run control-channel sweep in Setup" : "Run borrowed-window sweep in Setup"}</button>
           </div>;
         })}
       </div>)}

@@ -71,12 +71,12 @@ support is configured.
 127.0.0.1:9123
 ```
 
-The wizard can patch an existing trunk-recorder config and creates a timestamped
+Setup can patch an existing trunk-recorder config and creates a timestamped
 backup before writing. A fresh PizzaWave-managed config omits `captureDir` by
 default because `pizzad` owns the canonical audio store.
 
 If side-loading onto an existing trunk-recorder system, keep the existing config
-until the wizard has backed it up and validated callstream.
+until Setup has backed it up and validated callstream.
 
 ## Imports
 

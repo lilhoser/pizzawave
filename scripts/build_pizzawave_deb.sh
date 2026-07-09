@@ -292,8 +292,8 @@ Web UI: http://<tr-server-ip>:8080
 Config: /etc/pizzawave/pizzad.json
 Token: /etc/pizzawave/pizzad.token
 Open the web UI to complete first-run setup. Existing trunk-recorder installs
-are detected and configured from the setup wizard; package install does not
-modify or restart trunk-recorder.
+are detected by first-run and configured later from Setup; package install does
+not modify or restart trunk-recorder.
 MSG
 EOF
 

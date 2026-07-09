@@ -1684,7 +1684,7 @@ public sealed class RfSurveyService
         if (toolPrep == null || toolPrep.Tools.Count == 0)
             plans.Add(new("tool_prep", "Run tool prep", "Detect required SDR, P25, capture, audio, and transcription tooling.", true, "", "Run Tool Prep."));
         if (!completed.Contains("ground_truth_review"))
-            plans.Add(new("ground_truth_review", "Review ground truth", "Verify the setup-derived control channels, voice frequencies, SDR sources, and RF path facts before RF tests.", true, "", "Completed setup wizard or imported TR/RR data."));
+            plans.Add(new("ground_truth_review", "Review ground truth", "Verify the setup-derived control channels, voice frequencies, SDR sources, and RF path facts before RF tests.", true, "", "Completed Setup or imported TR/RR data."));
         if (!completed.Contains("tr_stopped_check"))
             plans.Add(new("tr_stopped_check", "Check TR service state", "Setup needs to know whether trunk-recorder is active before bounded SDR/P25 measurements.", true, "", "Setup will pause and restart trunk-recorder automatically when exclusive SDR access is required."));
         if (!completed.Contains("sdr_inventory"))
@@ -1742,7 +1742,7 @@ public sealed class RfSurveyService
         return new ExperimentOutcome(
             status,
             "Setup-derived ground truth should identify the system, control channels, voice frequencies, and configured SDR sources.",
-            "Completed setup wizard, TR config, and preferably RR/imported source data.",
+            "Completed Setup, TR config, and preferably RR/imported source data.",
             issues.Count == 0 ? $"Ground truth looks usable: {profile.ControlChannelsHz.Count} control channel(s), {profile.VoiceFrequenciesHz.Count} voice frequenc(ies), {profile.Sources.Count} SDR source(s)." : string.Join(" ", issues),
             issues.Count == 0 ? "" : string.Join(" ", issues),
             new

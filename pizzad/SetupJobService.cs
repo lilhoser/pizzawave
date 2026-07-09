@@ -315,11 +315,11 @@ public sealed class SetupJobService
         }
         await LogAsync(jobId, "info", "Calibration preflight only. This job does not run the long sweep or modify trunk-recorder config.", ct);
         await LogAsync(jobId, "info", "Use GQRX first to find a stable starting gain and either a PPM correction or observed error in Hz for each SDR/source.", ct);
-        await LogAsync(jobId, "info", "The wizard turns those defaults into tr_tune.sh commands. With defaults, error-sweep tests 9 candidates: base-error +/- 1200 Hz in 300 Hz steps.", ct);
+        await LogAsync(jobId, "info", "Setup turns those defaults into tr_tune.sh commands. With defaults, error-sweep tests 9 candidates: base-error +/- 1200 Hz in 300 Hz steps.", ct);
         await LogAsync(jobId, "info", "Default runtime is about 39 minutes per system/source: 9 passes x (20s warmup + 240s measurement). Short test runs can use --duration-sec 20 --warmup-sec 5.", ct);
         await LogAsync(jobId, "info", "During a full sweep, tr_tune.sh restarts TR per candidate and scores decode samples, zero-decode share, average/max decode rate, retunes, no-transmission, update-not-grant, started calls, and concluded calls.", ct);
         await LogAsync(jobId, "info", "A decode rate above 2 msg/sec is acceptable but marginal; higher and stable is better. Prefer stable decode and fewer retunes over a brief noisy peak.", ct);
-        await _database.UpdateJobAsync(jobId, "completed", 3, ++completed, 0, "Calibration prep complete. Review the generated plan in the wizard.", false, true, ct);
+        await _database.UpdateJobAsync(jobId, "completed", 3, ++completed, 0, "Calibration prep complete. Review the generated plan in Setup.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
 

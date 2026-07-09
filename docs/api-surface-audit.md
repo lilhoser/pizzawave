@@ -54,7 +54,7 @@ state only according to selected presets.
 
 Kept because these remain operator-facing and guarded by write auth:
 
-- setup wizard endpoints;
+- first-run prerequisite endpoints;
 - service restart endpoints;
 - live ingest pause/resume;
 - storage maintenance actions;

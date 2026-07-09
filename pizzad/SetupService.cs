@@ -285,13 +285,8 @@ public sealed class SetupService
 
     private void RefreshChecksFromDisk(object detection)
     {
-        ReconcileMonitoredAreasWithTrSystems();
         _config.Setup.TrDetected = JsonSerializer.Serialize(detection).Contains("\"found\":true", StringComparison.OrdinalIgnoreCase);
         _config.Setup.TrConfigured = ValidateTrConfig().Ok;
-        _config.Setup.TalkgroupsValidated = ValidateTalkgroups().Ok;
-        _config.Setup.CallstreamValidated = ValidateCallstream().Ok;
-        _config.Setup.MonitoredAreasValidated = ValidateLocations().Ok;
-        _config.Setup.HealthValidated = File.Exists(_config.TrunkRecorder.ConfigPath);
     }
 
     private IReadOnlyList<SetupCheckDto> BuildChecks() =>

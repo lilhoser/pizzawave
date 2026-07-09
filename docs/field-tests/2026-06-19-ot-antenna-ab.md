@@ -37,7 +37,7 @@ Rules for comparable OT runs:
 Rules for mobile RPI/yagi runs:
 
 - Use Site Setup for the full setup before each baseline.
-- Record RF-path metadata from the wizard: antenna, bearing/aim, polarization,
+- Record RF-path metadata from Setup: antenna, bearing/aim, polarization,
   placement, coax, adapters, SDR model/serial, gain, error, sample rate, selected
   system/site, and source plan.
 - Keep the yagi location, aim, coax, adapters, and host fixed between the
