@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -97,49 +96,6 @@ public sealed partial class SetupCalibrationService
 
         var diagnostics = $"Built calibration plan for {plans.Count} system(s) and {sourceDtos.Count} configured SDR source(s).";
         return new SetupCalibrationPlanDto(plans, sourceDtos, warnings, diagnostics);
-    }
-
-    public async Task<SetupValidationResult> OpenGqrxAsync(SetupOpenGqrxRequest request, CancellationToken ct)
-    {
-        var plan = BuildPlan();
-        var source = plan.Sources.FirstOrDefault(s => s.Index == request.SourceIndex);
-        if (source == null)
-            return new SetupValidationResult(false, $"Source {request.SourceIndex} was not found in the calibration plan.");
-
-        var frequency = request.FrequencyHz > 0 ? request.FrequencyHz : source.CenterFrequency;
-        var gqrx = await FindGqrxAsync(ct);
-        if (string.IsNullOrWhiteSpace(gqrx))
-        {
-            await TryInstallSdrToolsAsync(ct);
-            gqrx = await FindGqrxAsync(ct);
-        }
-        if (string.IsNullOrWhiteSpace(gqrx))
-            return new SetupValidationResult(false, "gqrx was not found on this machine. PizzaWave attempted to install SDR tools, but no compatible gqrx/gqrx-sdr command was available. Install the Raspberry Pi/ARM-compatible GQRX build, then try again.");
-        var display = await RunCaptureAsync("bash", "-lc \"printf '%s' \\\"${DISPLAY:-}\\\"\"", ct);
-        if (string.IsNullOrWhiteSpace(display.Stdout))
-            return new SetupValidationResult(false, $"gqrx is installed, but pizzad is running without a desktop DISPLAY. Open GQRX manually on the Pi desktop and tune {frequency:N0} Hz, or run: {gqrx.Trim()} -r {source.SampleRate} -f {frequency}");
-
-        var args = $"-r {source.SampleRate} -f {frequency}";
-        var psi = new ProcessStartInfo(gqrx.Trim())
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false
-        };
-        psi.ArgumentList.Add("-r");
-        psi.ArgumentList.Add(source.SampleRate.ToString());
-        psi.ArgumentList.Add("-f");
-        psi.ArgumentList.Add(frequency.ToString());
-        try
-        {
-            Process.Start(psi);
-            _logger.LogInformation("Started gqrx for source {SourceIndex} at {FrequencyHz}", source.Index, frequency);
-            return new SetupValidationResult(true, $"Opened gqrx for source {source.Index} at {frequency:N0} Hz.", new { command = $"{gqrx.Trim()} {args}" });
-        }
-        catch (Exception ex)
-        {
-            return new SetupValidationResult(false, "Unable to start gqrx: " + ex.Message, new { command = $"{gqrx.Trim()} {args}" });
-        }
     }
 
     private static IEnumerable<TrSource> ReadSources(JsonElement root)
@@ -352,49 +308,6 @@ public sealed partial class SetupCalibrationService
     private static string FormatRange(FrequencyRange range) =>
         range.LowHz == range.HighHz ? FormatHz(range.LowHz) : $"{FormatHz(range.LowHz)} to {FormatHz(range.HighHz)}";
 
-    private static async Task<string> FindGqrxAsync(CancellationToken ct)
-    {
-        var result = await RunCaptureAsync("bash", "-lc \"command -v gqrx || command -v gqrx-sdr || true\"", ct);
-        return result.Stdout.Trim();
-    }
-
-    private static async Task TryInstallSdrToolsAsync(CancellationToken ct)
-    {
-        var helper = FindAdminHelper();
-        if (string.IsNullOrWhiteSpace(helper))
-            return;
-        await RunCaptureAsync("sudo", $"{helper} install-sdr-tools", ct);
-    }
-
-    private static string? FindAdminHelper()
-    {
-        var candidates = new[]
-        {
-            "/usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh",
-            "/opt/pizzawave/scripts/pizzawave_setup_admin.sh",
-            Path.Combine(AppContext.BaseDirectory, "scripts", "pizzawave_setup_admin.sh"),
-            Path.Combine(AppContext.BaseDirectory, "pizzawave_setup_admin.sh")
-        };
-        return candidates.FirstOrDefault(File.Exists);
-    }
-
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunCaptureAsync(string fileName, string arguments, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo(fileName, arguments)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        using var process = Process.Start(psi);
-        if (process == null)
-            return (-1, string.Empty, "Unable to start process.");
-        var stdout = process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return (process.ExitCode, await stdout, await stderr);
-    }
-
     [GeneratedRegex(@"(?:rtl|airspy)[=:](?<serial>[^,\s]+)", RegexOptions.IgnoreCase)]
     private static partial Regex SdrDeviceRegex();
 
@@ -431,4 +344,3 @@ public sealed record SetupCalibrationSourcePlanDto(
     string Gain,
     IReadOnlyList<string> CoveredSystems);
 
-public sealed record SetupOpenGqrxRequest(int SourceIndex, long FrequencyHz = 0);

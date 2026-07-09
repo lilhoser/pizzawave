@@ -356,18 +356,7 @@ public sealed record SetupTrConfigSitesDto(
     IReadOnlyList<SetupTrConfigSiteDto> Sites,
     string Diagnostics);
 
-public sealed record SetupTrConfigSourcePlanRequest(
-    string? RadioReferenceSid = null,
-    string? HtmlText = null,
-    string? SiteNames = null,
-    string? SdrSerials = null,
-    int SampleRate = 2400000,
-    IReadOnlyList<SetupSdrDeviceDto>? SdrDevices = null,
-    IReadOnlyList<string>? SiteNameList = null);
-
 public sealed record SetupTrConfigSaveRequest(string ConfigJson);
-
-public sealed record SetupTrConfigPatchRequest(bool RestartTr = false, bool DisableCaptureDir = false);
 
 public sealed record SetupTrConfigSourceDto(
     string Label,
@@ -396,15 +385,6 @@ public sealed record SetupTrConfigDraftDto(
     string ConfigJson,
     IReadOnlyList<SetupTrConfigSystemDto> Systems,
     IReadOnlyList<SetupTrConfigSourceDto> Sources,
-    IReadOnlyList<string> Warnings,
-    string Diagnostics);
-
-public sealed record SetupTrConfigSourcePlanDto(
-    string SystemName,
-    IReadOnlyList<SetupTrConfigSystemDto> Systems,
-    IReadOnlyList<SetupTrConfigSourceDto> Sources,
-    int RequiredSourceCount,
-    int AvailableSourceCount,
     IReadOnlyList<string> Warnings,
     string Diagnostics);
 

@@ -92,7 +92,7 @@ public sealed class SetupTrConfigBuilderServiceTests
     }
 
     [Fact]
-    public async Task SourcePlanAsync_WarnsWhenSelectedSitesNeedMoreWindowsThanDetectedSdrs()
+    public async Task DraftAsync_WarnsWhenSelectedSitesNeedMoreWindowsThanDetectedSdrs()
     {
         var html = """
             Sites and Frequencies
@@ -101,22 +101,20 @@ public sealed class SetupTrConfigBuilderServiceTests
             """;
         var service = CreateService();
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "Site One County,Site Two County",
             SdrSerials: "00000001",
             SampleRate: 2_400_000), CancellationToken.None);
 
-        Assert.Equal(2, plan.RequiredSourceCount);
-        Assert.Equal(1, plan.AvailableSourceCount);
-        Assert.Single(plan.Sources);
-        Assert.Contains(plan.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(plan.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(draft.Sources);
+        Assert.Contains(draft.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(draft.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task SourcePlanAsync_PreservesCommaInSelectedSiteNameList()
+    public async Task DraftAsync_PreservesCommaInSelectedSiteNameList()
     {
         var html = """
             Sites and Frequencies
@@ -125,20 +123,20 @@ public sealed class SetupTrConfigBuilderServiceTests
             """;
         var service = CreateService();
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Clarksville Simulcast Montgomery, TN"],
             SdrSerials: "00000001",
             SampleRate: 2_048_000), CancellationToken.None);
 
-        var system = Assert.Single(plan.Systems);
+        var system = Assert.Single(draft.Systems);
         Assert.Equal("Clarksville Simulcast Montgomery, TN", system.SiteName);
-        Assert.DoesNotContain(plan.Warnings, warning => warning.Contains("No frequency table matched", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(draft.Warnings, warning => warning.Contains("No frequency table matched", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task SourcePlanAsync_UsesTrGuardedBandwidthForControlChannelCoverage()
+    public async Task DraftAsync_UsesTrGuardedBandwidthForControlChannelCoverage()
     {
         var html = """
             Sites and Frequencies
@@ -146,22 +144,20 @@ public sealed class SetupTrConfigBuilderServiceTests
             """;
         var service = CreateService();
 
-        var narrow = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var narrow = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Chattanooga Simulcast Hamilton, TN"],
             SdrSerials: "00000001",
             SampleRate: 2_048_000), CancellationToken.None);
-        var wide = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var wide = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Chattanooga Simulcast Hamilton, TN"],
             SdrSerials: "00000001",
             SampleRate: 2_400_000), CancellationToken.None);
 
-        Assert.Equal(2, narrow.RequiredSourceCount);
         Assert.Contains(narrow.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, wide.RequiredSourceCount);
         Assert.Empty(wide.Warnings);
         Assert.All(wide.Systems[0].ControlChannelsMhz, control => Assert.Contains(control, wide.Sources[0].CoveredFrequenciesMhz));
     }
@@ -211,7 +207,7 @@ public sealed class SetupTrConfigBuilderServiceTests
     }
 
     [Fact]
-    public async Task SourcePlanAsync_UsesPerDeviceSampleRateWindows()
+    public async Task DraftAsync_UsesPerDeviceSampleRateWindows()
     {
         var html = """
             Sites and Frequencies
@@ -222,20 +218,19 @@ public sealed class SetupTrConfigBuilderServiceTests
         var airspy = new SetupSdrDeviceDto(0, "Airspy", "26A464DC28793293", "Airspy Mini", "osmosdr", "airspy=26A464DC28793293", "", [3_000_000, 6_000_000], 3_000_000, "airspy-linearity", "15", "");
         var rtl = new SetupSdrDeviceDto(1, "RTL-SDR", "00000002", "RTL-SDR Blog V4", "osmosdr", "rtl=00000002,buflen=65536", "", [2_400_000], 2_400_000, "rtl-tuner-gain", "32", "");
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Site One County", "Site Two County"],
             SdrDevices: [airspy, rtl]), CancellationToken.None);
 
-        Assert.Equal(2, plan.AvailableSourceCount);
-        Assert.Equal(2, plan.Sources.Count);
-        Assert.Contains(plan.Sources, source => source.Type == "Airspy" && source.SampleRate == 3_000_000);
-        Assert.Contains(plan.Sources, source => source.Type == "RTL-SDR" && source.SampleRate == 2_400_000);
+        Assert.Equal(2, draft.Sources.Count);
+        Assert.Contains(draft.Sources, source => source.Type == "Airspy" && source.SampleRate == 3_000_000);
+        Assert.Contains(draft.Sources, source => source.Type == "RTL-SDR" && source.SampleRate == 2_400_000);
     }
 
     [Fact]
-    public async Task SourcePlanAsync_AirspyCanCoverMultipleSitesByControlChannels()
+    public async Task DraftAsync_AirspyCanCoverMultipleSitesByControlChannels()
     {
         var html = """
             Sites and Frequencies
@@ -245,19 +240,17 @@ public sealed class SetupTrConfigBuilderServiceTests
         var service = CreateService();
         var airspy = new SetupSdrDeviceDto(0, "Airspy", "26A464DC28793293", "Airspy Mini", "osmosdr", "airspy=26A464DC28793293", "", [3_000_000, 6_000_000], 3_000_000, "airspy-linearity", "15", "");
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Site One County", "Site Two County"],
             SdrDevices: [airspy]), CancellationToken.None);
 
-        Assert.Equal(1, plan.RequiredSourceCount);
-        Assert.Equal(1, plan.AvailableSourceCount);
-        var source = Assert.Single(plan.Sources);
+        var source = Assert.Single(draft.Sources);
         Assert.Equal("Airspy", source.Type);
-        Assert.All(plan.Systems.SelectMany(system => system.ControlChannelsMhz), control => Assert.Contains(control, source.CoveredFrequenciesMhz));
-        Assert.DoesNotContain(plan.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(plan.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
+        Assert.All(draft.Systems.SelectMany(system => system.ControlChannelsMhz), control => Assert.Contains(control, source.CoveredFrequenciesMhz));
+        Assert.DoesNotContain(draft.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(draft.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

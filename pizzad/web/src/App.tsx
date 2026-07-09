@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -11404,7 +11404,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
 
   async function validateSetupSection(section: string, saveFirst = true) {
     if (saveFirst) await saveSetupValues();
-    const result = await api.request<SetupValidationResult>(`/api/v1/setup/validate/${section}`, { method: "POST" });
+    const result = await api.request<SetupValidationResult>("/api/v1/setup/validate-required", { method: "POST" });
     setMessage(result.message);
     await reload();
     if (!result.ok) throw new Error(result.message);
@@ -11740,121 +11740,6 @@ function ChoiceCard({ active, title, description, disabled, onClick }: { active:
   </button>;
 }
 
-function CalibrationPlanCard({ plan }: { plan: ReturnType<typeof buildCalibrationPlan> }) {
-  return <div className="calibration-plan">
-    <div className="setup-job-head">
-      <strong>Planned tr_tune.sh workflow</strong>
-      <span className="pill">{plan.baseError === null ? "Needs base error" : `${plan.passCount} passes`}</span>
-      <span className="pill">{plan.estimatedSeconds > 0 ? `About ${formatElapsed(plan.estimatedSeconds)}` : "Time unknown"}</span>
-    </div>
-    <div className="calibration-plan-grid">
-      <div><span>Base error</span><strong>{plan.baseError === null ? "Not calculated" : `${plan.baseError} Hz`}</strong><small>{plan.baseSource}</small></div>
-      <div><span>Error candidates</span><strong>{plan.candidateSummary}</strong><small>centered on the GQRX/default value</small></div>
-      <div><span>Per pass</span><strong>{plan.warmupSec}s warmup + {plan.durationSec}s measure</strong><small>TR restarts for each candidate</small></div>
-    </div>
-    <ol className="calibration-step-list">
-      <li>Pause trunk-recorder for the candidate pass so the selected RTL-SDR can be claimed cleanly.</li>
-      <li>Patch a temporary TR config with the candidate error, modulation, control channel, device serial, and optional gain.</li>
-      <li>Start TR, wait for warmup, then collect journald metrics for the measurement window.</li>
-      <li>Score decode samples, zero-decode share, average/max decode rate, retunes, no-transmission, update-not-grant, started calls, and concluded calls.</li>
-      <li>Restore the baseline config unless the sweep is explicitly run with a leave-last-config option, then show findings for user review.</li>
-    </ol>
-    {plan.ppmCommand && <div>
-      <strong>PPM conversion command</strong>
-      <pre className="command-box">{plan.ppmCommand}</pre>
-    </div>}
-    <div>
-      <strong>Error sweep command</strong>
-      <pre className="command-box">{plan.errorSweepCommand || "Enter system shortName, control channel, RTL-SDR serial, and either base error or center Hz + PPM to generate the command."}</pre>
-    </div>
-    <small className="setup-note">A decode rate above 2 msg/sec is acceptable but marginal. Prefer the candidate with stable decode, low zero-decode share, and fewer retunes over a single noisy peak.</small>
-  </div>;
-}
-
-function GuidedCalibrationPlan({
-  plan,
-  inputs,
-  sweep,
-  busy,
-  setInput,
-  runSweep
-}: {
-  plan: SetupCalibrationPlan | null;
-  inputs: Record<string, { gain: string; errorHz: string; ppm: string }>;
-  sweep: { rangeHz: string; stepHz: string; warmupSec: string; durationSec: string };
-  busy: boolean;
-  setInput: (sourceIndex: string, key: "gain" | "errorHz" | "ppm", value: string) => void;
-  runSweep: (parameters: any) => Promise<void>;
-}) {
-  if (!plan) return <div className="calibration-plan"><div className="setup-note">Loading TR-derived calibration plan...</div></div>;
-  const sourceByIndex = new Map(plan.sources.map(source => [source.index, source]));
-  const rangeHz = Math.max(0, numberOrDefault(sweep.rangeHz, 1200));
-  const stepHz = Math.max(1, numberOrDefault(sweep.stepHz, 300));
-  const warmupSec = Math.max(0, numberOrDefault(sweep.warmupSec, 20));
-  const durationSec = Math.max(1, numberOrDefault(sweep.durationSec, 240));
-  const passCount = Math.floor((rangeHz * 2) / stepHz) + 1;
-  const estimatedSeconds = passCount * (warmupSec + durationSec);
-  const coversFrequency = (source: { centerFrequency: number; sampleRate: number }, frequencyHz: number) =>
-    frequencyHz >= source.centerFrequency - source.sampleRate / 2 && frequencyHz <= source.centerFrequency + source.sampleRate / 2;
-  return <div className="calibration-plan">
-    <div className="setup-job-head">
-      <strong>TR-derived tuning plan</strong>
-      <span className="pill">{plan.systems.length} system(s)</span>
-      <span className="pill">{plan.sources.length} SDR source(s)</span>
-      <span className="pill">{passCount} passes/tuner</span>
-      <span className="pill">About {formatElapsed(estimatedSeconds)} each</span>
-    </div>
-    <div className="setup-note">{plan.diagnostics}</div>
-    <div className="setup-note">GQRX is optional and is not launched from pizzad because the service normally has no desktop display. Leave Error Hz and PPM blank and use the wizard sweep first. Start with a short rough sweep, then narrow around the best row.</div>
-    {plan.warnings.length > 0 && <div className="setup-warning-list">{plan.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
-    <div className="calibration-guided-grid">
-      {plan.systems.map(system => <div className="calibration-system-card" key={system.shortName}>
-        <div className="setup-job-head">
-          <strong>{system.shortName}</strong>
-          <span className="pill">{system.modulation || "qpsk"}</span>
-          <span className="pill">Needs {system.requiredSdrCount} SDR tuner{system.requiredSdrCount === 1 ? "" : "s"}</span>
-        </div>
-        <div className="calibration-plan-grid">
-          <div><span>Control channels</span><strong>{formatFrequencyList(system.controlChannelsHz)}</strong><small>TR rotates among these; the active one is whichever control channel is currently carrying decode messages. Start with the first listed channel, then try the others if decode is poor.</small></div>
-          <div><span>Voice frequencies</span><strong>{system.voiceFrequenciesHz.length ? formatFrequencyList(system.voiceFrequenciesHz) : "Not needed for control-channel tuning"}</strong><small>TR configs normally do not list every voice frequency. Calibration tunes control-channel decode, so this is not a blocker.</small></div>
-          <div><span>Required tuner coverage</span><strong>{system.requiredRanges.map(range => formatFrequencyRange(range.lowHz, range.highHz)).join("; ") || "None"}</strong><small>Calculated from known control channels and configured SDR sample rate.</small></div>
-        </div>
-        {system.warnings.length > 0 && <div className="setup-warning-list">{system.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
-        {system.proposedSourceIndexes.map(sourceIndex => {
-          const source = sourceByIndex.get(sourceIndex);
-          if (!source) return null;
-          const input = inputs[String(source.index)] ?? { gain: source.gain ?? "", errorHz: source.errorHz ? String(source.errorHz) : "", ppm: "" };
-          const coveredControlChannels = system.controlChannelsHz.filter(frequencyHz => coversFrequency(source, frequencyHz));
-          const frequency = coveredControlChannels[0] ?? system.controlChannelsHz[0] ?? source.centerFrequency;
-          const canSweepControlChannel = coveredControlChannels.length > 0;
-          const templateSource = canSweepControlChannel ? null : plan.sources.find(other => other.index !== source.index && system.controlChannelsHz.some(frequencyHz => coversFrequency(other, frequencyHz)));
-          const borrowedFrequency = templateSource ? system.controlChannelsHz.find(frequencyHz => coversFrequency(templateSource, frequencyHz)) ?? frequency : frequency;
-          const templateSerial = templateSource?.serial || "";
-          const command = buildGuidedSweepCommand(system.shortName, system.modulation, source, input, canSweepControlChannel ? frequency : borrowedFrequency, sweep, templateSerial);
-          const parameters = buildGuidedSweepParameters(system.shortName, system.modulation, source, input, canSweepControlChannel ? frequency : borrowedFrequency, sweep, templateSerial);
-          return <div className="calibration-source-card" key={`${system.shortName}-${source.index}`}>
-            <div className="setup-job-head">
-              <strong>Source {source.index}</strong>
-              <span className="pill">{source.serial ? `rtl=${source.serial}` : source.device || "rtl source"}</span>
-              <span className="pill">{formatHz(source.centerFrequency)} center</span>
-              <span className="pill">{formatHz(source.sampleRate)} rate</span>
-            </div>
-            <div className="settings-grid">
-              <SettingInput label="Gain" description={`Current config value: ${source.gain || "blank"}. Optional for sweeps.`} value={input.gain} onChange={v => setInput(String(source.index), "gain", v)} />
-              <SettingInput label="Error Hz" description={`Current config value: ${source.errorHz || 0}. Leave blank to sweep around current config.`} value={input.errorHz} onChange={v => setInput(String(source.index), "errorHz", v)} />
-              <SettingInput label="PPM" description="Optional shortcut. Used only if Error Hz is blank." value={input.ppm} onChange={v => setInput(String(source.index), "ppm", v)} />
-            </div>
-            {!canSweepControlChannel && <div className="setup-warning-list"><div>{templateSource ? `Setup can temporarily borrow Source ${templateSource.index}'s center/rate to calibrate rtl=${source.serial || source.index} against a control channel, then restore the baseline config after the sweep.` : "This source does not cover any configured control channel. Use the source-center GQRX launch for RF inspection, or temporarily test this SDR against a known control-channel-capable source later."}</div></div>}
-            <strong>Planned sweep</strong>
-            {canSweepControlChannel || templateSource ? <pre className="command-box">{command}</pre> : <pre className="command-box">No control channel falls inside this source window.</pre>}
-            <button disabled={busy || (!canSweepControlChannel && !templateSource)} onClick={() => void runSweep(parameters)}>{canSweepControlChannel ? "Run control-channel sweep in Setup" : "Run borrowed-window sweep in Setup"}</button>
-          </div>;
-        })}
-      </div>)}
-    </div>
-  </div>;
-}
-
 function SetupReview({ status, requiredOpen }: { status: SetupStatus; requiredOpen: SetupStatus["checks"] }) {
   const values: any = status.values ?? {};
   const tr = values.trunkRecorder ?? {};
@@ -11910,86 +11795,6 @@ function SetupJobDrawer({ job, logs, running, onStopCalibration, stopping, open,
       {isCalibration && running && <button disabled={stopping} onClick={() => void onStopCalibration()}>{stopping ? "Stopping..." : "Stop calibration job"}</button>}
     </div>
     <pre>{logs.length ? logs.map(log => `[${new Date(log.timestampUtc).toLocaleTimeString()}] ${log.stream}: ${log.text}`).join("\n") : job ? "Waiting for job output..." : "No setup job output yet."}</pre>
-  </div>;
-}
-
-function TrSourcePlanPreview({ plan }: { plan: SetupTrConfigSourcePlan }) {
-  return <div className="tr-source-plan-preview">
-    <div className="setup-review compact">
-      <div><span>Required windows</span><code>{plan.requiredSourceCount}</code></div>
-      <div><span>Planned windows</span><code>{plan.availableSourceCount}</code></div>
-      <div><span>Selected sites</span><code>{plan.systems.length}</code></div>
-    </div>
-    <div className="setup-note">{plan.diagnostics}</div>
-    {plan.warnings.length > 0 && <div className="setup-warning-list">{plan.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
-    <div className="tr-site-cc-list">
-      {plan.systems.map(system => <div className="tr-site-cc-row" key={`${system.shortName}-${system.siteName}`}>
-        <strong>{system.siteName}</strong>
-        <small>CC {system.controlChannelsMhz.length ? system.controlChannelsMhz.map(formatMhz).join(", ") : "not detected"}</small>
-        <span>{system.warning || `Assigned ${system.assignedSerial || "no serial"}`}</span>
-      </div>)}
-    </div>
-    <div className="tr-source-plan-grid">
-      {plan.sources.map((source, index) => {
-        const low = source.centerFrequency - trUsableHalfBandwidth(source.sampleRate);
-        const high = source.centerFrequency + trUsableHalfBandwidth(source.sampleRate);
-        const coveredSites = plan.systems
-          .filter(system => system.frequenciesMhz.some(frequency => source.coveredFrequenciesMhz.includes(frequency)) || system.controlChannelsMhz.some(frequency => source.coveredFrequenciesMhz.includes(frequency)))
-          .map(system => system.shortName);
-        return <div className="tr-source-plan-card" key={`${source.centerFrequency}-${index}`}>
-          <div className="setup-job-head">
-            <strong>Source {index + 1}</strong>
-            <span className="pill">{source.type || "SDR"}</span>
-            <span className="pill">{source.serial || "unassigned"}</span>
-          </div>
-          <small>{formatRfHz(low)} to {formatRfHz(high)}</small>
-          <code>{formatRfHz(source.centerFrequency)}</code>
-          <span>{source.driver || "osmosdr"} {source.deviceArgs}</span>
-          <span>{formatHz(source.sampleRate)} rate, gain {source.gain || "default"}</span>
-          <span>{source.coveredFrequenciesMhz.length} frequenc{source.coveredFrequenciesMhz.length === 1 ? "y" : "ies"} covered</span>
-          <span>{coveredSites.length ? coveredSites.join(", ") : "No selected site coverage"}</span>
-        </div>;
-      })}
-    </div>
-  </div>;
-}
-
-function trUsableHalfBandwidth(sampleRate: number) {
-  return Math.floor(Math.max(0, sampleRate) * 0.46875);
-}
-
-function trSourcePlanBlockingWarnings(plan: SetupTrConfigSourcePlan | null) {
-  if (!plan)
-    return [];
-  return plan.warnings.filter(warning =>
-    /need \d+ SDR source window|uncovered control channel|fall outside|do not start/i.test(warning));
-}
-
-function TrConfigDraftPreview({ draft }: { draft: SetupTrConfigDraft }) {
-  return <div className="tr-config-draft">
-    <div className="setup-job-head">
-      <strong>{draft.systems.length} system/site draft(s)</strong>
-      <span>{draft.sources.length} SDR source(s)</span>
-    </div>
-    <div className="muted">{draft.diagnostics}</div>
-    {draft.warnings.length > 0 && <div className="setup-warning-list">{draft.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
-    <table className="table">
-      <thead><tr><th>Site</th><th>Short name</th><th>Device</th><th>Center</th><th>Control</th><th>Coverage</th><th>Warning</th></tr></thead>
-      <tbody>{draft.systems.map(system => {
-        const sources = draft.sources.filter(s => s.label === system.shortName || s.label.startsWith(`${system.shortName}-`));
-        const covered = new Set(sources.flatMap(source => source.coveredFrequenciesMhz.map(f => f.toFixed(6))));
-        const omitted = system.frequenciesMhz.filter(f => !covered.has(f.toFixed(6)));
-        return <tr key={`${system.shortName}-${system.siteName}`}>
-          <td>{system.siteName}</td>
-          <td>{system.shortName}</td>
-          <td>{sources.map(source => `${source.type || "SDR"} ${source.deviceArgs || source.serial || "unassigned"}`).join(", ") || system.assignedSerial || "unassigned"}</td>
-          <td>{sources.map(source => formatHz(source.centerFrequency)).join(", ") || formatHz(system.centerFrequency)}</td>
-          <td>{system.controlChannelsMhz.map(formatMhz).join(", ")}</td>
-          <td>{sources.length ? `${covered.size} covered / ${omitted.length} omitted` : `${system.frequenciesMhz.length} frequencies`}</td>
-          <td>{system.warning}</td>
-        </tr>;
-      })}</tbody>
-    </table>
   </div>;
 }
 
@@ -12159,26 +11964,6 @@ const stateNameByAbbreviation: Record<string, string> = {
   TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington",
   WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming"
 };
-
-function SdrDetectionPanel({ detection }: { detection: SetupSdrDetection }) {
-  return <div className="sdr-detection">
-    <strong>{detection.message}</strong>
-    <small>Detection temporarily frees claimed SDRs when needed, runs rtl_test, and parses device index/serial lines from its output.</small>
-    {detection.devices.length > 0 && <table className="table">
-      <thead><tr><th>#</th><th>Type</th><th>Serial</th><th>Device</th><th>Rate</th><th>Gain</th><th>Warning</th></tr></thead>
-      <tbody>{detection.devices.map(device => <tr key={`${device.index}-${device.serial || device.usbLine}`}>
-        <td>{device.index}</td>
-        <td>{device.type || "SDR"}</td>
-        <td>{device.serial || "unknown"}</td>
-        <td><div>{device.label || device.usbLine}</div><small>{device.driver || "osmosdr"} {device.deviceArgs}</small></td>
-        <td>{device.defaultSampleRate ? formatHz(device.defaultSampleRate) : ""}</td>
-        <td>{device.defaultGain ? `${device.defaultGain} ${device.gainMode}` : ""}</td>
-        <td>{device.warning}</td>
-      </tr>)}</tbody>
-    </table>}
-    <details><summary>Raw SDR output</summary><pre>{detection.rawOutput}</pre></details>
-  </div>;
-}
 
 function TalkgroupPreviewTable({ preview, updateRow, readOnly = false }: { preview: SetupTalkgroupPreview; updateRow: (index: number, patch: Partial<SetupTalkgroupRow>) => void; readOnly?: boolean }) {
   const categories = talkgroupCategoryOptions;
@@ -13773,83 +13558,6 @@ function modelIdForPath(rows: any[], engine: string, path: string) {
   return rows.find(row => row.engine === engine && row.path === path)?.id ?? rows.find(row => row.engine === engine)?.id ?? "none";
 }
 
-function buildCalibrationPlan(calibration: {
-  system: string;
-  controlChannelHz: string;
-  deviceSerial: string;
-  centerHz: string;
-  ppm: string;
-  baseErrorHz: string;
-  gain: string;
-  modulation: string;
-  rangeHz: string;
-  stepHz: string;
-  warmupSec: string;
-  durationSec: string;
-}) {
-  const rangeHz = Math.max(0, numberOrDefault(calibration.rangeHz, 1200));
-  const stepHz = Math.max(1, numberOrDefault(calibration.stepHz, 300));
-  const warmupSec = Math.max(0, numberOrDefault(calibration.warmupSec, 20));
-  const durationSec = Math.max(1, numberOrDefault(calibration.durationSec, 240));
-  const explicitBase = numericField(calibration.baseErrorHz);
-  const centerHz = numericField(calibration.centerHz);
-  const ppm = numericField(calibration.ppm);
-  let baseError: number | null = null;
-  let baseSource = "Enter base error directly, or provide GQRX center Hz and PPM.";
-
-  if (explicitBase !== null) {
-    baseError = Math.round(explicitBase);
-    baseSource = "Manual base error from GQRX/TR defaults.";
-  } else if (centerHz !== null && ppm !== null) {
-    baseError = Math.abs(Math.round(centerHz * ppm / 1_000_000));
-    baseSource = `Calculated from ${centerHz.toLocaleString()} Hz x ${ppm} PPM.`;
-  }
-
-  const candidates = baseError === null ? [] : buildErrorCandidates(baseError, rangeHz, stepHz);
-  const passCount = candidates.length;
-  const estimatedSeconds = passCount * (warmupSec + durationSec);
-  const candidateSummary = candidates.length
-    ? `${candidates[0]} to ${candidates[candidates.length - 1]} Hz, ${stepHz} Hz steps`
-    : "Not available yet";
-  const script = "/opt/pizzawave/scripts/tr_tune.sh";
-  const system = calibration.system.trim();
-  const control = calibration.controlChannelHz.trim();
-  const serial = calibration.deviceSerial.trim();
-  const gain = calibration.gain.trim();
-  const modulation = calibration.modulation || "qpsk";
-  const ppmCommand = centerHz !== null && ppm !== null
-    ? `sudo ${script} ppm-convert --center-hz ${Math.round(centerHz)} --ppm ${ppm} --tr-sign positive`
-    : "";
-  const errorSweepCommand = baseError !== null && system && control && serial
-    ? [
-      `sudo ${script} error-sweep`,
-      `--system ${system}`,
-      `--control-channel ${control}`,
-      `--device-serial ${serial}`,
-      `--base-error ${baseError}`,
-      `--range-hz ${rangeHz}`,
-      `--step-hz ${stepHz}`,
-      `--modulation ${modulation}`,
-      gain ? `--gain ${gain}` : "",
-      `--warmup-sec ${warmupSec}`,
-      `--duration-sec ${durationSec}`
-    ].filter(Boolean).join(" ")
-    : "";
-
-  return {
-    baseError,
-    baseSource,
-    candidates,
-    candidateSummary,
-    passCount,
-    estimatedSeconds,
-    warmupSec,
-    durationSec,
-    ppmCommand,
-    errorSweepCommand
-  };
-}
-
 function numericField(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value);
@@ -13861,17 +13569,6 @@ function numberOrDefault(value: string, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function buildErrorCandidates(baseError: number, rangeHz: number, stepHz: number) {
-  const start = baseError - rangeHz;
-  const end = baseError + rangeHz;
-  const candidates: number[] = [];
-  for (let value = start; value <= end; value += stepHz)
-    candidates.push(Math.round(value));
-  if (candidates[candidates.length - 1] !== Math.round(end))
-    candidates.push(Math.round(end));
-  return candidates;
-}
-
 function formatElapsed(seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
   const minutes = Math.floor(seconds / 60);
@@ -13881,72 +13578,6 @@ function formatElapsed(seconds: number) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-}
-
-function buildGuidedSweepCommand(
-  systemShortName: string,
-  modulation: string,
-  source: { index: number; serial: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string },
-  input: { gain: string; errorHz: string; ppm: string },
-  controlFrequencyHz: number,
-  sweep: { rangeHz: string; stepHz: string; warmupSec: string; durationSec: string },
-  templateSerial = ""
-) {
-  const error = numericField(input.errorHz);
-  const ppm = numericField(input.ppm);
-  const baseError = error !== null
-    ? Math.round(error)
-    : ppm !== null
-      ? Math.abs(Math.round(source.centerFrequency * ppm / 1_000_000))
-      : source.errorHz || 0;
-  const gain = input.gain.trim() || (source.gain && source.gain !== "0" ? source.gain : "32");
-  const serial = source.serial || String(source.index);
-  return [
-    "sudo /usr/lib/pizzawave/scripts/tr_tune.sh error-sweep",
-    `--system ${systemShortName}`,
-    `--control-channel ${controlFrequencyHz}`,
-    `--device-serial ${serial}`,
-    templateSerial ? `--template-serial ${templateSerial}` : "",
-    `--base-error ${baseError}`,
-    `--range-hz ${Math.max(0, numberOrDefault(sweep.rangeHz, 1200))}`,
-    `--step-hz ${Math.max(1, numberOrDefault(sweep.stepHz, 300))}`,
-    `--modulation ${modulation || "qpsk"}`,
-    gain ? `--gain ${gain}` : "",
-    `--warmup-sec ${Math.max(0, numberOrDefault(sweep.warmupSec, 20))}`,
-    `--duration-sec ${Math.max(1, numberOrDefault(sweep.durationSec, 240))}`
-  ].filter(Boolean).join(" ");
-}
-
-function buildGuidedSweepParameters(
-  systemShortName: string,
-  modulation: string,
-  source: { index: number; serial: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string },
-  input: { gain: string; errorHz: string; ppm: string },
-  controlFrequencyHz: number,
-  sweep: { rangeHz: string; stepHz: string; warmupSec: string; durationSec: string },
-  templateSerial = ""
-) {
-  const error = numericField(input.errorHz);
-  const ppm = numericField(input.ppm);
-  const baseError = error !== null
-    ? Math.round(error)
-    : ppm !== null
-      ? Math.abs(Math.round(source.centerFrequency * ppm / 1_000_000))
-      : source.errorHz || 0;
-  return {
-    systemShortName,
-    modulation: modulation || "qpsk",
-    sourceIndex: source.index,
-    serial: source.serial || String(source.index),
-    controlChannelHz: controlFrequencyHz,
-    baseErrorHz: baseError,
-    rangeHz: Math.max(0, numberOrDefault(sweep.rangeHz, 1200)),
-    stepHz: Math.max(1, numberOrDefault(sweep.stepHz, 300)),
-    warmupSec: Math.max(0, numberOrDefault(sweep.warmupSec, 20)),
-    durationSec: Math.max(1, numberOrDefault(sweep.durationSec, 240)),
-    gain: input.gain.trim() || (source.gain && source.gain !== "0" ? source.gain : "32"),
-    templateSerial
-  };
 }
 
 function buildGuidedSweepBatchParameters(

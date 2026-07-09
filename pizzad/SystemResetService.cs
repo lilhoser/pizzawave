@@ -125,17 +125,7 @@ public sealed class SystemResetService
             TrConfigMode = "radioReference",
             RestoreAppliedAtUtc = null,
             TrDetected = false,
-            TrConfigured = false,
-            TalkgroupsValidated = false,
-            CallstreamValidated = false,
-            TranscriptionValidated = false,
-            MonitoredAreasValidated = false,
-            HealthValidated = false,
-            AiInsightsSkippedOrValidated = !_config.AiInsights.Enabled,
-            EmbeddingsSkippedOrValidated = !_config.Embeddings.Enabled,
-            AlertsSkippedOrValidated = !_config.Alerts.EmailEnabled,
-            DiagnosticToolsSkippedOrInstalled = true,
-            CalibrationSkippedOrCompleted = true
+            TrConfigured = false
         };
     }
 

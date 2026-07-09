@@ -427,14 +427,6 @@ app.MapPost("/api/v1/setup/site/rf/{id}/tr/apply-source-draft", async (HttpConte
 .WithName("SiteSetupRfApplySourceDraft")
 .WithOpenApi();
 
-app.MapPost("/api/v1/setup/validate/{section}", async (string section, SetupService setup, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await setup.ValidateAsync(section, context.RequestAborted));
-})
-.WithName("SetupValidate")
-.WithOpenApi();
-
 app.MapPost("/api/v1/setup/validate-required", async (SetupService setup, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
@@ -474,14 +466,6 @@ app.MapGet("/api/v1/setup/sdrs", async (SetupJobService jobs, HttpContext contex
 .WithName("SetupSdrDetect")
 .WithOpenApi();
 
-app.MapGet("/api/v1/setup/calibration/plan", (SetupCalibrationService calibration, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(calibration.BuildPlan());
-})
-.WithName("SetupCalibrationPlan")
-.WithOpenApi();
-
 app.MapPost("/api/v1/setup/areas/boundaries", async (SetupAreaBoundaryRequest request, SetupAreaBoundaryService boundaries, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
@@ -495,14 +479,6 @@ app.MapPost("/api/v1/setup/areas/boundaries", async (SetupAreaBoundaryRequest re
     }
 })
 .WithName("SetupAreaBoundaries")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/calibration/open-gqrx", async (SetupOpenGqrxRequest request, SetupCalibrationService calibration, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await calibration.OpenGqrxAsync(request, context.RequestAborted));
-})
-.WithName("SetupCalibrationOpenGqrx")
 .WithOpenApi();
 
 app.MapPost("/api/v1/setup/jobs", async (SetupJobRequest request, SetupJobService jobs, HttpContext context, AuthService authService) =>
@@ -578,57 +554,6 @@ app.MapPost("/api/v1/setup/tr-config/sites", async (SetupTrConfigSitesRequest re
     }
 })
 .WithName("SetupTrConfigSites")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/tr-config/source-plan", async (SetupTrConfigSourcePlanRequest request, SetupTrConfigBuilderService builder, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await builder.SourcePlanAsync(request, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-})
-.WithName("SetupTrConfigSourcePlan")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/tr-config/save", async (SetupTrConfigSaveRequest request, SetupTrConfigBuilderService builder, HttpContext context, AuthService authService) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await builder.SaveAsync(request, context.RequestAborted));
-    }
-    catch (JsonException ex)
-    {
-        return Results.BadRequest(new { error = "Invalid TR config JSON: " + ex.Message });
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-})
-.WithName("SetupTrConfigSave")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/tr-config/patch-callstream", async (SetupTrConfigPatchRequest request, TrConfigService trConfig, HttpContext context, AuthService authService, RfSurveyService surveys) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        if (request.RestartTr)
-            await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
-        return Results.Ok(await trConfig.PatchCallstreamAsync(request, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-})
-.WithName("SetupTrConfigPatchCallstream")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/tr-config/editor", async (HttpContext context, AuthService authService, TrConfigService trConfig) =>

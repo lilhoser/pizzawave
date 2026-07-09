@@ -70,14 +70,7 @@ public sealed partial class SetupTrConfigBuilderService
         return new SetupTrConfigDraftDto(configJson, plan.Systems, plan.Sources, plan.Warnings, diagnostics);
     }
 
-    public async Task<SetupTrConfigSourcePlanDto> SourcePlanAsync(SetupTrConfigSourcePlanRequest request, CancellationToken ct)
-    {
-        var sampleRate = request.SampleRate > 0 ? request.SampleRate : DefaultSampleRate;
-        var html = await LoadHtmlAsync(new SetupTrConfigDraftRequest(RadioReferenceSid: request.RadioReferenceSid, HtmlText: request.HtmlText), ct);
-        return BuildSourcePlan(html, request.RadioReferenceSid, SiteFilters(request.SiteNameList, request.SiteNames), NormalizeDevices(request.SdrDevices, request.SdrSerials, sampleRate), sampleRate);
-    }
-
-    private static SetupTrConfigSourcePlanDto BuildSourcePlan(string html, string? sid, IReadOnlyList<string> siteFilters, IReadOnlyList<SelectedSdrDevice> devices, int requestedSampleRate)
+    private static SourcePlan BuildSourcePlan(string html, string? sid, IReadOnlyList<string> siteFilters, IReadOnlyList<SelectedSdrDevice> devices, int requestedSampleRate)
     {
         var systems = ParseSites(html, sid, siteFilters).ToList();
         var warnings = new List<string>();
@@ -177,10 +170,13 @@ public sealed partial class SetupTrConfigBuilderService
         if (systemDrafts.Any(s => s.Warning.Contains("control channel", StringComparison.OrdinalIgnoreCase) && s.Warning.Contains("not covered", StringComparison.OrdinalIgnoreCase)))
             warnings.Add("One or more selected sites have uncovered control channels. Do not start a baseline until source coverage is corrected.");
 
-        var systemName = systems.Select(site => site.SystemName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? ExtractTitle(HtmlToText(html), sid);
-        var diagnostics = $"Planned {coveragePlan.Count} source window(s) for {systems.Count} selected site(s); {requiredPlan.Count} window(s) are required at {requiredSampleRate:N0} sps.";
-        return new SetupTrConfigSourcePlanDto(systemName, systemDrafts, sourceDrafts, requiredPlan.Count, coveragePlan.Count, warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), diagnostics);
+        return new SourcePlan(systemDrafts, sourceDrafts, warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
+
+    private sealed record SourcePlan(
+        IReadOnlyList<SetupTrConfigSystemDto> Systems,
+        IReadOnlyList<SetupTrConfigSourceDto> Sources,
+        IReadOnlyList<string> Warnings);
 
     public async Task<SetupValidationResult> SaveAsync(SetupTrConfigSaveRequest request, CancellationToken ct)
     {

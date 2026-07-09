@@ -502,17 +502,7 @@ public sealed class SetupConfig
     public DateTime? RestoreAppliedAtUtc { get; set; }
     public bool TrDetected { get; set; }
     public bool TrConfigured { get; set; }
-    public bool TalkgroupsValidated { get; set; }
-    public bool CallstreamValidated { get; set; }
-    public bool TranscriptionValidated { get; set; }
-    public bool MonitoredAreasValidated { get; set; }
-    public bool HealthValidated { get; set; }
-    public bool AiInsightsSkippedOrValidated { get; set; } = true;
-    public bool EmbeddingsSkippedOrValidated { get; set; } = true;
-    public bool AlertsSkippedOrValidated { get; set; } = true;
     public bool InstallOptionalDiagnosticTools { get; set; }
-    public bool DiagnosticToolsSkippedOrInstalled { get; set; } = true;
-    public bool CalibrationSkippedOrCompleted { get; set; } = true;
     public string PendingRestorePath { get; set; } = string.Empty;
     public string PendingRestoreManifestJson { get; set; } = string.Empty;
 }

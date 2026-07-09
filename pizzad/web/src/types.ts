@@ -601,7 +601,6 @@ export type SetupTrConfigSource = { label: string; serial: string; type: string;
 export type SetupTrConfigDraft = { configJson: string; systems: SetupTrConfigSystem[]; sources: SetupTrConfigSource[]; warnings: string[]; diagnostics: string };
 export type SetupTrConfigSite = { name: string; shortName: string; frequencyCount: number; controlChannelCount: number; controlChannelsMhz: number[] };
 export type SetupTrConfigSites = { systemName: string; sites: SetupTrConfigSite[]; diagnostics: string };
-export type SetupTrConfigSourcePlan = { systemName: string; systems: SetupTrConfigSystem[]; sources: SetupTrConfigSource[]; requiredSourceCount: number; availableSourceCount: number; warnings: string[]; diagnostics: string };
 export type SetupAreaBoundaryCandidate = { label: string; kind: string; source: string; geoId: string; north: number; south: number; east: number; west: number };
 export type SetupAreaBoundaryResponse = { query: string; candidates: SetupAreaBoundaryCandidate[]; diagnostics: string };
 export type SiteSetupMonitoredArea = { areaId: string; areaLabel: string; systemShortName: string; north: number; south: number; east: number; west: number; aliases: string[] };
