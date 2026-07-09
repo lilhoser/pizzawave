@@ -11,7 +11,7 @@ work so that progress does not depend on conversation history.
 - Active package: 2 - Talkgroups
 - Current milestone: Package 2 operator verification
 - Working branch: `codex/operator-ux-review`
-- Last deployed commit: `99f4c96`
+- Last deployed commit: `28a6daa`
 - Operator verification: Package 1 accepted
 - Next action: ask the operator to inspect Package 2 and confirm acceptance.
 
@@ -142,6 +142,11 @@ Status: pending
 - `99f4c96`: Package 2 deployed; server-owned RR import provenance, explicit
   per-system refresh, server-paged catalog reads, and scoped Setup policy
   mutations.
+- `28a6daa`: Package 2 pagination stabilization deployed; Talkgroups retains
+  its last good page and retries a transient fetch, while rolling status
+  summaries use stale-while-refresh caching instead of holding concurrent UI
+  connections open. The deployment script now fails on native build, archive,
+  upload, or remote-deploy errors instead of reusing stale artifacts.
 
 ## Verification Log
 
@@ -181,3 +186,8 @@ Status: pending
   and operator category assignments. Re-entering Talkgroups did not repeat the
   import; both per-system refresh controls became available after the paged
   catalog loaded, and the provenance migration created no pending Setup change.
+- 2026-07-09: Package 2 pagination follow-up passed the production frontend
+  build, production backend build, existing backend suite, and live RPI checks.
+  Next, Last, and First completed repeatedly without `Failed to fetch`; the
+  catalog endpoint remained fast, and cached status-summary requests dropped
+  from multi-second waits to millisecond responses after warm-up.
