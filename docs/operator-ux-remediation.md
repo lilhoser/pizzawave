@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 1 - Setup state authority
-- Current milestone: 1A - versioned, field-scoped Setup mutations
+- Current milestone: 1B - per-site RadioReference identity
 - Working branch: `codex/operator-ux-review`
 - Last deployed commit: `d8e7ec9`
 - Operator verification: not requested yet
-- Next action: define the server-owned Setup mutation contract and replace
-  whole-document UI writes without changing the visible workflow.
+- Next action: replace the single RR system selector with server-owned,
+  per-site RR identity while preserving the currently selected sites.
 
 ## Working Rules
 
@@ -33,7 +33,7 @@ work so that progress does not depend on conversation history.
 
 Status: in progress
 
-- [ ] 1A. Replace stale whole-document Setup writes with versioned,
+- [x] 1A. Replace stale whole-document Setup writes with versioned,
   field-scoped mutations.
 - [ ] 1B. Represent RadioReference identity per selected system/site and remove
   the global-SID selection assumption.
@@ -138,3 +138,6 @@ Status: pending
 
 - 2026-07-09: Architecture review completed against deployed baseline. No code
   changes were made during the review.
+- 2026-07-09: Milestone 1A passed the existing backend test suite and production
+  frontend build. Setup mutations are serialized in the UI, version-checked by
+  the server, and limited to the fields named by each operation.

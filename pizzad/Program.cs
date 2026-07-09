@@ -177,6 +177,10 @@ app.MapPatch("/api/v1/setup/site", async (HttpContext context, SiteSetupUpdateRe
     {
         return Results.Ok(await siteSetup.UpdateDesiredAsync(request, context.RequestAborted));
     }
+    catch (SiteSetupVersionConflictException ex)
+    {
+        return Results.Conflict(new { message = ex.Message, expectedVersion = ex.ExpectedVersion, currentVersion = ex.CurrentVersion });
+    }
     catch (Exception ex)
     {
         return Results.BadRequest(new { message = ex.Message });

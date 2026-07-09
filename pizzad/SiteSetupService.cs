@@ -11,6 +11,7 @@ public sealed class SiteSetupService
     private readonly IngestControlService _ingest;
     private readonly LiveTrActivityMonitor _liveTrActivity;
     private readonly ILogger<SiteSetupService> _logger;
+    private readonly SemaphoreSlim _updateGate = new(1, 1);
 
     public SiteSetupService(
         EngineConfig config,
@@ -49,24 +50,31 @@ public sealed class SiteSetupService
 
     public async Task<SiteSetupDto> UpdateDesiredAsync(SiteSetupUpdateRequest request, CancellationToken ct)
     {
-        var applied = await BuildAppliedConfigAsync(ct);
-        var before = EffectiveDesired(applied);
-        var next = Normalize(request.Desired);
-        next.DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-        next.UpdatedAtUtc = DateTime.UtcNow;
-        next.LastAppliedAtUtc = _config.SiteSetup.LastAppliedAtUtc;
-        next.LastAppliedConfigHash = _config.SiteSetup.LastAppliedConfigHash ?? string.Empty;
-        next.LastAppliedSourceAssignmentSummary = _config.SiteSetup.LastAppliedSourceAssignmentSummary ?? string.Empty;
-        next.LastAppliedRfPathSummary = _config.SiteSetup.LastAppliedRfPathSummary ?? string.Empty;
-        next.LastAppliedDesiredJson = _config.SiteSetup.LastAppliedDesiredJson ?? string.Empty;
-
-        var changes = DescribeChanges(before, next);
-        _config.SiteSetup = next;
-        _config.Locations.MonitoredAreas = CloneMonitoredAreas(next.MonitoredAreas);
-        _config.Save();
-
-        if (changes.Count > 0)
+        await _updateGate.WaitAsync(ct);
+        try
         {
+            var applied = await BuildAppliedConfigAsync(ct);
+            var before = EffectiveDesired(applied);
+            if (request.ExpectedVersion != before.DesiredVersion)
+                throw new SiteSetupVersionConflictException(request.ExpectedVersion, before.DesiredVersion);
+
+            var next = ApplyPatch(before, request.Patch);
+            next.DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            next.UpdatedAtUtc = DateTime.UtcNow;
+            next.LastAppliedAtUtc = before.LastAppliedAtUtc;
+            next.LastAppliedConfigHash = before.LastAppliedConfigHash;
+            next.LastAppliedSourceAssignmentSummary = before.LastAppliedSourceAssignmentSummary;
+            next.LastAppliedRfPathSummary = before.LastAppliedRfPathSummary;
+            next.LastAppliedDesiredJson = before.LastAppliedDesiredJson;
+
+            var changes = DescribeChanges(before, next);
+            if (changes.Count == 0)
+                return await GetAsync(ct);
+
+            _config.SiteSetup = next;
+            _config.Locations.MonitoredAreas = CloneMonitoredAreas(next.MonitoredAreas);
+            _config.Save();
+
             await AddActivityAsync(
                 "change",
                 "desired_setup_updated",
@@ -75,10 +83,38 @@ public sealed class SiteSetupService
                 request.Source,
                 ct);
             _logger.LogInformation("Site Setup desired state updated: {Changes}", string.Join("; ", changes));
-        }
 
-        return await GetAsync(ct);
+            return await GetAsync(ct);
+        }
+        finally
+        {
+            _updateGate.Release();
+        }
     }
+
+    private static SiteSetupConfig ApplyPatch(SiteSetupConfig before, SiteSetupDesiredPatch patch) => Normalize(new SiteSetupConfig
+    {
+        DesiredVersion = before.DesiredVersion,
+        SiteLabel = patch.SiteLabel ?? before.SiteLabel,
+        LocationNotes = patch.LocationNotes ?? before.LocationNotes,
+        MonitoredAreas = patch.MonitoredAreas ?? before.MonitoredAreas,
+        RadioReferenceSid = patch.RadioReferenceSid ?? before.RadioReferenceSid,
+        SystemShortNames = patch.SystemShortNames ?? before.SystemShortNames,
+        SourcePlanSystemShortNames = patch.SourcePlanSystemShortNames ?? before.SourcePlanSystemShortNames,
+        SourcePlanMode = patch.SourcePlanMode ?? before.SourcePlanMode,
+        Systems = patch.Systems ?? before.Systems,
+        SelectedSourceIndexes = patch.SelectedSourceIndexes ?? before.SelectedSourceIndexes,
+        SourceAssignments = patch.SourceAssignments ?? before.SourceAssignments,
+        Sources = patch.Sources ?? before.Sources,
+        RfSelections = patch.RfSelections ?? before.RfSelections,
+        RfPath = patch.RfPath ?? before.RfPath,
+        UpdatedAtUtc = before.UpdatedAtUtc,
+        LastAppliedAtUtc = before.LastAppliedAtUtc,
+        LastAppliedConfigHash = before.LastAppliedConfigHash,
+        LastAppliedSourceAssignmentSummary = before.LastAppliedSourceAssignmentSummary,
+        LastAppliedRfPathSummary = before.LastAppliedRfPathSummary,
+        LastAppliedDesiredJson = before.LastAppliedDesiredJson
+    });
 
     public async Task<SiteSetupActivityDto> AddActivityAsync(SiteSetupActivityRequest request, CancellationToken ct)
     {

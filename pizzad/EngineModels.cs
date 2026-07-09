@@ -1107,7 +1107,31 @@ public sealed record SiteSetupAppliedSourceDto(
 
 public sealed record SiteSetupPendingChangeDto(string Category, string Summary);
 
-public sealed record SiteSetupUpdateRequest(SiteSetupConfig Desired, string Source = "ui");
+public sealed record SiteSetupUpdateRequest(long ExpectedVersion, SiteSetupDesiredPatch Patch, string Source = "ui");
+
+public sealed class SiteSetupDesiredPatch
+{
+    public string? SiteLabel { get; init; }
+    public string? LocationNotes { get; init; }
+    public List<MonitoredAreaConfig>? MonitoredAreas { get; init; }
+    public string? RadioReferenceSid { get; init; }
+    public List<string>? SystemShortNames { get; init; }
+    public List<string>? SourcePlanSystemShortNames { get; init; }
+    public string? SourcePlanMode { get; init; }
+    public List<RfSurveySystemDto>? Systems { get; init; }
+    public List<int>? SelectedSourceIndexes { get; init; }
+    public Dictionary<string, int>? SourceAssignments { get; init; }
+    public List<RfSurveySourceDto>? Sources { get; init; }
+    public List<SiteSetupRfSelection>? RfSelections { get; init; }
+    public RfSurveyPathProfileDto? RfPath { get; init; }
+}
+
+public sealed class SiteSetupVersionConflictException(long expectedVersion, long currentVersion)
+    : InvalidOperationException($"Setup changed after this screen loaded (expected version {expectedVersion}, current version {currentVersion}). Reloaded values must be reviewed before retrying.")
+{
+    public long ExpectedVersion { get; } = expectedVersion;
+    public long CurrentVersion { get; } = currentVersion;
+}
 
 public sealed record SiteSetupActivityRequest(
     string Category,

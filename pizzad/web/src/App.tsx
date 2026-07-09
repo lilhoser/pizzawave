@@ -854,6 +854,8 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
 
 function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrOperationChange }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void; onTrOperationChange: (value: string) => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
+  const currentRef = useRef<SiteSetup | null>(setup);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const [localPendingChanges, setLocalPendingChanges] = useState<SiteSetupPendingChange[]>([]);
   const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
@@ -877,6 +879,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
     localStorage.setItem("pizzawave-site-setup-apply-subpage", value);
   };
   useEffect(() => {
+    currentRef.current = setup;
     setCurrent(setup);
     setLocalPendingChanges([]);
   }, [setup]);
@@ -887,18 +890,38 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   }, [targetSection, clearTargetSection]);
   if (!current) return <div className="pane">Loading Site Setup...</div>;
   async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
-    if (!current) return;
-    const desired = { ...current.desired, ...patch };
     setLocalPendingChanges(field === "rfPath" ? [{ category: "RF path", summary: "RF path edits are being saved." }] : []);
     setSaveState({ field, status: "saving", message: "Saving" });
-    try {
-      const next = await api.request<SiteSetup>(siteSetupApi, { method: "PATCH", body: JSON.stringify({ desired, source: "ui" }) });
-      setCurrent(next);
-      setLocalPendingChanges([]);
-      setSaveState({ field, status: "saved", message: "Saved" });
-    } catch (error) {
-      setSaveState({ field, status: "error", message: error instanceof Error ? error.message : "Save failed" });
-    }
+    const save = async () => {
+      const base = currentRef.current;
+      if (!base) return;
+      try {
+        const next = await api.request<SiteSetup>(siteSetupApi, {
+          method: "PATCH",
+          body: JSON.stringify({ expectedVersion: base.desired.desiredVersion, patch, source: "ui" })
+        });
+        currentRef.current = next;
+        setCurrent(next);
+        setLocalPendingChanges([]);
+        setSaveState({ field, status: "saved", message: "Saved" });
+      } catch (error) {
+        let message = error instanceof Error ? error.message : "Save failed";
+        if (message.toLowerCase().includes("setup changed after this screen loaded")) {
+          try {
+            const latest = await api.request<SiteSetup>(siteSetupApi);
+            currentRef.current = latest;
+            setCurrent(latest);
+            message = `${message} Current Setup values have been reloaded.`;
+          } catch {
+            // Keep the original conflict message when the reload also fails.
+          }
+        }
+        setSaveState({ field, status: "error", message });
+      }
+    };
+    const queued = saveQueueRef.current.catch(() => undefined).then(save);
+    saveQueueRef.current = queued;
+    await queued;
   }
 
   return <div className="site-setup-shell">
@@ -931,12 +954,12 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
         <section className="site-setup-panel">
           {section === "Location" && <SiteSetupLocationSection setup={current} saveState={saveState} onSave={saveDesired} />}
           {section === "Systems & Sites" && <SiteSetupSystemsSection setup={current} saveState={saveState} onSave={saveDesired} />}
-          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} />}
+          {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} onSave={saveDesired} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
           <div style={section === "RF Validation" ? undefined : { display: "none" }} aria-hidden={section === "RF Validation" ? undefined : "true"}>
             <SiteSetupRfValidationSection setup={current} active={section === "RF Validation"} subPage={rfValidationSubPage} onSave={saveDesired} onTrOperationChange={onTrOperationChange} />
           </div>
-          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSetupChanged={setCurrent} onApplied={(next) => { setCurrent(next); void reload(); }} />}
+          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSave={saveDesired} onSetupChanged={(next) => { currentRef.current = next; setCurrent(next); }} onApplied={(next) => { currentRef.current = next; setCurrent(next); void reload(); }} />}
           {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
         </section>
       </div>
@@ -1713,7 +1736,7 @@ async function prepareSiteSetupRfWorkspace() {
   return api.request<RfSurveyDetail>(siteSetupRfApi);
 }
 
-function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onApplied }: { setup: SiteSetup; subPage: "source" | "review"; setSubPage: (value: "source" | "review") => void; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
+function SiteSetupApplySection({ setup, subPage, setSubPage, onSave, onSetupChanged, onApplied }: { setup: SiteSetup; subPage: "source" | "review"; setSubPage: (value: "source" | "review") => void; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onSetupChanged: (next: SiteSetup) => void; onApplied: (next: SiteSetup) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [draft, setDraft] = useState<RfSurveyConfigDraft | null>(null);
   const [busy, setBusy] = useState<"" | "load" | "save-plan" | "apply" | "discard">("load");
@@ -1833,16 +1856,8 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
     };
     if (JSON.stringify(nextPlan) === JSON.stringify(currentPlan))
       return setup;
-    const desired = {
-      ...setup.desired,
-      ...nextPlan
-    };
-    const next = await api.request<SiteSetup>(siteSetupApi, {
-      method: "PATCH",
-      body: JSON.stringify({ desired, source: "ui" })
-    });
-    onSetupChanged(next);
-    return next;
+    await onSave(nextPlan, "sourcePlan");
+    return setup;
   }
 
   async function reloadDraft() {
@@ -2455,7 +2470,7 @@ function uniqueTalkgroupImportSources(sources: SiteSetupTalkgroupSource[]) {
   return unique;
 }
 
-function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reload: () => Promise<void> }) {
+function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetup; reload: () => Promise<void>; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
   const [rrSources, setRrSources] = useState(() => initialTalkgroupSources(setup));
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -2527,10 +2542,7 @@ function SiteSetupTalkgroupsSection({ setup, reload }: { setup: SiteSetup; reloa
       return { ...system, talkgroupSystemShortName };
     });
     if (!changed) return;
-    await api.request<SiteSetup>(siteSetupApi, {
-      method: "PATCH",
-      body: JSON.stringify({ desired: { ...setup.desired, systems }, source: "ui" })
-    });
+    await onSave({ systems }, "systems");
   }
 
   async function importTalkgroups(importKey: string) {
