@@ -43,7 +43,7 @@ function readCachedRadioReferenceSites(sid: string): SetupTrConfigSites | null {
     const raw = localStorage.getItem(radioReferenceSitesCacheKey(sid));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SetupTrConfigSites;
-    return parsed && Array.isArray(parsed.sites) ? parsed : null;
+    return parsed && Array.isArray(parsed.sites) ? { ...parsed, radioReferenceSid: parsed.radioReferenceSid || sid.trim() } : null;
   } catch {
     return null;
   }
@@ -65,6 +65,7 @@ function readCachedRadioReferenceSitesForSids(sids: string[]): SetupTrConfigSite
     }
   }
   return {
+    radioReferenceSid: lists.map(list => list.radioReferenceSid).filter(Boolean).join(","),
     systemName: lists.map(list => list.systemName).filter(Boolean).join(", "),
     sites: [...sitesByKey.values()],
     diagnostics: lists.map(list => list.diagnostics).filter(Boolean).join("\n")
@@ -1224,140 +1225,205 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
 }
 
 function SiteSetupSystemsSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
-  const [radioReferenceSid, setRadioReferenceSid] = useState(setup.desired.radioReferenceSid);
-  const [radioReferenceSites, setRadioReferenceSites] = useState<SetupTrConfigSites | null>(() => readCachedRadioReferenceSites(setup.desired.radioReferenceSid));
+  const [newSid, setNewSid] = useState("");
+  const [catalogs, setCatalogs] = useState<SetupTrConfigSites[]>([]);
   const [siteSearch, setSiteSearch] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busySid, setBusySid] = useState("");
   const [message, setMessage] = useState("");
-  const selectedNames = selectedSetupSystemNames(setup);
+  const selectedSystems = setup.desired.systems;
+  const selectedSids = setupRadioReferenceSids(setup);
+  const selectedSidSignature = selectedSids.join("|");
+
   useEffect(() => {
-    setRadioReferenceSid(setup.desired.radioReferenceSid);
-    setRadioReferenceSites(readCachedRadioReferenceSites(setup.desired.radioReferenceSid));
-  }, [setup.desired.radioReferenceSid]);
+    let stopped = false;
+    async function loadSelectedCatalogs() {
+      if (!selectedSids.length) {
+        setCatalogs([]);
+        return;
+      }
+      setBusySid("selected");
+      try {
+        const loaded = await Promise.all(selectedSids.map(loadRadioReferenceSiteCatalog));
+        if (!stopped)
+          setCatalogs(loaded.sort((left, right) => left.systemName.localeCompare(right.systemName)));
+      } catch (error) {
+        if (!stopped)
+          setMessage(error instanceof Error ? error.message : "Unable to load selected RR systems.");
+      } finally {
+        if (!stopped)
+          setBusySid("");
+      }
+    }
+    void loadSelectedCatalogs();
+    return () => { stopped = true; };
+  }, [selectedSidSignature]);
 
   function statusFor(field: string) {
     if (saveState.field !== field || saveState.status === "idle") return null;
     return <span className={saveState.status === "error" ? "settings-message error" : saveState.status === "saved" ? "settings-message ok" : "settings-message"}>{saveState.message}</span>;
   }
 
-  async function saveSid() {
-    const sid = radioReferenceSid.trim();
-    if (sid === setup.desired.radioReferenceSid) return;
-    setRadioReferenceSites(readCachedRadioReferenceSites(sid));
-    await onSave({ radioReferenceSid: sid }, "radioReferenceSid");
-  }
-
-  async function loadSites() {
-    const sid = radioReferenceSid.trim();
-    if (!sid) {
-      setMessage("Enter an RR system ID first.");
+  async function addCatalog() {
+    const sid = newSid.trim();
+    if (!sid) return;
+    if (catalogs.some(row => row.radioReferenceSid === sid)) {
+      setMessage(`RR ${sid} is already loaded.`);
       return;
     }
-    setBusy(true);
+    setBusySid(sid);
     setMessage("");
     try {
-      const result = await api.request<SetupTrConfigSites>("/api/v1/setup/tr-config/sites", {
-        method: "POST",
-        body: JSON.stringify({ radioReferenceSid: sid })
-      });
-      writeCachedRadioReferenceSites(sid, result);
-      setRadioReferenceSites(result);
-      if (sid !== setup.desired.radioReferenceSid)
-        await onSave({ radioReferenceSid: sid }, "radioReferenceSid");
-      setMessage(`${result.sites.length.toLocaleString()} sites loaded.`);
+      const loaded = await loadRadioReferenceSiteCatalog(sid);
+      setCatalogs(current => [...current, loaded].sort((left, right) => left.systemName.localeCompare(right.systemName)));
+      setNewSid("");
+      setMessage(`${loaded.systemName} loaded with ${loaded.sites.length.toLocaleString()} site(s).`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load sites.");
+      setMessage(error instanceof Error ? error.message : "Unable to load RR system.");
     } finally {
-      setBusy(false);
+      setBusySid("");
     }
   }
 
-  async function saveSelectedSystems(nextNames: string[]) {
-    const uniqueNames = Array.from(new Set(nextNames)).filter(Boolean).sort((a, b) => a.localeCompare(b));
-    const systems = buildSurveySystemDefinitions(uniqueNames, null, radioReferenceSites, setup.desired.systems, radioReferenceSid.trim());
+  async function saveSelectedSystems(systems: RfSurveySystem[]) {
+    const ordered = [...systems].sort((left, right) => left.shortName.localeCompare(right.shortName));
+    const names = ordered.map(system => system.shortName);
+    const validNames = new Set(names.map(name => name.toLowerCase()));
+    const sourceAssignments = Object.fromEntries(Object.entries(setup.desired.sourceAssignments).filter(([name]) => validNames.has(name.toLowerCase())));
+    const selectedControlChannels = new Set(ordered.flatMap(system => system.controlChannelsHz).map(Math.round));
+    const rfSelections = setup.desired.rfSelections.filter(selection => selectedControlChannels.has(Math.round(selection.frequencyHz)));
     await onSave({
-      radioReferenceSid: radioReferenceSid.trim(),
-      systemShortNames: uniqueNames,
-      sourcePlanSystemShortNames: uniqueNames,
+      systemShortNames: names,
+      sourcePlanSystemShortNames: names,
       sourcePlanMode: setup.desired.sourcePlanMode || "full",
-      systems
+      sourceAssignments,
+      rfSelections,
+      systems: ordered
     }, "systems");
   }
 
-  async function toggleSite(site: SetupTrConfigSite, checked: boolean) {
-    const name = site.shortName || site.name;
-    const nextNames = checked
-      ? [...selectedNames, name]
-      : selectedNames.filter(value => !stringEqualsIgnoreCase(value, name));
-    await saveSelectedSystems(nextNames);
+  async function toggleSite(catalog: SetupTrConfigSites, site: SetupTrConfigSite, checked: boolean) {
+    const shortName = site.shortName || site.name;
+    const matchesIdentity = (system: RfSurveySystem) => stringEqualsIgnoreCase(system.shortName, shortName) && system.radioReferenceSid === catalog.radioReferenceSid;
+    if (!checked) {
+      await saveSelectedSystems(selectedSystems.filter(system => !matchesIdentity(system)));
+      return;
+    }
+    const shortNameConflict = selectedSystems.find(system => stringEqualsIgnoreCase(system.shortName, shortName) && system.radioReferenceSid && system.radioReferenceSid !== catalog.radioReferenceSid);
+    if (shortNameConflict) {
+      setMessage(`${shortName} is already selected from RR ${shortNameConflict.radioReferenceSid || "unknown"}. TR short names must be unique.`);
+      return;
+    }
+    const existing = selectedSystems.find(matchesIdentity);
+    if (existing) return;
+    const existingWithoutSid = selectedSystems.find(system => stringEqualsIgnoreCase(system.shortName, shortName) && !system.radioReferenceSid);
+    const selectedSystem: RfSurveySystem = {
+      shortName,
+      siteLabel: site.name || shortName,
+      controlChannelsHz: site.controlChannelsMhz.map(value => Math.round(value * 1_000_000)),
+      voiceFrequenciesHz: existingWithoutSid?.voiceFrequenciesHz ?? [],
+      radioReferenceSid: catalog.radioReferenceSid,
+      talkgroupSystemShortName: existingWithoutSid?.talkgroupSystemShortName ?? ""
+    };
+    await saveSelectedSystems(existingWithoutSid
+      ? selectedSystems.map(system => system === existingWithoutSid ? selectedSystem : system)
+      : [...selectedSystems, selectedSystem]);
   }
 
-  async function removeSelectedSystem(shortName: string) {
-    await saveSelectedSystems(selectedNames.filter(value => !stringEqualsIgnoreCase(value, shortName)));
+  async function removeSelectedSystem(system: RfSurveySystem) {
+    await saveSelectedSystems(selectedSystems.filter(row => !(stringEqualsIgnoreCase(row.shortName, system.shortName) && row.radioReferenceSid === system.radioReferenceSid)));
   }
 
-  const selectedSet = new Set(selectedNames.map(value => value.toLowerCase()));
+  async function removeCatalog(catalog: SetupTrConfigSites) {
+    const selected = selectedSystems.filter(system => system.radioReferenceSid === catalog.radioReferenceSid);
+    if (selected.length && !confirmAction(`Remove ${catalog.systemName}?`, `This also removes ${selected.length.toLocaleString()} selected site${selected.length === 1 ? "" : "s"} from RR ${catalog.radioReferenceSid}.`))
+      return;
+    if (selected.length)
+      await saveSelectedSystems(selectedSystems.filter(system => system.radioReferenceSid !== catalog.radioReferenceSid));
+    setCatalogs(current => current.filter(row => row.radioReferenceSid !== catalog.radioReferenceSid));
+  }
+
   const query = siteSearch.trim().toLowerCase();
-  const sites = (radioReferenceSites?.sites ?? []).filter(site => {
-    if (!query) return true;
-    return [site.name, site.shortName, ...site.controlChannelsMhz.map(formatMhz)].some(value => value.toLowerCase().includes(query));
-  });
-  const selectedSystems = setup.desired.systems.length
-    ? setup.desired.systems
-    : selectedNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
+  const selectedKeys = new Set(selectedSystems.map(system => setupSystemIdentity(system)));
+  const loadedSelectedKeys = new Set(catalogs.flatMap(catalog => catalog.sites.map(site => `${catalog.radioReferenceSid}:${(site.shortName || site.name).toLowerCase()}`)));
+  const unavailableSelectedSystems = selectedSystems.filter(system => !loadedSelectedKeys.has(setupSystemIdentity(system)));
 
   return <div className="site-setup-form site-setup-systems">
     <div className="site-setup-inline-fields">
       <label className="setting-field">
-        <span>RR system ID</span>
-        <input value={radioReferenceSid} inputMode="numeric" onChange={event => setRadioReferenceSid(event.target.value)} onBlur={() => void saveSid()} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} />
-        {statusFor("radioReferenceSid")}
+        <span>Add RR system ID</span>
+        <input value={newSid} inputMode="numeric" onChange={event => setNewSid(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void addCatalog(); }} />
       </label>
-      <button type="button" disabled={busy || !radioReferenceSid.trim()} onClick={() => void loadSites()}>{busy ? "Loading" : radioReferenceSites ? "Reload Sites" : "Load Sites"}</button>
+      <button type="button" disabled={Boolean(busySid) || !newSid.trim()} onClick={() => void addCatalog()}>{busySid && busySid !== "selected" ? "Loading" : "Add RR System"}</button>
     </div>
-    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    <div className="site-setup-source-list">
+      {catalogs.map(catalog => <button type="button" className="site-setup-source-chip" disabled={Boolean(busySid)} onClick={() => void removeCatalog(catalog)} title={`Remove RR ${catalog.radioReferenceSid}`} key={catalog.radioReferenceSid}>
+        <span>{catalog.systemName}</span><small>RR {catalog.radioReferenceSid}</small><b aria-hidden="true">x</b>
+      </button>)}
+      {busySid === "selected" && <span className="settings-message">Loading selected RR systems...</span>}
+    </div>
+    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("error") || message.toLowerCase().includes("must") ? "settings-message error" : "settings-message ok"}>{message}</div>}
     <label className="setting-field">
       <span>Search sites</span>
-      <input value={siteSearch} onChange={event => setSiteSearch(event.target.value)} placeholder="Name, short name, or control channel" />
+      <input value={siteSearch} onChange={event => setSiteSearch(event.target.value)} placeholder="Name, short name, control channel, or RR ID" />
       {statusFor("systems")}
     </label>
     <div className="site-setup-selection-summary">
-      <strong>{selectedSystems.length.toLocaleString()} selected</strong>
+      <strong>{selectedSystems.length.toLocaleString()} selected across {selectedSids.length.toLocaleString()} RR system{selectedSids.length === 1 ? "" : "s"}</strong>
       <div className="site-setup-selected-chips">
-        {selectedSystems.length
-          ? selectedSystems.map(system => {
-            const labelText = system.siteLabel || system.shortName;
-            return <button type="button" className="rf-selected-site-chip" key={system.shortName || labelText} onClick={() => void removeSelectedSystem(system.shortName || labelText)} title={`Remove ${labelText}`}>{labelText} <span aria-hidden="true">x</span></button>;
-          })
-          : <span>No systems selected</span>}
+        {selectedSystems.length ? selectedSystems.map(system => {
+          const labelText = system.siteLabel || system.shortName;
+          return <button type="button" className="rf-selected-site-chip" key={setupSystemIdentity(system)} onClick={() => void removeSelectedSystem(system)} title={`Remove ${labelText}`}>{labelText} <small>RR {system.radioReferenceSid || "--"}</small> <span aria-hidden="true">x</span></button>;
+        }) : <span>No systems selected</span>}
       </div>
     </div>
     <div className="site-setup-site-table-wrap">
       <table className="table compact-table site-setup-site-table">
-        <thead><tr><th></th><th>Site</th><th>Short name</th><th>Control channels</th></tr></thead>
-        <tbody>
-          {radioReferenceSites && sites.length === 0 && <tr><td colSpan={4}>No matching sites.</td></tr>}
-          {!radioReferenceSites && selectedSystems.map(system => <tr key={system.shortName}>
-            <td></td>
-            <td>{system.siteLabel || system.shortName}</td>
-            <td>{system.shortName}</td>
-            <td>{system.controlChannelsHz.length ? formatFrequencyList(system.controlChannelsHz) : "--"}</td>
+        <thead><tr><th></th><th>Site</th><th>System / RR ID</th><th>Short name</th><th>Control channels</th></tr></thead>
+        {catalogs.map(catalog => {
+          const sites = catalog.sites.filter(site => !query || [catalog.systemName, catalog.radioReferenceSid, site.name, site.shortName, ...site.controlChannelsMhz.map(formatMhz)].some(value => value.toLowerCase().includes(query)));
+          return <tbody key={catalog.radioReferenceSid}>
+            <tr className="table-group-row"><td colSpan={5}><strong>{catalog.systemName}</strong> <span className="muted">RR {catalog.radioReferenceSid}</span></td></tr>
+            {sites.length === 0 && <tr><td colSpan={5}>No matching sites.</td></tr>}
+            {sites.map(site => {
+              const identity = `${catalog.radioReferenceSid}:${(site.shortName || site.name).toLowerCase()}`;
+              const checked = selectedKeys.has(identity);
+              return <tr key={identity} className={checked ? "selected" : ""}>
+                <td><input type="checkbox" checked={checked} onChange={event => void toggleSite(catalog, site, event.currentTarget.checked)} aria-label={`Select ${site.name || site.shortName} from RR ${catalog.radioReferenceSid}`} /></td>
+                <td>{site.name || site.shortName}</td>
+                <td>{catalog.systemName} / RR {catalog.radioReferenceSid}</td>
+                <td>{site.shortName}</td>
+                <td>{site.controlChannelsMhz.length ? site.controlChannelsMhz.map(formatMhz).join(", ") : "--"}</td>
+              </tr>;
+            })}
+          </tbody>;
+        })}
+        {unavailableSelectedSystems.length > 0 && <tbody>
+          <tr className="table-group-row"><td colSpan={5}><strong>Selected sites with unavailable RR catalog data</strong></td></tr>
+          {unavailableSelectedSystems.map(system => <tr key={setupSystemIdentity(system)} className="selected">
+            <td></td><td>{system.siteLabel || system.shortName}</td><td>RR {system.radioReferenceSid || "--"}</td><td>{system.shortName}</td><td>{system.controlChannelsHz.length ? formatFrequencyList(system.controlChannelsHz) : "--"}</td>
           </tr>)}
-          {!radioReferenceSites && selectedSystems.length === 0 && <tr><td colSpan={4}>Load sites to select systems.</td></tr>}
-          {radioReferenceSites && sites.map(site => {
-            const siteKey = site.shortName || site.name;
-            const checked = selectedSet.has(siteKey.toLowerCase());
-            return <tr key={siteKey} className={checked ? "selected" : ""}>
-              <td><input type="checkbox" checked={checked} onChange={event => void toggleSite(site, event.currentTarget.checked)} aria-label={`Select ${site.name || site.shortName}`} /></td>
-              <td>{site.name || site.shortName}</td>
-              <td>{site.shortName}</td>
-              <td>{site.controlChannelsMhz.length ? site.controlChannelsMhz.map(formatMhz).join(", ") : "--"}</td>
-            </tr>;
-          })}
-        </tbody>
+        </tbody>}
+        {catalogs.length === 0 && unavailableSelectedSystems.length === 0 && <tbody><tr><td colSpan={5}>Add an RR system to select sites.</td></tr></tbody>}
       </table>
     </div>
   </div>;
+}
+
+async function loadRadioReferenceSiteCatalog(sid: string) {
+  const result = await api.request<SetupTrConfigSites>("/api/v1/setup/tr-config/sites", {
+    method: "POST",
+    body: JSON.stringify({ radioReferenceSid: sid })
+  });
+  writeCachedRadioReferenceSites(result.radioReferenceSid, result);
+  return result;
+}
+
+function setupSystemIdentity(system: Pick<RfSurveySystem, "shortName" | "radioReferenceSid">) {
+  return `${String(system.radioReferenceSid || "").trim()}:${String(system.shortName || "").trim().toLowerCase()}`;
+}
+
+function setupRadioReferenceSids(setup: SiteSetup) {
+  return Array.from(new Set(setup.desired.systems.map(system => String(system.radioReferenceSid || "").trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
 }
 
 function selectedSetupSystemNames(setup: SiteSetup) {
@@ -1516,7 +1582,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const controlChannels = normalizeControlChannelSelection(systems.flatMap(system => system.controlChannelsHz));
   const signature = JSON.stringify({
     siteLabel: setup.desired.siteLabel,
-    sid: setup.desired.radioReferenceSid,
+    sids: setupRadioReferenceSids(setup),
     systems,
     sources,
     selectedSourceIndexes,
@@ -1610,7 +1676,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const effectiveSystems = detail?.profile.systems?.length ? detail.profile.systems : systems;
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
-  const cachedSites = readCachedRadioReferenceSitesForSids(parseRadioReferenceSidList(setup.desired.radioReferenceSid));
+  const cachedSites = readCachedRadioReferenceSitesForSids(setupRadioReferenceSids(setup));
   const sweepSelectionStorageKey = detail ? `pizzawave-site-setup-waterfall-sweep-selections-${detail.session.id}` : "";
   useEffect(() => {
     if (!active)
@@ -1754,7 +1820,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSave, onSetupChan
   const [sdrSources, setSdrSources] = useState<RfSurveySource[] | null>(null);
   const signature = JSON.stringify({
     siteLabel: setup.desired.siteLabel,
-    sid: setup.desired.radioReferenceSid,
+    sids: setupRadioReferenceSids(setup),
     systems,
     sources,
     selectedSourceIndexes,
@@ -2296,7 +2362,7 @@ function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], s
     sourcePlanMode: setup.desired.sourcePlanMode || "full",
     systemDefinitions: systems,
     siteLabel: setup.desired.siteLabel || "Site Setup",
-    radioReferenceSid: setup.desired.radioReferenceSid || undefined,
+    radioReferenceSid: setupRadioReferenceSids(setup).join(",") || undefined,
     mode: "guided",
     groundTruthSource: "site-setup",
     rfPath: normalizeSetupRfPath(setup.desired.rfPath),
@@ -2329,7 +2395,7 @@ function waterfallTrOperationText(status: RfSurveyWaterfallStatus | null | undef
 function initialTalkgroupSources(setup: SiteSetup): SiteSetupTalkgroupSource[] {
   const systemNames = selectedSetupSystemNames(setup);
   const fallbackSystem = setup.desired.siteLabel || systemNames[0] || "";
-  const sids = parseRadioReferenceSidList(setup.desired.radioReferenceSid);
+  const sids = setupRadioReferenceSids(setup);
   const selectedSystems: RfSurveySystem[] = setup.desired.systems.length
     ? setup.desired.systems
     : systemNames.map(name => ({ shortName: name, siteLabel: name, controlChannelsHz: [], voiceFrequenciesHz: [] }));
@@ -2524,7 +2590,7 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
 
   async function saveTalkgroupSystemMapping(sources: SiteSetupTalkgroupSource[]) {
     const sids = Array.from(new Set([
-      ...parseRadioReferenceSidList(setup.desired.radioReferenceSid),
+      ...setupRadioReferenceSids(setup),
       ...sources.map(row => row.radioReferenceSid.trim()).filter(Boolean)
     ]));
     if (!setup.desired.systems.length || !sids.length) return;

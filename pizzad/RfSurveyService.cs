@@ -507,12 +507,18 @@ public sealed class RfSurveyService
         var systemNames = desired.Systems.Count > 0
             ? desired.Systems.Select(system => system.ShortName).Where(name => !string.IsNullOrWhiteSpace(name)).ToList()
             : desired.SystemShortNames;
+        var radioReferenceSids = desired.Systems
+            .Select(system => system.RadioReferenceSid?.Trim())
+            .Where(sid => !string.IsNullOrWhiteSpace(sid))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         var systems = ApplyExplicitRfSelections(desired.Systems, desired.RfSelections);
         return new RfSurveyCreateRequest(
             SystemShortName: systemNames.FirstOrDefault(),
             SiteLabel: string.IsNullOrWhiteSpace(desired.SiteLabel) ? "Site Setup" : desired.SiteLabel,
             Mode: "guided",
-            RadioReferenceSid: string.IsNullOrWhiteSpace(desired.RadioReferenceSid) ? null : desired.RadioReferenceSid,
+            RadioReferenceSid: radioReferenceSids.Count == 0 ? null : string.Join(",", radioReferenceSids),
             SystemShortNames: systemNames,
             SourcePlanSystemShortNames: desired.SourcePlanSystemShortNames.Count > 0 ? desired.SourcePlanSystemShortNames : systemNames,
             SourcePlanMode: string.IsNullOrWhiteSpace(desired.SourcePlanMode) ? "full" : desired.SourcePlanMode,

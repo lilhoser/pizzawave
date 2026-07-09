@@ -680,6 +680,23 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .site-setup-site-table tr.selected td {
   background: rgba(90, 167, 255, 0.1);
 }
+.site-setup-site-table .table-group-row td {
+  position: sticky;
+  top: 34px;
+  z-index: 1;
+  padding: 7px 10px;
+  background: #171a1d;
+  border-top: 1px solid #3a4652;
+  border-bottom: 1px solid #3a4652;
+}
+.site-setup-site-table .table-group-row td:first-child {
+  width: auto;
+  text-align: left;
+}
+.rf-selected-site-chip small {
+  color: #9faab5;
+  margin-left: 4px;
+}
 .site-setup-site-table td:first-child,
 .site-setup-site-table th:first-child {
   width: 38px;

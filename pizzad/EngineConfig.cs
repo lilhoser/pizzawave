@@ -200,7 +200,6 @@ public sealed class EngineConfig
         if (RfSurvey.P25ProbeTimeoutSeconds <= 0) RfSurvey.P25ProbeTimeoutSeconds = Math.Max(30, RfSurvey.P25ProbeDurationSeconds + 15);
         SiteSetup.SiteLabel = SiteSetup.SiteLabel?.Trim() ?? string.Empty;
         SiteSetup.LocationNotes = SiteSetup.LocationNotes?.Trim() ?? string.Empty;
-        SiteSetup.RadioReferenceSid = SiteSetup.RadioReferenceSid?.Trim() ?? string.Empty;
         SiteSetup.SourcePlanMode = string.IsNullOrWhiteSpace(SiteSetup.SourcePlanMode) ? "full" : SiteSetup.SourcePlanMode.Trim();
         SiteSetup.SystemShortNames ??= new();
         SiteSetup.SourcePlanSystemShortNames ??= new();
@@ -407,7 +406,6 @@ public sealed class SiteSetupConfig
     public string SiteLabel { get; set; } = string.Empty;
     public string LocationNotes { get; set; } = string.Empty;
     public List<MonitoredAreaConfig> MonitoredAreas { get; set; } = new();
-    public string RadioReferenceSid { get; set; } = string.Empty;
     public List<string> SystemShortNames { get; set; } = new();
     public List<string> SourcePlanSystemShortNames { get; set; } = new();
     public string SourcePlanMode { get; set; } = "full";

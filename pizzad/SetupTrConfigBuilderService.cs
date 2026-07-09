@@ -53,7 +53,7 @@ public sealed partial class SetupTrConfigBuilderService
             throw new InvalidOperationException("No RadioReference site rows were found for this SID.");
 
         var diagnostics = $"Found {sites.Count} RadioReference site(s). Select one or more before continuing.";
-        return new SetupTrConfigSitesDto(systemName, sites, diagnostics);
+        return new SetupTrConfigSitesDto(request.RadioReferenceSid.Trim(), systemName, sites, diagnostics);
     }
 
     public async Task<SetupTrConfigDraftDto> DraftAsync(SetupTrConfigDraftRequest request, CancellationToken ct)

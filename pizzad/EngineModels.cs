@@ -360,6 +360,7 @@ public sealed record SetupTrConfigSiteDto(
     IReadOnlyList<double> ControlChannelsMhz);
 
 public sealed record SetupTrConfigSitesDto(
+    string RadioReferenceSid,
     string SystemName,
     IReadOnlyList<SetupTrConfigSiteDto> Sites,
     string Diagnostics);
@@ -1114,7 +1115,6 @@ public sealed class SiteSetupDesiredPatch
     public string? SiteLabel { get; init; }
     public string? LocationNotes { get; init; }
     public List<MonitoredAreaConfig>? MonitoredAreas { get; init; }
-    public string? RadioReferenceSid { get; init; }
     public List<string>? SystemShortNames { get; init; }
     public List<string>? SourcePlanSystemShortNames { get; init; }
     public string? SourcePlanMode { get; init; }

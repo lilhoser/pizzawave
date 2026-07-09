@@ -98,7 +98,6 @@ public sealed class SiteSetupService
         SiteLabel = patch.SiteLabel ?? before.SiteLabel,
         LocationNotes = patch.LocationNotes ?? before.LocationNotes,
         MonitoredAreas = patch.MonitoredAreas ?? before.MonitoredAreas,
-        RadioReferenceSid = patch.RadioReferenceSid ?? before.RadioReferenceSid,
         SystemShortNames = patch.SystemShortNames ?? before.SystemShortNames,
         SourcePlanSystemShortNames = patch.SourcePlanSystemShortNames ?? before.SourcePlanSystemShortNames,
         SourcePlanMode = patch.SourcePlanMode ?? before.SourcePlanMode,
@@ -197,7 +196,6 @@ public sealed class SiteSetupService
             SiteLabel = before.SiteLabel,
             LocationNotes = before.LocationNotes,
             MonitoredAreas = CloneMonitoredAreas(_config.Locations.MonitoredAreas),
-            RadioReferenceSid = before.RadioReferenceSid,
             SystemShortNames = applied.SystemShortNames.ToList(),
             SourcePlanSystemShortNames = applied.SystemShortNames.ToList(),
             SourcePlanMode = before.SourcePlanMode,
@@ -442,7 +440,6 @@ public sealed class SiteSetupService
         SiteLabel = value.SiteLabel?.Trim() ?? string.Empty,
         LocationNotes = value.LocationNotes?.Trim() ?? string.Empty,
         MonitoredAreas = NormalizeMonitoredAreas(value.MonitoredAreas),
-        RadioReferenceSid = value.RadioReferenceSid?.Trim() ?? string.Empty,
         SystemShortNames = NormalizeStrings(value.SystemShortNames),
         SourcePlanSystemShortNames = NormalizeStrings(value.SourcePlanSystemShortNames),
         SourcePlanMode = string.IsNullOrWhiteSpace(value.SourcePlanMode) ? "full" : value.SourcePlanMode.Trim(),
@@ -466,7 +463,6 @@ public sealed class SiteSetupService
         AddIfChanged(changes, "site label", before.SiteLabel, after.SiteLabel);
         AddIfChanged(changes, "location notes", before.LocationNotes, after.LocationNotes);
         AddIfChanged(changes, "monitored areas", MonitoredAreaSummary(before.MonitoredAreas), MonitoredAreaSummary(after.MonitoredAreas));
-        AddIfChanged(changes, "RadioReference SID", before.RadioReferenceSid, after.RadioReferenceSid);
         AddIfChanged(changes, "systems/sites", string.Join(",", before.SystemShortNames), string.Join(",", after.SystemShortNames));
         AddIfChanged(changes, "source-plan systems", string.Join(",", before.SourcePlanSystemShortNames), string.Join(",", after.SourcePlanSystemShortNames));
         AddIfChanged(changes, "selected sources", string.Join(",", before.SelectedSourceIndexes), string.Join(",", after.SelectedSourceIndexes));
@@ -483,7 +479,6 @@ public sealed class SiteSetupService
         value.SiteLabel,
         value.LocationNotes,
         monitoredAreas = MonitoredAreaSummary(value.MonitoredAreas),
-        value.RadioReferenceSid,
         value.SystemShortNames,
         value.SourcePlanSystemShortNames,
         value.SelectedSourceIndexes,

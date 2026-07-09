@@ -600,7 +600,7 @@ export type SetupTrConfigSystem = { systemName: string; shortName: string; siteN
 export type SetupTrConfigSource = { label: string; serial: string; type: string; driver: string; deviceArgs: string; centerFrequency: number; sampleRate: number; gain: string; gainMode: string; coveredFrequenciesMhz: number[]; omittedFrequenciesMhz: number[] };
 export type SetupTrConfigDraft = { configJson: string; systems: SetupTrConfigSystem[]; sources: SetupTrConfigSource[]; warnings: string[]; diagnostics: string };
 export type SetupTrConfigSite = { name: string; shortName: string; frequencyCount: number; controlChannelCount: number; controlChannelsMhz: number[] };
-export type SetupTrConfigSites = { systemName: string; sites: SetupTrConfigSite[]; diagnostics: string };
+export type SetupTrConfigSites = { radioReferenceSid: string; systemName: string; sites: SetupTrConfigSite[]; diagnostics: string };
 export type SetupAreaBoundaryCandidate = { label: string; kind: string; source: string; geoId: string; north: number; south: number; east: number; west: number };
 export type SetupAreaBoundaryResponse = { query: string; candidates: SetupAreaBoundaryCandidate[]; diagnostics: string };
 export type SiteSetupMonitoredArea = { areaId: string; areaLabel: string; systemShortName: string; north: number; south: number; east: number; west: number; aliases: string[] };
@@ -626,7 +626,6 @@ export type SiteSetupConfig = {
   siteLabel: string;
   locationNotes: string;
   monitoredAreas: SiteSetupMonitoredArea[];
-  radioReferenceSid: string;
   systemShortNames: string[];
   sourcePlanSystemShortNames: string[];
   sourcePlanMode: string;
