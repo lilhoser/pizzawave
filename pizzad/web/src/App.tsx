@@ -1647,6 +1647,8 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       setBusy("load");
       setMessage("");
       try {
+        if (subPage === "review")
+          await saveSourcePlan();
         const workspace = await prepareSiteSetupRfWorkspace();
         if (!stopped) {
           setDetail(workspace);
