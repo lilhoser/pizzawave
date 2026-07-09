@@ -1633,6 +1633,7 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
   const draftSources = Array.isArray(parsedDraft?.sources) ? parsedDraft.sources : [];
   const draftWarnings = useMemo(() => siteSetupDraftWarningGroups(draft?.summary.warnings ?? []), [draft?.summary.warnings]);
   const draftReviewRows = useMemo(() => buildSiteSetupConfigReviewRows(parsedLiveDraft, parsedDraft), [parsedLiveDraft, parsedDraft]);
+  const discardInProgressRef = useRef(false);
 
   useEffect(() => {
     setSelectedSourceIndexes(defaultSelectedSources);
@@ -1647,8 +1648,13 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       setBusy("load");
       setMessage("");
       try {
-        if (subPage === "review")
+        if (discardInProgressRef.current)
+          return;
+        if (subPage === "review") {
           await saveSourcePlan();
+          if (stopped || discardInProgressRef.current)
+            return;
+        }
         const workspace = await prepareSiteSetupRfWorkspace();
         if (!stopped) {
           setDetail(workspace);
@@ -1801,8 +1807,12 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
       return;
     }
     if (!confirmAction("Discard pending Setup changes?", "This resets Setup's desired state to the current live TR config. TR will not be restarted.")) return;
+    discardInProgressRef.current = true;
     setBusy("discard");
     setMessage("");
+    setSubPage("source");
+    setDraft(null);
+    setDetail(null);
     try {
       const next = await api.request<SiteSetup>(`${siteSetupApi}/discard`, {
         method: "POST",
@@ -1812,12 +1822,11 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSetupChanged, onA
         })
       });
       onSetupChanged(next);
-      setDraft(null);
-      setDetail(null);
       setMessage("Discarded pending Setup changes.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to discard pending Setup changes.");
     } finally {
+      discardInProgressRef.current = false;
       setBusy("");
     }
   }
