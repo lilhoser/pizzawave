@@ -1,6 +1,6 @@
 # PizzaWave Open TODO
 
-Last consolidated: 2026-05-27
+Last consolidated: 2026-07-09
 
 This file is the active backlog. Historical checkpoints and deployment notes
 belong in `docs/current-status.md`; completed work should not remain here
@@ -13,7 +13,7 @@ unless it creates a current regression test or follow-up.
 3. Hourly PizzaWave quality monitoring.
 4. Focused test coverage where it gives real signal.
 5. Incident/RAG/geocoding quality improvements.
-6. Documentation pruning and alignment.
+6. Incident/RAG/geocoding documentation and regression notes.
 
 ## Clean Rig Setup And Setup API Audit
 
@@ -30,17 +30,14 @@ unless it creates a current regression test or follow-up.
 - Keep backup/restore and Reset + Setup in the clean-rig regression test.
   Backup/restore field testing succeeded on the live RPI, so treat this as a
   regression scenario rather than an unknown feature spike.
-- Fix restore/deploy frontend state handling so Settings cannot temporarily show
-  stale defaults while the backend config has already been restored correctly.
-- Audit setup, calibration, service, and admin endpoints during the setup flow
+- Audit remaining calibration, service, and admin endpoints during the setup flow
   for operator value, write-auth expectations, guardrails, bounded runtime/cost,
   safe failure behavior, and absence of hidden backfill/import/transcription
   flood behavior.
-- Continue the remaining setup/calibration endpoint audit after the clean
-  installer test. The first cleanup pass already removed deprecated rig-side
-  mutation endpoints for transcription retries, manual incident
-  generation/rebuild, recommendation auto-apply, and standalone TR CSV
-  generation.
+- Continue the remaining calibration endpoint audit after the clean installer
+  test. Completed cleanup passes removed deprecated rig-side mutation endpoints,
+  old migration entry points, setup-owned restore endpoints, and standalone TR
+  CSV generation.
 - Reintroduce a dedicated talkgroup enable/disable interface outside Setup.
   Setup should keep loading the catalog from selected RadioReference systems;
   operator policy such as disabling noisy TGs, incident eligibility, and future
@@ -167,7 +164,7 @@ unless it creates a current regression test or follow-up.
 
 ## Documentation
 
-- Keep docs aligned with the simplified API/setup flow.
+- Keep docs aligned with Reset, first-run prerequisites, and Setup.
 - Keep PizzaWave-only branding and avoid reintroducing old app names.
 - Keep unsupported old-app history out of main docs; git history is enough.
 - Keep LM Studio AI routing docs aligned with observed LM Link behavior.
