@@ -393,13 +393,20 @@ public sealed class BackupRestoreService
     private bool ExcludeAppDataPath(string path)
     {
         var relative = Path.GetRelativePath(_config.Storage.AppDataRoot, path);
-        var first = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).FirstOrDefault() ?? string.Empty;
+        var parts = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var first = parts.FirstOrDefault() ?? string.Empty;
+        var extension = Path.GetExtension(path);
         return first.Equals("backups", StringComparison.OrdinalIgnoreCase) ||
                first.Equals("backup-working", StringComparison.OrdinalIgnoreCase) ||
                first.Equals("cache", StringComparison.OrdinalIgnoreCase) ||
                first.Equals(".cache", StringComparison.OrdinalIgnoreCase) ||
                first.Equals("restore-staging", StringComparison.OrdinalIgnoreCase) ||
-               first.Equals("protected-config", StringComparison.OrdinalIgnoreCase);
+               first.Equals("protected-config", StringComparison.OrdinalIgnoreCase) ||
+               (first.Equals("rf-surveys", StringComparison.OrdinalIgnoreCase) &&
+                (extension.Equals(".cs16", StringComparison.OrdinalIgnoreCase) ||
+                 extension.Equals(".u8", StringComparison.OrdinalIgnoreCase) ||
+                 extension.Equals(".iq", StringComparison.OrdinalIgnoreCase) ||
+                 extension.Equals(".raw", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static bool IsSymlink(string path)

@@ -192,16 +192,24 @@ public sealed class BackupRestoreServiceTests
             var config = await CreateConfigAsync(root);
             var cachePath = Path.Combine(config.Storage.AppDataRoot, ".cache", "huggingface", "model.bin");
             var regularPath = Path.Combine(config.Storage.AppDataRoot, "talkgroups.json");
+            var rawRfCapturePath = Path.Combine(config.Storage.AppDataRoot, "rf-surveys", "rf-test", "rf-power-scans", "20260709000000", "source-0-851775000-gain-21.cs16");
+            var rfSummaryPath = Path.Combine(config.Storage.AppDataRoot, "rf-surveys", "rf-test", "survey.json");
             Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(rawRfCapturePath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(rfSummaryPath)!);
             await File.WriteAllTextAsync(cachePath, "cache");
             await File.WriteAllTextAsync(regularPath, "{}");
+            await File.WriteAllTextAsync(rawRfCapturePath, "raw iq");
+            await File.WriteAllTextAsync(rfSummaryPath, "{}");
 
             var service = new BackupRestoreService(config, NullLogger<BackupRestoreService>.Instance);
             var result = await service.CreateBackupAsync(null, CancellationToken.None);
 
             using var archive = System.IO.Compression.ZipFile.OpenRead(result.Path);
             Assert.Null(archive.GetEntry("appdata/.cache/huggingface/model.bin"));
+            Assert.Null(archive.GetEntry("appdata/rf-surveys/rf-test/rf-power-scans/20260709000000/source-0-851775000-gain-21.cs16"));
             Assert.NotNull(archive.GetEntry("appdata/talkgroups.json"));
+            Assert.NotNull(archive.GetEntry("appdata/rf-surveys/rf-test/survey.json"));
         }
         finally
         {
