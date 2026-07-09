@@ -239,6 +239,49 @@ Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category
     }
 
     [Fact]
+    public async Task UpdatePolicyAsync_DisablesOnlyExactSystemScopedTalkgroup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                Storage = new StorageConfig { AppDataRoot = root },
+                TrunkRecorder = new TrunkRecorderConfig
+                {
+                    TalkgroupCatalogPath = Path.Combine(root, "talkgroups.json"),
+                    TalkgroupsPath = Path.Combine(root, "talkgroups.csv")
+                }
+            };
+            var service = new TalkgroupCatalogService(config, Microsoft.Extensions.Logging.Abstractions.NullLogger<TalkgroupCatalogService>.Instance);
+            await service.SaveAsync(new TalkgroupCatalogDocument
+            {
+                Items =
+                [
+                    new TalkgroupCatalogItem { SystemShortName = "mswin", Id = 42518, AlphaTag = "Jackson PD", OpsCategory = "police", Enabled = true },
+                    new TalkgroupCatalogItem { SystemShortName = "entergy", Id = 42518, AlphaTag = "Utility Ops", OpsCategory = "utilities", Enabled = true },
+                    new TalkgroupCatalogItem { SystemShortName = "entergy", Id = 76, AlphaTag = "SYS Telecom", OpsCategory = "utilities", Enabled = true }
+                ]
+            }, generateTrCsv: true, CancellationToken.None);
+
+            var result = await service.UpdatePolicyAsync(new TalkgroupCatalogPolicyUpdateRequest(
+                [new TalkgroupCatalogPolicyTarget(SystemShortName: "entergy", Talkgroup: 42518)],
+                Enabled: false), CancellationToken.None);
+
+            var rows = service.Load().Items.ToDictionary(TalkgroupCatalogService.ItemKey, StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(1, result.Updated);
+            Assert.True(rows["mswin:42518"].Enabled);
+            Assert.False(rows["entergy:42518"].Enabled);
+            Assert.True(rows["entergy:76"].Enabled);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void DownstreamProfilePolicy_DisabledTalkgroupBlocksPostTranscriptionWork()
     {
         var profileId = Guid.NewGuid();
