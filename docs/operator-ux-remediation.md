@@ -9,12 +9,11 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 2 - Talkgroups
-- Current milestone: Package 2 deployment and operator verification
+- Current milestone: Package 2 operator verification
 - Working branch: `codex/operator-ux-review`
-- Last deployed commit: `9c48f30`
+- Last deployed commit: `99f4c96`
 - Operator verification: Package 1 accepted
-- Next action: deploy Package 2 to the RPI, verify import/paging/policy behavior,
-  and ask the operator to inspect the milestone.
+- Next action: ask the operator to inspect Package 2 and confirm acceptance.
 
 ## Working Rules
 
@@ -140,6 +139,9 @@ Status: pending
 - `9c48f30`: Package 1 deployed; versioned Setup mutations, per-site RR
   identity, Setup-owned RF handoff, and explicit live baselining for previously
   unspecified source gain.
+- `99f4c96`: Package 2 deployed; server-owned RR import provenance, explicit
+  per-system refresh, server-paged catalog reads, and scoped Setup policy
+  mutations.
 
 ## Verification Log
 
@@ -173,3 +175,9 @@ Status: pending
   save, and full-catalog replacement endpoints were removed. The last applied
   enabled-talkgroup set is retained so Discard can restore pending TR policy
   changes without undoing immediate category edits.
+- 2026-07-09: Package 2 deployed to the RPI. The live legacy catalog completed
+  its one-time provenance import with 2,529 MSWIN RR 4879 rows and 298 Entergy
+  RR 8202 rows, adding no duplicates and preserving 15 existing TR exclusions
+  and operator category assignments. Re-entering Talkgroups did not repeat the
+  import; both per-system refresh controls became available after the paged
+  catalog loaded, and the provenance migration created no pending Setup change.
