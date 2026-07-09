@@ -6485,7 +6485,18 @@ public sealed class RfSurveyService
 
         var assignedNames = assignments.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var system in systems.Where(system => !assignedNames.Contains(system.ShortName)))
-            warnings.Add($"{system.SiteLabel}: no explicit source assignment; Config Draft will not move an assigned source window for this site.");
+        {
+            var inferred = InferSourceAssignment(system, profile.Sources, selected, defaultRate);
+            if (inferred.HasValue)
+            {
+                assignments[system.ShortName] = inferred.Value;
+                warnings.Add($"{system.SiteLabel}: no explicit source assignment; Config Draft inferred Source {inferred.Value} from control-channel proximity.");
+            }
+            else
+            {
+                warnings.Add($"{system.SiteLabel}: no explicit source assignment; Config Draft will not move an assigned source window for this site.");
+            }
+        }
 
         var result = new Dictionary<int, SourceWindow>();
         foreach (var sourceIndex in selectedSourceIndexes)
@@ -6517,6 +6528,49 @@ public sealed class RfSurveyService
                 result[sourceIndex] = windows[0];
         }
         return result;
+    }
+
+    private static int? InferSourceAssignment(
+        RfSurveySystemDto system,
+        IReadOnlyList<RfSurveySourceDto> sources,
+        IReadOnlySet<int> selectedSourceIndexes,
+        int defaultRate)
+    {
+        var controlChannels = system.ControlChannelsHz
+            .Where(value => value > 0)
+            .Distinct()
+            .Order()
+            .ToList();
+        if (controlChannels.Count == 0)
+            return null;
+
+        var candidates = sources
+            .Where(source => selectedSourceIndexes.Contains(source.Index))
+            .Select(source =>
+            {
+                var sampleRate = source.SampleRate > 0 ? source.SampleRate : defaultRate;
+                var half = TrUsableHalfBandwidthHz(sampleRate);
+                var low = source.CenterHz - half;
+                var high = source.CenterHz + half;
+                var covered = controlChannels.Count(frequency => frequency >= low && frequency <= high);
+                var distance = controlChannels.Sum(frequency =>
+                {
+                    if (frequency < low)
+                        return low - frequency;
+                    if (frequency > high)
+                        return frequency - high;
+                    return 0;
+                });
+                var centerDistance = controlChannels.Sum(frequency => Math.Abs(frequency - source.CenterHz));
+                return new { source.Index, Covered = covered, Distance = distance, CenterDistance = centerDistance };
+            })
+            .OrderByDescending(row => row.Covered)
+            .ThenBy(row => row.Distance)
+            .ThenBy(row => row.CenterDistance)
+            .ThenBy(row => row.Index)
+            .ToList();
+
+        return candidates.Count == 0 ? null : candidates[0].Index;
     }
 
     private static IReadOnlyList<RfSurveySystemDto> AddObservedVoiceFrequencies(
