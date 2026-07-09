@@ -3,143 +3,25 @@ using System.Text.Json;
 
 namespace pizzad;
 
-public sealed class MigrationService
+public sealed class SystemResetService
 {
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EmbeddingService _embeddings;
     private readonly IngestControlService _ingest;
-    private readonly CredentialStore _credentials;
     private readonly AuthService _auth;
     private readonly BackupRestoreService _backups;
-    private readonly ILogger<MigrationService> _logger;
+    private readonly ILogger<SystemResetService> _logger;
 
-    public MigrationService(EngineConfig config, EngineDatabase database, EmbeddingService embeddings, IngestControlService ingest, CredentialStore credentials, AuthService auth, BackupRestoreService backups, ILogger<MigrationService> logger)
+    public SystemResetService(EngineConfig config, EngineDatabase database, EmbeddingService embeddings, IngestControlService ingest, AuthService auth, BackupRestoreService backups, ILogger<SystemResetService> logger)
     {
         _config = config;
         _database = database;
         _embeddings = embeddings;
         _ingest = ingest;
-        _credentials = credentials;
         _auth = auth;
         _backups = backups;
         _logger = logger;
-    }
-
-    public async Task<MigrationActionResultDto> BeginAsync(CancellationToken ct)
-    {
-        if (!_config.Setup.MigrationMode)
-        {
-            _config.Setup.MigrationPreviousCompleted = _config.Setup.Completed;
-            _config.Setup.MigrationPreviousCurrentStep = string.IsNullOrWhiteSpace(_config.Setup.CurrentStep)
-                ? (_config.Setup.Completed ? "complete" : "stack")
-                : _config.Setup.CurrentStep;
-        }
-        _config.Setup.Completed = false;
-        _config.Setup.CurrentStep = "migration";
-        _config.Setup.MigrationMode = true;
-        _config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
-        _config.Setup.MigrationResetAtUtc = null;
-        _config.Setup.PendingRestorePath = string.Empty;
-        _config.Setup.PendingRestoreManifestJson = string.Empty;
-        _ingest.Pause(false, "Migration mode started from System > Backup.", 0);
-        await SaveConfigAsync(ct);
-        return new MigrationActionResultDto(true, "Migration mode started. PizzaWave will open the setup wizard for migration choices.");
-    }
-
-    public async Task<MigrationActionResultDto> CancelAsync(CancellationToken ct)
-    {
-        var resetAlreadyApplied = _config.Setup.MigrationResetAtUtc.HasValue;
-        if (resetAlreadyApplied)
-            throw new InvalidOperationException("Migration reset has already been applied and cannot be canceled. Restore from a backup or continue setup for the new site.");
-
-        _config.Setup.MigrationMode = false;
-        _config.Setup.MigrationStartedAtUtc = null;
-        _config.Setup.MigrationResetAtUtc = null;
-        _config.Setup.Completed = _config.Setup.MigrationPreviousCompleted;
-        _config.Setup.CurrentStep = string.IsNullOrWhiteSpace(_config.Setup.MigrationPreviousCurrentStep)
-            ? (_config.Setup.Completed ? "complete" : "stack")
-            : _config.Setup.MigrationPreviousCurrentStep;
-        _config.Setup.MigrationPreviousCompleted = false;
-        _config.Setup.MigrationPreviousCurrentStep = string.Empty;
-        if (_config.Setup.Completed)
-            _ingest.Resume("Migration mode canceled before reset.", 0);
-        await SaveConfigAsync(ct);
-        return new MigrationActionResultDto(true, "Migration mode canceled. No site data was cleared.");
-    }
-
-    public MigrationProfileDto ExportProfile()
-    {
-        return new MigrationProfileDto(
-            1,
-            "PizzaWave Migration Profile",
-            DateTime.UtcNow,
-            _config.Branding,
-            _config.Server,
-            _config.Ingest,
-            _config.Storage,
-            _config.Transcription,
-            _config.AiInsights,
-            _config.Embeddings,
-            _credentials.SanitizeAlertsForExport(_config.Alerts),
-            _config.Auth);
-    }
-
-    public async Task<MigrationActionResultDto> ImportProfileAsync(MigrationProfileDto profile, CancellationToken ct)
-    {
-        if (!string.Equals(profile.Product, "PizzaWave Migration Profile", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Migration profile is not a supported PizzaWave migration profile.");
-
-        _config.Branding = profile.Branding;
-        _config.Server = profile.Server;
-        _config.Ingest = profile.Ingest;
-        _config.Storage = profile.Storage;
-        _config.Transcription = profile.Transcription;
-        _config.AiInsights = profile.AiInsights;
-        _config.Embeddings = profile.Embeddings;
-        _config.Alerts = _credentials.ApplyAlertSecrets(profile.Alerts, _config.Alerts, persistSecret: true);
-        _config.Auth = profile.Auth;
-        _config.ApplyDefaults();
-        await SaveConfigAsync(ct);
-        return new MigrationActionResultDto(true, "Migration profile imported. Review site-specific setup steps before finishing.");
-    }
-
-    public async Task<MigrationResetResultDto> ResetForNewSiteAsync(MigrationResetRequestDto? request, CancellationToken ct)
-    {
-        request ??= new MigrationResetRequestDto();
-        if (!_config.Setup.MigrationMode || _config.Setup.MigrationStartedAtUtc == null)
-            throw new InvalidOperationException("Begin migration mode before resetting this rig for a new site.");
-        if (!string.IsNullOrWhiteSpace(_config.Setup.PendingRestorePath))
-            throw new InvalidOperationException("Cancel or apply the pending restore before starting migration reset.");
-
-        var current = _config.Clone();
-        var warnings = new List<string>();
-        BackupCreateResultDto? backup = null;
-        _ingest.Pause(false, "Migration reset for new site.", 0);
-        PreflightProtectedSiteFilesForReset();
-
-        if (request.CreateBackup)
-            backup = await _backups.CreateBackupAsync(new BackupCreateRequestDto(request.BackupAudioWindow), ct);
-
-        await _database.ClearSiteDataForMigrationAsync(ct);
-        DeleteDirectoryContents(_config.Storage.AudioRoot, warnings);
-
-        var qdrant = await _embeddings.DeleteCollectionAsync(ct);
-        if (!qdrant.Ok)
-            warnings.Add(qdrant.Message);
-
-        DeleteFileIfExists(_config.TrunkRecorder.TalkgroupCatalogPath, warnings);
-        await ResetProtectedSiteFilesAsync(ct);
-
-        ApplyResetConfig(current, request);
-        _auth.RegenerateToken();
-        _config.ApplyDefaults();
-        await SaveConfigAsync(ct);
-
-        var message = backup == null
-            ? "Site-specific data was cleared. Continue setup with the new trunk-recorder site/frequency/talkgroup configuration."
-            : $"Created backup {backup.Name}. Site-specific data was cleared. Continue setup with the new trunk-recorder site/frequency/talkgroup configuration.";
-        return new MigrationResetResultDto(true, message, warnings, backup);
     }
 
     public async Task<SystemResetResultDto> ResetAsync(SystemResetRequestDto? request, CancellationToken ct)
@@ -185,13 +67,9 @@ public sealed class MigrationService
         if (clearSiteState)
         {
             DeleteFileIfExists(_config.TrunkRecorder.TalkgroupCatalogPath, warnings);
+            DeleteDirectoryContents(Path.Combine(_config.Storage.AppDataRoot, "rf-surveys"), warnings);
             await ResetProtectedSiteFilesAsync(ct);
-            ApplyResetConfig(current, request.ToMigrationResetRequest(fullReset));
-            _config.Setup.MigrationMode = false;
-            _config.Setup.MigrationStartedAtUtc = null;
-            _config.Setup.MigrationResetAtUtc = null;
-            _config.Setup.MigrationPreviousCompleted = false;
-            _config.Setup.MigrationPreviousCurrentStep = string.Empty;
+            ApplyResetConfig(current, request.ToCarryForwardOptions(fullReset));
             _config.Setup.RestoreAppliedAtUtc = null;
             _config.Setup.PendingRestorePath = string.Empty;
             _config.Setup.PendingRestoreManifestJson = string.Empty;
@@ -214,7 +92,7 @@ public sealed class MigrationService
         return new SystemResetResultDto(true, message, warnings, backup, fullReset ? "first-run" : clearSiteState ? "setup" : "backup");
     }
 
-    private void ApplyResetConfig(EngineConfig current, MigrationResetRequestDto request)
+    private void ApplyResetConfig(EngineConfig current, ResetCarryForwardOptions request)
     {
         _config.Branding = request.PreserveBranding ? CloneSection(current.Branding) : new BrandingConfig();
         _config.Server = CloneSection(current.Server);
@@ -245,9 +123,6 @@ public sealed class MigrationService
             CurrentStep = "tr",
             InstallMode = "freshTr",
             TrConfigMode = "radioReference",
-            MigrationMode = true,
-            MigrationStartedAtUtc = current.Setup.MigrationStartedAtUtc,
-            MigrationResetAtUtc = DateTime.UtcNow,
             RestoreAppliedAtUtc = null,
             TrDetected = false,
             TrConfigured = false,
@@ -285,7 +160,7 @@ public sealed class MigrationService
             UseShellExecute = false
         };
         psi.ArgumentList.Add(helper);
-        psi.ArgumentList.Add("reset-migration-site-files");
+        psi.ArgumentList.Add("reset-site-files");
         psi.ArgumentList.Add(_config.TrunkRecorder.ConfigPath);
         psi.ArgumentList.Add(_config.TrunkRecorder.TalkgroupsPath);
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Unable to start sudo helper.");
@@ -295,8 +170,8 @@ public sealed class MigrationService
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
         if (process.ExitCode != 0)
-            throw new InvalidOperationException($"Migration helper failed with exit code {process.ExitCode}: {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim()}");
-        _logger.LogInformation("Migration site file reset completed: {Output}", stdout.Trim());
+            throw new InvalidOperationException($"Site reset helper failed with exit code {process.ExitCode}: {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim()}");
+        _logger.LogInformation("Site file reset completed: {Output}", stdout.Trim());
     }
 
     private void PreflightProtectedSiteFilesForReset()
@@ -319,7 +194,7 @@ public sealed class MigrationService
         if (string.IsNullOrWhiteSpace(path))
             return;
         if (!path.StartsWith("/etc/trunk-recorder/", StringComparison.Ordinal))
-            throw new InvalidOperationException($"Migration reset refuses protected TR file outside /etc/trunk-recorder: {path}");
+            throw new InvalidOperationException($"Site reset refuses protected TR file outside /etc/trunk-recorder: {path}");
     }
 
     private static void DeleteDirectoryContents(string path, List<string> warnings)
@@ -396,12 +271,11 @@ public sealed class MigrationService
             Path.Combine(AppContext.BaseDirectory, "scripts", "pizzawave_setup_admin.sh")
         };
         return candidates.FirstOrDefault(File.Exists)
-            ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected migration actions are unavailable.");
+            ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected reset actions are unavailable.");
     }
 }
 
-public sealed record MigrationActionResultDto(bool Ok, string Message);
-public sealed class MigrationResetRequestDto
+public sealed class ResetCarryForwardOptions
 {
     public bool CreateBackup { get; set; } = true;
     public string BackupAudioWindow { get; set; } = "all";
@@ -413,7 +287,6 @@ public sealed class MigrationResetRequestDto
     public bool PreserveRfDiagnostics { get; set; } = true;
     public bool PreserveRfSurvey { get; set; } = true;
 }
-public sealed record MigrationResetResultDto(bool Ok, string Message, IReadOnlyList<string> Warnings, BackupCreateResultDto? Backup);
 public sealed class SystemResetRequestDto
 {
     public List<string> Presets { get; set; } = new();
@@ -428,7 +301,7 @@ public sealed class SystemResetRequestDto
     public bool PreserveRfDiagnostics { get; set; } = true;
     public bool PreserveRfSurvey { get; set; } = true;
 
-    public MigrationResetRequestDto ToMigrationResetRequest(bool fullReset) => new()
+    public ResetCarryForwardOptions ToCarryForwardOptions(bool fullReset) => new()
     {
         CreateBackup = false,
         BackupAudioWindow = BackupAudioWindow,
@@ -442,16 +315,3 @@ public sealed class SystemResetRequestDto
     };
 }
 public sealed record SystemResetResultDto(bool Ok, string Message, IReadOnlyList<string> Warnings, BackupCreateResultDto? Backup, string NextPage);
-public sealed record MigrationProfileDto(
-    int Version,
-    string Product,
-    DateTime CreatedUtc,
-    BrandingConfig Branding,
-    ServerConfig Server,
-    IngestConfig Ingest,
-    StorageConfig Storage,
-    TranscriptionConfig Transcription,
-    AiInsightsConfig AiInsights,
-    EmbeddingsConfig Embeddings,
-    AlertConfig Alerts,
-    AuthConfig Auth);

@@ -5,76 +5,45 @@ using System.Text;
 
 namespace pizzad.Tests;
 
-public sealed class MigrationServiceTests
+public sealed class SystemResetServiceTests
 {
     [Fact]
-    public async Task ResetForNewSite_RequiresBeginMigration()
-    {
-        using var temp = new TempMigrationStore();
-        var database = temp.CreateDatabase();
-        await database.InitializeAsync(CancellationToken.None);
-        await temp.SeedCallAsync(database);
-        var service = temp.CreateService(database);
-
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetForNewSiteAsync(new MigrationResetRequestDto(), CancellationToken.None));
-
-        Assert.Contains("Begin migration mode", error.Message);
-        Assert.True(File.Exists(temp.AudioFile));
-        Assert.True(File.Exists(temp.TrConfigPath));
-    }
-
-    [Fact]
-    public async Task CancelBeforeReset_RestoresPreviousCompletedState()
-    {
-        using var temp = new TempMigrationStore();
-        var database = temp.CreateDatabase();
-        await database.InitializeAsync(CancellationToken.None);
-        var service = temp.CreateService(database);
-
-        await service.BeginAsync(CancellationToken.None);
-        var cancel = await service.CancelAsync(CancellationToken.None);
-
-        Assert.True(cancel.Ok);
-        Assert.True(temp.Config.Setup.Completed);
-        Assert.Equal("complete", temp.Config.Setup.CurrentStep);
-        Assert.False(temp.Config.Setup.MigrationMode);
-        Assert.True(File.Exists(temp.AudioFile));
-    }
-
-    [Fact]
-    public async Task ResetForNewSite_ClearsQdrantEvenWhenSetupIncomplete()
+    public async Task SiteReset_ClearsQdrantEvenWhenSetupIncomplete()
     {
         using var qdrant = await FakeQdrantServer.StartAsync();
         using var temp = new TempMigrationStore();
         temp.Config.Setup.Completed = false;
-        temp.Config.Setup.MigrationMode = true;
-        temp.Config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
         temp.Config.Embeddings.Enabled = true;
         temp.Config.Embeddings.OpenAiBaseUrl = "http://embedding.invalid/v1";
         temp.Config.Embeddings.OpenAiModel = "nomic-embed-text";
         temp.Config.Embeddings.QdrantBaseUrl = qdrant.BaseUrl;
-        temp.Config.Embeddings.Collection = "migration_test";
+        temp.Config.Embeddings.Collection = "reset_test";
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
         await temp.SeedCallAsync(database);
         var service = temp.CreateService(database);
 
-        var result = await service.ResetForNewSiteAsync(new MigrationResetRequestDto(), CancellationToken.None);
+        var result = await service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = ["site-reset"],
+            CreateBackup = true
+        }, CancellationToken.None);
 
         Assert.True(result.Ok);
         Assert.NotNull(result.Backup);
-        Assert.Contains("/collections/migration_test", qdrant.Requests);
+        Assert.Contains("/collections/reset_test", qdrant.Requests);
         Assert.False(File.Exists(temp.AudioFile));
         Assert.False(File.Exists(temp.TrConfigPath));
         Assert.False(File.Exists(temp.TrTalkgroupsPath));
         Assert.False(File.Exists(temp.TalkgroupCatalogPath));
         Assert.Equal("freshTr", temp.Config.Setup.InstallMode);
         Assert.True(temp.Config.Embeddings.Enabled);
-        Assert.Equal("migration_test", temp.Config.Embeddings.Collection);
+        Assert.Equal("reset_test", temp.Config.Embeddings.Collection);
+        Assert.True(temp.Config.Setup.Completed);
     }
 
     [Fact]
-    public async Task ResetForNewSite_OnlyPreservesSelectedSettings()
+    public async Task SiteReset_OnlyPreservesSelectedSettings()
     {
         using var temp = new TempMigrationStore();
         temp.Config.Branding.StackName = "Old Site";
@@ -88,14 +57,13 @@ public sealed class MigrationServiceTests
         temp.Config.Alerts.EmailEnabled = true;
         temp.Config.Alerts.Playback.Enabled = true;
         temp.Config.RfSurvey.P25ProbeDurationSeconds = 75;
-        temp.Config.Setup.MigrationMode = true;
-        temp.Config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
         var service = temp.CreateService(database);
 
-        await service.ResetForNewSiteAsync(new MigrationResetRequestDto
+        await service.ResetAsync(new SystemResetRequestDto
         {
+            Presets = ["site-reset"],
             CreateBackup = false,
             PreserveBranding = false,
             PreserveTranscription = true,
@@ -116,24 +84,6 @@ public sealed class MigrationServiceTests
         Assert.False(temp.Config.Alerts.Playback.Enabled);
         Assert.Equal(45, temp.Config.RfSurvey.P25ProbeDurationSeconds);
         Assert.Empty(temp.Config.Alerts.Rules);
-    }
-
-    [Fact]
-    public async Task CancelAfterReset_IsRejected()
-    {
-        using var temp = new TempMigrationStore();
-        temp.Config.Setup.MigrationMode = true;
-        temp.Config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
-        temp.Config.Setup.MigrationResetAtUtc = DateTime.UtcNow;
-        var database = temp.CreateDatabase();
-        await database.InitializeAsync(CancellationToken.None);
-        var service = temp.CreateService(database);
-
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelAsync(CancellationToken.None));
-
-        Assert.Contains("cannot be canceled", error.Message);
-        Assert.True(temp.Config.Setup.MigrationMode);
-        Assert.NotNull(temp.Config.Setup.MigrationResetAtUtc);
     }
 
     private sealed class TempMigrationStore : IDisposable
@@ -197,16 +147,15 @@ public sealed class MigrationServiceTests
 
         public EngineDatabase CreateDatabase() => new(Config, NullLogger<EngineDatabase>.Instance);
 
-        public MigrationService CreateService(EngineDatabase database)
+        public SystemResetService CreateService(EngineDatabase database)
         {
             var events = new EventStream();
             var catalog = new TalkgroupCatalogService(Config, NullLogger<TalkgroupCatalogService>.Instance);
             var embeddings = new EmbeddingService(Config, database, events, catalog, NullLogger<EmbeddingService>.Instance);
             var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
-            var credentials = new CredentialStore(Config, NullLogger<CredentialStore>.Instance);
             var auth = new AuthService(Config, NullLogger<AuthService>.Instance);
             var backups = new BackupRestoreService(Config, NullLogger<BackupRestoreService>.Instance);
-            return new MigrationService(Config, database, embeddings, ingest, credentials, auth, backups, NullLogger<MigrationService>.Instance);
+            return new SystemResetService(Config, database, embeddings, ingest, auth, backups, NullLogger<SystemResetService>.Instance);
         }
 
         public async Task<long> SeedCallAsync(EngineDatabase database) =>

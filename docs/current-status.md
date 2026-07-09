@@ -256,31 +256,18 @@ Current master TODO list:
   - Remaining polish: stale frontend state/cache briefly showed old/default
     settings after restore/redeploy. Backend config and settings API were
     correct; add a cache-bust/forced settings reload follow-up.
-- Rig migration mode is implemented for moving a rig to a different
-  geography/site without carrying old RF/call state.
-  - `System > Backup > Begin Migration...` only enters migration setup mode and
-    pauses live ingest; it does not clear data.
-  - The setup wizard now has a `Migration` step with migration profile
-    export/import, `Reset For New Site`, and cancel controls.
-  - `Reset For New Site` clears calls/audio/incidents/jobs/metrics/geocodes/
-    recommendation baselines/Qdrant call vectors/talkgroup catalog/profile TG
-    overlays/monitored areas, backs up and removes old TR config/talkgroups, and
-    preserves portable settings such as transcription, AI Insights, embeddings,
-    auth, server/storage paths, and alert playback.
-  - Existing alert rules are preserved but disabled for review after reset.
-  - CLI fallback exists:
-    `sudo /usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh begin-migration`
-    and `cancel-migration`.
-- Migration profile review notes:
-  - Export/import is now in the migration wizard, not the normal Backup page.
-  - Migration profiles can carry path settings such as app data, DB, audio, and
-    Qdrant paths, but the operator must review hardware-sensitive AI,
-    transcription, embedding, and worker/concurrency settings when moving
-    between unlike systems.
-  - Credentials are not exported as cleartext. Alert SMTP passwords are resolved
-    through the local credential store; imported redacted/blank passwords do not
-    overwrite an existing stored secret.
-  - Migration reset rotates the admin token using the sudo-backed setup helper.
+- Reset and Site Setup replaced the old rig-migration wizard model.
+  - `System > Backup > Reset` owns `Data Only`, `Site Reset`, and `Full Reset`
+    presets.
+  - First-run is limited to host prerequisites: trunk-recorder install/reuse,
+    optional LM Link support, and optional native Qdrant.
+  - Site-specific work now belongs to Setup: location, systems/sites,
+    talkgroups, RF path, SDR inventory, waterfall/RF validation, source
+    planning, config draft/apply, and activity/evidence.
+  - Backup restore is staged/applied from `System > Backup` and returns there
+    with restore status rather than entering a migration wizard.
+  - Raw RF validation capture blobs are excluded from backups, and new RF power
+    scans delete raw captures after analysis while keeping JSON evidence.
 - Credential storage was restored after the settings refactor:
   - Alert SMTP passwords are stored in the local PizzaWave credential store and
     represented in config by the marker

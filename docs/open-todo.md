@@ -27,7 +27,7 @@ unless it creates a current regression test or follow-up.
   - conditional local embedding autoload at `lmstudio.service` startup;
   - explicit model IDs and Qwen thinking-mode validation through
     `message.content`, `reasoning_content`, and `reasoning_tokens`.
-- Keep backup/restore and rig migration mode in the clean-rig regression test.
+- Keep backup/restore and Reset + Setup in the clean-rig regression test.
   Backup/restore field testing succeeded on the live RPI, so treat this as a
   regression scenario rather than an unknown feature spike.
 - Fix restore/deploy frontend state handling so Settings cannot temporarily show

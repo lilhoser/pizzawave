@@ -25,10 +25,10 @@ UI.
 
 ## Main Guides
 
-- [Quickstart](quickstart.md): install, first-run wizard, and basic validation.
+- [Quickstart](quickstart.md): install, first-run prerequisites, Setup, and basic validation.
 - [Deployment](deployment.md): package flow, service operations, and updates.
 - [Backup and Restore](backup-restore.md): full-state backups and staged wizard restore.
-- [Rig Migration](migration.md): move a rig to a new geography/site while preserving portable settings.
+- [Reset and Site Setup](reset-and-setup.md): clean data, reset site state, or return to first-run before rebuilding Setup.
 - [Building](building.md): local development, self-contained packages, and deploy helpers.
 - [Testing](testing.md): BVT and medium feature-test lanes.
 - [Settings Schema](settings-schema.md): current `pizzad.json` sections.
@@ -59,25 +59,20 @@ UI.
 7. The web UI receives live status through SSE and reads server-computed models
    through REST APIs.
 
-## First-Run Setup
+## First-Run and Setup
 
-After installing the package, open the web UI and complete the setup wizard. The
-wizard handles:
+After installing the package, open the web UI and complete first-run
+prerequisites. First-run handles:
 
-- existing trunk-recorder detection and backup;
-- fresh trunk-recorder source-build flow when needed;
-- callstream patching;
-- talkgroup CSV import or creation;
-- monitored area mappings for geolocation;
-- transcription engine and model selection;
-- optional AI Insights through LM Link/OpenAI-compatible endpoints;
-- optional local or remote embedding endpoints backed by local Qdrant;
-- optional email alerts;
-- optional SFTP and local import configuration;
-- RTL-SDR calibration assistance.
+- existing trunk-recorder detection/reuse or fresh trunk-recorder source-build;
+- optional LM Link host support for AI Insights;
+- optional native Qdrant host support.
 
-The wizard saves progress incrementally and enables full engine operation only
-after required gates are complete.
+After first-run finishes, PizzaWave opens Setup. Setup owns location, systems
+and sites, talkgroups, RF path, SDR inventory, waterfall/RF validation, source
+planning, TR config apply, and monitoring resume. Settings owns app behavior
+such as transcription, AI, embeddings, alerts, playback, security, and service
+settings.
 
 ## Public Interfaces
 
@@ -108,4 +103,4 @@ security boundary. The callstream ingest listener should remain localhost-only.
 Write/admin token changes and protected config writes use the installed
 sudo-backed setup helper on Linux. Alert SMTP passwords are stored in the local
 PizzaWave credential store and are not returned through settings/setup status or
-exported as cleartext in migration profiles.
+backup/restore metadata.

@@ -1752,11 +1752,6 @@ public sealed class EngineDatabase
         await ExecuteNonQueryAsync(connection, "ANALYZE;", ct);
     }
 
-    public async Task ClearSiteDataForMigrationAsync(CancellationToken ct)
-    {
-        await ClearOperationalDataAsync(preserveAuditHistory: false, ct);
-    }
-
     public async Task ClearOperationalDataAsync(bool preserveAuditHistory, CancellationToken ct)
     {
         await using var connection = OpenConnection();

@@ -56,7 +56,7 @@ builder.Services.AddSingleton<SystemManagerService>();
 builder.Services.AddSingleton<SystemRecommendationService>();
 builder.Services.AddSingleton<SystemCpuSnapshotService>();
 builder.Services.AddSingleton<BackupRestoreService>();
-builder.Services.AddSingleton<MigrationService>();
+builder.Services.AddSingleton<SystemResetService>();
 builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<SiteSetupService>();
 builder.Services.AddSingleton<SetupJobService>();
@@ -927,22 +927,14 @@ app.MapPost("/api/v1/system/backups/restore", async (HttpContext context, AuthSe
 .WithName("SystemBackupsStageRestore")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/migration/begin", async (HttpContext context, AuthService authService, MigrationService migration) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await migration.BeginAsync(context.RequestAborted));
-})
-.WithName("SystemMigrationBegin")
-.WithOpenApi();
-
-app.MapPost("/api/v1/system/reset", async (HttpContext context, AuthService authService, MigrationService migration) =>
+app.MapPost("/api/v1/system/reset", async (HttpContext context, AuthService authService, SystemResetService reset) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     try
     {
         var request = await JsonSerializer.DeserializeAsync<SystemResetRequestDto>(context.Request.Body, EngineConfig.JsonOptions(), context.RequestAborted)
             ?? new SystemResetRequestDto();
-        return Results.Ok(await migration.ResetAsync(request, context.RequestAborted));
+        return Results.Ok(await reset.ResetAsync(request, context.RequestAborted));
     }
     catch (InvalidOperationException ex)
     {
@@ -952,87 +944,29 @@ app.MapPost("/api/v1/system/reset", async (HttpContext context, AuthService auth
 .WithName("SystemReset")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/migration/profile", (HttpContext context, AuthService authService, MigrationService migration) =>
-{
-    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    var profile = migration.ExportProfile();
-    var fileName = $"pizzawave-migration-profile-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.json";
-    return Results.File(JsonSerializer.SerializeToUtf8Bytes(profile, EngineConfig.JsonOptions()), "application/json", fileName);
-})
-.WithName("SystemMigrationProfileExport")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/migration/profile", async (HttpContext context, AuthService authService, MigrationService migration) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    var profile = await JsonSerializer.DeserializeAsync<MigrationProfileDto>(context.Request.Body, EngineConfig.JsonOptions(), context.RequestAborted);
-    if (profile == null) return Results.BadRequest(new { message = "Migration profile JSON is required." });
-    try
-    {
-        return Results.Ok(await migration.ImportProfileAsync(profile, context.RequestAborted));
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SetupMigrationProfileImport")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/migration/reset-new-site", async (HttpContext context, AuthService authService, MigrationService migration) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        var request = await ReadMigrationResetRequestAsync(context);
-        return Results.Ok(await migration.ResetForNewSiteAsync(request, context.RequestAborted));
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SetupMigrationResetNewSite")
-.WithOpenApi();
-
-app.MapPost("/api/v1/setup/migration/cancel", async (HttpContext context, AuthService authService, MigrationService migration) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await migration.CancelAsync(context.RequestAborted));
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SetupMigrationCancel")
-.WithOpenApi();
-
-app.MapGet("/api/v1/setup/restore", (HttpContext context, AuthService authService, BackupRestoreService backups) =>
+app.MapGet("/api/v1/system/backups/restore/pending", (HttpContext context, AuthService authService, BackupRestoreService backups) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var pending = backups.PendingRestore();
     return pending == null ? Results.NotFound() : Results.Ok(pending);
 })
-.WithName("SetupRestorePending")
+.WithName("SystemBackupsRestorePending")
 .WithOpenApi();
 
-app.MapPost("/api/v1/setup/restore/apply", async (HttpContext context, AuthService authService, BackupRestoreService backups) =>
+app.MapPost("/api/v1/system/backups/restore/apply", async (HttpContext context, AuthService authService, BackupRestoreService backups) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     return Results.Ok(await backups.ApplyPendingRestoreAsync(context.RequestAborted));
 })
-.WithName("SetupRestoreApply")
+.WithName("SystemBackupsRestoreApply")
 .WithOpenApi();
 
-app.MapPost("/api/v1/setup/restore/cancel", async (HttpContext context, AuthService authService, BackupRestoreService backups) =>
+app.MapPost("/api/v1/system/backups/restore/cancel", async (HttpContext context, AuthService authService, BackupRestoreService backups) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     return Results.Ok(await backups.CancelPendingRestoreAsync(context.RequestAborted));
 })
-.WithName("SetupRestoreCancel")
+.WithName("SystemBackupsRestoreCancel")
 .WithOpenApi();
 
 app.MapPost("/api/v1/system/storage/maintenance/{action}", async (string action, HttpContext context, AuthService authService, EngineDatabase database) =>
@@ -1702,18 +1636,6 @@ static (long Start, long End) ResolveQualityCheckRange(long? start, long? end, i
     var now = DateTimeOffset.UtcNow;
     var boundedHours = Math.Clamp(hours ?? 24, 1, 168);
     return (now.AddHours(-boundedHours).ToUnixTimeSeconds(), now.ToUnixTimeSeconds());
-}
-
-static async Task<MigrationResetRequestDto> ReadMigrationResetRequestAsync(HttpContext context)
-{
-    if (context.Request.ContentLength is null or 0)
-        return new MigrationResetRequestDto();
-
-    var request = await JsonSerializer.DeserializeAsync<MigrationResetRequestDto>(
-        context.Request.Body,
-        EngineConfig.JsonOptions(),
-        context.RequestAborted);
-    return request ?? new MigrationResetRequestDto();
 }
 
 static bool IsDefaultProfile(ProcessingProfile profile) =>

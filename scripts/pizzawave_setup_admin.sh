@@ -612,79 +612,7 @@ PY
   echo "Restore applied. qdrant/trunk-recorder were restarted when present; pizzad restart scheduled."
 }
 
-begin_migration() {
-  local config="${2:-/etc/pizzawave/pizzad.json}"
-  python3 - "$config" <<'PY'
-import grp
-import json
-import os
-import shutil
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-path = Path(sys.argv[1])
-if path.resolve() != Path("/etc/pizzawave/pizzad.json"):
-    raise SystemExit(f"Refusing migration config outside /etc/pizzawave/pizzad.json: {path}")
-data = json.loads(path.read_text(encoding="utf-8-sig"))
-setup = data.setdefault("setup", {})
-if not setup.get("migrationMode"):
-    setup["migrationPreviousCompleted"] = bool(setup.get("completed"))
-    setup["migrationPreviousCurrentStep"] = setup.get("currentStep") or ("complete" if setup.get("completed") else "stack")
-setup["completed"] = False
-setup["currentStep"] = "migration"
-setup["migrationMode"] = True
-setup["migrationStartedAtUtc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-backup_dir = Path("/var/backups/pizzawave/migration-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
-backup_dir.mkdir(parents=True, exist_ok=True)
-shutil.copy2(path, backup_dir / "pizzad.json")
-tmp = path.with_name(path.name + f".migration-tmp-{os.getpid()}")
-tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-os.chown(tmp, 0, grp.getgrnam("pizzawave").gr_gid)
-os.chmod(tmp, 0o660)
-os.replace(tmp, path)
-print(f"Migration mode enabled. Previous config copied to {backup_dir}.")
-PY
-  nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-migration-restart-pizzad.log 2>&1 &
-}
-
-cancel_migration() {
-  local config="${2:-/etc/pizzawave/pizzad.json}"
-  python3 - "$config" <<'PY'
-import grp
-import json
-import os
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-if path.resolve() != Path("/etc/pizzawave/pizzad.json"):
-    raise SystemExit(f"Refusing migration config outside /etc/pizzawave/pizzad.json: {path}")
-data = json.loads(path.read_text(encoding="utf-8-sig"))
-setup = data.setdefault("setup", {})
-reset_applied = bool(setup.get("migrationResetAtUtc"))
-setup["migrationMode"] = False
-setup["migrationStartedAtUtc"] = None
-setup["migrationResetAtUtc"] = None
-if reset_applied:
-    setup["completed"] = False
-    setup["currentStep"] = "tr"
-else:
-    setup["completed"] = bool(setup.get("migrationPreviousCompleted"))
-    setup["currentStep"] = setup.get("migrationPreviousCurrentStep") or ("complete" if setup.get("completed") else "stack")
-setup["migrationPreviousCompleted"] = False
-setup["migrationPreviousCurrentStep"] = ""
-tmp = path.with_name(path.name + f".migration-cancel-tmp-{os.getpid()}")
-tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-os.chown(tmp, 0, grp.getgrnam("pizzawave").gr_gid)
-os.chmod(tmp, 0o660)
-os.replace(tmp, path)
-print("Migration mode canceled.")
-PY
-  nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-migration-restart-pizzad.log 2>&1 &
-}
-
-reset_migration_site_files() {
+reset_site_files() {
   local tr_config="${2:-/etc/trunk-recorder/config.json}"
   local talkgroups="${3:-/etc/trunk-recorder/talkgroups.csv}"
   systemctl stop trunk-recorder.service 2>/dev/null || true
@@ -695,7 +623,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 targets = [Path(sys.argv[1]), Path(sys.argv[2])]
-backup_dir = Path("/var/backups/pizzawave/migration-site-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
+backup_dir = Path("/var/backups/pizzawave/site-reset-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
 backup_dir.mkdir(parents=True, exist_ok=True)
 for target in targets:
     if not str(target).startswith("/etc/trunk-recorder/"):
@@ -703,7 +631,7 @@ for target in targets:
     if target.exists():
         shutil.copy2(target, backup_dir / target.name)
         target.unlink()
-print(f"Site-specific TR files reset. Previous files were backed up under {backup_dir}.")
+print(f"Site TR files reset. Previous files were backed up under {backup_dir}.")
 PY
 }
 
@@ -788,20 +716,14 @@ case "$ACTION" in
   apply-staged-restore)
     apply_staged_restore "$@"
     ;;
-  begin-migration)
-    begin_migration "$@"
-    ;;
-  cancel-migration)
-    cancel_migration "$@"
-    ;;
-  reset-migration-site-files)
-    reset_migration_site_files "$@"
+  reset-site-files)
+    reset_site_files "$@"
     ;;
   install-auth-token)
     install_auth_token "$@"
     ;;
   *)
-    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|begin-migration|cancel-migration|reset-migration-site-files|install-auth-token}" >&2
+    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|reset-site-files|install-auth-token}" >&2
     exit 2
     ;;
 esac

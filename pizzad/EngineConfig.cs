@@ -498,11 +498,6 @@ public sealed class SetupConfig
     public string TrConfigMode { get; set; } = "radioReference";
     public string RadioReferenceSid { get; set; } = string.Empty;
     public DateTime? RestoreAppliedAtUtc { get; set; }
-    public bool MigrationMode { get; set; }
-    public DateTime? MigrationStartedAtUtc { get; set; }
-    public DateTime? MigrationResetAtUtc { get; set; }
-    public bool MigrationPreviousCompleted { get; set; }
-    public string MigrationPreviousCurrentStep { get; set; } = string.Empty;
     public bool TrDetected { get; set; }
     public bool TrConfigured { get; set; }
     public bool TalkgroupsValidated { get; set; }

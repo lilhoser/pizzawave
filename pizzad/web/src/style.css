@@ -6061,11 +6061,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-size: 13px;
   line-height: 1.4;
 }
-.setup-cancel-migration {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  margin: 0;
-}
 .setup-actions,
 .setup-button-row {
   display: flex;

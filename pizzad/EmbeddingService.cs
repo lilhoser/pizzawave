@@ -58,7 +58,7 @@ public sealed class EmbeddingService : BackgroundService
         catch (Exception ex)
         {
             _lastError = ex.Message;
-            _logger.LogWarning(ex, "Qdrant collection delete failed during migration reset");
+            _logger.LogWarning(ex, "Qdrant collection delete failed during system reset");
             return (false, $"Qdrant collection delete failed: {ex.Message}");
         }
     }

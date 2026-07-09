@@ -276,11 +276,6 @@ public sealed class SetupService
         _config.Setup.Completed = true;
         _config.Setup.CompletedAtUtc = DateTime.UtcNow;
         _config.Setup.CurrentStep = "complete";
-        _config.Setup.MigrationMode = false;
-        _config.Setup.MigrationStartedAtUtc = null;
-        _config.Setup.MigrationResetAtUtc = null;
-        _config.Setup.MigrationPreviousCompleted = false;
-        _config.Setup.MigrationPreviousCurrentStep = string.Empty;
         _config.Setup.RestoreAppliedAtUtc = null;
         await SaveConfigAsync(ct);
         InvalidateStatusCache();

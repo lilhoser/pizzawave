@@ -988,7 +988,7 @@ public sealed class SystemRecommendationService
                 new RecommendationRunbookStepDto("Check TR service state", "Open System > Services and verify whether trunk-recorder is active, failed, or stuck in auto-restart. If it is restart-looping, stop it before changing hardware.", new RecommendationTargetDto("system", "services", "")),
                 new RecommendationRunbookStepDto("Read the latest fault evidence", "Use the diagnostic rows and service log tail to identify the first concrete failure: missing SDR, permission error, config parse error, source stopped receiving samples, or callstream/plugin failure.", new RecommendationTargetDto("system", "recommendations", "")),
                 new RecommendationRunbookStepDto("Confirm live config and hardware", "Compare the live TR source config with currently detected SDR hardware before restarting capture.", new RecommendationTargetDto("tr", "tools", "")),
-                new RecommendationRunbookStepDto("Restart after the cause is fixed", "Restart trunk-recorder only after the configured receiver is visible and the live config still matches the intended Radio Setup workspace.", new RecommendationTargetDto("system", "services", ""))
+                new RecommendationRunbookStepDto("Restart after the cause is fixed", "Restart trunk-recorder only after the configured receiver is visible and the live config still matches the intended Setup source plan.", new RecommendationTargetDto("system", "services", ""))
             ],
             "A quiet radio site can also produce no calls. Treat the red live indicator as an operator alarm to inspect TR, not as automatic proof of RF failure."),
         "ai-blocked-queue" => new RecommendationRunbookDto(

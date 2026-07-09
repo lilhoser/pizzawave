@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, MigrationActionResult, MigrationResetResult, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupTrConfigSourcePlan, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -9619,7 +9619,7 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     setBusy("apply-restore");
     setMessage("Applying staged restore...");
     try {
-      const result = await api.request<BackupRestoreApplyResult>("/api/v1/setup/restore/apply", { method: "POST" });
+      const result = await api.request<BackupRestoreApplyResult>("/api/v1/system/backups/restore/apply", { method: "POST" });
       setMessage(result.message || "Restore applied. Review service status before resuming monitoring.");
       setPreview(null);
       await reload();
@@ -9636,7 +9636,7 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     if (!confirmAction("Cancel staged restore?", "This clears the staged restore files. No live data is changed.")) return;
     setBusy("cancel-restore");
     try {
-      const result = await api.request<BackupRestoreCancelResult>("/api/v1/setup/restore/cancel", { method: "POST" });
+      const result = await api.request<BackupRestoreCancelResult>("/api/v1/system/backups/restore/cancel", { method: "POST" });
       setPreview(null);
       setMessage(result.message || "Restore canceled.");
       await reload();
@@ -9694,7 +9694,7 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
   return <div className="system-manager-grid">
     <div className="card">
       <h3>Backup</h3>
-      <p className="muted">Create a portable archive of PizzaWave state for migration or disaster recovery.</p>
+      <p className="muted">Create a portable archive of PizzaWave state for relocation, cloning, or disaster recovery.</p>
       <label className="setting-field compact-setting">
         <span>Recorded audio<small>SQLite and configuration are always backed up fully. This controls recorded call audio by file timestamp.</small></span>
         <select value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioWindowOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
@@ -9746,7 +9746,7 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     </div>
     <div className="card">
       <h3>Reset</h3>
-      <p className="muted">Choose one or more reset presets, then confirm. Reset is the replacement for the old clean-install/migration entry points.</p>
+      <p className="muted">Choose one or more reset presets, then confirm. Reset is the replacement for the old clean-install and relocation entry points.</p>
       <div className="settings-fields">
         <label className="setup-check option-row">
           <input type="checkbox" checked={resetPresets.includes("data-only")} onChange={event => toggleResetPreset("data-only", event.currentTarget.checked)} />
@@ -11113,31 +11113,8 @@ function formatHz(value: number) {
   return `${value} Hz`;
 }
 
-type MigrationResetOptions = {
-  createBackup: boolean;
-  backupAudioWindow: string;
-  preserveBranding: boolean;
-  preserveTranscription: boolean;
-  preserveAiInsights: boolean;
-  preserveEmbeddings: boolean;
-  preserveAlerts: boolean;
-  preserveRfDiagnostics: boolean;
-};
-
-const defaultMigrationResetOptions: MigrationResetOptions = {
-  createBackup: true,
-  backupAudioWindow: "all",
-  preserveBranding: true,
-  preserveTranscription: true,
-  preserveAiInsights: true,
-  preserveEmbeddings: true,
-  preserveAlerts: true,
-  preserveRfDiagnostics: true
-};
-
 function setupWizardDraftKey(status: SetupStatus) {
-  const setup = status.values?.setup ?? {};
-  return `pizzawave-setup-wizard-draft-v2-${setup.migrationResetAtUtc || setup.migrationStartedAtUtc || "default"}`;
+  return `pizzawave-setup-wizard-draft-v2-${status.completed ? "complete" : "first-run"}`;
 }
 
 function readSetupWizardDraft(status: SetupStatus): Record<string, any> {
@@ -11210,8 +11187,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   const [calibrationInputs, setCalibrationInputs] = useState<Record<string, { gain: string; errorHz: string; ppm: string }>>({});
   const [calibrationSweep, setCalibrationSweep] = useState({ rangeHz: "1200", stepHz: "300", warmupSec: "20", durationSec: "240" });
   const [restorePreview, setRestorePreview] = useState<BackupRestorePreview | null>(null);
-  const [migrationOptions, setMigrationOptions] = useState<MigrationResetOptions>(defaultMigrationResetOptions);
-  const [migrationBackupEstimate, setMigrationBackupEstimate] = useState<BackupEstimate | null>(null);
   const [areaBoundaryCandidates, setAreaBoundaryCandidates] = useState<Record<string, SetupAreaBoundaryCandidate[]>>({});
   const [areaLookupBusy, setAreaLookupBusy] = useState("");
   const [areaAutoSeeded, setAreaAutoSeeded] = useState(false);
@@ -11221,7 +11196,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   const setupDraftDirty = useRef(false);
   const setupJobRunning = Boolean(setupJob && ["queued", "running", "paused"].includes(setupJob.status));
   const calibrationJobRunning = setupJobRunning && setupJobContext === "calibration";
-  const migrationResetApplied = Boolean(status.values?.setup?.migrationResetAtUtc);
   const detectedSdrSerials = sdrDetection?.devices.map(device => device.serial).filter(Boolean).join(",") ?? "";
   const selectedSdrDevices = sdrDetection && (!trDraftSerials.trim() || trDraftSerials.trim() === detectedSdrSerials)
     ? sdrDetection.devices
@@ -11333,17 +11307,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
       .finally(() => { if (!canceled) setTrSourcePlanLoading(false); });
     return () => { canceled = true; };
   }, [wizardStep, trInstallMode, trSiteList, selectedTrSites, trDraftSid, trDraftSerials, sdrDetection, detectedSdrSerials, selectedSdrDevices, trDraftRate]);
-  useEffect(() => {
-    if (wizardStep !== "migration" || !migrationOptions.createBackup || migrationResetApplied) {
-      setMigrationBackupEstimate(null);
-      return;
-    }
-    let canceled = false;
-    api.request<BackupEstimate>(`/api/v1/system/backups/estimate?audioWindow=${encodeURIComponent(migrationOptions.backupAudioWindow)}`)
-      .then(value => { if (!canceled) setMigrationBackupEstimate(value); })
-      .catch(() => { if (!canceled) setMigrationBackupEstimate(null); });
-    return () => { canceled = true; };
-  }, [wizardStep, migrationOptions.createBackup, migrationOptions.backupAudioWindow, migrationResetApplied]);
 
   function update(path: string[], value: any) {
     setupDraftDirty.current = true;
@@ -11359,10 +11322,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
       target[leaf] = value;
       return next;
     });
-  }
-
-  function updateMigrationOption<K extends keyof MigrationResetOptions>(key: K, value: MigrationResetOptions[K]) {
-    setMigrationOptions(current => ({ ...current, [key]: value }));
   }
 
   function updateTrRadioReferenceSid(value: string) {
@@ -11548,7 +11507,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
 
   async function loadPendingRestore() {
     try {
-      setRestorePreview(await api.request<BackupRestorePreview>("/api/v1/setup/restore"));
+      setRestorePreview(await api.request<BackupRestorePreview>("/api/v1/system/backups/restore/pending"));
     } catch {
       setRestorePreview(null);
     }
@@ -11562,7 +11521,7 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     if (!confirmAction("Apply staged restore?", "This will overwrite PizzaWave/TR files from the backup and restart services. PizzaWave will reconnect, run the required restore checks automatically, and only keep the wizard open if something needs attention.")) return;
     setBusy("apply-restore");
     try {
-      const result = await api.request<BackupRestoreApplyResult>("/api/v1/setup/restore/apply", { method: "POST" });
+      const result = await api.request<BackupRestoreApplyResult>("/api/v1/system/backups/restore/apply", { method: "POST" });
       setMessage(result.message || "Restore scheduled. Waiting for pizzad to restart...");
       await waitForHealth();
       setMessage("Restore applied. Running required checks...");
@@ -11584,63 +11543,10 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
     if (!confirmAction("Cancel staged restore?", "This clears the staged restore and deletes its temporary files. No live PizzaWave, TR, database, or audio files will be changed.")) return;
     setBusy("cancel-restore");
     try {
-      const result = await api.request<BackupRestoreCancelResult>("/api/v1/setup/restore/cancel", { method: "POST" });
+      const result = await api.request<BackupRestoreCancelResult>("/api/v1/system/backups/restore/cancel", { method: "POST" });
       setRestorePreview(null);
       setMessage(result.message || "Restore canceled.");
       await reload();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function resetForNewSite() {
-    if (migrationResetApplied) {
-      setMessage("Migration reset has already been applied. Restore from a backup or continue setup for the new site.");
-      return false;
-    }
-    const preserved = [
-      migrationOptions.preserveBranding ? "branding" : "",
-      migrationOptions.preserveTranscription ? "transcription" : "",
-      migrationOptions.preserveAiInsights ? "AI Insights" : "",
-      migrationOptions.preserveEmbeddings ? "embedding service settings" : "",
-      migrationOptions.preserveAlerts ? "alert delivery/playback" : "",
-      migrationOptions.preserveRfDiagnostics ? "RF diagnostics" : ""
-    ].filter(Boolean);
-    const backupText = migrationOptions.createBackup
-      ? `A full backup with all recorded audio will be created first${migrationBackupEstimate ? `; estimated source size is ${formatBytes(migrationBackupEstimate.bytes)} across ${migrationBackupEstimate.fileCount.toLocaleString()} file(s)` : ""}. If backup creation fails, reset will stop.`
-      : "No backup will be created before reset.";
-    const preserveText = preserved.length
-      ? `The reset will carry forward only: ${preserved.join(", ")}.`
-      : "The reset will not carry forward optional service settings.";
-    if (!confirmAction("Reset this rig for a new site?", `${backupText} ${preserveText} Calls, recorded audio, incidents, old TR config/talkgroups, monitored areas, jobs, metrics, recommendation baselines, alert rules, and Qdrant call vectors are always cleared and never migrated into the new site.`)) return false;
-    setBusy("migration-reset");
-    try {
-      const result = await api.request<MigrationResetResult>("/api/v1/setup/migration/reset-new-site", { method: "POST", body: JSON.stringify(migrationOptions) });
-      const backupMessage = result.backup ? ` Backup: ${result.backup.name} (${formatBytes(result.backup.bytes)}).` : "";
-      setMessage(`${result.message}${backupMessage}${result.warnings.length ? " Warnings: " + result.warnings.join(" ") : ""}`);
-      await reload();
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Migration reset failed.");
-      return false;
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function cancelMigration() {
-    if (migrationResetApplied) {
-      setMessage("Migration reset has already been applied and cannot be canceled. Restore from a backup or continue setup for the new site.");
-      return;
-    }
-    if (!confirmAction("Cancel migration mode?", "This exits migration mode and returns to the previous PizzaWave state. No site data has been cleared.")) return;
-    setBusy("migration-cancel");
-    try {
-      const result = await api.request<MigrationActionResult>("/api/v1/setup/migration/cancel", { method: "POST" });
-      setMessage(result.message);
-      await reload();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Cancel migration failed.");
     } finally {
       setBusy("");
     }
@@ -12201,7 +12107,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
   const installOptionalDiagnosticTools = Boolean(draft.setup?.installOptionalDiagnosticTools);
   const locations = draft.locations?.monitoredAreas ?? [];
   const postRestoreValidation = Boolean(status.values?.setup?.restoreAppliedAtUtc);
-  const migrationMode = status.currentStep === "migration" || Boolean(status.values?.setup?.migrationMode);
   const lmStudioDetection = (status.detection as any)?.lmStudio;
   const qdrantDetection = (status.detection as any)?.qdrant;
   const lmStudioInstalled = Boolean(lmStudioDetection?.found || lmStudioDetection?.serviceEnabled || lmStudioDetection?.binaryPath);
@@ -12322,9 +12227,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
         <h1>PizzaWave Setup</h1>
         <p>First-run setup prepares the host software. Site, talkgroup, RF, AI, and embedding configuration continue in Setup and Settings after this wizard.</p>
       </div>
-      {migrationMode && !migrationResetApplied && <button className="danger-button setup-cancel-migration" disabled={Boolean(busy) || setupJobRunning} onClick={() => void cancelMigration()}>
-        {busy === "migration-cancel" ? "Canceling..." : "Cancel Migration"}
-      </button>}
     </div>
     <div className="setup-message">{message}</div>
     <div className="setup-wizard-layout">
@@ -12383,35 +12285,6 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
             <button disabled={Boolean(busy)} onClick={() => void detect()}>{busy === "detect" ? "Detecting..." : "Detect TR"}</button>
             <button disabled={Boolean(busy) || setupJobRunning} onClick={() => void validate("tr")}>{busy === "tr" ? "Checking..." : "Check prerequisite"}</button>
           </div>
-        </SetupSection>}
-
-        {currentStep.id === "migration" && <SetupSection title="Migration" description="Choose what to back up and which reusable settings to seed into the new site. Site data is never migrated.">
-          {!migrationResetApplied && <>
-            <SettingCheckbox
-              label="Backup current system"
-              description={`Creates a full restore archive before reset, including all recorded audio.${migrationBackupEstimate ? ` Estimated source size: ${formatBytes(migrationBackupEstimate.bytes)} across ${migrationBackupEstimate.fileCount.toLocaleString()} file(s).` : ""}`}
-              checked={migrationOptions.createBackup}
-              onChange={value => updateMigrationOption("createBackup", value)}
-            />
-            <div className="setup-note">Carry forward only the settings checked below. Unchecked sections reset to PizzaWave defaults.</div>
-            <SettingCheckbox label="Branding" description="Copy the current PizzaWave display name." checked={migrationOptions.preserveBranding} onChange={value => updateMigrationOption("preserveBranding", value)} />
-            <SettingCheckbox label="Transcription" description="Copy provider, model, worker, and endpoint settings. Deferred talkgroups are cleared." checked={migrationOptions.preserveTranscription} onChange={value => updateMigrationOption("preserveTranscription", value)} />
-            <SettingCheckbox label="AI Insights" description="Copy chat endpoint, model, limits, and enablement." checked={migrationOptions.preserveAiInsights} onChange={value => updateMigrationOption("preserveAiInsights", value)} />
-            <SettingCheckbox label="Vector DB service" description="Copy embedding endpoint and Qdrant service settings. Existing vectors are deleted." checked={migrationOptions.preserveEmbeddings} onChange={value => updateMigrationOption("preserveEmbeddings", value)} />
-            <SettingCheckbox label="Alert delivery" description="Copy email and playback settings. Alert rules are cleared." checked={migrationOptions.preserveAlerts} onChange={value => updateMigrationOption("preserveAlerts", value)} />
-            <SettingCheckbox label="RF diagnostics" description="Copy P25 probe command and timing settings. Prior RF validation runs are cleared." checked={migrationOptions.preserveRfDiagnostics} onChange={value => updateMigrationOption("preserveRfDiagnostics", value)} />
-            <div className="maintenance-help">
-              <p><strong>Always cleared</strong>: calls, recorded audio, incidents, old TR config, talkgroups, monitored areas, jobs, metrics, recommendations, alert rules, and Qdrant call vectors.</p>
-            </div>
-            <div className="setup-note">Click Reset &amp; Continue to confirm the reset and move to TR Config. Cancel Migration is available until reset runs.</div>
-          </>}
-          {migrationResetApplied && <>
-            <div className="maintenance-help">
-              <p><strong>Reset applied</strong>: site data has already been cleared. Migration cannot be canceled after this point.</p>
-              <p><strong>Next</strong>: continue to TR Config, or restore from a backup if this reset should be undone.</p>
-            </div>
-            <div className="setup-note">Click Next to configure the new TR site, frequencies, and talkgroups.</div>
-          </>}
         </SetupSection>}
 
         {currentStep.id === "restore" && <SetupSection title="Restore Backup" description="Review the staged backup before applying it. Applying restore overwrites backed-up PizzaWave/TR files and restarts services, then setup checks must be run again.">
@@ -12667,17 +12540,10 @@ function SetupWizard({ status, reload, onComplete }: { status: SetupStatus; relo
         <div className="setup-nav-row">
           <button disabled={stepIndex === 0 || Boolean(busy) || setupJobRunning} onClick={previousStep}>Back</button>
           {stepIndex < setupSteps.length - 1 && <button
-            className={currentStep.id === "migration" && !migrationResetApplied ? "danger-button" : undefined}
             disabled={Boolean(busy) || setupJobRunning}
             onClick={() => void nextStep()}
           >
-            {busy === "migration-reset"
-              ? "Resetting..."
-              : busy === `advance-${currentStep.id}`
-                ? "Working..."
-                : currentStep.id === "migration" && !migrationResetApplied
-                  ? "Reset & Continue"
-                  : "Next"}
+            {busy === `advance-${currentStep.id}` ? "Working..." : "Next"}
           </button>}
         </div>
       </div>
