@@ -8,13 +8,13 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 1 - Setup state authority
-- Current milestone: Package 1 operator acceptance
+- Active package: 2 - Talkgroups
+- Current milestone: 2A - server-owned RR import provenance
 - Working branch: `codex/operator-ux-review`
 - Last deployed commit: `9c48f30`
-- Operator verification: requested after live smoke verification
-- Next action: receive operator feedback on Package 1, address any defects, and
-  close the package before beginning Talkgroups.
+- Operator verification: Package 1 accepted
+- Next action: replace browser-owned RR import state with a server-owned,
+  auditable import operation and durable provenance.
 
 ## Working Rules
 
@@ -31,7 +31,7 @@ work so that progress does not depend on conversation history.
 
 ### 1. Setup State Authority
 
-Status: in progress
+Status: complete
 
 - [x] 1A. Replace stale whole-document Setup writes with versioned,
   field-scoped mutations.
@@ -43,7 +43,7 @@ Status: in progress
   Setup mutation.
 - [x] Build and test.
 - [x] Deploy and verify on the RPI.
-- [ ] Operator acceptance.
+- [x] Operator acceptance.
 
 Acceptance:
 
@@ -56,7 +56,7 @@ Acceptance:
 
 ### 2. Talkgroups
 
-Status: pending
+Status: in progress
 
 - [ ] Move one-time RR import provenance to the server.
 - [ ] Replace full-catalog writes with scoped, paged mutations.
@@ -129,6 +129,7 @@ Status: pending
 - 2026-07-09: Setup is the sole owner of desired monitoring configuration.
 - 2026-07-09: Major product and data-model decisions require operator review in
   chat; routine implementation decisions do not.
+- 2026-07-09: Operator accepted Package 1 after deployed verification.
 
 ## Deployment Log
 
@@ -155,3 +156,6 @@ Status: pending
   Systems & Sites loaded the independent MSWIN RR 4879 and Entergy RR 8202
   catalogs, retained the correct selected sites, and required no admin token
   for the read-only catalog load.
+- 2026-07-09: Operator accepted Package 1. Package 2 discovery confirmed that
+  RR import completion is browser-session state and Setup catalog edits still
+  replace the full catalog document from the client.
