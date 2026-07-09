@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 1 - Setup state authority
-- Current milestone: Package 1 deployment and operator verification
+- Current milestone: Package 1 operator acceptance
 - Working branch: `codex/operator-ux-review`
-- Last deployed commit: `d8e7ec9`
-- Operator verification: not requested yet
-- Next action: deploy Package 1 to the RPI, verify the Setup workflow, and ask
-  the operator to inspect the milestone.
+- Last deployed commit: `66603aa`
+- Operator verification: requested after live smoke verification
+- Next action: receive operator feedback on Package 1, address any defects, and
+  close the package before beginning Talkgroups.
 
 ## Working Rules
 
@@ -42,7 +42,7 @@ Status: in progress
 - [x] 1D. Confirm pending-change and activity records cover every resulting
   Setup mutation.
 - [x] Build and test.
-- [ ] Deploy and verify on the RPI.
+- [x] Deploy and verify on the RPI.
 - [ ] Operator acceptance.
 
 Acceptance:
@@ -132,7 +132,9 @@ Status: pending
 
 ## Deployment Log
 
-- `d8e7ec9`: current deployed baseline; asynchronous auditable backup jobs.
+- `d8e7ec9`: starting baseline; asynchronous auditable backup jobs.
+- `66603aa`: Package 1 deployed; versioned Setup mutations, per-site RR
+  identity, and Setup-owned RF handoff.
 
 ## Verification Log
 
@@ -148,3 +150,7 @@ Status: pending
   production frontend build. Waterfall selections and accepted RF calibration
   now mutate versioned Setup state, create pending/audit records, and no longer
   write the standalone TR editor draft.
+- 2026-07-09: Package 1 deployed to the RPI and passed live API/UI smoke checks.
+  Systems & Sites loaded the independent MSWIN RR 4879 and Entergy RR 8202
+  catalogs, retained the correct selected sites, and required no admin token
+  for the read-only catalog load.
