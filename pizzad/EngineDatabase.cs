@@ -410,13 +410,7 @@ public sealed class EngineDatabase
                 COALESCE(SUM(CASE WHEN transcription_status='pending' AND stop_time > start_time THEN stop_time - start_time ELSE 0 END), 0) AS pending_audio_seconds,
                 COALESCE(SUM(CASE WHEN quality_reason <> 'ok' THEN 1 ELSE 0 END), 0) AS weak_calls,
                 COALESCE(SUM(CASE WHEN transcription_status='failed' OR quality_reason='transcription_error' THEN 1 ELSE 0 END), 0) AS failed_calls,
-                COALESCE(SUM(CASE
-                    WHEN lower(COALESCE(transcription, '')) GLOB '*yeah yeah yeah*'
-                      OR lower(COALESCE(transcription, '')) GLOB '*okay okay okay*'
-                      OR lower(COALESCE(transcription, '')) GLOB '*copy copy copy*'
-                      OR lower(COALESCE(transcription, '')) GLOB '*thank you thank you thank you*'
-                      OR lower(COALESCE(transcription, '')) GLOB '*inaudible inaudible*'
-                    THEN 1 ELSE 0 END), 0) AS repetitive_calls,
+                COALESCE(SUM(CASE WHEN quality_reason='repetitive' THEN 1 ELSE 0 END), 0) AS repetitive_calls,
                 COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM incident_calls ic WHERE ic.call_id = calls.id) THEN 1 ELSE 0 END), 0) AS incident_calls
             FROM calls
             WHERE start_time >= $start
@@ -1098,6 +1092,66 @@ public sealed class EngineDatabase
         return groups;
     }
 
+    public async Task<List<TalkgroupCallStatsDto>> ListTalkgroupCallStatsAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COALESCE(NULLIF(system_short_name, ''), '') AS system_short_name,
+                talkgroup,
+                COALESCE(NULLIF(talkgroup_name, ''), 'TG ' || talkgroup) AS label,
+                COALESCE(NULLIF(category, ''), 'other') AS stored_category,
+                COUNT(*) AS call_count,
+                SUM(CASE WHEN transcription_status='complete' AND quality_reason='ok' THEN 1 ELSE 0 END) AS strong_call_count,
+                MAX(start_time) AS last_heard
+            FROM calls
+            WHERE start_time >= $start AND start_time <= $end
+            GROUP BY system_short_name, talkgroup, label, stored_category
+            ORDER BY label COLLATE NOCASE ASC;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        var groups = new List<TalkgroupCallStatsDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            groups.Add(new TalkgroupCallStatsDto(
+                reader.GetString(reader.GetOrdinal("system_short_name")),
+                reader.GetInt64(reader.GetOrdinal("talkgroup")),
+                reader.GetString(reader.GetOrdinal("label")),
+                reader.GetString(reader.GetOrdinal("stored_category")),
+                reader.GetInt32(reader.GetOrdinal("call_count")),
+                reader.GetInt32(reader.GetOrdinal("strong_call_count")),
+                reader.GetInt64(reader.GetOrdinal("last_heard"))));
+        }
+        return groups;
+    }
+
+    public async Task<List<EngineCall>> ListTalkgroupCallsAsync(long start, long end, string? systemShortName, long talkgroup, int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM calls
+            WHERE start_time >= $start AND start_time <= $end
+              AND COALESCE(NULLIF(system_short_name, ''), '') = $system
+              AND talkgroup = $talkgroup
+            ORDER BY start_time DESC, id DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        Add(command, "$system", systemShortName?.Trim() ?? string.Empty);
+        Add(command, "$talkgroup", talkgroup);
+        Add(command, "$limit", Math.Clamp(limit, 1, 1000));
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            calls.Add(ReadCall(reader));
+        return calls;
+    }
+
     public async Task<List<EngineCall>> ListCategoryTalkgroupCallsAsync(long start, long end, string category, string? systemShortName, long talkgroup, int limit, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -1157,6 +1211,48 @@ public sealed class EngineDatabase
         Add(command, "$start", start);
         Add(command, "$end", end);
         Add(command, "$category", category);
+        for (var i = 0; i < tokens.Count; i++)
+            Add(command, $"$q{i}", $"%{EscapeLike(tokens[i])}%");
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            calls.Add(ReadCall(reader));
+        return calls;
+    }
+
+    public async Task<List<EngineCall>> ListSearchCallsAsync(long start, long end, string query, CancellationToken ct)
+    {
+        var tokens = query
+            .Trim()
+            .ToLowerInvariant()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.Length > 0)
+            .Take(8)
+            .ToList();
+        if (tokens.Count == 0)
+            return [];
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        var filters = tokens.Select((_, index) => $"""
+            (
+                lower(COALESCE(talkgroup_name, '')) LIKE $q{index} ESCAPE '\'
+                OR lower(COALESCE(transcription, '')) LIKE $q{index} ESCAPE '\'
+                OR lower(COALESCE(system_short_name, '')) LIKE $q{index} ESCAPE '\'
+                OR lower(COALESCE(category, '')) LIKE $q{index} ESCAPE '\'
+                OR CAST(id AS TEXT) LIKE $q{index} ESCAPE '\'
+                OR CAST(talkgroup AS TEXT) LIKE $q{index} ESCAPE '\'
+            )
+            """);
+        command.CommandText = $"""
+            SELECT * FROM calls
+            WHERE start_time >= $start AND start_time <= $end
+              AND {string.Join(" AND ", filters)}
+            ORDER BY start_time DESC, id DESC
+            LIMIT 1000;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
         for (var i = 0; i < tokens.Count; i++)
             Add(command, $"$q{i}", $"%{EscapeLike(tokens[i])}%");
         var calls = new List<EngineCall>();
@@ -2973,10 +3069,16 @@ public sealed class EngineDatabase
                 FirstSeen = reader.GetInt64(6),
                 LastSeen = reader.GetInt64(7),
                 Confidence = reader.GetDouble(8),
-                Calls = await ListIncidentCallsAsync(connection, incidentId, ct)
+                Calls = []
             });
         }
+
+        var callsByIncident = await ListIncidentCallsAsync(connection, incidents.Select(i => i.Id).ToList(), ct);
         return incidents
+            .Select(i => i with
+            {
+                Calls = callsByIncident.TryGetValue(i.Id, out var calls) ? calls : []
+            })
             .Where(i => i.Calls.Count >= 1)
             .Select(i => i with { Category = string.IsNullOrWhiteSpace(i.Category) || i.Category == "other" ? DominantIncidentCategory(i.Calls) : i.Category })
             .ToList();
@@ -3027,6 +3129,59 @@ public sealed class EngineDatabase
                 reader.GetString(10)));
         }
         return calls;
+    }
+
+    private static async Task<Dictionary<long, List<IncidentCallDto>>> ListIncidentCallsAsync(SqliteConnection connection, IReadOnlyList<long> incidentIds, CancellationToken ct)
+    {
+        if (incidentIds.Count == 0)
+            return [];
+
+        var parameters = incidentIds.Select((_, i) => $"$incident_id{i}").ToArray();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT ic.incident_id, c.id, c.start_time, c.transcription, COALESCE(c.category, 'other'), COALESCE(c.talkgroup_name, ''), COALESCE(c.system_short_name, ''), c.talkgroup, COALESCE(c.audio_path, ''),
+                   COALESCE(MAX(CASE WHEN am.id IS NOT NULL THEN 1 ELSE 0 END), 0),
+                   COALESCE(MAX(CASE WHEN am.id IS NOT NULL AND COALESCE(am.dismissed_at_utc, '') = '' THEN 1 ELSE 0 END), 0),
+                   COALESCE(group_concat(DISTINCT am.rule_name), '')
+            FROM incident_calls ic
+            JOIN calls c ON c.id = ic.call_id
+            LEFT JOIN alert_matches am ON am.call_id = c.id
+            WHERE ic.incident_id IN ({string.Join(",", parameters)})
+              AND c.transcription_status = 'complete'
+              AND c.quality_reason = 'ok'
+              AND length(trim(c.transcription)) > 0
+            GROUP BY ic.incident_id, c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name, c.talkgroup, c.audio_path
+            ORDER BY ic.incident_id ASC, c.start_time ASC;
+            """;
+        for (var i = 0; i < incidentIds.Count; i++)
+            Add(command, parameters[i], incidentIds[i]);
+
+        var byIncident = new Dictionary<long, List<IncidentCallDto>>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var incidentId = reader.GetInt64(0);
+            var callId = reader.GetInt64(1);
+            if (!byIncident.TryGetValue(incidentId, out var calls))
+            {
+                calls = [];
+                byIncident[incidentId] = calls;
+            }
+
+            calls.Add(new IncidentCallDto(
+                callId,
+                reader.GetInt64(2),
+                reader.GetString(3),
+                CallAudioLinks.ForCall(callId, reader.GetString(8)),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetInt64(7),
+                reader.GetInt64(9) != 0,
+                reader.GetInt64(10) != 0,
+                reader.GetString(11)));
+        }
+        return byIncident;
     }
 
     private static async Task<List<IncidentCallDto>> ListSpecificIncidentCallsAsync(SqliteConnection connection, IReadOnlyList<long> callIds, CancellationToken ct)
@@ -3508,6 +3663,8 @@ public sealed class EngineDatabase
         await AddColumnIfMissingAsync(connection, "incidents", "status", "TEXT NOT NULL DEFAULT 'active'", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "updated_at_utc", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_calls_system_tg_start ON calls(system_short_name, talkgroup, start_time DESC);", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_calls_quality_start ON calls(quality_reason, start_time DESC);", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "cc_summary_decode_lines", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "cc_summary_decode_zero", "INTEGER NOT NULL DEFAULT 0", ct);
@@ -3716,6 +3873,8 @@ public sealed class EngineDatabase
         CREATE INDEX IF NOT EXISTS idx_calls_category_start ON calls(category, start_time DESC);
         CREATE INDEX IF NOT EXISTS idx_calls_tg_start ON calls(talkgroup, start_time DESC);
         CREATE INDEX IF NOT EXISTS idx_calls_system_start ON calls(system_short_name, start_time DESC);
+        CREATE INDEX IF NOT EXISTS idx_calls_system_tg_start ON calls(system_short_name, talkgroup, start_time DESC);
+        CREATE INDEX IF NOT EXISTS idx_calls_quality_start ON calls(quality_reason, start_time DESC);
 
         CREATE TABLE IF NOT EXISTS call_annotations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

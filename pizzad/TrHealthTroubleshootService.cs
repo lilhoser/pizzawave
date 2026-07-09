@@ -9,6 +9,7 @@ namespace pizzad;
 
 public sealed class TrHealthTroubleshootService
 {
+    private static readonly TimeSpan TroubleshootCacheTtl = TimeSpan.FromSeconds(30);
     private static readonly Regex TrTimestampRegex = new(
         @"\[(?<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]",
         RegexOptions.Compiled);
@@ -22,6 +23,10 @@ public sealed class TrHealthTroubleshootService
     private readonly EngineDatabase _database;
     private readonly TrConfigService _trConfig;
     private readonly ILogger<TrHealthTroubleshootService> _logger;
+    private readonly SemaphoreSlim _cacheGate = new(1, 1);
+    private TrTroubleshootCacheEntry? _cachedTroubleshoot;
+    private Task<TrTroubleshootDto>? _troubleshootBuildTask;
+    private string _troubleshootBuildKey = string.Empty;
 
     public TrHealthTroubleshootService(EngineConfig config, EngineDatabase database, TrConfigService trConfig, ILogger<TrHealthTroubleshootService> logger)
     {
@@ -32,6 +37,51 @@ public sealed class TrHealthTroubleshootService
     }
 
     public async Task<TrTroubleshootDto> BuildAsync(long start, long end, bool bySystem, string baseline, CancellationToken ct)
+    {
+        var cacheKey = TroubleshootCacheKey(start, end, bySystem, baseline);
+        var now = DateTimeOffset.UtcNow;
+        Task<TrTroubleshootDto> buildTask;
+        await _cacheGate.WaitAsync(ct);
+        try
+        {
+            if (_cachedTroubleshoot is { } cached &&
+                cached.Key == cacheKey &&
+                now - cached.CreatedAt <= TroubleshootCacheTtl)
+                return cached.Value;
+
+            if (_troubleshootBuildTask is { IsCompleted: false } running && _troubleshootBuildKey == cacheKey)
+                buildTask = running;
+            else
+            {
+                _troubleshootBuildKey = cacheKey;
+                _troubleshootBuildTask = BuildCoreAsync(start, end, bySystem, baseline, CancellationToken.None);
+                buildTask = _troubleshootBuildTask;
+            }
+        }
+        finally
+        {
+            _cacheGate.Release();
+        }
+
+        var result = await buildTask.WaitAsync(ct);
+        await _cacheGate.WaitAsync(ct);
+        try
+        {
+            if (_troubleshootBuildKey == cacheKey)
+            {
+                _cachedTroubleshoot = new TrTroubleshootCacheEntry(cacheKey, DateTimeOffset.UtcNow, result);
+                _troubleshootBuildTask = null;
+            }
+        }
+        finally
+        {
+            _cacheGate.Release();
+        }
+
+        return result;
+    }
+
+    private async Task<TrTroubleshootDto> BuildCoreAsync(long start, long end, bool bySystem, string baseline, CancellationToken ct)
     {
         var summaryStart = DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeSeconds();
         var baselineStart = DateTimeOffset.UtcNow.AddDays(-BaselineDays(baseline)).ToUnixTimeSeconds();
@@ -61,6 +111,17 @@ public sealed class TrHealthTroubleshootService
             diagnostics,
             "Click Generate Recommendation to send the current troubleshooting snapshot to the configured AI insights endpoint.");
     }
+
+    private static (long Start, long End) NormalizeTroubleshootRange(long start, long end) =>
+        (RoundDownMinute(start), RoundDownMinute(end));
+
+    private static string TroubleshootCacheKey(long start, long end, bool bySystem, string baseline)
+    {
+        var normalized = NormalizeTroubleshootRange(start, end);
+        return $"{normalized.Start}:{normalized.End}:{bySystem}:{(baseline ?? string.Empty).Trim().ToLowerInvariant()}";
+    }
+
+    private static long RoundDownMinute(long value) => value - value % 60;
 
     public async Task<TrRfAnalysisDto> BuildRfAnalysisAsync(string? system, long start, long end, CancellationToken ct)
     {
@@ -1333,4 +1394,6 @@ public sealed class TrHealthTroubleshootService
     private sealed record TrDesiredSystem(string ShortName, IReadOnlyList<long> ControlChannelsHz, IReadOnlyList<long> VoiceFrequenciesHz);
 
     private sealed record FrequencyRange(long LowHz, long HighHz, long CenterHz);
+
+    private sealed record TrTroubleshootCacheEntry(string Key, DateTimeOffset CreatedAt, TrTroubleshootDto Value);
 }

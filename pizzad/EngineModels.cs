@@ -188,6 +188,15 @@ public sealed record CategoryGroupDto(
     int StrongCount = 0,
     int WeakCount = 0);
 
+public sealed record TalkgroupCallStatsDto(
+    string SystemShortName,
+    long Talkgroup,
+    string Label,
+    string StoredCategory,
+    int Count,
+    int StrongCount,
+    long LastHeard);
+
 public sealed record CategoryInsightDto(
     long Id,
     string Title,
