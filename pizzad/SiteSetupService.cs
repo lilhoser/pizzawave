@@ -256,6 +256,7 @@ public sealed class SiteSetupService
         {
             if (configured.MonitoredAreas.Count == 0 && _config.Locations.MonitoredAreas.Count > 0)
                 configured.MonitoredAreas = CloneMonitoredAreas(_config.Locations.MonitoredAreas);
+            configured.Sources = FillMissingDesiredSourceGains(configured.Sources, applied.Sources);
             return configured;
         }
 
@@ -702,6 +703,19 @@ public sealed class SiteSetupService
                 };
         }).ToList();
     }
+
+    private static List<RfSurveySourceDto> FillMissingDesiredSourceGains(
+        IReadOnlyList<RfSurveySourceDto> desired,
+        IReadOnlyList<SiteSetupAppliedSourceDto> applied) =>
+        desired.Select(source =>
+        {
+            if (!string.IsNullOrWhiteSpace(source.Gain))
+                return source;
+            var live = applied.FirstOrDefault(row => row.Index == source.Index);
+            return live == null || string.IsNullOrWhiteSpace(live.Gain)
+                ? source
+                : source with { Gain = live.Gain };
+        }).ToList();
 
     private static string SourceAssignmentSummary(IReadOnlyDictionary<string, int>? values) =>
         string.Join("|", NormalizeSourceAssignments(values)
