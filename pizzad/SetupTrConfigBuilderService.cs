@@ -62,7 +62,7 @@ public sealed partial class SetupTrConfigBuilderService
         var sampleRate = request.SampleRate > 0 ? request.SampleRate : TemplateSampleRate(template) ?? DefaultSampleRate;
         var html = await LoadHtmlAsync(request, ct);
         var siteFilters = SiteFilters(request.SiteNameList, request.SiteNames);
-        var devices = NormalizeDevices(request.SdrDevices, request.SdrSerials, sampleRate);
+        var devices = NormalizeDevices(request.SdrDevices, sampleRate);
         var plan = BuildSourcePlan(html, request.RadioReferenceSid, siteFilters, devices, sampleRate);
 
         var configJson = BuildConfigJson(plan.Systems, plan.Sources, template);
@@ -756,7 +756,7 @@ public sealed partial class SetupTrConfigBuilderService
 
     private static long MhzToHz(double mhz) => (long)Math.Round(mhz * 1_000_000);
 
-    private static IReadOnlyList<SelectedSdrDevice> NormalizeDevices(IReadOnlyList<SetupSdrDeviceDto>? devices, string? serials, int requestedSampleRate)
+    private static IReadOnlyList<SelectedSdrDevice> NormalizeDevices(IReadOnlyList<SetupSdrDeviceDto>? devices, int requestedSampleRate)
     {
         var selected = (devices ?? [])
             .Where(device => !string.IsNullOrWhiteSpace(device.Type) || !string.IsNullOrWhiteSpace(device.Serial) || !string.IsNullOrWhiteSpace(device.DeviceArgs))
@@ -765,10 +765,7 @@ public sealed partial class SetupTrConfigBuilderService
         if (selected.Count > 0)
             return selected;
 
-        var splitSerials = SplitList(serials);
-        if (splitSerials.Count == 0)
-            return [RtlSelectedDevice(0, string.Empty, requestedSampleRate)];
-        return splitSerials.Select((serial, index) => RtlSelectedDevice(index, serial, requestedSampleRate)).ToList();
+        return [RtlSelectedDevice(0, string.Empty, requestedSampleRate)];
     }
 
     private static SelectedSdrDevice NormalizeDevice(SetupSdrDeviceDto device, int ordinal, int requestedSampleRate)

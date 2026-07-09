@@ -14,6 +14,21 @@ public sealed class SetupTrConfigBuilderServiceTests
             new TalkgroupCatalogService(effectiveConfig, NullLogger<TalkgroupCatalogService>.Instance));
     }
 
+    private static SetupSdrDeviceDto RtlDevice(int index, string serial, int sampleRate = 2_400_000) =>
+        new(
+            index,
+            "RTL-SDR",
+            serial,
+            string.IsNullOrWhiteSpace(serial) ? $"RTL-SDR #{index}" : $"RTL-SDR {serial}",
+            "osmosdr",
+            string.IsNullOrWhiteSpace(serial) ? $"rtl={index},buflen=65536" : $"rtl={serial},buflen=65536",
+            "",
+            [sampleRate],
+            sampleRate,
+            "rtl-tuner-gain",
+            "32",
+            "");
+
     [Fact]
     public async Task ListSitesAsync_ReturnsSelectableRadioReferenceRows()
     {
@@ -51,7 +66,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "etv raymond",
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         var system = Assert.Single(draft.Systems);
@@ -79,7 +94,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "etv raymond",
-            SdrSerials: "00000001,00000002",
+            SdrDevices: [RtlDevice(0, "00000001"), RtlDevice(1, "00000002")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         var source = Assert.Single(draft.Sources);
@@ -105,7 +120,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "Site One County,Site Two County",
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         Assert.Single(draft.Sources);
@@ -127,7 +142,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Clarksville Simulcast Montgomery, TN"],
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001", 2_048_000)],
             SampleRate: 2_048_000), CancellationToken.None);
 
         var system = Assert.Single(draft.Systems);
@@ -148,13 +163,13 @@ public sealed class SetupTrConfigBuilderServiceTests
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Chattanooga Simulcast Hamilton, TN"],
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001", 2_048_000)],
             SampleRate: 2_048_000), CancellationToken.None);
         var wide = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Chattanooga Simulcast Hamilton, TN"],
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         Assert.Contains(narrow.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
@@ -365,7 +380,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "etv raymond",
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         using var doc = JsonDocument.Parse(draft.ConfigJson);

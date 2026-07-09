@@ -10641,7 +10641,6 @@ function TrConfigEditorPanel({
   const [busy, setBusy] = useState<"" | "load" | "save" | "draft" | "rr">("load");
   const [rrSid, setRrSid] = useState("");
   const [rrSites, setRrSites] = useState("");
-  const [rrSerials, setRrSerials] = useState("");
   const [rrCandidate, setRrCandidate] = useState<SetupTrConfigDraft | null>(null);
   const lastSavedDraftRef = useRef("");
 
@@ -10715,8 +10714,7 @@ function TrConfigEditorPanel({
         method: "POST",
         body: JSON.stringify({
           radioReferenceSid: rrSid.trim(),
-          siteNames: rrSites.trim(),
-          sdrSerials: rrSerials.trim()
+          siteNames: rrSites.trim()
         })
       });
       setRrCandidate(draft);
@@ -10833,7 +10831,6 @@ function TrConfigEditorPanel({
           <div className="tr-config-rr-grid">
             <label>SID <input value={rrSid} onChange={e => setRrSid(e.target.value)} /></label>
             <label>Site filters <input value={rrSites} onChange={e => setRrSites(e.target.value)} placeholder="Hamilton, Cleveland" /></label>
-            <label>SDR serials <input value={rrSerials} onChange={e => setRrSerials(e.target.value)} /></label>
             <button disabled={busy === "rr" || !rrSid.trim()} onClick={() => void draftFromRadioReference()}>{busy === "rr" ? "Drafting..." : "Preview RR Candidate"}</button>
           </div>
           {rrCandidate && <div className="tr-config-candidate">

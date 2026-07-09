@@ -337,7 +337,6 @@ public sealed record SetupTrConfigDraftRequest(
     string? RadioReferenceUrl = null,
     string? HtmlText = null,
     string? SiteNames = null,
-    string? SdrSerials = null,
     int SampleRate = 2400000,
     IReadOnlyList<SetupSdrDeviceDto>? SdrDevices = null,
     IReadOnlyList<string>? SiteNameList = null);
