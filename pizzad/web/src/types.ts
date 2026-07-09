@@ -594,6 +594,7 @@ export type BackupRestoreApplyResult = { scheduled: boolean; message: string };
 export type BackupRestoreCancelResult = { canceled: boolean; message: string };
 export type MigrationActionResult = { ok: boolean; message: string };
 export type MigrationResetResult = { ok: boolean; message: string; warnings: string[]; backup?: BackupCreateResult | null };
+export type SystemResetResult = { ok: boolean; message: string; warnings: string[]; backup?: BackupCreateResult | null; nextPage: string };
 export type SetupValidationResult = { ok: boolean; message: string; detail?: any };
 export type SetupTalkgroupRow = { key: string; systemShortName: string; id: number; mode: string; alphaTag: string; description: string; tag: string; category: string; opsCategory: string; included: boolean; exclusionReason: string };
 export type SetupTalkgroupPreview = { rows: SetupTalkgroupRow[]; includedByCategory: Record<string, number>; includedCount: number; excludedCount: number; diagnostics: string };

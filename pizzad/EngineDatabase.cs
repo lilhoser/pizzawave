@@ -1754,9 +1754,14 @@ public sealed class EngineDatabase
 
     public async Task ClearSiteDataForMigrationAsync(CancellationToken ct)
     {
+        await ClearOperationalDataAsync(preserveAuditHistory: false, ct);
+    }
+
+    public async Task ClearOperationalDataAsync(bool preserveAuditHistory, CancellationToken ct)
+    {
         await using var connection = OpenConnection();
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=OFF;", ct);
-        var tables = new[]
+        var tables = new List<string>
         {
             "call_post_processing",
             "call_embedding_jobs",
@@ -1765,7 +1770,6 @@ public sealed class EngineDatabase
             "call_annotations",
             "alert_matches",
             "incident_calls",
-            "incident_operation_audit",
             "evidence_verifier_runs",
             "incidents",
             "insight_events",
@@ -1779,6 +1783,14 @@ public sealed class EngineDatabase
             "job_logs",
             "jobs"
         };
+        if (!preserveAuditHistory)
+        {
+            tables.Add("incident_operation_audit");
+            tables.Add("site_setup_activity");
+            tables.Add("rf_survey_notes");
+            tables.Add("rf_survey_experiments");
+            tables.Add("rf_survey_sessions");
+        }
         foreach (var table in tables)
             await ExecuteNonQueryAsync(connection, $"DELETE FROM {table};", ct);
         await ExecuteNonQueryAsync(connection, "DELETE FROM sqlite_sequence WHERE name IN (" + string.Join(",", tables.Select(t => $"'{t}'")) + ");", ct);

@@ -935,6 +935,23 @@ app.MapPost("/api/v1/system/migration/begin", async (HttpContext context, AuthSe
 .WithName("SystemMigrationBegin")
 .WithOpenApi();
 
+app.MapPost("/api/v1/system/reset", async (HttpContext context, AuthService authService, MigrationService migration) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var request = await JsonSerializer.DeserializeAsync<SystemResetRequestDto>(context.Request.Body, EngineConfig.JsonOptions(), context.RequestAborted)
+            ?? new SystemResetRequestDto();
+        return Results.Ok(await migration.ResetAsync(request, context.RequestAborted));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SystemReset")
+.WithOpenApi();
+
 app.MapGet("/api/v1/system/migration/profile", (HttpContext context, AuthService authService, MigrationService migration) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

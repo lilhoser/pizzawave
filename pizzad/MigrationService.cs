@@ -142,6 +142,78 @@ public sealed class MigrationService
         return new MigrationResetResultDto(true, message, warnings, backup);
     }
 
+    public async Task<SystemResetResultDto> ResetAsync(SystemResetRequestDto? request, CancellationToken ct)
+    {
+        request ??= new SystemResetRequestDto();
+        var presets = request.Presets
+            .Select(preset => (preset ?? string.Empty).Trim().ToLowerInvariant())
+            .Where(preset => !string.IsNullOrWhiteSpace(preset))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (presets.Count == 0)
+            throw new InvalidOperationException("Choose at least one reset preset.");
+        if (!string.IsNullOrWhiteSpace(_config.Setup.PendingRestorePath))
+            throw new InvalidOperationException("Cancel or apply the pending restore before starting reset.");
+
+        var dataOnly = presets.Contains("data-only");
+        var siteReset = presets.Contains("site-reset");
+        var fullReset = presets.Contains("full-reset");
+        var customReset = presets.Contains("custom");
+        var clearOperationalData = dataOnly || siteReset || fullReset || customReset;
+        var clearSiteState = siteReset || fullReset;
+
+        var current = _config.Clone();
+        var warnings = new List<string>();
+        BackupCreateResultDto? backup = null;
+
+        _ingest.Pause(false, $"System reset started: {string.Join(", ", presets)}.", 0);
+        if (clearSiteState)
+            PreflightProtectedSiteFilesForReset();
+
+        if (request.CreateBackup)
+            backup = await _backups.CreateBackupAsync(new BackupCreateRequestDto(request.BackupAudioWindow), ct);
+
+        if (clearOperationalData)
+        {
+            await _database.ClearOperationalDataAsync(request.PreserveAuditHistory && !clearSiteState, ct);
+            DeleteDirectoryContents(_config.Storage.AudioRoot, warnings);
+            var qdrant = await _embeddings.DeleteCollectionAsync(ct);
+            if (!qdrant.Ok)
+                warnings.Add(qdrant.Message);
+        }
+
+        if (clearSiteState)
+        {
+            DeleteFileIfExists(_config.TrunkRecorder.TalkgroupCatalogPath, warnings);
+            await ResetProtectedSiteFilesAsync(ct);
+            ApplyResetConfig(current, request.ToMigrationResetRequest(fullReset));
+            _config.Setup.MigrationMode = false;
+            _config.Setup.MigrationStartedAtUtc = null;
+            _config.Setup.MigrationResetAtUtc = null;
+            _config.Setup.MigrationPreviousCompleted = false;
+            _config.Setup.MigrationPreviousCurrentStep = string.Empty;
+            _config.Setup.RestoreAppliedAtUtc = null;
+            _config.Setup.PendingRestorePath = string.Empty;
+            _config.Setup.PendingRestoreManifestJson = string.Empty;
+            _config.Setup.CurrentStep = fullReset ? "tr" : "complete";
+            _config.Setup.Completed = !fullReset;
+            _config.Setup.CompletedAtUtc = fullReset ? null : DateTime.UtcNow;
+        }
+
+        if (fullReset)
+            _auth.RegenerateToken();
+
+        _config.ApplyDefaults();
+        await SaveConfigAsync(ct);
+
+        var message = fullReset
+            ? "Full reset complete. First-run prerequisites must be completed before returning to normal operation."
+            : clearSiteState
+                ? "Site reset complete. Open Setup to choose location, systems, talkgroups, RF path, and TR source planning."
+                : "Data reset complete. Current site/configuration was preserved.";
+        return new SystemResetResultDto(true, message, warnings, backup, fullReset ? "first-run" : clearSiteState ? "setup" : "backup");
+    }
+
     private void ApplyResetConfig(EngineConfig current, MigrationResetRequestDto request)
     {
         _config.Branding = request.PreserveBranding ? CloneSection(current.Branding) : new BrandingConfig();
@@ -342,6 +414,34 @@ public sealed class MigrationResetRequestDto
     public bool PreserveRfSurvey { get; set; } = true;
 }
 public sealed record MigrationResetResultDto(bool Ok, string Message, IReadOnlyList<string> Warnings, BackupCreateResultDto? Backup);
+public sealed class SystemResetRequestDto
+{
+    public List<string> Presets { get; set; } = new();
+    public bool CreateBackup { get; set; } = true;
+    public string BackupAudioWindow { get; set; } = "all";
+    public bool PreserveAuditHistory { get; set; } = true;
+    public bool PreserveBranding { get; set; } = true;
+    public bool PreserveTranscription { get; set; } = true;
+    public bool PreserveAiInsights { get; set; } = true;
+    public bool PreserveEmbeddings { get; set; } = true;
+    public bool PreserveAlerts { get; set; } = true;
+    public bool PreserveRfDiagnostics { get; set; } = true;
+    public bool PreserveRfSurvey { get; set; } = true;
+
+    public MigrationResetRequestDto ToMigrationResetRequest(bool fullReset) => new()
+    {
+        CreateBackup = false,
+        BackupAudioWindow = BackupAudioWindow,
+        PreserveBranding = !fullReset && PreserveBranding,
+        PreserveTranscription = !fullReset && PreserveTranscription,
+        PreserveAiInsights = !fullReset && PreserveAiInsights,
+        PreserveEmbeddings = !fullReset && PreserveEmbeddings,
+        PreserveAlerts = !fullReset && PreserveAlerts,
+        PreserveRfDiagnostics = !fullReset && PreserveRfDiagnostics,
+        PreserveRfSurvey = !fullReset && PreserveRfSurvey
+    };
+}
+public sealed record SystemResetResultDto(bool Ok, string Message, IReadOnlyList<string> Warnings, BackupCreateResultDto? Backup, string NextPage);
 public sealed record MigrationProfileDto(
     int Version,
     string Product,

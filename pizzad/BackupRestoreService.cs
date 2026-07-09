@@ -148,17 +148,8 @@ public sealed class BackupRestoreService
         var planPath = Path.Combine(stageRoot, "restore-plan.json");
         await File.WriteAllTextAsync(planPath, JsonSerializer.Serialize(plan, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
 
-        _config.Setup.Completed = false;
-        _config.Setup.CurrentStep = "restore";
         _config.Setup.PendingRestorePath = stageRoot;
         _config.Setup.PendingRestoreManifestJson = JsonSerializer.Serialize(manifest, EngineConfig.JsonOptions());
-        _config.Setup.TrDetected = false;
-        _config.Setup.TrConfigured = false;
-        _config.Setup.TalkgroupsValidated = false;
-        _config.Setup.CallstreamValidated = false;
-        _config.Setup.TranscriptionValidated = false;
-        _config.Setup.MonitoredAreasValidated = false;
-        _config.Setup.HealthValidated = false;
         await SaveConfigAsync(ct);
 
         return new BackupRestorePreviewDto(stageRoot, manifest, checks);
@@ -190,8 +181,6 @@ public sealed class BackupRestoreService
         var stageRoot = _config.Setup.PendingRestorePath;
         _config.Setup.PendingRestorePath = string.Empty;
         _config.Setup.PendingRestoreManifestJson = string.Empty;
-        if (!_config.Setup.Completed)
-            _config.Setup.CurrentStep = "stack";
         await SaveConfigAsync(ct);
 
         if (!string.IsNullOrWhiteSpace(stageRoot) && IsRestoreStagePath(stageRoot) && Directory.Exists(stageRoot))
@@ -244,7 +233,7 @@ public sealed class BackupRestoreService
             ?? throw new InvalidOperationException("Restore plan could not be read.");
         foreach (var entry in plan.Entries)
             CopyPlanEntry(entry);
-        ForceRestoredConfigIntoSetupMode(_config.ConfigPath);
+        MarkRestoredConfigApplied(_config.ConfigPath);
         return new BackupRestoreApplyResultDto(true, "Restore files were copied. Restart pizzad before using the restored data.");
     }
 
@@ -482,7 +471,7 @@ public sealed class BackupRestoreService
         }
     }
 
-    private static void ForceRestoredConfigIntoSetupMode(string configPath)
+    private static void MarkRestoredConfigApplied(string configPath)
     {
         if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
             return;
@@ -491,13 +480,7 @@ public sealed class BackupRestoreService
         var setup = root.TryGetValue("setup", out var existing)
             ? JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(existing, EngineConfig.JsonOptions()), EngineConfig.JsonOptions()) ?? new()
             : new Dictionary<string, object?>();
-        setup["completed"] = false;
-        setup["completedAtUtc"] = null;
-        setup["currentStep"] = "tr";
-        setup["installMode"] = "reuseExistingTr";
         setup["restoreAppliedAtUtc"] = DateTime.UtcNow;
-        foreach (var key in new[] { "trDetected", "trConfigured", "talkgroupsValidated", "callstreamValidated", "transcriptionValidated", "monitoredAreasValidated", "healthValidated" })
-            setup[key] = false;
         setup["pendingRestorePath"] = string.Empty;
         setup["pendingRestoreManifestJson"] = string.Empty;
         root["setup"] = setup;

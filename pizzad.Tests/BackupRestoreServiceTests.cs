@@ -37,7 +37,7 @@ public sealed class BackupRestoreServiceTests
     }
 
     [Fact]
-    public async Task StageRestore_ValidatesArchiveAndLaunchesSetupMode()
+    public async Task StageRestore_ValidatesArchiveWithoutLaunchingSetupMode()
     {
         var root = NewTempRoot();
         try
@@ -51,8 +51,8 @@ public sealed class BackupRestoreServiceTests
 
             Assert.NotEmpty(preview.Manifest.Entries);
             Assert.All(preview.Checks, check => Assert.True(check.Ok, check.Message));
-            Assert.False(config.Setup.Completed);
-            Assert.Equal("restore", config.Setup.CurrentStep);
+            Assert.True(config.Setup.Completed);
+            Assert.Equal("complete", config.Setup.CurrentStep);
             Assert.True(Directory.Exists(config.Setup.PendingRestorePath));
             Assert.False(string.IsNullOrWhiteSpace(config.Setup.PendingRestoreManifestJson));
         }
@@ -175,7 +175,7 @@ public sealed class BackupRestoreServiceTests
             Assert.NotNull(preview);
             Assert.NotEmpty(preview.Manifest.Entries);
             Assert.All(preview.Checks, check => Assert.True(check.Ok, check.Message));
-            Assert.Equal("restore", config.Setup.CurrentStep);
+            Assert.Equal("complete", config.Setup.CurrentStep);
         }
         finally
         {
