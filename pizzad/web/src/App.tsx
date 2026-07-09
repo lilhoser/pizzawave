@@ -12964,7 +12964,19 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
         page: String(page),
         pageSize: String(showAllRows ? 10_000 : 50)
       });
-      const loaded = await api.request<TalkgroupCatalogPage>(`/api/v1/talkgroups/catalog/page?${parameters}`);
+      const path = `/api/v1/talkgroups/catalog/page?${parameters}`;
+      let loaded: TalkgroupCatalogPage;
+      try {
+        loaded = await api.request<TalkgroupCatalogPage>(path);
+      } catch (error) {
+        const transientNetworkFailure = error instanceof TypeError && error.message === "Failed to fetch";
+        if (!transientNetworkFailure || serial !== loadSerialRef.current)
+          throw error;
+        await new Promise(resolve => window.setTimeout(resolve, 400));
+        if (serial !== loadSerialRef.current)
+          return;
+        loaded = await api.request<TalkgroupCatalogPage>(path);
+      }
       if (serial === loadSerialRef.current) {
         setCatalogPage(loaded);
         setMessage("");
@@ -13059,6 +13071,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const allVisibleSelected = visibleKeys.length > 0 && visibleSelectedCount === visibleKeys.length;
   const enabledCount = catalogPage?.enabledCount ?? 0;
   const excludedCount = catalogPage?.excludedCount ?? 0;
+  const loadingCatalog = busy === "load";
   const hasSystemScopedRows = visibleRows.some(item => item.systemShortName);
   const topCategoryCounts = Object.entries(catalogPage?.categoryCounts ?? {})
     .sort(([aCategory, aCount], [bCategory, bCount]) => bCount - aCount || aCategory.localeCompare(bCategory))
@@ -13088,7 +13101,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   return <div className={`${embedded ? "site-setup-catalog-editor" : "card settings-card wide"} talkgroups-settings-card`}>
     <div className="settings-fields">
       {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
-      <div className="talkgroup-catalog-table">
+      <div className="talkgroup-catalog-table" aria-busy={loadingCatalog}>
         {topCategoryCounts.length > 0 && <div className="talkgroup-category-summary">
           {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
         </div>}
@@ -13112,12 +13125,12 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
             </select>
             <button disabled={Boolean(busy)} onClick={() => setSelectedTalkgroupKeys(new Set())}>Clear</button>
           </span>}
-          <button disabled={currentPage <= 1} onClick={() => setPage(1)}>First</button>
-          <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
+          <button disabled={loadingCatalog || currentPage <= 1} onClick={() => setPage(1)}>First</button>
+          <button disabled={loadingCatalog || currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Prev</button>
           <span>{currentPage} / {pageCount}</span>
-          <button disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
-          <button disabled={currentPage >= pageCount} onClick={() => setPage(pageCount)}>Last</button>
-          <button onClick={() => { setShowAllRows(current => !current); setPage(1); }}>{showAllRows ? "Paginate" : "Show all"}</button>
+          <button disabled={loadingCatalog || currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
+          <button disabled={loadingCatalog || currentPage >= pageCount} onClick={() => setPage(pageCount)}>Last</button>
+          <button disabled={loadingCatalog} onClick={() => { setShowAllRows(current => !current); setPage(1); }}>{showAllRows ? "Paginate" : "Show all"}</button>
         </div>
         <table className="table compact-table talkgroup-catalog-grid">
           <colgroup>

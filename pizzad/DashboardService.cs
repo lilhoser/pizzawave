@@ -6,7 +6,7 @@ public sealed class DashboardService
 {
     private static readonly TimeSpan DashboardCacheTtl = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DashboardBuildTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan StatusCacheTtl = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan StatusCacheTtl = TimeSpan.FromMinutes(1);
     private readonly EngineDatabase _database;
     private readonly EngineConfig _config;
     private readonly GeocodingService _geocoding;
@@ -254,7 +254,7 @@ public sealed class DashboardService
     {
         var cacheKey = StatusCacheKey(start, end);
         var now = DateTimeOffset.UtcNow;
-        Task<StatusSummaryDto>? buildTask = null;
+        Task<StatusSummaryDto> buildTask;
         await _statusCacheGate.WaitAsync(ct);
         try
         {
@@ -269,17 +269,25 @@ public sealed class DashboardService
             {
                 var normalized = NormalizeStatusRange(start, end);
                 _statusBuildKey = cacheKey;
-                _statusBuildTask = BuildStatusSummaryCoreAsync(normalized.Start, normalized.End, CancellationToken.None);
+                _statusBuildTask = BuildAndCacheStatusSummaryAsync(cacheKey, normalized.Start, normalized.End);
                 buildTask = _statusBuildTask;
             }
+
+            if (_statusCache is { } stale && stale.Key == cacheKey)
+                return stale.Value;
         }
         finally
         {
             _statusCacheGate.Release();
         }
 
-        var result = await buildTask.WaitAsync(ct);
-        await _statusCacheGate.WaitAsync(ct);
+        return await buildTask.WaitAsync(ct);
+    }
+
+    private async Task<StatusSummaryDto> BuildAndCacheStatusSummaryAsync(string cacheKey, long start, long end)
+    {
+        var result = await BuildStatusSummaryCoreAsync(start, end, CancellationToken.None);
+        await _statusCacheGate.WaitAsync();
         try
         {
             if (_statusBuildKey == cacheKey)
@@ -314,13 +322,14 @@ public sealed class DashboardService
     private static (long Start, long End) NormalizeStatusRange(long start, long end) =>
         (RoundDownStatusBucket(start), RoundDownStatusBucket(end));
 
-    private static string StatusCacheKey(long start, long end)
+    private string StatusCacheKey(long start, long end)
     {
         var normalized = NormalizeStatusRange(start, end);
-        return $"{normalized.Start}:{normalized.End}";
+        var activeProfile = _config.Profiles.ActiveProfileId.ToString("D");
+        return $"{activeProfile}:{normalized.End - normalized.Start}";
     }
 
-    private static long RoundDownStatusBucket(long value) => value - value % 10;
+    private static long RoundDownStatusBucket(long value) => value - value % 60;
 
     private List<EngineCall> ApplyProfile(IEnumerable<EngineCall> calls) => calls.Where(c => Allows(c.Category, c.SystemShortName, c.Talkgroup)).ToList();
 
