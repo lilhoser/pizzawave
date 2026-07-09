@@ -415,6 +415,14 @@ MVP should include:
 Defer from MVP:
 
 - CLI;
-- waterfall/spectrum visualization;
 - IQ capture/replay;
 - fully automated yagi bearing sweeps. Bearing/position are notes in MVP.
+
+Implemented in Setup after this original MVP split:
+
+- live waterfall/spectrum visualization;
+- waterfall screen grab export;
+- selected-control-channel signal checks;
+- P25 identify from the waterfall candidate table;
+- waterfall-to-RF-sweep handoff for selected control channels, gain, sample
+  rate, source, and recommended error.

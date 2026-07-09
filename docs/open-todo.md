@@ -63,8 +63,9 @@ unless it creates a current regression test or follow-up.
 
 ## Hourly Quality Monitoring
 
-- Run `pizzawave-cross-rig-quality-check` as the single recurring quality
-  monitor.
+- Keep `pizzawave-cross-rig-quality-check` as the single recurring quality
+  monitor. It is active as a Codex hourly automation and should remain
+  observation-only.
 - Use the rig-local `/api/v1/system/quality-check` endpoint where possible for
   call, transcript, AI, evidence-verifier, incident, and audit windows.
 - Analyze OT/omicrontheta as the Hamilton/TN quality target.
