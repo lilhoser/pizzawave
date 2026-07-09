@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
-import type { AlertMatch, BackupArchive, BackupCreateResult, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupPreview, SetupTalkgroupRow, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogItem, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -9709,14 +9709,48 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
   const [audioWindow, setAudioWindow] = useState("7d");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [backupJob, setBackupJob] = useState<Job | null>(null);
   const [preview, setPreview] = useState<BackupRestorePreview | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [resetPresets, setResetPresets] = useState<string[]>(["data-only"]);
   const [resetCreateBackup, setResetCreateBackup] = useState(true);
   const [resetPreserveAudit, setResetPreserveAudit] = useState(true);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const handledBackupJobId = useRef<number | null>(null);
   useEffect(() => { void loadBackups(); }, []);
   useEffect(() => { void loadBackupEstimate(); }, [audioWindow]);
+  useEffect(() => {
+    let canceled = false;
+    const pollMs = backupJob && isActiveJob(backupJob) ? 2000 : 5000;
+    async function loadBackupJob() {
+      try {
+        const jobs = await api.request<Job[]>("/api/v1/jobs");
+        const current = backupJob?.id
+          ? jobs.find(job => job.id === backupJob.id)
+          : jobs.find(job => job.type === "system_backup" && isActiveJob(job));
+        if (canceled)
+          return;
+        if (current) {
+          setBackupJob(current);
+          if (!isActiveJob(current) && handledBackupJobId.current !== current.id) {
+            handledBackupJobId.current = current.id;
+            setMessage(current.message || `Backup job #${current.id} ${current.status}.`);
+            await loadBackups();
+          }
+        } else if (!backupJob || isActiveJob(backupJob)) {
+          setBackupJob(null);
+        }
+      } catch {
+        // The status bar already reports fetch failures; keep the last visible backup job state here.
+      }
+    }
+    void loadBackupJob();
+    const timer = window.setInterval(() => void loadBackupJob(), pollMs);
+    return () => {
+      canceled = true;
+      window.clearInterval(timer);
+    };
+  }, [backupJob?.id, backupJob?.status]);
 
   const audioWindowOptions = [
     { value: "24h", label: "Last 24h" },
@@ -9726,6 +9760,23 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     { value: "all", label: "All" }
   ];
   const audioWindowLabel = audioWindowOptions.find(option => option.value === audioWindow)?.label ?? "All";
+  const activeBackupJob = backupJob && isActiveJob(backupJob);
+  const locked = Boolean(busy) || Boolean(activeBackupJob);
+
+  function isActiveJob(job: Job) {
+    return ["queued", "running", "paused", "canceling"].includes((job.status ?? "").toLowerCase());
+  }
+
+  function jobTone(job: Job | null) {
+    if (!job)
+      return message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "error" : "ok";
+    const status = (job.status ?? "").toLowerCase();
+    if (status === "failed")
+      return "error";
+    if (status === "canceled" || status === "canceling")
+      return "warning";
+    return status === "completed" ? "ok" : "info";
+  }
 
   async function loadBackups() {
     try {
@@ -9753,13 +9804,30 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     const sizeText = estimate ? ` Estimated source size is ${formatBytes(estimate.bytes)} across ${estimate.fileCount.toLocaleString()} file(s); compressed archive size may differ.` : "";
     if (!confirmAction("Create backup?", `This archives PizzaWave SQLite data, ${audioWindowLabel.toLowerCase()} of recorded call audio, app data, Qdrant storage, TR config, talkgroups, and PizzaWave config.${sizeText} It can take a while on rigs with lots of audio.`)) return;
     setBusy("create");
-    setMessage("Creating backup archive...");
+    setMessage("Starting backup job...");
     try {
-      const result = await api.request<BackupCreateResult>("/api/v1/system/backups", { method: "POST", body: JSON.stringify({ audioWindow }) });
-      setMessage(`Created ${result.name}: ${formatBytes(result.bytes)} across ${result.fileCount.toLocaleString()} file(s).${result.warnings.length ? " Review warnings below." : ""}`);
-      await loadBackups();
+      const job = await api.request<Job>("/api/v1/system/backups", { method: "POST", body: JSON.stringify({ audioWindow }) });
+      handledBackupJobId.current = null;
+      setBackupJob(job);
+      setMessage(`Backup job #${job.id} started. You can monitor or stop it from this page or System > Jobs.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Backup failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function stopBackupJob() {
+    if (!backupJob || !isActiveJob(backupJob))
+      return;
+    if (!confirmAction("Stop backup job?", `This requests cancellation for backup job #${backupJob.id}. A partial archive may be discarded.`)) return;
+    setBusy("cancel-backup");
+    try {
+      const job = await api.request<Job>(`/api/v1/jobs/${backupJob.id}/control`, { method: "POST", body: JSON.stringify({ action: "cancel" }) });
+      setBackupJob(job);
+      setMessage(`Stop requested for backup job #${job.id}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to stop backup job.");
     } finally {
       setBusy("");
     }
@@ -9887,18 +9955,29 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     }
   }
 
-  return <div className="system-manager-grid">
+  return <>
+  {(message || backupJob) && <div className={`backup-job-banner section-status ${jobTone(backupJob)}`}>
+    <div>
+      {backupJob
+        ? <strong>Backup job #{backupJob.id}: {label(backupJob.status)}</strong>
+        : <strong>Backup / Restore</strong>}
+      <span>{backupJob?.message || message}</span>
+      {backupJob && <small>{backupJob.completed.toLocaleString()} / {backupJob.total.toLocaleString()} step(s)</small>}
+    </div>
+    {backupJob && isActiveJob(backupJob) && <button className="danger-button" disabled={Boolean(busy)} onClick={() => void stopBackupJob()}>{busy === "cancel-backup" ? "Stopping..." : "Stop Backup"}</button>}
+  </div>}
+  <div className="system-manager-grid">
     <div className="card">
       <h3>Backup</h3>
       <p className="muted">Create a portable archive of PizzaWave state for relocation, cloning, or disaster recovery.</p>
       <label className="setting-field compact-setting">
         <span>Recorded audio<small>SQLite and configuration are always backed up fully. This controls recorded call audio by file timestamp.</small></span>
-        <select value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioWindowOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+        <select disabled={locked} value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioWindowOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
       </label>
       <div className="setup-button-row">
-        <button disabled={Boolean(busy)} onClick={() => void createBackup()}>{busy === "create" ? "Creating..." : "Create Backup"}</button>
-        <button disabled={Boolean(busy)} onClick={() => void loadBackups()}>Refresh</button>
-        <button type="button" onClick={() => setShowHelp(true)}>Help</button>
+        <button disabled={locked} onClick={() => void createBackup()}>{busy === "create" ? "Starting..." : "Create Backup"}</button>
+        <button disabled={locked} onClick={() => void loadBackups()}>Refresh</button>
+        <button type="button" disabled={locked} onClick={() => setShowHelp(true)}>Help</button>
       </div>
       {estimate && <div className="backup-preview">
         <div className="audit-kpis">
@@ -9912,7 +9991,6 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
         </tr>)}</tbody></table>}
         {estimate.warnings.length > 0 && <div className="setup-warning-list">{estimate.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
       </div>}
-      {message && <p className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{message}</p>}
     </div>
     {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
       <div className="modal-card" onClick={event => event.stopPropagation()}>
@@ -9932,11 +10010,11 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
     <div className="card">
       <h3>Restore</h3>
       <p className="muted">Stage a backup, review verification, then apply it from this page.</p>
-      <input ref={fileRef} type="file" accept=".zip,application/zip" />
+      <input ref={fileRef} disabled={locked} type="file" accept=".zip,application/zip" />
       <div className="setup-button-row">
-        <button className="danger-button" disabled={Boolean(busy)} onClick={() => void stageRestore()}>{busy === "restore" ? "Staging..." : "Stage Restore"}</button>
-        {preview && <button className="danger-button" disabled={Boolean(busy) || preview.checks.some(check => !check.ok)} onClick={() => void applyRestore()}>{busy === "apply-restore" ? "Applying..." : "Apply Staged Restore"}</button>}
-        {preview && <button disabled={Boolean(busy)} onClick={() => void cancelRestore()}>{busy === "cancel-restore" ? "Canceling..." : "Cancel Restore"}</button>}
+        <button className="danger-button" disabled={locked} onClick={() => void stageRestore()}>{busy === "restore" ? "Staging..." : "Stage Restore"}</button>
+        {preview && <button className="danger-button" disabled={locked || preview.checks.some(check => !check.ok)} onClick={() => void applyRestore()}>{busy === "apply-restore" ? "Applying..." : "Apply Staged Restore"}</button>}
+        {preview && <button disabled={locked} onClick={() => void cancelRestore()}>{busy === "cancel-restore" ? "Canceling..." : "Cancel Restore"}</button>}
       </div>
       {preview && <BackupRestorePreviewCard preview={preview} />}
     </div>
@@ -9945,22 +10023,22 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
       <p className="muted">Choose one or more reset presets, then confirm. Reset is the replacement for the old clean-install and relocation entry points.</p>
       <div className="settings-fields">
         <label className="setup-check option-row">
-          <input type="checkbox" checked={resetPresets.includes("data-only")} onChange={event => toggleResetPreset("data-only", event.currentTarget.checked)} />
+          <input type="checkbox" disabled={locked} checked={resetPresets.includes("data-only")} onChange={event => toggleResetPreset("data-only", event.currentTarget.checked)} />
           <span><strong>Data Only</strong><span> Clear calls, audio, incidents, transcripts, AI/vector history, jobs, metrics, and recommendations. Current site/config stays in place.</span></span>
         </label>
         <label className="setup-check option-row">
-          <input type="checkbox" checked={resetPresets.includes("site-reset")} onChange={event => toggleResetPreset("site-reset", event.currentTarget.checked)} />
+          <input type="checkbox" disabled={locked} checked={resetPresets.includes("site-reset")} onChange={event => toggleResetPreset("site-reset", event.currentTarget.checked)} />
           <span><strong>Site Reset</strong><span> Clear site/location state, TR config, generated TG files/catalog policy, RF evidence/activity, and all historical operating data.</span></span>
         </label>
         <label className="setup-check option-row">
-          <input type="checkbox" checked={resetPresets.includes("full-reset")} onChange={event => toggleResetPreset("full-reset", event.currentTarget.checked)} />
+          <input type="checkbox" disabled={locked} checked={resetPresets.includes("full-reset")} onChange={event => toggleResetPreset("full-reset", event.currentTarget.checked)} />
           <span><strong>Full Reset</strong><span> Return to first-run prerequisite mode. Backup archives are preserved.</span></span>
         </label>
-        <SettingCheckbox label="Create backup before reset" description={`Uses the Backup audio window currently set to ${audioWindowLabel}.`} checked={resetCreateBackup} onChange={setResetCreateBackup} />
-        <SettingCheckbox label="Preserve audit/setup history for Data Only" description="Site Reset and Full Reset clear setup/RF activity history regardless of this option." checked={resetPreserveAudit} onChange={setResetPreserveAudit} />
+        <SettingCheckbox label="Create backup before reset" description={`Uses the Backup audio window currently set to ${audioWindowLabel}.`} checked={resetCreateBackup} onChange={setResetCreateBackup} disabled={locked} />
+        <SettingCheckbox label="Preserve audit/setup history for Data Only" description="Site Reset and Full Reset clear setup/RF activity history regardless of this option." checked={resetPreserveAudit} onChange={setResetPreserveAudit} disabled={locked} />
       </div>
       <div className="setup-button-row">
-        <button className="danger-button" disabled={Boolean(busy) || resetPresets.length === 0} onClick={() => void runReset()}>{busy === "reset" ? "Resetting..." : "Run Reset"}</button>
+        <button className="danger-button" disabled={locked || resetPresets.length === 0} onClick={() => void runReset()}>{busy === "reset" ? "Resetting..." : "Run Reset"}</button>
       </div>
     </div>
     <div className="card">
@@ -9971,10 +10049,11 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
           <td><code>{row.path}</code></td>
           <td>{new Date(row.createdUtc).toLocaleString()}</td>
           <td>{formatBytes(row.bytes)}</td>
-          <td><a href={`/api/v1/system/backups/${encodeURIComponent(row.name)}`}>Download</a> <button disabled={Boolean(busy)} onClick={() => void stageLocalRestore(row)}>{busy === `restore-${row.name}` ? "Staging..." : "Restore"}</button> <button className="danger-button" disabled={Boolean(busy)} onClick={() => void deleteBackup(row.name)}>Delete</button></td>
+          <td><a href={`/api/v1/system/backups/${encodeURIComponent(row.name)}`}>Download</a> <button disabled={locked} onClick={() => void stageLocalRestore(row)}>{busy === `restore-${row.name}` ? "Staging..." : "Restore"}</button> <button className="danger-button" disabled={locked} onClick={() => void deleteBackup(row.name)}>Delete</button></td>
         </tr>)}</tbody></table>}
     </div>
-  </div>;
+  </div>
+  </>;
 
   async function deleteBackup(name: string) {
     if (!confirmAction("Delete backup?", `This permanently deletes ${name} from local backup storage. Download it first if you need to keep a copy.`)) return;
@@ -13206,9 +13285,9 @@ function SettingSelect({ label: text, description, value, options, onChange }: {
   </label>;
 }
 
-function SettingCheckbox({ label: text, description, checked, onChange }: { label: string; description: string; checked: any; onChange: (value: boolean) => void }) {
+function SettingCheckbox({ label: text, description, checked, onChange, disabled = false }: { label: string; description: string; checked: any; onChange: (value: boolean) => void; disabled?: boolean }) {
   return <label className="setting-checkbox">
-    <input type="checkbox" checked={Boolean(checked)} onChange={e => onChange(e.target.checked)} />
+    <input type="checkbox" disabled={disabled} checked={Boolean(checked)} onChange={e => onChange(e.target.checked)} />
     <span>{text}<small>{description}</small></span>
   </label>;
 }

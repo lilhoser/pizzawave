@@ -56,6 +56,8 @@ builder.Services.AddSingleton<SystemManagerService>();
 builder.Services.AddSingleton<SystemRecommendationService>();
 builder.Services.AddSingleton<SystemCpuSnapshotService>();
 builder.Services.AddSingleton<BackupRestoreService>();
+builder.Services.AddSingleton<BackupJobService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupJobService>());
 builder.Services.AddSingleton<SystemResetService>();
 builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<SiteSetupService>();
@@ -852,10 +854,17 @@ app.MapGet("/api/v1/system/backups", (HttpContext context, AuthService authServi
 .WithName("SystemBackupsList")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/backups", async (HttpContext context, BackupCreateRequestDto request, AuthService authService, BackupRestoreService backups) =>
+app.MapPost("/api/v1/system/backups", async (HttpContext context, BackupCreateRequestDto request, AuthService authService, BackupJobService backups) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await backups.CreateBackupAsync(request, context.RequestAborted));
+    try
+    {
+        return Results.Ok(await backups.StartAsync(request, context.RequestAborted));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(new { message = ex.Message });
+    }
 })
 .WithName("SystemBackupsCreate")
 .WithOpenApi();
@@ -1345,7 +1354,7 @@ app.MapPost("/api/v1/talkgroups/catalog/policy", async (HttpContext context, Tal
 .WithName("TalkgroupCatalogPolicyUpdate")
 .WithOpenApi();
 
-app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database) =>
+app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, BackupJobService backups) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var job = await database.GetJobAsync(id, context.RequestAborted);
@@ -1354,6 +1363,7 @@ app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long i
     {
         JobDto? updated = job.Type switch
         {
+            BackupJobService.JobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await backups.CancelAsync(id, context.RequestAborted),
             "sftp_import" or "local_import" => throw new InvalidOperationException("Historical import jobs are no longer supported from the web application."),
             _ => throw new InvalidOperationException("This job type does not support pause/resume/cancel.")
         };

@@ -1207,6 +1207,25 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   display: grid;
   gap: 10px;
 }
+.backup-job-banner {
+  display: flex;
+  width: auto;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  white-space: normal;
+}
+.backup-job-banner > div {
+  display: grid;
+  gap: 3px;
+}
+.backup-job-banner span,
+.backup-job-banner small {
+  display: block;
+}
 .service-action-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
