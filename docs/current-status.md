@@ -501,10 +501,11 @@ snapshots are no longer present in the workspace.
   sudoers before the bundled `/opt/...` fallback. The Services restart endpoint
   was verified against `trunk-recorder.service`.
 - Earlier feature deployed: System > Metrics > Bandwidth backed by
-  `/api/v1/system/remote-bandwidth`. This report is derived from stored calls,
-  audio files, and `lm_usage`; it excludes local/loopback endpoints so the RPI's
-  current local AI endpoint (`http://localhost:1234/v1`) is not counted as
-  remote RTX traffic.
+  `/api/v1/system/remote-bandwidth`. The report now reads the
+  `remote_bandwidth_usage` ledger populated when remote transcription and AI
+  usage are recorded, so page load is a SQL aggregation instead of a scan over
+  calls and audio files. AI usage is counted for remote/LM Link execution mode
+  even when the OpenAI-compatible URL itself is loopback.
 - Post-deploy checks:
   - `pizzad.service` active;
   - `/api/v1/health` returned `status: ok`;

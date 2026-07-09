@@ -891,6 +891,18 @@ public sealed record RemoteBandwidthEntryDto(
     string Basis,
     bool Estimated);
 
+public sealed record RemoteBandwidthUsageRecordDto(
+    string SourceKey,
+    DateTime TimestampUtc,
+    string Activity,
+    string Endpoint,
+    long RequestBytes,
+    long ResponseBytes,
+    long TotalBytes,
+    string Basis,
+    bool Estimated,
+    bool MissingAudio);
+
 public sealed record RemoteBandwidthReportDto(
     string Ledger,
     string RemoteHost,

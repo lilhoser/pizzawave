@@ -18,6 +18,7 @@ public sealed class EnginePipeline
     private readonly EmbeddingService _embeddings;
     private readonly CallAudioService _audio;
     private readonly TranscriptPostProcessingService _postProcessing;
+    private readonly RemoteBandwidthEstimatorService _bandwidth;
     private readonly LiveTrActivityMonitor _liveTrActivity;
     private readonly ILogger<EnginePipeline> _logger;
     private readonly ConcurrentQueue<TranscriptionQueueItem> _liveQueue = new();
@@ -56,6 +57,7 @@ public sealed class EnginePipeline
         EmbeddingService embeddings,
         CallAudioService audio,
         TranscriptPostProcessingService postProcessing,
+        RemoteBandwidthEstimatorService bandwidth,
         LiveTrActivityMonitor liveTrActivity,
         ILogger<EnginePipeline> logger)
     {
@@ -69,6 +71,7 @@ public sealed class EnginePipeline
         _embeddings = embeddings;
         _audio = audio;
         _postProcessing = postProcessing;
+        _bandwidth = bandwidth;
         _liveTrActivity = liveTrActivity;
         _logger = logger;
     }
@@ -397,6 +400,7 @@ public sealed class EnginePipeline
                 RawMetadataJson = MergeTranscriptionMetadata(call.RawMetadataJson, result.Metadata)
             };
             await UpdateCallTranscriptionWithRetryAsync(item.CallId, result.Text, quality.Status, quality.Reason, alert.IsMatch, updatedCall.RawMetadataJson, ct);
+            await RecordRemoteBandwidthUsageAsync(updatedCall, ct);
             await _postProcessing.ProcessAsync(updatedCall, ct);
             RecordTranscriptionPerformance(startedAt, stopwatch.Elapsed, audioSeconds, backlog);
 
@@ -434,6 +438,8 @@ public sealed class EnginePipeline
             var call = await _database.GetCallAsync(item.CallId, ct);
             var metadata = MergeTranscriptionMetadata(call?.RawMetadataJson ?? "{}", CreateTranscriptionFailureMetadata(ex));
             await UpdateCallTranscriptionWithRetryAsync(item.CallId, string.Empty, "failed", "transcription_error", false, metadata, ct);
+            if (call != null)
+                await RecordRemoteBandwidthUsageAsync(call with { Transcription = string.Empty, TranscriptionStatus = "failed", QualityReason = "transcription_error", IsAlertMatch = false, RawMetadataJson = metadata }, ct);
         }
     }
 
@@ -453,6 +459,18 @@ public sealed class EnginePipeline
                 _logger.LogWarning(ex, "SQLite was locked while updating transcription for call {CallId}; retrying attempt {Attempt}/{MaxAttempts} after {DelayMs}ms", callId, attempt, maxAttempts, delay.TotalMilliseconds);
                 await Task.Delay(delay, ct);
             }
+        }
+    }
+
+    private async Task RecordRemoteBandwidthUsageAsync(EngineCall call, CancellationToken ct)
+    {
+        try
+        {
+            await _bandwidth.RecordTranscriptionAsync(call, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to record remote bandwidth usage for call {CallId}", call.Id);
         }
     }
 

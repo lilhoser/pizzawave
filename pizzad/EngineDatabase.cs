@@ -590,7 +590,8 @@ public sealed class EngineDatabase
                 finish_reason, input_chars, payload_chars, prompt_tokens, completion_tokens, total_tokens)
             VALUES (
                 $timestamp_utc, $trigger_activity, $request_kind, $success, $error, $endpoint, $request_model, $response_model,
-                $finish_reason, $input_chars, $payload_chars, $prompt_tokens, $completion_tokens, $total_tokens);
+                $finish_reason, $input_chars, $payload_chars, $prompt_tokens, $completion_tokens, $total_tokens)
+            RETURNING id;
             """;
         Add(command, "$timestamp_utc", entry.TimestampUtc.ToString("O"));
         Add(command, "$trigger_activity", entry.TriggerActivity);
@@ -606,7 +607,10 @@ public sealed class EngineDatabase
         Add(command, "$prompt_tokens", entry.PromptTokens);
         Add(command, "$completion_tokens", entry.CompletionTokens);
         Add(command, "$total_tokens", entry.TotalTokens);
-        await command.ExecuteNonQueryAsync(ct);
+        var result = await command.ExecuteScalarAsync(ct);
+        var id = Convert.ToInt64(result);
+        var includeLoopbackRelay = _config.AiInsights.ExecutionMode is "remote" or "lmlink";
+        await UpsertRemoteAiBandwidthUsageAsync(connection, id, entry, includeLoopbackRelay, ct);
     }
 
     public async Task AddEvidenceVerifierRunAsync(EvidenceVerifierRunDto entry, CancellationToken ct)
@@ -712,6 +716,12 @@ public sealed class EngineDatabase
         Add(command, "$monitoring_state", entry.MonitoringState);
         Add(command, "$source", entry.Source);
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task UpsertRemoteBandwidthUsageAsync(RemoteBandwidthUsageRecordDto usage, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await UpsertRemoteBandwidthUsageAsync(connection, usage, ct);
     }
 
     public async Task<IReadOnlyList<SiteSetupActivityDto>> ListSiteSetupActivityAsync(int limit, CancellationToken ct)
@@ -1770,6 +1780,7 @@ public sealed class EngineDatabase
             "insight_events",
             "insight_windows",
             "lm_usage",
+            "remote_bandwidth_usage",
             "calls",
             "tr_health_samples",
             "geocode_cache",
@@ -1791,6 +1802,112 @@ public sealed class EngineDatabase
         await ExecuteNonQueryAsync(connection, "DELETE FROM sqlite_sequence WHERE name IN (" + string.Join(",", tables.Select(t => $"'{t}'")) + ");", ct);
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=ON;", ct);
         await ExecuteNonQueryAsync(connection, "VACUUM;", ct);
+    }
+
+    public async Task<RemoteBandwidthSummaryDto> SummarizeRemoteBandwidthAsync(DateTime? startUtc, DateTime? endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COALESCE(SUM(request_bytes), 0) AS request_bytes,
+                COALESCE(SUM(response_bytes), 0) AS response_bytes,
+                COALESCE(SUM(total_bytes), 0) AS total_bytes,
+                COALESCE(SUM(CASE WHEN total_bytes > 0 THEN 1 ELSE 0 END), 0) AS requests,
+                COALESCE(SUM(CASE WHEN missing_audio != 0 THEN 1 ELSE 0 END), 0) AS missing_audio
+            FROM remote_bandwidth_usage
+            WHERE ($start IS NULL OR timestamp_utc >= $start)
+              AND ($end IS NULL OR timestamp_utc <= $end);
+            """;
+        Add(command, "$start", startUtc?.ToString("O"));
+        Add(command, "$end", endUtc?.ToString("O"));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return new RemoteBandwidthSummaryDto();
+        return new RemoteBandwidthSummaryDto(
+            reader.GetInt64(reader.GetOrdinal("request_bytes")),
+            reader.GetInt64(reader.GetOrdinal("response_bytes")),
+            reader.GetInt64(reader.GetOrdinal("total_bytes")),
+            Convert.ToInt32(reader.GetInt64(reader.GetOrdinal("requests"))),
+            Convert.ToInt32(reader.GetInt64(reader.GetOrdinal("missing_audio"))));
+    }
+
+    public async Task<IReadOnlyList<RemoteBandwidthBucketDto>> ListRemoteBandwidthDayBucketsAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        return await ReadListAsync(connection, """
+            SELECT strftime('%m/%d', timestamp_utc) AS label,
+                   COALESCE(SUM(request_bytes), 0) AS request_bytes,
+                   COALESCE(SUM(response_bytes), 0) AS response_bytes,
+                   COALESCE(SUM(total_bytes), 0) AS total_bytes,
+                   COUNT(*) AS requests
+            FROM remote_bandwidth_usage
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end
+            GROUP BY label
+            ORDER BY label;
+            """,
+            command =>
+            {
+                Add(command, "$start", startUtc.ToString("O"));
+                Add(command, "$end", endUtc.ToString("O"));
+            },
+            reader => new RemoteBandwidthBucketDto(
+                reader.GetString(reader.GetOrdinal("label")),
+                "all",
+                reader.GetInt64(reader.GetOrdinal("request_bytes")),
+                reader.GetInt64(reader.GetOrdinal("response_bytes")),
+                reader.GetInt64(reader.GetOrdinal("total_bytes")),
+                Convert.ToInt32(reader.GetInt64(reader.GetOrdinal("requests")))),
+            ct);
+    }
+
+    public async Task<IReadOnlyList<RemoteBandwidthBucketDto>> ListRemoteBandwidthActivityBucketsAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        return await ReadListAsync(connection, """
+            SELECT activity,
+                   COALESCE(SUM(request_bytes), 0) AS request_bytes,
+                   COALESCE(SUM(response_bytes), 0) AS response_bytes,
+                   COALESCE(SUM(total_bytes), 0) AS total_bytes,
+                   COUNT(*) AS requests
+            FROM remote_bandwidth_usage
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end
+            GROUP BY activity
+            ORDER BY total_bytes DESC;
+            """,
+            command =>
+            {
+                Add(command, "$start", startUtc.ToString("O"));
+                Add(command, "$end", endUtc.ToString("O"));
+            },
+            reader => new RemoteBandwidthBucketDto(
+                reader.GetString(reader.GetOrdinal("activity")),
+                reader.GetString(reader.GetOrdinal("activity")),
+                reader.GetInt64(reader.GetOrdinal("request_bytes")),
+                reader.GetInt64(reader.GetOrdinal("response_bytes")),
+                reader.GetInt64(reader.GetOrdinal("total_bytes")),
+                Convert.ToInt32(reader.GetInt64(reader.GetOrdinal("requests")))),
+            ct);
+    }
+
+    public async Task<IReadOnlyList<RemoteBandwidthEntryDto>> ListRemoteBandwidthEntriesAsync(DateTime startUtc, DateTime endUtc, int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        return await ReadListAsync(connection, """
+            SELECT timestamp_utc, activity, endpoint, request_bytes, response_bytes, total_bytes, basis, estimated
+            FROM remote_bandwidth_usage
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end
+            ORDER BY timestamp_utc DESC
+            LIMIT $limit;
+            """,
+            command =>
+            {
+                Add(command, "$start", startUtc.ToString("O"));
+                Add(command, "$end", endUtc.ToString("O"));
+                Add(command, "$limit", Math.Max(1, limit));
+            },
+            ReadRemoteBandwidthEntry,
+            ct);
     }
 
     public async Task<TokenUsageReportDto> GetTokenUsageAsync(long start, long end, CancellationToken ct)
@@ -3113,6 +3230,89 @@ public sealed class EngineDatabase
         reader.GetInt32(reader.GetOrdinal("completion_tokens")),
         reader.GetInt32(reader.GetOrdinal("total_tokens")));
 
+    private static RemoteBandwidthEntryDto ReadRemoteBandwidthEntry(SqliteDataReader reader) => new(
+        DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc"))),
+        reader.GetString(reader.GetOrdinal("activity")),
+        reader.GetString(reader.GetOrdinal("endpoint")),
+        reader.GetInt64(reader.GetOrdinal("request_bytes")),
+        reader.GetInt64(reader.GetOrdinal("response_bytes")),
+        reader.GetInt64(reader.GetOrdinal("total_bytes")),
+        reader.GetString(reader.GetOrdinal("basis")),
+        reader.GetInt64(reader.GetOrdinal("estimated")) != 0);
+
+    private static async Task UpsertRemoteBandwidthUsageAsync(SqliteConnection connection, RemoteBandwidthUsageRecordDto usage, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO remote_bandwidth_usage (
+                source_key, timestamp_utc, activity, endpoint, request_bytes, response_bytes,
+                total_bytes, basis, estimated, missing_audio, created_at_utc, updated_at_utc)
+            VALUES (
+                $source_key, $timestamp_utc, $activity, $endpoint, $request_bytes, $response_bytes,
+                $total_bytes, $basis, $estimated, $missing_audio, $now, $now)
+            ON CONFLICT(source_key) DO UPDATE SET
+                timestamp_utc=excluded.timestamp_utc,
+                activity=excluded.activity,
+                endpoint=excluded.endpoint,
+                request_bytes=excluded.request_bytes,
+                response_bytes=excluded.response_bytes,
+                total_bytes=excluded.total_bytes,
+                basis=excluded.basis,
+                estimated=excluded.estimated,
+                missing_audio=excluded.missing_audio,
+                updated_at_utc=excluded.updated_at_utc;
+            """;
+        var now = DateTime.UtcNow.ToString("O");
+        Add(command, "$source_key", usage.SourceKey);
+        Add(command, "$timestamp_utc", usage.TimestampUtc.ToString("O"));
+        Add(command, "$activity", usage.Activity);
+        Add(command, "$endpoint", usage.Endpoint);
+        Add(command, "$request_bytes", usage.RequestBytes);
+        Add(command, "$response_bytes", usage.ResponseBytes);
+        Add(command, "$total_bytes", usage.TotalBytes);
+        Add(command, "$basis", usage.Basis);
+        Add(command, "$estimated", usage.Estimated ? 1 : 0);
+        Add(command, "$missing_audio", usage.MissingAudio ? 1 : 0);
+        Add(command, "$now", now);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task UpsertRemoteAiBandwidthUsageAsync(SqliteConnection connection, long lmUsageId, TokenUsageEntryDto entry, bool includeLoopbackRelay, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Endpoint) || (!includeLoopbackRelay && !IsRemoteEndpoint(entry.Endpoint)))
+            return;
+
+        var requestBytes = Math.Max(0, entry.PayloadChars);
+        var responseBytes = Math.Max(0, entry.CompletionTokens * 4 + 512);
+        if (!entry.Success && entry.CompletionTokens == 0)
+            responseBytes = 0;
+
+        await UpsertRemoteBandwidthUsageAsync(connection, new RemoteBandwidthUsageRecordDto(
+            $"lm_usage:{lmUsageId}",
+            entry.TimestampUtc,
+            "AI insights",
+            entry.Endpoint,
+            requestBytes,
+            responseBytes,
+            requestBytes + responseBytes,
+            includeLoopbackRelay
+                ? "lm_usage payload_chars plus completion-token response estimate; AI execution mode is remote/lmlink"
+                : "lm_usage payload_chars plus completion-token response estimate",
+            true,
+            false), ct);
+    }
+
+    private static bool IsRemoteEndpoint(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+            return false;
+        var host = uri.Host;
+        return !string.IsNullOrWhiteSpace(host) &&
+               !host.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
+               !host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
+               !host.Equals("::1", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static TokenUsageBucketDto TokenBucket(string label, IEnumerable<TokenUsageEntryDto> rows)
     {
         var list = rows.ToList();
@@ -3381,6 +3581,24 @@ public sealed class EngineDatabase
                 total_tokens INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
+
+            CREATE TABLE IF NOT EXISTS remote_bandwidth_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_key TEXT NOT NULL UNIQUE,
+                timestamp_utc TEXT NOT NULL,
+                activity TEXT NOT NULL DEFAULT '',
+                endpoint TEXT NOT NULL DEFAULT '',
+                request_bytes INTEGER NOT NULL DEFAULT 0,
+                response_bytes INTEGER NOT NULL DEFAULT 0,
+                total_bytes INTEGER NOT NULL DEFAULT 0,
+                basis TEXT NOT NULL DEFAULT '',
+                estimated INTEGER NOT NULL DEFAULT 1,
+                missing_audio INTEGER NOT NULL DEFAULT 0,
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_bandwidth_time ON remote_bandwidth_usage(timestamp_utc DESC);
+            CREATE INDEX IF NOT EXISTS idx_remote_bandwidth_activity_time ON remote_bandwidth_usage(activity, timestamp_utc DESC);
 
             CREATE TABLE IF NOT EXISTS evidence_verifier_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3695,6 +3913,24 @@ public sealed class EngineDatabase
             total_tokens INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS remote_bandwidth_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_key TEXT NOT NULL UNIQUE,
+            timestamp_utc TEXT NOT NULL,
+            activity TEXT NOT NULL DEFAULT '',
+            endpoint TEXT NOT NULL DEFAULT '',
+            request_bytes INTEGER NOT NULL DEFAULT 0,
+            response_bytes INTEGER NOT NULL DEFAULT 0,
+            total_bytes INTEGER NOT NULL DEFAULT 0,
+            basis TEXT NOT NULL DEFAULT '',
+            estimated INTEGER NOT NULL DEFAULT 1,
+            missing_audio INTEGER NOT NULL DEFAULT 0,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_remote_bandwidth_time ON remote_bandwidth_usage(timestamp_utc DESC);
+        CREATE INDEX IF NOT EXISTS idx_remote_bandwidth_activity_time ON remote_bandwidth_usage(activity, timestamp_utc DESC);
 
         CREATE TABLE IF NOT EXISTS evidence_verifier_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

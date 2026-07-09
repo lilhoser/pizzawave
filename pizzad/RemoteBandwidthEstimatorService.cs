@@ -6,17 +6,14 @@ public sealed class RemoteBandwidthEstimatorService
 {
     private const int TranscriptionMultipartOverheadBytes = 768;
     private const int TranscriptionJsonResponseOverheadBytes = 128;
-    private const int AiJsonResponseOverheadBytes = 512;
 
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
-    private readonly ILogger<RemoteBandwidthEstimatorService> _logger;
 
     public RemoteBandwidthEstimatorService(EngineConfig config, EngineDatabase database, ILogger<RemoteBandwidthEstimatorService> logger)
     {
         _config = config;
         _database = database;
-        _logger = logger;
     }
 
     public async Task<RemoteBandwidthReportDto> BuildReportAsync(long start, long end, CancellationToken ct)
@@ -25,116 +22,87 @@ public sealed class RemoteBandwidthEstimatorService
         var endUtc = DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime;
         var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var selectedEntries = await BuildEntriesAsync(start, end, ct);
-        var monthlyEntries = await BuildEntriesAsync(new DateTimeOffset(monthStart).ToUnixTimeSeconds(), DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ct);
-        var allTimeEntries = await BuildEntriesAsync(null, null, ct);
-        var missingAudio = selectedEntries.Count(e => e.Basis.Contains("missing audio", StringComparison.OrdinalIgnoreCase));
+        var summary = await _database.SummarizeRemoteBandwidthAsync(startUtc, endUtc, ct);
+        var monthlySummary = await _database.SummarizeRemoteBandwidthAsync(monthStart, DateTime.UtcNow, ct);
+        var allTimeSummary = await _database.SummarizeRemoteBandwidthAsync(null, null, ct);
+        var byDay = await _database.ListRemoteBandwidthDayBucketsAsync(startUtc, endUtc, ct);
+        var byActivity = await _database.ListRemoteBandwidthActivityBucketsAsync(startUtc, endUtc, ct);
+        var entries = await _database.ListRemoteBandwidthEntriesAsync(startUtc, endUtc, 500, ct);
+        var missingAudio = summary.MissingAudioFiles;
         var notes = Notes(missingAudio);
 
         return new RemoteBandwidthReportDto(
-            "derived:calls+lm_usage+audio-files",
+            "sqlite:remote_bandwidth_usage",
             RemoteHost(),
             TranscriptionEndpoint(),
             AiEndpoint(),
             ShouldIncludeRemoteTranscription(),
             notes,
-            Summary(selectedEntries),
-            Summary(monthlyEntries),
-            Summary(allTimeEntries),
-            BucketsByDay(selectedEntries),
-            BucketsByActivity(selectedEntries),
-            selectedEntries
-                .Where(e => e.TotalBytes > 0 || e.Basis.Contains("missing audio", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(e => e.TimestampUtc)
-                .Take(500)
-                .ToList());
+            summary,
+            monthlySummary,
+            allTimeSummary,
+            byDay,
+            byActivity,
+            entries);
     }
 
     public async Task<RemoteBandwidthUsageSnapshotDto> BuildUsageSnapshotAsync(long start, long end, CancellationToken ct)
     {
-        var selectedEntries = await BuildEntriesAsync(start, end, ct);
-        var missingAudio = selectedEntries.Count(e => e.Basis.Contains("missing audio", StringComparison.OrdinalIgnoreCase));
+        var startUtc = DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime;
+        var endUtc = DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime;
+        var summary = await _database.SummarizeRemoteBandwidthAsync(startUtc, endUtc, ct);
+        var byActivity = await _database.ListRemoteBandwidthActivityBucketsAsync(startUtc, endUtc, ct);
         return new RemoteBandwidthUsageSnapshotDto(
             RemoteHost(),
             TranscriptionEndpoint(),
             AiEndpoint(),
             ShouldIncludeRemoteTranscription(),
-            Notes(missingAudio),
-            Summary(selectedEntries),
-            BucketsByActivity(selectedEntries));
+            Notes(summary.MissingAudioFiles),
+            summary,
+            byActivity);
     }
 
-    private async Task<List<RemoteBandwidthEntryDto>> BuildEntriesAsync(long? start, long? end, CancellationToken ct)
+    public async Task RecordTranscriptionAsync(EngineCall call, CancellationToken ct)
     {
-        var entries = new List<RemoteBandwidthEntryDto>();
-        if (ShouldIncludeRemoteTranscription())
-        {
-            var transcriptionStart = start ?? 0;
-            var transcriptionEnd = end ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var calls = await _database.ListCallsAsync(transcriptionStart, transcriptionEnd, null, ct);
-            foreach (var call in calls.Where(c => !string.Equals(c.TranscriptionStatus, "pending", StringComparison.OrdinalIgnoreCase)))
-                entries.Add(EstimateTranscription(call));
-        }
+        if (!ShouldIncludeRemoteTranscription())
+            return;
 
-        DateTime? startUtc = start.HasValue ? DateTimeOffset.FromUnixTimeSeconds(start.Value).UtcDateTime : null;
-        DateTime? endUtc = end.HasValue ? DateTimeOffset.FromUnixTimeSeconds(end.Value).UtcDateTime : null;
-        var aiHost = Host(AiEndpoint());
-        if (!string.IsNullOrWhiteSpace(aiHost) && !IsLocalHost(aiHost))
-        {
-            var usageRows = await _database.ListLmUsageEntriesAsync(startUtc, endUtc, ct);
-            foreach (var row in usageRows.Where(row => Host(row.Endpoint).Equals(aiHost, StringComparison.OrdinalIgnoreCase)))
-                entries.Add(EstimateAi(row));
-        }
-
-        return entries;
-    }
-
-    private RemoteBandwidthEntryDto EstimateTranscription(EngineCall call)
-    {
         var endpoint = $"{TranscriptionEndpoint().TrimEnd('/')}/audio/transcriptions";
         var audioPath = Path.IsPathRooted(call.AudioPath) ? call.AudioPath : Path.Combine(_config.Storage.AudioRoot, call.AudioPath);
+        var timestampUtc = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).UtcDateTime;
+        var responseBytes = EstimateTranscriptionResponseBytes(call);
+        RemoteBandwidthUsageRecordDto usage;
         if (!File.Exists(audioPath))
         {
-            return new RemoteBandwidthEntryDto(
-                DateTimeOffset.FromUnixTimeSeconds(call.StartTime).UtcDateTime,
+            usage = new RemoteBandwidthUsageRecordDto(
+                $"transcription-call:{call.Id}",
+                timestampUtc,
                 "remote transcription",
                 endpoint,
                 0,
-                EstimateTranscriptionResponseBytes(call),
-                EstimateTranscriptionResponseBytes(call),
+                responseBytes,
+                responseBytes,
                 $"missing audio file: {call.AudioPath}",
+                true,
                 true);
         }
+        else
+        {
+            var uploadBytes = EstimateRemoteWhisperAudioBytes(audioPath) + TranscriptionMultipartOverheadBytes + Encoding.UTF8.GetByteCount(ResolveTranscriptionModel());
+            usage = new RemoteBandwidthUsageRecordDto(
+                $"transcription-call:{call.Id}",
+                timestampUtc,
+                "remote transcription",
+                endpoint,
+                uploadBytes,
+                responseBytes,
+                uploadBytes + responseBytes,
+                "audio file size plus OpenAI-compatible multipart/model overhead",
+                true,
+                false);
+        }
 
-        var uploadBytes = EstimateRemoteWhisperAudioBytes(audioPath) + TranscriptionMultipartOverheadBytes + Encoding.UTF8.GetByteCount(ResolveTranscriptionModel());
-        var responseBytes = EstimateTranscriptionResponseBytes(call);
-        return new RemoteBandwidthEntryDto(
-            DateTimeOffset.FromUnixTimeSeconds(call.StartTime).UtcDateTime,
-            "remote transcription",
-            endpoint,
-            uploadBytes,
-            responseBytes,
-            uploadBytes + responseBytes,
-            "audio file size plus OpenAI-compatible multipart/model overhead",
-            true);
-    }
-
-    private RemoteBandwidthEntryDto EstimateAi(TokenUsageEntryDto row)
-    {
-        var requestBytes = Math.Max(0, row.PayloadChars);
-        var responseBytes = Math.Max(0, row.CompletionTokens * 4 + AiJsonResponseOverheadBytes);
-        if (!row.Success && row.CompletionTokens == 0)
-            responseBytes = 0;
-
-        return new RemoteBandwidthEntryDto(
-            row.TimestampUtc,
-            "AI insights",
-            row.Endpoint,
-            requestBytes,
-            responseBytes,
-            requestBytes + responseBytes,
-            "lm_usage payload_chars plus completion-token response estimate",
-            true);
+        await _database.UpsertRemoteBandwidthUsageAsync(usage, ct);
     }
 
     private long EstimateRemoteWhisperAudioBytes(string path)
@@ -212,6 +180,8 @@ public sealed class RemoteBandwidthEstimatorService
         var aiHost = Host(AiEndpoint());
         if (!string.IsNullOrWhiteSpace(aiHost) && !IsLocalHost(aiHost))
             return aiHost;
+        if (_config.AiInsights.ExecutionMode is "remote" or "lmlink")
+            return _config.AiInsights.ExecutionMode;
         var transcriptionHost = Host(TranscriptionEndpoint());
         return IsLocalHost(transcriptionHost) ? string.Empty : transcriptionHost;
     }
@@ -243,51 +213,20 @@ public sealed class RemoteBandwidthEstimatorService
     {
         var notes = new List<string>
         {
-            "Derived from stored calls, audio files, and the lm_usage table; HTTP headers/TLS/TCP framing are not included.",
+            "Derived from the remote_bandwidth_usage ledger recorded during transcription and AI usage writes; HTTP headers/TLS/TCP framing are not included.",
+            "Requests that happened before this ledger existed are not reconstructed on report load.",
             "AI response bytes are estimated from completion tokens because response bodies are not stored."
         };
         if (ShouldIncludeRemoteTranscription())
             notes.Add("Remote transcription bytes assume the current remote-faster-whisper endpoint and estimate 8 kHz PCM uploads after PizzaWave's 16 kHz normalization.");
         else
             notes.Add("Remote transcription is not included because the current transcription provider is not remote-faster-whisper with a non-local endpoint.");
-        if (IsLocalHost(Host(AiEndpoint())))
+        if (IsLocalHost(Host(AiEndpoint())) && _config.AiInsights.ExecutionMode is not ("remote" or "lmlink"))
             notes.Add("AI insight rows are not included because the current AI endpoint is local/loopback, not the remote RTX host.");
+        else if (_config.AiInsights.ExecutionMode is "remote" or "lmlink")
+            notes.Add("AI insight rows are included because AI execution mode is remote/lmlink, even if the local endpoint is a relay.");
         if (missingAudio > 0)
             notes.Add($"{missingAudio:N0} selected-range transcription call(s) had missing audio files.");
         return string.Join(" ", notes);
-    }
-
-    private static RemoteBandwidthSummaryDto Summary(IReadOnlyList<RemoteBandwidthEntryDto> entries)
-    {
-        var request = entries.Sum(e => e.RequestBytes);
-        var response = entries.Sum(e => e.ResponseBytes);
-        return new RemoteBandwidthSummaryDto(
-            request,
-            response,
-            request + response,
-            entries.Count(e => e.TotalBytes > 0),
-            entries.Count(e => e.Basis.Contains("missing audio", StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private static IReadOnlyList<RemoteBandwidthBucketDto> BucketsByDay(IReadOnlyList<RemoteBandwidthEntryDto> entries) =>
-        entries
-            .GroupBy(e => e.TimestampUtc.ToLocalTime().ToString("MM/dd"))
-            .Select(g => Bucket(g.Key, "all", g))
-            .OrderBy(b => b.Label)
-            .ToList();
-
-    private static IReadOnlyList<RemoteBandwidthBucketDto> BucketsByActivity(IReadOnlyList<RemoteBandwidthEntryDto> entries) =>
-        entries
-            .GroupBy(e => e.Activity)
-            .Select(g => Bucket(g.Key, g.Key, g))
-            .OrderByDescending(b => b.TotalBytes)
-            .ToList();
-
-    private static RemoteBandwidthBucketDto Bucket(string label, string activity, IEnumerable<RemoteBandwidthEntryDto> rows)
-    {
-        var list = rows.ToList();
-        var request = list.Sum(r => r.RequestBytes);
-        var response = list.Sum(r => r.ResponseBytes);
-        return new RemoteBandwidthBucketDto(label, activity, request, response, request + response, list.Count);
     }
 }
