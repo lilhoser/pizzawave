@@ -6429,7 +6429,7 @@ function WaterfallStep({
   const peakHistoryRef = useRef<Map<string, SpectrumPeakTrack>>(new Map());
   const otherDetectedCcHistoryRef = useRef<Map<string, WaterfallDetectedCcTrack>>(new Map());
   const ccSignalHistoryRef = useRef<Map<string, WaterfallCcSignalTrack>>(new Map());
-  const visiblePeaksRef = useRef<PositionedSpectrumPeak[]>([]);
+  const spectrumMarkersRef = useRef<SpectrumMarker[]>([]);
   const lastFrameRef = useRef("");
   const lastWaterfallStatusUiAtRef = useRef(0);
   const lastWaterfallTableUiAtRef = useRef(0);
@@ -6530,7 +6530,7 @@ function WaterfallStep({
     peakHistoryRef.current.clear();
     otherDetectedCcHistoryRef.current.clear();
     ccSignalHistoryRef.current.clear();
-    visiblePeaksRef.current = [];
+    spectrumMarkersRef.current = [];
     spectrumScaleRef.current = null;
     waterfallScaleRef.current = null;
     spectrumAxisRef.current = null;
@@ -6603,7 +6603,9 @@ function WaterfallStep({
       const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
       const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
       const nextOtherDetectedCcRows = updateVisibleOtherDetectedCcRows(otherDetectedCcHistoryRef.current, positionedPeaks, systems, controlChannelOptions);
-      visiblePeaksRef.current = positionedPeaks;
+      spectrumMarkersRef.current = showControlChannelLines
+        ? buildSpectrumMarkers(nextCcSignalRows, nextOtherDetectedCcRows, axis)
+        : [];
       const now = Date.now();
       if (now - lastWaterfallTableUiAtRef.current >= 750) {
         lastWaterfallTableUiAtRef.current = now;
@@ -6613,7 +6615,8 @@ function WaterfallStep({
       drawSpectrumFrame(spectrumCanvasRef.current, frame, smoothed, spectrumScaleRef.current, axis, {
         controlChannelsHz: controlChannelOptions,
         showControlChannels: showControlChannelLines,
-        peaks: positionedPeaks
+        peaks: positionedPeaks,
+        suspectedControlChannels: nextOtherDetectedCcRows
       });
       drawWaterfallFrame(canvasRef.current, smoothWaterfallBins(frame.powersDb), waterfallScaleRef.current);
     }
@@ -6951,18 +6954,16 @@ function WaterfallStep({
       return;
     const rect = canvas.getBoundingClientRect();
     const xCanvas = (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width);
-    const nearest = nearestSpectrumPeak(xCanvas, visiblePeaksRef.current);
+    const nearest = nearestSpectrumMarker(xCanvas, spectrumMarkersRef.current);
     if (!nearest) {
       setSpectrumHover(null);
       return;
     }
     const xCss = nearest.x * rect.width / canvas.width;
-    const yCss = nearest.y * rect.height / canvas.height;
     setSpectrumHover({
       left: canvas.offsetLeft + xCss,
-      top: canvas.offsetTop + Math.max(6, yCss - 34),
-      peak: nearest,
-      text: `${formatSpectrumTickHz(nearest.frequencyHz)} / ${formatFixed(nearest.powerDb, 1)} dB / SNR ${formatFixed(nearest.snrDb, 1)} dB`
+      top: canvas.offsetTop + 8,
+      text: `${nearest.kind === "selected" ? nearest.label : "Suspected CC"} / ${formatSpectrumTickHz(nearest.frequencyHz)} / ${label(nearest.rating)} / SNR ${formatFixed(nearest.snrDb, 1)} dB / stability ${Math.round(nearest.confidence * 100)}%`
     });
   }
 
@@ -7041,15 +7042,16 @@ function WaterfallStep({
       </div>
     </div>
     <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by signal-to-noise ratio. Measured signal offset is the detected carrier displacement from the matched selected-site or cached RadioReference control channel.</small></div>
+      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Sorted by site name. Strong, steady, and weak ratings combine signal-to-noise ratio with persistence across frames.</small></div>
       <div className="rf-waterfall-candidate-table">
         <div className={showSweepSelection ? "rf-waterfall-candidate-row header" : "rf-waterfall-candidate-row header no-sweep-selection"}>
-          {showSweepSelection && <span>Use</span>}<span>Site</span><span>Matched control channel</span><span>Detected</span><span>Signal-to-noise</span><span>Measured signal offset</span><span>Confidence</span><span>Source</span><span>Action</span>
+          {showSweepSelection && <span>Use</span>}<span>Site</span><span>Matched control channel</span><span>Detected</span><span>Signal-to-noise</span><span>Measured signal offset</span><span>Rating</span><span>Source</span><span>Action</span>
         </div>
         {waterfallCandidates.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect selected and nearby RR control channels.</div> : waterfallCandidates.map(row => {
           const identify = identifyResults[row.identifyPeak.key];
           const selected = selectedSweepControlChannelSet.has(row.sweepFrequencyHz);
-          return <div className={`${showSweepSelection ? "rf-waterfall-candidate-row" : "rf-waterfall-candidate-row no-sweep-selection"} ${row.origin} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
+          const rating = waterfallCandidateRating(row);
+          return <div className={`${showSweepSelection ? "rf-waterfall-candidate-row" : "rf-waterfall-candidate-row no-sweep-selection"} ${row.origin} signal-${rating} ${identify ? `identified ${identify.status}` : ""}`.trim()} key={row.key}>
             {showSweepSelection && <label className="rf-waterfall-use-check">
               <input type="checkbox" checked={selected} onChange={event => void toggleCandidateForSweep(row, event.target.checked)} aria-label={`Use ${formatRfHz(row.sweepFrequencyHz)} for RF Sweep`} />
               <span>{selected ? "Use" : ""}</span>
@@ -7059,7 +7061,7 @@ function WaterfallStep({
             <code>{row.detectedFrequencyHz > 0 ? formatRfHz(row.detectedFrequencyHz) : "--"}</code>
             <strong>{Number.isFinite(row.snrDb) ? `${formatFixed(row.snrDb, 1)} dB` : "--"}</strong>
             <span>{Number.isFinite(row.offsetHz) ? formatSignedHz(row.offsetHz) : "--"}</span>
-            <span>{Math.round(row.confidence * 100)}%</span>
+            <span className={`rf-signal-rating ${rating}`}>{label(rating)}</span>
             <span>{waterfallCandidateSourceLabel(row, identify)}</span>
             <button type="button" disabled={identifyRunning || row.identifyPeak.frequencyHz <= 0} onClick={() => void runP25Identify(row.identifyPeak)}>{identify?.status === "running" ? "Running..." : identify ? "P25 ID Again" : "P25 ID"}</button>
             {identify && <WaterfallIdentifyDetail result={identify} />}
@@ -7167,8 +7169,10 @@ function buildWaterfallCandidateRows(
       system: matchedSelected ? fallbackTarget?.system : rrTarget?.system
     });
   }
-  return rows
-    .sort((left, right) => (right.snrDb - left.snrDb) || (right.confidence - left.confidence) || Math.abs(left.offsetHz) - Math.abs(right.offsetHz));
+  return rows.sort((left, right) =>
+    left.siteLabel.localeCompare(right.siteLabel, undefined, { sensitivity: "base" })
+    || left.systemShortName.localeCompare(right.systemShortName, undefined, { sensitivity: "base" })
+    || (left.targetFrequencyHz || left.detectedFrequencyHz) - (right.targetFrequencyHz || right.detectedFrequencyHz));
 }
 
 function nearestFrequencyTarget<T extends { frequencyHz: number }>(frequencyHz: number, targets: T[], maxDistanceHz = Number.POSITIVE_INFINITY) {
@@ -7503,8 +7507,10 @@ type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number; tuneFr
 type WaterfallDetectedCcTrack = PositionedSpectrumPeak & { displayHits: number; displayMisses: number; promoted: boolean };
 type P25IdentifyFields = { nac: string; wacn: string; systemId: string; rfss: string; site: string; decodedControlChannelHz: number; adjacentSites: string[]; secondaryControlChannels: string[]; tsbkCount: number; grantCount: number; demod: string; sourceIndex?: number; exitCode?: number; timedOut: boolean };
 type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; measuredFrequencyHz: number; targetFrequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string; fields?: P25IdentifyFields };
-type SpectrumHover = { left: number; top: number; text: string; peak: PositionedSpectrumPeak };
-type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[] };
+type WaterfallSignalRating = "strong" | "steady" | "weak";
+type SpectrumHover = { left: number; top: number; text: string };
+type SpectrumMarker = { x: number; frequencyHz: number; snrDb: number; confidence: number; rating: WaterfallSignalRating; kind: "selected" | "suspected"; label: string };
+type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[]; suspectedControlChannels: WaterfallDetectedCcTrack[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
 type WaterfallFrequencyTarget = { systemShortName: string; siteLabel: string; frequencyHz: number; system?: RfSurveySystem };
 type WaterfallCandidateRow = { key: string; origin: "selected" | "rr" | "unknown"; siteLabel: string; systemShortName: string; targetFrequencyHz: number; detectedFrequencyHz: number; sweepFrequencyHz: number; snrDb: number; offsetHz: number; confidence: number; hits: number; identifyPeak: PositionedSpectrumPeak; system?: RfSurveySystem };
@@ -7782,6 +7788,18 @@ function waterfallOtherDetectedConfidence(row: Pick<WaterfallDetectedCcTrack, "d
   return clamp01((row.displayHits - row.displayMisses * 0.5) / 30);
 }
 
+function waterfallSignalRating(snrDb: number, confidence: number): WaterfallSignalRating {
+  if (snrDb >= 12 && confidence >= 0.65)
+    return "strong";
+  if (snrDb >= 6 && confidence >= 0.45)
+    return "steady";
+  return "weak";
+}
+
+function waterfallCandidateRating(row: Pick<WaterfallCandidateRow, "snrDb" | "confidence">) {
+  return waterfallSignalRating(row.snrDb, row.confidence);
+}
+
 function updateVisibleOtherDetectedCcRows(history: Map<string, WaterfallDetectedCcTrack>, peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {
   const promotionHits = 6;
   const retentionMisses = 36;
@@ -7879,17 +7897,45 @@ function positionSpectrumPeaks(peaks: SpectrumPeakTrack[], scale: SpectrumDispla
     .filter(peak => peak.x >= margin.left && peak.x <= margin.left + plotWidth && peak.y >= margin.top && peak.y <= margin.top + plotHeight);
 }
 
-function nearestSpectrumPeak(xCanvas: number, peaks: PositionedSpectrumPeak[]) {
-  let nearest: PositionedSpectrumPeak | null = null;
+function buildSpectrumMarkers(requestedRows: WaterfallCcSignalRow[], suspectedRows: WaterfallDetectedCcTrack[], axis: SpectrumAxis): SpectrumMarker[] {
+  const { margin, plotWidth } = spectrumGeometry();
+  const selected = requestedRows
+    .filter(row => row.frequencyHz >= axis.startHz && row.frequencyHz <= axis.startHz + axis.sampleRate)
+    .map(row => ({
+      x: margin.left + (row.frequencyHz - axis.startHz) / Math.max(1, axis.sampleRate) * plotWidth,
+      frequencyHz: row.frequencyHz,
+      snrDb: row.snrDb,
+      confidence: row.confidence,
+      rating: waterfallSignalRating(row.snrDb, row.confidence),
+      kind: "selected" as const,
+      label: `${row.siteLabel} selected CC`
+    }));
+  const suspected = suspectedRows.map(row => {
+    const confidence = waterfallOtherDetectedConfidence(row);
+    return {
+      x: row.x,
+      frequencyHz: row.frequencyHz,
+      snrDb: row.snrDb,
+      confidence,
+      rating: waterfallSignalRating(row.snrDb, confidence),
+      kind: "suspected" as const,
+      label: "Suspected CC"
+    };
+  });
+  return [...selected, ...suspected];
+}
+
+function nearestSpectrumMarker(xCanvas: number, markers: SpectrumMarker[]) {
+  let nearest: SpectrumMarker | null = null;
   let nearestDistance = Infinity;
-  for (const peak of peaks) {
-    const distance = Math.abs(peak.x - xCanvas);
+  for (const marker of markers) {
+    const distance = Math.abs(marker.x - xCanvas);
     if (distance < nearestDistance) {
-      nearest = peak;
+      nearest = marker;
       nearestDistance = distance;
     }
   }
-  return nearest && nearestDistance <= 16 ? nearest : null;
+  return nearest && nearestDistance <= 12 ? nearest : null;
 }
 
 function spectrumGeometry(width = 1024, height = 150) {
@@ -7969,6 +8015,16 @@ function drawSpectrumFrame(canvas: HTMLCanvasElement | null, frame: NonNullable<
   }
   if (options?.showControlChannels) {
     ctx.textBaseline = "top";
+    for (const suspected of options.suspectedControlChannels) {
+      const confidence = waterfallOtherDetectedConfidence(suspected);
+      const rating = waterfallSignalRating(suspected.snrDb, confidence);
+      ctx.strokeStyle = rating === "strong" ? "rgba(255, 223, 53, .95)" : rating === "steady" ? "rgba(255, 223, 53, .72)" : "rgba(255, 223, 53, .48)";
+      ctx.lineWidth = rating === "strong" ? 1.8 : rating === "steady" ? 1.4 : 1;
+      ctx.beginPath();
+      ctx.moveTo(suspected.x, margin.top);
+      ctx.lineTo(suspected.x, margin.top + plotHeight);
+      ctx.stroke();
+    }
     for (const frequency of options.controlChannelsHz) {
       if (frequency < axis.startHz || frequency > axis.startHz + axis.sampleRate)
         continue;

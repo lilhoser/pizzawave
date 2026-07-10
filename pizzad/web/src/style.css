@@ -5021,6 +5021,18 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   border-color: rgba(255, 237, 138, .42);
 }
 
+.rf-waterfall-candidate-row.signal-strong {
+  box-shadow: inset 3px 0 rgba(84, 214, 138, .9);
+}
+
+.rf-waterfall-candidate-row.signal-steady {
+  box-shadow: inset 3px 0 rgba(255, 223, 53, .85);
+}
+
+.rf-waterfall-candidate-row.signal-weak {
+  box-shadow: inset 3px 0 rgba(255, 166, 77, .72);
+}
+
 .rf-waterfall-candidate-row.identified.passed {
   border-color: rgba(84, 214, 138, .72);
 }
@@ -5044,6 +5056,30 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-candidate-row strong {
   color: #f3f7fb;
+}
+
+.rf-signal-rating {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.rf-signal-rating.strong {
+  color: #54d68a;
+}
+
+.rf-signal-rating.steady {
+  color: #ffdf35;
+}
+
+.rf-signal-rating.weak {
+  color: #ffa64d;
 }
 
 .rf-waterfall-candidate-row button {
