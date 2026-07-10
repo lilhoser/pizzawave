@@ -281,6 +281,7 @@ public sealed record JobDto
     public DateTime CreatedAtUtc { get; init; }
     public DateTime? StartedAtUtc { get; init; }
     public DateTime? FinishedAtUtc { get; init; }
+    public IReadOnlyList<string> SupportedOperations { get; init; } = [];
 }
 
 public sealed record JobLogDto(

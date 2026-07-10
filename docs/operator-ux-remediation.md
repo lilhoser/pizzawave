@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 4 - System Workspace
-- Current milestone: Package 3 closed and operator-accepted; Package 4 ready for discovery
-- Working branch: `codex/operator-ux-loading-status`
+- Current milestone: Package 4 implementation ready for preflight
+- Working branch: `codex/operator-ux-system-workspace`
 - Last deployed commit: `4263348`
 - Operator verification: Packages 1, 2, and 3 accepted
-- Next action: begin fresh Package 4 repository discovery and operator
-  interview before changing the System workspace architecture.
+- Next action: run the Package 4 preflight, build, deploy, and live verification
+  cycle.
 
 ## Working Rules
 
@@ -82,12 +82,12 @@ Status: complete and operator-accepted
 
 ### 4. System Workspace
 
-Status: pending
+Status: in progress
 
-- [ ] Load each System tab independently.
-- [ ] Make Refresh contextual to the visible tab.
-- [ ] Surface only job controls supported by each job.
-- [ ] Reorganize System navigation around operator tasks.
+- [x] Load each System tab independently.
+- [x] Make Refresh contextual to the visible tab.
+- [x] Surface only job controls supported by each job.
+- [x] Reorganize System navigation around operator tasks.
 - [ ] Deploy, verify, and obtain operator acceptance.
 
 ### 5. Setup UX
@@ -190,6 +190,17 @@ Status: pending
   one System refresh, and panel-local Retry only while a load is failed.
 - 2026-07-09: Operator accepted milestone 3B and closed Package 3 after live
   inspection of the consolidated Settings and System refresh behavior.
+- 2026-07-09: Package 4 System navigation uses noun-based operator areas:
+  Health, Processing, Data, Receiver, and Performance. System remembers the
+  last area and page; direct status links still open their exact destination.
+- 2026-07-09: Each visible System page owns its load, retry, failure, and
+  Refresh work. Refresh updates only the visible page; persistent monitoring
+  continues on its independent shared schedule.
+- 2026-07-09: Jobs is status and history. The server declares operations each
+  job supports in its current state; the UI does not infer controls from job
+  status. Workflow-specific cancellation remains in the owning workspace, and
+  completed-job cleanup remains the Data maintenance action rather than a
+  per-row Delete control.
 
 ## Deployment Log
 

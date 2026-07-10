@@ -176,7 +176,6 @@ function App() {
   const [pendingProfileHides, setPendingProfileHides] = useState<ProfileTalkgroupSetting[]>([]);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [monitoringCheckedAt, setMonitoringCheckedAt] = useState<number | null>(null);
-  const [recommendations, setRecommendations] = useState<SystemRecommendations | null>(null);
   const [cpuSnapshot, setCpuSnapshot] = useState<SystemCpuSnapshot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
@@ -195,6 +194,7 @@ function App() {
   const [refreshClock, setRefreshClock] = useState(Date.now());
   const [setupTrOperation, setSetupTrOperation] = useState("");
   const [systemTargetTab, setSystemTargetTab] = useState<SystemTopTab | null>(null);
+  const [systemRefreshSignal, setSystemRefreshSignal] = useState(0);
   const [setupTargetSection, setSetupTargetSection] = useState<string | null>(null);
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
   const pageRef = useRef<Page>(page);
@@ -347,9 +347,6 @@ function App() {
     const latestActiveAlert = alertRows.find(alert => alert.active !== false);
     if (latestActiveAlert && autoplayAllows(alertConfig.values ?? alertConfig, "alert"))
       playCallAudio(latestActiveAlert.callId, "alert", undefined, alertPlaybackLabel(latestActiveAlert));
-    void api.request<SystemRecommendations>("/api/v1/system/recommendations")
-      .then(setRecommendations)
-      .catch(() => { });
   }, [rangeHours]);
   const currentSearch = pageSearches[page] ?? "";
   useEffect(() => {
@@ -387,11 +384,6 @@ function App() {
     enabled: page === "setup" && setupStatus?.completed !== false && !setupTrOperation,
     load: () => api.request<SiteSetup>(siteSetupApi)
   });
-  const systemResource = usePersistentRefresh({
-    key: `system|${rangeHours}`,
-    enabled: page === "system" && setupStatus?.completed !== false,
-    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
-  });
   const settingsResource = usePersistentRefresh({
     key: "settings",
     enabled: page === "settings" && setupStatus?.completed !== false && !settingsDirty,
@@ -405,16 +397,15 @@ function App() {
   const categoryResult = categoryResource.data;
   const category = categoryResult?.page === page ? categoryResult.data : null;
   const siteSetup = setupResource.data;
-  const troubleshoot = systemResource.data;
 
   const load = useCallback(async () => {
     lastPageRefreshAtRef.current = Date.now();
     if (pageRef.current === "dashboard") await dashboardResource.refresh();
     else if (categories.includes(pageRef.current as any)) await categoryResource.refresh();
     else if (pageRef.current === "setup" && !setupWaterfallActiveRef.current) await setupResource.refresh();
-    else if (pageRef.current === "system") await systemResource.refresh();
+    else if (pageRef.current === "system") setSystemRefreshSignal(current => current + 1);
     else if (pageRef.current === "settings" && !settingsDirty) await settingsResource.refresh();
-  }, [categoryResource.refresh, dashboardResource.refresh, settingsDirty, settingsResource.refresh, setupResource.refresh, systemResource.refresh]);
+  }, [categoryResource.refresh, dashboardResource.refresh, settingsDirty, settingsResource.refresh, setupResource.refresh]);
 
   useEffect(() => { pageRef.current = page; }, [page]);
   useEffect(() => { rangeHoursRef.current = rangeHours; }, [rangeHours]);
@@ -616,9 +607,7 @@ function App() {
       ? { label: `${label(page)} calls`, state: categoryResource.state }
       : page === "setup"
         ? { label: "Setup", state: setupResource.state }
-        : page === "system"
-          ? { label: "System", state: systemResource.state }
-          : null;
+        : null;
   const delayedResources = [
     { label: "Shared operational status", state: statusResource.state },
     activePageRefresh
@@ -860,7 +849,6 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
               {navIcon(item)} {label(item)}
               {item === "dashboard" && activeAlertCount > 0 && <span className="nav-badge high">{activeAlertCount}</span>}
               {item === "setup" && (siteSetup?.pendingChanges.length ?? 0) > 0 && <span className="nav-badge medium">{siteSetup?.pendingChanges.length}</span>}
-              {item === "system" && recommendations && recommendations.openCount > 0 && <span className={`nav-badge ${recommendations.highCount > 0 ? "high" : recommendations.mediumCount > 0 ? "medium" : "low"}`}>{recommendations.openCount}</span>}
             </button>
           </React.Fragment>
         ))}
@@ -899,8 +887,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             void statusResource.refresh();
         }} /></div>}
         {setupStatus?.completed && page === "system" && <div className="refresh-page-shell">
-          <PanelLoadState label="System summary" state={systemResource.state} hasData={Boolean(troubleshoot)} onRetry={systemResource.refresh} showUpdated />
-          <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={async () => { await Promise.all([systemResource.refresh(), statusResource.refresh()]); }} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />
+          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={statusResource.refresh} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />
         </div>}
         {setupStatus?.completed && page === "settings" && <div className="refresh-page-shell">
           <SettingsLoadNotice state={settingsResource.state} hasData={Object.keys(settingsSections).length > 0} dirty={settingsDirty} onReload={settingsResource.refresh} />
@@ -4044,6 +4031,7 @@ function confidenceClass(score: number) {
 
 type SystemTopTab = "recommendations" | "services" | "cpu" | "queue" | "jobs" | "storage" | "backup" | "tr" | "metrics";
 type SystemTrTab = "summary" | "config" | "restore" | "logs";
+type SystemArea = "health" | "processing" | "data" | "receiver" | "performance";
 
 function normalizeSystemTopTab(value: string | null): SystemTopTab {
   if (value === "service" || value === "qdrant") return "services";
@@ -4052,7 +4040,37 @@ function normalizeSystemTopTab(value: string | null): SystemTopTab {
     : "recommendations";
 }
 
-function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot, recommendations, setRecommendations, targetTab, clearTargetTab, onOpenSetup }: { data: TrTroubleshoot | null; jobs: Job[]; rangeHours: number; reload: () => Promise<void>; engineHealth: EngineHealth | null; cpuSnapshot: SystemCpuSnapshot | null; recommendations: SystemRecommendations | null; setRecommendations: (value: SystemRecommendations | null) => void; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenSetup?: (section?: string) => void }) {
+function systemAreaForTab(tab: SystemTopTab): SystemArea {
+  if (["services", "cpu", "queue", "jobs"].includes(tab)) return "processing";
+  if (["storage", "backup"].includes(tab)) return "data";
+  if (tab === "tr") return "receiver";
+  if (tab === "metrics") return "performance";
+  return "health";
+}
+
+function defaultSystemAreaTab(area: SystemArea): SystemTopTab {
+  if (area === "processing") return "services";
+  if (area === "data") return "storage";
+  if (area === "receiver") return "tr";
+  if (area === "performance") return "metrics";
+  return "recommendations";
+}
+
+function rememberedSystemAreaTab(area: SystemArea): SystemTopTab {
+  const saved = normalizeSystemTopTab(localStorage.getItem(`pizzawave-system-${area}-tab`));
+  return systemAreaForTab(saved) === area ? saved : defaultSystemAreaTab(area);
+}
+
+function visibleSystemPageLabel(topTab: SystemTopTab, trTab: SystemTrTab, metricsTab: string) {
+  if (topTab === "recommendations") return "Health";
+  if (topTab === "cpu") return "Processor";
+  if (topTab === "backup") return "Backup and Restore";
+  if (topTab === "tr") return trTab === "config" ? "Active Configuration" : trTab === "restore" ? "Configuration Restore" : trTab === "logs" ? "Receiver Logs" : "Receiver Summary";
+  if (topTab === "metrics") return metricsTab === "rf" ? "Radio Frequency Performance" : metricsTab === "ai" ? "Artificial Intelligence Usage" : label(metricsTab);
+  return label(topTab);
+}
+
+function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSignal, targetTab, clearTargetTab, onOpenSetup }: { rangeHours: number; engineHealth: EngineHealth | null; refreshSharedStatus: () => Promise<unknown>; refreshSignal: number; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenSetup?: (section?: string) => void }) {
   const [topTab, setTopTabState] = useState<SystemTopTab>(() => normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
   const [trTab, setTrTabState] = useState<SystemTrTab>(() => {
     const saved = localStorage.getItem("pizzawave-system-tr-tab");
@@ -4071,19 +4089,63 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
   const [ingestMessage, setIngestMessage] = useState("");
   const [recommendationBusy, setRecommendationBusy] = useState(false);
   const [panelRefreshToken, setPanelRefreshToken] = useState(0);
-  const setTopTab = (value: typeof topTab) => { setTopTabState(value); localStorage.setItem("pizzawave-system-tab", value); };
+  const observedRefreshSignal = useRef(refreshSignal);
+  const setTopTab = (value: typeof topTab) => {
+    setTopTabState(value);
+    localStorage.setItem("pizzawave-system-tab", value);
+    localStorage.setItem(`pizzawave-system-${systemAreaForTab(value)}-tab`, value);
+  };
   const setTrTab = (value: typeof trTab) => { setTrTabState(value); localStorage.setItem("pizzawave-system-tr-tab", value); };
   const setMetricsTab = (value: typeof metricsTab) => { setMetricsTabState(value); localStorage.setItem("pizzawave-system-metrics-tab", value); };
+  useEffect(() => {
+    localStorage.setItem("pizzawave-system-tab", topTab);
+    localStorage.setItem(`pizzawave-system-${systemAreaForTab(topTab)}-tab`, topTab);
+  }, [topTab]);
   useEffect(() => {
     if (!targetTab) return;
     setTopTab(targetTab);
     clearTargetTab?.();
   }, [targetTab, clearTargetTab]);
 
-  const runtimeResource = usePersistentRefresh({
-    key: `system-runtime|${jobs.length}`,
-    enabled: ["services", "storage"].includes(topTab),
+  const recommendationsResource = usePersistentRefresh({
+    key: "system-health",
+    enabled: topTab === "recommendations",
+    load: () => api.request<SystemRecommendations>("/api/v1/system/recommendations")
+  });
+  const servicesRuntimeResource = usePersistentRefresh({
+    key: "system-services-runtime",
+    enabled: topTab === "services",
     load: () => api.request<any>("/api/v1/system/runtime")
+  });
+  const servicesSummaryResource = usePersistentRefresh({
+    key: `system-services-summary|${rangeHours}`,
+    enabled: topTab === "services",
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
+  });
+  const cpuResource = usePersistentRefresh({
+    key: "system-processor",
+    enabled: topTab === "cpu",
+    load: () => api.request<SystemCpuSnapshot>("/api/v1/system/cpu")
+  });
+  const jobsResource = usePersistentRefresh({
+    key: "system-jobs",
+    enabled: topTab === "jobs",
+    load: () => api.request<Job[]>("/api/v1/jobs")
+  });
+  const storageResource = usePersistentRefresh({
+    key: "system-storage",
+    enabled: topTab === "storage",
+    load: () => api.request<any>("/api/v1/system/runtime")
+  });
+  const receiverSummaryResource = usePersistentRefresh({
+    key: `system-receiver-${trTab}|${rangeHours}`,
+    enabled: topTab === "tr" && (trTab === "summary" || trTab === "logs"),
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
+  });
+  const performanceSummaryResource = usePersistentRefresh({
+    key: `system-performance-${metricsTab}|${rangeHours}`,
+    enabled: topTab === "metrics" && (metricsTab === "overview" || metricsTab === "transcription"),
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
   });
   const metricsDataResource = usePersistentRefresh({
     key: `system-metrics-rf|${rangeHours}|${bySystem}|${baseline}`,
@@ -4111,23 +4173,36 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
     load: () => api.request<RemoteBandwidthReport>(`/api/v1/system/remote-bandwidth?${rangeQuery(rangeHours)}`)
   });
 
-  if (!data) return null;
-  const runtime = runtimeResource.data;
+  const recommendations = recommendationsResource.data;
+  const servicesRuntime = servicesRuntimeResource.data;
+  const servicesSummary = servicesSummaryResource.data;
+  const cpuSnapshot = cpuResource.data;
+  const jobs = jobsResource.data;
+  const storageRuntime = storageResource.data;
+  const receiverSummary = receiverSummaryResource.data;
+  const performanceSummary = performanceSummaryResource.data;
   const metricsData = metricsDataResource.data;
   const dashboardStats = dashboardStatsResource.data;
   const incidentAudit = incidentAuditResource.data;
   const tokenUsage = tokenUsageResource.data;
   const bandwidthUsage = bandwidthUsageResource.data;
-  const active = metricsData ?? data;
+  const systemArea = systemAreaForTab(topTab);
   async function refreshVisibleSystemPanel() {
-    const refreshes: Promise<unknown>[] = [reload()];
-    if (["services", "storage"].includes(topTab)) refreshes.push(runtimeResource.refresh());
+    const refreshes: Promise<unknown>[] = [];
+    if (topTab === "recommendations") refreshes.push(recommendationsResource.refresh());
+    if (topTab === "services") refreshes.push(servicesRuntimeResource.refresh(), servicesSummaryResource.refresh());
+    if (topTab === "cpu") refreshes.push(cpuResource.refresh());
+    if (topTab === "jobs") refreshes.push(jobsResource.refresh());
+    if (topTab === "storage") refreshes.push(storageResource.refresh());
+    if (topTab === "queue" || topTab === "backup" || (topTab === "tr" && (trTab === "config" || trTab === "restore")))
+      setPanelRefreshToken(current => current + 1);
+    if (topTab === "tr" && (trTab === "summary" || trTab === "logs")) refreshes.push(receiverSummaryResource.refresh());
+    if (topTab === "metrics" && (metricsTab === "overview" || metricsTab === "transcription")) refreshes.push(performanceSummaryResource.refresh());
     if (topTab === "metrics" && metricsTab === "rf") refreshes.push(metricsDataResource.refresh());
     if (topTab === "metrics" && ["overview", "calls", "incidents"].includes(metricsTab)) refreshes.push(dashboardStatsResource.refresh());
     if (topTab === "metrics" && metricsTab === "incidents") refreshes.push(incidentAuditResource.refresh());
     if (topTab === "metrics" && metricsTab === "ai") refreshes.push(tokenUsageResource.refresh());
     if (topTab === "metrics" && metricsTab === "bandwidth") refreshes.push(bandwidthUsageResource.refresh());
-    setPanelRefreshToken(current => current + 1);
     await Promise.all(refreshes);
   }
   async function restartService(service: "pizzad" | "trunk-recorder" | "qdrant") {
@@ -4137,7 +4212,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
     try {
       const job = await api.request<Job>(`/api/v1/system/services/${service}/restart`, { method: "POST" });
       setRestartMessages(current => ({ ...current, [service]: `Restart queued as job ${job.id}.` }));
-      setTimeout(() => void reload(), service === "pizzad" ? 6000 : 1500);
+      setTimeout(() => void Promise.all([servicesRuntimeResource.refresh(), servicesSummaryResource.refresh(), refreshSharedStatus()]), service === "pizzad" ? 6000 : 1500);
     } catch (error) {
       setRestartMessages(current => ({ ...current, [service]: error instanceof Error ? error.message : "Restart failed." }));
     } finally {
@@ -4151,7 +4226,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
     try {
       const job = await api.request<Job>("/api/v1/system/services/trunk-recorder/stop", { method: "POST" });
       setRestartMessages(current => ({ ...current, "trunk-recorder": `Stop queued as job ${job.id}.` }));
-      setTimeout(() => void reload(), 1500);
+      setTimeout(() => void Promise.all([servicesRuntimeResource.refresh(), servicesSummaryResource.refresh(), refreshSharedStatus()]), 1500);
     } catch (error) {
       setRestartMessages(current => ({ ...current, "trunk-recorder": error instanceof Error ? error.message : "Stop failed." }));
     } finally {
@@ -4172,7 +4247,8 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
         })
       });
       setIngestMessage(result.paused ? "Live ingest is paused. New callstream payloads will be dropped." : "Live ingest resumed.");
-      await reload();
+      setPanelRefreshToken(current => current + 1);
+      await refreshSharedStatus();
     } catch (error) {
       setIngestMessage(error instanceof Error ? error.message : "Failed to update ingest control.");
     } finally {
@@ -4204,7 +4280,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
   async function setRecommendationState(id: string, action: "ignore" | "restore" | "reset-baseline") {
     setRecommendationBusy(true);
     try {
-      setRecommendations(await api.request<SystemRecommendations>(`/api/v1/system/recommendations/${encodeURIComponent(id)}/state`, {
+      recommendationsResource.setData(await api.request<SystemRecommendations>(`/api/v1/system/recommendations/${encodeURIComponent(id)}/state`, {
         method: "POST",
         body: JSON.stringify({ action })
       }));
@@ -4236,63 +4312,80 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
       }
       const path = result.save?.generatedCsvPath ? ` (${result.save.generatedCsvPath})` : "";
       setInsightText(`${result.updated.toLocaleString()} talkgroup catalog row(s) excluded from generated TR CSVs${path}. Apply/restart TR for capture policy to consume the change.`);
-      setRecommendations(await api.request<SystemRecommendations>("/api/v1/system/recommendations"));
+      recommendationsResource.setData(await api.request<SystemRecommendations>("/api/v1/system/recommendations"));
     } catch (error) {
       setInsightText(error instanceof Error ? error.message : "Unable to exclude talkgroup candidates.");
     } finally {
       setRecommendationBusy(false);
     }
   }
+  useEffect(() => {
+    if (observedRefreshSignal.current === refreshSignal) return;
+    observedRefreshSignal.current = refreshSignal;
+    void refreshVisibleSystemPanel();
+  }, [refreshSignal]);
+
+  function selectSystemArea(area: SystemArea) {
+    setTopTab(rememberedSystemAreaTab(area));
+  }
+
   return (
     <div className="trouble-page">
       <div className="trouble-tabs">
-        <button className={topTab === "recommendations" ? "active" : ""} onClick={() => setTopTab("recommendations")}>Recommendations{recommendations && recommendations.openCount > 0 ? ` (${recommendations.openCount})` : ""}</button>
+        <button className={systemArea === "health" ? "active" : ""} onClick={() => selectSystemArea("health")}>Health{recommendations && recommendations.openCount > 0 ? ` (${recommendations.openCount})` : ""}</button>
+        <button className={systemArea === "processing" ? "active" : ""} onClick={() => selectSystemArea("processing")}>Processing</button>
+        <button className={systemArea === "data" ? "active" : ""} onClick={() => selectSystemArea("data")}>Data</button>
+        <button className={systemArea === "receiver" ? "active" : ""} onClick={() => selectSystemArea("receiver")}>Receiver</button>
+        <button className={systemArea === "performance" ? "active" : ""} onClick={() => selectSystemArea("performance")}>Performance</button>
+        <button onClick={() => void refreshVisibleSystemPanel()}>Refresh {visibleSystemPageLabel(topTab, trTab, metricsTab)}</button>
+      </div>
+      {systemArea === "processing" && <div className="trouble-tabs nested">
         <button className={topTab === "services" ? "active" : ""} onClick={() => setTopTab("services")}>Services</button>
-        <button className={topTab === "cpu" ? "active" : ""} onClick={() => setTopTab("cpu")}>CPU</button>
+        <button className={topTab === "cpu" ? "active" : ""} onClick={() => setTopTab("cpu")}>Processor</button>
         <button className={topTab === "queue" ? "active" : ""} onClick={() => setTopTab("queue")}>Queue</button>
         <button className={topTab === "jobs" ? "active" : ""} onClick={() => setTopTab("jobs")}>Jobs</button>
+      </div>}
+      {systemArea === "data" && <div className="trouble-tabs nested">
         <button className={topTab === "storage" ? "active" : ""} onClick={() => setTopTab("storage")}>Storage</button>
-        <button className={topTab === "backup" ? "active" : ""} onClick={() => setTopTab("backup")}>Backup</button>
-        <button className={topTab === "tr" ? "active" : ""} onClick={() => setTopTab("tr")}>Trunk Recorder</button>
-        <button className={topTab === "metrics" ? "active" : ""} onClick={() => setTopTab("metrics")}>Metrics</button>
-        <button onClick={() => void refreshVisibleSystemPanel()}>Refresh</button>
-      </div>
-      {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onExcludeTalkgroups={excludeTalkgroupsFromTr} onAction={async action => {
+        <button className={topTab === "backup" ? "active" : ""} onClick={() => setTopTab("backup")}>Backup and Restore</button>
+      </div>}
+      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="system health" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onExcludeTalkgroups={excludeTalkgroupsFromTr} onAction={async action => {
         if (action.kind === "pause-ingest") await setIngestPaused(true, false);
         if (action.kind === "exclude-talkgroups-from-tr") await excludeTalkgroupsFromTr((action.talkgroups ?? []).map(talkgroup => ({ talkgroup })));
-      }} />}
-      {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={runtimeResource.state} hasData={Boolean(runtime)} onRetry={runtimeResource.refresh} /><ServicesManager runtime={runtime} data={data} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} /></div>}
-      {topTab === "cpu" && <CpuPanel snapshot={cpuSnapshot} />}
-      {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} />}
-      {topTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
-      {topTab === "storage" && <div className="trouble-panel"><PanelLoadState label="storage status" state={runtimeResource.state} hasData={Boolean(runtime)} onRetry={runtimeResource.refresh} /><PizzadStorageManager runtime={runtime} reload={runtimeResource.refresh} /></div>}
-      {topTab === "backup" && <div className="trouble-panel"><BackupRestorePanel reload={reload} refreshToken={panelRefreshToken} /></div>}
+      }} /></div>}
+      {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={servicesRuntimeResource.state} hasData={Boolean(servicesRuntime)} onRetry={servicesRuntimeResource.refresh} /><PanelLoadState label="receiver health summary" state={servicesSummaryResource.state} hasData={Boolean(servicesSummary)} onRetry={servicesSummaryResource.refresh} />{servicesRuntime && <ServicesManager runtime={servicesRuntime} data={servicesSummary} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} />}</div>}
+      {topTab === "cpu" && <div className="trouble-panel"><PanelLoadState label="processor status" state={cpuResource.state} hasData={Boolean(cpuSnapshot)} onRetry={cpuResource.refresh} />{cpuSnapshot && <CpuPanel snapshot={cpuSnapshot} />}</div>}
+      {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} refreshToken={panelRefreshToken} />}
+      {topTab === "jobs" && <div className="trouble-panel"><PanelLoadState label="jobs" state={jobsResource.state} hasData={Boolean(jobs)} onRetry={jobsResource.refresh} />{jobs && <JobsPanel jobs={jobs} reload={async () => { await jobsResource.refresh(); }} />}</div>}
+      {topTab === "storage" && <div className="trouble-panel"><PanelLoadState label="storage status" state={storageResource.state} hasData={Boolean(storageRuntime)} onRetry={storageResource.refresh} />{storageRuntime && <PizzadStorageManager runtime={storageRuntime} reload={async () => { await storageResource.refresh(); }} />}</div>}
+      {topTab === "backup" && <div className="trouble-panel"><BackupRestorePanel reload={async () => { await refreshSharedStatus(); }} refreshToken={panelRefreshToken} /></div>}
       {topTab === "tr" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Summary</button>
-          <button className={trTab === "config" ? "active" : ""} onClick={() => setTrTab("config")}>Config</button>
+          <button className={trTab === "config" ? "active" : ""} onClick={() => setTrTab("config")}>Active Config</button>
           <button className={trTab === "restore" ? "active" : ""} onClick={() => setTrTab("restore")}>Restore Config</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Logs</button>
         </div>
-        {trTab === "summary" && <TrHealthSummaryView data={data} />}
+        {(trTab === "summary" || trTab === "logs") && <PanelLoadState label={trTab === "logs" ? "receiver logs" : "receiver summary"} state={receiverSummaryResource.state} hasData={Boolean(receiverSummary)} onRetry={receiverSummaryResource.refresh} />}
+        {trTab === "summary" && receiverSummary && <TrHealthSummaryView data={receiverSummary} />}
         {trTab === "config" && <TrConfigReadOnlyPanel onOpenSetup={onOpenSetup} refreshToken={panelRefreshToken} />}
         {trTab === "restore" && <TrConfigRestorePanel refreshToken={panelRefreshToken} />}
-        {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
+        {trTab === "logs" && receiverSummary && <pre className="log-box">{receiverSummary.logOutput}</pre>}
       </div>}
       {topTab === "metrics" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
           <button className={metricsTab === "overview" ? "active" : ""} onClick={() => setMetricsTab("overview")}>Overview</button>
           <button className={metricsTab === "calls" ? "active" : ""} onClick={() => setMetricsTab("calls")}>Calls</button>
           <button className={metricsTab === "transcription" ? "active" : ""} onClick={() => setMetricsTab("transcription")}>Transcription</button>
-          <button className={metricsTab === "rf" ? "active" : ""} onClick={() => setMetricsTab("rf")}>RF</button>
+          <button className={metricsTab === "rf" ? "active" : ""} onClick={() => setMetricsTab("rf")}>Radio Frequency</button>
           <button className={metricsTab === "incidents" ? "active" : ""} onClick={() => setMetricsTab("incidents")}>Incidents</button>
-          <button className={metricsTab === "ai" ? "active" : ""} onClick={() => setMetricsTab("ai")}>AI</button>
+          <button className={metricsTab === "ai" ? "active" : ""} onClick={() => setMetricsTab("ai")}>AI Usage</button>
           <button className={metricsTab === "bandwidth" ? "active" : ""} onClick={() => setMetricsTab("bandwidth")}>Bandwidth</button>
         </div>
-        {metricsTab === "overview" && <><PanelLoadState label="metrics overview" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><MetricsOverviewPanel data={data} dashboard={dashboardStats} engineHealth={engineHealth} tokenUsage={tokenUsage} bandwidthUsage={bandwidthUsage} navigate={(top, sub) => { setTopTab(top); if (top === "metrics" && sub) setMetricsTab(sub as any); }} /></>}
+        {metricsTab === "overview" && <><PanelLoadState label="performance summary" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} /><PanelLoadState label="call and incident metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} />{performanceSummary && dashboardStats && <MetricsOverviewPanel data={performanceSummary} dashboard={dashboardStats} engineHealth={engineHealth} tokenUsage={tokenUsage} bandwidthUsage={bandwidthUsage} navigate={(top, sub) => { setTopTab(top); if (top === "metrics" && sub) setMetricsTab(sub as any); }} />}</>}
         {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><DashboardStatisticsPanel data={dashboardStats} /></>}
-        {metricsTab === "transcription" && <QualityAuditView data={data} rangeHours={rangeHours} />}
-        {metricsTab === "rf" && <><PanelLoadState label="RF metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} /><RfMetricsPanel data={active} rangeHours={rangeHours} bySystem={bySystem} baseline={baseline} setBySystem={setBySystem} setBaseline={setBaseline} /></>}
+        {metricsTab === "transcription" && <><PanelLoadState label="transcription performance" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} />{performanceSummary && <QualityAuditView data={performanceSummary} rangeHours={rangeHours} />}</>}
+        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rangeHours} bySystem={bySystem} baseline={baseline} setBySystem={setBySystem} setBaseline={setBaseline} />}</>}
         {metricsTab === "incidents" && <><PanelLoadState label="incident metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><PanelLoadState label="incident audit" state={incidentAuditResource.state} hasData={Boolean(incidentAudit)} onRetry={incidentAuditResource.refresh} /><IncidentMetricsPanel dashboard={dashboardStats} audit={incidentAudit} /></>}
         {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} /></>}
         {metricsTab === "bandwidth" && <><PanelLoadState label="remote bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} /></>}
@@ -9431,11 +9524,11 @@ function CpuPanel({ snapshot }: { snapshot: SystemCpuSnapshot | null }) {
   </div>;
 }
 
-function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestart, onStopTr }: { runtime: any | null; data: TrTroubleshoot; restartBusy: "" | "pizzad" | "trunk-recorder" | "qdrant"; restartMessages: Record<string, string>; onRestart: (service: "pizzad" | "trunk-recorder" | "qdrant") => void; onStopTr: () => void }) {
+function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestart, onStopTr }: { runtime: any | null; data: TrTroubleshoot | null; restartBusy: "" | "pizzad" | "trunk-recorder" | "qdrant"; restartMessages: Record<string, string>; onRestart: (service: "pizzad" | "trunk-recorder" | "qdrant") => void; onStopTr: () => void }) {
   if (!runtime) return <div className="card">Loading service status...</div>;
   const embeddings = runtime.queues?.embeddings;
   const trIntentionallyStopped = runtime.liveTrActivity?.status === "stopped";
-  const healthIssues = data.health.metrics.filter(row => row.isIssue).length + data.health.systems.filter(row => row.isIssue).length;
+  const healthIssues = data ? data.health.metrics.filter(row => row.isIssue).length + data.health.systems.filter(row => row.isIssue).length : null;
   const services = [
     { key: "pizzad" as const, title: "Pizzad", button: "Restart Pizzad", svc: runtime.service?.pizzad },
     { key: "trunk-recorder" as const, title: "Trunk Recorder", button: "Restart TR", svc: runtime.service?.trunkRecorder },
@@ -9459,7 +9552,7 @@ function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestar
     </div>
     <div className="audit-kpis">
       <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} status={runtime.service?.pizzad?.ok ? "ok" : "error"} subtext={`${formatBytes(runtime.process?.workingSetBytes || 0)} RSS, ${runtime.process?.threadCount ?? 0} thread(s)`} />
-      <Kpi label="Trunk Recorder" value={runtime.service?.trunkRecorder?.active || "unknown"} status={trIntentionallyStopped ? "warning" : runtime.service?.trunkRecorder?.ok ? "ok" : "error"} subtext={trIntentionallyStopped ? "Stopped by operator" : healthIssues > 0 ? `${healthIssues} RF/resource issue row(s)` : "RF/resource health OK"} />
+      <Kpi label="Trunk Recorder" value={runtime.service?.trunkRecorder?.active || "unknown"} status={trIntentionallyStopped ? "warning" : runtime.service?.trunkRecorder?.ok ? "ok" : "error"} subtext={trIntentionallyStopped ? "Stopped by operator" : healthIssues === null ? "Receiver health summary unavailable" : healthIssues > 0 ? `${healthIssues} RF/resource issue row(s)` : "RF/resource health OK"} />
       <Kpi label="Qdrant" value={runtime.service?.qdrant?.active || "unknown"} status={runtime.service?.qdrant?.ok && embeddings?.qdrantOk ? "ok" : embeddings?.enabled ? "error" : "neutral"} subtext={embeddings?.collection || "collection"} />
       <Kpi label="Embeddings" value={embeddings?.enabled ? label(embeddings.status || "unknown") : "Disabled"} status={!embeddings?.enabled ? "neutral" : embeddings.status === "ok" ? "ok" : "warning"} subtext={`${embeddings?.queueDepth ?? 0} queued, ${(embeddings?.pendingCalls ?? 0).toLocaleString()} pending, ${(embeddings?.failedCalls ?? 0).toLocaleString()} failed`} />
       <Kpi label="Vector Latency" value={`${Number(embeddings?.lastSearchMs || 0).toFixed(0)}ms`} status="ok" subtext={`upsert ${Number(embeddings?.lastUpsertMs || 0).toFixed(0)}ms, dim ${embeddings?.vectorSize || "--"}`} />
@@ -10328,23 +10421,12 @@ function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> 
   }, [totalPages]);
 
   async function control(id: number, action: string) {
-    if (["pause", "cancel"].includes(action) && !confirmAction(`${label(action)} job ${id}?`, "This changes a running or queued background job.")) return;
-    setMessage(`${label(action)} job ${id}...`);
+    const actionLabel = action === "cancel" ? "Stop" : label(action);
+    if (["pause", "cancel"].includes(action) && !confirmAction(`${actionLabel} job ${id}?`, "This changes a running or queued background job.")) return;
+    setMessage(`${actionLabel} job ${id}...`);
     try {
       await api.request(`/api/v1/jobs/${id}/control`, { method: "POST", body: JSON.stringify({ action }) });
-      setMessage(`${label(action)} sent for job ${id}`);
-      await reload();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function deleteJob(id: number) {
-    if (!confirmAction(`Delete job ${id}?`, "This removes the finished job row and its logs from the local database.")) return;
-    setMessage(`Deleting job ${id}...`);
-    try {
-      await api.request(`/api/v1/jobs/${id}`, { method: "DELETE" });
-      setMessage(`Deleted job ${id}`);
+      setMessage(`${actionLabel} sent for job ${id}`);
       await reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -10367,13 +10449,13 @@ function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> 
           </div>
         </div>
         <div className="jobs-table-wrap">
-          <JobsTable jobs={pageJobs} onControl={control} onDelete={deleteJob} />
+          <JobsTable jobs={pageJobs} onControl={control} />
         </div>
     </div>
   </div>;
 }
 
-function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused }: { engineHealth: EngineHealth | null; ingestBusy: boolean; ingestMessage: string; onSetIngestPaused: (pause: boolean, untilQueueClear?: boolean) => Promise<void> }) {
+function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused, refreshToken }: { engineHealth: EngineHealth | null; ingestBusy: boolean; ingestMessage: string; onSetIngestPaused: (pause: boolean, untilQueueClear?: boolean) => Promise<void>; refreshToken: number }) {
   const [detail, setDetail] = useState<QueueDetailKey>("status");
   const [issuePage, setIssuePage] = useState(1);
   const showDetail = (next: QueueDetailKey) => {
@@ -10381,7 +10463,7 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
     setIssuePage(1);
   };
   const queueResource = usePersistentRefresh({
-    key: `system-queue|${engineHealth?.serverTimeUtc ?? "initial"}`,
+    key: `system-queue|${engineHealth?.serverTimeUtc ?? "initial"}|${refreshToken}`,
     enabled: true,
     load: () => api.request<QueueSnapshot>("/api/v1/system/queue")
   });
@@ -10673,12 +10755,12 @@ function queueDetailRows(detail: QueueDetailKey, data: {
   return common;
 }
 
-function JobsTable({ jobs, onControl, onDelete }: { jobs: Job[]; onControl: (id: number, action: string) => Promise<void>; onDelete: (id: number) => Promise<void> }) {
+function JobsTable({ jobs, onControl }: { jobs: Job[]; onControl: (id: number, action: string) => Promise<void> }) {
   if (!jobs.length) return <span className="muted">No jobs</span>;
   return <table className="table jobs-table">
     <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Timestamps</th><th>Message</th><th>Actions</th></tr></thead>
     <tbody>{jobs.map(job => {
-      const active = isActiveJob(job);
+      const supported = new Set(job.supportedOperations ?? []);
       return <tr key={job.id}>
         <td>{job.id}</td>
         <td>{label(job.type)}</td>
@@ -10691,11 +10773,10 @@ function JobsTable({ jobs, onControl, onDelete }: { jobs: Job[]; onControl: (id:
         </td>
         <td>{job.message}</td>
         <td className="job-actions-cell"><div>
-          {active ? <>
-            {job.type !== "summary_generation" && job.status === "running" && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
-            {job.type !== "summary_generation" && job.status === "paused" && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
-            {(job.status === "queued" || job.status === "running" || job.status === "paused") && <button onClick={() => void onControl(job.id, "cancel")}>Cancel</button>}
-          </> : <button onClick={() => void onDelete(job.id)}>Delete</button>}
+          {supported.has("pause") && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
+          {supported.has("resume") && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
+          {supported.has("cancel") && <button onClick={() => void onControl(job.id, "cancel")}>Stop</button>}
+          {supported.size === 0 && <span className="muted">--</span>}
         </div></td>
       </tr>;
     })}</tbody>

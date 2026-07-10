@@ -142,6 +142,7 @@ export type Job = {
   createdAtUtc: string;
   startedAtUtc?: string | null;
   finishedAtUtc?: string | null;
+  supportedOperations: string[];
 };
 export type JobLog = { id: number; jobId: number; timestampUtc: string; stream: string; text: string };
 export type SetupArtifact = { path: string; exists: boolean; notes: string };

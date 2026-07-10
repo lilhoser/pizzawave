@@ -798,7 +798,8 @@ app.MapGet("/api/v1/jobs", async (HttpContext context, AuthService authService, 
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     await database.PruneJobsOlderThanAsync(DateTime.UtcNow.AddDays(-30), context.RequestAborted);
-    return Results.Ok(await database.ListJobsAsync(context.RequestAborted));
+    var jobs = await database.ListJobsAsync(context.RequestAborted);
+    return Results.Ok(jobs.Select(JobControlPolicy.Describe));
 })
 .WithName("Jobs")
 .WithOpenApi();
@@ -1379,13 +1380,16 @@ app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long i
     if (job == null) return Results.NotFound();
     try
     {
+        if (!JobControlPolicy.Supports(job, request.Action))
+            throw new InvalidOperationException("This job does not support the requested operation in its current state.");
+
         JobDto? updated = job.Type switch
         {
             BackupJobService.JobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await backups.CancelAsync(id, context.RequestAborted),
             "sftp_import" or "local_import" => throw new InvalidOperationException("Historical import jobs are no longer supported from the web application."),
             _ => throw new InvalidOperationException("This job type does not support pause/resume/cancel.")
         };
-        return updated == null ? Results.NotFound() : Results.Ok(updated);
+        return updated == null ? Results.NotFound() : Results.Ok(JobControlPolicy.Describe(updated));
     }
     catch (Exception ex)
     {
