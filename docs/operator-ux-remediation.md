@@ -704,3 +704,22 @@ Status: pending
   latest evidence remains the operator's rerun, desired version
   `1783696822034`, applied hash `e95b8867...`, and both source serials and
   corrections are unchanged.
+- 2026-07-10: Operator rerun `rfx-20260710165804-4c5ac081514` confirmed
+  single-channel isolation but exposed two remaining ownership defects. ETV
+  captured six real audio calls, while the sweep had replaced source 0's saved
+  +3600 Hz correction with one carrier's +4395 Hz signal offset; continuity
+  fell to 10.5 messages/second with 53.3% zero-decode. Tylertown's isolated
+  proof passed RF coverage validation, then Trunk Recorder exited because the
+  generated system referenced the nonexistent
+  `/etc/trunk-recorder/talkgroups.tylertown-ms-walthall-ms.csv`.
+- 2026-07-10: Source-correction and proof-catalog fix `82da743` preserves a
+  configured SDR's exact saved hardware correction for every candidate, keeps
+  Waterfall carrier offsets as evidence, and only derives a correction from
+  strong observations when no saved correction exists. Temporary proofs use
+  the installed base talkgroup catalog and allow unknown calls because labels
+  are not required for control-channel proof. The focused 44-test RF suite and
+  all 420 backend tests passed. Automatic backend deployment completed in 96.6
+  seconds with zero build warnings or errors. Live health was `ok`; PizzaWave
+  and Trunk Recorder were active. No new scan or Setup mutation was performed;
+  desired version `1783696822034`, applied hash `e95b8867...`, and exact source
+  corrections +3600/+4155 Hz remain unchanged.
