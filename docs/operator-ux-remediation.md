@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3B operator interview - specialized panel refresh ownership
+- Current milestone: 3B operator interview - Settings supporting-data ownership
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `fd16f1b`
 - Operator verification: Packages 1, 2, and 3A accepted
-- Next action: decide how visible read-only specialized panels refresh and
-  report failures before implementing the bounded 3B milestone.
+- Next action: decide how Settings supporting inventories and catalogs load
+  without refreshing editable form drafts.
 
 ## Working Rules
 
@@ -180,6 +180,10 @@ Status: pending
   reconnection do not refresh form fields. Initial load failure renders an
   unavailable state rather than plausible defaults; reloading server values is
   an explicit action that cannot silently discard unsaved edits.
+- 2026-07-09: Read-only specialized panels load and retry only while visible,
+  retain last-good data, and own their error, last-updated time, and Retry
+  action. System Refresh updates the shared System summary and the visible
+  specialized panel; hidden panels perform no refresh work.
 
 ## Deployment Log
 
