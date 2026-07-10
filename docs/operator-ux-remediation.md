@@ -9,14 +9,14 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 source-bound Waterfall-to-RF-Sweep handoff
-  deployed and verified; awaiting operator inspection
+- Current milestone: Package 5 RF Sweep reliability remediation deployed and
+  verified; awaiting operator rerun and inspection
 - Working branch: `codex/operator-ux-setup-ux`
-- Last deployed commit: `232eba7`
+- Last deployed commit: `5b37ac7`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: operator verifies selecting Use on source 0 and source 1 retains
-  two independent SDR-bound measurements in Control-Channel Proof; then obtain
-  end-to-end Package 5 acceptance.
+- Next action: operator reruns Control-Channel Proof with the retained
+  source-bound measurements and verifies per-SDR correction reconciliation,
+  carrier-local RF evidence, and post-readiness TR proof timing.
 
 ## Working Rules
 
@@ -191,6 +191,15 @@ Accepted design:
   rate, frequency correction, and measured quality. Control-Channel Proof runs
   only those exact SDR/control-channel pairs, rejects stale serial mappings,
   and carries the same per-SDR settings into P25, monitoring, and voice checks.
+- Waterfall signal displacement remains `Measured signal offset` evidence and
+  is never copied directly into source configuration. RF Sweep reconciles one
+  PPM correction per SDR crystal, uses only strong agreeing observations,
+  falls back to the saved correction for weak observations, and blocks
+  contradictory strong measurements before hardware access. RF power evidence
+  is the median of windows distributed across the capture and considers only
+  the +/-8 kHz carrier neighborhood. TR proof duration starts after the scoped
+  site/control channel emits its first decode-rate measurement; readiness
+  timeout is blocked rather than scored as an empty failed trial.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [x] Make source planning a server-owned, reviewable projection.
@@ -635,3 +644,24 @@ Status: pending
   No RF run or Setup mutation occurred. Desired version `1783690411070`, applied
   hash `e95b8867...`, two systems, two SDR sources, zero RF selections, and the
   pending Systems/Sites, Control Channels, and RF Path categories were unchanged.
+- 2026-07-10: Operator RF Sweep `rfx-20260710152147-6cabfc4757c` exposed three
+  reliability defects. ETV Raymond passed RF/P25 but was falsely failed because
+  Airspy/TR initialization consumed its 45-second proof window. Tylertown used
+  weak, mutually inconsistent measured offsets (+91 and -3344 Hz) as separate
+  crystal corrections instead of retaining source 1's saved +4155 Hz baseline.
+  The two-second RF screen analyzed only its first 1024 samples and selected the
+  same +23.4375 kHz edge bin for both Tylertown channels while their strongest
+  signals were about 1.28 MHz away. The source pairing itself was correct.
+- 2026-07-10: Reliability remediation `5b37ac7` separates measured signal
+  offsets from configuration, reconciles one correction per SDR in PPM, derives
+  persisted serials from configured hardware identity, replaces the single IQ
+  snapshot with nine median 4096-sample FFT windows and an +/-8 kHz carrier
+  window, waits up to 90 seconds for scoped TR decode readiness before timing a
+  proof, and retains the exact P25 pass marker in evidence. All 417 backend
+  tests and the production frontend build passed. The automatic helper completed
+  a full deployment in 125.1 seconds with zero warnings or errors. Live health
+  was `ok`; both Airspy serials and all three migrated measured-offset fields
+  were present, the new web asset loaded, and no browser warnings/errors appeared.
+  No RF run or Setup mutation occurred during verification. Desired version
+  `1783696822034`, applied hash `e95b8867...`, retained selections, and pending
+  Systems/Sites, Control Channels, and RF Path categories were unchanged.
