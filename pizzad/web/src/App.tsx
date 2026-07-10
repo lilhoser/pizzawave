@@ -51,29 +51,6 @@ function readCachedRadioReferenceSites(sid: string): SetupTrConfigSites | null {
   }
 }
 
-function readCachedRadioReferenceSitesForSids(sids: string[]): SetupTrConfigSites | null {
-  const lists = sids.map(readCachedRadioReferenceSites).filter((value): value is SetupTrConfigSites => Boolean(value));
-  if (lists.length === 0)
-    return null;
-  if (lists.length === 1)
-    return lists[0];
-  const sitesByKey = new Map<string, SetupTrConfigSite>();
-  for (const list of lists) {
-    for (const site of list.sites ?? []) {
-      const key = (site.shortName || site.name).trim().toLowerCase();
-      if (!key || sitesByKey.has(key))
-        continue;
-      sitesByKey.set(key, site);
-    }
-  }
-  return {
-    radioReferenceSid: lists.map(list => list.radioReferenceSid).filter(Boolean).join(","),
-    systemName: lists.map(list => list.systemName).filter(Boolean).join(", "),
-    sites: [...sitesByKey.values()],
-    diagnostics: lists.map(list => list.diagnostics).filter(Boolean).join("\n")
-  };
-}
-
 function writeCachedRadioReferenceSites(sid: string, sites: SetupTrConfigSites) {
   if (!sid.trim()) return;
   try {
@@ -1777,30 +1754,12 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
       setBusy("");
     }
   }
-  async function adoptWaterfallSite(system: RfSurveySystem) {
-    const existingNames = new Set(setup.desired.systems.map(item => item.shortName.toLowerCase()));
-    if (existingNames.has(system.shortName.toLowerCase()))
-      return;
-
-    const nextSystems = [...setup.desired.systems, system].sort((left, right) => left.shortName.localeCompare(right.shortName));
-    const nextNames = Array.from(new Set([...selectedSetupSystemNames(setup), system.shortName].filter(Boolean))).sort((left, right) => left.localeCompare(right));
-    const nextSourcePlanSystems = Array.from(new Set([
-      ...(setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : selectedSetupSystemNames(setup)),
-      system.shortName
-    ].filter(Boolean))).sort((left, right) => left.localeCompare(right));
-    await onSave({
-      systems: nextSystems,
-      systemShortNames: nextNames,
-      sourcePlanSystemShortNames: nextSourcePlanSystems
-    }, "systems");
-  }
   const handleWaterfallStatusChange = useCallback((status: RfSurveyWaterfallStatus | null) => {
     onTrOperationChange(waterfallTrOperationText(status));
   }, [onTrOperationChange]);
   const effectiveSystems = detail?.profile.systems?.length ? detail.profile.systems : systems;
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
-  const cachedSites = readCachedRadioReferenceSitesForSids(setupRadioReferenceSids(setup));
   useEffect(() => {
     if (!active)
       return;
@@ -1901,12 +1860,10 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
             sources={effectiveSources}
             selectedSources={selectedSourceIndexes}
             systems={effectiveSystems}
-            radioReferenceSites={cachedSites}
             controlChannels={effectiveControlChannels}
             activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
             waterfallSweepSelections={waterfallSweepSelections}
             onWaterfallSweepSelections={updateWaterfallSweepSelections}
-            onAdoptWaterfallSite={adoptWaterfallSite}
             onRunExperiment={runExperiment}
             onReload={refreshWorkspace}
             onStatusChange={handleWaterfallStatusChange}
@@ -1927,7 +1884,6 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
           surveyId={detail.session.id}
           systemShortName={effectiveSystems[0]?.shortName ?? ""}
           systems={effectiveSystems}
-          radioReferenceSites={cachedSites}
           sources={effectiveSources}
           controlChannels={effectiveControlChannels}
           activeControlChannelHz={activeControlChannelHz || effectiveControlChannels[0] || 0}
@@ -1940,7 +1896,6 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
           onStopAndInventory={runSdrInventoryExperiment}
           onRunP25={runP25}
           onRunExperiment={runExperiment}
-          onAdoptWaterfallSite={adoptWaterfallSite}
           onReload={refreshWorkspace}
           onShowDetails={setDetails}
           onOpenRunLog={() => undefined}
@@ -5464,7 +5419,6 @@ function SiteValidationStep({
   surveyId,
   systemShortName,
   systems,
-  radioReferenceSites,
   sources,
   controlChannels,
   activeControlChannelHz,
@@ -5477,7 +5431,6 @@ function SiteValidationStep({
   onStopAndInventory,
   onRunP25,
   onRunExperiment,
-  onAdoptWaterfallSite,
   onReload,
   onShowDetails,
   onOpenRunLog,
@@ -5505,7 +5458,6 @@ function SiteValidationStep({
   surveyId: string;
   systemShortName: string;
   systems: RfSurveySystem[];
-  radioReferenceSites: SetupTrConfigSites | null;
   sources: RfSurveySource[];
   controlChannels: number[];
   activeControlChannelHz: number;
@@ -5518,7 +5470,6 @@ function SiteValidationStep({
   onStopAndInventory: () => Promise<void>;
   onRunP25: (controlChannelHz?: number) => Promise<void>;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
-  onAdoptWaterfallSite: (system: RfSurveySystem) => Promise<void>;
   onReload: () => Promise<void>;
   onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void;
   onOpenRunLog: () => void;
@@ -6075,12 +6026,10 @@ function SiteValidationStep({
         sources={sources}
         selectedSources={selectedSources}
         systems={systems}
-        radioReferenceSites={radioReferenceSites}
         controlChannels={controlChannels}
         activeControlChannelHz={activeControlChannelHz}
         waterfallSweepSelections={selectedWaterfallSweepSelections}
         onWaterfallSweepSelections={onWaterfallSweepSelections}
-        onAdoptWaterfallSite={onAdoptWaterfallSite}
         onRunExperiment={onRunExperiment}
         onReload={onReload}
       />
@@ -6360,12 +6309,10 @@ function WaterfallStep({
   sources,
   selectedSources,
   systems,
-  radioReferenceSites,
   controlChannels,
   activeControlChannelHz,
   waterfallSweepSelections,
   onWaterfallSweepSelections,
-  onAdoptWaterfallSite,
   onRunExperiment,
   onReload,
   onStatusChange,
@@ -6378,12 +6325,10 @@ function WaterfallStep({
   sources: RfSurveySource[];
   selectedSources: number[];
   systems: RfSurveySystem[];
-  radioReferenceSites: SetupTrConfigSites | null;
   controlChannels: number[];
   activeControlChannelHz: number;
   waterfallSweepSelections?: WaterfallSweepSelection[];
   onWaterfallSweepSelections?: (values: WaterfallSweepSelection[]) => void;
-  onAdoptWaterfallSite: (system: RfSurveySystem) => Promise<void>;
   onRunExperiment: (type: string, estimate: string, controlChannelHz?: number, extraRequest?: Record<string, unknown>) => Promise<RfSurveyExperiment | undefined>;
   onReload: () => Promise<void>;
   onStatusChange?: (status: RfSurveyWaterfallStatus | null) => void;
@@ -6602,7 +6547,8 @@ function WaterfallStep({
       const consistentPeaks = updateConsistentSpectrumPeaks(peakHistoryRef.current, frame, smoothed, axis);
       const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
       const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
-      const nextOtherDetectedCcRows = updateVisibleOtherDetectedCcRows(otherDetectedCcHistoryRef.current, positionedPeaks, systems, controlChannelOptions);
+      const frameAtMs = Date.parse(frame.capturedAtUtc) || Date.now();
+      const nextOtherDetectedCcRows = updateVisibleOtherDetectedCcRows(otherDetectedCcHistoryRef.current, positionedPeaks, systems, controlChannelOptions, frameAtMs);
       const nextSpectrumSuspectedCcRows = activeSpectrumSuspectedRows(otherDetectedCcHistoryRef.current);
       spectrumMarkersRef.current = showControlChannelLines
         ? buildSpectrumMarkers(nextCcSignalRows, nextSpectrumSuspectedCcRows, axis)
@@ -6743,8 +6689,8 @@ function WaterfallStep({
     const measuredFrequency = Math.round(peak.measuredFrequencyHz ?? peak.frequencyHz);
     const publishedTargetFrequency = Math.round(peak.targetFrequencyHz ?? 0);
     const nearestTarget = publishedTargetFrequency > 0
-      ? nearestTargetControlChannel(publishedTargetFrequency, systems, controlChannelOptions, 20_000)
-      : nearestTargetControlChannel(measuredFrequency, systems, controlChannelOptions, 20_000);
+      ? nearestTargetControlChannel(publishedTargetFrequency, systems, controlChannelOptions, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ)
+      : nearestTargetControlChannel(measuredFrequency, systems, controlChannelOptions, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ);
     const targetFrequency = publishedTargetFrequency > 0 ? publishedTargetFrequency : nearestTarget?.frequencyHz ?? 0;
     const offset = targetFrequency > 0 ? Math.round(measuredFrequency - targetFrequency) : 0;
     const targetLabel = nearestTarget ? `${nearestTarget.siteLabel} ${formatRfHz(nearestTarget.frequencyHz)}` : "";
@@ -6878,17 +6824,20 @@ function WaterfallStep({
     ];
     const reportOtherRows = [...otherDetectedCcRows];
     for (const result of Object.values(identifyResults)) {
-      if (result.key.startsWith("requested:"))
+      if (result.key.startsWith("requested:") || result.status !== "passed")
         continue;
       if (!reportOtherRows.some(row => row.key === result.key))
         reportOtherRows.push({
           ...result.peak,
-          displayHits: Math.max(6, result.peak.hits),
+          displayHits: Math.max(1, result.peak.hits),
           displayMisses: 0,
+          observedMs: SUSPECTED_CC_RATING_WINDOW_MS,
+          missingMs: 0,
+          lastFrameAtMs: Date.parse(result.createdAtUtc) || Date.now(),
           promoted: true
         });
     }
-    const reportCandidates = buildWaterfallCandidateRows(ccSignalRows, reportOtherRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
+    const reportCandidates = buildWaterfallCandidateRows(ccSignalRows, reportOtherRows, systems, controlChannelOptions, identifyResults);
     const candidateRows = reportCandidates.length
       ? reportCandidates.map(row => {
         const identify = identifyResults[row.identifyPeak.key];
@@ -6961,8 +6910,10 @@ function WaterfallStep({
       return;
     }
     const xCss = nearest.x * rect.width / canvas.width;
+    const popupWidth = Math.min(460, rect.width * 0.92);
+    const safeXCss = Math.max(popupWidth / 2 + 4, Math.min(rect.width - popupWidth / 2 - 4, xCss));
     setSpectrumHover({
-      left: canvas.offsetLeft + xCss,
+      left: canvas.offsetLeft + safeXCss,
       top: canvas.offsetTop + 8,
       text: `${nearest.kind === "selected" ? nearest.label : "Suspected CC"} / ${formatSpectrumTickHz(nearest.frequencyHz)} / ${label(nearest.rating)} / SNR ${formatFixed(nearest.snrDb, 1)} dB / stability ${Math.round(nearest.confidence * 100)}%`
     });
@@ -6973,22 +6924,23 @@ function WaterfallStep({
   const peakSnrDb = frame && Number.isFinite(frame.peakDb) && Number.isFinite(frame.noiseFloorDb) ? frame.peakDb - frame.noiseFloorDb : NaN;
   const displayedOtherDetectedCcRows = [...otherDetectedCcRows];
   for (const result of Object.values(identifyResults)) {
-    if (result.key.startsWith("requested:"))
+    if (result.key.startsWith("requested:") || (result.status !== "running" && result.status !== "passed"))
       continue;
     if (!displayedOtherDetectedCcRows.some(row => row.key === result.key))
       displayedOtherDetectedCcRows.push({
         ...result.peak,
-        displayHits: Math.max(6, result.peak.hits),
+        displayHits: Math.max(1, result.peak.hits),
         displayMisses: 0,
+        observedMs: SUSPECTED_CC_RATING_WINDOW_MS,
+        missingMs: 0,
+        lastFrameAtMs: Date.parse(result.createdAtUtc) || Date.now(),
         promoted: true
       });
   }
-  const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, radioReferenceSites, controlChannelOptions, identifyResults);
+  const waterfallCandidates = buildWaterfallCandidateRows(ccSignalRows, displayedOtherDetectedCcRows, systems, controlChannelOptions, identifyResults);
   async function toggleCandidateForSweep(row: WaterfallCandidateRow, selected: boolean) {
     if (!showSweepSelection)
       return;
-    if (selected && row.origin !== "selected" && row.system && !systems.some(system => system.shortName.toLowerCase() === row.system?.shortName.toLowerCase()))
-      await onAdoptWaterfallSite(row.system);
     toggleSweepControlChannel(row, selected);
   }
   return <div className="rf-waterfall-panel">
@@ -7043,7 +6995,7 @@ function WaterfallStep({
       </div>
     </div>
     <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Sorted by site name. Strong, steady, and weak ratings combine signal-to-noise ratio with persistence across frames.</small></div>
+      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Sorted by site name. Unidentified carriers must persist for about 8 seconds; ratings settle over a 12-second window.</small></div>
       <div className="rf-waterfall-candidate-table">
         <div className={showSweepSelection ? "rf-waterfall-candidate-row header" : "rf-waterfall-candidate-row header no-sweep-selection"}>
           {showSweepSelection && <span>Use</span>}<span>Site</span><span>Matched control channel</span><span>Detected</span><span>Signal-to-noise</span><span>Measured signal offset</span><span>Rating</span><span>Source</span><span>Action</span>
@@ -7077,7 +7029,6 @@ function buildWaterfallCandidateRows(
   requestedRows: WaterfallCcSignalRow[],
   otherRows: WaterfallDetectedCcTrack[],
   selectedSystems: RfSurveySystem[],
-  radioReferenceSites: SetupTrConfigSites | null,
   fallbackControlChannels: number[],
   identifyResults: Record<string, WaterfallIdentifyResult>
 ): WaterfallCandidateRow[] {
@@ -7109,16 +7060,11 @@ function buildWaterfallCandidateRows(
   })));
   const fallbackTargets = fallbackControlChannels.map(frequencyHz => ({ systemShortName: "", siteLabel: "Selected CC", frequencyHz, system: undefined as RfSurveySystem | undefined }));
   const matchableTargets = selectedTargets.length ? selectedTargets : fallbackTargets;
-  const rrTargets = buildRadioReferenceControlChannelTargets(radioReferenceSites, selectedSystems);
   const otherCandidateRows: WaterfallCandidateRow[] = otherRows.map(row => {
-    const fallbackTarget = nearestFrequencyTarget(row.frequencyHz, matchableTargets, 20_000);
+    const fallbackTarget = nearestFrequencyTarget(row.frequencyHz, matchableTargets, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ);
     const matchedSelected = Boolean(fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase()));
-    const rrTarget = matchedSelected ? null : nearestFrequencyTarget(row.frequencyHz, rrTargets, 20_000);
-    const matchedRr = Boolean(rrTarget);
-    const targetFrequencyHz = Math.round(fallbackTarget?.frequencyHz ?? rrTarget?.frequencyHz ?? row.frequencyHz);
-    const origin: WaterfallCandidateRow["origin"] = matchedSelected
-      ? "selected"
-      : matchedRr ? "rr" : "unknown";
+    const targetFrequencyHz = matchedSelected ? Math.round(fallbackTarget!.frequencyHz) : 0;
+    const origin: WaterfallCandidateRow["origin"] = matchedSelected ? "selected" : "unknown";
     const identifyPeak: PositionedSpectrumPeak = {
       ...row,
       tuneFrequencyHz: matchedSelected ? targetFrequencyHz : Math.round(row.frequencyHz),
@@ -7128,17 +7074,17 @@ function buildWaterfallCandidateRows(
     return {
       key: row.key,
       origin,
-      siteLabel: matchedSelected ? fallbackTarget?.siteLabel ?? "Selected CC" : rrTarget?.siteLabel ?? "Unknown CC",
-      systemShortName: matchedSelected ? fallbackTarget?.systemShortName ?? "" : rrTarget?.systemShortName ?? "",
-      targetFrequencyHz: matchedSelected || matchedRr ? targetFrequencyHz : 0,
+      siteLabel: matchedSelected ? fallbackTarget?.siteLabel ?? "Selected CC" : "Unidentified carrier",
+      systemShortName: matchedSelected ? fallbackTarget?.systemShortName ?? "" : "",
+      targetFrequencyHz,
       detectedFrequencyHz: Math.round(row.frequencyHz),
-      sweepFrequencyHz: matchedSelected || matchedRr ? targetFrequencyHz : Math.round(row.frequencyHz),
+      sweepFrequencyHz: matchedSelected ? targetFrequencyHz : Math.round(row.frequencyHz),
       snrDb: Number.isFinite(row.snrDb) ? row.snrDb : Number.NEGATIVE_INFINITY,
-      offsetHz: matchedSelected || matchedRr ? Math.round(row.frequencyHz - targetFrequencyHz) : Number.NaN,
+      offsetHz: matchedSelected ? Math.round(row.frequencyHz - targetFrequencyHz) : Number.NaN,
       confidence: waterfallOtherDetectedConfidence(row),
       hits: row.displayHits,
       identifyPeak,
-      system: matchedSelected ? fallbackTarget?.system : rrTarget?.system
+      system: matchedSelected ? fallbackTarget?.system : undefined
     };
   });
   const rows: WaterfallCandidateRow[] = [...selectedRows, ...otherCandidateRows];
@@ -7146,28 +7092,24 @@ function buildWaterfallCandidateRows(
     if (rows.some(row => row.key === result.key))
       continue;
     const measuredFrequencyHz = Math.round(result.measuredFrequencyHz || result.frequencyHz);
-    const fallbackTarget = nearestFrequencyTarget(measuredFrequencyHz, matchableTargets, 20_000);
+    const fallbackTarget = nearestFrequencyTarget(measuredFrequencyHz, matchableTargets, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ);
     const matchedSelected = Boolean(fallbackTarget?.systemShortName && selectedNames.has(fallbackTarget.systemShortName.toLowerCase()));
-    const rrTarget = matchedSelected ? null : nearestFrequencyTarget(measuredFrequencyHz, rrTargets, 20_000);
-    const matchedRr = Boolean(rrTarget);
-    const targetFrequencyHz = Math.round(fallbackTarget?.frequencyHz ?? rrTarget?.frequencyHz ?? result.targetFrequencyHz ?? result.frequencyHz);
-    const origin: WaterfallCandidateRow["origin"] = matchedSelected
-      ? "selected"
-      : matchedRr ? "rr" : "unknown";
+    const targetFrequencyHz = matchedSelected ? Math.round(fallbackTarget!.frequencyHz) : 0;
+    const origin: WaterfallCandidateRow["origin"] = matchedSelected ? "selected" : "unknown";
     rows.push({
       key: result.key,
       origin,
-      siteLabel: matchedSelected ? fallbackTarget?.siteLabel ?? result.targetLabel ?? "Selected CC" : rrTarget?.siteLabel ?? "Unknown CC",
-      systemShortName: matchedSelected ? fallbackTarget?.systemShortName ?? "" : rrTarget?.systemShortName ?? "",
-      targetFrequencyHz: matchedSelected || matchedRr ? targetFrequencyHz : 0,
+      siteLabel: matchedSelected ? fallbackTarget?.siteLabel ?? "Selected CC" : "Unidentified carrier",
+      systemShortName: matchedSelected ? fallbackTarget?.systemShortName ?? "" : "",
+      targetFrequencyHz,
       detectedFrequencyHz: measuredFrequencyHz,
-      sweepFrequencyHz: matchedSelected || matchedRr ? targetFrequencyHz : measuredFrequencyHz,
+      sweepFrequencyHz: matchedSelected ? targetFrequencyHz : measuredFrequencyHz,
       snrDb: result.peak.snrDb,
-      offsetHz: matchedSelected || matchedRr ? Math.round(measuredFrequencyHz - targetFrequencyHz) : Number.NaN,
+      offsetHz: matchedSelected ? Math.round(measuredFrequencyHz - targetFrequencyHz) : Number.NaN,
       confidence: clamp01(result.peak.hits / 30),
       hits: result.peak.hits,
       identifyPeak: result.peak,
-      system: matchedSelected ? fallbackTarget?.system : rrTarget?.system
+      system: matchedSelected ? fallbackTarget?.system : undefined
     });
   }
   return rows.sort((left, right) =>
@@ -7183,172 +7125,9 @@ function nearestFrequencyTarget<T extends { frequencyHz: number }>(frequencyHz: 
     .sort((left, right) => left.distance - right.distance)[0]?.target ?? null;
 }
 
-function buildRadioReferenceControlChannelTargets(radioReferenceSites: SetupTrConfigSites | null, selectedSystems: RfSurveySystem[] = []): WaterfallFrequencyTarget[] {
-  const rows: WaterfallFrequencyTarget[] = [];
-  const selectedStates = inferSelectedSetupStates(selectedSystems, radioReferenceSites);
-  for (const site of radioReferenceSites?.sites ?? []) {
-    const siteLabel = site.name || site.shortName || "RR site";
-    if (selectedStates.size > 0) {
-      const siteState = inferStateFromText([siteLabel, site.shortName, radioReferenceSites?.systemName]);
-      if (!siteState || !selectedStates.has(siteState))
-        continue;
-    }
-    const systemShortName = site.shortName || site.name || "";
-    for (const frequencyMhz of site.controlChannelsMhz ?? []) {
-      const frequencyHz = Math.round(Number(frequencyMhz) * 1_000_000);
-      if (!Number.isFinite(frequencyHz) || frequencyHz <= 0)
-        continue;
-      rows.push({
-        systemShortName,
-        siteLabel,
-        frequencyHz,
-        system: radioReferenceSiteToRfSurveySystem(site, radioReferenceSites?.systemName)
-      });
-    }
-  }
-  return rows;
-}
-
-function radioReferenceSiteToRfSurveySystem(site: SetupTrConfigSite, systemName?: string): RfSurveySystem {
-  const shortName = site.shortName || site.name || "rr-site";
-  return {
-    shortName,
-    siteLabel: site.name || shortName,
-    controlChannelsHz: uniqueSortedFrequencies((site.controlChannelsMhz ?? [])
-      .map(frequencyMhz => Math.round(Number(frequencyMhz) * 1_000_000))
-      .filter(frequencyHz => Number.isFinite(frequencyHz) && frequencyHz > 0)),
-    voiceFrequenciesHz: [],
-    talkgroupSystemShortName: systemName?.trim() || undefined
-  };
-}
-
-function inferSelectedSetupStates(selectedSystems: RfSurveySystem[], radioReferenceSites: SetupTrConfigSites | null) {
-  const selectedNames = new Set(selectedSystems.map(system => system.shortName.toLowerCase()));
-  const values = selectedSystems.flatMap(system => [system.siteLabel, system.shortName]);
-  for (const site of radioReferenceSites?.sites ?? []) {
-    const siteKey = (site.shortName || site.name || "").toLowerCase();
-    if (selectedNames.has(siteKey))
-      values.push(site.name, site.shortName, radioReferenceSites?.systemName ?? "");
-  }
-  return new Set(values.map(value => inferStateFromText([value])).filter((value): value is string => Boolean(value)));
-}
-
-function inferStateFromText(values: Array<string | undefined | null>) {
-  const text = values.filter(Boolean).join(" ").toLowerCase();
-  if (!text.trim())
-    return "";
-  for (const [token, state] of Object.entries(radioReferenceStateTokens)) {
-    if (new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text))
-      return state;
-  }
-  return "";
-}
-
-const radioReferenceStateTokens: Record<string, string> = {
-  al: "alabama",
-  alabama: "alabama",
-  ak: "alaska",
-  alaska: "alaska",
-  az: "arizona",
-  arizona: "arizona",
-  ar: "arkansas",
-  arkansas: "arkansas",
-  ca: "california",
-  california: "california",
-  co: "colorado",
-  colorado: "colorado",
-  ct: "connecticut",
-  connecticut: "connecticut",
-  de: "delaware",
-  delaware: "delaware",
-  fl: "florida",
-  florida: "florida",
-  ga: "georgia",
-  georgia: "georgia",
-  hi: "hawaii",
-  hawaii: "hawaii",
-  id: "idaho",
-  idaho: "idaho",
-  il: "illinois",
-  illinois: "illinois",
-  in: "indiana",
-  indiana: "indiana",
-  ia: "iowa",
-  iowa: "iowa",
-  ks: "kansas",
-  kansas: "kansas",
-  ky: "kentucky",
-  kentucky: "kentucky",
-  la: "louisiana",
-  louisiana: "louisiana",
-  me: "maine",
-  maine: "maine",
-  md: "maryland",
-  maryland: "maryland",
-  ma: "massachusetts",
-  massachusetts: "massachusetts",
-  mi: "michigan",
-  michigan: "michigan",
-  mn: "minnesota",
-  minnesota: "minnesota",
-  ms: "mississippi",
-  mississippi: "mississippi",
-  mo: "missouri",
-  missouri: "missouri",
-  mt: "montana",
-  montana: "montana",
-  ne: "nebraska",
-  nebraska: "nebraska",
-  nv: "nevada",
-  nevada: "nevada",
-  nh: "new-hampshire",
-  "new hampshire": "new-hampshire",
-  nj: "new-jersey",
-  "new jersey": "new-jersey",
-  nm: "new-mexico",
-  "new mexico": "new-mexico",
-  ny: "new-york",
-  "new york": "new-york",
-  nc: "north-carolina",
-  "north carolina": "north-carolina",
-  nd: "north-dakota",
-  "north dakota": "north-dakota",
-  oh: "ohio",
-  ohio: "ohio",
-  ok: "oklahoma",
-  oklahoma: "oklahoma",
-  or: "oregon",
-  oregon: "oregon",
-  pa: "pennsylvania",
-  pennsylvania: "pennsylvania",
-  ri: "rhode-island",
-  "rhode island": "rhode-island",
-  sc: "south-carolina",
-  "south carolina": "south-carolina",
-  sd: "south-dakota",
-  "south dakota": "south-dakota",
-  tn: "tennessee",
-  tennessee: "tennessee",
-  tx: "texas",
-  texas: "texas",
-  ut: "utah",
-  utah: "utah",
-  vt: "vermont",
-  vermont: "vermont",
-  va: "virginia",
-  virginia: "virginia",
-  wa: "washington",
-  washington: "washington",
-  wv: "west-virginia",
-  "west virginia": "west-virginia",
-  wi: "wisconsin",
-  wisconsin: "wisconsin",
-  wy: "wyoming",
-  wyoming: "wyoming"
-};
 
 function waterfallCandidateSourceLabel(row: WaterfallCandidateRow, identify?: WaterfallIdentifyResult) {
-  const prefix = row.origin === "selected" ? "Selected site" : row.origin === "rr" ? "RR cached site" : "Unknown CC";
+  const prefix = row.origin === "selected" ? "Selected site" : "Spectrum suspect";
   if (identify?.status === "passed")
     return `${prefix} / P25`;
   if (identify?.status === "failed")
@@ -7505,7 +7284,7 @@ type SpectrumDisplayScale = { lowDb: number; highDb: number };
 type SpectrumAxis = { startHz: number; sampleRate: number };
 type SpectrumPeakTrack = { key: string; frequencyHz: number; powerDb: number; snrDb: number; hits: number; misses: number };
 type PositionedSpectrumPeak = SpectrumPeakTrack & { x: number; y: number; tuneFrequencyHz?: number; measuredFrequencyHz?: number; targetFrequencyHz?: number };
-type WaterfallDetectedCcTrack = PositionedSpectrumPeak & { displayHits: number; displayMisses: number; promoted: boolean };
+type WaterfallDetectedCcTrack = PositionedSpectrumPeak & { displayHits: number; displayMisses: number; observedMs: number; missingMs: number; lastFrameAtMs: number; promoted: boolean };
 type P25IdentifyFields = { nac: string; wacn: string; systemId: string; rfss: string; site: string; decodedControlChannelHz: number; adjacentSites: string[]; secondaryControlChannels: string[]; tsbkCount: number; grantCount: number; demod: string; sourceIndex?: number; exitCode?: number; timedOut: boolean };
 type WaterfallIdentifyResult = { key: string; peak: PositionedSpectrumPeak; frequencyHz: number; measuredFrequencyHz: number; targetFrequencyHz: number; status: "running" | "passed" | "failed" | "blocked"; summary: string; detail: string; targetLabel: string; offsetHz: number; createdAtUtc: string; experimentId?: string; fields?: P25IdentifyFields };
 type WaterfallSignalRating = "strong" | "steady" | "weak";
@@ -7513,9 +7292,14 @@ type SpectrumHover = { left: number; top: number; text: string };
 type SpectrumMarker = { x: number; frequencyHz: number; snrDb: number; confidence: number; rating: WaterfallSignalRating; kind: "selected" | "suspected"; label: string };
 type SpectrumDrawOptions = { controlChannelsHz: number[]; showControlChannels: boolean; peaks: PositionedSpectrumPeak[]; suspectedControlChannels: WaterfallDetectedCcTrack[] };
 type WaterfallCcSignalRow = { systemShortName: string; siteLabel: string; frequencyHz: number; status: "candidate" | "weak-trace" | "not-seen"; label: string; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number; confidence: number };
-type WaterfallFrequencyTarget = { systemShortName: string; siteLabel: string; frequencyHz: number; system?: RfSurveySystem };
-type WaterfallCandidateRow = { key: string; origin: "selected" | "rr" | "unknown"; siteLabel: string; systemShortName: string; targetFrequencyHz: number; detectedFrequencyHz: number; sweepFrequencyHz: number; snrDb: number; offsetHz: number; confidence: number; hits: number; identifyPeak: PositionedSpectrumPeak; system?: RfSurveySystem };
+type WaterfallCandidateRow = { key: string; origin: "selected" | "unknown"; siteLabel: string; systemShortName: string; targetFrequencyHz: number; detectedFrequencyHz: number; sweepFrequencyHz: number; snrDb: number; offsetHz: number; confidence: number; hits: number; identifyPeak: PositionedSpectrumPeak; system?: RfSurveySystem };
 type WaterfallCcSignalTrack = { signalScore: number; hitCount: number; frameCount: number; peakFrequencyHz: number; offsetHz: number; snrDb: number; powerDb: number };
+
+const CONTROL_CHANNEL_MATCH_TOLERANCE_HZ = 8_000;
+const SPECTRUM_SUSPECT_MIN_OBSERVED_MS = 5_000;
+const SUSPECTED_CC_PROMOTION_MS = 8_000;
+const SUSPECTED_CC_RATING_WINDOW_MS = 12_000;
+const SUSPECTED_CC_RETENTION_MS = 12_000;
 
 function buildSpectrumDisplayScale(frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], spanDb = 45, previous?: SpectrumDisplayScale | null): SpectrumDisplayScale {
   if (previous)
@@ -7556,7 +7340,7 @@ function buildWaterfallCcSignalRows(systems: RfSurveySystem[], fallbackControlCh
   }
   return [...uniqueTargets.values()].map(target => {
     const key = `${target.systemShortName}:${target.frequencyHz}`;
-    const nearest = nearestPeakAroundFrequency(target.frequencyHz, powers, frame, axis, 25_000);
+    const nearest = nearestPeakAroundFrequency(target.frequencyHz, powers, frame, axis, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ);
     const previous = history.get(key);
     const isSignalFrame = Boolean(nearest && nearest.snrDb >= 6);
     const signalScore = clamp01((previous?.signalScore ?? 0) * (isSignalFrame ? 0.9 : 0.94) + (isSignalFrame ? 0.1 : 0));
@@ -7785,8 +7569,8 @@ function p25IdentifyHasStrongEvidence(fields: P25IdentifyFields) {
   );
 }
 
-function waterfallOtherDetectedConfidence(row: Pick<WaterfallDetectedCcTrack, "displayHits" | "displayMisses">) {
-  return clamp01((row.displayHits - row.displayMisses * 0.5) / 30);
+function waterfallOtherDetectedConfidence(row: Pick<WaterfallDetectedCcTrack, "observedMs">) {
+  return clamp01(row.observedMs / SUSPECTED_CC_RATING_WINDOW_MS);
 }
 
 function waterfallSignalRating(snrDb: number, confidence: number): WaterfallSignalRating {
@@ -7801,16 +7585,15 @@ function waterfallCandidateRating(row: Pick<WaterfallCandidateRow, "snrDb" | "co
   return waterfallSignalRating(row.snrDb, row.confidence);
 }
 
-function updateVisibleOtherDetectedCcRows(history: Map<string, WaterfallDetectedCcTrack>, peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[]) {
-  const promotionHits = 6;
-  const retentionMisses = 36;
+function updateVisibleOtherDetectedCcRows(history: Map<string, WaterfallDetectedCcTrack>, peaks: PositionedSpectrumPeak[], systems: RfSurveySystem[], fallbackControlChannels: number[], frameAtMs: number) {
   const activeKeys = new Set<string>();
   for (const track of history.values())
     track.displayMisses += 1;
-  for (const peak of peaks.filter(row => !nearestTargetControlChannel(row.frequencyHz, systems, fallbackControlChannels, 20_000))) {
+  for (const peak of peaks.filter(row => !nearestTargetControlChannel(row.frequencyHz, systems, fallbackControlChannels, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ))) {
     activeKeys.add(peak.key);
     const previous = history.get(peak.key);
-    const nextHits = Math.min(30, (previous?.displayHits ?? 0) + 1);
+    const elapsedMs = previous ? Math.max(0, Math.min(1_000, frameAtMs - previous.lastFrameAtMs)) : 0;
+    const nextObservedMs = Math.min(SUSPECTED_CC_RATING_WINDOW_MS * 2, (previous?.observedMs ?? 0) + elapsedMs);
     history.set(peak.key, {
       ...peak,
       frequencyHz: ema(previous?.frequencyHz, peak.frequencyHz, 0.24),
@@ -7820,26 +7603,34 @@ function updateVisibleOtherDetectedCcRows(history: Map<string, WaterfallDetected
       y: ema(previous?.y, peak.y, 0.28),
       hits: peak.hits,
       misses: peak.misses,
-      displayHits: nextHits,
+      displayHits: Math.min(200, (previous?.displayHits ?? 0) + 1),
       displayMisses: 0,
-      promoted: Boolean(previous?.promoted) || nextHits >= promotionHits
+      observedMs: nextObservedMs,
+      missingMs: 0,
+      lastFrameAtMs: frameAtMs,
+      promoted: Boolean(previous?.promoted) || nextObservedMs >= SUSPECTED_CC_PROMOTION_MS
     });
   }
   for (const [key, track] of history.entries()) {
-    if (!activeKeys.has(key))
+    if (!activeKeys.has(key)) {
+      const elapsedMs = Math.max(0, Math.min(1_000, frameAtMs - track.lastFrameAtMs));
       track.displayHits = Math.max(0, track.displayHits - 0.35);
-    if (track.displayMisses > retentionMisses && track.displayHits < promotionHits)
+      track.observedMs = Math.max(0, track.observedMs - elapsedMs * 0.25);
+      track.missingMs += elapsedMs;
+      track.lastFrameAtMs = frameAtMs;
+    }
+    if (track.missingMs > SUSPECTED_CC_RETENTION_MS)
       history.delete(key);
   }
   return [...history.values()]
-    .filter(track => track.promoted && track.displayMisses <= retentionMisses)
+    .filter(track => track.promoted && track.missingMs <= SUSPECTED_CC_RETENTION_MS)
     .sort((left, right) => right.snrDb - left.snrDb)
     .slice(0, 8);
 }
 
 function activeSpectrumSuspectedRows(history: Map<string, WaterfallDetectedCcTrack>) {
   return [...history.values()]
-    .filter(track => track.displayHits > 0 && track.displayMisses <= 2)
+    .filter(track => track.observedMs >= SPECTRUM_SUSPECT_MIN_OBSERVED_MS && track.missingMs <= 1_200)
     .sort((left, right) => left.frequencyHz - right.frequencyHz)
     .slice(0, 16);
 }

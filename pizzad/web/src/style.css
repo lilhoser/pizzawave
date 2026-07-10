@@ -4909,16 +4909,18 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   position: absolute;
   z-index: 2;
   transform: translateX(-50%);
-  max-width: min(280px, 86%);
-  padding: 4px 7px;
+  width: max-content;
+  max-width: min(460px, 92%);
+  padding: 6px 9px;
   border: 1px solid rgba(255, 223, 53, .72);
   border-radius: 4px;
   background: rgba(13, 17, 23, .92);
   color: #ffed8a;
   font-size: 12px;
-  line-height: 1.2;
+  line-height: 1.35;
   pointer-events: none;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   box-shadow: 0 4px 12px rgba(0, 0, 0, .32);
 }
 
@@ -5011,10 +5013,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 
 .rf-waterfall-candidate-row.selected {
   border-color: rgba(84, 214, 138, .55);
-}
-
-.rf-waterfall-candidate-row.rr {
-  border-color: rgba(89, 168, 255, .5);
 }
 
 .rf-waterfall-candidate-row.unknown {
