@@ -432,6 +432,7 @@ public sealed class SiteSetupRfSelection
     public string SourceSerial { get; set; } = string.Empty;
     public string Gain { get; set; } = string.Empty;
     public int? SampleRateHz { get; set; }
+    public int? MeasuredSignalOffsetHz { get; set; }
     public int? ErrorHz { get; set; }
     public double? SnrDb { get; set; }
     public double? Confidence { get; set; }

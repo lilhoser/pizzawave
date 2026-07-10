@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace pizzad;
 
@@ -613,8 +614,8 @@ public sealed class SiteSetupService
         Systems = value.Systems?.ToList() ?? [],
         SelectedSourceIndexes = value.SelectedSourceIndexes?.Distinct().Order().ToList() ?? [],
         SourceAssignments = NormalizeSourceAssignments(value.SourceAssignments),
-        Sources = value.Sources?.ToList() ?? [],
-        RfSelections = NormalizeRfSelections(value.RfSelections),
+        Sources = NormalizeSources(value.Sources),
+        RfSelections = NormalizeRfSelections(value.RfSelections, value.Sources),
         RfPath = value.RfPath ?? new RfSurveyPathProfileDto(),
         UpdatedAtUtc = value.UpdatedAtUtc,
         LastAppliedAtUtc = value.LastAppliedAtUtc,
@@ -659,36 +660,41 @@ public sealed class SiteSetupService
         talkgroupPolicyHash = value.LastAppliedTalkgroupPolicyHash
     };
 
-    private static List<SiteSetupRfSelection> NormalizeRfSelections(IEnumerable<SiteSetupRfSelection>? values) =>
-        (values ?? [])
+    private static List<SiteSetupRfSelection> NormalizeRfSelections(
+        IEnumerable<SiteSetupRfSelection>? values,
+        IEnumerable<RfSurveySourceDto>? sources)
+    {
+        var normalizedSources = NormalizeSources(sources);
+        return (values ?? [])
             .Where(value => value != null && value.FrequencyHz > 0)
+            .Select(value => new SiteSetupRfSelection
+            {
+                FrequencyHz = value.FrequencyHz,
+                SourceIndex = value.SourceIndex >= 0 ? value.SourceIndex : null,
+                SourceSerial = FirstNonEmpty(
+                    value.SourceSerial,
+                    normalizedSources.FirstOrDefault(source => source.Index == value.SourceIndex)?.Serial),
+                Gain = value.Gain?.Trim() ?? string.Empty,
+                SampleRateHz = value.SampleRateHz > 0 ? value.SampleRateHz : null,
+                MeasuredSignalOffsetHz = value.MeasuredSignalOffsetHz ?? value.ErrorHz,
+                ErrorHz = null,
+                SnrDb = value.SnrDb is double snr && double.IsFinite(snr) ? snr : null,
+                Confidence = value.Confidence is double confidence && double.IsFinite(confidence)
+                    ? Math.Clamp(confidence, 0, 1)
+                    : null
+            })
             .GroupBy(value => new
             {
                 value.FrequencyHz,
-                SourceIndex = value.SourceIndex >= 0 ? value.SourceIndex : null,
+                value.SourceIndex,
                 SourceSerial = value.SourceSerial?.Trim().ToUpperInvariant() ?? string.Empty
             })
-            .Select(group =>
-            {
-                var value = group.Last();
-                return new SiteSetupRfSelection
-                {
-                    FrequencyHz = value.FrequencyHz,
-                    SourceIndex = value.SourceIndex >= 0 ? value.SourceIndex : null,
-                    SourceSerial = value.SourceSerial?.Trim() ?? string.Empty,
-                    Gain = value.Gain?.Trim() ?? string.Empty,
-                    SampleRateHz = value.SampleRateHz > 0 ? value.SampleRateHz : null,
-                    ErrorHz = value.ErrorHz,
-                    SnrDb = value.SnrDb is double snr && double.IsFinite(snr) ? snr : null,
-                    Confidence = value.Confidence is double confidence && double.IsFinite(confidence)
-                        ? Math.Clamp(confidence, 0, 1)
-                        : null
-                };
-            })
+            .Select(group => group.Last())
             .OrderBy(value => value.SourceIndex ?? int.MaxValue)
             .ThenBy(value => value.SourceSerial, StringComparer.OrdinalIgnoreCase)
             .ThenBy(value => value.FrequencyHz)
             .ToList();
+    }
 
     private static List<MonitoredAreaConfig> NormalizeMonitoredAreas(IEnumerable<MonitoredAreaConfig>? areas) =>
         (areas ?? [])
@@ -710,6 +716,30 @@ public sealed class SiteSetupService
             .OrderBy(area => area.SystemShortName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(area => area.AreaLabel, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static List<RfSurveySourceDto> NormalizeSources(IEnumerable<RfSurveySourceDto>? sources) =>
+        (sources ?? [])
+            .Where(source => source != null && (!string.IsNullOrWhiteSpace(source.Device) || !string.IsNullOrWhiteSpace(source.Serial)))
+            .Select(source => source with
+            {
+                Device = source.Device?.Trim() ?? string.Empty,
+                Serial = FirstNonEmpty(source.Serial, ExtractConfiguredSerial(source.Device)),
+                SdrType = source.SdrType?.Trim() ?? string.Empty,
+                Gain = source.Gain?.Trim() ?? string.Empty
+            })
+            .GroupBy(source => source.Index)
+            .Select(group => group.Last())
+            .OrderBy(source => source.Index)
+            .ToList();
+
+    private static string ExtractConfiguredSerial(string? device)
+    {
+        var match = Regex.Match(device ?? string.Empty, @"(?:airspy|rtl)[=:](?<serial>[^,\s]+)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["serial"].Value.Trim() : string.Empty;
+    }
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
     private static List<MonitoredAreaConfig> CloneMonitoredAreas(IEnumerable<MonitoredAreaConfig>? areas) =>
         NormalizeMonitoredAreas(areas);
@@ -898,7 +928,7 @@ public sealed class SiteSetupService
 
     private static string RfSelectionSummary(IEnumerable<SiteSetupRfSelection>? selections) =>
         string.Join("|", (selections ?? [])
-            .Select(selection => $"{selection.FrequencyHz}:{selection.SourceIndex}:{selection.SourceSerial}:{selection.Gain}:{selection.SampleRateHz}:{selection.ErrorHz}")
+            .Select(selection => $"{selection.FrequencyHz}:{selection.SourceIndex}:{selection.SourceSerial}:{selection.Gain}:{selection.SampleRateHz}:{selection.MeasuredSignalOffsetHz ?? selection.ErrorHz}")
             .Order(StringComparer.Ordinal));
 
     private string TalkgroupPolicySnapshotJson() => JsonSerializer.Serialize(_talkgroups.Load().Items
