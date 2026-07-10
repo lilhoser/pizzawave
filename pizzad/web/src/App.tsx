@@ -7703,15 +7703,20 @@ function buildSpectrumMarkers(requestedRows: WaterfallCcSignalRow[], suspectedRo
   const { margin, plotWidth } = spectrumGeometry();
   const selected = requestedRows
     .filter(row => row.frequencyHz >= axis.startHz && row.frequencyHz <= axis.startHz + axis.sampleRate)
-    .map(row => ({
-      x: margin.left + (row.frequencyHz - axis.startHz) / Math.max(1, axis.sampleRate) * plotWidth,
-      frequencyHz: row.frequencyHz,
-      snrDb: row.snrDb,
-      confidence: row.confidence,
-      rating: waterfallSignalRating(row.snrDb, row.confidence),
-      kind: "selected" as const,
-      label: `${row.siteLabel} selected CC`
-    }));
+    .map(row => {
+      const seen = row.status !== "not-seen";
+      const snrDb = seen ? row.snrDb : 0;
+      const confidence = seen ? row.confidence : 0;
+      return {
+        x: margin.left + (row.frequencyHz - axis.startHz) / Math.max(1, axis.sampleRate) * plotWidth,
+        frequencyHz: row.frequencyHz,
+        snrDb,
+        confidence,
+        rating: waterfallSignalRating(snrDb, confidence),
+        kind: "selected" as const,
+        label: `${row.siteLabel} selected CC`
+      };
+    });
   const suspected = suspectedRows.map(row => {
     const confidence = waterfallOtherDetectedConfidence(row);
     return {
