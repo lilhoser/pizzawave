@@ -9,12 +9,13 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 4 closed and operator-accepted; Package 5 ready for discovery
-- Working branch: `codex/operator-ux-system-workspace`
+- Current milestone: Package 5 repository discovery complete; operator interview
+  started before milestone 5A design or implementation
+- Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: begin fresh Package 5 repository discovery and operator
-  interview before changing the Setup UX architecture.
+- Next action: review the RF validation stage model and operator-facing
+  frequency-error terminology with the operator before changing behavior.
 
 ## Working Rules
 
@@ -93,7 +94,29 @@ Status: complete and operator-accepted
 
 ### 5. Setup UX
 
-Status: pending
+Status: discovery complete; operator interview in progress
+
+Discovery findings:
+
+- RF validation already persists RF sessions and experiment evidence, and the
+  deployed Setup UI exposes Waterfall and RF Sweep. The canonical preflight,
+  tool-prep, control-channel, source-coverage, voice/transcription, and verdict
+  stages are not presented as one clear operator workflow. Frequency correction
+  is also described inconsistently as error, base error, target error, offset,
+  peak delta, and PPM.
+- Config Draft is server-built, uses RF validation evidence, and produces a
+  live-versus-candidate review. The selectable plan alternatives, fit decisions,
+  tuning windows, and source centers shown before that review are still computed
+  in the browser, so source planning is not yet a server-owned reviewable
+  projection.
+- Setup records a single ordered RF chain. Splitters and multicouplers can record
+  an output count, but the model cannot represent downstream branches, and SDR
+  chain items are not linked to detected/configured source hardware.
+- RF experiments already write database rows and self-contained artifact files.
+  Waterfall start/stop and final apply create Setup activity, but general RF
+  runs, captures, and generated reports are not attached as first-class Setup
+  evidence/activity records; the waterfall image report is generated only in
+  the browser.
 
 - [ ] Clarify RF validation stages and absolute error terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
