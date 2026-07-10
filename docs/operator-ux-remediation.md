@@ -9,13 +9,13 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 operator interview in progress; core workflow,
-  source-planning, RF-path, and evidence designs accepted before implementation
+- Current milestone: Package 5 operator interview complete; milestone 5A RF
+  Validation stage and terminology implementation ready to begin
 - Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: review the operator-requested named experiment and evidence-trail
-  viewer before changing behavior.
+- Next action: implement milestone 5A without changing source-planning,
+  RF-path, or evidence persistence ownership yet.
 
 ## Working Rules
 
@@ -155,6 +155,14 @@ Accepted design:
   Compact measurements, representative images, logs, configuration comparisons,
   reports, and required audio persist by default. Raw IQ retention is explicit
   opt-in with size and retention warnings.
+- RF Validation includes one cross-session Experiments & Evidence history that
+  defaults to the current site and can be searched and filtered across prior
+  Setup sessions. Short experiments receive an editable operator name with an
+  automatic descriptive default and may record a hypothesis or physical
+  change. The viewer snapshots run inputs and revisions, supports side-by-side
+  comparison, repeat with changed-context warnings, annotations, and copying
+  successful settings into reviewed pending Setup changes. Historical evidence
+  never changes live monitoring directly.
 
 - [ ] Clarify RF validation stages and absolute error terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -285,6 +293,11 @@ Status: pending
   waterfall images are server-owned. Compact evidence and required audio are
   retained by default; large raw IQ capture retention requires an explicit
   operator choice with storage guidance.
+- 2026-07-10: Package 5 adds a cross-session Experiments & Evidence history,
+  defaulted to the current site, for named short experiments. Operators can
+  search, filter, compare, annotate, repeat, and copy successful settings into
+  pending Setup changes; immutable history never applies directly to live
+  monitoring.
 
 ## Deployment Log
 
