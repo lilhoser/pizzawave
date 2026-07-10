@@ -551,3 +551,18 @@ Status: pending
   annotations. The completion candidate passes all 407 backend tests and the
   production frontend build; deployment and live end-to-end verification
   remain.
+- 2026-07-10: Package 5 completion candidate `da62b8d` deployed through the
+  automatic helper's full backend path in 61.2 seconds with zero build warnings
+  or errors. The stable-SDR-label follow-up `7e6f9da` then deployed through the
+  automatic web-only path in 1.8 seconds without restarting `pizzad` or Trunk
+  Recorder.
+- 2026-07-10: Live APIs and browser verification confirmed the three guidance
+  cards; derived Location context with all three legacy area records inactive;
+  no Monitored Area, sync, or old save wording; one migrated RF branch with two
+  serial-labeled Airspy endpoint choices; the server-recommended two-window,
+  three-site Source Coverage projection; cross-session Experiments & Evidence;
+  and final-only Apply & Resume review with no Sources subpage. No browser
+  console errors appeared. No plan selection, RF run, path edit, discard, or
+  apply occurred. Desired version `1783684339423`, applied hash `e95b8867...`,
+  and the three existing pending categories remained unchanged. Operator
+  end-to-end acceptance remains.
