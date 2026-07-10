@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3A category-header follow-up preflight complete
+- Current milestone: 3A category-header follow-up deployed; awaiting operator inspection
 - Working branch: `codex/operator-ux-loading-status`
-- Last deployed commit: `2c56be5`
+- Last deployed commit: `fd16f1b`
 - Operator verification: Packages 1 and 2 accepted
-- Next action: deploy and live-verify the accepted compact category header and
-  structured talkgroup jurisdiction naming follow-up.
+- Next action: operator inspection and acceptance of the compact category
+  header and structured talkgroup naming follow-up before beginning 3B.
 
 ## Working Rules
 
@@ -193,6 +193,10 @@ Status: pending
   use indefinite bounded backoff for temporary failures, and no longer mix
   browser transport with Trunk Recorder monitoring. Search is page-owned and
   automatic event refreshes are scoped to affected views.
+- `fd16f1b`: Package 3A category-header follow-up deployed; category search is
+  inline with the title and sort controls, secondary controls live in a More
+  menu, selection mode has a contextual action strip, and catalog imports
+  preserve RadioReference jurisdiction for friendly talkgroup names.
 
 ## Verification Log
 
@@ -263,3 +267,12 @@ Status: pending
   badge, page-local update times and Refresh actions on Dashboard, Setup, and
   System, immediate local Dashboard filtering, delayed Police server search,
   retained Police results while refreshing, and no browser console errors.
+- 2026-07-09: The category-header follow-up passed all 393 backend tests and the
+  production frontend build. It deployed through the automatic helper, and
+  `/api/v1/health` returned healthy without a separate Trunk Recorder restart.
+- 2026-07-09: Live Police-page verification confirmed the compact one-line
+  header, More menu, contextual talkgroup-selection strip, description-first
+  friendly names, active monitoring, and no browser console errors. The live
+  catalog was intentionally not refreshed; jurisdiction prefixes will populate
+  on the next explicit RadioReference refresh, while the structured importer is
+  covered by parser and site-to-catalog mapping tests.
