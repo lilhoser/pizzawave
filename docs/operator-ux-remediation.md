@@ -584,3 +584,14 @@ Status: pending
   774.785 MHz spectrum spike aligned with its waterfall column, with no browser
   console errors. Health was `ok`; desired version `1783690411070`, applied
   hash `e95b8867...`, systems, SDR sources, and pending categories were unchanged.
+- 2026-07-10: RF candidate review commits `f2f3a7e` and `3a42513` retain red
+  selected-site control-channel bars and add full yellow bars for every current
+  suspected carrier. One shared signal-to-noise-ratio plus persistence rating
+  drives Strong, Steady, and Weak hover text and table colors. The candidates
+  table now sorts stably by site name and frequency instead of re-ranking on
+  every signal update. Production builds passed; automatic web-only deployments
+  completed in 7.4 and 3.9 seconds without restarting PizzaWave or Trunk
+  Recorder. Live hover checks covered a weak 771.984 MHz suspect and the strong
+  selected 773.781 MHz control channel; table order remained alphabetical and
+  selectable, with no browser console errors. Health and active Setup state were
+  unchanged at desired version `1783690411070` and applied hash `e95b8867...`.
