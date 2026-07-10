@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3A category-header follow-up deployed; awaiting operator inspection
+- Current milestone: 3A closed and operator-accepted; 3B ready for discovery
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `fd16f1b`
-- Operator verification: Packages 1 and 2 accepted
-- Next action: operator inspection and acceptance of the compact category
-  header and structured talkgroup naming follow-up before beginning 3B.
+- Operator verification: Packages 1, 2, and 3A accepted
+- Next action: audit Settings and specialized page-local data panels, then
+  interview the operator section by section before making 3B design changes.
 
 ## Working Rules
 
@@ -173,6 +173,8 @@ Status: pending
   heading during import. Technical system, talkgroup ID, and alpha-tag identity
   remain visible as subdued secondary metadata; PizzaWave does not infer
   jurisdiction from the receiver site or alpha-tag abbreviation.
+- 2026-07-09: Operator accepted and closed milestone 3A, including its compact
+  category-header and structured talkgroup-naming follow-up.
 
 ## Deployment Log
 
@@ -276,3 +278,5 @@ Status: pending
   catalog was intentionally not refreshed; jurisdiction prefixes will populate
   on the next explicit RadioReference refresh, while the structured importer is
   covered by parser and site-to-catalog mapping tests.
+- 2026-07-09: Operator accepted the deployed 3A milestone and authorized its
+  closure. Package 3 remains in progress at the 3B boundary.
