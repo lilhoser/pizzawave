@@ -177,6 +177,10 @@ Accepted design:
   hardware), validation progress (the next task or blocking issue), and apply
   plus monitoring state. Last setup change is audit history and belongs in the
   Activity Log rather than the persistent guidance row.
+- Control-Channel Proof defaults to one recommended run showing the selected
+  site, source, control channel, estimated duration, and Run action, followed by
+  live progress and measured results. Sample rate, gain sequence, correction
+  changes, and candidate limits remain available under Advanced settings.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -324,6 +328,10 @@ Status: pending
   operator guidance for current site/hardware scope, validation progress and
   next blocker, and apply plus monitoring state. Last setup change moves to the
   Activity Log.
+- 2026-07-10: Package 5 Control-Channel Proof leads with one recommended run,
+  progress, and measured results. Sample rate, gain, correction changes, and
+  candidate limits remain available as advanced settings rather than competing
+  with the primary task.
 
 ## Deployment Log
 
