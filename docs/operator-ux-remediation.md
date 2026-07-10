@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 4 - System Workspace
-- Current milestone: Package 4 implementation ready for preflight
+- Current milestone: Package 4 deployed and ready for operator inspection
 - Working branch: `codex/operator-ux-system-workspace`
-- Last deployed commit: `4263348`
+- Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, and 3 accepted
-- Next action: run the Package 4 preflight, build, deploy, and live verification
-  cycle.
+- Next action: operator inspection and acceptance of the deployed Package 4
+  System workspace.
 
 ## Working Rules
 
@@ -82,13 +82,14 @@ Status: complete and operator-accepted
 
 ### 4. System Workspace
 
-Status: in progress
+Status: deployed; awaiting operator acceptance
 
 - [x] Load each System tab independently.
 - [x] Make Refresh contextual to the visible tab.
 - [x] Surface only job controls supported by each job.
 - [x] Reorganize System navigation around operator tasks.
-- [ ] Deploy, verify, and obtain operator acceptance.
+- [x] Deploy and verify.
+- [ ] Operator acceptance.
 
 ### 5. Setup UX
 
@@ -228,6 +229,9 @@ Status: pending
 - `4263348`: Package 3B deployed; Settings uses one protected server-hydration
   boundary, supporting inventories load only with their visible tab, and System
   read-only panels retain last-good data behind one consolidated Refresh action.
+- `54c8fe3`: Package 4 deployed; System uses task-based noun navigation,
+  remembers the last area/page, loads visible pages independently, refreshes
+  only the visible page, and renders only server-declared job operations.
 
 ## Verification Log
 
@@ -323,3 +327,18 @@ Status: pending
   remained active and no page or panel error notice appeared.
 - 2026-07-09: Operator accepted 3B and authorized closure of Package 3. Package
   4 remains unstarted at its discovery boundary.
+- 2026-07-09: Package 4 passed the backend suite including eight focused job
+  operation-policy cases and passed the production frontend build. The checked-
+  in web assets were rebuilt from the current source.
+- 2026-07-09: Package 4 deployed through the automatic helper's full backend
+  path in 138.2 seconds. The ARM64 build completed with zero warnings and zero
+  errors; `/api/v1/health` returned healthy with active Trunk Recorder data and
+  a clear processing queue. Trunk Recorder was not restarted separately.
+- 2026-07-09: Live browser verification confirmed Health, Processing, Data,
+  Receiver, and Performance navigation; remembered area and page state; exact
+  Queue and Processor status-link destinations; contextual Refresh labels for
+  each inspected page; independently rendered Storage, Backup and Restore,
+  Configuration Restore, Bandwidth, Jobs, Health, Processor, and Queue pages;
+  no inferred or per-row deletion controls on terminal jobs; and no browser
+  console errors. The live jobs API returned the supported-operations contract
+  on all 23 rows and no operations on the 23 terminal jobs.
