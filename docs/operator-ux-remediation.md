@@ -9,14 +9,14 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 RF Validation clarity follow-up deployed and
-  verified; awaiting operator inspection
+- Current milestone: Package 5 source-bound Waterfall-to-RF-Sweep handoff
+  deployed and verified; awaiting operator inspection
 - Working branch: `codex/operator-ux-setup-ux`
-- Last deployed commit: `b38269e`
+- Last deployed commit: `232eba7`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: obtain operator acceptance of the RF Validation clarity
-  follow-up, then begin the reviewed Setup guidance-card and derived-location
-  milestone before the server-owned source-planning projection.
+- Next action: operator verifies selecting Use on source 0 and source 1 retains
+  two independent SDR-bound measurements in Control-Channel Proof; then obtain
+  end-to-end Package 5 acceptance.
 
 ## Working Rules
 
@@ -186,6 +186,11 @@ Accepted design:
   Call and Transcription Proof exposes only the next eligible proof action, and
   Verdict leads with the decision, decisive blockers, evidence, and next step.
   The repeated six-stage status block becomes a compact progress stepper.
+- A Waterfall Use decision belongs to the SDR that measured it. Setup persists
+  both source index and hardware serial with the control channel, gain, sample
+  rate, frequency correction, and measured quality. Control-Channel Proof runs
+  only those exact SDR/control-channel pairs, rejects stale serial mappings,
+  and carries the same per-SDR settings into P25, monitoring, and voice checks.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [x] Make source planning a server-owned, reviewable projection.
@@ -613,3 +618,20 @@ Status: pending
   showed ETV 773.781 MHz Strong at +4.395 kHz in both views, ETV 773.281 MHz
   Steady at +6.348 kHz, no false statewide site names, no console errors, health
   `ok`, and unchanged active Setup version `1783690411070`/hash `e95b8867...`.
+- 2026-07-10: Active-span containment commit `f01ab68` limits suspected control
+  channels and retained candidates to the current SDR center and sample-rate
+  window. A 6 MHz capture centered near 773 MHz can no longer display cached or
+  inferred 850 MHz candidates.
+- 2026-07-10: Source-bound handoff commit `232eba7` removes the source-switch
+  rewrite that previously reassigned all Waterfall selections to the newest
+  source. Setup now preserves the same frequency independently for multiple
+  SDRs, records the hardware serial, and sends exact source/channel/gain/sample-
+  rate/correction measurements to RF Sweep instead of scanning a source-channel
+  cross product. The server validates serial ownership before hardware access
+  and carries each measurement through candidate follow-up. All 410 backend
+  tests and the production frontend build passed. The automatic helper completed
+  a full deployment in 96.9 seconds with zero build warnings or errors. Live
+  health was `ok`; the new web asset loaded with no browser warnings or errors.
+  No RF run or Setup mutation occurred. Desired version `1783690411070`, applied
+  hash `e95b8867...`, two systems, two SDR sources, zero RF selections, and the
+  pending Systems/Sites, Control Channels, and RF Path categories were unchanged.
