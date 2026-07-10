@@ -1031,11 +1031,13 @@ public sealed class RfSurveyService
         if (!coverage.Ok)
             throw new InvalidOperationException("Candidate TR config still cannot start with the selected source plan: " + string.Join(" ", coverage.Blockers));
 
+        await _talkgroups.GenerateTrCsvAsync(ct);
+        ValidateReferencedTalkgroupFiles(liveRoot);
+
         var candidatePath = Path.Combine(row.Session.ArtifactPath, $"tr-config-source-apply-{DateTime.UtcNow:yyyyMMddHHmmss}.json");
         Directory.CreateDirectory(row.Session.ArtifactPath);
         await File.WriteAllTextAsync(candidatePath, candidateJson, ct);
         var backupPath = await InstallTrFileAsync(candidatePath, livePath, ct);
-        await _talkgroups.GenerateTrCsvAsync(ct);
         var serviceOutput = request.RestartTr ? await RunServiceHelperAsync("restart-tr", ct) : "Restart TR when you are ready for the change to take effect.";
         var sourcePlanSummary = BuildAppliedSourcePlanSummary(liveRoot, changed);
         await WriteArtifactAsync(row.Session.ArtifactPath, "tr-config-source-apply.json", new
@@ -7529,7 +7531,7 @@ public sealed class RfSurveyService
         return keptNames;
     }
 
-    private static IReadOnlyList<string> EnsureDraftWorkspaceSystems(
+    private IReadOnlyList<string> EnsureDraftWorkspaceSystems(
         JsonObject root,
         IReadOnlyList<RfSurveySystemDto> definitions,
         IReadOnlyList<string> requestedNames,
@@ -7554,8 +7556,9 @@ public sealed class RfSurveyService
             system["shortName"] = definition.ShortName;
             system["type"] = "p25";
             system["modulation"] = "qpsk";
-            if (!string.IsNullOrWhiteSpace(definition.TalkgroupSystemShortName))
-                system["talkgroupSystemShortName"] = TalkgroupCatalogService.NormalizeSystemShortName(definition.TalkgroupSystemShortName);
+            var talkgroupSystem = ResolveTalkgroupSystemShortName(definition, _talkgroups.Load());
+            if (!string.IsNullOrWhiteSpace(talkgroupSystem))
+                system["talkgroupSystemShortName"] = talkgroupSystem;
             system["control_channels"] = new JsonArray(definition.ControlChannelsHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
             if (definition.VoiceFrequenciesHz.Count > 0)
                 system["channels"] = new JsonArray(definition.VoiceFrequenciesHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
@@ -7564,6 +7567,40 @@ public sealed class RfSurveyService
             changes.Add($"systems: added {definition.ShortName} from selected Setup site definitions");
         }
         return names;
+    }
+
+    private static string ResolveTalkgroupSystemShortName(RfSurveySystemDto definition, TalkgroupCatalogDocument catalog)
+    {
+        if (!string.IsNullOrWhiteSpace(definition.TalkgroupSystemShortName))
+            return TalkgroupCatalogService.NormalizeSystemShortName(definition.TalkgroupSystemShortName);
+        var sid = definition.RadioReferenceSid?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(sid))
+            return string.Empty;
+        var imported = catalog.Imports
+            .Where(row => string.Equals(row.RadioReferenceSid?.Trim(), sid, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(row => row.ImportedAtUtc)
+            .Select(row => row.SystemShortName)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        if (string.IsNullOrWhiteSpace(imported))
+            imported = catalog.Items
+                .Where(row => string.Equals(row.RadioReferenceSid?.Trim(), sid, StringComparison.OrdinalIgnoreCase))
+                .Select(row => row.SystemShortName)
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        return TalkgroupCatalogService.NormalizeSystemShortName(imported);
+    }
+
+    private static void ValidateReferencedTalkgroupFiles(JsonObject root)
+    {
+        if (root["systems"] is not JsonArray systems)
+            return;
+        var missing = systems
+            .OfType<JsonObject>()
+            .Select(system => system["talkgroupsFile"]?.GetValue<string>() ?? string.Empty)
+            .Where(path => !string.IsNullOrWhiteSpace(path) && !File.Exists(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (missing.Count > 0)
+            throw new InvalidOperationException("Candidate TR config references missing talkgroup catalog file(s): " + string.Join(", ", missing) + ". Monitoring was not changed.");
     }
 
     private void PatchCallstreamStreams(JsonObject root, IReadOnlyList<string> systemShortNames, List<string> changes)

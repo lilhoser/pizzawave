@@ -330,6 +330,22 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public void ResolveTalkgroupSystemShortName_UsesRadioReferenceImportOwnership()
+    {
+        var definition = new RfSurveySystemDto("jackson-ms-hinds-ms", "Jackson", [855_287_500], [], "8202", "");
+        var catalog = new TalkgroupCatalogDocument
+        {
+            Imports = [new TalkgroupCatalogImport { RadioReferenceSid = "8202", SystemShortName = "Entergy", ImportedAtUtc = DateTime.UtcNow }]
+        };
+        var method = typeof(RfSurveyService).GetMethod("ResolveTalkgroupSystemShortName", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "ResolveTalkgroupSystemShortName");
+
+        var resolved = (string)method.Invoke(null, [definition, catalog])!;
+
+        Assert.Equal("entergy", resolved);
+    }
+
+    [Fact]
     public async Task GetAsync_InvalidatesSiteSetupSoftwareCheckForDifferentAppliedConfig()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-software-revision-{Guid.NewGuid():N}");
