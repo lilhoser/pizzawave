@@ -135,6 +135,28 @@ function RefreshNotice({ state, hasData, onRetry }: { state: RefreshState; hasDa
   </div>;
 }
 
+function SettingsLoadNotice({ state, hasData, dirty, onReload }: { state: RefreshState; hasData: boolean; dirty: boolean; onReload: () => Promise<unknown> }) {
+  if (!hasData && !state.error)
+    return <div className="page-load-state" role="status"><RefreshCw size={16} className="spin" /> Loading server settings...</div>;
+  if (!hasData)
+    return <div className="page-refresh-notice error" role="alert"><span>Settings are unavailable: {state.error}</span><button onClick={() => void onReload()}>Retry</button></div>;
+  return <div className={state.error ? "page-refresh-notice error" : "page-refresh-notice"} role={state.error ? "alert" : "status"}>
+    <span>{state.error ? `Reload failed. The current draft is still based on server settings loaded at ${formatRefreshTime(state.lastUpdatedAt)}. ${state.error}` : `Server settings loaded ${formatRefreshTime(state.lastUpdatedAt)}`}</span>
+    <button disabled={dirty || state.refreshing} title={dirty ? "Save or discard changes before reloading server settings." : ""} onClick={() => void onReload()}>{state.refreshing ? "Reloading..." : "Reload from server"}</button>
+  </div>;
+}
+
+function PanelLoadState({ label: panelLabel, state, hasData, onRetry, showUpdated = false }: { label: string; state: RefreshState; hasData: boolean; onRetry: () => Promise<unknown>; showUpdated?: boolean }) {
+  if (!hasData && state.loading)
+    return <div className="panel-load-state" role="status"><RefreshCw size={14} className="spin" /> Loading {panelLabel}...</div>;
+  if (!state.error)
+    return showUpdated && hasData ? <div className="page-refresh-notice" role="status"><span>{panelLabel} updated {formatRefreshTime(state.lastUpdatedAt)}</span></div> : null;
+  return <div className="page-refresh-notice error panel-refresh-notice" role="alert">
+    <span>{hasData ? `${panelLabel} update failed. Showing data from ${formatRefreshTime(state.lastUpdatedAt)}. ${state.error}` : `Unable to load ${panelLabel}: ${state.error}`}</span>
+    <button onClick={() => void onRetry()}>Retry</button>
+  </div>;
+}
+
 function PageSearch({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return <label className="global-search page-search">
     <Search size={15} aria-hidden="true" />
@@ -158,6 +180,7 @@ function App() {
   const [cpuSnapshot, setCpuSnapshot] = useState<SystemCpuSnapshot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [activeAlertCount, setActiveAlertCount] = useState(0);
   const [alertSettings, setAlertSettings] = useState<any>(null);
   const [autoplayMuted, setAutoplayMuted] = useState(() => localStorage.getItem("pizzawave-autoplay-muted") === "1");
@@ -245,16 +268,6 @@ function App() {
     };
   }, []);
 
-  const loadSettings = useCallback(async () => {
-    setSettingsLoadState(current => ({ ...current, loading: true, message: "Loading settings...", error: false }));
-    try {
-      setSettingsSections(await fetchSettingsSections());
-      setSettingsLoadState(current => ({ loading: false, version: current.version + 1, message: "Settings loaded", error: false }));
-    } catch (error) {
-      setSettingsLoadState(current => ({ loading: false, version: current.version, message: error instanceof Error ? error.message : "Settings load failed", error: true }));
-    }
-  }, [fetchSettingsSections]);
-
   async function exportSettingsFile() {
     setSettingsLoadState(current => ({ ...current, loading: true, message: "Exporting settings...", error: false }));
     try {
@@ -280,7 +293,9 @@ function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      setSettingsSections(settingsSectionsFromFile(parsed));
+      const imported = settingsSectionsFromFile(parsed);
+      setSettingsSections(imported);
+      settingsResource.setData(imported);
       setSettingsLoadState(current => ({ loading: false, version: current.version + 1, message: `Loaded ${file.name}. Save each changed section to apply it.`, error: false }));
     } catch (error) {
       setSettingsLoadState(current => ({ loading: false, version: current.version, message: error instanceof Error ? error.message : "Settings file load failed", error: true }));
@@ -377,6 +392,15 @@ function App() {
     enabled: page === "system" && setupStatus?.completed !== false,
     load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
   });
+  const settingsResource = usePersistentRefresh({
+    key: "settings",
+    enabled: page === "settings" && setupStatus?.completed !== false && !settingsDirty,
+    load: fetchSettingsSections,
+    onSuccess: sections => {
+      setSettingsSections(sections);
+      setSettingsLoadState(current => ({ loading: false, version: current.version + 1, message: "Settings loaded from server", error: false }));
+    }
+  });
   const dashboard = dashboardResource.data;
   const categoryResult = categoryResource.data;
   const category = categoryResult?.page === page ? categoryResult.data : null;
@@ -389,8 +413,8 @@ function App() {
     else if (categories.includes(pageRef.current as any)) await categoryResource.refresh();
     else if (pageRef.current === "setup" && !setupWaterfallActiveRef.current) await setupResource.refresh();
     else if (pageRef.current === "system") await systemResource.refresh();
-    else if (pageRef.current === "settings") await loadSettings();
-  }, [categoryResource.refresh, dashboardResource.refresh, loadSettings, setupResource.refresh, systemResource.refresh]);
+    else if (pageRef.current === "settings" && !settingsDirty) await settingsResource.refresh();
+  }, [categoryResource.refresh, dashboardResource.refresh, settingsDirty, settingsResource.refresh, setupResource.refresh, systemResource.refresh]);
 
   useEffect(() => { pageRef.current = page; }, [page]);
   useEffect(() => { rangeHoursRef.current = rangeHours; }, [rangeHours]);
@@ -439,7 +463,6 @@ function App() {
     localStorage.setItem("pizzawave-autoplay-muted", autoplayMuted ? "1" : "0");
   }, [autoplayMuted]);
 
-  useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
   useEffect(() => {
     const handle = window.setInterval(() => setRefreshClock(Date.now()), 30_000);
     return () => window.clearInterval(handle);
@@ -876,10 +899,13 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             void statusResource.refresh();
         }} /></div>}
         {setupStatus?.completed && page === "system" && <div className="refresh-page-shell">
-          <RefreshNotice state={systemResource.state} hasData={Boolean(troubleshoot)} onRetry={systemResource.refresh} />
-          <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />
+          <PanelLoadState label="System summary" state={systemResource.state} hasData={Boolean(troubleshoot)} onRetry={systemResource.refresh} showUpdated />
+          <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={async () => { await Promise.all([systemResource.refresh(), statusResource.refresh()]); }} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />
         </div>}
-        {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} />}
+        {setupStatus?.completed && page === "settings" && <div className="refresh-page-shell">
+          <SettingsLoadNotice state={settingsResource.state} hasData={Object.keys(settingsSections).length > 0} dirty={settingsDirty} onReload={settingsResource.refresh} />
+          {Object.keys(settingsSections).length > 0 && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={async () => { await statusResource.refresh(); }} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} onDirtyChange={setSettingsDirty} />}
+        </div>}
       </main>
       {!inSetup && <footer className="statusbar">
         <button type="button" className="pill status-pill-button" onClick={() => goSetup("Talkgroups")}>Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</button>
@@ -4038,18 +4064,13 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
   });
   const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
-  const [metricsData, setMetricsData] = useState<TrTroubleshoot | null>(null);
-  const [runtime, setRuntime] = useState<any | null>(null);
-  const [tokenUsage, setTokenUsage] = useState<TokenUsageReport | null>(null);
-  const [bandwidthUsage, setBandwidthUsage] = useState<RemoteBandwidthReport | null>(null);
-  const [incidentAudit, setIncidentAudit] = useState<IncidentOperationAuditRow[] | null>(null);
-  const [dashboardStats, setDashboardStats] = useState<Dashboard | null>(null);
   const [insightText, setInsightText] = useState("");
   const [restartBusy, setRestartBusy] = useState<"" | "pizzad" | "trunk-recorder" | "qdrant">("");
   const [restartMessages, setRestartMessages] = useState<Record<string, string>>({});
   const [ingestBusy, setIngestBusy] = useState(false);
   const [ingestMessage, setIngestMessage] = useState("");
   const [recommendationBusy, setRecommendationBusy] = useState(false);
+  const [panelRefreshToken, setPanelRefreshToken] = useState(0);
   const setTopTab = (value: typeof topTab) => { setTopTabState(value); localStorage.setItem("pizzawave-system-tab", value); };
   const setTrTab = (value: typeof trTab) => { setTrTabState(value); localStorage.setItem("pizzawave-system-tr-tab", value); };
   const setMetricsTab = (value: typeof metricsTab) => { setMetricsTabState(value); localStorage.setItem("pizzawave-system-metrics-tab", value); };
@@ -4059,43 +4080,56 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
     clearTargetTab?.();
   }, [targetTab, clearTargetTab]);
 
-  async function loadRuntime() {
-    try {
-      setRuntime(await api.request<any>("/api/v1/system/runtime"));
-    } catch {
-      setRuntime(null);
-    }
-  }
-
-  useEffect(() => {
-    if (!["services", "storage"].includes(topTab)) return;
-    void loadRuntime();
-  }, [topTab, jobs.length]);
-  useEffect(() => {
-    if (topTab !== "metrics" || metricsTab !== "rf") return;
-    void api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=${bySystem}&baseline=${baseline}`)
-      .then(setMetricsData)
-      .catch(() => setMetricsData(null));
-  }, [topTab, metricsTab, bySystem, baseline, rangeHours]);
-  useEffect(() => {
-    if (topTab !== "metrics" || metricsTab !== "ai") return;
-    void api.request<TokenUsageReport>(`/api/v1/system/token-usage?${rangeQuery(rangeHours)}`).then(setTokenUsage).catch(() => setTokenUsage(null));
-  }, [topTab, metricsTab, rangeHours]);
-  useEffect(() => {
-    if (topTab !== "metrics" || metricsTab !== "bandwidth") return;
-    void api.request<RemoteBandwidthReport>(`/api/v1/system/remote-bandwidth?${rangeQuery(rangeHours)}`).then(setBandwidthUsage).catch(() => setBandwidthUsage(null));
-  }, [topTab, metricsTab, rangeHours]);
-  useEffect(() => {
-    if (topTab !== "metrics" || !["overview", "calls", "incidents"].includes(metricsTab)) return;
-    void api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`).then(setDashboardStats).catch(() => setDashboardStats(null));
-  }, [topTab, metricsTab, rangeHours]);
-  useEffect(() => {
-    if (topTab !== "metrics" || metricsTab !== "incidents") return;
-    void api.request<IncidentOperationAuditRow[]>(`/api/v1/incidents/audit?hours=${Math.max(1, rangeHours)}&limit=80`).then(setIncidentAudit).catch(() => setIncidentAudit(null));
-  }, [topTab, metricsTab, rangeHours]);
+  const runtimeResource = usePersistentRefresh({
+    key: `system-runtime|${jobs.length}`,
+    enabled: ["services", "storage"].includes(topTab),
+    load: () => api.request<any>("/api/v1/system/runtime")
+  });
+  const metricsDataResource = usePersistentRefresh({
+    key: `system-metrics-rf|${rangeHours}|${bySystem}|${baseline}`,
+    enabled: topTab === "metrics" && metricsTab === "rf",
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=${bySystem}&baseline=${baseline}`)
+  });
+  const dashboardStatsResource = usePersistentRefresh({
+    key: `system-metrics-dashboard|${rangeHours}`,
+    enabled: topTab === "metrics" && ["overview", "calls", "incidents"].includes(metricsTab),
+    load: () => api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`)
+  });
+  const incidentAuditResource = usePersistentRefresh({
+    key: `system-metrics-incidents|${rangeHours}`,
+    enabled: topTab === "metrics" && metricsTab === "incidents",
+    load: () => api.request<IncidentOperationAuditRow[]>(`/api/v1/incidents/audit?hours=${Math.max(1, rangeHours)}&limit=80`)
+  });
+  const tokenUsageResource = usePersistentRefresh({
+    key: `system-metrics-ai|${rangeHours}`,
+    enabled: topTab === "metrics" && metricsTab === "ai",
+    load: () => api.request<TokenUsageReport>(`/api/v1/system/token-usage?${rangeQuery(rangeHours)}`)
+  });
+  const bandwidthUsageResource = usePersistentRefresh({
+    key: `system-metrics-bandwidth|${rangeHours}`,
+    enabled: topTab === "metrics" && metricsTab === "bandwidth",
+    load: () => api.request<RemoteBandwidthReport>(`/api/v1/system/remote-bandwidth?${rangeQuery(rangeHours)}`)
+  });
 
   if (!data) return null;
+  const runtime = runtimeResource.data;
+  const metricsData = metricsDataResource.data;
+  const dashboardStats = dashboardStatsResource.data;
+  const incidentAudit = incidentAuditResource.data;
+  const tokenUsage = tokenUsageResource.data;
+  const bandwidthUsage = bandwidthUsageResource.data;
   const active = metricsData ?? data;
+  async function refreshVisibleSystemPanel() {
+    const refreshes: Promise<unknown>[] = [reload()];
+    if (["services", "storage"].includes(topTab)) refreshes.push(runtimeResource.refresh());
+    if (topTab === "metrics" && metricsTab === "rf") refreshes.push(metricsDataResource.refresh());
+    if (topTab === "metrics" && ["overview", "calls", "incidents"].includes(metricsTab)) refreshes.push(dashboardStatsResource.refresh());
+    if (topTab === "metrics" && metricsTab === "incidents") refreshes.push(incidentAuditResource.refresh());
+    if (topTab === "metrics" && metricsTab === "ai") refreshes.push(tokenUsageResource.refresh());
+    if (topTab === "metrics" && metricsTab === "bandwidth") refreshes.push(bandwidthUsageResource.refresh());
+    setPanelRefreshToken(current => current + 1);
+    await Promise.all(refreshes);
+  }
   async function restartService(service: "pizzad" | "trunk-recorder" | "qdrant") {
     if (!confirmAction(`Restart ${label(service)}?`, "This interrupts the service briefly. Live ingestion or processing may pause while it restarts.")) return;
     setRestartBusy(service);
@@ -4221,18 +4255,18 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
         <button className={topTab === "backup" ? "active" : ""} onClick={() => setTopTab("backup")}>Backup</button>
         <button className={topTab === "tr" ? "active" : ""} onClick={() => setTopTab("tr")}>Trunk Recorder</button>
         <button className={topTab === "metrics" ? "active" : ""} onClick={() => setTopTab("metrics")}>Metrics</button>
-        <button onClick={() => void reload()}>Refresh</button>
+        <button onClick={() => void refreshVisibleSystemPanel()}>Refresh</button>
       </div>
       {topTab === "recommendations" && <RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onExcludeTalkgroups={excludeTalkgroupsFromTr} onAction={async action => {
         if (action.kind === "pause-ingest") await setIngestPaused(true, false);
         if (action.kind === "exclude-talkgroups-from-tr") await excludeTalkgroupsFromTr((action.talkgroups ?? []).map(talkgroup => ({ talkgroup })));
       }} />}
-      {topTab === "services" && <div className="trouble-panel"><ServicesManager runtime={runtime} data={data} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} /></div>}
-      {topTab === "cpu" && <CpuPanel snapshot={cpuSnapshot} reload={reload} />}
+      {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={runtimeResource.state} hasData={Boolean(runtime)} onRetry={runtimeResource.refresh} /><ServicesManager runtime={runtime} data={data} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} /></div>}
+      {topTab === "cpu" && <CpuPanel snapshot={cpuSnapshot} />}
       {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} />}
       {topTab === "jobs" && <JobsPanel jobs={jobs} reload={reload} />}
-      {topTab === "storage" && <div className="trouble-panel"><PizzadStorageManager runtime={runtime} reload={loadRuntime} /></div>}
-      {topTab === "backup" && <div className="trouble-panel"><BackupRestorePanel reload={reload} /></div>}
+      {topTab === "storage" && <div className="trouble-panel"><PanelLoadState label="storage status" state={runtimeResource.state} hasData={Boolean(runtime)} onRetry={runtimeResource.refresh} /><PizzadStorageManager runtime={runtime} reload={runtimeResource.refresh} /></div>}
+      {topTab === "backup" && <div className="trouble-panel"><BackupRestorePanel reload={reload} refreshToken={panelRefreshToken} /></div>}
       {topTab === "tr" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Summary</button>
@@ -4241,8 +4275,8 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Logs</button>
         </div>
         {trTab === "summary" && <TrHealthSummaryView data={data} />}
-        {trTab === "config" && <TrConfigReadOnlyPanel onOpenSetup={onOpenSetup} />}
-        {trTab === "restore" && <TrConfigRestorePanel />}
+        {trTab === "config" && <TrConfigReadOnlyPanel onOpenSetup={onOpenSetup} refreshToken={panelRefreshToken} />}
+        {trTab === "restore" && <TrConfigRestorePanel refreshToken={panelRefreshToken} />}
         {trTab === "logs" && <pre className="log-box">{data.logOutput}</pre>}
       </div>}
       {topTab === "metrics" && <div className="trouble-panel">
@@ -4255,41 +4289,31 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
           <button className={metricsTab === "ai" ? "active" : ""} onClick={() => setMetricsTab("ai")}>AI</button>
           <button className={metricsTab === "bandwidth" ? "active" : ""} onClick={() => setMetricsTab("bandwidth")}>Bandwidth</button>
         </div>
-        {metricsTab === "overview" && <MetricsOverviewPanel data={data} dashboard={dashboardStats} engineHealth={engineHealth} tokenUsage={tokenUsage} bandwidthUsage={bandwidthUsage} navigate={(top, sub) => { setTopTab(top); if (top === "metrics" && sub) setMetricsTab(sub as any); }} />}
-        {metricsTab === "calls" && <DashboardStatisticsPanel data={dashboardStats} />}
+        {metricsTab === "overview" && <><PanelLoadState label="metrics overview" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><MetricsOverviewPanel data={data} dashboard={dashboardStats} engineHealth={engineHealth} tokenUsage={tokenUsage} bandwidthUsage={bandwidthUsage} navigate={(top, sub) => { setTopTab(top); if (top === "metrics" && sub) setMetricsTab(sub as any); }} /></>}
+        {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><DashboardStatisticsPanel data={dashboardStats} /></>}
         {metricsTab === "transcription" && <QualityAuditView data={data} rangeHours={rangeHours} />}
-        {metricsTab === "rf" && <RfMetricsPanel data={active} rangeHours={rangeHours} bySystem={bySystem} baseline={baseline} setBySystem={setBySystem} setBaseline={setBaseline} />}
-        {metricsTab === "incidents" && <IncidentMetricsPanel dashboard={dashboardStats} audit={incidentAudit} />}
-        {metricsTab === "ai" && <TokenUsagePanel report={tokenUsage} />}
-        {metricsTab === "bandwidth" && <RemoteBandwidthPanel report={bandwidthUsage} />}
+        {metricsTab === "rf" && <><PanelLoadState label="RF metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} /><RfMetricsPanel data={active} rangeHours={rangeHours} bySystem={bySystem} baseline={baseline} setBySystem={setBySystem} setBaseline={setBaseline} /></>}
+        {metricsTab === "incidents" && <><PanelLoadState label="incident metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><PanelLoadState label="incident audit" state={incidentAuditResource.state} hasData={Boolean(incidentAudit)} onRetry={incidentAuditResource.refresh} /><IncidentMetricsPanel dashboard={dashboardStats} audit={incidentAudit} /></>}
+        {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} /></>}
+        {metricsTab === "bandwidth" && <><PanelLoadState label="remote bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} /></>}
       </div>}
     </div>
   );
 }
 
-function TrConfigReadOnlyPanel({ onOpenSetup }: { onOpenSetup?: () => void }) {
-  const [editor, setEditor] = useState<TrConfigEditor | null>(null);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(true);
-
-  useEffect(() => {
-    let canceled = false;
-    setBusy(true);
-    api.request<TrConfigEditor>("/api/v1/system/tr-config/editor")
-      .then(editorResult => {
-        if (canceled) return;
-        setEditor(editorResult);
-        setMessage("");
-      })
-      .catch(error => !canceled && setMessage(error instanceof Error ? error.message : "Unable to load TR config."))
-      .finally(() => !canceled && setBusy(false));
-    return () => { canceled = true; };
-  }, []);
+function TrConfigReadOnlyPanel({ onOpenSetup, refreshToken }: { onOpenSetup?: () => void; refreshToken: number }) {
+  const editorResource = usePersistentRefresh({
+    key: `system-tr-config|${refreshToken}`,
+    enabled: true,
+    load: () => api.request<TrConfigEditor>("/api/v1/system/tr-config/editor")
+  });
+  const editor = editorResource.data;
 
   const liveConfig = editor?.liveConfigJson ?? "";
 
-  if (busy && !editor) return <div className="card">Loading TR config...</div>;
+  if (!editor) return <PanelLoadState label="active Trunk Recorder configuration" state={editorResource.state} hasData={false} onRetry={editorResource.refresh} />;
   return <div className="tr-config-readonly">
+    <PanelLoadState label="active Trunk Recorder configuration" state={editorResource.state} hasData={true} onRetry={editorResource.refresh} />
     <div className="setup-job-head">
       <div>
         <h3>Active TR Config</h3>
@@ -4299,7 +4323,6 @@ function TrConfigReadOnlyPanel({ onOpenSetup }: { onOpenSetup?: () => void }) {
       {onOpenSetup && <button className="danger-button" onClick={onOpenSetup}>Open Setup</button>}
     </div>
     <div className="setup-note">Use Setup for site changes, source planning, RF validation, and applying monitored TR configuration changes.</div>
-    {message && <p className="settings-message error">{message}</p>}
     {editor && <div className="setup-review">
       <div><span>Systems</span><code>{editor.summary.systems.length.toLocaleString()}</code></div>
       <div><span>Sources</span><code>{editor.summary.sources.length.toLocaleString()}</code></div>
@@ -9364,7 +9387,7 @@ function IncidentMetricsPanel({ dashboard, audit }: { dashboard: Dashboard | nul
   </div>;
 }
 
-function CpuPanel({ snapshot, reload }: { snapshot: SystemCpuSnapshot | null; reload: () => Promise<void> }) {
+function CpuPanel({ snapshot }: { snapshot: SystemCpuSnapshot | null }) {
   if (!snapshot) return <div className="card">Loading CPU/resource status...</div>;
   const latest = snapshot.latest;
   const peak = snapshot.peaks;
@@ -9385,7 +9408,6 @@ function CpuPanel({ snapshot, reload }: { snapshot: SystemCpuSnapshot | null; re
     <div className="card">
       <div className="card-heading-row">
         <h3>Operator Readout</h3>
-        <button onClick={() => void reload()}>Refresh</button>
       </div>
       <table className="table"><thead><tr><th>Signal</th><th>Value</th><th>Status</th><th>Meaning</th></tr></thead><tbody>
         {snapshot.insights.map(row => <tr key={row.label}>
@@ -9716,9 +9738,7 @@ function RunbookDetail({ item, busy, onClose, onOpen, onState, onExcludeTalkgrou
   </div>;
 }
 
-function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
-  const [rows, setRows] = useState<BackupArchive[]>([]);
-  const [estimate, setEstimate] = useState<BackupEstimate | null>(null);
+function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<void>; refreshToken: number }) {
   const [audioWindow, setAudioWindow] = useState("7d");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -9730,8 +9750,16 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
   const [resetPreserveAudit, setResetPreserveAudit] = useState(true);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const handledBackupJobId = useRef<number | null>(null);
-  useEffect(() => { void loadBackups(); }, []);
-  useEffect(() => { void loadBackupEstimate(); }, [audioWindow]);
+  const inventoryResource = usePersistentRefresh({
+    key: `system-backups|${audioWindow}|${refreshToken}`,
+    enabled: true,
+    load: async () => {
+      const [rows, estimate] = await Promise.all([api.request<BackupArchive[]>("/api/v1/system/backups"), loadBackupEstimateValue()]);
+      return { rows, estimate };
+    }
+  });
+  const rows = inventoryResource.data?.rows ?? [];
+  const estimate = inventoryResource.data?.estimate ?? null;
   useEffect(() => {
     let canceled = false;
     const pollMs = backupJob && isActiveJob(backupJob) ? 2000 : 5000;
@@ -9792,25 +9820,11 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
   }
 
   async function loadBackups() {
-    try {
-      const [backupRows, backupEstimate] = await Promise.all([api.request<BackupArchive[]>("/api/v1/system/backups"), loadBackupEstimateValue()]);
-      setRows(backupRows);
-      setEstimate(backupEstimate);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load backups.");
-    }
+    await inventoryResource.refresh();
   }
 
   async function loadBackupEstimateValue() {
     return api.request<BackupEstimate>(`/api/v1/system/backups/estimate?audioWindow=${encodeURIComponent(audioWindow)}`);
-  }
-
-  async function loadBackupEstimate() {
-    try {
-      setEstimate(await loadBackupEstimateValue());
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to estimate backup size.");
-    }
   }
 
   async function createBackup() {
@@ -9969,6 +9983,7 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
   }
 
   return <>
+  <PanelLoadState label="backup inventory" state={inventoryResource.state} hasData={Boolean(inventoryResource.data)} onRetry={inventoryResource.refresh} />
   {(message || backupJob) && <div className={`backup-job-banner section-status ${jobTone(backupJob)}`}>
     <div>
       {backupJob
@@ -9989,7 +10004,6 @@ function BackupRestorePanel({ reload }: { reload: () => Promise<void> }) {
       </label>
       <div className="setup-button-row">
         <button disabled={locked} onClick={() => void createBackup()}>{busy === "create" ? "Starting..." : "Create Backup"}</button>
-        <button disabled={locked} onClick={() => void loadBackups()}>Refresh</button>
         <button type="button" disabled={locked} onClick={() => setShowHelp(true)}>Help</button>
       </div>
       {estimate && <div className="backup-preview">
@@ -10360,22 +10374,18 @@ function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> 
 }
 
 function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused }: { engineHealth: EngineHealth | null; ingestBusy: boolean; ingestMessage: string; onSetIngestPaused: (pause: boolean, untilQueueClear?: boolean) => Promise<void> }) {
-  const [queue, setQueue] = useState<QueueSnapshot | null>(null);
-  const [queueError, setQueueError] = useState("");
   const [detail, setDetail] = useState<QueueDetailKey>("status");
   const [issuePage, setIssuePage] = useState(1);
   const showDetail = (next: QueueDetailKey) => {
     setDetail(next);
     setIssuePage(1);
   };
-  useEffect(() => {
-    let canceled = false;
-    api.request<QueueSnapshot>("/api/v1/system/queue")
-      .then(snapshot => { if (!canceled) { setQueue(snapshot); setQueueError(""); } })
-      .catch(error => { if (!canceled) setQueueError(error instanceof Error ? error.message : "Queue load failed"); });
-    return () => { canceled = true; };
-  }, [engineHealth?.serverTimeUtc]);
-  const q = queue;
+  const queueResource = usePersistentRefresh({
+    key: `system-queue|${engineHealth?.serverTimeUtc ?? "initial"}`,
+    enabled: true,
+    load: () => api.request<QueueSnapshot>("/api/v1/system/queue")
+  });
+  const q = queueResource.data;
   const depth = q?.queueDepth ?? engineHealth?.queueDepth ?? 0;
   const pending = q?.pendingTranscriptions ?? engineHealth?.pendingTranscriptions ?? 0;
   const live = q?.liveQueueDepth ?? engineHealth?.liveQueueDepth ?? 0;
@@ -10467,8 +10477,8 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
       <div className="jobs-card-head">
         <h3>Transcription Queue</h3>
         <span className={`job-status status-${queueState === "Pressure" || queueState === "Growing" || queueState === "Blocked" ? "failed" : queueState === "Draining" ? "running" : "completed"}`}>{queueState}</span>
-        {queueError && <span className="section-status error">{queueError}</span>}
       </div>
+      <PanelLoadState label="queue details" state={queueResource.state} hasData={Boolean(q)} onRetry={queueResource.refresh} />
       <div className="audit-kpis queue-kpis">
         <Kpi label="Queued" value={depth.toLocaleString()} status={queueStatus} subtext={`${pending.toLocaleString()} pending in database`} onClick={() => showDetail("queued")} />
         <Kpi label="Pending Audio" value={formatDurationMinutes(pendingAudioSeconds / 60)} status={queueStatus} subtext={`${pendingAudioSeconds.toLocaleString()} audio seconds queued`} onClick={() => showDetail("queued")} />
@@ -11016,20 +11026,17 @@ function readTrFrequencyHz(value: unknown) {
   return Math.round(numeric > 0 && numeric < 1_000_000 ? numeric * 1_000_000 : numeric);
 }
 
-function TrConfigRestorePanel() {
-  const [rows, setRows] = useState<TrConfigBackup[]>([]);
+function TrConfigRestorePanel({ refreshToken }: { refreshToken: number }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  useEffect(() => { void loadBackups(); }, []);
+  const backupsResource = usePersistentRefresh({
+    key: `system-tr-config-backups|${refreshToken}`,
+    enabled: true,
+    load: () => api.request<TrConfigBackup[]>("/api/v1/system/tr-config/backups")
+  });
+  const rows = backupsResource.data ?? [];
   async function loadBackups() {
-    setBusy("load");
-    try {
-      setRows(await api.request<TrConfigBackup[]>("/api/v1/system/tr-config/backups"));
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load TR config backups.");
-    } finally {
-      setBusy("");
-    }
+    await backupsResource.refresh();
   }
   async function restore(row: TrConfigBackup) {
     if (!confirmAction("Restore TR config backup?", `This installs ${row.name}, creates a backup of the current TR config first, and restarts trunk-recorder.`)) return;
@@ -11054,10 +11061,10 @@ function TrConfigRestorePanel() {
         <h3>Restore TR Config</h3>
         <p className="muted">Timestamped config backups are created before Setup applies source changes and before TR config editor saves.</p>
       </div>
-      <button disabled={Boolean(busy)} onClick={() => void loadBackups()}>Refresh</button>
     </div>
+    <PanelLoadState label="Trunk Recorder configuration backups" state={backupsResource.state} hasData={Boolean(backupsResource.data)} onRetry={backupsResource.refresh} />
     {message && <p className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{message}</p>}
-    {rows.length === 0 ? <p className="muted">{busy === "load" ? "Loading backups..." : "No TR config backups found."}</p> :
+    {rows.length === 0 && !backupsResource.state.loading ? <p className="muted">No TR config backups found.</p> :
       <table className="table">
         <thead><tr><th>Backup</th><th>Created</th><th>Size</th><th></th></tr></thead>
         <tbody>{rows.map(row => <tr key={row.path}>
@@ -12054,7 +12061,7 @@ const stateNameByAbbreviation: Record<string, string> = {
   WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming"
 };
 
-function SettingsView({ settingsSections, settingsLoadState, reload, pendingProfileHides, setPendingProfileHides }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void>; pendingProfileHides: ProfileTalkgroupSetting[]; setPendingProfileHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>> }) {
+function SettingsView({ settingsSections, settingsLoadState, reload, pendingProfileHides, setPendingProfileHides, onDirtyChange }: { settingsSections: Record<string, any>; settingsLoadState: { loading: boolean; version: number; message: string; error: boolean }; reload: () => Promise<void>; pendingProfileHides: ProfileTalkgroupSetting[]; setPendingProfileHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>>; onDirtyChange: (dirty: boolean) => void }) {
   const settingsTabs = [
     ["transcription", "Transcription"],
     ["ai", "AI"],
@@ -12073,9 +12080,6 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
   const [savingSection, setSavingSection] = useState("");
   const [sectionStatus, setSectionStatus] = useState<Record<string, { kind: "ok" | "error" | "info"; text: string }>>({});
   const [testingSection, setTestingSection] = useState("");
-  const [models, setModels] = useState<any[]>([]);
-  const [aiModels, setAiModels] = useState<string[]>([]);
-  const [aiModelsMessage, setAiModelsMessage] = useState("");
   const [showAiHelp, setShowAiHelp] = useState(false);
   const [modelBusy, setModelBusy] = useState("");
 
@@ -12088,16 +12092,25 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
       setMessage(settingsLoadState.message);
     }
   }, [settingsSections, settingsLoadState.version]);
-  useEffect(() => { void loadModels(); }, []);
-  useEffect(() => {
-    if (!sections["ai-insights"]?.enabled) return;
-    void loadAiModels();
-  }, [sections["ai-insights"]?.enabled, sections["ai-insights"]?.openAiBaseUrl]);
+  const modelsResource = usePersistentRefresh({
+    key: "settings-transcription-models",
+    enabled: settingsTab === "transcription",
+    load: () => api.request<any[]>("/api/v1/settings/transcription/models")
+  });
+  const aiModelsResource = usePersistentRefresh({
+    key: `settings-ai-models|${sections["ai-insights"]?.openAiBaseUrl ?? ""}`,
+    enabled: settingsTab === "ai" && Boolean(sections["ai-insights"]?.enabled),
+    load: () => api.request<any>("/api/v1/settings/ai-insights/models")
+  });
+  const models = modelsResource.data ?? [];
+  const aiModelsResult = aiModelsResource.data;
+  const aiModels = Array.isArray(aiModelsResult?.models) ? aiModelsResult.models as string[] : [];
+  const aiModelsMessage = aiModelsResult?.message ?? (aiModels.length ? `Found ${aiModels.length} model(s).` : "No models returned.");
   useEffect(() => {
     if (!modelBusy) return;
-    const timer = window.setInterval(() => void loadModels(), 1500);
+    const timer = window.setInterval(() => void modelsResource.refresh(), 1500);
     return () => window.clearInterval(timer);
-  }, [modelBusy]);
+  }, [modelBusy, modelsResource.refresh]);
   useEffect(() => localStorage.setItem("pizzawave-settings-tab", settingsTab), [settingsTab]);
   const dirtySections = useMemo(() => {
     const names = Object.keys(sections).filter(section => section !== "profiles");
@@ -12117,6 +12130,10 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedSectionChanges]);
+  useEffect(() => {
+    onDirtyChange(hasUnsavedSectionChanges);
+    return () => onDirtyChange(false);
+  }, [hasUnsavedSectionChanges, onDirtyChange]);
 
   const engine = sections.engine ?? {};
   const transcription = sections.transcription ?? {};
@@ -12185,27 +12202,6 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
     await test(section);
   }
 
-  async function loadModels() {
-    try {
-      setModels(await api.request<any[]>("/api/v1/settings/transcription/models"));
-    } catch {
-      setModels([]);
-    }
-  }
-
-  async function loadAiModels() {
-    setAiModelsMessage("Loading models...");
-    try {
-      const result = await api.request<any>("/api/v1/settings/ai-insights/models");
-      const rows = Array.isArray(result.models) ? result.models : [];
-      setAiModels(rows);
-      setAiModelsMessage(result.message ?? (rows.length ? `Found ${rows.length} model(s).` : "No models returned."));
-    } catch (error) {
-      setAiModels([]);
-      setAiModelsMessage(error instanceof Error ? error.message : "Unable to load models.");
-    }
-  }
-
   async function downloadModel(model: string) {
     setModelBusy(model);
     try {
@@ -12213,7 +12209,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
       setSectionStatus(current => ({ ...current, transcription: { kind: result.ok ? "ok" : "error", text: result.message ?? "Download complete" } }));
       if (result.ok !== false && result.path && model.startsWith("whisper-"))
         update("transcription", ["whisperModelFile"], result.path);
-      await loadModels();
+      await modelsResource.refresh();
     } finally {
       setModelBusy("");
     }
@@ -12225,7 +12221,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
     try {
       const result = await api.request<any>(`/api/v1/settings/transcription/models/${model}`, { method: "DELETE" });
       setSectionStatus(current => ({ ...current, transcription: { kind: result.ok ? "ok" : "error", text: result.message ?? "Removed" } }));
-      await loadModels();
+      await modelsResource.refresh();
     } finally {
       setModelBusy("");
     }
@@ -12294,6 +12290,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
 
     <div className="settings-flow">
       {settingsTab === "transcription" && <SettingsCard title="Transcription" description="Controls how individual calls become text. This is separate from AI summaries and incidents." busy={savingSection === "transcription"} testing={testingSection === "transcription"} status={sectionStatus.transcription} onSave={() => save("transcription")} onTest={() => test("transcription")}>
+        <PanelLoadState label="installed transcription models" state={modelsResource.state} hasData={Boolean(modelsResource.data)} onRetry={modelsResource.refresh} />
         <SettingSelect label="Engine" description="Required provider for turning new calls into text." value={transcription.provider} options={["whisper", "faster-whisper", "remote-faster-whisper", "vosk", "lmstudio", "openai"]} onChange={v => update("transcription", ["provider"], v)} />
         {transcription.provider === "whisper" && <>
           <SettingSelect label="Whisper model" description="Select a managed model. Download missing models below." value={modelIdForPath(models, "whisper", transcription.whisperModelFile)} options={modelOptions(models, "whisper")} onChange={v => update("transcription", ["whisperModelFile"], modelPath(models, v))} />
@@ -12336,10 +12333,11 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
         <SettingCheckbox label="Enable AI usage" description="When off, pizzad will not call LM Studio or other LLM endpoints." checked={aiInsights.enabled} onChange={updateAiEnabled} />
         <SettingSelect label="Execution" description="Operator intent. The base URL still decides which OpenAI-compatible server receives requests." value={aiInsights.executionMode ?? "local"} options={["local", "remote", "lmlink"]} onChange={v => update("ai-insights", ["executionMode"], v)} />
         <SettingInput label="Base URL" description="OpenAI-compatible chat endpoint. Use a remote host/Tailnet URL for GPU LLMs; avoid localhost unless this rig should run the LLM." value={aiInsights.openAiBaseUrl} onChange={v => update("ai-insights", ["openAiBaseUrl"], v)} />
+        <PanelLoadState label="available AI models" state={aiModelsResource.state} hasData={Boolean(aiModelsResource.data)} onRetry={aiModelsResource.refresh} />
         {aiInsights.enabled && aiModels.length > 0
-          ? <><div className="setting-field model-refresh-field"><span>Model<small>Chat model id used for summaries, incidents, and recommendations. LM Studio lists loadable model ids, not runtime aliases.</small></span><div><select value={aiModels.includes(aiInsights.openAiModel) ? aiInsights.openAiModel : ""} onChange={e => update("ai-insights", ["openAiModel"], e.target.value)}><option value="" disabled>Choose model</option>{aiModels.map(model => <option value={model} key={model}>{model}</option>)}</select><button type="button" onClick={() => void loadAiModels()}>Refresh</button><small>{aiModels.length} model{aiModels.length === 1 ? "" : "s"}</small></div></div>{aiInsights.openAiModel && !aiModels.includes(aiInsights.openAiModel) && <p className="settings-message error">Current saved model is not in the loadable model-id list: {aiInsights.openAiModel}</p>}</>
+          ? <><div className="setting-field model-refresh-field"><span>Model<small>Chat model id used for summaries, incidents, and recommendations. LM Studio lists loadable model ids, not runtime aliases.</small></span><div><select value={aiModels.includes(aiInsights.openAiModel) ? aiInsights.openAiModel : ""} onChange={e => update("ai-insights", ["openAiModel"], e.target.value)}><option value="" disabled>Choose model</option>{aiModels.map(model => <option value={model} key={model}>{model}</option>)}</select><button type="button" onClick={() => void aiModelsResource.refresh()}>Discover models</button><small>{aiModels.length} model{aiModels.length === 1 ? "" : "s"}</small></div></div>{aiInsights.openAiModel && !aiModels.includes(aiInsights.openAiModel) && <p className="settings-message error">Current saved model is not in the loadable model-id list: {aiInsights.openAiModel}</p>}</>
           : <SettingInput label="Model" description="Chat model id used for summaries, incidents, and recommendations." value={aiInsights.openAiModel} onChange={v => update("ai-insights", ["openAiModel"], v)} />}
-        {aiInsights.enabled && aiModels.length === 0 && <div className="setting-inline-actions"><button type="button" onClick={() => void loadAiModels()}>Refresh</button><span className="muted">{aiModelsMessage}</span></div>}
+        {aiInsights.enabled && aiModels.length === 0 && !aiModelsResource.state.error && <div className="setting-inline-actions"><span className="muted">{aiModelsResource.state.loading ? "Discovering models..." : aiModelsMessage}</span></div>}
         <SettingInput label="API key" description="Optional bearer token. LM Studio local/link setups may leave this blank." type="password" value={aiInsights.openAiApiKey} onChange={v => update("ai-insights", ["openAiApiKey"], v)} />
         <SettingInput label="Timeout (ms)" description="Maximum wait for a single LLM request." type="number" value={aiInsights.timeoutMs} onChange={v => update("ai-insights", ["timeoutMs"], numberOrZero(v))} />
         <SettingInput label="Retries" description="Retry attempts after a failed LLM request." type="number" value={aiInsights.maxRetries} onChange={v => update("ai-insights", ["maxRetries"], numberOrZero(v))} />
@@ -12454,7 +12452,23 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
   const [draftProfileId, setDraftProfileId] = useState("");
   const appliedPendingKeyRef = useRef("");
 
-  useEffect(() => { void loadProfiles(); }, []);
+  const profilesResource = usePersistentRefresh({
+    key: "settings-profiles",
+    enabled: true,
+    load: async () => {
+      const [profiles, catalogResponse] = await Promise.all([
+        api.request<ProfileState>("/api/v1/profiles"),
+        api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog")
+      ]);
+      return { profiles, catalog: catalogResponse.document };
+    },
+    onSuccess: result => {
+      setProfileState(result.profiles);
+      setCatalog(result.catalog);
+      setSelectedProfileId(result.profiles.activeProfileId || result.profiles.profiles[0]?.id || "");
+      setMessage("");
+    }
+  });
   useEffect(() => {
     if (!pendingHides.length || !profileState)
       return;
@@ -12505,24 +12519,6 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
     setMessage(`${created ? "Created" : "Updated"} draft profile with ${pendingHides.length.toLocaleString()} selected TG${pendingHides.length === 1 ? "" : "s"} to hide. Rename it, then Save Profiles.`);
     appliedPendingKeyRef.current = pendingKey;
   }, [pendingHides, profileState, draftProfileId, setPendingHides]);
-
-  async function loadProfiles() {
-    setBusy("load");
-    try {
-      const [profiles, catalogResponse] = await Promise.all([
-        api.request<ProfileState>("/api/v1/profiles"),
-        api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog")
-      ]);
-      setProfileState(profiles);
-      setCatalog(catalogResponse.document);
-      setSelectedProfileId(profiles.activeProfileId || profiles.profiles[0]?.id || "");
-      setMessage("");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load profiles.");
-    } finally {
-      setBusy("");
-    }
-  }
 
   const profiles = profileState?.profiles ?? [];
   const selectedProfile = profiles.find(profile => profile.id === selectedProfileId) ?? profiles[0];
@@ -12663,11 +12659,11 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
       <h3>Profiles</h3>
       <p>Profiles hide talkgroups from user-facing views and downstream processing without changing TR capture.</p>
       <div className="settings-card-actions">
-        <button disabled={busy === "load"} onClick={() => void loadProfiles()}>{busy === "load" ? "Loading..." : "Reload"}</button>
         <button className="danger-button" disabled={!profileState || busy === "save"} onClick={() => void saveProfiles()}>{busy === "save" ? "Saving..." : "Save Profiles"}</button>
       </div>
       {message && <span className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") ? "section-status error" : "section-status ok"}>{message}</span>}
     </div>
+    <PanelLoadState label="profiles and talkgroups" state={profilesResource.state} hasData={Boolean(profileState && catalog)} onRetry={profilesResource.refresh} />
     {!selectedProfile ? <p className="muted">No profiles loaded.</p> : <div className="settings-fields">
       <div className="profile-editor-grid">
         <label className="setting-field"><span>Profile</span><div><select value={selectedProfile.id} onChange={event => setSelectedProfileId(event.target.value)}>{profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></div></label>

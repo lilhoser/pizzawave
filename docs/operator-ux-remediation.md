@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3B operator interview - Settings supporting-data ownership
+- Current milestone: 3B consolidated refresh ownership - preflight complete
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `fd16f1b`
 - Operator verification: Packages 1, 2, and 3A accepted
-- Next action: decide how Settings supporting inventories and catalogs load
-  without refreshing editable form drafts.
+- Next action: deploy the accepted 3B milestone with the automatic helper and
+  live-verify Settings and visible System panels.
 
 ## Working Rules
 
@@ -184,6 +184,10 @@ Status: pending
   retain last-good data, and own their error, last-updated time, and Retry
   action. System Refresh updates the shared System summary and the visible
   specialized panel; hidden panels perform no refresh work.
+- 2026-07-09: Settings supporting inventories load only with their visible tab,
+  retry temporary initial failures, and never change editable selections or
+  profile drafts. Refresh controls remain consolidated: one Settings reload,
+  one System refresh, and panel-local Retry only while a load is failed.
 
 ## Deployment Log
 
@@ -289,3 +293,7 @@ Status: pending
   covered by parser and site-to-catalog mapping tests.
 - 2026-07-09: Operator accepted the deployed 3A milestone and authorized its
   closure. Package 3 remains in progress at the 3B boundary.
+- 2026-07-09: Package 3B preflight passed all 394 backend tests and the
+  production frontend build. Settings form hydration, supporting inventories,
+  and visible System panels now use the accepted consolidated refresh
+  boundaries; deployment and live verification remain.

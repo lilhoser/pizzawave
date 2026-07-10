@@ -355,6 +355,19 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   margin: 0;
   padding: 3px 9px;
 }
+.panel-load-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  color: #9faab5;
+  font-size: 12px;
+}
+.panel-refresh-notice {
+  margin-bottom: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 6px;
+}
 .spin {
   animation: refresh-spin 1s linear infinite;
 }
