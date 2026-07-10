@@ -662,7 +662,12 @@ public sealed class SiteSetupService
     private static List<SiteSetupRfSelection> NormalizeRfSelections(IEnumerable<SiteSetupRfSelection>? values) =>
         (values ?? [])
             .Where(value => value != null && value.FrequencyHz > 0)
-            .GroupBy(value => value.FrequencyHz)
+            .GroupBy(value => new
+            {
+                value.FrequencyHz,
+                SourceIndex = value.SourceIndex >= 0 ? value.SourceIndex : null,
+                SourceSerial = value.SourceSerial?.Trim().ToUpperInvariant() ?? string.Empty
+            })
             .Select(group =>
             {
                 var value = group.Last();
@@ -670,6 +675,7 @@ public sealed class SiteSetupService
                 {
                     FrequencyHz = value.FrequencyHz,
                     SourceIndex = value.SourceIndex >= 0 ? value.SourceIndex : null,
+                    SourceSerial = value.SourceSerial?.Trim() ?? string.Empty,
                     Gain = value.Gain?.Trim() ?? string.Empty,
                     SampleRateHz = value.SampleRateHz > 0 ? value.SampleRateHz : null,
                     ErrorHz = value.ErrorHz,
@@ -679,7 +685,9 @@ public sealed class SiteSetupService
                         : null
                 };
             })
-            .OrderBy(value => value.FrequencyHz)
+            .OrderBy(value => value.SourceIndex ?? int.MaxValue)
+            .ThenBy(value => value.SourceSerial, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(value => value.FrequencyHz)
             .ToList();
 
     private static List<MonitoredAreaConfig> NormalizeMonitoredAreas(IEnumerable<MonitoredAreaConfig>? areas) =>
@@ -890,7 +898,7 @@ public sealed class SiteSetupService
 
     private static string RfSelectionSummary(IEnumerable<SiteSetupRfSelection>? selections) =>
         string.Join("|", (selections ?? [])
-            .Select(selection => $"{selection.FrequencyHz}:{selection.SourceIndex}:{selection.Gain}:{selection.SampleRateHz}:{selection.ErrorHz}")
+            .Select(selection => $"{selection.FrequencyHz}:{selection.SourceIndex}:{selection.SourceSerial}:{selection.Gain}:{selection.SampleRateHz}:{selection.ErrorHz}")
             .Order(StringComparer.Ordinal));
 
     private string TalkgroupPolicySnapshotJson() => JsonSerializer.Serialize(_talkgroups.Load().Items

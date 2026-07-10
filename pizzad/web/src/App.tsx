@@ -5266,6 +5266,7 @@ function normalizeControlChannelSelection(values: unknown): number[] {
 type WaterfallSweepSelection = {
   frequencyHz: number;
   sourceIndex?: number;
+  sourceSerial?: string;
   gain?: string;
   sampleRateHz?: number;
   errorHz?: number;
@@ -5285,7 +5286,7 @@ type RecommendedWaterfallError = {
 
 function normalizeWaterfallSweepSelections(values: unknown): WaterfallSweepSelection[] {
   const items = Array.isArray(values) ? values : [];
-  const selections = new Map<number, WaterfallSweepSelection>();
+  const selections = new Map<string, WaterfallSweepSelection>();
   for (const item of items) {
     const rawFrequency = typeof item === "object" && item != null
       ? Number((item as Record<string, unknown>).frequencyHz ?? (item as Record<string, unknown>).controlChannelHz)
@@ -5294,18 +5295,21 @@ function normalizeWaterfallSweepSelections(values: unknown): WaterfallSweepSelec
       continue;
     const frequencyHz = Math.round(rawFrequency);
     if (typeof item !== "object" || item == null) {
-      selections.set(frequencyHz, { frequencyHz });
+      selections.set(`unassigned:${frequencyHz}`, { frequencyHz });
       continue;
     }
     const row = item as Record<string, unknown>;
     const sourceIndex = Number(row.sourceIndex);
+    const sourceSerial = typeof row.sourceSerial === "string" ? row.sourceSerial.trim() : "";
     const sampleRateHz = Number(row.sampleRateHz);
     const errorHz = Number(row.errorHz ?? row.offsetHz);
     const snrDb = Number(row.snrDb);
     const confidence = Number(row.confidence);
-    selections.set(frequencyHz, {
+    const sourceKey = Number.isFinite(sourceIndex) ? `index:${Math.round(sourceIndex)}` : sourceSerial ? `serial:${sourceSerial.toLowerCase()}` : "unassigned";
+    selections.set(`${sourceKey}:${frequencyHz}`, {
       frequencyHz,
       ...(Number.isFinite(sourceIndex) ? { sourceIndex: Math.round(sourceIndex) } : {}),
+      ...(sourceSerial ? { sourceSerial } : {}),
       ...(typeof row.gain === "string" && row.gain.trim() ? { gain: row.gain.trim() } : {}),
       ...(Number.isFinite(sampleRateHz) && sampleRateHz > 0 ? { sampleRateHz: Math.round(sampleRateHz) } : {}),
       ...(Number.isFinite(errorHz) ? { errorHz: Math.round(errorHz) } : {}),
@@ -5313,13 +5317,14 @@ function normalizeWaterfallSweepSelections(values: unknown): WaterfallSweepSelec
       ...(Number.isFinite(confidence) ? { confidence: clamp01(confidence) } : {})
     });
   }
-  return [...selections.values()].sort((left, right) => left.frequencyHz - right.frequencyHz);
+  return [...selections.values()].sort((left, right) => (left.sourceIndex ?? Number.MAX_SAFE_INTEGER) - (right.sourceIndex ?? Number.MAX_SAFE_INTEGER) || left.frequencyHz - right.frequencyHz);
 }
 
 function toSiteSetupRfSelectionPayload(row: WaterfallSweepSelection) {
   return {
     frequencyHz: row.frequencyHz,
     ...(row.sourceIndex != null ? { sourceIndex: row.sourceIndex } : {}),
+    ...(row.sourceSerial ? { sourceSerial: row.sourceSerial } : {}),
     gain: row.gain ?? "",
     ...(row.sampleRateHz != null ? { sampleRateHz: row.sampleRateHz } : {}),
     ...(row.errorHz != null ? { errorHz: row.errorHz } : {}),
@@ -5520,17 +5525,35 @@ function SiteValidationStep({
   const hasWaterfallSweepHandoff = selectedWaterfallSweepSelections.length > 0;
   const validationRunControlChannels = selectedWaterfallSweepControlChannels.length ? selectedWaterfallSweepControlChannels : controlChannels;
   const selectedWaterfallSourceIndexes = uniqueNonNegativeIntegers(selectedWaterfallSweepSelections.map(row => row.sourceIndex));
+  const selectedWaterfallSourceMeasurements = selectedWaterfallSweepSelections
+    .filter(row => row.sourceIndex != null)
+    .map(row => ({
+      sourceIndex: row.sourceIndex!,
+      sourceSerial: row.sourceSerial ?? "",
+      controlChannelHz: row.frequencyHz,
+      gain: row.gain ?? "",
+      ...(row.sampleRateHz != null ? { sampleRateHz: row.sampleRateHz } : {}),
+      ...(row.errorHz != null ? { errorHz: row.errorHz } : {}),
+      ...(row.snrDb != null ? { snrDb: row.snrDb } : {}),
+      ...(row.confidence != null ? { confidence: row.confidence } : {})
+    }));
+  const invalidWaterfallSourceSelection = selectedWaterfallSweepSelections.find(row => {
+    if (row.sourceIndex == null)
+      return true;
+    const source = effectivePowerSources.find(candidate => candidate.index === row.sourceIndex);
+    return !source || Boolean(row.sourceSerial && source.serial && row.sourceSerial.toLowerCase() !== source.serial.toLowerCase());
+  });
   const selectedWaterfallPowerSources = selectedWaterfallSourceIndexes.length
     ? effectivePowerSources.filter(source => selectedWaterfallSourceIndexes.includes(source.index))
     : [];
   const validationPowerSources = selectedWaterfallPowerSources.length ? selectedWaterfallPowerSources : effectivePowerSources;
-  const waterfallRecommendedError = recommendedWaterfallError(selectedWaterfallSweepSelections);
+  const waterfallRecommendedError = selectedWaterfallSourceIndexes.length <= 1 ? recommendedWaterfallError(selectedWaterfallSweepSelections) : null;
   const validationHandoffSourceIndex = selectedWaterfallSourceIndexes.length === 1 ? selectedWaterfallSourceIndexes[0] : undefined;
   const validationErrorBaseSource = validationHandoffSourceIndex !== undefined
     ? validationPowerSources.find(source => source.index === validationHandoffSourceIndex)
     : validationPowerSources.length === 1 ? validationPowerSources[0] : undefined;
   const validationErrorBaseHz = validationErrorBaseSource?.errorHz ?? 0;
-  const handoffValidationOffsets = waterfallRecommendedError ? [Math.round(waterfallRecommendedError.errorHz - validationErrorBaseHz)] : [];
+  const handoffValidationOffsets = hasWaterfallSweepHandoff ? [0] : [];
   const handoffValidationOffsetText = handoffValidationOffsets.length ? handoffValidationOffsets.map(formatSignedHzInput).join(",") : "";
   const validationOffsets = parseIntegerSequence(validationErrorOffsets, [-300, 0, 300]);
   const validationAutoError = validationErrorOffsets.trim().toLowerCase() === "auto";
@@ -5542,17 +5565,26 @@ function SiteValidationStep({
     ? `frequency correction ${formatSignedHz(waterfallRecommendedError.errorHz)}${validationRecommendedOffsetText ? ` / correction change ${validationRecommendedOffsetText}` : ""}${waterfallRecommendedError.conflict ? ` (selected measurements range ${formatSignedHz(waterfallRecommendedError.minErrorHz)} to ${formatSignedHz(waterfallRecommendedError.maxErrorHz)})` : ""}`
     : "";
   const selectedWaterfallGains = uniqueCaseInsensitive(selectedWaterfallSweepSelections.map(row => row.gain ?? ""));
-  const waterfallSeedGainSequence = selectedWaterfallGains.length ? effectivePowerGainSequence(selectedWaterfallGains, validationPowerSources).join(",") : "";
+  const waterfallSeedGainSequence = selectedWaterfallSourceIndexes.length <= 1 && selectedWaterfallGains.length ? effectivePowerGainSequence(selectedWaterfallGains, validationPowerSources).join(",") : "";
   const validationPowerGains = effectivePowerGainSequence(parseGainSequence(powerGainSequence), validationPowerSources);
   const selectedWaterfallSampleRates = uniqueSortedFrequencies(selectedWaterfallSweepSelections.map(row => row.sampleRateHz ?? 0));
-  const waterfallSampleRateHz = selectedWaterfallSampleRates.length === 1 ? selectedWaterfallSampleRates[0] : 0;
+  const waterfallSampleRateHz = selectedWaterfallSourceIndexes.length <= 1 && selectedWaterfallSampleRates.length === 1 ? selectedWaterfallSampleRates[0] : 0;
   const waterfallSeedSampleRateMhz = waterfallSampleRateHz ? formatMhzInput(waterfallSampleRateHz) : "";
   const validationRequestSampleRateHz = validationSampleRateOk ? parsedValidationSampleRateHz : 0;
-  const validationRequestSampleRateOk = validationSampleRateOk;
+  const validationRequestSampleRateOk = selectedWaterfallSourceMeasurements.length
+    ? selectedWaterfallSourceMeasurements.every(row => Number.isFinite(row.sampleRateHz) && (row.sampleRateHz ?? 0) > 0)
+    : validationSampleRateOk;
   const validationFormSampleRateMhz = validationSampleRateMhz;
   const validationFormGainSequence = powerGainSequence;
-  const validationPowerGainInvalid = validationPowerSources.some(isAirspyRfSource) && validationPowerGains.some(gain => !validateAirspyLinearityGain(gain));
-  const powerSweepPasses = Math.max(1, validationPowerSources.length) * Math.max(1, validationRunControlChannels.length) * Math.max(1, validationPowerGains.length);
+  const validationPowerGainInvalid = selectedWaterfallSourceMeasurements.length
+    ? selectedWaterfallSourceMeasurements.some(row => {
+      const source = validationPowerSources.find(candidate => candidate.index === row.sourceIndex);
+      return Boolean(source && isAirspyRfSource(source) && !validateAirspyLinearityGain(row.gain || source.gain));
+    })
+    : validationPowerSources.some(isAirspyRfSource) && validationPowerGains.some(gain => !validateAirspyLinearityGain(gain));
+  const powerSweepPasses = selectedWaterfallSourceMeasurements.length
+    ? selectedWaterfallSourceMeasurements.length
+    : Math.max(1, validationPowerSources.length) * Math.max(1, validationRunControlChannels.length) * Math.max(1, validationPowerGains.length);
   const validationP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, powerSweepPasses, validationRunControlChannels.length + (systems.length || 1)));
   const validationProbePasses = validationP25SeedCount * Math.max(1, validationOffsets.length);
   const validationMetricRunCount = hasWaterfallSweepHandoff ? Math.min(1, validationP25SeedCount) : Math.max(1, Math.min(validationMetricCount, validationP25SeedCount));
@@ -5565,8 +5597,10 @@ function SiteValidationStep({
   const validationRunning = busy === "rf_validation_sweep";
   const validationPlan = nextExperiments.find(plan => plan.type === "rf_validation_sweep");
   const validationSweepStatus = rfValidationEffectiveStatus(validationSweep, systems);
-  const validationBlocked = validationPlan?.enabled === false;
-  const validationBlocker = validationPlan?.blockingIssue ?? "";
+  const validationBlocked = validationPlan?.enabled === false || Boolean(invalidWaterfallSourceSelection);
+  const validationBlocker = invalidWaterfallSourceSelection
+    ? `A Waterfall result at ${formatRfHz(invalidWaterfallSourceSelection.frequencyHz)} is not attached to an available SDR. Clear it and select Use again from the SDR that will receive this site.`
+    : validationPlan?.blockingIssue ?? "";
   const validationResultRows = useMemo(() => rfSweepProgressRowsFromExperiment(validationSweep), [validationSweep?.id, validationSweep?.evidenceJson]);
   const validationResultCandidates = useMemo(() => rfSweepCandidateProgressFromExperiment(validationSweep), [validationSweep?.id, validationSweep?.evidenceJson]);
   const showLiveValidationProgress = validationRunning || validationProgress?.active === true;
@@ -5574,7 +5608,9 @@ function SiteValidationStep({
   const activeValidationControlChannels = activeValidationTarget?.controlChannelsHz?.length ? activeValidationTarget.controlChannelsHz : validationRunControlChannels;
   const activeValidationPowerSources = activeValidationTarget ? effectivePowerSources : validationPowerSources;
   const activeValidationPowerGains = activeValidationTarget ? effectivePowerGains : validationPowerGains;
-  const activeValidationPowerPasses = Math.max(1, activeValidationPowerSources.length) * Math.max(1, activeValidationControlChannels.length) * Math.max(1, activeValidationPowerGains.length);
+  const activeValidationPowerPasses = activeValidationTarget
+    ? Math.max(1, activeValidationPowerSources.length) * Math.max(1, activeValidationControlChannels.length) * Math.max(1, activeValidationPowerGains.length)
+    : powerSweepPasses;
   const activeValidationP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, activeValidationPowerPasses, activeValidationControlChannels.length + (activeValidationTarget ? 1 : systems.length || 1)));
   const activeValidationProbePasses = activeValidationP25SeedCount * Math.max(1, validationOffsets.length);
   const activeValidationMetricRunCount = !activeValidationTarget && hasWaterfallSweepHandoff ? Math.min(1, activeValidationP25SeedCount) : Math.max(1, Math.min(validationMetricCount, activeValidationP25SeedCount));
@@ -5608,7 +5644,7 @@ function SiteValidationStep({
     if (!hasWaterfallSweepHandoff)
       return;
     const seedKey = selectedWaterfallSweepSelections
-      .map(row => `${row.frequencyHz}:${row.sourceIndex ?? ""}:${row.gain ?? ""}:${row.sampleRateHz ?? ""}:${row.errorHz ?? ""}:${row.snrDb ?? ""}`)
+      .map(row => `${row.frequencyHz}:${row.sourceIndex ?? ""}:${row.sourceSerial ?? ""}:${row.gain ?? ""}:${row.sampleRateHz ?? ""}:${row.errorHz ?? ""}:${row.snrDb ?? ""}`)
       .join("|");
     if (!seedKey || validationHandoffSeedKey.current === seedKey)
       return;
@@ -5617,9 +5653,8 @@ function SiteValidationStep({
       setPowerGainSequence(waterfallSeedGainSequence);
     if (waterfallSeedSampleRateMhz)
       setValidationSampleRateMhz(waterfallSeedSampleRateMhz);
-    if (handoffValidationOffsetText)
-      setValidationErrorOffsets(handoffValidationOffsetText);
-  }, [hasWaterfallSweepHandoff, selectedWaterfallSweepSelections.map(row => `${row.frequencyHz}:${row.sourceIndex ?? ""}:${row.gain ?? ""}:${row.sampleRateHz ?? ""}:${row.errorHz ?? ""}:${row.snrDb ?? ""}`).join("|"), waterfallSeedGainSequence, waterfallSeedSampleRateMhz, handoffValidationOffsetText]);
+    setValidationErrorOffsets("0");
+  }, [hasWaterfallSweepHandoff, selectedWaterfallSweepSelections.map(row => `${row.frequencyHz}:${row.sourceIndex ?? ""}:${row.sourceSerial ?? ""}:${row.gain ?? ""}:${row.sampleRateHz ?? ""}:${row.errorHz ?? ""}:${row.snrDb ?? ""}`).join("|"), waterfallSeedGainSequence, waterfallSeedSampleRateMhz, handoffValidationOffsetText]);
   useEffect(() => {
     const saved = Number(localStorage.getItem(sweepStorageKey));
     const evidenceJobId = sweep?.evidenceJson ? Number(parseExperimentJson<any>(sweep.evidenceJson)?.job?.id) : 0;
@@ -5715,6 +5750,7 @@ function SiteValidationStep({
       parameters: {
         scanAllControlChannels: selectedWaterfallSweepControlChannels.length === 0,
         ...(selectedWaterfallSweepControlChannels.length ? { controlChannelsHz: selectedWaterfallSweepControlChannels } : {}),
+        ...(selectedWaterfallSourceMeasurements.length ? { sourceMeasurements: selectedWaterfallSourceMeasurements } : {}),
         gainSequence: validationPowerGains,
         sampleRateHz: validationRequestSampleRateHz || undefined
       }
@@ -5726,7 +5762,9 @@ function SiteValidationStep({
     const targetControlChannelCount = Math.max(1, targetControlChannels.length || validationRunControlChannels.length);
     const targetPowerSourceCount = targetSystem ? effectivePowerSources.length : validationPowerSources.length;
     const targetGainCount = targetSystem ? effectivePowerGains.length : validationPowerGains.length;
-    const targetRfPasses = Math.max(1, targetPowerSourceCount) * targetControlChannelCount * Math.max(1, targetGainCount);
+    const targetRfPasses = !targetSystem && selectedWaterfallSourceMeasurements.length
+      ? selectedWaterfallSourceMeasurements.length
+      : Math.max(1, targetPowerSourceCount) * targetControlChannelCount * Math.max(1, targetGainCount);
     const targetP25SeedCount = Math.max(1, Math.min(validationRfCandidateLimit, targetRfPasses, targetControlChannelCount + (targetSystem ? 1 : systems.length || 1)));
     const targetVoiceCandidateCount = targetSystem ? Math.max(1, Math.min(2, targetControlChannelCount)) : validationVoiceCandidateCount;
     const targetMetricCandidateCount = targetSystem ? Math.max(1, Math.min(validationMetricCount, targetP25SeedCount)) : validationMetricRunCount;
@@ -5738,6 +5776,7 @@ function SiteValidationStep({
           targetSystemShortName: targetSystem.shortName,
           controlChannelsHz: targetSystem.controlChannelsHz
         } : selectedChannels.length ? { controlChannelsHz: selectedChannels } : {}),
+        ...(!targetSystem && selectedWaterfallSourceMeasurements.length ? { sourceMeasurements: selectedWaterfallSourceMeasurements } : {}),
         gainSequence: !targetSystem ? validationPowerGains : effectivePowerGains,
         sampleRateHz: !targetSystem ? validationRequestSampleRateHz || undefined : validationSampleRateOk ? parsedValidationSampleRateHz : undefined,
         errorOffsetsHz: validationOffsets,
@@ -6069,9 +6108,12 @@ function SiteValidationStep({
             {airspyPowerGainMessage && <div className={validationPowerGainInvalid ? "settings-message error" : "setup-note"}>{validationPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
             <div className="rf-waterfall-sweep-selection">
               <strong>RF Sweep CCs</strong>
-              <span>{selectedWaterfallSweepControlChannels.length ? `${selectedWaterfallSweepControlChannels.map(formatRfHz).join(", ")} / gain ${validationPowerGains.join(", ")}${validationRecommendedErrorText ? ` / ${validationRecommendedErrorText}` : ""}${waterfallSampleRateHz ? ` / ${formatMhzInput(waterfallSampleRateHz)} MS/s` : ""}${validationHandoffSourceIndex !== undefined ? ` / source ${validationHandoffSourceIndex}` : ""}` : "All requested control channels"}</span>
+              <span>{selectedWaterfallSourceMeasurements.length
+                ? selectedWaterfallSourceMeasurements.map(row => `source ${row.sourceIndex}${row.sourceSerial ? ` (${row.sourceSerial})` : ""}: ${formatRfHz(row.controlChannelHz)}, gain ${row.gain || "saved"}, correction ${formatSignedHz(row.errorHz ?? 0)}${row.sampleRateHz ? `, ${formatMhzInput(row.sampleRateHz)} MS/s` : ""}`).join("; ")
+                : "All requested control channels"}</span>
               {selectedWaterfallSweepControlChannels.length > 0 && <button type="button" onClick={() => onWaterfallSweepSelections?.([])}>Clear</button>}
             </div>
+            {selectedWaterfallSourceMeasurements.length > 0 && <div className="setup-note">Each Waterfall result will run only on the SDR that measured it. Gain, sample rate, and frequency correction remain source-specific; correction change is applied as an optional delta.</div>}
           </details>
           <div className="rf-sweep-callout" role="status" aria-live="polite">
             <span>Estimated time</span>
@@ -6098,7 +6140,7 @@ function SiteValidationStep({
             <div className="rf-sweep-plan-grid">
               <div><span>SDR sources</span><code>{activeValidationPowerSources.map(source => `${source.sdrType || "SDR"} ${source.index}${source.serial ? ` (${source.serial})` : ""}`).join(", ") || "None"}</code></div>
               <div><span>Sample rate</span><code>{validationRequestSampleRateOk ? `${formatMhzInput(validationRequestSampleRateHz)} MHz` : "Invalid"}</code></div>
-              <div><span>RF screens</span><code>{activeValidationPowerSources.length} source(s) x {activeValidationControlChannels.length} CC x {activeValidationPowerGains.length} gain = {activeValidationPowerPasses}</code></div>
+              <div><span>RF screens</span><code>{!activeValidationTarget && selectedWaterfallSourceMeasurements.length ? `${selectedWaterfallSourceMeasurements.length} source-bound Waterfall choice(s)` : `${activeValidationPowerSources.length} source(s) x ${activeValidationControlChannels.length} CC x ${activeValidationPowerGains.length} gain = ${activeValidationPowerPasses}`}</code></div>
               <div><span>P25 probes</span><code>{activeValidationP25SeedCount} seed(s) x {validationOffsets.length} correction change(s) = {activeValidationProbePasses}</code></div>
               <div><span>Follow-up limits</span><code>{activeValidationMetricRunCount} monitoring candidate(s); {activeValidationVoiceCandidateCount} voice candidate(s)</code></div>
             </div>
@@ -6388,7 +6430,9 @@ function WaterfallStep({
   ]);
   const selectedSweepSelections = normalizeWaterfallSweepSelections(waterfallSweepSelections);
   const selectedSweepControlChannels = normalizeControlChannelSelection(selectedSweepSelections.map(row => row.frequencyHz));
-  const selectedSweepControlChannelSet = new Set(selectedSweepControlChannels);
+  const selectedSweepControlChannelSet = new Set(selectedSweepSelections
+    .filter(row => row.sourceIndex === sourceIndex || (row.sourceIndex == null && row.sourceSerial && row.sourceSerial === selectedSource?.serial))
+    .map(row => row.frequencyHz));
   const frequencyOk = Number.isFinite(frequencyHz) && frequencyHz > 0;
   const sampleRateOk = Number.isFinite(sampleRateHz) && sampleRateHz > 0;
   const gainOk = !selectedSourceIsAirspy || validateAirspyLinearityGain(gain.trim() || selectedSource?.gain || "15");
@@ -6434,23 +6478,6 @@ function WaterfallStep({
     if (!activeControlChannelHz) return;
     setFrequencyMhz(current => current || formatMhzInput(activeControlChannelHz));
   }, [activeControlChannelHz]);
-
-  useEffect(() => {
-    if (!selectedSweepControlChannels.length)
-      return;
-    const current = normalizeWaterfallSweepSelections(waterfallSweepSelections);
-    const selected = new Set(selectedSweepControlChannels);
-    const next = current.map(row => selected.has(row.frequencyHz)
-      ? {
-        ...row,
-        sourceIndex,
-        gain: gain.trim() || selectedSource?.gain || "",
-        sampleRateHz: sampleRateOk ? sampleRateHz : row.sampleRateHz
-      }
-      : row);
-    if (JSON.stringify(next) !== JSON.stringify(current))
-      onWaterfallSweepSelections?.(next);
-  }, [selectedSweepControlChannels.join(","), sourceIndex, gain, sampleRateHz, sampleRateOk, selectedSource?.gain]);
 
   useEffect(() => {
     if (!frequencyMenuOpen)
@@ -6794,11 +6821,13 @@ function WaterfallStep({
       return;
     const frequencyHz = Math.round(row.sweepFrequencyHz);
     const current = normalizeWaterfallSweepSelections(waterfallSweepSelections);
-    const remaining = current.filter(item => item.frequencyHz !== frequencyHz);
+    const remaining = current.filter(item => !(item.frequencyHz === frequencyHz &&
+      (item.sourceIndex === sourceIndex || (item.sourceIndex == null && item.sourceSerial && item.sourceSerial === selectedSource?.serial))));
     if (selected) {
       remaining.push({
         frequencyHz,
         sourceIndex,
+        sourceSerial: selectedSource?.serial || undefined,
         gain: gain.trim() || selectedSource?.gain || "",
         sampleRateHz: sampleRateOk ? sampleRateHz : undefined,
         errorHz: Number.isFinite(row.offsetHz) ? Math.round(row.offsetHz) : undefined,

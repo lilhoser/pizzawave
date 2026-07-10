@@ -624,7 +624,7 @@ export type SiteSetupAppliedConfig = { configPath: string; configExists: boolean
 export type SiteSetupStatus = { monitoringState: string; message: string; pendingApply: boolean; desiredVersion: number; appliedConfigHash: string; lastAppliedAtUtc?: string | null };
 export type SiteSetupPendingChange = { category: string; summary: string };
 export type SiteSetupActivity = { id: number; timestampUtc: string; category: string; action: string; summary: string; detailsJson: string; desiredVersion: number; appliedConfigHash: string; monitoringState: string; source: string };
-export type SiteSetupRfSelection = { frequencyHz: number; sourceIndex?: number | null; gain: string; sampleRateHz?: number | null; errorHz?: number | null; snrDb?: number | null; confidence?: number | null };
+export type SiteSetupRfSelection = { frequencyHz: number; sourceIndex?: number | null; sourceSerial?: string; gain: string; sampleRateHz?: number | null; errorHz?: number | null; snrDb?: number | null; confidence?: number | null };
 export type SiteSetupConfig = {
   desiredVersion: number;
   siteLabel: string;

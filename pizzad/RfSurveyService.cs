@@ -1949,7 +1949,10 @@ public sealed class RfSurveyService
 
     private async Task<ExperimentOutcome> RunRfPowerScanAsync(string artifactPath, RfSurveyProfileDto profile, RfSurveyRunExperimentRequest request, CancellationToken ct)
     {
-        var controlChannels = ReadPowerScanControlChannels(request.Parameters, request.ControlChannelHz, profile.ControlChannelsHz);
+        var sourceMeasurements = ReadPowerScanSourceMeasurements(request.Parameters);
+        var controlChannels = sourceMeasurements.Count > 0
+            ? sourceMeasurements.Select(measurement => measurement.ControlChannelHz).Distinct().ToList()
+            : ReadPowerScanControlChannels(request.Parameters, request.ControlChannelHz, profile.ControlChannelsHz);
         var firstControlChannel = controlChannels.FirstOrDefault();
         if (firstControlChannel <= 0)
             return new ExperimentOutcome(
@@ -1961,7 +1964,9 @@ public sealed class RfSurveyService
                 new { profile.ControlChannelsHz },
                 new { recommendation = "Select or import site ground truth before running RF Sweep.", followUps = new[] { "Select the site again.", "Refresh TR/RR ground truth.", "Confirm the active TR config has control_channels." } });
 
-        var selectedSourceIndexes = request.SourceIndex.HasValue
+        var selectedSourceIndexes = sourceMeasurements.Count > 0
+            ? sourceMeasurements.Select(measurement => measurement.SourceIndex).Distinct().ToList()
+            : request.SourceIndex.HasValue
             ? new[] { request.SourceIndex.Value }
             : profile.SelectedSourceIndexes.Count > 0 ? profile.SelectedSourceIndexes : profile.Sources.Select(s => s.Index).ToList();
         var sources = profile.Sources
@@ -1979,6 +1984,23 @@ public sealed class RfSurveyService
                 "No SDR source is available.",
                 new { profile.Sources },
                 new { recommendation = "Select or add an SDR source before running RF Sweep.", followUps = new[] { "Return to Scope and select SDRs.", "Review the active TR source list.", "Run SDR inventory after sources are selected." } });
+
+        foreach (var measurement in sourceMeasurements)
+        {
+            var source = profile.Sources.FirstOrDefault(candidate => candidate.Index == measurement.SourceIndex);
+            if (source == null || (!string.IsNullOrWhiteSpace(measurement.SourceSerial) &&
+                                   !string.Equals(source.Serial, measurement.SourceSerial, StringComparison.OrdinalIgnoreCase)))
+            {
+                return new ExperimentOutcome(
+                    "failed",
+                    "Each Waterfall result must remain attached to the SDR that measured it.",
+                    "The selected SDR index and hardware serial must still match the current Setup source.",
+                    $"Source {measurement.SourceIndex} for {measurement.ControlChannelHz} Hz no longer matches the saved Waterfall result.",
+                    "The source-bound Waterfall handoff is stale.",
+                    new { sourceMeasurements, profile.Sources },
+                    new { recommendation = "Return to Waterfall, choose the intended SDR, and select Use again for this control channel.", followUps = new[] { "Review the selected source serial.", "Clear the stale Waterfall result.", "Run RF Sweep again after selecting Use on the intended SDR." } });
+            }
+        }
 
         var duration = Math.Clamp(request.DurationSeconds <= 0 ? 5 : request.DurationSeconds, 2, 15);
         var outputDir = Path.Combine(artifactPath, "rf-power-scans", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
@@ -2015,14 +2037,32 @@ public sealed class RfSurveyService
             var rtlIndexesBySerial = sources.Any(source => !IsAirspySource(source))
                 ? await ReadRtlIndexesBySerialAsync(ct)
                 : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var controlChannel in controlChannels)
+            var scanTargets = sourceMeasurements.Count > 0
+                ? sourceMeasurements.Select(measurement => new RfPowerScanTarget(
+                    measurement.ControlChannelHz,
+                    sources.First(source => source.Index == measurement.SourceIndex),
+                    measurement)).ToList()
+                : controlChannels.SelectMany(controlChannel => sources.Select(source => new RfPowerScanTarget(controlChannel, source, null))).ToList();
+            foreach (var target in scanTargets)
             {
-                foreach (var source in sources)
+                var controlChannel = target.ControlChannelHz;
+                var source = target.Source;
+                var measurement = target.Measurement;
+                var measuredSource = measurement == null
+                    ? source
+                    : source with
+                    {
+                        Gain = string.IsNullOrWhiteSpace(measurement.Gain) ? source.Gain : measurement.Gain,
+                        SampleRate = measurement.SampleRateHz is > 0 ? measurement.SampleRateHz.Value : source.SampleRate,
+                        ErrorHz = measurement.ErrorHz ?? source.ErrorHz
+                    };
                 {
-                    var sourceGainSequence = PowerScanGainSequenceForSource(source, gainSequence, gainOverrides);
+                    var sourceGainSequence = measurement != null && !string.IsNullOrWhiteSpace(measurement.Gain)
+                        ? new[] { measuredSource.Gain }
+                        : PowerScanGainSequenceForSource(measuredSource, gainSequence, gainOverrides);
                     foreach (var gain in sourceGainSequence)
                     {
-                        var scanSource = source with { Gain = gain };
+                        var scanSource = measuredSource with { Gain = gain };
                         var isAirspy = IsAirspySource(scanSource);
                         var commandName = isAirspy ? "airspy_rx" : "rtl_sdr";
                         if (!await CommandExistsAsync(commandName, ct))
@@ -2151,6 +2191,7 @@ public sealed class RfSurveyService
             profile.SystemShortName,
             controlChannelHz = firstControlChannel,
             controlChannelsHz = controlChannels,
+            sourceMeasurements,
             gainSequence,
             durationSeconds = duration,
             outputDir,
@@ -2350,8 +2391,7 @@ public sealed class RfSurveyService
         var candidates = new List<RfValidationCandidate>();
         foreach (var seed in powerCandidates)
         {
-            var source = profile.Sources.FirstOrDefault(row => row.Index == seed.SourceIndex);
-            var baseError = source?.ErrorHz ?? seed.ErrorHz;
+            var baseError = seed.ErrorHz;
             foreach (var offset in BuildValidationErrorOffsets(errorDiscovery, errorOffsets, seed.PeakOffsetHz))
             {
                 var errorHz = baseError + offset;
@@ -2486,7 +2526,7 @@ public sealed class RfSurveyService
             candidates[i] = candidate with { P25Status = "running", P25Summary = $"Running P25 probe for {p25Duration} second(s)." };
             await WriteRfValidationProgressAsync(powerOutcome.Evidence, candidates, ct);
             candidate = candidates[i];
-            var candidateProfile = ProfileWithCandidateSource(sweepProfile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.ControlChannelHz);
+            var candidateProfile = ProfileWithCandidateSource(sweepProfile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.SampleRateHz, candidate.ControlChannelHz);
             ExperimentOutcome? probe = null;
             JsonObject? p25Evidence = null;
             var triedDemods = new List<string>();
@@ -2797,6 +2837,49 @@ public sealed class RfSurveyService
         return profileControlChannels.Where(hz => hz > 0).Take(1).ToList();
     }
 
+    private static IReadOnlyList<RfPowerSourceMeasurement> ReadPowerScanSourceMeasurements(JsonElement? parameters)
+    {
+        if (parameters is not { ValueKind: JsonValueKind.Object } root ||
+            !root.TryGetProperty("sourceMeasurements", out var values) ||
+            values.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var measurements = new List<RfPowerSourceMeasurement>();
+        foreach (var row in values.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object ||
+                !row.TryGetProperty("sourceIndex", out var sourceIndexElement) ||
+                !TryReadInt(sourceIndexElement, out var sourceIndex) || sourceIndex < 0)
+                continue;
+            var controlChannelHz = JsonLong(row, "controlChannelHz");
+            if (controlChannelHz <= 0)
+                continue;
+            var sampleRateHz = row.TryGetProperty("sampleRateHz", out var sampleRateElement) &&
+                               TryReadInt(sampleRateElement, out var parsedSampleRate) && parsedSampleRate > 0
+                ? parsedSampleRate
+                : (int?)null;
+            var errorHz = row.TryGetProperty("errorHz", out var errorElement) && TryReadInt(errorElement, out var parsedError)
+                ? parsedError
+                : (int?)null;
+            measurements.Add(new RfPowerSourceMeasurement(
+                sourceIndex,
+                JsonString(row, "sourceSerial").Trim(),
+                controlChannelHz,
+                JsonString(row, "gain").Trim(),
+                sampleRateHz,
+                errorHz,
+                JsonNullableDouble(row, "snrDb"),
+                JsonNullableDouble(row, "confidence")));
+        }
+
+        return measurements
+            .GroupBy(value => new { value.SourceIndex, Serial = value.SourceSerial.ToUpperInvariant(), value.ControlChannelHz })
+            .Select(group => group.Last())
+            .OrderBy(value => value.SourceIndex)
+            .ThenBy(value => value.ControlChannelHz)
+            .ToList();
+    }
+
     private static string ReadStringParameter(JsonElement? parameters, string name)
     {
         if (parameters is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(name, out var element))
@@ -3038,6 +3121,7 @@ public sealed class RfSurveyService
                 Device = JsonString(row, "device"),
                 ControlChannelHz = controlChannel,
                 Gain = gain,
+                SampleRateHz = JsonInt(row, "sampleRate"),
                 ErrorHz = JsonInt(row, "errorHz"),
                 RfStatus = JsonString(row, "status"),
                 RfIssue = JsonString(row, "issue"),
@@ -3262,7 +3346,7 @@ public sealed class RfSurveyService
         return channels.Where(channel => channel > 0).Distinct().ToList();
     }
 
-    private static RfSurveyProfileDto ProfileWithCandidateSource(RfSurveyProfileDto profile, int sourceIndex, string gain, int errorHz, long? controlChannelHz = null)
+    private static RfSurveyProfileDto ProfileWithCandidateSource(RfSurveyProfileDto profile, int sourceIndex, string gain, int errorHz, int? sampleRateHz = null, long? controlChannelHz = null)
     {
         var scoped = profile;
         var candidateSystem = controlChannelHz.HasValue ? SystemForControlChannel(profile, controlChannelHz.Value) : null;
@@ -3288,10 +3372,12 @@ public sealed class RfSurveyService
                 {
                     if (source.Index != sourceIndex)
                         return source;
-                    var centerHz = CenterForCandidateControlChannels(candidateControlChannels, source.SampleRate);
+                    var candidateSampleRate = sampleRateHz is > 0 ? sampleRateHz.Value : source.SampleRate;
+                    var centerHz = CenterForCandidateControlChannels(candidateControlChannels, candidateSampleRate);
                     return source with
                     {
                         CenterHz = centerHz > 0 ? centerHz : source.CenterHz,
+                        SampleRate = candidateSampleRate,
                         Gain = gain,
                         ErrorHz = errorHz
                     };
@@ -3888,6 +3974,7 @@ public sealed class RfSurveyService
         public string SiteLabel { get; init; } = string.Empty;
         public long ControlChannelHz { get; init; }
         public string Gain { get; init; } = string.Empty;
+        public int SampleRateHz { get; init; }
         public int ErrorHz { get; init; }
         public int ErrorOffsetHz { get; init; }
         public string RfStatus { get; init; } = string.Empty;
@@ -4075,6 +4162,21 @@ public sealed class RfSurveyService
         string Sparkline,
         double? StrongestPeakDb,
         double? StrongestPeakOffsetHz);
+
+    private sealed record RfPowerSourceMeasurement(
+        int SourceIndex,
+        string SourceSerial,
+        long ControlChannelHz,
+        string Gain,
+        int? SampleRateHz,
+        int? ErrorHz,
+        double? SnrDb,
+        double? Confidence);
+
+    private sealed record RfPowerScanTarget(
+        long ControlChannelHz,
+        RfSurveySourceDto Source,
+        RfPowerSourceMeasurement? Measurement);
 
     private static string SummarizeRfPowerBlocker(RfPowerScanRow row)
     {
@@ -5301,7 +5403,7 @@ public sealed class RfSurveyService
                     await InstallTrFileAsync(candidatePath, livePath, ct);
                     await RunServiceHelperAsync("restart-tr", ct);
 
-                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.ControlChannelHz);
+                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.SampleRateHz, candidate.ControlChannelHz);
                     var start = DateTimeOffset.UtcNow;
                     await Task.Delay(TimeSpan.FromSeconds(durationSeconds), ct);
                     var end = DateTimeOffset.UtcNow;
@@ -5399,7 +5501,7 @@ public sealed class RfSurveyService
                     await InstallTrFileAsync(candidatePath, livePath, ct);
                     await RunServiceHelperAsync("restart-tr", ct);
 
-                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.ControlChannelHz);
+                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.SampleRateHz, candidate.ControlChannelHz);
                     var start = DateTimeOffset.UtcNow;
                     await Task.Delay(TimeSpan.FromSeconds(durationSeconds), ct);
                     var end = DateTimeOffset.UtcNow;

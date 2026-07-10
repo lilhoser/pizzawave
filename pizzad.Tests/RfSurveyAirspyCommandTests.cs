@@ -147,6 +147,31 @@ public sealed class RfSurveyAirspyCommandTests
     }
 
     [Fact]
+    public void BuildRfValidationPowerParameters_PreservesSourceBoundMeasurements()
+    {
+        using var doc = JsonDocument.Parse("""{"sourceMeasurements":[{"sourceIndex":0,"sourceSerial":"A0","controlChannelHz":773000000,"gain":"15","sampleRateHz":6000000,"errorHz":1250},{"sourceIndex":1,"sourceSerial":"B1","controlChannelHz":769000000,"gain":"12","sampleRateHz":3000000,"errorHz":-500}]}""");
+
+        var parameters = InvokeBuildRfValidationPowerParameters(doc.RootElement);
+
+        Assert.Equal(2, parameters.GetProperty("sourceMeasurements").GetArrayLength());
+        Assert.Equal("B1", parameters.GetProperty("sourceMeasurements")[1].GetProperty("sourceSerial").GetString());
+        Assert.Equal(-500, parameters.GetProperty("sourceMeasurements")[1].GetProperty("errorHz").GetInt32());
+    }
+
+    [Fact]
+    public void ReadPowerScanSourceMeasurements_KeepsSameFrequencyForDifferentSdrs()
+    {
+        using var doc = JsonDocument.Parse("""{"sourceMeasurements":[{"sourceIndex":0,"sourceSerial":"A0","controlChannelHz":773000000,"gain":"15","sampleRateHz":6000000,"errorHz":1250},{"sourceIndex":1,"sourceSerial":"B1","controlChannelHz":773000000,"gain":"12","sampleRateHz":3000000,"errorHz":-500}]}""");
+
+        var measurements = InvokeReadPowerScanSourceMeasurements(doc.RootElement);
+
+        Assert.Equal(2, measurements.Count);
+        Assert.Equal([0, 1], measurements.Select(row => (int)GetProperty(row, "SourceIndex")).ToArray());
+        Assert.Equal([1250, -500], measurements.Select(row => (int?)GetProperty(row, "ErrorHz")).ToArray());
+        Assert.Equal([6_000_000, 3_000_000], measurements.Select(row => (int?)GetProperty(row, "SampleRateHz")).ToArray());
+    }
+
+    [Fact]
     public void BuildRfValidationPowerParameters_DefaultsToAllControlChannels()
     {
         using var doc = JsonDocument.Parse("""{"gainSequence":["20"]}""");
@@ -213,6 +238,19 @@ public sealed class RfSurveyAirspyCommandTests
         return (IReadOnlyList<long>)(method.Invoke(null, [parameters, requestedControlChannel, profileControlChannels])
             ?? throw new InvalidOperationException("ReadPowerScanControlChannels returned null."));
     }
+
+    private static IReadOnlyList<object> InvokeReadPowerScanSourceMeasurements(JsonElement parameters)
+    {
+        var method = typeof(RfSurveyService).GetMethod("ReadPowerScanSourceMeasurements", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "ReadPowerScanSourceMeasurements");
+        var values = method.Invoke(null, [parameters]) as System.Collections.IEnumerable
+            ?? throw new InvalidOperationException("ReadPowerScanSourceMeasurements returned null.");
+        return values.Cast<object>().ToList();
+    }
+
+    private static object GetProperty(object value, string name) =>
+        value.GetType().GetProperty(name)?.GetValue(value)
+        ?? throw new MissingMemberException(value.GetType().FullName, name);
 
     private static RfSurveySourceDto AirspySource(string device, string serial) =>
         new(
