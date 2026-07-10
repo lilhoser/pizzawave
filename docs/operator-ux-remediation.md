@@ -9,13 +9,14 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 milestone 5A RF Validation stages and terminology
-  deployed and verified; awaiting operator inspection
+- Current milestone: Package 5 RF Validation clarity follow-up implemented and
+  tested; deployment withheld during unresolved live data-reset ingest pause
 - Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `6b18b1a`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: obtain operator acceptance of milestone 5A, then implement the
-  server-owned source-planning projection as milestone 5B.
+- Next action: confirm the live data-reset/ingest-pause state is safe, then
+  deploy commit `b38269e` and perform read-only live verification before the
+  server-owned source-planning projection begins.
 
 ## Working Rules
 
@@ -504,3 +505,10 @@ Status: pending
   preparation/source/call/verdict summaries, standardized correction and
   signal-offset labels, Source Coverage routing into Apply & Resume, remembered
   Source Coverage selection on return, and no browser console errors.
+- 2026-07-10: The RF Validation clarity follow-up passed the 404-case backend
+  suite, including applied-revision software-check lifecycle and non-mutating
+  check coverage, and passed the production frontend build. The implementation
+  is committed as `b38269e` but was not deployed because preflight found live
+  ingest still paused for a data-only reset, with no active job record and 159
+  calls dropped during the pause. The three persisted pending Setup changes
+  remained present; no RF experiment, apply, reset, or live mutation was run.
