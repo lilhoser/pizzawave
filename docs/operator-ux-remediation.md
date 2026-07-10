@@ -10,12 +10,12 @@ work so that progress does not depend on conversation history.
 
 - Active package: 5 - Setup UX
 - Current milestone: Package 5 operator interview in progress; RF validation
-  stage and terminology design accepted before milestone 5A implementation
+  and server-owned source-planning designs accepted before implementation
 - Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: review the server-owned source-planning projection with the
-  operator before changing behavior.
+- Next action: review branched RF-path topology and source-linked SDR hardware
+  with the operator before changing behavior.
 
 ## Working Rules
 
@@ -128,6 +128,15 @@ Accepted design:
   signal offset` is the observed displacement in spectrum evidence. `Correction
   change` is a trial value relative to the saved correction. PPM is derived
   technical information rather than a separate editable authority.
+- Source planning belongs to RF Validation's Source Coverage stage. The server
+  returns one recommended plan plus valid alternatives, with exact source
+  assignments, centers, usable windows, covered and missed frequencies,
+  evidence, assumptions, warnings, and a projection version tied to Setup.
+  The browser sends operator intent and optional assignment constraints but
+  does not calculate fit or tuning windows. Selecting a plan persists the
+  server projection for review; stale projections are rejected and regenerated.
+  Apply & Resume retains only final configuration comparison, Discard, and the
+  guarded apply action.
 
 - [ ] Clarify RF validation stages and absolute error terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -243,6 +252,11 @@ Status: pending
   Proof, and Verdict stages while retaining existing controls within those
   stages. Operator-facing tuning terms distinguish saved frequency correction,
   measured signal offset, and trial correction change; PPM is derived only.
+- 2026-07-10: Package 5 source planning is a server-owned, versioned projection
+  in RF Validation's Source Coverage stage. The server owns recommendations,
+  alternatives, assignments, tuning windows, coverage, evidence, assumptions,
+  and warnings; the browser supplies operator intent and constraints. Apply &
+  Resume is limited to final comparison, discard, and guarded application.
 
 ## Deployment Log
 
