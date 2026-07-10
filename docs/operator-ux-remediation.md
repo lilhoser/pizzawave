@@ -8,13 +8,13 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 4 - System Workspace
-- Current milestone: Package 4 deployed and ready for operator inspection
+- Active package: 5 - Setup UX
+- Current milestone: Package 4 closed and operator-accepted; Package 5 ready for discovery
 - Working branch: `codex/operator-ux-system-workspace`
 - Last deployed commit: `54c8fe3`
-- Operator verification: Packages 1, 2, and 3 accepted
-- Next action: operator inspection and acceptance of the deployed Package 4
-  System workspace.
+- Operator verification: Packages 1, 2, 3, and 4 accepted
+- Next action: begin fresh Package 5 repository discovery and operator
+  interview before changing the Setup UX architecture.
 
 ## Working Rules
 
@@ -82,14 +82,14 @@ Status: complete and operator-accepted
 
 ### 4. System Workspace
 
-Status: deployed; awaiting operator acceptance
+Status: complete and operator-accepted
 
 - [x] Load each System tab independently.
 - [x] Make Refresh contextual to the visible tab.
 - [x] Surface only job controls supported by each job.
 - [x] Reorganize System navigation around operator tasks.
 - [x] Deploy and verify.
-- [ ] Operator acceptance.
+- [x] Operator acceptance.
 
 ### 5. Setup UX
 
@@ -202,6 +202,8 @@ Status: pending
   status. Workflow-specific cancellation remains in the owning workspace, and
   completed-job cleanup remains the Data maintenance action rather than a
   per-row Delete control.
+- 2026-07-09: Operator accepted Package 4 after live inspection of the
+  task-based System workspace.
 
 ## Deployment Log
 
@@ -342,3 +344,5 @@ Status: pending
   no inferred or per-row deletion controls on terminal jobs; and no browser
   console errors. The live jobs API returned the supported-operations contract
   on all 23 rows and no operations on the 23 terminal jobs.
+- 2026-07-09: Operator accepted Package 4 and authorized its closure. Package 5
+  remains unstarted at its discovery and operator-interview boundary.
