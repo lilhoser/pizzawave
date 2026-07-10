@@ -8,13 +8,13 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 3 - Loading And Status
-- Current milestone: 3B deployed and live-verified; awaiting operator inspection
+- Active package: 4 - System Workspace
+- Current milestone: Package 3 closed and operator-accepted; Package 4 ready for discovery
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `4263348`
-- Operator verification: Packages 1, 2, and 3A accepted
-- Next action: operator inspection and acceptance of 3B before closing Package
-  3 and beginning Package 4.
+- Operator verification: Packages 1, 2, and 3 accepted
+- Next action: begin fresh Package 4 repository discovery and operator
+  interview before changing the System workspace architecture.
 
 ## Working Rules
 
@@ -66,7 +66,7 @@ Status: complete
 
 ### 3. Loading And Status
 
-Status: in progress
+Status: complete and operator-accepted
 
 - [x] 3A. Give Dashboard, call-category pages, Setup, and System a shared
   retained-data refresh contract; separate monitoring state; scope automatic
@@ -78,7 +78,7 @@ Status: in progress
 - [x] Keep last-good data visible during refresh.
 - [x] Debounce search and stop unrelated full-page refreshes.
 - [x] Separate API connectivity, TR monitoring state, and view-fetch failures.
-- [ ] Deploy, verify, and obtain operator acceptance.
+- [x] Deploy, verify, and obtain operator acceptance.
 
 ### 4. System Workspace
 
@@ -188,6 +188,8 @@ Status: pending
   retry temporary initial failures, and never change editable selections or
   profile drafts. Refresh controls remain consolidated: one Settings reload,
   one System refresh, and panel-local Retry only while a load is failed.
+- 2026-07-09: Operator accepted milestone 3B and closed Package 3 after live
+  inspection of the consolidated Settings and System refresh behavior.
 
 ## Deployment Log
 
@@ -308,3 +310,5 @@ Status: pending
   Profiles reload control, and exactly one persistent System Refresh control on
   Services, Backup, TR config restore, Queue, and Metrics/Bandwidth. Monitoring
   remained active and no page or panel error notice appeared.
+- 2026-07-09: Operator accepted 3B and authorized closure of Package 3. Package
+  4 remains unstarted at its discovery boundary.
