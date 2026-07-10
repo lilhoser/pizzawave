@@ -91,17 +91,12 @@ content, or one-off test outputs. The checked-in web assets under
 
 ## Development Deploy Helpers
 
-Use the web-only deploy for frontend-only changes:
-
-```powershell
-.\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
-```
-
-This skips `npm ci`, copies only `wwwroot`, and does not restart `pizzad`.
-Pass `-NpmCi` when `package-lock.json` changed.
-
-Use the full tar deploy when backend/runtime files changed:
+Use the automatic development deploy helper:
 
 ```powershell
 .\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
+
+It compares local hashes with the live manifest and automatically selects a
+health-only check, a no-restart web deployment, or a backend deployment. Use
+`deploy_pizzad_web.ps1` only as an explicit frontend-only override.

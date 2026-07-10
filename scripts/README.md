@@ -17,15 +17,16 @@ This folder contains operational helpers for PizzaWave deployments.
 | `tr_tune.sh` | Guided trunk-recorder/RTL-SDR tuning helper |
 | `prime_tr_health.py` | One-time import helper for trunk-recorder health history |
 | `deploy_pizzad_web.ps1` | Fast frontend-only deploy helper; rebuilds and copies `wwwroot` without restarting `pizzad` |
-| `deploy_pizzad_tar.ps1` | Full/direct development deploy helper with optional `-WebOnly`, `-BackendOnly`, `-SkipNpmCi`, `-NoRestart`, and health polling |
+| `deploy_pizzad_tar.ps1` | Automatic development deploy helper with hashed build reuse, live artifact comparison, per-stage timing, and health polling |
 
 ## Notes
 
 The preferred release path is the `.deb` package. Direct tar deployment is for
 development iteration only.
 
-For UI-only iteration, prefer `deploy_pizzad_web.ps1`. Use the full tar deploy
-when backend/runtime files changed.
+The tar helper automatically selects no-op, web-only, or backend deployment by
+comparing source/output hashes with the live deployment manifest. The web-only
+wrapper remains available when an explicit frontend-only operation is useful.
 
 `pizzad` owns ongoing trunk-recorder health collection. Import helpers are for
 one-time priming or controlled maintenance tasks.

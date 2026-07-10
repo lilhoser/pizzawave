@@ -33,23 +33,23 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 
 ## Deployment Helpers
 
-- For UI-only changes under `pizzad/web` or `pizzad/wwwroot`, use the web-only
-  deploy helper. It rebuilds the Vite app, copies only `wwwroot`, does not
-  publish the backend, and does not restart `pizzad`:
-
-```powershell
-.\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
-```
-
-- Use the full tar deploy only when backend/runtime/package files changed:
+- Use the automatic direct-deploy helper for development deployments:
 
 ```powershell
 .\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
-- The tar helper also supports `-WebOnly`, `-BackendOnly`, `-SkipNpmCi`,
-  `-NoRestart`, and `-HealthTimeoutSeconds`. Prefer `-SkipNpmCi` for iterative
-  web deploys unless `package-lock.json` changed.
+- The helper hashes deployable inputs and compares them with the live manifest.
+  It performs only a health check when nothing changed, automatically uses a
+  no-restart web-only deployment for frontend changes, and publishes/restarts
+  only for backend changes. Do not manually choose a full deployment for a UI
+  change.
+- `-WebOnly` and `-BackendOnly` remain explicit overrides. `-ForceBuild`
+  invalidates local build caches; `-ForceDeploy` repeats the smallest valid
+  deployment. Use `-BackendOnly -ForceDeploy` only when a full reinstall is
+  genuinely required.
+- The helper prints per-stage timing and must fail on any build, archive,
+  upload, remote-install, or health-check error.
 - Do not restart `trunk-recorder` as part of deploy verification unless the user
   explicitly asks. Verify `pizzad` health with `/api/v1/health`.
 

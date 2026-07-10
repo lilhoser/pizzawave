@@ -63,10 +63,9 @@ dotnet build pizzawave.sln --configuration Release
 ## Deploy Development Build
 
 ```powershell
-.\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
 .\scripts\deploy_pizzad_tar.ps1 -HostName lilhoser@192.168.1.173 -Rid linux-x64
 .\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
-Use `deploy_pizzad_web.ps1` for frontend-only changes; use the tar deploy when
-backend/runtime files changed.
+The tar helper automatically selects no-op, frontend-only, or backend
+deployment. `deploy_pizzad_web.ps1` remains an explicit frontend-only override.

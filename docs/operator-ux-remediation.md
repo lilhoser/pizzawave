@@ -191,3 +191,11 @@ Status: pending
   Next, Last, and First completed repeatedly without `Failed to fetch`; the
   catalog endpoint remained fast, and cached status-summary requests dropped
   from multi-second waits to millisecond responses after warm-up.
+- 2026-07-09: The development deploy helper was converted to hash-based
+  automatic selection with fail-closed native commands and per-stage timing.
+  Live RPI verification measured 3.1 seconds for a no-change health check, 6.7
+  seconds for a cached web-only install without restarting `pizzad`, 62.9
+  seconds for a cached full backend reinstall, and 74.4 seconds for a forced
+  clean ARM64 backend build and reinstall, compared with the prior 202-261
+  second full path. Checked-in web source provenance and incremental TypeScript
+  metadata allow fresh worktrees to reuse verified generated assets.
