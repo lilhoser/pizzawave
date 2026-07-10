@@ -576,3 +576,11 @@ Status: pending
   `e95b8867...`, and pending categories Systems/Sites, Control Channels, and RF
   Path remained unchanged. `/api/v1/health` was degraded only because live
   Trunk Recorder activity was stale shortly after the pizzad restart.
+- 2026-07-10: Spectrum/waterfall alignment fix `c5dc837` gives the waterfall
+  the spectrum plot's same normalized left label margin and right inset instead
+  of stretching frequency bins across the full canvas. The production web build
+  passed and the automatic helper deployed it web-only in 5.9 seconds without
+  restarting PizzaWave or Trunk Recorder. Retained live evidence showed the
+  774.785 MHz spectrum spike aligned with its waterfall column, with no browser
+  console errors. Health was `ok`; desired version `1783690411070`, applied
+  hash `e95b8867...`, systems, SDR sources, and pending categories were unchanged.
