@@ -691,9 +691,7 @@ export type RfSurveyPathProfile = {
   sdrNotes: string;
   observations: string;
   chain: RfSurveyRfChainItem[];
-  branches: RfSurveyRfBranch[];
 };
-export type RfSurveyRfBranch = { id: string; label: string; chain: RfSurveyRfChainItem[]; sdrSerial: string; sdrDevice: string; sdrIndex?: number | null; unused: boolean };
 export type RfSurveySource = { index: number; device: string; serial: string; sdrType: string; centerHz: number; sampleRate: number; errorHz: number; gain: string };
 export type RfSurveyDevice = { index: number; serial: string; label: string; sdrType: string; usbLine: string; warning: string; sampleRateOptions?: number[]; defaultSampleRate?: number };
 export type RfSurveySystem = { shortName: string; siteLabel: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; radioReferenceSid?: string; talkgroupSystemShortName?: string };

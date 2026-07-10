@@ -189,7 +189,6 @@ public sealed class SiteSetupService
                 throw new SiteSetupVersionConflictException(request.ExpectedVersion, before.DesiredVersion);
 
             var next = ApplyPatch(before, request.Patch);
-            ValidateRfPath(next.RfPath);
             next.DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             next.UpdatedAtUtc = DateTime.UtcNow;
             next.LastAppliedAtUtc = before.LastAppliedAtUtc;
@@ -810,16 +809,6 @@ public sealed class SiteSetupService
                 item.Passband
             }.Select(value => value?.Trim() ?? ""))));
         var chain = ChainSummary(path.Chain);
-        var branches = string.Join("~", (path.Branches ?? []).Select(branch => string.Join("^", new[]
-        {
-            branch.Id?.Trim() ?? "",
-            branch.Label?.Trim() ?? "",
-            branch.SdrSerial?.Trim() ?? "",
-            branch.SdrDevice?.Trim() ?? "",
-            branch.SdrIndex?.ToString() ?? "",
-            branch.Unused.ToString(),
-            ChainSummary(branch.Chain)
-        })));
         return string.Join("|", new[]
         {
             path.Antenna,
@@ -835,27 +824,8 @@ public sealed class SiteSetupService
             path.Filters,
             path.SdrNotes,
             path.Observations,
-            chain,
-            branches
+            chain
         }.Select(value => value?.Trim() ?? ""));
-    }
-
-    private static void ValidateRfPath(RfSurveyPathProfileDto? path)
-    {
-        if (path?.Branches == null || path.Branches.Count == 0)
-            return;
-        var duplicateId = path.Branches.Where(branch => !string.IsNullOrWhiteSpace(branch.Id))
-            .GroupBy(branch => branch.Id.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1);
-        if (duplicateId != null)
-            throw new InvalidOperationException($"RF path branch ID '{duplicateId.Key}' is duplicated.");
-        var duplicateSerial = path.Branches.Where(branch => !branch.Unused && !string.IsNullOrWhiteSpace(branch.SdrSerial))
-            .GroupBy(branch => branch.SdrSerial.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1);
-        if (duplicateSerial != null)
-            throw new InvalidOperationException($"SDR serial '{duplicateSerial.Key}' cannot terminate more than one RF path branch.");
-        var duplicateIndex = path.Branches.Where(branch => !branch.Unused && string.IsNullOrWhiteSpace(branch.SdrSerial) && branch.SdrIndex.HasValue)
-            .GroupBy(branch => branch.SdrIndex!.Value).FirstOrDefault(group => group.Count() > 1);
-        if (duplicateIndex != null)
-            throw new InvalidOperationException($"SDR source {duplicateIndex.Key} cannot terminate more than one RF path branch.");
     }
 
     private static bool HasRfPathDetails(RfSurveyPathProfileDto? path) =>

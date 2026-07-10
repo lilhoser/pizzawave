@@ -1288,17 +1288,7 @@ public sealed record RfSurveyPathProfileDto
     public string SdrNotes { get; init; } = string.Empty;
     public string Observations { get; init; } = string.Empty;
     public IReadOnlyList<RfSurveyRfChainItemDto> Chain { get; init; } = [];
-    public IReadOnlyList<RfSurveyRfBranchDto> Branches { get; init; } = [];
 }
-
-public sealed record RfSurveyRfBranchDto(
-    string Id = "",
-    string Label = "",
-    IReadOnlyList<RfSurveyRfChainItemDto>? Chain = null,
-    string SdrSerial = "",
-    string SdrDevice = "",
-    int? SdrIndex = null,
-    bool Unused = false);
 
 public sealed record RfSurveySystemDto(
     string ShortName,

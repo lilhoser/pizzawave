@@ -641,8 +641,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #9faab5;
   font-size: 11px;
 }
-.rf-source-projection-list,
-.rf-path-branches {
+.rf-source-projection-list {
   display: grid;
   gap: 8px;
 }
@@ -667,26 +666,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .rf-source-projection-card span,
 .rf-source-projection-card small { font-size: 11px; color: #aeb9c3; }
 .rf-source-projection-windows { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-.rf-path-branch {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid #38414a;
-  border-left: 3px solid #4c8cbd;
-  border-radius: 7px;
-  background: #171b20;
-}
-.rf-path-branch-head {
-  display: grid;
-  grid-template-columns: minmax(150px, .8fr) minmax(210px, 1.2fr) auto auto;
-  gap: 8px;
-  align-items: end;
-}
-.rf-path-branch-head > label:not(.compact-toggle) {
-  display: grid;
-  gap: 3px;
-}
-.rf-path-branch-head > label > span { color: #9faab5; font-size: 11px; }
 .rf-history-toolbar,
 .rf-history-filters,
 .rf-history-annotation {

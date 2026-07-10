@@ -7039,12 +7039,6 @@ public sealed class RfSurveyService
 
     private static string SummarizeRfPath(RfSurveyPathProfileDto path)
     {
-        if (path.Branches.Count > 0)
-        {
-            var active = path.Branches.Count(branch => !branch.Unused);
-            var linked = path.Branches.Count(branch => !branch.Unused && (!string.IsNullOrWhiteSpace(branch.SdrSerial) || branch.SdrIndex.HasValue));
-            return $"one upstream signal / {active} branch(es) / {linked} SDR endpoint(s)";
-        }
         if (path.Chain.Count > 0)
         {
             var antenna = string.IsNullOrWhiteSpace(path.AntennaType) ? "antenna" : path.AntennaType.Trim();
@@ -7086,13 +7080,6 @@ public sealed class RfSurveyService
             if (!string.IsNullOrWhiteSpace(item.PortCount))
                 return true;
         }
-        if (path.Branches.Any(branch =>
-                !string.IsNullOrWhiteSpace(branch.Label) ||
-                !string.IsNullOrWhiteSpace(branch.SdrSerial) ||
-                branch.SdrIndex.HasValue ||
-                branch.Unused ||
-                (branch.Chain?.Count ?? 0) > 0))
-            return true;
         return false;
     }
 

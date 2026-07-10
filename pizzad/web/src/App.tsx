@@ -1590,10 +1590,17 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     }
   }
   return <div className="site-setup-form site-setup-hardware">
+    <div className="site-setup-hardware-inventory">
+      <div className="setup-job-head">
+        <div><strong>SDR hardware</strong><small>Detect connected receivers before documenting or validating the RF path.</small></div>
+        <button type="button" className="primary" disabled={sdrBusy} onClick={() => void runSdrInventory()}>{sdrBusy ? "Running..." : sdrDetection ? "Rerun SDR Inventory" : "Run SDR Inventory"}</button>
+      </div>
+      {sdrMessage && <span className={sdrMessage.toLowerCase().includes("fail") || sdrMessage.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{sdrMessage}</span>}
+      {sdrDetection && <SetupSdrInventorySummary detection={sdrDetection} />}
+    </div>
     <RfPathStep
       path={rfPath}
       setPath={updateRfPath}
-      sources={siteSetupSources(setup)}
       onTouched={() => undefined}
       onLoadPrevious={async () => {
         const next = normalizeSetupRfPath(setup.desired.rfPath);
@@ -1603,28 +1610,12 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
       headerMode="actions"
     />
     {statusFor("rfPath")}
-    <div className="site-setup-hardware-inventory">
-      <div className="rf-primary-actions">
-        <button type="button" disabled={sdrBusy} onClick={() => void runSdrInventory()}>{sdrBusy ? "Running..." : sdrDetection ? "Rerun SDR Inventory" : "Run SDR Inventory"}</button>
-        {sdrMessage && <span className={sdrMessage.toLowerCase().includes("fail") || sdrMessage.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{sdrMessage}</span>}
-      </div>
-      {sdrDetection && <SetupSdrInventorySummary detection={sdrDetection} />}
-    </div>
   </div>;
 }
 
 function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathProfile {
   const value = path ?? ({} as RfSurveyPathProfile);
-  const legacyChain = (value.chain ?? []).map(normalizeRfChainItem);
-  const branches = (value.branches ?? []).map(branch => ({
-    id: branch.id || createClientId(),
-    label: branch.label || "",
-    chain: (branch.chain ?? []).map(normalizeRfChainItem),
-    sdrSerial: branch.sdrSerial || "",
-    sdrDevice: branch.sdrDevice || "",
-    sdrIndex: branch.sdrIndex ?? null,
-    unused: branch.unused === true
-  }));
+  const chain = (value.chain ?? []).map(normalizeRfChainItem);
   return {
     antenna: value.antenna ?? "",
     antennaType: value.antennaType ?? "",
@@ -1639,8 +1630,7 @@ function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathPr
     filters: value.filters ?? "",
     sdrNotes: value.sdrNotes ?? "",
     observations: value.observations ?? "",
-    chain: branches.length ? legacyChain : [],
-    branches: branches.length ? branches : [{ id: createClientId(), label: "Primary branch", chain: legacyChain, sdrSerial: "", sdrDevice: "", sdrIndex: null, unused: false }]
+    chain: chain.length ? chain : [newRfChainItem()]
   };
 }
 
@@ -4878,16 +4868,14 @@ const emptyRfPath = (): RfSurveyPathProfile => ({
   chain: [
     { type: "antenna", label: "Yagi", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorOutType: "unknown", connectorOutGender: "unknown", gainDb: "", groundPlane: "unknown" },
     { type: "sdr", label: "Configured SDR", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorInType: "unknown", connectorInGender: "unknown" }
-  ],
-  branches: []
+  ]
 });
 
 function normalizeRfPathProfile(value?: Partial<RfSurveyPathProfile> | null): RfSurveyPathProfile {
   return {
     ...emptyRfPath(),
     ...(value ?? {}),
-    chain: value?.chain?.length ? value.chain : emptyRfPath().chain,
-    branches: value?.branches ?? []
+    chain: value?.chain?.length ? value.chain : emptyRfPath().chain
   };
 }
 
@@ -4983,24 +4971,19 @@ function sourceCoversFrequency(source: Pick<RfSurveySource, "centerHz" | "sample
   return frequencyHz >= source.centerHz - rate / 2 && frequencyHz <= source.centerHz + rate / 2;
 }
 
-function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full", sources = [] }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions"; sources?: RfSurveySource[] }) {
+function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full" }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions" }) {
   const updateChain = (index: number, patch: Partial<RfSurveyPathProfile["chain"][number]>) => { onTouched(); setPath(current => ({ ...current, chain: current.chain.map((item, i) => i === index ? { ...item, ...patch } : item) })); };
   const updatePath = (patch: Partial<RfSurveyPathProfile>) => { onTouched(); setPath(current => ({ ...current, ...patch })); };
-  const updateBranch = (id: string, patch: Partial<RfSurveyPathProfile["branches"][number]>) => { onTouched(); setPath(current => ({ ...current, branches: current.branches.map(branch => branch.id === id ? { ...branch, ...patch } : branch) })); };
-  const addBranch = () => { onTouched(); setPath(current => ({ ...current, branches: [...current.branches, { id: createClientId(), label: `Branch ${current.branches.length + 1}`, chain: [], sdrSerial: "", sdrDevice: "", sdrIndex: null, unused: false }] })); };
-  const linkedKeys = new Set(path.branches.filter(branch => !branch.unused).map(branch => branch.sdrSerial || (branch.sdrIndex == null ? "" : `index:${branch.sdrIndex}`)).filter(Boolean));
+  const addItem = () => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); };
   return <div className="rf-step-stack">
     {headerMode === "full" && <div className="rf-chain-head">
-      <div><strong>RF path tree</strong><span>One upstream antenna signal may split into ordered branches, each ending at one detected SDR.</span></div>
+      <div><strong>Documented RF hardware path</strong><span>List the physical hardware in signal order from antenna to receiver.</span></div>
       <div className="rf-primary-actions">
         <button disabled={busy === "load-rf-path"} onClick={() => void onLoadPrevious()}>{busy === "load-rf-path" ? "Loading..." : "Load Previous"}</button>
-        <button onClick={addBranch}>Add branch</button>
+        <button onClick={addItem}>Add hardware item</button>
       </div>
     </div>}
-    {headerMode === "actions" && <div className="rf-primary-actions">
-      <button type="button" onClick={addBranch}>Add branch</button>
-    </div>}
-    {headerMode === "full" && <div className="setup-note">Document physical order here. RF Validation separately proves control channels, tuning, gain, and frequency correction.</div>}
+    {headerMode === "actions" && <div className="rf-chain-head"><div><strong>Documented RF hardware path</strong><span>List the physical hardware in signal order from antenna to receiver.</span></div><button type="button" onClick={addItem}>Add hardware item</button></div>}
     <div className="rf-path-notes-grid">
       <label>
         <span>Position notes</span>
@@ -5021,45 +5004,10 @@ function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode
         />
       </label>
     </div>
-    <details className="rf-technical-details" open={path.chain.length > 0}>
-      <summary>Shared upstream components ({path.chain.length})</summary>
-      <div className="setup-note">Components before the signal splits into branches.</div>
-      <div className="rf-primary-actions"><button type="button" onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add upstream component</button></div>
-      <div className="rf-chain-list">{path.chain.map((item, index) => <RfChainItemEditor item={normalizeRfChainItem(item)} index={index} key={index} update={patch => updateChain(index, patch)} remove={() => { onTouched(); setPath(current => ({ ...current, chain: current.chain.filter((_, i) => i !== index) })); }} />)}</div>
-    </details>
-    <div className="rf-path-branches">
-      {path.branches.map((branch, branchIndex) => {
-        const endpointKey = branch.sdrSerial || (branch.sdrIndex == null ? "" : `index:${branch.sdrIndex}`);
-        return <section className="rf-path-branch" key={branch.id}>
-          <div className="rf-path-branch-head">
-            <label><span>Branch name</span><input value={branch.label} onChange={event => updateBranch(branch.id, { label: event.target.value })} placeholder={`Branch ${branchIndex + 1}`} /></label>
-            <label><span>SDR endpoint</span><select disabled={branch.unused} value={endpointKey} onChange={event => {
-              const source = sources.find(row => (rfSourceStableSerial(row) || `index:${row.index}`) === event.target.value);
-              updateBranch(branch.id, source ? { sdrSerial: rfSourceStableSerial(source), sdrDevice: source.device || source.sdrType, sdrIndex: source.index, unused: false } : { sdrSerial: "", sdrDevice: "", sdrIndex: null });
-            }}><option value="">Not linked</option>{sources.map(source => {
-              const serial = rfSourceStableSerial(source);
-              const key = serial || `index:${source.index}`;
-              const usedElsewhere = linkedKeys.has(key) && key !== endpointKey;
-              return <option key={key} value={key} disabled={usedElsewhere}>{source.sdrType || "SDR"} {serial || `Source ${source.index}`}{usedElsewhere ? " (already linked)" : ""}</option>;
-            })}</select></label>
-            <label className="compact-toggle"><input type="checkbox" checked={branch.unused} onChange={event => updateBranch(branch.id, { unused: event.currentTarget.checked, sdrSerial: event.currentTarget.checked ? "" : branch.sdrSerial, sdrDevice: event.currentTarget.checked ? "" : branch.sdrDevice, sdrIndex: event.currentTarget.checked ? null : branch.sdrIndex })} /> Unused output</label>
-            <button type="button" className="danger-button" disabled={path.branches.length === 1} onClick={() => { onTouched(); setPath(current => ({ ...current, branches: current.branches.filter(row => row.id !== branch.id) })); }}>Remove branch</button>
-          </div>
-          {!branch.unused && !endpointKey && <div className="setup-warning-list"><div>Link this branch to a detected SDR by serial number before final review.</div></div>}
-          <div className="rf-primary-actions"><button type="button" onClick={() => updateBranch(branch.id, { chain: [...branch.chain, newRfChainItem()] })}>Add branch component</button></div>
-          <div className="rf-chain-list">{branch.chain.map((item, index) => <RfChainItemEditor item={normalizeRfChainItem(item)} index={index} key={`${branch.id}-${index}`} update={patch => updateBranch(branch.id, { chain: branch.chain.map((value, itemIndex) => itemIndex === index ? { ...value, ...patch } : value) })} remove={() => updateBranch(branch.id, { chain: branch.chain.filter((_, itemIndex) => itemIndex !== index) })} />)}</div>
-        </section>;
-      })}
+    <div className="rf-chain-list">
+      {path.chain.map((item, index) => <RfChainItemEditor item={normalizeRfChainItem(item)} index={index} key={index} update={patch => updateChain(index, patch)} remove={() => { onTouched(); setPath(current => ({ ...current, chain: current.chain.filter((_, i) => i !== index) })); }} />)}
     </div>
   </div>;
-}
-
-function rfSourceStableSerial(source: Pick<RfSurveySource, "serial" | "device">) {
-  const explicit = String(source.serial || "").trim();
-  if (explicit) return explicit;
-  const device = String(source.device || "").trim();
-  const marker = /(?:serial:|airspy=|rtl=)([a-z0-9_-]+)/i.exec(device);
-  return marker?.[1] || "";
 }
 
 const rfChainTypes = ["antenna", "coax", "splitter", "multicoupler", "lna", "filter", "sdr", "other"];

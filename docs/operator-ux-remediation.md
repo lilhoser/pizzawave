@@ -138,14 +138,10 @@ Accepted design:
   server projection for review; stale projections are rejected and regenerated.
   Apply & Resume retains only final configuration comparison, Discard, and the
   guarded apply action.
-- RF-path topology is a tree limited to one upstream antenna signal that may
-  split through splitters or multicouplers into multiple downstream branches.
-  Each branch preserves ordered components and ends at a detected SDR linked by
-  stable hardware identity, preferably its serial number, or is marked unused.
-  Setup does not silently rebind missing hardware. The server rejects loops,
-  duplicate SDR endpoints, and impossible paths while allowing incomplete
-  drafts. Existing linear chains migrate to one branch. Multiple antennas,
-  combiners, switches, and rejoining branches are outside Package 5.
+- Hardware & RF Path remains a straightforward documented list of physical RF
+  hardware in signal order. Setup does not model upstream paths, trees,
+  branches, or SDR endpoints here. SDR Inventory is a separate prominent action
+  at the top of the page.
 - Each RF run has a stable run identity and append-only started and terminal
   activity events that the UI groups as one run. Terminal events reference
   first-class evidence records indexed in the database and stored in the RF
@@ -193,7 +189,7 @@ Accepted design:
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [x] Make source planning a server-owned, reviewable projection.
-- [x] Support branched RF paths and source-linked SDR hardware.
+- [x] Keep RF-path documentation as one straightforward ordered hardware list.
 - [x] Attach RF captures and reports to Setup evidence/activity.
 - [ ] Deploy, verify, and obtain operator acceptance.
 
@@ -566,3 +562,8 @@ Status: pending
   apply occurred. Desired version `1783684339423`, applied hash `e95b8867...`,
   and the three existing pending categories remained unchanged. Operator
   end-to-end acceptance remains.
+- 2026-07-10: Operator rejected the RF branch/tree editor as confusing and
+  superseded the earlier topology decision. Hardware & RF Path returns to one
+  ordered documented hardware list, and SDR Inventory moves to a prominent
+  top-of-page action. The branch DTO, validation, frontend types, controls, and
+  styling were removed rather than hidden.
