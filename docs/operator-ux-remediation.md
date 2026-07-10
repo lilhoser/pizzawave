@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3B discovery and operator interview - Settings refresh ownership
+- Current milestone: 3B operator interview - specialized panel refresh ownership
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `fd16f1b`
 - Operator verification: Packages 1, 2, and 3A accepted
-- Next action: decide how Settings refresh protects unsaved edits, then audit
-  the remaining specialized panels section by section before implementation.
+- Next action: decide how visible read-only specialized panels refresh and
+  report failures before implementing the bounded 3B milestone.
 
 ## Working Rules
 
@@ -175,6 +175,11 @@ Status: pending
   jurisdiction from the receiver site or alpha-tag abbreviation.
 - 2026-07-09: Operator accepted and closed milestone 3A, including its compact
   category-header and structured talkgroup-naming follow-up.
+- 2026-07-09: Settings forms load the active server configuration once when the
+  page opens and then become an operator-owned draft. Events, timers, and
+  reconnection do not refresh form fields. Initial load failure renders an
+  unavailable state rather than plausible defaults; reloading server values is
+  an explicit action that cannot silently discard unsaved edits.
 
 ## Deployment Log
 
