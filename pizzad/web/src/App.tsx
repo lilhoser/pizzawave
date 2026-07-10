@@ -7893,7 +7893,8 @@ function nearestSpectrumPeak(xCanvas: number, peaks: PositionedSpectrumPeak[]) {
 }
 
 function spectrumGeometry(width = 1024, height = 150) {
-  const margin = { left: 58, right: 10, top: 10, bottom: 30 };
+  const horizontalScale = width / 1024;
+  const margin = { left: 58 * horizontalScale, right: 10 * horizontalScale, top: 10, bottom: 30 };
   return {
     margin,
     plotWidth: width - margin.left - margin.right,
@@ -8212,13 +8213,17 @@ function drawWaterfallFrame(canvas: HTMLCanvasElement | null, powers: number[], 
     return;
   const low = scale.lowDb;
   const high = Math.max(low + 1, scale.highDb);
+  const { margin, plotWidth } = spectrumGeometry(canvas.width, 150);
+  const plotStart = Math.round(margin.left);
+  const plotEnd = Math.round(margin.left + plotWidth);
   for (let x = 0; x < canvas.width; x++) {
-    const position = x / Math.max(1, canvas.width - 1) * (powers.length - 1);
+    const inPlot = x >= plotStart && x <= plotEnd;
+    const position = inPlot ? (x - plotStart) / Math.max(1, plotEnd - plotStart) * (powers.length - 1) : 0;
     const left = Math.floor(position);
     const right = Math.min(powers.length - 1, left + 1);
     const mix = position - left;
     const value = powers[left] * (1 - mix) + powers[right] * mix;
-    const color = waterfallColor((value - low) / Math.max(1, high - low));
+    const color = inPlot ? waterfallColor((value - low) / Math.max(1, high - low)) : [0, 53, 111];
     for (let y = 0; y < scrollRows; y++) {
       const index = (y * canvas.width + x) * 4;
       row.data[index] = color[0];
