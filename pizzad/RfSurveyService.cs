@@ -1697,15 +1697,15 @@ public sealed class RfSurveyService
             plans.Add(new("sdr_inventory", "Inventory SDRs", "Run the installed Airspy/RTL-SDR inventory tools and capture factual device output.", voiceReady || toolPrep?.Tools.Any(t => t.Category == "sdr" && t.Installed) == true, voiceReady ? "" : "Install SDR tools so the SDR can be claimed during a bounded TR pause.", "Setup pauses TR if needed, runs rtl_test and/or airspy_info, then restarts TR."));
         var combinedRfPassed = completed.Contains("rf_validation_sweep");
         if (!combinedRfPassed && !completed.Contains("rf_power_scan"))
-            plans.Add(new("rf_power_scan", "Measure RF power", "Capture a short IQ window at the selected control channel and estimate peak power, noise floor, SNR, overload risk, and frequency offset.", true, "", "Setup pauses TR if needed, runs rtl_sdr or airspy_rx, then restarts TR."));
+            plans.Add(new("rf_power_scan", "Measure RF power", "Capture a short IQ window at the selected control channel and estimate peak power, noise floor, signal-to-noise ratio, overload risk, and measured signal offset.", true, "", "Setup pauses Trunk Recorder if needed, runs the SDR capture tool, then restarts Trunk Recorder."));
         if (!completed.Contains("rf_validation_sweep"))
-            plans.Add(new("rf_validation_sweep", "Run RF validation sweep", "Rank control-channel/source/gain/error candidates with a short RF screen, P25 probe, and TR CC metrics on only the best candidates.", combinedSweepReady, combinedSweepBlocker, "Known control channels, selected SDR source, configured P25 probe command, valid TR source coverage, and trunk-recorder service control."));
+            plans.Add(new("rf_validation_sweep", "Run RF validation sweep", "Rank control-channel, source, gain, and frequency-correction candidates with a short RF screen, P25 probe, and Trunk Recorder control-channel metrics on only the best candidates.", combinedSweepReady, combinedSweepBlocker, "Known control channels, selected SDR source, configured P25 probe command, valid Trunk Recorder source coverage, and service control."));
         if (!combinedRfPassed && !completed.Contains("control_channel_quality"))
             plans.Add(new("control_channel_quality", "Measure CC quality", "Measure per-control-channel decode rate, zero-decode, continuity, retunes, and call events from a fresh TR journal window.", trCoverageReady, trCoverageReady ? "" : "TR CC Metrics are blocked until the TR config source plan can cover the selected control channels: " + string.Join(" ", trCoverage?.Blockers ?? []), "trunk-recorder running on the current TR config; known control channel list."));
         if (!combinedRfPassed && !completed.Contains("control_channel_p25_probe"))
             plans.Add(new("control_channel_p25_probe", "Probe P25 control channel", "Capture control-channel evidence with validated P25 tooling before voice-call trials.", p25Ready, p25Ready ? "" : "P25 probe is blocked until P25 and SDR tooling are installed.", "Setup pauses TR if needed, runs the validated OP25/P25 command, then restarts TR."));
         if (!completed.Contains("error_gain_sweep"))
-            plans.Add(new("error_gain_sweep", "Run error/gain sweep", "Run controlled tr_tune measurements through the Setup RF validation API.", true, "", "The sweep runner manages temporary TR configs and restarts TR after cleanup."));
+            plans.Add(new("error_gain_sweep", "Run frequency-correction and gain sweep", "Run controlled Trunk Recorder tuning measurements through Setup RF Validation.", true, "", "The sweep runner manages temporary configurations and restarts Trunk Recorder after cleanup."));
         var latestP25 = experiments
             .Where(e => e.Type == "control_channel_p25_probe")
             .OrderBy(e => e.CreatedAtUtc)
@@ -2104,7 +2104,7 @@ public sealed class RfSurveyService
         var status = !string.IsNullOrWhiteSpace(trRestartError) ? "failed" : measured.Count == 0 ? "failed" : good ? "passed" : "failed";
         var summary = best == null
             ? "RF sweep did not produce an analyzable IQ capture."
-            : $"Best RF sweep: source {best.Index}, CC {best.ControlChannelHz}, gain {best.Gain}, control-channel SNR {best.SnrDb:F1} dB, CC peak {best.PeakDb:F1} dB, noise floor {best.NoiseFloorDb:F1} dB, CC offset {best.PeakOffsetHz:F0} Hz.";
+            : $"Best RF sweep: source {best.Index}, control channel {best.ControlChannelHz}, gain {best.Gain}, control-channel SNR {best.SnrDb:F1} dB, control peak {best.PeakDb:F1} dB, noise floor {best.NoiseFloorDb:F1} dB, measured signal offset {best.PeakOffsetHz:F0} Hz.";
         var blocker = !string.IsNullOrWhiteSpace(trRestartError) ? $"trunk-recorder did not restart after RF power scan: {trRestartError}" :
             status == "passed" ? "" :
             best == null ? string.Join(" ", blockers) :
@@ -2148,7 +2148,7 @@ public sealed class RfSurveyService
                 selectedGain = best?.Gain ?? "",
                 best,
                 followUps = status == "passed"
-                    ? new[] { "Run P25 probe on the same control channel.", "If P25 fails despite good SNR, inspect error/gain and modulation settings." }
+                    ? new[] { "Run P25 probe on the same control channel.", "If P25 fails despite good signal-to-noise ratio, inspect frequency correction, gain, and modulation settings." }
                     : new[] { "Try alternate control channel.", "Change gain sequence and rerun RF sweep.", "Bypass suspect RF path components and rerun.", "Verify antenna aim/polarization." }
             });
     }
@@ -2344,12 +2344,12 @@ public sealed class RfSurveyService
         {
             return new ExperimentOutcome(
                 "failed",
-                "A combined RF validation sweep should produce at least one source/control-channel/gain/error candidate before decode checks run.",
-                "Known control channels, selected SDR source, and candidate error offsets.",
+                "A combined RF validation sweep should produce at least one source, control-channel, gain, and frequency-correction candidate before decode checks run.",
+                "Known control channels, selected SDR source, and candidate correction changes.",
                 "RF validation sweep produced RF measurements but no decode candidates.",
-                "No candidate error-offset combinations were generated.",
+                "No candidate frequency-correction combinations were generated.",
                 new { sweepProfile.SystemShortName, power = powerOutcome.Evidence, parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets, p25Demods } },
-                new { recommendation = "Reset the RF sweep error offsets or rerun with error discovery enabled.", candidates = Array.Empty<RfValidationCandidate>() });
+                new { recommendation = "Reset the RF sweep correction changes or rerun with automatic correction discovery enabled.", candidates = Array.Empty<RfValidationCandidate>() });
         }
         await WriteRfValidationProgressAsync(powerOutcome.Evidence, candidates, ct);
 
@@ -2377,7 +2377,7 @@ public sealed class RfSurveyService
             await WriteArtifactAsync(artifactPath, $"rf-validation-sweep-{DateTime.UtcNow:yyyyMMddHHmmss}.json", p25BlockedEvidence, ct);
             return new ExperimentOutcome(
                 "blocked",
-                "A usable RF path should rank one or more control-channel/source/gain/error candidates with RF margin, P25 frame evidence, and live TR decode metrics.",
+                "A usable RF path should rank one or more control-channel, source, gain, and frequency-correction candidates with RF margin, P25 frame evidence, and live Trunk Recorder decode metrics.",
                 "Known control channels, selected SDR source, P25 probe command, SDR tools, and trunk-recorder service control.",
                 $"RF screen found {candidates.Count} candidate condition(s), but P25 probing is not configured.",
                 p25Preview.BlockingIssue,
@@ -2643,7 +2643,7 @@ public sealed class RfSurveyService
             ? $"Validated {monitorableSites.Count}/{siteReadiness.Count} selected site(s): {string.Join("; ", siteReadiness.Select(site => site.Monitorable && site.BestControlChannelHz.HasValue ? $"{site.Label} {FormatHz(site.BestControlChannelHz.Value)} passed" : $"{site.Label} not proven"))}."
             : best == null
             ? "RF validation sweep produced no ranked candidates."
-            : $"Best candidate: source {best.SourceIndex}, CC {FormatHz(best.ControlChannelHz)}, gain {best.Gain}, error {best.ErrorHz} Hz, RF SNR {best.SnrDb:F1} dB, P25 {best.P25Status}, TR metrics {(string.IsNullOrWhiteSpace(best.MetricsStatus) ? "not run" : best.MetricsStatus)}, voice {(string.IsNullOrWhiteSpace(best.VoiceStatus) ? "not run" : best.VoiceStatus)}.";
+            : $"Best candidate: source {best.SourceIndex}, control channel {FormatHz(best.ControlChannelHz)}, gain {best.Gain}, frequency correction {best.ErrorHz:+0;-0;0} Hz, RF SNR {best.SnrDb:F1} dB, P25 {best.P25Status}, Trunk Recorder metrics {(string.IsNullOrWhiteSpace(best.MetricsStatus) ? "not run" : best.MetricsStatus)}, voice {(string.IsNullOrWhiteSpace(best.VoiceStatus) ? "not run" : best.VoiceStatus)}.";
         var technicalBlocker = BuildRfValidationTechnicalBlocker(candidates);
         var blocker = pass ? "" :
             !string.IsNullOrWhiteSpace(technicalBlocker) ? technicalBlocker :
@@ -2679,7 +2679,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(artifactPath, $"rf-validation-sweep-{DateTime.UtcNow:yyyyMMddHHmmss}.json", evidence, ct);
         return new ExperimentOutcome(
             status,
-            "A usable RF path should rank one or more control-channel/source/gain/error candidates with RF margin, P25 frame evidence, and live TR decode metrics.",
+            "A usable RF path should rank one or more control-channel, source, gain, and frequency-correction candidates with RF margin, P25 frame evidence, and live Trunk Recorder decode metrics.",
             "Known control channels, selected SDR source, P25 probe command, SDR tools, and trunk-recorder service control.",
             summary,
             blocker,
@@ -2704,7 +2704,7 @@ public sealed class RfSurveyService
                     ? p25Only
                         ? new[] { "Rerun RF Sweep.", "Run final Call Quality verification only after TR metrics pass." }
                         : new[] { "Open Config Draft.", "Use the site-readiness rows when assigning SDR source windows." }
-                    : new[] { "Review ranked candidate TR scan clues.", "Try a narrower gain/error set around the strongest P25 candidate.", "Verify antenna aim and selected control channels.", "Use more SDR bandwidth or a different source center if no-source grants dominate." }
+                    : new[] { "Review ranked candidate Trunk Recorder scan clues.", "Try a narrower frequency-correction and gain set around the strongest P25 candidate.", "Verify antenna aim and selected control channels.", "Use more SDR bandwidth or a different source center if no-source grants dominate." }
             });
     }
 
@@ -3700,7 +3700,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(session.ArtifactPath, $"cc-quality-{DateTime.UtcNow:yyyyMMddHHmmss}.json", evidence, ct);
         return new ExperimentOutcome(
             status,
-            "Known control channels should produce stable periodic TR decode summaries before error/gain sweeps are considered meaningful.",
+            "Known control channels should produce stable periodic Trunk Recorder decode summaries before frequency-correction and gain sweeps are considered meaningful.",
             "trunk-recorder running; selected site has setup/RR control-channel ground truth.",
             strongEnough
                 ? $"CC quality passed. {FormatHz(evaluated!.FrequencyHz)} averaged {evaluated.AvgDecodeRate:F1} msg/sec with {evaluated.ZeroDecodePct:F1}% zero-decode across {evaluated.Samples} sample(s)."
@@ -3711,12 +3711,12 @@ public sealed class RfSurveyService
             {
                 recommendation = strongEnough
                     ? "Proceed to SDR inventory/P25 probe or use this CC as the primary candidate for follow-up sweeps."
-                    : "Do not rank error/gain sweeps as conclusive until a known control channel has stable decode samples.",
+                    : "Do not rank frequency-correction and gain sweeps as conclusive until a known control channel has stable decode samples.",
                 selectedControlChannelHz = selectedCc,
                 evaluatedRow = evaluated,
                 strongest = knownRows.OrderByDescending(row => row.Score).FirstOrDefault(),
                 followUps = strongEnough
-                    ? new[] { "Run P25 probe against the strongest CC.", "Run error/gain sweep only after CC samples are stable." }
+                    ? new[] { "Run P25 probe against the strongest control channel.", "Run frequency-correction and gain refinement only after control-channel samples are stable." }
                     : new[] { "Extend the CC quality window.", "Probe each alternate CC.", "Check antenna aim/RF path and source center coverage.", "Review TR config for off-center source mapping." }
             });
     }
@@ -5032,7 +5032,7 @@ public sealed class RfSurveyService
                     ? new[] { "Run a stability-duration control-channel probe.", "Run a voice capture trial." }
                     : toolFailure
                     ? new[] { "Review the P25 probe log.", "Fix the command template or rendered arguments.", "Re-run the same control-channel probe." }
-                    : new[] { "Probe alternate control channel.", "Try a gain sweep.", "Verify antenna aim and polarization.", "Verify source center/rate/error values." }
+                    : new[] { "Probe an alternate control channel.", "Try a gain sweep.", "Verify antenna aim and polarization.", "Verify source center, sample rate, and frequency correction." }
             });
     }
 
@@ -5041,7 +5041,7 @@ public sealed class RfSurveyService
         if (request.Parameters == null)
             return new ExperimentOutcome(
                 "failed",
-                "Error/gain sweep requires concrete sweep parameters.",
+                "Frequency-correction and gain sweep requires concrete sweep parameters.",
                 "Selected site, control channel, and one or more selected SDR sources.",
                 "Sweep parameters were not supplied.",
                 "Sweep parameters were not supplied.",
@@ -5061,9 +5061,9 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(artifactPath, $"error-gain-sweep-job-{job.Id}.json", evidence, ct);
         return new ExperimentOutcome(
             "running",
-            "Error/gain sweep runs controlled tr_tune measurements for selected SDR source settings.",
+            "Frequency-correction and gain sweep runs controlled Trunk Recorder tuning measurements for selected SDR source settings.",
             "Selected site, selected SDR source(s), control channel, and sweep parameters.",
-            $"Started error/gain sweep job {job.Id}. Results will populate from the job output feed.",
+            $"Started frequency-correction and gain sweep job {job.Id}. Results will populate from the job output feed.",
             "",
             evidence,
             new
@@ -5081,7 +5081,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(artifactPath, $"error-gain-sweep-cancel-{job.Id}.json", evidence, ct);
         return new ExperimentOutcome(
             "running",
-            "Cancel active error/gain sweep processes.",
+            "Cancel active frequency-correction and gain sweep processes.",
             "An active or recently active sweep job.",
             $"Requested sweep cancellation with job {job.Id}.",
             "",
@@ -5379,7 +5379,7 @@ public sealed class RfSurveyService
                     var voiceInconclusive = realCalls.Count == 0 && metricsStatus == "passed";
                     var status = realCalls.Count > 0 ? "passed" : voiceInconclusive ? "inconclusive" : "failed";
                     var summary = realCalls.Count > 0
-                        ? $"Voice trial captured {realCalls.Count} real call(s) with audio for source {candidate.SourceIndex}, {FormatHz(candidate.ControlChannelHz)}, gain {candidate.Gain}, error {candidate.ErrorHz} Hz."
+                        ? $"Voice trial captured {realCalls.Count} real call(s) with audio for source {candidate.SourceIndex}, {FormatHz(candidate.ControlChannelHz)}, gain {candidate.Gain}, frequency correction {candidate.ErrorHz:+0;-0;0} Hz."
                         : voiceInconclusive
                             ? BuildOptionalVoiceCaveat(metricsRow)
                             : BuildVoiceCaptureFailureSummary(["No real captured calls with audio were found in this candidate voice window."], analysis);
@@ -5638,7 +5638,7 @@ public sealed class RfSurveyService
             if (analysis.DecodeLines > 0)
                 parts.Add($"Control-channel decode averaged {analysis.AvgDecodeRate:F1}/sec with {analysis.DecodeZeroPct:F1}% zero-decode.");
             if (analysis.TuningErrSamples > 0)
-                parts.Add($"Voice recorder tuning error averaged {analysis.AvgTuningErrorAbsHz:F0} Hz, max {analysis.MaxTuningErrorAbsHz:F0} Hz.");
+                parts.Add($"Measured voice-recorder tuning offset averaged {analysis.AvgTuningErrorAbsHz:F0} Hz, max {analysis.MaxTuningErrorAbsHz:F0} Hz.");
             return string.Join(" ", parts);
         }
         return blockers[0] + " TR did not show usable recorder starts in this capture window.";
@@ -5674,7 +5674,7 @@ public sealed class RfSurveyService
         if (recordedFrequencies.Count > 0 && noSampleCallEnds > 0)
             recommendations.Add($"Covered voice calls were attempted on {string.Join(", ", recordedFrequencies.Take(5).Select(row => $"{row.Frequency} ({row.Count})"))}, but no audio samples reached callstream.");
         if (avgTuningErrorAbsHz >= 1000)
-            recommendations.Add($"Voice recorder tuning error is high enough to matter for capture ({avgTuningErrorAbsHz:F0} Hz average). The RF work-loop should score error/ppm/gain using voice capture, not only P25 sync.");
+            recommendations.Add($"Measured voice-recorder tuning offset is high enough to matter for capture ({avgTuningErrorAbsHz:F0} Hz average). RF Validation should score frequency correction and gain using voice capture, not only P25 sync. PPM remains a derived technical value.");
         if (health.CallsStarted == 0 && noSourceFrequencies.Count == 0 && health.DecodeLines > 0)
             recommendations.Add("The control channel decoded during the window, but no voice grants were captured. Rerun the gate during busier traffic before changing hardware.");
         if (recommendations.Count == 0)
@@ -8270,7 +8270,7 @@ public sealed class RfSurveyService
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "rf_validation_sweep") != "passed")
             rows.Add("Run the combined RF Sweep to rank candidates using RF margin, P25 evidence, and TR CC metrics.");
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "control_channel_quality") != "passed")
-            rows.Add("Measure stable per-control-channel decode quality before treating error/gain sweeps as conclusive.");
+            rows.Add("Measure stable per-control-channel decode quality before treating frequency-correction and gain sweeps as conclusive.");
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "rf_power_scan") != "passed")
             rows.Add("Run RF power scan to confirm the selected control channel stands above the noise floor without overload.");
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "control_channel_p25_probe") != "passed")

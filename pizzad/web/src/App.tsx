@@ -908,6 +908,24 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
   );
 }
 
+type SiteSetupRfStage = "preparation" | "spectrum" | "control" | "coverage" | "calls" | "verdict";
+
+const siteSetupRfStages: Array<{ id: SiteSetupRfStage; label: string }> = [
+  { id: "preparation", label: "Preparation" },
+  { id: "spectrum", label: "Spectrum Inspection" },
+  { id: "control", label: "Control-Channel Proof" },
+  { id: "coverage", label: "Source Coverage" },
+  { id: "calls", label: "Call & Transcription Proof" },
+  { id: "verdict", label: "Verdict" }
+];
+
+function storedSiteSetupRfStage(): SiteSetupRfStage {
+  const saved = localStorage.getItem("pizzawave-site-setup-rf-validation-subpage");
+  if (saved === "sweep") return "control";
+  if (saved === "waterfall") return "spectrum";
+  return siteSetupRfStages.some(stage => stage.id === saved) ? saved as SiteSetupRfStage : "preparation";
+}
+
 function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrOperationChange }: { setup: SiteSetup | null; reload: () => Promise<void>; targetSection?: string | null; clearTargetSection?: () => void; onTrOperationChange: (value: string) => void }) {
   const [current, setCurrent] = useState<SiteSetup | null>(setup);
   const currentRef = useRef<SiteSetup | null>(setup);
@@ -920,14 +938,14 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
     const saved = localStorage.getItem("pizzawave-site-setup-section") || "Location";
     return enabledSections.has(saved) ? saved : "Location";
   });
-  const [rfValidationSubPage, setRfValidationSubPageState] = useState<"waterfall" | "sweep">(() => localStorage.getItem("pizzawave-site-setup-rf-validation-subpage") === "sweep" ? "sweep" : "waterfall");
+  const [rfValidationStage, setRfValidationStageState] = useState<SiteSetupRfStage>(storedSiteSetupRfStage);
   const [applySubPage, setApplySubPageState] = useState<"source" | "review">(() => localStorage.getItem("pizzawave-site-setup-apply-subpage") === "review" ? "review" : "source");
   const setSection = (value: string) => {
     setSectionState(value);
     localStorage.setItem("pizzawave-site-setup-section", value);
   };
-  const setRfValidationSubPage = (value: "waterfall" | "sweep") => {
-    setRfValidationSubPageState(value);
+  const setRfValidationStage = (value: SiteSetupRfStage) => {
+    setRfValidationStageState(value);
     localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", value);
   };
   const setApplySubPage = (value: "source" | "review") => {
@@ -997,8 +1015,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
               <strong>{item}</strong>
             </button>
             {item === "RF Validation" && <div className="site-setup-subnav">
-              <button type="button" className={section === item && rfValidationSubPage === "waterfall" ? "active" : ""} onClick={() => { setSection(item); setRfValidationSubPage("waterfall"); }}>Waterfall</button>
-              <button type="button" className={section === item && rfValidationSubPage === "sweep" ? "active" : ""} onClick={() => { setSection(item); setRfValidationSubPage("sweep"); }}>RF Sweep</button>
+              {siteSetupRfStages.map(stage => <button type="button" className={section === item && rfValidationStage === stage.id ? "active" : ""} key={stage.id} onClick={() => { setSection(item); setRfValidationStage(stage.id); }}>{stage.label}</button>)}
             </div>}
             {item === "Apply & Resume" && <div className="site-setup-subnav">
               <button type="button" className={section === item && applySubPage === "source" ? "active" : ""} onClick={() => { setSection(item); setApplySubPage("source"); }}>Sources</button>
@@ -1013,7 +1030,14 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
           {section === "Talkgroups" && <SiteSetupTalkgroupsSection setup={current} reload={reload} onSave={saveDesired} />}
           {section === "Hardware & RF Path" && <SiteSetupHardwareSection setup={current} saveState={saveState} onSave={saveDesired} />}
           <div style={section === "RF Validation" ? undefined : { display: "none" }} aria-hidden={section === "RF Validation" ? undefined : "true"}>
-            <SiteSetupRfValidationSection setup={current} active={section === "RF Validation"} subPage={rfValidationSubPage} onSave={saveDesired} onTrOperationChange={onTrOperationChange} />
+            <SiteSetupRfValidationSection
+              setup={current}
+              active={section === "RF Validation"}
+              stage={rfValidationStage}
+              onSave={saveDesired}
+              onTrOperationChange={onTrOperationChange}
+              onOpenSourceCoverage={() => { setSection("Apply & Resume"); setApplySubPage("source"); }}
+            />
           </div>
           {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSave={saveDesired} onSetupChanged={(next) => { currentRef.current = next; setCurrent(next); }} onApplied={(next) => { currentRef.current = next; setCurrent(next); void reload(); }} />}
           {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
@@ -1619,7 +1643,7 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
   </div>;
 }
 
-function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOperationChange }: { setup: SiteSetup; active: boolean; subPage: "waterfall" | "sweep"; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onTrOperationChange: (value: string) => void }) {
+function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperationChange, onOpenSourceCoverage }: { setup: SiteSetup; active: boolean; stage: SiteSetupRfStage; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onTrOperationChange: (value: string) => void; onOpenSourceCoverage: () => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1782,16 +1806,29 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
   const validationSweep = latestExperiment("rf_validation_sweep");
   const p25 = latestExperiment("control_channel_p25_probe");
   const sweep = latestExperiment("error_gain_sweep");
+  const voiceCapture = latestExperiment("voice_capture_trial");
+  const transcriptionGate = latestExperiment("transcription_gate");
+  const stabilityVerdict = latestExperiment("stability_verdict");
   return <div className="site-setup-form site-setup-rf-validation">
     {busy === "workspace" && <div className="setup-note">Preparing RF validation session...</div>}
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
     {detail
       ? <>
-        <div style={subPage === "waterfall" ? undefined : { display: "none" }} aria-hidden={subPage === "waterfall" ? undefined : "true"}>
+        <SiteSetupRfStageBanner stage={stage} detail={detail} setup={setup} validationSweep={validationSweep} voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} />
+        {stage === "preparation" && <SiteSetupRfPreparationStage
+          detail={detail}
+          systems={effectiveSystems}
+          sources={effectiveSources}
+          inventory={inventory}
+          busy={busy === "sdr_inventory"}
+          onRunInventory={() => void runSdrInventoryExperiment()}
+          onShowDetails={setDetails}
+        />}
+        <div style={stage === "spectrum" ? undefined : { display: "none" }} aria-hidden={stage === "spectrum" ? undefined : "true"}>
           <WaterfallStep
             apiBase={siteSetupRfApi}
             surveyId={detail.session.id}
-            visible={active && subPage === "waterfall"}
+            visible={active && stage === "spectrum"}
             locked={effectiveSources.length === 0 || effectiveControlChannels.length === 0}
             sources={effectiveSources}
             selectedSources={selectedSourceIndexes}
@@ -1807,7 +1844,7 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
             onStatusChange={handleWaterfallStatusChange}
           />
         </div>
-        {subPage === "sweep" && <SiteValidationStep
+        {stage === "control" && <SiteValidationStep
           apiBase={siteSetupRfApi}
           activeOperation="power"
           busy={busy}
@@ -1844,6 +1881,9 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
           onAcceptSweepCandidate={acceptSweepCandidate}
           inventoryRequired={false}
         />}
+        {stage === "coverage" && <SiteSetupRfCoverageStage setup={setup} detail={detail} onOpenSourceCoverage={onOpenSourceCoverage} />}
+        {stage === "calls" && <SiteSetupRfCallProofStage validationSweep={validationSweep} voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} nextExperiments={detail.nextExperiments ?? []} />}
+        {stage === "verdict" && <SiteSetupRfVerdictStage detail={detail} stabilityVerdict={stabilityVerdict} />}
         {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
           <div className="rf-details-modal" onClick={event => event.stopPropagation()}>
             <div className="settings-header"><h3>{details.title}</h3><button onClick={() => setDetails(null)}>Close</button></div>
@@ -1852,6 +1892,115 @@ function SiteSetupRfValidationSection({ setup, active, subPage, onSave, onTrOper
         </div>}
       </>
       : !busy && <div className="setup-warning-list"><div>RF Validation needs at least one selected site/control channel and one SDR source.</div></div>}
+  </div>;
+}
+
+function SiteSetupRfStageBanner({ stage, detail, setup, validationSweep, voiceCapture, transcriptionGate }: { stage: SiteSetupRfStage; detail: RfSurveyDetail; setup: SiteSetup; validationSweep?: RfSurveyExperiment; voiceCapture?: RfSurveyExperiment; transcriptionGate?: RfSurveyExperiment }) {
+  const descriptions: Record<SiteSetupRfStage, string> = {
+    preparation: "Confirm selected sites, source hardware, and required tools before taking measurements.",
+    spectrum: "Inspect the live spectrum and retain candidate control channels for measured validation.",
+    control: "Prove control-channel reception, P25 decoding, and stability across the selected hardware and settings.",
+    coverage: "Review which known and observed frequencies each source can monitor before building configuration.",
+    calls: "Require real call capture and useful transcription evidence before declaring the setup ready.",
+    verdict: "Review the combined RF, coverage, call, transcription, and stability result."
+  };
+  const toolReady = detail.toolPrep?.readyForControlChannelTests === true;
+  const sourcePlanReady = setup.desired.sourcePlanSystemShortNames.length > 0 && setup.desired.selectedSourceIndexes.length > 0;
+  const stageState: Record<SiteSetupRfStage, { text: string; tone: string }> = {
+    preparation: detail.profile.sources.length > 0 && toolReady ? { text: "Ready", tone: "ok" } : { text: "Needs review", tone: "warning" },
+    spectrum: setup.desired.rfSelections.length > 0 ? { text: "Evidence retained", tone: "ok" } : { text: "Available", tone: "" },
+    control: validationSweep ? { text: label(validationSweep.status), tone: validationSweep.status === "passed" ? "ok" : validationSweep.status === "failed" ? "error" : "warning" } : { text: "Not run", tone: "" },
+    coverage: detail.session.sourcePlanSummary ? { text: "Applied", tone: "ok" } : sourcePlanReady ? { text: "Ready to review", tone: "warning" } : { text: "Needs inputs", tone: "" },
+    calls: transcriptionGate ? { text: label(transcriptionGate.status), tone: transcriptionGate.status === "passed" ? "ok" : "warning" } : voiceCapture ? { text: `Capture ${label(voiceCapture.status)}`, tone: voiceCapture.status === "passed" ? "ok" : "warning" } : { text: "Not proved", tone: "" },
+    verdict: detail.session.verdict && detail.session.verdict !== "not_started" ? { text: label(detail.session.verdict), tone: detail.session.verdict.toLowerCase().includes("pass") ? "ok" : "warning" } : { text: "Not ready", tone: "" }
+  };
+  return <div className="rf-workflow-banner">
+    <div className="rf-workflow-heading">
+      <div><span>RF Validation</span><strong>{siteSetupRfStages.find(item => item.id === stage)?.label}</strong></div>
+      <p>{descriptions[stage]}</p>
+    </div>
+    <div className="rf-workflow-stage-strip" aria-label="RF Validation stage status">
+      {siteSetupRfStages.map((item, index) => <div className={item.id === stage ? "active" : ""} key={item.id}>
+        <span>{index + 1}</span>
+        <strong>{item.label}</strong>
+        <small className={`section-status ${stageState[item.id].tone}`.trim()}>{stageState[item.id].text}</small>
+      </div>)}
+    </div>
+  </div>;
+}
+
+function SiteSetupRfPreparationStage({ detail, systems, sources, inventory, busy, onRunInventory, onShowDetails }: { detail: RfSurveyDetail; systems: RfSurveySystem[]; sources: RfSurveySource[]; inventory?: RfSurveyExperiment; busy: boolean; onRunInventory: () => void; onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void }) {
+  const prep = detail.toolPrep;
+  return <div className="rf-step-stack rf-stage-summary">
+    <div className="rf-stage-fact-grid">
+      <div><span>Selected sites</span><strong>{systems.length}</strong><small>{systems.map(system => system.siteLabel || system.shortName).join(", ") || "Choose sites in Systems & Sites."}</small></div>
+      <div><span>Configured sources</span><strong>{sources.length}</strong><small>{sources.map(source => `Source ${source.index} ${source.serial || source.sdrType || source.device}`).join(", ") || "Run SDR Inventory."}</small></div>
+      <div><span>Control-channel tools</span><strong>{prep?.readyForControlChannelTests ? "Ready" : "Needs attention"}</strong><small>{prep?.generatedAtUtc ? `Checked ${new Date(prep.generatedAtUtc).toLocaleString()}` : "Tool readiness has not been recorded."}</small></div>
+      <div><span>Call and transcription tools</span><strong>{prep?.readyForVoiceCapture && prep?.readyForTranscriptionGate ? "Ready" : "Needs attention"}</strong><small>Both real call capture and useful transcription are required for a passing verdict.</small></div>
+    </div>
+    <div className="rf-primary-actions">
+      <button type="button" className="danger-button" disabled={busy} onClick={onRunInventory}>{busy ? "Running..." : inventory ? "Rerun SDR Inventory" : "Run SDR Inventory"}</button>
+      {inventory && <button type="button" onClick={() => onShowDetails({ title: "SDR Inventory Details", body: <pre className="log-box">{inventory.evidenceJson}</pre> })}>View Inventory Evidence</button>}
+    </div>
+    {inventory && <SdrInventorySummary experiment={inventory} />}
+    {prep?.warnings?.length ? <div className="setup-warning-list">{prep.warnings.map(warning => <div key={warning}>{warning}</div>)}</div> : null}
+    {prep?.tools?.length ? <div className="rf-tool-status-list compact">
+      {prep.tools.map(tool => <div className="rf-tool-row" key={tool.id}>
+        <strong>{tool.label}</strong>
+        <span className={`section-status ${tool.installed ? "ok" : tool.required ? "error" : "warning"}`}>{tool.installed ? "Available" : tool.required ? "Required" : "Optional"}</span>
+        <span>{tool.installed ? tool.version || tool.purpose : tool.installHint || tool.purpose}</span>
+      </div>)}
+    </div> : null}
+  </div>;
+}
+
+function SiteSetupRfCoverageStage({ setup, detail, onOpenSourceCoverage }: { setup: SiteSetup; detail: RfSurveyDetail; onOpenSourceCoverage: () => void }) {
+  const systems = setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : selectedSetupSystemNames(setup);
+  const sources = setup.desired.selectedSourceIndexes.length ? setup.desired.selectedSourceIndexes : siteSetupSources(setup).map(source => source.index);
+  return <div className="rf-step-stack rf-stage-summary">
+    <div className="rf-stage-fact-grid">
+      <div><span>Planning scope</span><strong>{systems.length} site{systems.length === 1 ? "" : "s"}</strong><small>{systems.join(", ") || "No sites selected."}</small></div>
+      <div><span>Coverage mode</span><strong>{setup.desired.sourcePlanMode === "control" ? "Control channels only" : "Full known frequencies"}</strong><small>{setup.desired.sourcePlanMode === "control" ? "Voice-frequency coverage may remain incomplete." : "Includes known and recently observed voice frequencies when available."}</small></div>
+      <div><span>Selected hardware</span><strong>{sources.length} source{sources.length === 1 ? "" : "s"}</strong><small>{sources.map(index => `Source ${index}`).join(", ") || "Run SDR Inventory first."}</small></div>
+      <div><span>Applied source evidence</span><strong>{detail.session.sourcePlanSummary ? "Recorded" : "Not applied"}</strong><small>{detail.session.sourcePlanSummary || "Review coverage before final configuration."}</small></div>
+    </div>
+    <div className="setup-note">Review selected sites, coverage mode, hardware assignments, calculated source centers, and missed frequencies before final configuration.</div>
+    <div className="rf-primary-actions"><button type="button" className="primary" onClick={onOpenSourceCoverage}>Review Source Coverage</button></div>
+  </div>;
+}
+
+function SiteSetupRfCallProofStage({ validationSweep, voiceCapture, transcriptionGate, nextExperiments }: { validationSweep?: RfSurveyExperiment; voiceCapture?: RfSurveyExperiment; transcriptionGate?: RfSurveyExperiment; nextExperiments: RfSurveyExperimentPlan[] }) {
+  const sweepCandidates = validationSweep ? rfValidationCandidates(validationSweep) : [];
+  const voiceCandidates = sweepCandidates.filter((candidate: any) => candidate.voiceStatus);
+  const realCalls = voiceCandidates.reduce((total: number, candidate: any) => total + Number(candidate.voiceRealCalls ?? 0), 0);
+  const voicePlan = nextExperiments.find(plan => plan.type === "voice_capture_trial");
+  const transcriptionPlan = nextExperiments.find(plan => plan.type === "transcription_gate");
+  return <div className="rf-step-stack rf-stage-summary">
+    <div className="rf-stage-fact-grid">
+      <div><span>Short RF Sweep voice trials</span><strong>{voiceCandidates.length ? `${voiceCandidates.length} candidate${voiceCandidates.length === 1 ? "" : "s"}` : "No evidence"}</strong><small>{realCalls ? `${realCalls} real call${realCalls === 1 ? "" : "s"} with audio observed.` : "A control-channel result alone cannot pass this stage."}</small></div>
+      <div><span>Bounded call capture</span><strong>{voiceCapture ? label(voiceCapture.status) : "Not run"}</strong><small>{voiceCapture?.blockingIssue || voiceCapture?.resultSummary || voicePlan?.blockingIssue || "Real captured calls are required when traffic is available."}</small></div>
+      <div><span>Transcription proof</span><strong>{transcriptionGate ? label(transcriptionGate.status) : "Not run"}</strong><small>{transcriptionGate?.blockingIssue || transcriptionGate?.resultSummary || transcriptionPlan?.blockingIssue || "Useful completed transcripts are required for a passing verdict."}</small></div>
+    </div>
+    {voiceCapture && <ExperimentSummary experiment={voiceCapture} />}
+    {transcriptionGate && <ExperimentSummary experiment={transcriptionGate} />}
+    {!voiceCapture && voicePlan?.blockingIssue && <div className="setup-warning-list"><div>{voicePlan.blockingIssue}</div></div>}
+    {!transcriptionGate && transcriptionPlan?.blockingIssue && <div className="setup-warning-list"><div>{transcriptionPlan.blockingIssue}</div></div>}
+  </div>;
+}
+
+function SiteSetupRfVerdictStage({ detail, stabilityVerdict }: { detail: RfSurveyDetail; stabilityVerdict?: RfSurveyExperiment }) {
+  const verdict = detail.session.verdict && detail.session.verdict !== "not_started" ? label(detail.session.verdict) : "Not ready";
+  const stability = detail.session.stability && detail.session.stability !== "unknown" ? label(detail.session.stability) : "Not proved";
+  const blockers = detail.nextExperiments.filter(plan => !plan.enabled && plan.blockingIssue).map(plan => plan.blockingIssue);
+  return <div className="rf-step-stack rf-stage-summary">
+    <div className="rf-verdict-summary">
+      <div><span>Verdict</span><strong>{verdict}</strong></div>
+      <div><span>Stability</span><strong>{stability}</strong></div>
+      <div><span>Last updated</span><strong>{new Date(detail.session.updatedAtUtc).toLocaleString()}</strong></div>
+    </div>
+    {stabilityVerdict && <ExperimentSummary experiment={stabilityVerdict} />}
+    {blockers.length > 0 ? <div className="setup-warning-list">{Array.from(new Set(blockers)).map(blocker => <div key={blocker}>{blocker}</div>)}</div> : <div className="setup-note">No remaining server-declared blockers. Review the measured evidence before final configuration.</div>}
+    <div className="setup-note">A passing verdict requires reliable control-channel decoding, source coverage, real call capture when traffic is available, useful transcription, and stable results across the required windows.</div>
   </div>;
 }
 
@@ -2174,7 +2323,7 @@ function SiteSetupConfigReviewTable({ rows }: { rows: SiteSetupConfigReviewRow[]
         {rows.length
           ? rows.map((row, index) => <tr className={row.tone ?? "changed"} key={`${row.area}-${row.setting}-${index}`}>
             <td>{row.area}</td>
-            <td>{row.setting}</td>
+            <td>{siteSetupSettingLabel(row.setting)}</td>
             <td><code>{row.current}</code></td>
             <td><code>{row.next}</code></td>
           </tr>)
@@ -2247,12 +2396,16 @@ function buildSiteSetupConfigReviewRows(current: any, next: any): SiteSetupConfi
   return rows;
 }
 
+function siteSetupSettingLabel(setting: string) {
+  return setting.toLowerCase() === "error" ? "Frequency correction" : setting;
+}
+
 function formatSiteSetupSourceSummary(source: any) {
   const parts = [
     source?.device || "source",
     source?.center ? `center ${formatRfHz(readTrFrequencyHz(source.center))}` : "",
     source?.rate ? `rate ${formatHz(Number(source.rate))}` : "",
-    source?.error !== undefined ? `error ${source.error} Hz` : "",
+    source?.error !== undefined ? `frequency correction ${formatSignedHz(Number(source.error))}` : "",
     siteSetupSourceGainText(source)
   ].filter(Boolean);
   return parts.join(" / ") || "Source";
@@ -4590,7 +4743,7 @@ function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode
     {headerMode === "actions" && <div className="rf-primary-actions">
       <button type="button" onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add Chain Item</button>
     </div>}
-    {headerMode === "full" && <div className="setup-note">Use RF Path to document the physical antenna/coax/filter/SDR chain. Use SDR Inventory to choose hardware. Use RF Sweep to prove which source, control channel, gain, and error settings can decode before Config Draft builds the monitoring plan.</div>}
+    {headerMode === "full" && <div className="setup-note">Use RF Path to document the physical antenna/coax/filter/SDR chain. Use SDR Inventory to choose hardware. Use RF Sweep to prove which source, control channel, gain, and frequency-correction settings can decode before Config Draft builds the monitoring plan.</div>}
     <div className="rf-path-notes-grid">
       <label>
         <span>Position notes</span>
@@ -4820,7 +4973,7 @@ function normalizeSweepCandidate(candidate: SweepCandidate): SweepCandidate {
     decode0Pct,
     avgDecodeRate,
     maxDecodeRate: hasDecodeSamples ? (candidate.maxDecodeRate ?? 0) : 0,
-    metricWarning: hasDecodeSamples ? candidate.metricWarning : candidate.metricWarning || "No parser-visible CC message-rate samples were found in this measurement window; call counts are informational, but error ranking is advisory until a rerun captures CC message-rate samples.",
+    metricWarning: hasDecodeSamples ? candidate.metricWarning : candidate.metricWarning || "No parser-visible control-channel message-rate samples were found in this measurement window; call counts are informational, but frequency-correction ranking is advisory until a rerun captures comparable samples.",
     score: hasDecodeSamples ? (1000 - decode0Pct) * 1_000_000 + avgDecodeRate * 1000 + (candidate.callsConcluded ?? 0) : -1_000_000 + (candidate.callsConcluded ?? 0)
   };
 }
@@ -4908,10 +5061,10 @@ function compareSweepRun(current?: SweepCandidate, previous?: SweepHistoryEntry)
   const currentAvg = current.avgDecodeRate ?? 0;
   const delta = currentAvg - previous.bestAvgDecodeRate;
   if (delta < -1)
-    return { tone: "warning", text: `This run looks worse than the prior best: ${current.errorHz} Hz averaged ${currentAvg.toFixed(1)}/sec vs ${previous.bestErrorHz} Hz at ${previous.bestAvgDecodeRate.toFixed(1)}/sec. Consider returning to ${previous.bestErrorHz} Hz or sweeping the other direction.` };
+    return { tone: "warning", text: `This run looks worse than the prior best: frequency correction ${formatSignedHz(current.errorHz)} averaged ${currentAvg.toFixed(1)}/sec versus ${formatSignedHz(previous.bestErrorHz)} at ${previous.bestAvgDecodeRate.toFixed(1)}/sec. Consider returning to ${formatSignedHz(previous.bestErrorHz)} or sweeping the other direction.` };
   if (delta > 1)
-    return { tone: "ok", text: `This run improved on the prior best: ${current.errorHz} Hz averaged ${currentAvg.toFixed(1)}/sec vs ${previous.bestErrorHz} Hz at ${previous.bestAvgDecodeRate.toFixed(1)}/sec.` };
-  return { tone: "neutral", text: `This run is roughly tied with the prior best (${previous.bestErrorHz} Hz). Prefer the candidate with more samples, fewer zero-decode windows, and fewer retunes.` };
+    return { tone: "ok", text: `This run improved on the prior best: frequency correction ${formatSignedHz(current.errorHz)} averaged ${currentAvg.toFixed(1)}/sec versus ${formatSignedHz(previous.bestErrorHz)} at ${previous.bestAvgDecodeRate.toFixed(1)}/sec.` };
+  return { tone: "neutral", text: `This run is roughly tied with the prior best frequency correction (${formatSignedHz(previous.bestErrorHz)}). Prefer the candidate with more samples, fewer zero-decode windows, and fewer retunes.` };
 }
 
 type RfRefinementSubpage = "path" | "cc" | "inventory" | "waterfall" | "power" | "p25" | "sweep";
@@ -5201,10 +5354,10 @@ function SiteValidationStep({
   const validationAutoError = validationErrorOffsets.trim().toLowerCase() === "auto";
   const validationFormErrorSearch = validationErrorOffsets;
   const validationRecommendedOffsetText = handoffValidationOffsets.length
-    ? `${handoffValidationOffsets.map(formatSignedHz).join(", ")}${validationErrorBaseSource ? ` from source ${formatSignedHz(validationErrorBaseHz)}` : ""}`
+    ? `${handoffValidationOffsets.map(formatSignedHz).join(", ")}${validationErrorBaseSource ? ` from saved source correction ${formatSignedHz(validationErrorBaseHz)}` : ""}`
     : "";
   const validationRecommendedErrorText = waterfallRecommendedError
-    ? `target error ${formatSignedHz(waterfallRecommendedError.errorHz)}${validationRecommendedOffsetText ? ` / offset ${validationRecommendedOffsetText}` : ""}${waterfallRecommendedError.conflict ? ` (selected peaks range ${formatSignedHz(waterfallRecommendedError.minErrorHz)} to ${formatSignedHz(waterfallRecommendedError.maxErrorHz)})` : ""}`
+    ? `frequency correction ${formatSignedHz(waterfallRecommendedError.errorHz)}${validationRecommendedOffsetText ? ` / correction change ${validationRecommendedOffsetText}` : ""}${waterfallRecommendedError.conflict ? ` (selected measurements range ${formatSignedHz(waterfallRecommendedError.minErrorHz)} to ${formatSignedHz(waterfallRecommendedError.maxErrorHz)})` : ""}`
     : "";
   const selectedWaterfallGains = uniqueCaseInsensitive(selectedWaterfallSweepSelections.map(row => row.gain ?? ""));
   const waterfallSeedGainSequence = selectedWaterfallGains.length ? effectivePowerGainSequence(selectedWaterfallGains, validationPowerSources).join(",") : "";
@@ -5574,7 +5727,7 @@ function SiteValidationStep({
       const evidence = parseExperimentJson<any>(experiment.evidenceJson);
       const job = evidence?.job as Job | undefined;
       if (!job?.id)
-        throw new Error("Error/gain sweep experiment did not return a job handle.");
+        throw new Error("Frequency-correction and gain sweep did not return a job handle.");
       setSweepJob(job);
       setSweepLogs([]);
       sweepLogLastId.current = 0;
@@ -5610,7 +5763,7 @@ function SiteValidationStep({
       if (!onAcceptSweepCandidate)
         throw new Error("This RF refinement view is not connected to Setup.");
       await onAcceptSweepCandidate(source, result, candidate);
-      setSweepMessage(`Accepted Source ${source.index} gain ${result.gain || source.gain || "unchanged"} and error ${candidate.errorHz} Hz as pending Setup values. Live monitoring is unchanged until Apply & Resume.`);
+      setSweepMessage(`Accepted Source ${source.index} gain ${result.gain || source.gain || "unchanged"} and frequency correction ${formatSignedHz(candidate.errorHz)} as pending Setup values. Live monitoring is unchanged until Apply & Resume.`);
     } catch (error) {
       setSweepMessage(error instanceof Error ? error.message : "Unable to accept the sweep candidate into Setup.");
     } finally {
@@ -5717,7 +5870,7 @@ function SiteValidationStep({
             <div className="rf-cc-runline compact">
               <label><span>Sample rate MHz</span><input className={validationRequestSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" value={validationFormSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
               <label><span>Gain sequence</span><input className={validationPowerGainInvalid ? "invalid" : ""} value={validationFormGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
-              <label><span>Error offset</span><input className="rf-short-input" size={6} value={validationFormErrorSearch} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
+              <label><span>Correction change (Hz)</span><input className="rf-short-input" size={6} value={validationFormErrorSearch} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
               <label><span>Metric candidates</span><input className="rf-short-input" size={6} inputMode="numeric" value={validationMetricsCandidates} onChange={event => setValidationMetricsCandidates(event.target.value)} /></label>
               <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationRequestSampleRateOk || validationPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
               {(validationRunning || validationProgress?.active) && <button disabled={sweepBusy === "cancel-validation"} onClick={() => void cancelValidationSweep()}>{sweepBusy === "cancel-validation" ? "Canceling..." : "Cancel"}</button>}
@@ -5726,7 +5879,7 @@ function SiteValidationStep({
             {airspyPowerGainMessage && <div className={validationPowerGainInvalid ? "settings-message error" : "setup-note"}>{validationPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
             <div className="rf-waterfall-sweep-selection">
               <strong>RF Sweep CCs</strong>
-              <span>{selectedWaterfallSweepControlChannels.length ? `${selectedWaterfallSweepControlChannels.map(formatRfHz).join(", ")} / gain ${validationPowerGains.join(", ")}${validationRecommendedErrorText ? ` / error ${validationRecommendedErrorText}` : ""}${waterfallSampleRateHz ? ` / ${formatMhzInput(waterfallSampleRateHz)} MS/s` : ""}${validationHandoffSourceIndex !== undefined ? ` / source ${validationHandoffSourceIndex}` : ""}` : "All requested control channels"}</span>
+              <span>{selectedWaterfallSweepControlChannels.length ? `${selectedWaterfallSweepControlChannels.map(formatRfHz).join(", ")} / gain ${validationPowerGains.join(", ")}${validationRecommendedErrorText ? ` / ${validationRecommendedErrorText}` : ""}${waterfallSampleRateHz ? ` / ${formatMhzInput(waterfallSampleRateHz)} MS/s` : ""}${validationHandoffSourceIndex !== undefined ? ` / source ${validationHandoffSourceIndex}` : ""}` : "All requested control channels"}</span>
               {selectedWaterfallSweepControlChannels.length > 0 && <button type="button" onClick={() => onWaterfallSweepSelections?.([])}>Clear</button>}
             </div>
           </div>
@@ -5754,7 +5907,7 @@ function SiteValidationStep({
             <div><span>SDR sources</span><code>{activeValidationPowerSources.map(source => `${source.sdrType || "SDR"} ${source.index}${source.serial ? ` (${source.serial})` : ""}`).join(", ") || "None"}</code></div>
             <div><span>Sample rate</span><code>{validationRequestSampleRateOk ? `${formatMhzInput(validationRequestSampleRateHz)} MHz` : "Invalid"}</code></div>
             <div><span>RF screens</span><code>{activeValidationPowerSources.length} source(s) x {activeValidationControlChannels.length} CC x {activeValidationPowerGains.length} gain = {activeValidationPowerPasses}</code></div>
-            <div><span>P25 probes</span><code>{activeValidationP25SeedCount} control channel seed(s) x {validationOffsets.length} error candidate(s) = {activeValidationProbePasses}</code></div>
+            <div><span>P25 probes</span><code>{activeValidationP25SeedCount} control-channel seed(s) x {validationOffsets.length} correction change(s) = {activeValidationProbePasses}</code></div>
             <div><span>Follow-up limits</span><code>{activeValidationMetricRunCount} TR metric candidate(s); {activeValidationVoiceCandidateCount} voice trial candidate(s)</code></div>
           </div>
           <RfSweepPermutationResults
@@ -5791,7 +5944,7 @@ function SiteValidationStep({
     },
     {
       id: "sweep",
-      title: "Error/Gain Refinement",
+      title: "Frequency Correction & Gain Refinement",
       status: sweepJobRunning ? "running" : sweepJob?.status || persistedSweepStatus,
       estimate: `about ${formatElapsed(sweepEstimateSeconds)} for ${sweepPassCount} passes`,
       locked: !inventory,
@@ -5800,14 +5953,14 @@ function SiteValidationStep({
       begin: beginSweep,
       result: undefined,
       body: <div className="rf-step-stack">
-        <p>Searches nearby SDR frequency-error settings for steadier control-channel decoding after RF Sweep has found a usable CC/gain condition.</p>
+        <p>Searches nearby source frequency-correction settings for steadier control-channel decoding after RF Sweep has found a usable control-channel and gain condition.</p>
         <div className="setup-note">Accepting a candidate updates the pending Setup source values. Apply & Resume remains the only action that changes live monitoring.</div>
         {!sweep && staleSweep && <StaleExperimentNotice experiment={staleSweep} activeControlChannelHz={selectedCcNumber} />}
         <div className="rf-sweep-table">
           <div className="rf-sweep-header">
             <span>SDR</span>
             <span>Precision</span>
-            <span>Base Error Hz</span>
+            <span>Saved correction (Hz)</span>
             <span>Gain</span>
             <span>Range Hz</span>
             <span>Step Hz</span>
@@ -5828,7 +5981,7 @@ function SiteValidationStep({
                 <option value="deep">Deep</option>
                 <option value="custom">Custom</option>
               </select></label>
-              <label><span>Base error Hz</span><input inputMode="numeric" value={input.errorHz} onChange={event => updateSweepField(source.index, { errorHz: event.target.value })} /></label>
+              <label><span>Saved correction (Hz)</span><input inputMode="numeric" value={input.errorHz} onChange={event => updateSweepField(source.index, { errorHz: event.target.value })} /></label>
               <label><span>{sourceIsAirspy ? `Linearity gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={sourceGainInvalid ? "invalid" : ""} value={input.gain} onChange={event => updateSweepField(source.index, { gain: event.target.value })} /></label>
               <label><span>Range Hz</span><input inputMode="numeric" value={input.rangeHz} onChange={event => updateSweepField(source.index, { rangeHz: event.target.value })} /></label>
               <label><span>Step Hz</span><input inputMode="numeric" value={input.stepHz} onChange={event => updateSweepField(source.index, { stepHz: event.target.value })} /></label>
@@ -5856,22 +6009,22 @@ function SiteValidationStep({
             return <div className="rf-sweep-result-card" key={`result-${source.index}`}>
               <div className="setup-job-head">
                 <strong>Source {source.index} Sweep Results</strong>
-                <span className="muted">{result.candidates.length} candidate row{result.candidates.length === 1 ? "" : "s"}; top ranked {result.candidates[0] ? `${result.candidates[0].errorHz} Hz` : "unknown"}</span>
+                <span className="muted">{result.candidates.length} candidate row{result.candidates.length === 1 ? "" : "s"}; top-ranked frequency correction {result.candidates[0] ? formatSignedHz(result.candidates[0].errorHz) : "unknown"}</span>
               </div>
               <div className="setup-note">Artifacts: {result.summaryPath || result.outputDir}</div>
               {result.candidates[0] && <div className="rf-sweep-recommendation">
-                <strong>Current recommendation: {result.candidates[0].errorHz} Hz</strong>
+                <strong>Recommended frequency correction: {formatSignedHz(result.candidates[0].errorHz)}</strong>
                 <span>{result.candidates[0].hasDecodeSamples ? `${result.candidates[0].avgDecodeRate.toFixed(1)}/sec average across ${result.candidates[0].totalDecode ?? 0} CC message-rate sample(s)` : "No comparable CC message-rate samples captured"}</span>
               </div>}
               {sweepComparison && <div className={`rf-sweep-comparison ${sweepComparison.tone}`}>{sweepComparison.text}</div>}
               {!hasComparableDecode && <div className="setup-warning-list">
-                <div>This sweep result has no parser-visible CC message-rate samples. Calls may still start/end during the window, but error ranking is advisory until a rerun captures CC message-rate samples with the current TR diagnostic settings.</div>
+                <div>This sweep result has no parser-visible control-channel message-rate samples. Calls may still start/end during the window, but frequency-correction ranking is advisory until a rerun captures comparable samples with the current Trunk Recorder diagnostic settings.</div>
               </div>}
               <div className="rf-sweep-candidate-table">
-                <div className="rf-sweep-candidate-header"><span></span><span>Error</span><span>CC avg</span><span>CC samples</span><span>% zero-decode</span><span>Retunes</span><span>Calls started/ended</span><span>No TX</span></div>
+                <div className="rf-sweep-candidate-header"><span></span><span>Frequency correction</span><span>Control average</span><span>Control samples</span><span>% zero-decode</span><span>Retunes</span><span>Calls started/ended</span><span>No transmission</span></div>
                 {result.candidates.slice(0, 8).map(candidate => <label className={candidate.errorHz === selectedError ? "selected" : ""} key={`${source.index}-${candidate.errorHz}`}>
                   <input type="radio" name={`sweep-candidate-${source.index}`} checked={candidate.errorHz === selectedError} onChange={() => setSelectedSweepCandidates(current => ({ ...current, [String(source.index)]: candidate.errorHz }))} />
-                  <code>{candidate.errorHz} Hz</code>
+                  <code>{formatSignedHz(candidate.errorHz)}</code>
                   <span>{formatSweepRate(candidate)}</span>
                   <span>{candidate.totalDecode ?? 0}</span>
                   <span>{formatSweepPercent(candidate)}</span>
@@ -5882,11 +6035,11 @@ function SiteValidationStep({
               </div>
               <div className="rf-inline-actions">
                 <button disabled={!selectedCandidate || sweepBusy === `apply-${source.index}`} onClick={() => selectedCandidate && void applySweepCandidate(source, result, selectedCandidate)}>{sweepBusy === `apply-${source.index}` ? "Accepting..." : "Use in Setup"}</button>
-                {selectedCandidate && <button title="Uses the selected error value as the new center and reduces the range/step for a follow-up sweep. It does not run anything until you click Rerun." onClick={() => {
+                {selectedCandidate && <button title="Uses the selected frequency correction as the new center and reduces the range and step for a follow-up sweep. It does not run anything until you click Rerun." onClick={() => {
                   updateSweepInput(source.index, { precision: "custom", errorHz: String(selectedCandidate.errorHz), rangeHz: "300", stepHz: "100" });
                   setHighlightedSweepSource(source.index);
                   window.setTimeout(() => setHighlightedSweepSource(current => current === source.index ? null : current), 1800);
-                  setSweepMessage(`Prepared Source ${source.index} for a narrower follow-up sweep centered on ${selectedCandidate.errorHz} Hz. Click Rerun to execute it.`);
+                  setSweepMessage(`Prepared Source ${source.index} for a narrower follow-up sweep centered on frequency correction ${formatSignedHz(selectedCandidate.errorHz)}. Click Rerun to execute it.`);
                 }}>Narrow Sweep</button>}
                 <button disabled={!selectedCandidate || sweepBusy === `ai-${source.index}`} onClick={() => selectedCandidate && void analyzeSweepCandidate(source, result, selectedCandidate)}>{sweepBusy === `ai-${source.index}` ? "Analyzing..." : "Analyze"}</button>
               </div>
@@ -6358,7 +6511,7 @@ function WaterfallStep({
       status: "running",
       summary: "P25 Identify running",
       detail: targetLabel
-        ? `Matched saved CC ${targetLabel}; observed error ${formatSignedHz(offset)}.`
+        ? `Matched saved control channel ${targetLabel}; measured signal offset ${formatSignedHz(offset)}.`
         : "This peak is not within 20 kHz of a selected Setup control channel.",
       targetLabel,
       offsetHz: offset,
@@ -6493,7 +6646,7 @@ function WaterfallStep({
         const identify = identifyResults[row.identifyPeak.key];
         const evidence = [
           `SNR ${formatFixed(row.snrDb, 1)} dB`,
-          Number.isFinite(row.offsetHz) ? `observed error ${formatSignedHz(row.offsetHz)}` : "",
+          Number.isFinite(row.offsetHz) ? `measured signal offset ${formatSignedHz(row.offsetHz)}` : "",
           `confidence ${Math.round(row.confidence * 100)}%`,
           identify ? waterfallIdentifyReportText(identify) : ""
         ].filter(Boolean).join(" / ");
@@ -6639,10 +6792,10 @@ function WaterfallStep({
       </div>
     </div>
     <div className="rf-waterfall-cc-panel">
-      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by SNR. Observed error is measured from the matched selected-site or cached RR control channel.</small></div>
+      <div className="rf-waterfall-cc-head"><span>Control Channel Candidates</span><small>Ranked by signal-to-noise ratio. Measured signal offset is the detected carrier displacement from the matched selected-site or cached RadioReference control channel.</small></div>
       <div className="rf-waterfall-candidate-table">
         <div className={showSweepSelection ? "rf-waterfall-candidate-row header" : "rf-waterfall-candidate-row header no-sweep-selection"}>
-          {showSweepSelection && <span>Use</span>}<span>Site</span><span>Matched CC</span><span>Detected</span><span>SNR</span><span>Observed error</span><span>Confidence</span><span>Source</span><span>Action</span>
+          {showSweepSelection && <span>Use</span>}<span>Site</span><span>Matched control channel</span><span>Detected</span><span>Signal-to-noise</span><span>Measured signal offset</span><span>Confidence</span><span>Source</span><span>Action</span>
         </div>
         {waterfallCandidates.length === 0 ? <div className="rf-waterfall-cc-empty">Start waterfall to inspect selected and nearby RR control channels.</div> : waterfallCandidates.map(row => {
           const identify = identifyResults[row.identifyPeak.key];
@@ -7251,7 +7404,7 @@ function summarizeWaterfallIdentifyResult(base: WaterfallIdentifyResult, experim
   const effectiveStatus: WaterfallIdentifyResult["status"] = status === "passed" && !hasStrongIdentityEvidence ? "failed" : status;
   const demodDetail = attemptedDemods.length > 1 ? `Tried demods: ${attemptedDemods.join(", ")}.` : "";
   const targetDetail = base.targetLabel
-    ? `Matched saved CC ${base.targetLabel}; observed error ${formatSignedHz(base.offsetHz)}.`
+    ? `Matched saved control channel ${base.targetLabel}; measured signal offset ${formatSignedHz(base.offsetHz)}.`
     : "Not in the selected Setup control-channel list; probed the measured peak directly.";
   const identitySummary = p25IdentifySummary(fields);
   const measuredFrequency = base.measuredFrequencyHz || base.frequencyHz;
@@ -8632,7 +8785,7 @@ function RfSweepPermutationResults({
         <span>Control channel</span>
         <span>Gains</span>
         <span>SNR</span>
-        <span>Peak delta</span>
+        <span>Measured signal offset</span>
         <span>Issue</span>
       </div>
       {groups.length === 0 && <div className="rf-sweep-plan-row neutral" role="row">
@@ -8692,7 +8845,7 @@ function RfSweepPermutationResults({
                 return <div className={`rf-sweep-plan-followup ${rfSweepRowClass(stage.status, stage.label)}`} key={candidate.id || `${group.key}-${item.gain}-${candidate.errorHz}`}>
                   <span></span>
                   <span className={`section-status ${rfSweepStatusTone(stage.status, stage.label)}`.trim()}>{stage.label || "P25 probe"}</span>
-                  <span>Tune error {candidate.errorHz} Hz</span>
+                  <span>Frequency correction {formatSignedHz(candidate.errorHz)}</span>
                   <span>{stage.status ? label(stage.status) : "pending"}</span>
                   <span>{stage.summary || "Waiting for follow-up result."}</span>
                 </div>;
@@ -8874,7 +9027,7 @@ function RfValidationStageSummary({ candidate, experiment, systems = [] }: { can
   return <div className="rf-validation-stage-card">
     <div>
       <strong>{experiment.status === "passed" ? "Validated Candidate" : "Current Best Candidate"}</strong>
-      <span>{system?.siteLabel || system?.shortName || candidate.systemShortName || "Unknown site"} / Source {candidate.sourceIndex}, {candidate.controlChannelHz ? formatRfHz(Number(candidate.controlChannelHz)) : "--"}, gain {candidate.gain ?? "auto"}, tune error {candidate.errorHz ?? 0} Hz</span>
+      <span>{system?.siteLabel || system?.shortName || candidate.systemShortName || "Unknown site"} / Source {candidate.sourceIndex}, {candidate.controlChannelHz ? formatRfHz(Number(candidate.controlChannelHz)) : "--"}, gain {candidate.gain ?? "auto"}, frequency correction {formatSignedHz(Number(candidate.errorHz ?? 0))}</span>
     </div>
     <div className="rf-validation-stage-strip">
       {stages.map(stage => <div className="rf-validation-stage" key={stage.label}>
@@ -8942,7 +9095,7 @@ function RfValidationRecommendations({
           </div>
           {best && <div className="rf-site-best">
             <span>Best evidence</span>
-            <code>{formatRfHz(Number(best.controlChannelHz))} / source {best.sourceIndex} / gain {best.gain ?? "auto"} / tune error {best.errorHz ?? 0} Hz</code>
+            <code>{formatRfHz(Number(best.controlChannelHz))} / source {best.sourceIndex} / gain {best.gain ?? "auto"} / frequency correction {formatSignedHz(Number(best.errorHz ?? 0))}</code>
             <span>{rfValidationCandidateOutcome(best)}</span>
           </div>}
           <div className="rf-site-readiness-table">
@@ -8955,7 +9108,7 @@ function RfValidationRecommendations({
                 <span className={rfValidationStageClass(candidate?.p25Frames ? "passed" : candidate?.p25Status)}>{label(candidate?.p25Status || "not run")}</span>
                 <span className={rfValidationStageClass(candidate?.metricsStatus)}>{label(candidate?.metricsStatus || "not run")}</span>
                 <span className={rfValidationStageClass(rfValidationCandidateVoiceStatus(candidate))}>{label(rfValidationCandidateVoiceStatus(candidate))}{candidate?.voiceRealCalls ? ` (${candidate.voiceRealCalls})` : ""}</span>
-                <span>{candidate ? `gain ${candidate.gain ?? "auto"}, tune error ${candidate.errorHz ?? 0} Hz` : "--"}</span>
+                <span>{candidate ? `gain ${candidate.gain ?? "auto"}, frequency correction ${formatSignedHz(Number(candidate.errorHz ?? 0))}` : "--"}</span>
                 <span>{candidate ? rfValidationCandidateOutcome(candidate) : "No candidate tested"}</span>
               </div>;
             })}
@@ -9191,7 +9344,7 @@ function RfPowerVisualAid({ experiment }: { experiment: RfSurveyExperiment }) {
       note="Any repeated clipping means gain or external amplification is too high."
     />
     <div className="rf-aid-context">
-      <div><span>Peak delta</span><code>{Number.isFinite(ccOffset) ? `${formatFixed(ccOffset, 0)} Hz` : "--"}</code></div>
+      <div><span>Measured signal offset</span><code>{Number.isFinite(ccOffset) ? formatSignedHz(ccOffset) : "--"}</code></div>
       <div><span>Noise floor</span><code>{best.noiseFloorDb == null ? "--" : `${formatFixed(best.noiseFloorDb, 1)} dBFS`}</code></div>
       <p>{adjacentText}</p>
     </div>
@@ -9258,7 +9411,7 @@ function RfPowerScanDetails({ experiment }: { experiment: RfSurveyExperiment }) 
       </div>
     </details>
     <div className="rf-power-table">
-      <div className="rf-power-row header"><span>SDR</span><span>CC</span><span>Status</span><span>Quality</span><span>Gain</span><span>CC SNR</span><span>CC Peak</span><span>Noise</span><span>Peak delta</span><span>Strongest</span><span>Clip</span><span>Output</span></div>
+      <div className="rf-power-row header"><span>SDR</span><span>Control channel</span><span>Status</span><span>Quality</span><span>Gain</span><span>Control SNR</span><span>Control peak</span><span>Noise</span><span>Measured signal offset</span><span>Strongest</span><span>Clip</span><span>Output</span></div>
       {rows.map((row: any, index: number) => {
         const quality = rfPowerQuality(row);
         return <div className={row.overload ? "rf-power-row warning" : row.status === "measured" ? "rf-power-row" : "rf-power-row failed"} key={`${row.index}-${index}`}>
