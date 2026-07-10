@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: Package 3 discovery and design confirmation
-- Working branch: `codex/operator-ux-review`
+- Current milestone: 3A - Top-level Loading And Monitoring Status
+- Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `8bafece`
 - Operator verification: Packages 1 and 2 accepted
-- Next action: audit the current loading, refresh, error, and connectivity state
-  implementation before proposing the first Package 3 milestone.
+- Next action: deploy milestone 3A with the automatic helper, verify the live
+  retained-data/search/monitoring workflow, and request operator inspection.
 
 ## Working Rules
 
@@ -68,6 +68,12 @@ Status: complete
 
 Status: in progress
 
+- [ ] 3A. Give Dashboard, call-category pages, Setup, and System a shared
+  retained-data refresh contract; separate monitoring state; scope automatic
+  updates; and make search page-owned.
+- [ ] 3B. Apply the accepted refresh contract to Settings and specialized
+  page-local data panels without preempting Package 4's independent System-tab
+  architecture.
 - [ ] Add page-local loading, refreshing, error, retry, and last-updated state.
 - [ ] Keep last-good data visible during refresh.
 - [ ] Debounce search and stop unrelated full-page refreshes.
@@ -135,6 +141,29 @@ Status: pending
   refresh preserves operator policy and manual fields.
 - 2026-07-09: Operator accepted Package 2 after the pagination stabilization
   and deployment-efficiency follow-up.
+- 2026-07-09: Package 3 refresh failures keep last-good data visible, identify
+  when it was last updated, and expose page-local retry rather than replacing
+  useful content with a loading screen.
+- 2026-07-09: Browser-to-PizzaWave transport is not a persistent operator
+  status. Reconnection is silent; affected pages own request failures; the
+  technical REST/SSE badge is removed; and a single exception-only delayed
+  update pill appears after 90 seconds without a successful refresh.
+- 2026-07-09: Trunk Recorder monitoring remains persistently visible and uses
+  distinct active, warming, stale, faulted, intentionally stopped, and
+  Setup-paused states with monitoring freshness kept separate from page fetch
+  failures.
+- 2026-07-09: Search is owned by Dashboard and call-category pages. Dashboard
+  filtering is local, category requests wait briefly for typing to stop, and
+  search does not reload unrelated status or pages.
+- 2026-07-09: Automatic events refresh only affected shared data and relevant
+  visible-page data. A genuine event-stream reconnection performs one
+  contextual catch-up refresh; initial connection does not duplicate the
+  initial page load.
+- 2026-07-09: Temporary refresh failures retry indefinitely while their page
+  remains relevant, backing off from approximately one second to a one-minute
+  ceiling and resetting immediately after success. Definite authentication,
+  permission, invalid-request, and missing-endpoint errors require operator
+  action instead of automatic retry.
 
 ## Deployment Log
 

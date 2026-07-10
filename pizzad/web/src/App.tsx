@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
+import { usePersistentRefresh } from "./refresh";
+import type { RefreshState } from "./refresh";
 import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
@@ -116,21 +118,42 @@ function categoryPageKey(page: Page, rangeHours: number, search: string) {
   return `${page}|${rangeHours}|${search.trim()}`;
 }
 
+function formatRefreshTime(timestamp: number | null) {
+  return timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) : "not yet";
+}
+
+function RefreshNotice({ state, hasData, onRetry }: { state: RefreshState; hasData: boolean; onRetry: () => Promise<unknown> }) {
+  if (!hasData && !state.error)
+    return <div className="page-load-state" role="status"><RefreshCw size={16} className="spin" /> Loading current data...</div>;
+  if (!hasData && state.error)
+    return <div className="page-refresh-notice error" role="alert"><span>Unable to load this page: {state.error}</span><button onClick={() => void onRetry()}>Retry</button></div>;
+  if (state.error)
+    return <div className="page-refresh-notice error" role="alert"><span>Update failed. Showing data last updated at {formatRefreshTime(state.lastUpdatedAt)}. {state.error}</span><button onClick={() => void onRetry()}>Retry now</button></div>;
+  return <div className="page-refresh-notice" role="status">
+    <span>{state.refreshing ? "Refreshing..." : `Updated ${formatRefreshTime(state.lastUpdatedAt)}`}</span>
+    <button disabled={state.refreshing} onClick={() => void onRetry()}>{state.refreshing ? "Refreshing..." : "Refresh"}</button>
+  </div>;
+}
+
+function PageSearch({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return <label className="global-search page-search">
+    <Search size={15} aria-hidden="true" />
+    <input type="search" value={value} placeholder={placeholder} aria-label={placeholder} onChange={event => onChange(event.target.value)} />
+  </label>;
+}
+
 function App() {
   const [page, setPageState] = useState<Page>(() => normalizePage(localStorage.getItem("pizzawave-page")));
   const [rangeHours, setRangeHours] = useState(24);
   const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
-  const [status, setStatus] = useState("Starting");
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [category, setCategory] = useState<{ key: string; data: CategoryPage } | null>(null);
+  const [appNotice, setAppNotice] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null);
   const [profileState, setProfileState] = useState<ProfileState | null>(null);
   const [pendingProfileHides, setPendingProfileHides] = useState<ProfileTalkgroupSetting[]>([]);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
-  const [siteSetup, setSiteSetup] = useState<SiteSetup | null>(null);
-  const [troubleshoot, setTroubleshoot] = useState<TrTroubleshoot | null>(null);
+  const [monitoringCheckedAt, setMonitoringCheckedAt] = useState<number | null>(null);
   const [recommendations, setRecommendations] = useState<SystemRecommendations | null>(null);
   const [cpuSnapshot, setCpuSnapshot] = useState<SystemCpuSnapshot | null>(null);
   const [settingsSections, setSettingsSections] = useState<Record<string, any>>({});
@@ -143,24 +166,18 @@ function App() {
   const [focusedIncidentId, setFocusedIncidentId] = useState<number | null>(null);
   const [focusedHashTarget, setFocusedHashTarget] = useState("");
   const [dashboardMode, setDashboardMode] = useState<DashboardMode>("incidents");
-  const [globalSearch, setGlobalSearch] = useState("");
+  const [pageSearches, setPageSearches] = useState<Record<string, string>>({});
+  const [debouncedCategorySearch, setDebouncedCategorySearch] = useState("");
+  const [updateDelayOpen, setUpdateDelayOpen] = useState(false);
+  const [refreshClock, setRefreshClock] = useState(Date.now());
+  const [setupTrOperation, setSetupTrOperation] = useState("");
   const [systemTargetTab, setSystemTargetTab] = useState<SystemTopTab | null>(null);
   const [setupTargetSection, setSetupTargetSection] = useState<string | null>(null);
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
-  const refreshStatusRef = useRef<() => Promise<void>>(async () => { });
-  const refreshVisiblePageRef = useRef<() => Promise<void>>(async () => { });
-  const statusRefreshInFlightRef = useRef<Promise<void> | null>(null);
-  const visibleRefreshInFlightRef = useRef<Promise<void> | null>(null);
-  const visibleRefreshInFlightKeyRef = useRef("");
-  const visibleRefreshSerialRef = useRef(0);
-  const statusRefreshHadSuccessRef = useRef(false);
   const pageRef = useRef<Page>(page);
   const rangeHoursRef = useRef(rangeHours);
-  const globalSearchRef = useRef(globalSearch);
-  const categoryRequestIdRef = useRef(0);
   const lastStatusRefreshAtRef = useRef(0);
   const lastPageRefreshAtRef = useRef(0);
-  const lastDashboardRefreshRef = useRef(0);
   const lastSetupStatusRefreshAtRef = useRef(0);
   const setupStatusRef = useRef<SetupStatus | null>(null);
   const setupWaterfallActiveRef = useRef(false);
@@ -203,8 +220,6 @@ function App() {
     };
   }, []);
   function setPage(next: Page) {
-    if (categories.includes(next as any))
-      categoryRequestIdRef.current += 1;
     setPageState(next);
     localStorage.setItem("pizzawave-page", next);
   }
@@ -276,10 +291,8 @@ function App() {
   }
 
   const refreshStatusData = useCallback(async () => {
-    if (pageRef.current === "setup" && setupWaterfallActiveRef.current) {
-      setStatus("Setup RF");
+    if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
       return;
-    }
     let setup = setupStatusRef.current;
     const now = Date.now();
     const shouldRefreshSetupStatus =
@@ -295,16 +308,14 @@ function App() {
     }
     if (!setup)
       throw new Error("Setup status unavailable.");
+    const healthStatus = await api.request<EngineHealth>("/api/v1/health");
+    setEngineHealth(healthStatus);
+    setMonitoringCheckedAt(Date.now());
     if (!setup.completed) {
-      const healthStatus = await api.request<EngineHealth>("/api/v1/health");
-      setEngineHealth(healthStatus);
-      statusRefreshHadSuccessRef.current = true;
-      setStatus("Setup");
       return;
     }
 
-    const [healthStatus, jobRows, summary, profiles, alertRows, alertConfig, cpu] = await Promise.all([
-      api.request<EngineHealth>("/api/v1/health"),
+    const [jobRows, summary, profiles, alertRows, alertConfig, cpu] = await Promise.all([
       api.request<Job[]>("/api/v1/jobs"),
       api.request<StatusSummary>(`/api/v1/status?${rangeQuery(rangeHours)}`),
       api.request<ProfileState>("/api/v1/profiles"),
@@ -312,7 +323,6 @@ function App() {
       api.request<any>("/api/v1/settings/alerts"),
       api.request<SystemCpuSnapshot>("/api/v1/system/cpu").catch(() => null)
     ]);
-    setEngineHealth(healthStatus);
     setCpuSnapshot(cpu);
     setJobs(jobRows);
     setStatusSummary(summary);
@@ -322,92 +332,68 @@ function App() {
     const latestActiveAlert = alertRows.find(alert => alert.active !== false);
     if (latestActiveAlert && autoplayAllows(alertConfig.values ?? alertConfig, "alert"))
       playCallAudio(latestActiveAlert.callId, "alert", undefined, alertPlaybackLabel(latestActiveAlert));
-    statusRefreshHadSuccessRef.current = true;
-    setStatus("Live");
     void api.request<SystemRecommendations>("/api/v1/system/recommendations")
       .then(setRecommendations)
       .catch(() => { });
   }, [rangeHours]);
+  const currentSearch = pageSearches[page] ?? "";
+  useEffect(() => {
+    if (!categories.includes(page as any)) return;
+    const handle = window.setTimeout(() => setDebouncedCategorySearch(currentSearch.trim()), 300);
+    return () => window.clearTimeout(handle);
+  }, [currentSearch, page]);
 
-  const refreshVisiblePage = useCallback(async () => {
-    if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
-      return;
-    if (page === "dashboard") {
-      const nextDashboard = await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`);
-      setDashboard(nextDashboard);
-      maybeAutoplayDashboard(nextDashboard);
-      lastDashboardRefreshRef.current = Date.now();
-    } else if (categories.includes(page as any)) {
-      const search = globalSearch.trim();
-      const key = categoryPageKey(page, rangeHours, search);
-      const requestId = ++categoryRequestIdRef.current;
-      const nextCategory = await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}${search ? `&q=${encodeURIComponent(search)}` : ""}`);
-      if (
-        requestId === categoryRequestIdRef.current &&
-        pageRef.current === page &&
-        key === categoryPageKey(pageRef.current, rangeHoursRef.current, globalSearchRef.current)
-      ) {
-        setCategory({ key, data: nextCategory });
-      }
-    } else if (page === "setup") {
-      setSiteSetup(await api.request<SiteSetup>(siteSetupApi));
-    } else if (page === "system") {
-      setTroubleshoot(await api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`));
+  const statusResource = usePersistentRefresh({
+    key: `shared-status|${rangeHours}`,
+    enabled: true,
+    load: async () => {
+      lastStatusRefreshAtRef.current = Date.now();
+      await refreshStatusData();
+      return true;
     }
-  }, [page, rangeHours, globalSearch]);
-
-  const reportRefreshError = useCallback((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Error";
-    setStatus(statusRefreshHadSuccessRef.current && message === "Failed to fetch" ? "Reconnecting" : message);
-  }, []);
-
-  const runStatusRefresh = useCallback(() => {
-    if (statusRefreshInFlightRef.current)
-      return statusRefreshInFlightRef.current;
-    const now = Date.now();
-    if (now - lastStatusRefreshAtRef.current < 5_000)
-      return Promise.resolve();
-    lastStatusRefreshAtRef.current = now;
-    const task = refreshStatusData()
-      .catch(reportRefreshError)
-      .finally(() => {
-        statusRefreshInFlightRef.current = null;
-      });
-    statusRefreshInFlightRef.current = task;
-    return task;
-  }, [refreshStatusData, reportRefreshError]);
-
-  const runVisibleRefresh = useCallback(() => {
-    const key = categoryPageKey(pageRef.current, rangeHoursRef.current, globalSearchRef.current);
-    if (visibleRefreshInFlightRef.current && visibleRefreshInFlightKeyRef.current === key)
-      return visibleRefreshInFlightRef.current;
-    const serial = ++visibleRefreshSerialRef.current;
-    visibleRefreshInFlightKeyRef.current = key;
-    const task = (async () => {
-      lastPageRefreshAtRef.current = Date.now();
-      await refreshVisiblePageRef.current();
-    })()
-      .catch(reportRefreshError)
-      .finally(() => {
-        if (visibleRefreshSerialRef.current === serial) {
-          visibleRefreshInFlightRef.current = null;
-          visibleRefreshInFlightKeyRef.current = "";
-        }
-      });
-    visibleRefreshInFlightRef.current = task;
-    return task;
-  }, [reportRefreshError]);
+  });
+  const dashboardResource = usePersistentRefresh({
+    key: `dashboard|${rangeHours}`,
+    enabled: page === "dashboard" && setupStatus?.completed !== false,
+    load: () => api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`),
+    onSuccess: maybeAutoplayDashboard
+  });
+  const categoryResource = usePersistentRefresh({
+    key: categoryPageKey(page, rangeHours, debouncedCategorySearch),
+    enabled: categories.includes(page as any) && setupStatus?.completed !== false,
+    load: async () => {
+      const search = debouncedCategorySearch.trim();
+      const data = await api.request<CategoryPage>(`/api/v1/categories/${page}?${rangeQuery(rangeHours)}${search ? `&q=${encodeURIComponent(search)}` : ""}`);
+      return { page, search, data };
+    }
+  });
+  const setupResource = usePersistentRefresh({
+    key: "site-setup",
+    enabled: page === "setup" && setupStatus?.completed !== false && !setupTrOperation,
+    load: () => api.request<SiteSetup>(siteSetupApi)
+  });
+  const systemResource = usePersistentRefresh({
+    key: `system|${rangeHours}`,
+    enabled: page === "system" && setupStatus?.completed !== false,
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
+  });
+  const dashboard = dashboardResource.data;
+  const categoryResult = categoryResource.data;
+  const category = categoryResult?.page === page ? categoryResult.data : null;
+  const siteSetup = setupResource.data;
+  const troubleshoot = systemResource.data;
 
   const load = useCallback(async () => {
-    void runStatusRefresh();
-    await runVisibleRefresh();
-  }, [runStatusRefresh, runVisibleRefresh]);
+    lastPageRefreshAtRef.current = Date.now();
+    if (pageRef.current === "dashboard") await dashboardResource.refresh();
+    else if (categories.includes(pageRef.current as any)) await categoryResource.refresh();
+    else if (pageRef.current === "setup" && !setupWaterfallActiveRef.current) await setupResource.refresh();
+    else if (pageRef.current === "system") await systemResource.refresh();
+    else if (pageRef.current === "settings") await loadSettings();
+  }, [categoryResource.refresh, dashboardResource.refresh, loadSettings, setupResource.refresh, systemResource.refresh]);
 
-  useEffect(() => { refreshStatusRef.current = refreshStatusData; }, [refreshStatusData]);
-  useEffect(() => { refreshVisiblePageRef.current = refreshVisiblePage; }, [refreshVisiblePage]);
   useEffect(() => { pageRef.current = page; }, [page]);
   useEffect(() => { rangeHoursRef.current = rangeHours; }, [rangeHours]);
-  useEffect(() => { globalSearchRef.current = globalSearch; }, [globalSearch]);
   useEffect(() => { setupStatusRef.current = setupStatus; }, [setupStatus]);
   useEffect(() => {
     api.setAuthTokenProvider(request => {
@@ -453,8 +439,11 @@ function App() {
     localStorage.setItem("pizzawave-autoplay-muted", autoplayMuted ? "1" : "0");
   }, [autoplayMuted]);
 
-  useEffect(() => { void load(); }, [load, page, rangeHours, globalSearch]);
   useEffect(() => { if (page === "settings") void loadSettings(); }, [page, loadSettings]);
+  useEffect(() => {
+    const handle = window.setInterval(() => setRefreshClock(Date.now()), 30_000);
+    return () => window.clearInterval(handle);
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("pizzawave-theme", theme);
@@ -462,6 +451,7 @@ function App() {
 
   useEffect(() => {
     const events = new EventSource("/api/v1/events/stream");
+    let connectedOnce = false;
     let statusTimer = 0;
     let pageTimer = 0;
     const scheduleStatus = (delayMs: number) => {
@@ -471,7 +461,7 @@ function App() {
       const elapsed = Date.now() - lastStatusRefreshAtRef.current;
       delayMs = Math.max(delayMs, elapsed >= 5_000 ? 0 : 5_000 - elapsed);
       statusTimer = window.setTimeout(() => {
-        void runStatusRefresh();
+        void statusResource.refresh();
       }, delayMs);
     };
     const schedulePage = (delayMs: number) => {
@@ -482,29 +472,30 @@ function App() {
       const elapsed = Date.now() - lastPageRefreshAtRef.current;
       delayMs = Math.max(delayMs, elapsed >= minIntervalMs ? 0 : minIntervalMs - elapsed);
       pageTimer = window.setTimeout(() => {
-        if (pageRef.current === "dashboard")
-          lastDashboardRefreshRef.current = Date.now();
-        void runVisibleRefresh();
+        void load();
       }, delayMs);
     };
-    const refreshCurrentView = () => {
+    const refreshCallDataSoon = () => {
+      scheduleStatus(900);
+      if (pageRef.current === "dashboard" || categories.includes(pageRef.current as any))
+        schedulePage(3000);
+    };
+    const refreshDashboardData = () => {
       scheduleStatus(500);
-      schedulePage(900);
-    };
-    const refreshCurrentViewSoon = () => {
-      scheduleStatus(900);
-      schedulePage(3000);
-    };
-    const refreshStatusOnly = () => {
-      scheduleStatus(900);
+      if (pageRef.current === "dashboard")
+        schedulePage(900);
     };
     events.addEventListener("connected", () => {
-      setStatus("Live");
-      refreshCurrentView();
+      if (connectedOnce) {
+        scheduleStatus(0);
+        if (pageRef.current !== "settings")
+          schedulePage(0);
+      }
+      connectedOnce = true;
     });
-    events.addEventListener("call_ingested", refreshCurrentViewSoon);
+    events.addEventListener("call_ingested", refreshCallDataSoon);
     events.addEventListener("call_transcribed", event => {
-      refreshCurrentViewSoon();
+      refreshCallDataSoon();
       try {
         const payload = JSON.parse((event as MessageEvent).data || "{}");
         if (payload.callId && autoplayAllows(alertSettingsRef.current, "police"))
@@ -514,23 +505,21 @@ function App() {
           }).catch(() => { });
       } catch { }
     });
-    events.addEventListener("alert_matched", refreshCurrentView);
-    events.addEventListener("summary_updated", refreshCurrentView);
-    events.addEventListener("job_updated", refreshCurrentView);
-    events.addEventListener("health_updated", refreshStatusOnly);
-    events.onerror = () => setStatus("Reconnecting");
+    events.addEventListener("alert_matched", refreshDashboardData);
+    events.addEventListener("summary_updated", refreshDashboardData);
+    events.addEventListener("job_updated", () => scheduleStatus(900));
+    events.addEventListener("health_updated", () => scheduleStatus(900));
     return () => {
       window.clearTimeout(statusTimer);
       window.clearTimeout(pageTimer);
       events.close();
     };
-  }, [runStatusRefresh, runVisibleRefresh]);
+  }, [load, statusResource.refresh]);
   const nav = useMemo(() => ["dashboard", ...categories, "setup", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
   const activeJobCount = jobs.filter(j => j.status === "running" || j.status === "queued" || j.status === "paused").length;
   const trCoveragePausedByJob = jobs.some(j => j.status === "running" && j.type === "setup_tr_calibration_sweep");
-  const [setupTrOperation, setSetupTrOperation] = useState("");
   const trCoveragePaused = trCoveragePausedByJob || Boolean(setupTrOperation);
   const queueDepth = engineHealth?.queueDepth ?? 0;
   const aiCompletionIssue = engineHealth?.aiCompletionHealth && !["ok", "unknown"].includes(engineHealth.aiCompletionHealth.status) ? engineHealth.aiCompletionHealth.message : "";
@@ -550,16 +539,36 @@ function App() {
   const ingestPaused = Boolean(engineHealth?.ingest?.paused);
   const liveTrActivity = engineHealth?.liveTrActivity;
   const trIntentionallyStopped = liveTrActivity?.status === "stopped";
+  const monitoringOutdated = Boolean(statusResource.state.error && monitoringCheckedAt && refreshClock - monitoringCheckedAt >= 90_000);
+  const monitoringTone = monitoringOutdated
+    ? "live-status-warning"
+    : trCoveragePaused
+      ? "ingest-paused"
+      : liveTrActivity?.status === "fault" || liveTrActivity?.stale
+        ? "live-status-error"
+        : trIntentionallyStopped || liveTrActivity?.status === "warming" || !liveTrActivity
+          ? "live-status-warning"
+          : "live-status-ok";
   const livePillClass = [
     "pill",
-    trCoveragePaused ? "ingest-paused" : liveTrActivity?.stale ? "live-status-error" : trIntentionallyStopped ? "live-status-warning" : status === "Reconnecting" ? "live-status-warning" : status === "Live" ? "live-status-ok" : ""
+    monitoringTone
   ].filter(Boolean).join(" ");
-  const livePillText = trCoveragePaused ? "TR paused" : liveTrActivity?.stale ? "Live stale" : trIntentionallyStopped ? "TR stopped" : status;
-  const livePillTitle = trCoveragePaused
+  const livePillText = monitoringOutdated
+    ? `Monitoring last checked ${formatRefreshTime(monitoringCheckedAt)}`
+    : trCoveragePaused
+      ? "Monitoring temporarily paused"
+      : liveTrActivity?.status === "fault"
+        ? "Monitoring faulted"
+        : liveTrActivity?.stale
+          ? "Monitoring stale"
+          : trIntentionallyStopped
+            ? "Monitoring intentionally stopped"
+            : liveTrActivity?.status === "warming" || !liveTrActivity
+              ? "Monitoring warming up"
+              : "Monitoring active";
+  const livePillTitle = `${trCoveragePaused
     ? setupTrOperation || "trunk-recorder is temporarily paused or restarting while Setup runs an RF validation job."
-    : liveTrActivity?.stale || trIntentionallyStopped
-    ? liveTrActivity.message
-    : "Live means the browser is connected to pizzad and recent TR activity has not crossed the silence threshold.";
+    : liveTrActivity?.message || "Waiting for the first monitoring health result."} Last checked: ${formatRefreshTime(monitoringCheckedAt)}.`;
   const cpuPillClass = ["pill", "status-pill-button", `cpu-health-${cpuSnapshot?.severity ?? "unknown"}`].join(" ");
   const cpuPillText = cpuSnapshot?.latest
     ? `CPU ${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
@@ -577,6 +586,27 @@ function App() {
   const queueHealthTitle = engineHealth
     ? `${engineHealth.recentAudioSecondsTranscribed.toLocaleString()} audio seconds transcribed (${audioTranscribedPerMinute.toFixed(0)}s/min) and ${engineHealth.recentAudioSecondsIngested.toLocaleString()} audio seconds ingested (${audioIngestedPerMinute.toFixed(0)}s/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Calls: ${engineHealth.recentCallsTranscribed.toLocaleString()} done (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min), ${engineHealth.recentCallsIngested.toLocaleString()} in (${engineHealth.recentIngestPerMinute.toFixed(1)}/min). Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${queueBlockedNotes.join(" ")}`.trim()
     : "Transcription queue is clear.";
+
+  const activePageRefresh = page === "dashboard"
+    ? { label: "Dashboard", state: dashboardResource.state }
+    : categories.includes(page as any)
+      ? { label: `${label(page)} calls`, state: categoryResource.state }
+      : page === "setup"
+        ? { label: "Setup", state: setupResource.state }
+        : page === "system"
+          ? { label: "System", state: systemResource.state }
+          : null;
+  const delayedResources = [
+    { label: "Shared operational status", state: statusResource.state },
+    activePageRefresh
+  ].filter((entry): entry is { label: string; state: RefreshState } => Boolean(
+    entry && entry.state.failureStartedAt && refreshClock - entry.state.failureStartedAt >= 90_000
+  ));
+  const longestDelayStartedAt = delayedResources.reduce<number | null>((oldest, entry) => {
+    const started = entry.state.failureStartedAt;
+    return started && (!oldest || started < oldest) ? started : oldest;
+  }, null);
+  const updateDelayMinutes = longestDelayStartedAt ? Math.max(1, Math.floor((refreshClock - longestDelayStartedAt) / 60_000)) : 0;
 
   const inSetup = Boolean(setupStatus && !setupStatus.completed);
   function autoplayAllows(config: any, kind: "alert" | "incident" | "traffic" | "police") {
@@ -651,7 +681,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
     setPage("dashboard");
     try {
       const nextDashboard = await api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`);
-      setDashboard(nextDashboard);
+      dashboardResource.setData(nextDashboard);
       const incidentId = context?.incidentId
         ?? nextDashboard.incidents.find(incident => incident.calls.some(call => call.callId === context?.callId))?.id
         ?? null;
@@ -659,10 +689,10 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         setFocusedIncidentId(incidentId);
         window.setTimeout(() => document.getElementById(`incident-${incidentId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 50);
       } else if (target === "incident") {
-        setStatus("Incident not visible yet");
+        setAppNotice("Incident not visible yet");
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Dashboard refresh failed");
+      setAppNotice(error instanceof Error ? error.message : "Dashboard refresh failed");
     }
   }
   function maybeAutoplayDashboard(nextDashboard: Dashboard) {
@@ -692,7 +722,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
       await load();
     } catch (error) {
       setProfileState(profileState);
-      setStatus(error instanceof Error ? error.message : "Unable to switch profile.");
+      setAppNotice(error instanceof Error ? error.message : "Unable to switch profile.");
     }
   }
   function goDashboard(mode: DashboardMode) {
@@ -767,22 +797,23 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {profileState && profileState.profiles.length > 0 && <select aria-label="Active profile" value={profileState.activeProfileId} onChange={e => void switchActiveProfile(e.target.value)}>
           {profileState.profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}
         </select>}
-        <label className="global-search" title="Search the current page">
-          <Search size={15} aria-hidden="true" />
-          <input
-            type="search"
-            value={globalSearch}
-            placeholder={page === "dashboard" ? "Search incidents" : categories.includes(page as any) ? "Search calls" : "Search page"}
-            aria-label="Search current page"
-            onChange={e => setGlobalSearch(e.target.value)}
-          />
-        </label>
         {page === "settings" && <>
           <input ref={settingsFileInputRef} type="file" accept="application/json,.json" hidden onChange={e => void loadSettingsFile(e.target.files?.[0])} />
           <button disabled={settingsLoadState.loading} onClick={() => settingsFileInputRef.current?.click()}>{settingsLoadState.loading ? "Loading..." : "Load Settings"}</button>
           <button disabled={settingsLoadState.loading} onClick={() => void exportSettingsFile()}>Export Settings</button>
         </>}
         <span className={livePillClass} title={livePillTitle}>{livePillText}</span>
+        {delayedResources.length > 0 && <div className="autoplay-menu-wrap update-delay-wrap">
+          <button type="button" className="pill live-status-warning status-pill-button" onClick={() => setUpdateDelayOpen(value => !value)}>Updates delayed · {updateDelayMinutes}m</button>
+          {updateDelayOpen && <div className="autoplay-menu update-delay-menu">
+            {delayedResources.map(entry => <div key={entry.label}>
+              <strong>{entry.label}</strong>
+              <span>{entry.state.error || "Refresh has not completed."}</span>
+              <small>Last updated {formatRefreshTime(entry.state.lastUpdatedAt)}</small>
+            </div>)}
+          </div>}
+        </div>}
+        {appNotice && <button type="button" className="pill live-status-warning status-pill-button" title="Dismiss" onClick={() => setAppNotice("")}>{appNotice}</button>}
         {activeAutoplay && <span className="pill playback-status" title={activeAutoplay.label}>Playing "{activeAutoplay.label}"</span>}
         {alertSettings?.playback?.enabled && <div className="autoplay-menu-wrap">
           <button type="button" className={autoplayMuted ? "icon-button muted-button" : "icon-button"} title={autoplayMuted ? "Autoplay muted or blocked. Open playback menu." : "Autoplay enabled. Open playback menu."} onClick={() => setAutoplayMenuOpen(v => !v)}>{autoplayMuted ? <BellOff size={16} /> : <Bell size={16} />}</button>
@@ -794,7 +825,6 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           </div>}
         </div>}
         {ingestPaused && <span className="pill ingest-paused" title={`New live callstream payloads are being dropped. ${engineHealth?.ingest?.reason ?? ""}`}>Ingest paused</span>}
-        <span className="pill" title="REST loads the current view; SSE triggers live refreshes when calls, jobs, alerts, summaries, or health change.">REST+SSE</span>
       </header>
       {!inSetup && <aside className="nav">
         {visibleNav.map(item => (
@@ -813,12 +843,19 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         ))}
       </aside>}
       <main className={`main ${inSetup ? "setup-main" : ""}`}>
+        {!setupStatus && <RefreshNotice state={statusResource.state} hasData={false} onRetry={statusResource.refresh} />}
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
-        {setupStatus?.completed && page === "dashboard" && <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={globalSearch} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />}
-        {setupStatus?.completed && categories.includes(page as any) && <CategoryView
-          data={category?.key === categoryPageKey(page, rangeHours, globalSearch) ? category.data : null}
+        {setupStatus?.completed && page === "dashboard" && <div className="refresh-page-shell">
+          <RefreshNotice state={dashboardResource.state} hasData={Boolean(dashboard)} onRetry={dashboardResource.refresh} />
+          <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={currentSearch} onSearchChange={value => setPageSearches(searches => ({ ...searches, [page]: value }))} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />
+        </div>}
+        {setupStatus?.completed && categories.includes(page as any) && <div className="refresh-page-shell">
+          <RefreshNotice state={categoryResource.state} hasData={Boolean(category)} onRetry={categoryResource.refresh} />
+          <CategoryView
+          data={category}
           rangeHours={rangeHours}
-          searchQuery={globalSearch}
+          searchQuery={currentSearch}
+          onSearchChange={value => setPageSearches(searches => ({ ...searches, [page]: value }))}
           profileState={profileState}
           setProfileState={setProfileState}
           reload={load}
@@ -829,14 +866,19 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             localStorage.setItem("pizzawave-settings-tab", "profiles");
             setPage("settings");
           }}
-        />}
-        {setupStatus?.completed && page === "setup" && <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={value => {
+        /></div>}
+        {setupStatus?.completed && page === "setup" && <div className="refresh-page-shell">
+          <RefreshNotice state={setupResource.state} hasData={Boolean(siteSetup)} onRetry={setupResource.refresh} />
+          <SiteSetupView setup={siteSetup} reload={load} targetSection={setupTargetSection} clearTargetSection={() => setSetupTargetSection(null)} onTrOperationChange={value => {
           setupWaterfallActiveRef.current = value.toLowerCase().includes("waterfall");
           setSetupTrOperation(value);
           if (!value)
-            void refreshStatusRef.current();
-        }} />}
-        {setupStatus?.completed && page === "system" && <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />}
+            void statusResource.refresh();
+        }} /></div>}
+        {setupStatus?.completed && page === "system" && <div className="refresh-page-shell">
+          <RefreshNotice state={systemResource.state} hasData={Boolean(troubleshoot)} onRetry={systemResource.refresh} />
+          <SystemView data={troubleshoot} jobs={jobs} rangeHours={rangeHours} reload={load} engineHealth={engineHealth} cpuSnapshot={cpuSnapshot} recommendations={recommendations} setRecommendations={setRecommendations} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />
+        </div>}
         {setupStatus?.completed && page === "settings" && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={load} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} />}
       </main>
       {!inSetup && <footer className="statusbar">
@@ -889,7 +931,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
     setSection(targetSection);
     clearTargetSection?.();
   }, [targetSection, clearTargetSection]);
-  if (!current) return <div className="pane">Loading Site Setup...</div>;
+  if (!current) return null;
   async function saveDesired(patch: Partial<SiteSetupConfig>, field: string) {
     setLocalPendingChanges(field === "rfPath" ? [{ category: "RF path", summary: "RF path edits are being saved." }] : []);
     setSaveState({ field, status: "saving", message: "Saving" });
@@ -2614,14 +2656,14 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
   </div>;
 }
 
-function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery, hiddenIncidentCount = 0 }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string; hiddenIncidentCount?: number }) {
+function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery, onSearchChange, hiddenIncidentCount = 0 }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string; onSearchChange: (value: string) => void; hiddenIncidentCount?: number }) {
   const [focusedLocationKey, setFocusedLocationKey] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationHeat | null>(null);
   useEffect(() => {
     setSelectedLocation(null);
     setFocusedLocationKey(null);
   }, [mode]);
-  if (!data) return <div className="pane">Loading dashboard...</div>;
+  if (!data) return null;
   const incidentLocationMap = buildIncidentLocationMap(data.locationHeat);
   const alertLocationMap = buildAlertLocationMap(data.locationHeat, data.alerts);
   const incidentLocationRows = data.locationHeat.filter(row => row.incidentLinks?.length > 0);
@@ -2640,6 +2682,7 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
   const mapRows = mode === "alerts" ? alertLocationRows : incidentLocationRows;
   return (
     <div className="dashboard-shell">
+      <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder="Search incidents and alerts" /></div>
       <div className="dashboard dashboard-around">
         <section className="pane dashboard-map-pane">
           <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : "No geolocated incidents detected in the selected range."} />
@@ -3332,7 +3375,7 @@ function LocationSourceCall({ call, searchQuery = "" }: { call: LocationHeat["so
   </div>;
 }
 
-function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileState, reload, onOpenProfiles }: { data: CategoryPage | null; rangeHours: number; searchQuery: string; profileState: ProfileState | null; setProfileState: React.Dispatch<React.SetStateAction<ProfileState | null>>; reload: () => Promise<void>; onOpenProfiles: (settings?: ProfileTalkgroupSetting[]) => void }) {
+function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileState, setProfileState, reload, onOpenProfiles }: { data: CategoryPage | null; rangeHours: number; searchQuery: string; onSearchChange: (value: string) => void; profileState: ProfileState | null; setProfileState: React.Dispatch<React.SetStateAction<ProfileState | null>>; reload: () => Promise<void>; onOpenProfiles: (settings?: ProfileTalkgroupSetting[]) => void }) {
   const [sortMode, setSortModeState] = useState<CategorySortMode>(() => normalizeCategorySort(localStorage.getItem("pizzawave-category-sort")));
   const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") !== "0");
   const [selectionMode, setSelectionMode] = useState(false);
@@ -3401,7 +3444,7 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
       setHidingSelected(false);
     }
   }
-  if (!data) return <div className="category-page">Loading...</div>;
+  if (!data) return null;
   const totalCallCount = data.groups.reduce((sum, group) => sum + group.count, 0);
   const strongCallCount = data.groups.reduce((sum, group) => sum + group.strongCount, 0);
   const displayCallCount = hideWeakCalls ? strongCallCount : totalCallCount;
@@ -3417,6 +3460,7 @@ function CategoryView({ data, rangeHours, searchQuery, profileState, setProfileS
   const filteredGroups = sortedGroups.filter(group => matchesCategoryGroupSearch(group, searchQuery));
   const selectedCount = filteredGroups.filter(group => selectedTalkgroupKeys.has(categoryGroupKey(group))).length;
   return <div className="category-page category-mode-page" data-category={data.category}>
+    <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder={`Search ${label(data.category)} calls`} /></div>
     <section className="pane category-pane raw-category">
       <div className="category-header">
         <div className="category-title-row">
@@ -4047,7 +4091,7 @@ function SystemView({ data, jobs, rangeHours, reload, engineHealth, cpuSnapshot,
     void api.request<IncidentOperationAuditRow[]>(`/api/v1/incidents/audit?hours=${Math.max(1, rangeHours)}&limit=80`).then(setIncidentAudit).catch(() => setIncidentAudit(null));
   }, [topTab, metricsTab, rangeHours]);
 
-  if (!data) return <div className="trouble-page">Loading system data...</div>;
+  if (!data) return null;
   const active = metricsData ?? data;
   async function restartService(service: "pizzad" | "trunk-recorder" | "qdrant") {
     if (!confirmAction(`Restart ${label(service)}?`, "This interrupts the service briefly. Live ingestion or processing may pause while it restarts.")) return;
