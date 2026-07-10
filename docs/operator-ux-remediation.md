@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3A closed and operator-accepted; 3B ready for discovery
+- Current milestone: 3B discovery and operator interview - Settings refresh ownership
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `fd16f1b`
 - Operator verification: Packages 1, 2, and 3A accepted
-- Next action: audit Settings and specialized page-local data panels, then
-  interview the operator section by section before making 3B design changes.
+- Next action: decide how Settings refresh protects unsaved edits, then audit
+  the remaining specialized panels section by section before implementation.
 
 ## Working Rules
 
