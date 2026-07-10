@@ -173,6 +173,10 @@ Accepted design:
   fallback. Manual geographic boundaries are explicit overrides only when the
   imported data is missing or incorrect. Legacy Monitored Areas are not treated
   as RF coverage and are not silently retained as active location authority.
+- Setup's three persistent guidance cards show current scope (selected sites and
+  hardware), validation progress (the next task or blocking issue), and apply
+  plus monitoring state. Last setup change is audit history and belongs in the
+  Activity Log rather than the persistent guidance row.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -316,6 +320,10 @@ Status: pending
   jurisdiction first and selected-site geography as fallback. Manual geography
   is an explicit correction for missing or inaccurate source data, rather than
   an independent active-area list or an RF-coverage model.
+- 2026-07-10: Package 5 replaces Setup's administrative summary cards with
+  operator guidance for current site/hardware scope, validation progress and
+  next blocker, and apply plus monitoring state. Last setup change moves to the
+  Activity Log.
 
 ## Deployment Log
 
