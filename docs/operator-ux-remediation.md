@@ -567,3 +567,12 @@ Status: pending
   ordered documented hardware list, and SDR Inventory moves to a prominent
   top-of-page action. The branch DTO, validation, frontend types, controls, and
   styling were removed rather than hidden.
+- 2026-07-10: Simplified Hardware & RF Path commit `7014194` deployed through
+  the automatic helper's full backend path in 76.0 seconds with zero build
+  warnings or errors. Live browser verification confirmed SDR Inventory at the
+  top, the restored single ordered hardware list, no branch/tree controls, and
+  no browser console errors. The operator's active desired version
+  `1783690411070`, two current systems, two SDR sources, applied hash
+  `e95b8867...`, and pending categories Systems/Sites, Control Channels, and RF
+  Path remained unchanged. `/api/v1/health` was degraded only because live
+  Trunk Recorder activity was stale shortly after the pizzad restart.
