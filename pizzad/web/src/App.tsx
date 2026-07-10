@@ -6520,6 +6520,7 @@ function WaterfallStep({
     if (!visible)
       return;
     const frames = next?.frames?.length ? next.frames : next?.frame ? [next.frame] : [];
+    const forceTableUpdate = frames.length > 1 || !next?.active;
     for (const frame of frames) {
       const renderKey = `${frame.sequence}:${spectrumSpanDb}:${showControlChannelLines ? "cc" : "no-cc"}:${controlChannels.join(",")}`;
       if (renderKey === lastFrameRef.current)
@@ -6554,7 +6555,7 @@ function WaterfallStep({
         ? buildSpectrumMarkers(nextCcSignalRows, nextSpectrumSuspectedCcRows, axis)
         : [];
       const now = Date.now();
-      if (now - lastWaterfallTableUiAtRef.current >= 750) {
+      if (forceTableUpdate || now - lastWaterfallTableUiAtRef.current >= 750) {
         lastWaterfallTableUiAtRef.current = now;
         setCcSignalRows(nextCcSignalRows);
         setOtherDetectedCcRows(nextOtherDetectedCcRows);
