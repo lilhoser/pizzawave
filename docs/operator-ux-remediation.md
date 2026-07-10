@@ -9,11 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3A deployed; awaiting operator inspection
+- Current milestone: 3A category-header follow-up preflight complete
 - Working branch: `codex/operator-ux-loading-status`
 - Last deployed commit: `2c56be5`
 - Operator verification: Packages 1 and 2 accepted
-- Next action: operator inspection of milestone 3A before beginning 3B.
+- Next action: deploy and live-verify the accepted compact category header and
+  structured talkgroup jurisdiction naming follow-up.
 
 ## Working Rules
 
@@ -163,6 +164,15 @@ Status: pending
   ceiling and resetting immediately after success. Definite authentication,
   permission, invalid-request, and missing-endpoint errors require operator
   action instead of automatic retry.
+- 2026-07-09: Package 3A operator feedback moves category search into the
+  existing title/sort header, removes the aggregate count cluster, and moves
+  weak-call and talkgroup-selection controls into a compact More menu.
+  Selection-only actions appear in a temporary contextual strip.
+- 2026-07-09: Category talkgroup titles use the RadioReference description as
+  the friendly name and preserve RadioReference's structured jurisdiction
+  heading during import. Technical system, talkgroup ID, and alpha-tag identity
+  remain visible as subdued secondary metadata; PizzaWave does not infer
+  jurisdiction from the receiver site or alpha-tag abbreviation.
 
 ## Deployment Log
 

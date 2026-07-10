@@ -65,7 +65,7 @@ public sealed class DashboardServiceTests
         var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
         await database.InitializeAsync(CancellationToken.None);
         var catalog = new TalkgroupCatalogService(config, NullLogger<TalkgroupCatalogService>.Instance);
-        await catalog.SaveAsync(new TalkgroupCatalogDocument
+        await TestCatalogWriter.WriteAsync(config, new TalkgroupCatalogDocument
         {
             Items =
             [
@@ -81,7 +81,7 @@ public sealed class DashboardServiceTests
                     Source = "test"
                 }
             ]
-        }, generateTrCsv: false, CancellationToken.None);
+        });
 
         var start = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
         var callId = await database.UpsertCallAsync(Call("call-76", start + 10, "entergy", 76, "WC MS Ops", "other"), CancellationToken.None);

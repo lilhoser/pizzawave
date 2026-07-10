@@ -1688,7 +1688,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .category-mode-page {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+  gap: 0;
 }
 .insights-pane, .calls-pane { min-height: 0; }
 .category-pane {
@@ -1703,14 +1703,19 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .category-title-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px 8px;
+  width: 100%;
 }
 .category-title-row h2 {
   margin: 0;
+  flex: 0 0 auto;
 }
-.category-title-row .muted {
-  flex-basis: 100%;
+.category-title-row .page-search {
+  min-width: 180px;
+  max-width: 380px;
+  margin-left: auto;
+  flex: 1 1 260px;
 }
 .category-actions {
   display: inline-flex;
@@ -1736,6 +1741,39 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+.category-more-menu-wrap > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  white-space: nowrap;
+}
+.category-more-menu {
+  min-width: 190px;
+}
+.category-more-menu .category-quality-toggle {
+  width: 100%;
+  padding: 6px 8px 9px;
+}
+.category-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--category-border, #38414a);
+  border-radius: 5px;
+  background: var(--category-bg, #20252a);
+  font-size: 12px;
+}
+.category-selection-bar span {
+  margin-right: auto;
+  color: #d7ecff;
+  font-weight: 700;
+}
+.category-selection-bar button {
+  margin: 0;
 }
 .category-quality-toggle input {
   width: auto;
@@ -1789,6 +1827,19 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+.call-group-title-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.call-group-title-copy strong {
+  overflow-wrap: anywhere;
+}
+.call-group-title-copy small {
+  color: #9faab5;
+  font-size: 11px;
+  font-weight: 500;
 }
 .call-group-select {
   width: 17px;

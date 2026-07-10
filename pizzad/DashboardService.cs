@@ -202,9 +202,10 @@ public sealed class DashboardService
             .ThenByDescending(call => call.Id)
             .Take(Math.Clamp(limit, 1, 500))
             .ToList();
-        var label = calls.Count > 0 ? GetTalkgroupLabel(calls[0]) : $"TG {parsed.Talkgroup}";
+        var resolved = _catalog.Resolve(parsed.SystemShortName, parsed.Talkgroup);
+        var label = resolved.Found ? resolved.Label : calls.Count > 0 ? GetTalkgroupLabel(calls[0]) : $"TG {parsed.Talkgroup}";
         var strongCount = calls.Count(IsStrongCall);
-        return new CategoryGroupDto(label, calls, TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount);
+        return new CategoryGroupDto(label, calls, TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount, resolved.Jurisdiction, resolved.AlphaTag, resolved.SystemShortName);
     }
 
     private List<CategoryGroupDto> BuildCategoryGroupsFromStats(IReadOnlyList<TalkgroupCallStatsDto> stats, string category)
@@ -223,8 +224,9 @@ public sealed class DashboardService
                 var first = rows.OrderByDescending(r => r.LastHeard).First();
                 var count = rows.Sum(r => r.Count);
                 var strong = rows.Sum(r => r.StrongCount);
+                var resolved = _catalog.Resolve(first.SystemShortName, first.Talkgroup);
                 return new CategoryGroupDto(
-                    GetTalkgroupLabel(first.SystemShortName, first.Talkgroup, first.Label),
+                    resolved.Found ? resolved.Label : GetTalkgroupLabel(first.SystemShortName, first.Talkgroup, first.Label),
                     [],
                     group.Key,
                     first.SystemShortName,
@@ -232,7 +234,10 @@ public sealed class DashboardService
                     count,
                     rows.Max(r => r.LastHeard),
                     strong,
-                    count - strong);
+                    count - strong,
+                    resolved.Jurisdiction,
+                    resolved.AlphaTag,
+                    resolved.SystemShortName);
             })
             .OrderBy(group => group.Label, StringComparer.OrdinalIgnoreCase)
             .ToList();

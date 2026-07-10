@@ -186,7 +186,10 @@ public sealed record CategoryGroupDto(
     int Count = 0,
     long LastHeard = 0,
     int StrongCount = 0,
-    int WeakCount = 0);
+    int WeakCount = 0,
+    string Jurisdiction = "",
+    string AlphaTag = "",
+    string CatalogSystemShortName = "");
 
 public sealed record TalkgroupCallStatsDto(
     string SystemShortName,

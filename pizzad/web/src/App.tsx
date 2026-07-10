@@ -3379,6 +3379,7 @@ function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileSt
   const [sortMode, setSortModeState] = useState<CategorySortMode>(() => normalizeCategorySort(localStorage.getItem("pizzawave-category-sort")));
   const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") !== "0");
   const [selectionMode, setSelectionMode] = useState(false);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
   const [selectionOrderKeys, setSelectionOrderKeys] = useState<string[]>([]);
   const [hidingSelected, setHidingSelected] = useState(false);
@@ -3445,14 +3446,7 @@ function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileSt
     }
   }
   if (!data) return null;
-  const totalCallCount = data.groups.reduce((sum, group) => sum + group.count, 0);
-  const strongCallCount = data.groups.reduce((sum, group) => sum + group.strongCount, 0);
-  const displayCallCount = hideWeakCalls ? strongCallCount : totalCallCount;
   const visibleSourceGroups = hideWeakCalls ? data.groups.filter(group => group.strongCount > 0) : data.groups;
-  const weakHiddenTalkgroupCount = data.groups.length - visibleSourceGroups.length;
-  const profileHiddenTalkgroupCount = (activeProfile?.talkgroups ?? [])
-    .filter(setting => setting.enabled === false && normalizeUiCategory(setting.category || data.category) === data.category)
-    .length;
   const autoSortedGroups = sortCategoryGroups(visibleSourceGroups, sortMode);
   const sortedGroups = selectionMode && selectionOrderKeys.length
     ? stableCategoryGroupOrder(visibleSourceGroups, selectionOrderKeys)
@@ -3460,33 +3454,34 @@ function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileSt
   const filteredGroups = sortedGroups.filter(group => matchesCategoryGroupSearch(group, searchQuery));
   const selectedCount = filteredGroups.filter(group => selectedTalkgroupKeys.has(categoryGroupKey(group))).length;
   return <div className="category-page category-mode-page" data-category={data.category}>
-    <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder={`Search ${label(data.category)} calls`} /></div>
     <section className="pane category-pane raw-category">
       <div className="category-header">
         <div className="category-title-row">
           <h2>{label(data.category)} Calls by Talkgroup</h2>
-          <div className="category-actions">
-            <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
-              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
-              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "tgid" ? "active" : ""} onClick={() => setSortMode("tgid")}>TG ID</button>
-              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
-              <button type="button" disabled={selectionMode} title={selectionMode ? "Exit TG selection to change sorting." : undefined} className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
-            </div>
-            <label className="category-quality-toggle">
+          <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
+            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
+            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "tgid" ? "active" : ""} onClick={() => setSortMode("tgid")}>TG ID</button>
+            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
+            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
+          </div>
+          <PageSearch value={searchQuery} onChange={onSearchChange} placeholder={`Search ${label(data.category)} calls`} />
+          <div className="autoplay-menu-wrap category-more-menu-wrap">
+            <button type="button" aria-label="More category options" onClick={() => setCategoryMenuOpen(value => !value)}>More <ChevronDown size={14} /></button>
+            {categoryMenuOpen && <div className="autoplay-menu category-more-menu">
+              <label className="category-quality-toggle">
               <input type="checkbox" checked={hideWeakCalls} onChange={event => setHideWeakCalls(event.currentTarget.checked)} />
               <span>Hide weak calls</span>
-            </label>
-            <button type="button" className={selectionMode ? "active" : ""} onClick={() => toggleSelectionMode(autoSortedGroups)}>{selectionMode ? "Selecting TGs" : "Select TGs"}</button>
-            {selectionMode && <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected} onClick={() => void hideSelectedTalkgroups(filteredGroups)}>{hidingSelected ? "Hiding..." : `Hide selected (${selectedCount})`}</button>}
-            {selectionMode && <button type="button" disabled={hidingSelected} onClick={clearSelection}>Clear</button>}
+              </label>
+              <button type="button" onClick={() => { toggleSelectionMode(autoSortedGroups); setCategoryMenuOpen(false); }}>{selectionMode ? "Exit talkgroup selection" : "Select talkgroups"}</button>
+            </div>}
           </div>
-          <span className="muted category-counts">
-            {displayCallCount.toLocaleString()} of {totalCallCount.toLocaleString()} call{totalCallCount === 1 ? "" : "s"} shown / {filteredGroups.length.toLocaleString()} shown / {data.groups.length.toLocaleString()} profile TG{data.groups.length === 1 ? "" : "s"}
-            {profileHiddenTalkgroupCount > 0 ? ` / ${profileHiddenTalkgroupCount.toLocaleString()} hidden by profile` : ""}
-            {weakHiddenTalkgroupCount > 0 ? ` / ${weakHiddenTalkgroupCount.toLocaleString()} hidden by weak-call filter` : ""}
-          </span>
         </div>
       </div>
+      {selectionMode && <div className="category-selection-bar">
+        <span>{selectedCount.toLocaleString()} talkgroup{selectedCount === 1 ? "" : "s"} selected</span>
+        <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected} onClick={() => void hideSelectedTalkgroups(filteredGroups)}>{hidingSelected ? "Hiding..." : "Hide selected from profile"}</button>
+        <button type="button" disabled={hidingSelected} onClick={clearSelection}>Cancel</button>
+      </div>}
       <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} selectionMode={selectionMode} selectedTalkgroupKeys={selectedTalkgroupKeys} onToggleSelected={setTalkgroupSelected} />
     </section>
   </div>;
@@ -3775,6 +3770,11 @@ function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWe
       .finally(() => setLoading(false));
   }, [open, calls.length, loading, category, group.talkgroupKey, group.talkgroup, rangeHours]);
   const visibleCalls = calls.filter(call => (!hideWeakCalls || isStrongCall(call)) && matchesCallSearch(call, searchQuery));
+  const technicalLabel = [
+    group.catalogSystemShortName?.toUpperCase(),
+    group.talkgroup ? `TG ${group.talkgroup}` : "",
+    group.alphaTag
+  ].filter(Boolean).join(" · ");
   return <details className={`call-group category-${category}`} open={open} onToggle={e => setOpen(e.currentTarget.open)}>
     <summary>
       <span className="call-group-title">
@@ -3786,25 +3786,28 @@ function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWe
           onClick={event => event.stopPropagation()}
           onChange={event => onToggleSelected(group, event.currentTarget.checked)}
         />}
-        <HighlightedText text={group.label} query={searchQuery} />
+        <span className="call-group-title-copy">
+          <strong><HighlightedText text={group.label} query={searchQuery} /></strong>
+          {technicalLabel && <small>{technicalLabel}</small>}
+        </span>
       </span>
       <span className="muted">{hideWeakCalls ? `${visibleCount.toLocaleString()} of ${count.toLocaleString()} calls shown` : `${count.toLocaleString()} calls`}{group.lastHeard ? `; latest ${relativeTime(group.lastHeard)}` : ""}</span>
     </summary>
     {open && loading && <div className="call-group-status">Loading calls...</div>}
     {open && error && <div className="call-group-status error">{error}</div>}
-    {open && visibleCalls.map(c => <CallRow call={c} searchQuery={searchQuery} key={c.id} />)}
+    {open && visibleCalls.map(c => <CallRow call={c} talkgroupLabel={group.label} searchQuery={searchQuery} key={c.id} />)}
     {open && calls.length > 0 && visibleCalls.length === 0 && <div className="call-group-status">{hideWeakCalls ? "No loaded strong calls match this view." : "No loaded calls match this search."}</div>}
     {open && calls.length >= 150 && <div className="call-group-status">Showing latest 150 calls.</div>}
   </details>;
 }
 
-function CallRow({ call, searchQuery = "" }: { call: EngineCall; searchQuery?: string }) {
+function CallRow({ call, talkgroupLabel, searchQuery = "" }: { call: EngineCall; talkgroupLabel?: string; searchQuery?: string }) {
   const status = call.qualityReason && call.qualityReason !== "ok" ? `${call.transcriptionStatus}: ${call.qualityReason}` : call.transcriptionStatus;
   const transcript = call.transcription?.trim();
   const missingText = call.transcriptionStatus === "pending"
     ? "Pending transcription"
     : `No transcript available (${status || "not transcribed"}).`;
-  return <div id={`call-${call.id}`} className={`call category-${call.category}`}><div className="call-head"><strong><HighlightedText text={call.talkgroupName || `TG ${call.talkgroup}`} query={searchQuery} /> <CopyCardLink targetId={`call-${call.id}`} label="Copy call link" /></strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div><HighlightedText text={transcript || missingText} query={searchQuery} /></div><PlayableAudio src={call.audioPath ? `/api/v1/calls/${call.id}/audio` : ""} /></div>;
+  return <div id={`call-${call.id}`} className={`call category-${call.category}`}><div className="call-head"><strong><HighlightedText text={talkgroupLabel || call.talkgroupName || `TG ${call.talkgroup}`} query={searchQuery} /> <CopyCardLink targetId={`call-${call.id}`} label="Copy call link" /></strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div><HighlightedText text={transcript || missingText} query={searchQuery} /></div><PlayableAudio src={call.audioPath ? `/api/v1/calls/${call.id}/audio` : ""} /></div>;
 }
 
 function CopyCardLink({ targetId, hashTarget, label }: { targetId: string; hashTarget?: string; label: string }) {
@@ -3960,7 +3963,7 @@ function isStrongCall(call: EngineCall) {
 }
 
 function matchesCategoryGroupSearch(group: CategoryPage["groups"][number], query: string) {
-  return matchesTextSearch([group.label, group.talkgroup, group.count], query)
+  return matchesTextSearch([group.label, group.jurisdiction, group.alphaTag, group.catalogSystemShortName, group.talkgroup, group.count], query)
     || (group.calls ?? []).some(call => matchesCallSearch(call, query));
 }
 

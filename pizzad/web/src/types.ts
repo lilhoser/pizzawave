@@ -127,7 +127,7 @@ export type EngineCall = {
 export type CategoryPage = {
   category: string;
   groupBy: string;
-  groups: { label: string; calls: EngineCall[]; talkgroupKey: string; systemShortName: string; talkgroup: number; count: number; lastHeard: number; strongCount: number; weakCount: number }[];
+  groups: { label: string; calls: EngineCall[]; talkgroupKey: string; systemShortName: string; talkgroup: number; count: number; lastHeard: number; strongCount: number; weakCount: number; jurisdiction: string; alphaTag: string; catalogSystemShortName: string }[];
   insights: CategoryInsight[];
   incidents: Incident[];
 };
@@ -536,6 +536,7 @@ export type TalkgroupCatalogItem = {
   mode: string;
   alphaTag: string;
   description: string;
+  jurisdiction: string;
   tag: string;
   sourceCategory: string;
   opsCategory: string;
