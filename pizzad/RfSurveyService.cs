@@ -487,7 +487,7 @@ public sealed class RfSurveyService
             UpdatedAtUtc = now
         };
 
-        var toolPrep = await LatestReusableToolPrepAsync(null, ct) ?? EmptyToolPrep();
+        var toolPrep = EmptyToolPrep(desired.LastAppliedConfigHash);
         await WriteArtifactAsync(artifactPath, "survey.json", session, ct);
         await WriteArtifactAsync(artifactPath, "input-profile.json", profile, ct);
         await WriteArtifactAsync(artifactPath, "tool-prep.json", toolPrep, ct);
@@ -575,7 +575,7 @@ public sealed class RfSurveyService
         SdrSources: request.SdrSources,
         SourceAssignments: request.SourceAssignments);
 
-    public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct, bool compactExperiments = false)
+    public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct, bool compactExperiments = false, string appliedConfigHash = "")
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct);
         if (row == null)
@@ -586,9 +586,14 @@ public sealed class RfSurveyService
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson) ?? new RfSurveyProfileDto()),
             ct);
         var recoveredSession = await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, persist: false, ct);
-        var toolPrepState = await ResolveToolPrepForReadAsync(recoveredSession.Id, row.Value.ToolPrepJson, ct);
+        var toolPrepState = string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase)
+            ? (Prep: DeserializeOrDefault<RfSurveyToolPrepDto>(row.Value.ToolPrepJson), Json: row.Value.ToolPrepJson)
+            : await ResolveToolPrepForReadAsync(recoveredSession.Id, row.Value.ToolPrepJson, ct);
         var session = NormalizeAppliedSourcePlanSession(recoveredSession) with { SdrSummary = SummarizeSelectedSdrs(profile) };
         var toolPrep = toolPrepState.Prep;
+        if (string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase) &&
+            !ToolPrepMatchesAppliedConfig(toolPrep, appliedConfigHash))
+            toolPrep = EmptyToolPrep(appliedConfigHash);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
         if (compactExperiments)
             experiments = experiments.Select(CompactExperimentForWorkspaceOpen).ToList();
@@ -739,7 +744,9 @@ public sealed class RfSurveyService
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
             ct);
-        var toolPrepState = await EnsureReusableToolPrepAsync(row.Session, row.ProfileJson, row.ToolPrepJson, ct);
+        var toolPrepState = string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase)
+            ? (Prep: DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson), Json: row.ToolPrepJson)
+            : await EnsureReusableToolPrepAsync(row.Session, row.ProfileJson, row.ToolPrepJson, ct);
         var toolPrep = toolPrepState.Prep ?? EmptyToolPrep();
         var requestedSystems = NormalizeRequestedSystemNames(request.SystemShortNames, request.SystemShortName);
         var effectiveSystems = requestedSystems.Count > 0
@@ -1237,23 +1244,25 @@ public sealed class RfSurveyService
         return new RfSurveyTrActionResultDto(true, "restore-config", "Original TR config was restored from the Setup backup.", "", backupPath, backupPath, serviceOutput);
     }
 
-    public async Task<RfSurveyToolPrepDto> RunToolPrepAsync(string id, CancellationToken ct)
+    public async Task<RfSurveyToolPrepDto> RunToolPrepAsync(string id, string appliedConfigHash, bool force, CancellationToken ct)
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var existing = DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson);
+        if (!force && ToolPrepMatchesAppliedConfig(existing, appliedConfigHash))
+            return existing!;
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
             row.Session,
             NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
             ct);
-        var generatedP25Template = await EnsureP25ProbeTemplateAsync(ct);
         var tools = new List<RfSurveyToolStatusDto>
         {
-            await ToolAsync("rtl-sdr", "RTL-SDR tools", "sdr", profile.Sources.Any(IsRtlSource), "rtl_test", "rtl_test -t", "Enumerates and smoke-tests RTL-SDR devices.", "Run SDR prep/install from setup."),
-            await ToolAsync("rtl-sdr-capture", "RTL-SDR capture", "sdr", profile.Sources.Any(IsRtlSource), "rtl_sdr", "rtl_sdr 2>&1 | head -20", "Captures short IQ windows for RF power/noise scans.", "Install rtl-sdr."),
-            await ToolAsync("airspy", "Airspy tools", "sdr", profile.Sources.Any(IsAirspySource), "airspy_info", "airspy_info", "Enumerates and validates Airspy devices.", "Install airspy host tools for this platform."),
-            await ToolAsync("airspy-capture", "Airspy capture", "sdr", profile.Sources.Any(IsAirspySource), "airspy_rx", "airspy_rx -h", "Captures short IQ windows for RF power/noise scans.", "Install airspy host tools for this platform."),
-            await P25ToolAsync(),
-            await ToolAsync("trunk-recorder", "trunk-recorder", "capture", true, "trunk-recorder", "trunk-recorder --version", "Runs temporary candidate configs and voice capture trials.", "Complete trunk-recorder setup first."),
-            await ToolAsync("ffprobe", "ffprobe", "audio", true, "ffprobe", "ffprobe -version", "Inspects captured audio duration and levels.", "Install ffmpeg/ffprobe."),
+            await SoftwareToolAsync("rtl-sdr", "RTL-SDR tools", "sdr", profile.Sources.Any(IsRtlSource), "rtl_test", "Supports explicit RTL-SDR hardware inventory.", "Install rtl-sdr.", ct),
+            await SoftwareToolAsync("rtl-sdr-capture", "RTL-SDR capture", "sdr", profile.Sources.Any(IsRtlSource), "rtl_sdr", "Captures bounded IQ windows for RF measurements.", "Install rtl-sdr.", ct),
+            await SoftwareToolAsync("airspy", "Airspy tools", "sdr", profile.Sources.Any(IsAirspySource), "airspy_info", "Supports explicit Airspy hardware inventory.", "Install Airspy host tools for this platform.", ct),
+            await SoftwareToolAsync("airspy-capture", "Airspy capture", "sdr", profile.Sources.Any(IsAirspySource), "airspy_rx", "Captures bounded IQ windows for RF measurements.", "Install Airspy host tools for this platform.", ct),
+            await P25SoftwareToolAsync(ct),
+            await SoftwareToolAsync("trunk-recorder", "trunk-recorder", "capture", true, "trunk-recorder", "Runs temporary candidate configurations and voice-capture trials.", "Complete trunk-recorder setup first.", ct),
+            await SoftwareToolAsync("ffprobe", "ffprobe", "audio", true, "ffprobe", "Inspects captured audio duration and levels.", "Install ffmpeg/ffprobe.", ct),
             TranscriptionTool()
         };
         var warnings = new List<string>();
@@ -1263,19 +1272,27 @@ public sealed class RfSurveyService
             warnings.Add("Transcription provider is disabled. RF validation cannot pass without usable captured-call transcription.");
         if (!tools.Any(t => t.Category == "p25" && t.Installed))
             warnings.Add("No validated P25 control-channel tool was found. Control-channel experiments are blocked until P25 tooling is installed.");
-        if (generatedP25Template)
-            warnings.Add("Generated the default OP25 rx.py P25 probe command template. Review it if this host uses a nonstandard OP25 install.");
+        else if (string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate))
+            warnings.Add("P25 software is available, but the Setup P25 probe command is not configured. Configure it explicitly before control-channel proof.");
+
+        var requiredSoftwareReady = tools.Where(t => t.Required).All(t => t.Installed);
+        var requiredSdrSoftware = tools.Where(t => t.Category == "sdr" && t.Required).ToList();
+        var sdrSoftwareReady = requiredSdrSoftware.Count > 0 && requiredSdrSoftware.All(t => t.Installed);
+        var p25Ready = tools.Any(t => t.Category == "p25" && t.Installed) && !string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate);
 
         var prep = new RfSurveyToolPrepDto(
             DateTime.UtcNow,
-            (profile.Mode != "guided" || _config.AiInsights.Enabled) && tools.Where(t => t.Required).All(t => t.Installed),
-            tools.Any(t => t.Category == "p25" && t.Installed) && tools.Any(t => t.Category == "sdr" && t.Installed),
+            (profile.Mode != "guided" || _config.AiInsights.Enabled) && requiredSoftwareReady,
+            p25Ready && sdrSoftwareReady,
             tools.First(t => t.Id == "trunk-recorder").Installed,
             !string.Equals(_config.Transcription.Provider, "none", StringComparison.OrdinalIgnoreCase),
             tools,
-            warnings);
+            warnings)
+        {
+            AppliedConfigHash = appliedConfigHash?.Trim() ?? string.Empty
+        };
 
-        var session = row.Session with { Status = "tool_prep", UpdatedAtUtc = DateTime.UtcNow };
+        var session = row.Session with { UpdatedAtUtc = DateTime.UtcNow };
         await WriteArtifactAsync(session.ArtifactPath, "tool-prep.json", prep, ct);
         await _database.UpdateRfSurveySessionAsync(
             session,
@@ -1688,7 +1705,7 @@ public sealed class RfSurveyService
                 : "";
         var plans = new List<RfSurveyExperimentPlanDto>();
         if (toolPrep == null || toolPrep.Tools.Count == 0)
-            plans.Add(new("tool_prep", "Run tool prep", "Detect required SDR, P25, capture, audio, and transcription tooling.", true, "", "Run Tool Prep."));
+            plans.Add(new("tool_prep", "Check required software", "Check required SDR, P25, capture, audio, and transcription software without accessing SDR hardware or changing configuration.", true, "", "Open Preparation to run the software check."));
         if (!completed.Contains("ground_truth_review"))
             plans.Add(new("ground_truth_review", "Review ground truth", "Verify the setup-derived control channels, voice frequencies, SDR sources, and RF path facts before RF tests.", true, "", "Completed Setup or imported TR/RR data."));
         if (!completed.Contains("tr_stopped_check"))
@@ -1872,8 +1889,8 @@ public sealed class RfSurveyService
             new { trState, trWasActive, trStopOutput, trRestartOutput, trRestartError, configuredSources = profile.Sources, serialNotes, detection, outputs },
             new
             {
-                recommendation = restartFailed ? "Restart trunk-recorder before continuing Setup RF validation." : missing ? "Run tool prep/install for missing SDR host tools." : visible ? "Proceed to RF power scan before P25 probing." : "Check USB, permissions, drivers, and whether another process is using the SDR.",
-                followUps = missing ? new[] { "Install missing SDR toolchain.", "Re-run Tool Prep.", "Re-run SDR inventory." } : Array.Empty<string>()
+                recommendation = restartFailed ? "Restart trunk-recorder before continuing Setup RF validation." : missing ? "Install the missing SDR software, then recheck required software." : visible ? "Proceed to RF power scan before P25 probing." : "Check USB, permissions, drivers, and whether another process is using the SDR.",
+                followUps = missing ? new[] { "Install missing SDR software.", "Recheck required software.", "Rerun SDR inventory." } : Array.Empty<string>()
             });
     }
 
@@ -6172,7 +6189,7 @@ public sealed class RfSurveyService
         };
     }
 
-    private async Task<RfSurveyToolStatusDto> P25ToolAsync()
+    private async Task<RfSurveyToolStatusDto> P25SoftwareToolAsync(CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate))
         {
@@ -6189,63 +6206,16 @@ public sealed class RfSurveyService
         }
         foreach (var candidate in new[] { "rx.py", "multi_rx.py", "op25_rx.py" })
         {
-            var result = await RunCaptureAsync("bash", $"-lc \"command -v {candidate} >/dev/null 2>&1 && {candidate} --help 2>&1 | head -1 || true\"", CancellationToken.None);
-            if (!string.IsNullOrWhiteSpace(result.Stdout))
-                return new RfSurveyToolStatusDto("p25", "P25 control-channel tooling", "p25", true, true, result.Stdout.Trim(), candidate, "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Installed.");
+            if (await CommandExistsAsync(candidate, ct))
+                return new RfSurveyToolStatusDto("p25", "P25 control-channel software", "p25", true, true, "Available on PATH", candidate, "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Available.");
         }
         return new RfSurveyToolStatusDto("p25", "P25 control-channel tooling", "p25", true, false, "", "rx.py / multi_rx.py / op25_rx.py", "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Install a validated OP25/P25 toolchain for this host architecture.");
     }
 
-    private async Task<bool> EnsureP25ProbeTemplateAsync(CancellationToken ct)
+    private static async Task<RfSurveyToolStatusDto> SoftwareToolAsync(string id, string label, string category, bool required, string command, string purpose, string installHint, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate))
-            return false;
-        if (!await CommandExistsAsync("rx.py", ct))
-            return false;
-
-        _config.RfSurvey.P25ProbeCommandTemplate =
-            "rx.py --args {device} -f {frequency_hz} -S {sample_rate} -q {error_ppm} -g {gain} -D cqpsk -l 56120 -v 10";
-        if (string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeWorkingDirectory))
-            _config.RfSurvey.P25ProbeWorkingDirectory = "/tmp";
-        _config.RfSurvey.P25ProbeDurationSeconds = Math.Clamp(_config.RfSurvey.P25ProbeDurationSeconds <= 0 ? 45 : _config.RfSurvey.P25ProbeDurationSeconds, 10, 300);
-        _config.RfSurvey.P25ProbeTimeoutSeconds = Math.Max(_config.RfSurvey.P25ProbeTimeoutSeconds, _config.RfSurvey.P25ProbeDurationSeconds + 30);
-        await SaveEngineConfigAsync(ct);
-        return true;
-    }
-
-    private async Task SaveEngineConfigAsync(CancellationToken ct)
-    {
-        _config.ApplyDefaults();
-        if (OperatingSystem.IsWindows() || !_config.ConfigPath.StartsWith("/etc/", StringComparison.Ordinal))
-        {
-            _config.Save();
-            return;
-        }
-
-        var stagingRoot = Path.Combine(_config.Storage.AppDataRoot, "protected-config");
-        Directory.CreateDirectory(stagingRoot);
-        var candidatePath = Path.Combine(stagingRoot, $"pizzad-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.json");
-        await File.WriteAllTextAsync(candidatePath, JsonSerializer.Serialize(_config, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
-        try
-        {
-            var helper = FindAdminHelper() ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected config writes are unavailable.");
-            var result = await RunAdminHelperAsync(helper, ["install-pizzad-config", candidatePath, _config.ConfigPath], ct);
-            if (result.ExitCode != 0)
-                throw new InvalidOperationException($"install-pizzad-config failed: {result.Output.Trim()}");
-        }
-        finally
-        {
-            try { File.Delete(candidatePath); } catch { }
-        }
-    }
-
-    private static async Task<RfSurveyToolStatusDto> ToolAsync(string id, string label, string category, bool required, string command, string versionCommand, string purpose, string installHint)
-    {
-        var exists = await CommandExistsAsync(command, CancellationToken.None);
-        var version = exists
-            ? (await RunCaptureAsync("bash", "-lc " + Quote(versionCommand + " 2>&1 | head -3"), CancellationToken.None)).Stdout.Trim()
-            : string.Empty;
-        return new RfSurveyToolStatusDto(id, label, category, required, exists, version, command, purpose, exists ? "Installed." : installHint);
+        var exists = await CommandExistsAsync(command, ct);
+        return new RfSurveyToolStatusDto(id, label, category, required, exists, exists ? "Available on PATH" : string.Empty, command, purpose, exists ? "Available." : installHint);
     }
 
     private RfSurveyToolStatusDto TranscriptionTool()
@@ -6325,14 +6295,20 @@ public sealed class RfSurveyService
 
     private static bool HasToolPrepRun(RfSurveyToolPrepDto? prep) => prep?.Tools.Count > 0;
 
-    private static RfSurveyToolPrepDto EmptyToolPrep() => new(
+    private static bool ToolPrepMatchesAppliedConfig(RfSurveyToolPrepDto? prep, string appliedConfigHash) =>
+        HasToolPrepRun(prep) && string.Equals(prep!.AppliedConfigHash, appliedConfigHash?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+    private static RfSurveyToolPrepDto EmptyToolPrep(string appliedConfigHash = "") => new(
         DateTime.UtcNow,
         false,
         false,
         false,
         false,
         [],
-        ["Tool prep has not run yet."]);
+        ["Required software has not been checked for this applied Setup."])
+    {
+        AppliedConfigHash = appliedConfigHash?.Trim() ?? string.Empty
+    };
 
     private async Task TryCopyTrConfigAsync(string artifactPath, CancellationToken ct)
     {

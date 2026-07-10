@@ -730,7 +730,7 @@ export type RfSurveySession = {
   completedAtUtc?: string | null;
 };
 export type RfSurveyToolStatus = { id: string; label: string; category: string; required: boolean; installed: boolean; version: string; command: string; purpose: string; installHint: string };
-export type RfSurveyToolPrep = { generatedAtUtc: string; readyForGuidedSurvey: boolean; readyForControlChannelTests: boolean; readyForVoiceCapture: boolean; readyForTranscriptionGate: boolean; tools: RfSurveyToolStatus[]; warnings: string[] };
+export type RfSurveyToolPrep = { generatedAtUtc: string; readyForGuidedSurvey: boolean; readyForControlChannelTests: boolean; readyForVoiceCapture: boolean; readyForTranscriptionGate: boolean; tools: RfSurveyToolStatus[]; warnings: string[]; appliedConfigHash: string };
 export type RfSurveyExperiment = { id: string; type: string; status: string; hypothesis: string; requiredSetup: string; resultSummary: string; blockingIssue: string; evidenceJson: string; interpretationJson: string; createdAtUtc: string; startedAtUtc?: string | null; finishedAtUtc?: string | null };
 export type RfSurveyExperimentPlan = { type: string; label: string; purpose: string; enabled: boolean; blockingIssue: string; requiredSetup: string };
 export type RfSurveyCancelExperimentResult = { cancelRequested: boolean; message: string; cleanupOutput: string };

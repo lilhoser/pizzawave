@@ -1483,7 +1483,10 @@ public sealed record RfSurveyToolPrepDto(
     bool ReadyForVoiceCapture,
     bool ReadyForTranscriptionGate,
     IReadOnlyList<RfSurveyToolStatusDto> Tools,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    public string AppliedConfigHash { get; init; } = string.Empty;
+}
 
 public sealed record RfSurveyToolStatusDto(
     string Id,

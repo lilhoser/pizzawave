@@ -330,6 +330,123 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public async Task GetAsync_InvalidatesSiteSetupSoftwareCheckForDifferentAppliedConfig()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-software-revision-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = Path.Combine(root, "tr-config.json") },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            File.WriteAllText(config.TrunkRecorder.ConfigPath, "{}");
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+            var session = new RfSurveySessionDto
+            {
+                Id = "site-setup",
+                Status = "source_plan_applied",
+                SiteLabel = "Site Setup",
+                ArtifactPath = Path.Combine(root, "site-setup"),
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            Directory.CreateDirectory(session.ArtifactPath);
+            var prep = new RfSurveyToolPrepDto(
+                DateTime.UtcNow,
+                true,
+                true,
+                true,
+                true,
+                [new("p25", "P25", "p25", true, true, "Available", "rx.py", "P25 probe", "Available")],
+                [])
+            {
+                AppliedConfigHash = "old-config"
+            };
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(new RfSurveyProfileDto { SiteLabel = "Site Setup" }, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(prep, EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var detail = await service.GetAsync("site-setup", CancellationToken.None, appliedConfigHash: "new-config");
+            var stored = await database.GetRfSurveySessionAsync("site-setup", CancellationToken.None);
+            var storedPrep = JsonSerializer.Deserialize<RfSurveyToolPrepDto>(stored!.Value.ToolPrepJson, EngineConfig.JsonOptions());
+
+            Assert.NotNull(detail);
+            Assert.Empty(detail!.ToolPrep!.Tools);
+            Assert.Equal("new-config", detail.ToolPrep.AppliedConfigHash);
+            Assert.Contains(detail.ToolPrep.Warnings, warning => warning.Contains("not been checked", StringComparison.OrdinalIgnoreCase));
+            Assert.Single(storedPrep!.Tools);
+            Assert.Equal("old-config", storedPrep.AppliedConfigHash);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunToolPrepAsync_PreservesConfigurationAndSessionStatus()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-software-check-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = Path.Combine(root, "tr-config.json") },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            File.WriteAllText(config.TrunkRecorder.ConfigPath, "{}");
+            config.RfSurvey.P25ProbeCommandTemplate = string.Empty;
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+            var session = new RfSurveySessionDto
+            {
+                Id = "site-setup",
+                Status = "source_plan_applied",
+                SiteLabel = "Site Setup",
+                ArtifactPath = Path.Combine(root, "site-setup"),
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            Directory.CreateDirectory(session.ArtifactPath);
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(new RfSurveyProfileDto { SiteLabel = "Site Setup" }, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, false, false, false, false, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var prep = await service.RunToolPrepAsync("site-setup", "applied-config", false, CancellationToken.None);
+            var stored = await database.GetRfSurveySessionAsync("site-setup", CancellationToken.None);
+            var storedPrep = JsonSerializer.Deserialize<RfSurveyToolPrepDto>(stored!.Value.ToolPrepJson, EngineConfig.JsonOptions());
+            var repeated = await service.RunToolPrepAsync("site-setup", "applied-config", false, CancellationToken.None);
+            var storedAfterRepeat = await database.GetRfSurveySessionAsync("site-setup", CancellationToken.None);
+
+            Assert.Equal("applied-config", prep.AppliedConfigHash);
+            Assert.NotEmpty(prep.Tools);
+            Assert.Equal(string.Empty, config.RfSurvey.P25ProbeCommandTemplate);
+            Assert.Equal("source_plan_applied", stored.Value.Session.Status);
+            Assert.Equal("applied-config", storedPrep!.AppliedConfigHash);
+            Assert.Equal(prep.GeneratedAtUtc, repeated.GeneratedAtUtc);
+            Assert.Equal(stored.Value.Session.UpdatedAtUtc, storedAfterRepeat!.Value.Session.UpdatedAtUtc);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task UpdateDraft_DoesNotRefreshSavedWorkspaceFromLiveTr()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-draft-preserve-{Guid.NewGuid():N}");

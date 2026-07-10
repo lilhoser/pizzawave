@@ -6,7 +6,7 @@ import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
-import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -1651,6 +1651,7 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
   const [duration, setDuration] = useState("45");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
   const [details, setDetails] = useState<{ title: string; body: React.ReactNode } | null>(null);
+  const softwareCheckAttemptRef = useRef("");
   const systems = siteSetupSystems(setup);
   const sources = siteSetupSources(setup);
   const selectedSourceIndexes = setup.desired.selectedSourceIndexes.length
@@ -1663,7 +1664,8 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
     systems,
     sources,
     selectedSourceIndexes,
-    rfPath: setup.desired.rfPath
+    rfPath: setup.desired.rfPath,
+    appliedConfigHash: setup.status.appliedConfigHash
   });
   useEffect(() => {
     if (!active)
@@ -1728,6 +1730,19 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
     if (detection?.devices?.length) {
       const detectedSources = setupSourcesFromSdrDetection(setup, detection);
       await onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
+    }
+  }
+  async function runSoftwareCheck(force = false) {
+    if (!detail) return;
+    setBusy("software_check");
+    setMessage("");
+    try {
+      const toolPrep = await api.request<RfSurveyToolPrep>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/software-check${force ? "?force=true" : ""}`, { method: "POST" });
+      setDetail(current => current ? { ...current, toolPrep } : current);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Required software check failed.");
+    } finally {
+      setBusy("");
     }
   }
   async function adoptWaterfallSite(system: RfSurveySystem) {
@@ -1809,6 +1824,15 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
   const voiceCapture = latestExperiment("voice_capture_trial");
   const transcriptionGate = latestExperiment("transcription_gate");
   const stabilityVerdict = latestExperiment("stability_verdict");
+  useEffect(() => {
+    if (!active || stage !== "preparation" || !detail || (detail.toolPrep?.tools.length ?? 0) > 0)
+      return;
+    const key = `${detail.session.id}:${setup.status.appliedConfigHash || "unapplied"}`;
+    if (softwareCheckAttemptRef.current === key)
+      return;
+    softwareCheckAttemptRef.current = key;
+    void runSoftwareCheck();
+  }, [active, stage, detail?.session.id, detail?.toolPrep?.tools.length, setup.status.appliedConfigHash]);
   return <div className="site-setup-form site-setup-rf-validation">
     {busy === "workspace" && <div className="setup-note">Preparing RF validation session...</div>}
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
@@ -1820,7 +1844,9 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
           systems={effectiveSystems}
           sources={effectiveSources}
           inventory={inventory}
-          busy={busy === "sdr_inventory"}
+          inventoryBusy={busy === "sdr_inventory"}
+          softwareCheckBusy={busy === "software_check"}
+          onSoftwareCheck={() => void runSoftwareCheck(true)}
           onRunInventory={() => void runSdrInventoryExperiment()}
           onShowDetails={setDetails}
         />}
@@ -1929,43 +1955,62 @@ function SiteSetupRfStageBanner({ stage, detail, setup, validationSweep, voiceCa
   </div>;
 }
 
-function SiteSetupRfPreparationStage({ detail, systems, sources, inventory, busy, onRunInventory, onShowDetails }: { detail: RfSurveyDetail; systems: RfSurveySystem[]; sources: RfSurveySource[]; inventory?: RfSurveyExperiment; busy: boolean; onRunInventory: () => void; onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void }) {
+function SiteSetupRfPreparationStage({ detail, systems, sources, inventory, inventoryBusy, softwareCheckBusy, onSoftwareCheck, onRunInventory, onShowDetails }: { detail: RfSurveyDetail; systems: RfSurveySystem[]; sources: RfSurveySource[]; inventory?: RfSurveyExperiment; inventoryBusy: boolean; softwareCheckBusy: boolean; onSoftwareCheck: () => void; onRunInventory: () => void; onShowDetails: (value: { title: string; body: React.ReactNode } | null) => void }) {
   const prep = detail.toolPrep;
+  const checkComplete = (prep?.tools.length ?? 0) > 0;
+  const missingRequired = (prep?.tools ?? []).filter(tool => tool.required && !tool.installed);
+  const warnings = checkComplete ? prep?.warnings ?? [] : [];
+  const hasIssues = missingRequired.length > 0 || warnings.length > 0 || !prep?.readyForControlChannelTests || !prep?.readyForVoiceCapture || !prep?.readyForTranscriptionGate;
+  const softwareStatus = softwareCheckBusy ? "Checking" : checkComplete ? hasIssues ? "Needs attention" : "Ready" : "Not checked";
   return <div className="rf-step-stack rf-stage-summary">
-    <div className="rf-stage-fact-grid">
-      <div><span>Selected sites</span><strong>{systems.length}</strong><small>{systems.map(system => system.siteLabel || system.shortName).join(", ") || "Choose sites in Systems & Sites."}</small></div>
-      <div><span>Configured sources</span><strong>{sources.length}</strong><small>{sources.map(source => `Source ${source.index} ${source.serial || source.sdrType || source.device}`).join(", ") || "Run SDR Inventory."}</small></div>
-      <div><span>Control-channel tools</span><strong>{prep?.readyForControlChannelTests ? "Ready" : "Needs attention"}</strong><small>{prep?.generatedAtUtc ? `Checked ${new Date(prep.generatedAtUtc).toLocaleString()}` : "Tool readiness has not been recorded."}</small></div>
-      <div><span>Call and transcription tools</span><strong>{prep?.readyForVoiceCapture && prep?.readyForTranscriptionGate ? "Ready" : "Needs attention"}</strong><small>Both real call capture and useful transcription are required for a passing verdict.</small></div>
+    <div className="rf-stage-status-list">
+      <div><span>Setup scope</span><strong>{systems.length} site{systems.length === 1 ? "" : "s"} / {sources.length} source{sources.length === 1 ? "" : "s"}</strong><small>{systems.map(system => system.siteLabel || system.shortName).join(", ") || "Choose sites in Systems & Sites."}</small></div>
+      <div><span>Required software</span><strong className={hasIssues && checkComplete ? "warning-text" : ""}>{softwareStatus}</strong><small>{checkComplete ? `Checked ${new Date(prep!.generatedAtUtc).toLocaleString()}` : softwareCheckBusy ? "Checking software availability without accessing SDR hardware." : "The first Preparation visit checks this applied Setup once."}</small></div>
+      <div><span>SDR inventory</span><strong>{inventory ? label(inventory.status) : "Not run"}</strong><small>{inventory?.resultSummary || "Hardware detection remains a separate explicit operation."}</small></div>
     </div>
     <div className="rf-primary-actions">
-      <button type="button" className="danger-button" disabled={busy} onClick={onRunInventory}>{busy ? "Running..." : inventory ? "Rerun SDR Inventory" : "Run SDR Inventory"}</button>
+      {checkComplete && hasIssues && <button type="button" className="danger-button" disabled={softwareCheckBusy || inventoryBusy} onClick={onSoftwareCheck}>{softwareCheckBusy ? "Checking..." : "Recheck required software"}</button>}
+      {!checkComplete && !softwareCheckBusy && <button type="button" className="danger-button" disabled={inventoryBusy} onClick={onSoftwareCheck}>Retry required software check</button>}
+      {!inventory && checkComplete && !hasIssues && <button type="button" className="danger-button" disabled={inventoryBusy || softwareCheckBusy} onClick={onRunInventory}>{inventoryBusy ? "Running..." : "Run SDR Inventory"}</button>}
+      {inventory && <button type="button" disabled={inventoryBusy || softwareCheckBusy} onClick={onRunInventory}>{inventoryBusy ? "Running..." : "Rerun SDR Inventory"}</button>}
       {inventory && <button type="button" onClick={() => onShowDetails({ title: "SDR Inventory Details", body: <pre className="log-box">{inventory.evidenceJson}</pre> })}>View Inventory Evidence</button>}
     </div>
     {inventory && <SdrInventorySummary experiment={inventory} />}
-    {prep?.warnings?.length ? <div className="setup-warning-list">{prep.warnings.map(warning => <div key={warning}>{warning}</div>)}</div> : null}
-    {prep?.tools?.length ? <div className="rf-tool-status-list compact">
-      {prep.tools.map(tool => <div className="rf-tool-row" key={tool.id}>
-        <strong>{tool.label}</strong>
-        <span className={`section-status ${tool.installed ? "ok" : tool.required ? "error" : "warning"}`}>{tool.installed ? "Available" : tool.required ? "Required" : "Optional"}</span>
-        <span>{tool.installed ? tool.version || tool.purpose : tool.installHint || tool.purpose}</span>
-      </div>)}
-    </div> : null}
+    {warnings.length ? <div className="setup-warning-list">{warnings.map(warning => <div key={warning}>{warning}</div>)}</div> : null}
+    {checkComplete && <details className="rf-technical-details" open={missingRequired.length > 0}>
+      <summary>{missingRequired.length ? `${missingRequired.length} required software issue${missingRequired.length === 1 ? "" : "s"}` : "Software check details"}</summary>
+      <div className="rf-tool-status-list compact">
+        {prep!.tools.map(tool => <div className="rf-tool-row" key={tool.id}>
+          <strong>{tool.label}</strong>
+          <span className={`section-status ${tool.installed ? "ok" : tool.required ? "error" : "warning"}`}>{tool.installed ? "Available" : tool.required ? "Required" : "Optional"}</span>
+          <span>{tool.installed ? tool.version || tool.purpose : tool.installHint || tool.purpose}</span>
+        </div>)}
+      </div>
+    </details>}
   </div>;
 }
 
 function SiteSetupRfCoverageStage({ setup, detail, onOpenSourceCoverage }: { setup: SiteSetup; detail: RfSurveyDetail; onOpenSourceCoverage: () => void }) {
   const systems = setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : selectedSetupSystemNames(setup);
   const sources = setup.desired.selectedSourceIndexes.length ? setup.desired.selectedSourceIndexes : siteSetupSources(setup).map(source => source.index);
+  const coverageMode = setup.desired.sourcePlanMode === "control" ? "Control channels only" : "Full known frequencies";
   return <div className="rf-step-stack rf-stage-summary">
-    <div className="rf-stage-fact-grid">
-      <div><span>Planning scope</span><strong>{systems.length} site{systems.length === 1 ? "" : "s"}</strong><small>{systems.join(", ") || "No sites selected."}</small></div>
-      <div><span>Coverage mode</span><strong>{setup.desired.sourcePlanMode === "control" ? "Control channels only" : "Full known frequencies"}</strong><small>{setup.desired.sourcePlanMode === "control" ? "Voice-frequency coverage may remain incomplete." : "Includes known and recently observed voice frequencies when available."}</small></div>
-      <div><span>Selected hardware</span><strong>{sources.length} source{sources.length === 1 ? "" : "s"}</strong><small>{sources.map(index => `Source ${index}`).join(", ") || "Run SDR Inventory first."}</small></div>
-      <div><span>Applied source evidence</span><strong>{detail.session.sourcePlanSummary ? "Recorded" : "Not applied"}</strong><small>{detail.session.sourcePlanSummary || "Review coverage before final configuration."}</small></div>
+    <div className="rf-recommended-action">
+      <div>
+        <span>Recommended next task</span>
+        <strong>Review source coverage</strong>
+        <small>{systems.length} site{systems.length === 1 ? "" : "s"} / {sources.length} source{sources.length === 1 ? "" : "s"} / {coverageMode}</small>
+      </div>
+      <button type="button" className="primary" onClick={onOpenSourceCoverage}>Review Source Coverage</button>
     </div>
-    <div className="setup-note">Review selected sites, coverage mode, hardware assignments, calculated source centers, and missed frequencies before final configuration.</div>
-    <div className="rf-primary-actions"><button type="button" className="primary" onClick={onOpenSourceCoverage}>Review Source Coverage</button></div>
+    {detail.session.sourcePlanSummary
+      ? <div className="rf-evidence-line"><span>Recorded plan</span><strong>{detail.session.sourcePlanSummary}</strong></div>
+      : <div className="setup-note">Compare hardware assignments, calculated tuning windows, and any missed frequencies before final configuration.</div>}
+    <details className="rf-technical-details"><summary>Planning scope</summary><div className="rf-stage-status-list">
+      <div><span>Sites</span><strong>{systems.join(", ") || "None selected"}</strong></div>
+      <div><span>Sources</span><strong>{sources.map(index => `Source ${index}`).join(", ") || "None selected"}</strong></div>
+      <div><span>Coverage</span><strong>{coverageMode}</strong></div>
+    </div></details>
   </div>;
 }
 
@@ -1975,32 +2020,42 @@ function SiteSetupRfCallProofStage({ validationSweep, voiceCapture, transcriptio
   const realCalls = voiceCandidates.reduce((total: number, candidate: any) => total + Number(candidate.voiceRealCalls ?? 0), 0);
   const voicePlan = nextExperiments.find(plan => plan.type === "voice_capture_trial");
   const transcriptionPlan = nextExperiments.find(plan => plan.type === "transcription_gate");
+  const nextPlan = !voiceCapture || voiceCapture.status !== "passed" ? voicePlan : transcriptionPlan;
   return <div className="rf-step-stack rf-stage-summary">
-    <div className="rf-stage-fact-grid">
-      <div><span>Short RF Sweep voice trials</span><strong>{voiceCandidates.length ? `${voiceCandidates.length} candidate${voiceCandidates.length === 1 ? "" : "s"}` : "No evidence"}</strong><small>{realCalls ? `${realCalls} real call${realCalls === 1 ? "" : "s"} with audio observed.` : "A control-channel result alone cannot pass this stage."}</small></div>
-      <div><span>Bounded call capture</span><strong>{voiceCapture ? label(voiceCapture.status) : "Not run"}</strong><small>{voiceCapture?.blockingIssue || voiceCapture?.resultSummary || voicePlan?.blockingIssue || "Real captured calls are required when traffic is available."}</small></div>
-      <div><span>Transcription proof</span><strong>{transcriptionGate ? label(transcriptionGate.status) : "Not run"}</strong><small>{transcriptionGate?.blockingIssue || transcriptionGate?.resultSummary || transcriptionPlan?.blockingIssue || "Useful completed transcripts are required for a passing verdict."}</small></div>
+    <div className={`rf-recommended-action ${nextPlan?.enabled === false ? "blocked" : ""}`.trim()}>
+      <div>
+        <span>{nextPlan?.enabled === false ? "Current blocker" : "Recommended next task"}</span>
+        <strong>{nextPlan?.label || (transcriptionGate ? "Review proof evidence" : "Complete Control-Channel Proof")}</strong>
+        <small>{nextPlan?.blockingIssue || nextPlan?.purpose || "Measured call and transcription evidence will appear here."}</small>
+      </div>
     </div>
-    {voiceCapture && <ExperimentSummary experiment={voiceCapture} />}
-    {transcriptionGate && <ExperimentSummary experiment={transcriptionGate} />}
-    {!voiceCapture && voicePlan?.blockingIssue && <div className="setup-warning-list"><div>{voicePlan.blockingIssue}</div></div>}
-    {!transcriptionGate && transcriptionPlan?.blockingIssue && <div className="setup-warning-list"><div>{transcriptionPlan.blockingIssue}</div></div>}
+    <div className="rf-stage-status-list">
+      <div><span>RF Sweep call evidence</span><strong>{voiceCandidates.length ? `${voiceCandidates.length} candidate${voiceCandidates.length === 1 ? "" : "s"}` : "None"}</strong><small>{realCalls ? `${realCalls} real call${realCalls === 1 ? "" : "s"} with audio observed.` : "No real call audio has been proved."}</small></div>
+      <div><span>Call capture</span><strong>{voiceCapture ? label(voiceCapture.status) : "Not run"}</strong><small>{voiceCapture?.resultSummary || voiceCapture?.blockingIssue || "Required when traffic is available."}</small></div>
+      <div><span>Transcription</span><strong>{transcriptionGate ? label(transcriptionGate.status) : "Not run"}</strong><small>{transcriptionGate?.resultSummary || transcriptionGate?.blockingIssue || "Useful completed transcripts are required."}</small></div>
+    </div>
+    {(voiceCapture || transcriptionGate) && <details className="rf-technical-details"><summary>Proof evidence</summary>
+      {voiceCapture && <ExperimentSummary experiment={voiceCapture} />}
+      {transcriptionGate && <ExperimentSummary experiment={transcriptionGate} />}
+    </details>}
   </div>;
 }
 
 function SiteSetupRfVerdictStage({ detail, stabilityVerdict }: { detail: RfSurveyDetail; stabilityVerdict?: RfSurveyExperiment }) {
   const verdict = detail.session.verdict && detail.session.verdict !== "not_started" ? label(detail.session.verdict) : "Not ready";
   const stability = detail.session.stability && detail.session.stability !== "unknown" ? label(detail.session.stability) : "Not proved";
-  const blockers = detail.nextExperiments.filter(plan => !plan.enabled && plan.blockingIssue).map(plan => plan.blockingIssue);
+  const blockers = Array.from(new Set(detail.nextExperiments.filter(plan => !plan.enabled && plan.blockingIssue).map(plan => plan.blockingIssue)));
   return <div className="rf-step-stack rf-stage-summary">
     <div className="rf-verdict-summary">
       <div><span>Verdict</span><strong>{verdict}</strong></div>
       <div><span>Stability</span><strong>{stability}</strong></div>
-      <div><span>Last updated</span><strong>{new Date(detail.session.updatedAtUtc).toLocaleString()}</strong></div>
     </div>
-    {stabilityVerdict && <ExperimentSummary experiment={stabilityVerdict} />}
-    {blockers.length > 0 ? <div className="setup-warning-list">{Array.from(new Set(blockers)).map(blocker => <div key={blocker}>{blocker}</div>)}</div> : <div className="setup-note">No remaining server-declared blockers. Review the measured evidence before final configuration.</div>}
-    <div className="setup-note">A passing verdict requires reliable control-channel decoding, source coverage, real call capture when traffic is available, useful transcription, and stable results across the required windows.</div>
+    {blockers.length > 0
+      ? <div className="rf-recommended-action blocked"><div><span>Next blocker</span><strong>Complete the next required proof</strong><small>{blockers[0]}</small></div></div>
+      : <div className="rf-recommended-action"><div><span>Next task</span><strong>Review and apply the measured setup</strong><small>No server-declared blockers remain.</small></div></div>}
+    {blockers.length > 1 && <details className="rf-technical-details"><summary>{blockers.length - 1} additional blocker{blockers.length === 2 ? "" : "s"}</summary><div className="setup-warning-list">{blockers.slice(1).map(blocker => <div key={blocker}>{blocker}</div>)}</div></details>}
+    {stabilityVerdict && <details className="rf-technical-details"><summary>Verdict evidence</summary><ExperimentSummary experiment={stabilityVerdict} /></details>}
+    <small className="muted">Updated {new Date(detail.session.updatedAtUtc).toLocaleString()}</small>
   </div>;
 }
 
@@ -5866,14 +5921,24 @@ function SiteValidationStep({
       result: validationSweep,
       body: <div className="rf-step-stack">
         <div className="rf-sweep-compact">
-          <div className="rf-sweep-form">
+          <div className="rf-recommended-run">
+            <div>
+              <span>Recommended run</span>
+              <strong>{activeValidationTarget ? activeValidationTarget.siteLabel || activeValidationTarget.shortName : `${systems.length} selected site${systems.length === 1 ? "" : "s"}`}</strong>
+              <small>{activeValidationPowerSources.length} source{activeValidationPowerSources.length === 1 ? "" : "s"} / {activeValidationControlChannels.length} control channel{activeValidationControlChannels.length === 1 ? "" : "s"} / about {formatElapsed(activeValidationEstimateSeconds)}</small>
+            </div>
+            <div className="rf-primary-actions">
+              <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationRequestSampleRateOk || validationPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : validationSweep ? "Rerun proof" : "Run proof"}</button>
+              {(validationRunning || validationProgress?.active) && <button disabled={sweepBusy === "cancel-validation"} onClick={() => void cancelValidationSweep()}>{sweepBusy === "cancel-validation" ? "Canceling..." : "Cancel"}</button>}
+            </div>
+          </div>
+          <details className="rf-advanced-settings">
+            <summary>Advanced settings</summary>
             <div className="rf-cc-runline compact">
               <label><span>Sample rate MHz</span><input className={validationRequestSampleRateOk ? "rf-short-input" : "rf-short-input invalid"} size={8} inputMode="decimal" value={validationFormSampleRateMhz} onChange={event => updateValidationSampleRate(event.target.value)} /></label>
               <label><span>Gain sequence</span><input className={validationPowerGainInvalid ? "invalid" : ""} value={validationFormGainSequence} onChange={event => setPowerGainSequence(event.target.value)} /></label>
               <label><span>Correction change (Hz)</span><input className="rf-short-input" size={6} value={validationFormErrorSearch} onChange={event => setValidationErrorOffsets(event.target.value)} /></label>
               <label><span>Metric candidates</span><input className="rf-short-input" size={6} inputMode="numeric" value={validationMetricsCandidates} onChange={event => setValidationMetricsCandidates(event.target.value)} /></label>
-              <button className="danger-button" disabled={Boolean(busy) || validationBlocked || !validationRequestSampleRateOk || validationPowerGainInvalid} onClick={() => void runValidationSweep()}>{busy === "rf_validation_sweep" ? "Running..." : "Run"}</button>
-              {(validationRunning || validationProgress?.active) && <button disabled={sweepBusy === "cancel-validation"} onClick={() => void cancelValidationSweep()}>{sweepBusy === "cancel-validation" ? "Canceling..." : "Cancel"}</button>}
             </div>
             {validationSampleRateMessage && !waterfallSampleRateHz && <div className="settings-message error">{validationSampleRateMessage}</div>}
             {airspyPowerGainMessage && <div className={validationPowerGainInvalid ? "settings-message error" : "setup-note"}>{validationPowerGainInvalid ? `${airspyPowerGainMessage} Remove values above ${AIRSPY_LINEARITY_GAIN_MAX}.` : airspyPowerGainMessage}</div>}
@@ -5882,7 +5947,7 @@ function SiteValidationStep({
               <span>{selectedWaterfallSweepControlChannels.length ? `${selectedWaterfallSweepControlChannels.map(formatRfHz).join(", ")} / gain ${validationPowerGains.join(", ")}${validationRecommendedErrorText ? ` / ${validationRecommendedErrorText}` : ""}${waterfallSampleRateHz ? ` / ${formatMhzInput(waterfallSampleRateHz)} MS/s` : ""}${validationHandoffSourceIndex !== undefined ? ` / source ${validationHandoffSourceIndex}` : ""}` : "All requested control channels"}</span>
               {selectedWaterfallSweepControlChannels.length > 0 && <button type="button" onClick={() => onWaterfallSweepSelections?.([])}>Clear</button>}
             </div>
-          </div>
+          </details>
           <div className="rf-sweep-callout" role="status" aria-live="polite">
             <span>Estimated time</span>
             <strong>{formatElapsed(activeValidationEstimateSeconds)}</strong>
@@ -5898,27 +5963,30 @@ function SiteValidationStep({
           {validationCancelMessage && <div className="setup-note">{validationCancelMessage}</div>}
           {sweepMessage && <div className="setup-note">{sweepMessage}</div>}
         </div>
-        <div className="rf-sweep-plan" aria-label="RF sweep permutation plan">
-          <div className="rf-sweep-plan-head">
-            <strong>{activeValidationTarget ? "Targeted Permutation Plan and Results" : "Permutation Plan and Results"}</strong>
-            <span>{activeValidationTarget ? `Only ${activeValidationTarget.siteLabel || activeValidationTarget.shortName} is being rerun; other site results are not part of this live pass.` : "Each selected site is screened across its control channels; TR and voice checks run on the strongest candidates to learn whether the site is monitorable."}</span>
+        <details className="rf-technical-details rf-sweep-plan-details" open={validationRunning || validationProgress?.active === true}>
+          <summary>Permutation plan and technical results</summary>
+          <div className="rf-sweep-plan" aria-label="RF sweep permutation plan">
+            <div className="rf-sweep-plan-head">
+              <strong>{activeValidationTarget ? "Targeted plan and results" : "Plan and results"}</strong>
+              <span>{activeValidationTarget ? `Only ${activeValidationTarget.siteLabel || activeValidationTarget.shortName} is included in this rerun.` : "The strongest candidates receive P25, monitoring, and voice follow-up checks."}</span>
+            </div>
+            <div className="rf-sweep-plan-grid">
+              <div><span>SDR sources</span><code>{activeValidationPowerSources.map(source => `${source.sdrType || "SDR"} ${source.index}${source.serial ? ` (${source.serial})` : ""}`).join(", ") || "None"}</code></div>
+              <div><span>Sample rate</span><code>{validationRequestSampleRateOk ? `${formatMhzInput(validationRequestSampleRateHz)} MHz` : "Invalid"}</code></div>
+              <div><span>RF screens</span><code>{activeValidationPowerSources.length} source(s) x {activeValidationControlChannels.length} CC x {activeValidationPowerGains.length} gain = {activeValidationPowerPasses}</code></div>
+              <div><span>P25 probes</span><code>{activeValidationP25SeedCount} seed(s) x {validationOffsets.length} correction change(s) = {activeValidationProbePasses}</code></div>
+              <div><span>Follow-up limits</span><code>{activeValidationMetricRunCount} monitoring candidate(s); {activeValidationVoiceCandidateCount} voice candidate(s)</code></div>
+            </div>
+            <RfSweepPermutationResults
+              sources={activeValidationPowerSources}
+              controlChannels={activeValidationControlChannels}
+              gains={activeValidationPowerGains}
+              rows={validationProgressRows}
+              candidates={validationProgressCandidates}
+              active={validationRunning || validationProgress?.active === true}
+            />
           </div>
-          <div className="rf-sweep-plan-grid">
-            <div><span>SDR sources</span><code>{activeValidationPowerSources.map(source => `${source.sdrType || "SDR"} ${source.index}${source.serial ? ` (${source.serial})` : ""}`).join(", ") || "None"}</code></div>
-            <div><span>Sample rate</span><code>{validationRequestSampleRateOk ? `${formatMhzInput(validationRequestSampleRateHz)} MHz` : "Invalid"}</code></div>
-            <div><span>RF screens</span><code>{activeValidationPowerSources.length} source(s) x {activeValidationControlChannels.length} CC x {activeValidationPowerGains.length} gain = {activeValidationPowerPasses}</code></div>
-            <div><span>P25 probes</span><code>{activeValidationP25SeedCount} control-channel seed(s) x {validationOffsets.length} correction change(s) = {activeValidationProbePasses}</code></div>
-            <div><span>Follow-up limits</span><code>{activeValidationMetricRunCount} TR metric candidate(s); {activeValidationVoiceCandidateCount} voice trial candidate(s)</code></div>
-          </div>
-          <RfSweepPermutationResults
-            sources={activeValidationPowerSources}
-            controlChannels={activeValidationControlChannels}
-            gains={activeValidationPowerGains}
-            rows={validationProgressRows}
-            candidates={validationProgressCandidates}
-            active={validationRunning || validationProgress?.active === true}
-          />
-        </div>
+        </details>
       </div>
     },
     {
@@ -6746,11 +6814,18 @@ function WaterfallStep({
     toggleSweepControlChannel(row, selected);
   }
   return <div className="rf-waterfall-panel">
-    <div className="rf-waterfall-controls">
+    <div className="rf-waterfall-controls rf-waterfall-primary-controls">
       <label><span>Source</span><select value={String(sourceIndex)} disabled={controlsDisabled || locked || status?.active || sourceOptions.length <= 1} onChange={event => setSourceIndex(Number(event.target.value))}>
         {sourceOptions.map(source => <option value={String(source.index)} key={source.index}>Source {source.index} / {source.sdrType || "SDR"}{source.serial ? ` / ${source.serial}` : source.device ? ` / ${source.device}` : ""}</option>)}
       </select></label>
       <label className="rf-frequency-combo" ref={frequencyComboRef}><span>Frequency MHz</span><div className="rf-frequency-combo-input"><input className={frequencyOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={frequencyMhz} onChange={event => setFrequencyMhz(event.target.value)} onFocus={() => setFrequencyMenuOpen(true)} /><button type="button" disabled={controlsDisabled} aria-label="Show saved control channels" title="Show saved control channels" onClick={() => setFrequencyMenuOpen(open => !open)}><ChevronDown size={14} aria-hidden="true" /></button></div>{frequencyMenuOpen && <div className="rf-frequency-menu" role="listbox" aria-label="Saved control channels">{controlChannelOptions.length === 0 ? <div className="rf-frequency-menu-empty">No saved CCs</div> : controlChannelOptions.map(value => <button type="button" role="option" aria-selected={formatMhzInput(value) === frequencyMhz} key={value} onMouseDown={event => event.preventDefault()} onClick={() => { setFrequencyMhz(formatMhzInput(value)); setFrequencyMenuOpen(false); }}>{formatMhzInput(value)}<span>{formatRfHz(value)}</span></button>)}</div>}</label>
+      <button type="button" className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
+      <button type="button" disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
+      <button type="button" className="icon-button" disabled={controlsDisabled || !frame} aria-label="Download waterfall screen grab" title="Download waterfall screen grab" onClick={downloadWaterfallReport}><Camera size={16} aria-hidden="true" /></button>
+    </div>
+    <details className="rf-advanced-settings rf-waterfall-advanced">
+      <summary>Advanced display and capture settings</summary>
+      <div className="rf-waterfall-controls">
       <label><span>Rate MHz</span><input className={sampleRateOk ? "" : "invalid"} disabled={controlsDisabled} inputMode="decimal" value={sampleRateMhz} onChange={event => setSampleRateMhz(event.target.value)} /></label>
       <label><span>{selectedSourceIsAirspy ? `Lin gain 0-${AIRSPY_LINEARITY_GAIN_MAX}` : "Gain"}</span><input className={gainOk ? "" : "invalid"} disabled={controlsDisabled} inputMode={selectedSourceIsAirspy ? "numeric" : undefined} value={gain} onChange={event => setGain(event.target.value)} /></label>
       <label><span>Power span</span><select value={String(spectrumSpanDb)} disabled={controlsDisabled} onChange={event => setSpectrumSpanDb(Number(event.target.value))}>
@@ -6760,10 +6835,8 @@ function WaterfallStep({
         <option value="70">70 dB</option>
       </select></label>
       <label className="rf-waterfall-check"><input type="checkbox" disabled={controlsDisabled} checked={showControlChannelLines} onChange={event => setShowControlChannelLines(event.target.checked)} /><span>CC lines</span></label>
-      <button type="button" className="danger-button" disabled={!canStart || status?.active === true} onClick={() => void startWaterfall()}>{busy === "start" ? "Starting..." : "Start"}</button>
-      <button type="button" disabled={controlsDisabled || !status?.active || busy === "stop"} onClick={() => void stopWaterfall()}>{busy === "stop" ? "Stopping..." : "Stop"}</button>
-      <button type="button" className="icon-button" disabled={controlsDisabled || !frame} aria-label="Download waterfall screen grab" title="Download waterfall screen grab" onClick={downloadWaterfallReport}><Camera size={16} aria-hidden="true" /></button>
-    </div>
+      </div>
+    </details>
     {locked && <div className="setup-note">Run SDR Inventory first.</div>}
     {visibleMessage && <div className="settings-message error">{visibleMessage}</div>}
     <div className="rf-waterfall-stage">

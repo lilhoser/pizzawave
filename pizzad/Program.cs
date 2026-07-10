@@ -246,7 +246,8 @@ app.MapGet("/api/v1/setup/site/rf", async (HttpContext context, AuthService auth
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var setup = await siteSetup.GetAsync(context.RequestAborted);
-    return Results.Ok(await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted));
+    var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+    return Results.Ok(await surveys.GetAsync(detail.Session.Id, context.RequestAborted, appliedConfigHash: setup.Status.AppliedConfigHash) ?? detail);
 })
 .WithName("SiteSetupRfGet")
 .WithOpenApi();
@@ -256,11 +257,30 @@ app.MapGet("/api/v1/setup/site/rf/{id}", async (HttpContext context, string id, 
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var setup = await siteSetup.GetAsync(context.RequestAborted);
     var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
-    return compact == true
-        ? Results.Ok(await surveys.GetAsync(detail.Session.Id, context.RequestAborted, compactExperiments: true) ?? detail)
-        : Results.Ok(detail);
+    return Results.Ok(await surveys.GetAsync(
+        detail.Session.Id,
+        context.RequestAborted,
+        compactExperiments: compact == true,
+        appliedConfigHash: setup.Status.AppliedConfigHash) ?? detail);
 })
 .WithName("SiteSetupRfGetById")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/software-check", async (HttpContext context, string id, bool? force, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var setup = await siteSetup.GetAsync(context.RequestAborted);
+        var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        return Results.Ok(await surveys.RunToolPrepAsync(detail.Session.Id, setup.Status.AppliedConfigHash, force == true, context.RequestAborted));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupRfSoftwareCheck")
 .WithOpenApi();
 
 app.MapPost("/api/v1/setup/site/rf/{id}/experiments/run", async (HttpContext context, string id, RfSurveyRunExperimentRequest request, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>
