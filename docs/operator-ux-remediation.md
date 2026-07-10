@@ -595,3 +595,21 @@ Status: pending
   selected 773.781 MHz control channel; table order remained alphabetical and
   selectable, with no browser console errors. Health and active Setup state were
   unchanged at desired version `1783690411070` and applied hash `e95b8867...`.
+- 2026-07-10: Follow-up commits `687951d`, `b8cdab2`, `80dcebc`, and `4de9599`
+  correct over-eager control-channel inference. Spectrum suspects now need five
+  seconds of persistence for a yellow bar and eight seconds for table promotion;
+  ratings use a 12-second window and decay slowly. Selected-site matching is
+  limited to an actual +/-8 kHz carrier distance, including per-FFT-bin checks,
+  so adjacent traffic no longer supplies stale control-channel metrics.
+- 2026-07-10: Frequency-only matching against all 175 cached MSWIN sites was
+  removed. An unselected carrier remains `Unidentified carrier` until P25
+  evidence proves identity; it can no longer inherit labels such as Poplarville
+  South Pearl River or Red Water Leake, nor can selecting it silently add that
+  guessed site to Setup. Failed P25 probes no longer remain as candidates.
+- 2026-07-10: Spectrum popups now use a fitted, wrapping 460 px layout. Retained
+  history forces its latest frame into both spectrum and table so their ratings
+  agree. Production builds passed and automatic web-only follow-ups completed
+  without restarting PizzaWave or Trunk Recorder. Live retained verification
+  showed ETV 773.781 MHz Strong at +4.395 kHz in both views, ETV 773.281 MHz
+  Steady at +6.348 kHz, no false statewide site names, no console errors, health
+  `ok`, and unchanged active Setup version `1783690411070`/hash `e95b8867...`.
