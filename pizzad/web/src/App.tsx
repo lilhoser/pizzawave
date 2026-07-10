@@ -6,7 +6,7 @@ import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
-import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -1017,10 +1017,6 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
             {item === "RF Validation" && <div className="site-setup-subnav">
               {siteSetupRfStages.map(stage => <button type="button" className={section === item && rfValidationStage === stage.id ? "active" : ""} key={stage.id} onClick={() => { setSection(item); setRfValidationStage(stage.id); }}>{stage.label}</button>)}
             </div>}
-            {item === "Apply & Resume" && <div className="site-setup-subnav">
-              <button type="button" className={section === item && applySubPage === "source" ? "active" : ""} onClick={() => { setSection(item); setApplySubPage("source"); }}>Sources</button>
-              <button type="button" className={section === item && applySubPage === "review" ? "active" : ""} onClick={() => { setSection(item); setApplySubPage("review"); }}>Review</button>
-            </div>}
           </div>)}
         </section>
 
@@ -1036,10 +1032,10 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
               stage={rfValidationStage}
               onSave={saveDesired}
               onTrOperationChange={onTrOperationChange}
-              onOpenSourceCoverage={() => { setSection("Apply & Resume"); setApplySubPage("source"); }}
+              onServerSetupChanged={(next) => { currentRef.current = next; setCurrent(next); }}
             />
           </div>
-          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage={applySubPage} setSubPage={setApplySubPage} onSave={saveDesired} onSetupChanged={(next) => { currentRef.current = next; setCurrent(next); }} onApplied={(next) => { currentRef.current = next; setCurrent(next); void reload(); }} />}
+          {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage="review" setSubPage={setApplySubPage} onSave={saveDesired} onSetupChanged={(next) => { currentRef.current = next; setCurrent(next); }} onApplied={(next) => { currentRef.current = next; setCurrent(next); void reload(); }} />}
           {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
         </section>
       </div>
@@ -1048,24 +1044,28 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
 }
 
 function SiteSetupChangeStrip({ setup, localPendingChanges = [] }: { setup: SiteSetup; localPendingChanges?: SiteSetupPendingChange[] }) {
-  const latest = setup.recentActivity[0];
   const pendingChanges = setup.pendingChanges.length ? setup.pendingChanges : localPendingChanges;
-  const changedCategories = pendingChanges.map(change => label(change.category));
-  return <div className="site-setup-change-strip" aria-label="Setup change summary">
-    <section className={pendingChanges.length ? "warning" : "ok"}>
-      <span>Config changes</span>
-      <strong>{pendingChanges.length ? `${pendingChanges.length} pending` : "None"}</strong>
-      <small>{changedCategories.join(", ") || "No unapplied setup changes"}</small>
+  const guidance = setup.guidance;
+  const scope = guidance?.scope ?? { state: "info", value: `${setup.desired.systems.length} selected sites`, detail: `${setup.desired.sources.length} SDR sources` };
+  const validation = guidance?.validation ?? { state: "warning", value: "Review RF Validation", detail: "Continue with the next incomplete proof stage." };
+  const apply = pendingChanges.length
+    ? { state: "warning", value: `${pendingChanges.length} change${pendingChanges.length === 1 ? "" : "s"} to apply`, detail: "Review the final configuration before Apply & Resume." }
+    : guidance?.applyAndMonitoring ?? { state: siteSetupMonitoringTone(setup.status.monitoringState), value: "Configuration current", detail: setup.status.message };
+  return <div className="site-setup-change-strip" aria-label="Setup operator guidance">
+    <section className={scope.state}>
+      <span>Current scope</span>
+      <strong>{scope.value}</strong>
+      <small>{scope.detail}</small>
     </section>
-    <section className={latest ? "info" : "neutral"}>
-      <span>Last setup change</span>
-      <strong>{latest ? label(latest.action) : "No activity"}</strong>
-      <small>{latest ? `${latest.summary} / ${new Date(latest.timestampUtc).toLocaleString()}` : "No setup activity recorded"}</small>
+    <section className={validation.state}>
+      <span>Validation next</span>
+      <strong>{validation.value}</strong>
+      <small>{validation.detail}</small>
     </section>
-    <section className={setup.status.pendingApply ? "warning" : siteSetupMonitoringTone(setup.status.monitoringState)}>
-      <span>Apply state</span>
-      <strong>{setup.status.pendingApply ? "Apply needed" : "Current"}</strong>
-      <small>{setup.status.pendingApply ? "Desired setup differs from the running TR config" : "No pending TR config apply"}</small>
+    <section className={apply.state}>
+      <span>Apply & monitoring</span>
+      <strong>{apply.value}</strong>
+      <small>{apply.detail}</small>
     </section>
   </div>;
 }
@@ -1150,12 +1150,8 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
     setLocationNotes(setup.desired.locationNotes);
     setAreas(normalizeSiteSetupAreas(setup.desired.monitoredAreas));
   }, [setup.desired.siteLabel, setup.desired.locationNotes, setup.desired.monitoredAreas, setup.desired.desiredVersion]);
-
-  const selectedSystems = setup.desired.sourcePlanSystemShortNames.length
-    ? setup.desired.sourcePlanSystemShortNames
-    : setup.desired.systemShortNames.length
-      ? setup.desired.systemShortNames
-      : setup.desired.systems.map(system => system.shortName).filter(Boolean);
+  const locationContext = setup.locationContext ?? { derivedLocations: [], legacyAreaCount: 0 };
+  const overrideRows = areas.map((area, index) => ({ area, index })).filter(row => row.area.isOverride);
 
   function statusFor(field: string) {
     if (saveState.field !== field || saveState.status === "idle") return null;
@@ -1187,25 +1183,22 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
     setAreas(next);
     saveAreas(next);
   }
-  function seedAreasFromSelectedSystems() {
-    const existingBySystem = new Map(areas.map(area => [area.systemShortName.toLowerCase(), area]));
-    const next = selectedSystems.map(systemName => {
-      const existing = existingBySystem.get(systemName.toLowerCase());
-      if (existing) return existing;
-      const system = setup.desired.systems.find(item => item.shortName === systemName);
-      return normalizeSiteSetupArea({
-        areaId: createClientId(),
-        areaLabel: suggestAreaLabelFromSite(system?.siteLabel || systemName),
-        systemShortName: systemName,
-        north: 0,
-        south: 0,
-        east: 0,
-        west: 0,
-        aliases: [systemName]
-      });
-    });
+  function addOverride(context?: SiteSetup["locationContext"]["derivedLocations"][number]) {
+    const siteShortNames = context?.siteShortNames ?? [];
+    const systemShortName = siteShortNames[0] ?? "";
+    const next = [...areas, normalizeSiteSetupArea({
+      areaId: createClientId(),
+      areaLabel: context?.label ?? "",
+      systemShortName,
+      north: 0,
+      south: 0,
+      east: 0,
+      west: 0,
+      aliases: Array.from(new Set([...siteShortNames, context?.catalogSystemShortName ?? ""].filter(Boolean))),
+      isOverride: true,
+      contextKey: context?.key ?? ""
+    })];
     setAreas(next);
-    saveAreas(next);
   }
   async function lookupAreaBoundary(index: number, key: string) {
     const area = areas[index];
@@ -1257,26 +1250,49 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
       <textarea value={locationNotes} onChange={event => setLocationNotes(event.target.value)} onBlur={saveLocationNotes} rows={4} />
       {statusFor("locationNotes")}
     </label>
+    <div className="settings-subsection setup-location-context">
+      <div className="setup-job-head">
+        <div>
+          <strong>Derived location context</strong>
+          <small>RadioReference talkgroup jurisdiction is used first; selected-site geography is the fallback.</small>
+        </div>
+      </div>
+      {locationContext.derivedLocations.length === 0 && <div className="setup-note">Import talkgroups and select sites to derive location context.</div>}
+      {locationContext.derivedLocations.length > 0 && <details className="rf-technical-details"><summary>{locationContext.derivedLocations.length} imported and fallback context{locationContext.derivedLocations.length === 1 ? "" : "s"}</summary><div className="setup-location-context-list">
+        {locationContext.derivedLocations.map(context => <div className="setup-location-context-row" key={context.key}>
+          <div>
+            <strong>{context.label}</strong>
+            <small>{context.source}{context.talkgroupCount > 0 ? ` / ${context.talkgroupCount} talkgroups` : ""}</small>
+          </div>
+          <span>{context.siteLabels.join(", ") || context.siteShortNames.join(", ")}</span>
+          <button type="button" disabled={context.hasOverride} onClick={() => addOverride(context)}>{context.hasOverride ? "Override added" : "Add override"}</button>
+        </div>)}
+      </div></details>}
+      {locationContext.legacyAreaCount > 0 && <div className="setup-note">{locationContext.legacyAreaCount} legacy area record{locationContext.legacyAreaCount === 1 ? " is" : "s are"} preserved for compatibility but no longer shown as Setup location authority.</div>}
+    </div>
     <div className="settings-subsection">
       <div className="setup-job-head">
-        <strong>Monitored Areas</strong>
-        <button type="button" disabled={selectedSystems.length === 0} onClick={seedAreasFromSelectedSystems}>Sync from selected sites</button>
+        <div>
+          <strong>Location overrides</strong>
+          <small>Add one only when imported jurisdiction or selected-site geography is missing or incorrect.</small>
+        </div>
+        <button type="button" onClick={() => addOverride()}>Add manual override</button>
         {statusFor("monitoredAreas")}
       </div>
-      {areas.length === 0 && <div className="setup-note">No monitored areas are configured.</div>}
-      {areas.map((area, index) => {
+      {overrideRows.length === 0 && <div className="setup-note">No location overrides. Imported context remains authoritative.</div>}
+      {overrideRows.map(({ area, index }) => {
         const key = areaDraftKey(area, index);
         const candidates = areaBoundaryCandidates[key] ?? [];
         return <div className="setup-area" key={key}>
           <div className="setup-area-head">
             <div>
-              <span>System</span>
+              <span>Applies to site/system</span>
               <code>{area.systemShortName || "--"}</code>
             </div>
             <button type="button" className="danger-button" onClick={() => removeArea(index)}>Remove</button>
           </div>
           <div className="area-label-row">
-            <SettingInput label="Area label" description="County or city boundary label." value={area.areaLabel} onChange={value => updateArea(index, { areaLabel: value })} />
+            <SettingInput label="Override boundary" description="County or city boundary used instead of imported context." value={area.areaLabel} onChange={value => updateArea(index, { areaLabel: value })} />
             <button type="button" disabled={Boolean(areaLookupBusy) || !String(area.areaLabel || area.systemShortName || "").trim()} onClick={() => void lookupAreaBoundary(index, key)}>
               {areaLookupBusy === key ? "Finding..." : "Find boundary"}
             </button>
@@ -1287,7 +1303,7 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
               <small>{candidate.kind} / {candidate.source} / N {candidate.north.toFixed(4)}, S {candidate.south.toFixed(4)}, E {candidate.east.toFixed(4)}, W {candidate.west.toFixed(4)}</small>
             </button>)}
           </div>}
-          {hasUsableAreaBounds(area) ? <AreaMapPreview area={area} /> : <div className="setup-note">Boundary lookup is pending for this area.</div>}
+          {hasUsableAreaBounds(area) ? <AreaMapPreview area={area} /> : <div className="setup-note">Find and review the boundary before saving this override.</div>}
           <div className="area-coordinate-grid">
             <SettingInput label="North" description="Northern latitude boundary." value={String(area.north ?? "")} onChange={value => updateArea(index, { north: numberOrZero(value) })} />
             <SettingInput label="South" description="Southern latitude boundary." value={String(area.south ?? "")} onChange={value => updateArea(index, { south: numberOrZero(value) })} />
@@ -1295,7 +1311,7 @@ function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSet
             <SettingInput label="West" description="Western longitude boundary." value={String(area.west ?? "")} onChange={value => updateArea(index, { west: numberOrZero(value) })} />
           </div>
           <div className="setup-button-row">
-            <button type="button" onClick={() => saveAreas()}>Save monitored area</button>
+            <button type="button" disabled={!hasUsableAreaBounds(area)} onClick={() => saveAreas()}>Save override</button>
           </div>
         </div>;
       })}
@@ -1577,6 +1593,7 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     <RfPathStep
       path={rfPath}
       setPath={updateRfPath}
+      sources={siteSetupSources(setup)}
       onTouched={() => undefined}
       onLoadPrevious={async () => {
         const next = normalizeSetupRfPath(setup.desired.rfPath);
@@ -1598,7 +1615,16 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
 
 function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathProfile {
   const value = path ?? ({} as RfSurveyPathProfile);
-  const chain = (value.chain ?? []).map(normalizeRfChainItem);
+  const legacyChain = (value.chain ?? []).map(normalizeRfChainItem);
+  const branches = (value.branches ?? []).map(branch => ({
+    id: branch.id || createClientId(),
+    label: branch.label || "",
+    chain: (branch.chain ?? []).map(normalizeRfChainItem),
+    sdrSerial: branch.sdrSerial || "",
+    sdrDevice: branch.sdrDevice || "",
+    sdrIndex: branch.sdrIndex ?? null,
+    unused: branch.unused === true
+  }));
   return {
     antenna: value.antenna ?? "",
     antennaType: value.antennaType ?? "",
@@ -1613,7 +1639,8 @@ function normalizeSetupRfPath(path?: RfSurveyPathProfile | null): RfSurveyPathPr
     filters: value.filters ?? "",
     sdrNotes: value.sdrNotes ?? "",
     observations: value.observations ?? "",
-    chain: chain.length ? chain : [newRfChainItem()]
+    chain: branches.length ? legacyChain : [],
+    branches: branches.length ? branches : [{ id: createClientId(), label: "Primary branch", chain: legacyChain, sdrSerial: "", sdrDevice: "", sdrIndex: null, unused: false }]
   };
 }
 
@@ -1643,10 +1670,14 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
   </div>;
 }
 
-function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperationChange, onOpenSourceCoverage }: { setup: SiteSetup; active: boolean; stage: SiteSetupRfStage; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onTrOperationChange: (value: string) => void; onOpenSourceCoverage: () => void }) {
+function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperationChange, onServerSetupChanged }: { setup: SiteSetup; active: boolean; stage: SiteSetupRfStage; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onTrOperationChange: (value: string) => void; onServerSetupChanged: (next: SiteSetup) => void }) {
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [experimentName, setExperimentName] = useState("");
+  const [experimentHypothesis, setExperimentHypothesis] = useState("");
+  const [experimentPhysicalChange, setExperimentPhysicalChange] = useState("");
   const [activeControlChannelHz, setActiveControlChannelHz] = useState(0);
   const [duration, setDuration] = useState("45");
   const [waterfallSweepSelections, setWaterfallSweepSelections] = useState<WaterfallSweepSelection[]>([]);
@@ -1707,9 +1738,20 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
     try {
       const experiment = await api.request<RfSurveyExperiment>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
         method: "POST",
-        body: JSON.stringify({ type, durationSeconds: type === "rf_validation_sweep" ? 300 : 45, controlChannelHz, ...extraRequest })
+        body: JSON.stringify({
+          type,
+          durationSeconds: type === "rf_validation_sweep" ? 300 : 45,
+          controlChannelHz,
+          name: experimentName.trim(),
+          hypothesis: experimentHypothesis.trim(),
+          physicalChange: experimentPhysicalChange.trim(),
+          ...extraRequest
+        })
       });
       await refreshWorkspace();
+      setExperimentName("");
+      setExperimentHypothesis("");
+      setExperimentPhysicalChange("");
       return experiment;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : `${label(type)} failed.`);
@@ -1836,7 +1878,17 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
   return <div className="site-setup-form site-setup-rf-validation">
     {busy === "workspace" && <div className="setup-note">Preparing RF validation session...</div>}
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
-    {detail
+    <div className="rf-history-toolbar">
+      <button type="button" className={showHistory ? "primary" : ""} onClick={() => setShowHistory(value => !value)}>{showHistory ? "Back to validation" : "Experiments & Evidence"}</button>
+      {!showHistory && <details className="rf-experiment-context"><summary>Name or describe the next experiment</summary><div className="rf-experiment-context-fields">
+        <label><span>Name</span><input value={experimentName} onChange={event => setExperimentName(event.target.value)} placeholder="Automatic descriptive name" /></label>
+        <label><span>Hypothesis</span><input value={experimentHypothesis} onChange={event => setExperimentHypothesis(event.target.value)} placeholder="What are you testing?" /></label>
+        <label><span>Physical change</span><input value={experimentPhysicalChange} onChange={event => setExperimentPhysicalChange(event.target.value)} placeholder="Antenna, cable, filter, placement, or none" /></label>
+      </div></details>}
+    </div>
+    {showHistory
+      ? <SetupRfHistoryViewer currentSite={setup.desired.siteLabel} />
+      : detail
       ? <>
         <SiteSetupRfStageBanner stage={stage} detail={detail} setup={setup} validationSweep={validationSweep} voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} />
         {stage === "preparation" && <SiteSetupRfPreparationStage
@@ -1907,7 +1959,7 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
           onAcceptSweepCandidate={acceptSweepCandidate}
           inventoryRequired={false}
         />}
-        {stage === "coverage" && <SiteSetupRfCoverageStage setup={setup} detail={detail} onOpenSourceCoverage={onOpenSourceCoverage} />}
+        {stage === "coverage" && <SiteSetupRfCoverageStage setup={setup} detail={detail} onServerSetupChanged={onServerSetupChanged} />}
         {stage === "calls" && <SiteSetupRfCallProofStage validationSweep={validationSweep} voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} nextExperiments={detail.nextExperiments ?? []} />}
         {stage === "verdict" && <SiteSetupRfVerdictStage detail={detail} stabilityVerdict={stabilityVerdict} />}
         {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
@@ -1918,6 +1970,85 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
         </div>}
       </>
       : !busy && <div className="setup-warning-list"><div>RF Validation needs at least one selected site/control channel and one SDR source.</div></div>}
+  </div>;
+}
+
+function SetupRfHistoryViewer({ currentSite }: { currentSite: string }) {
+  const [history, setHistory] = useState<SetupRfHistory>({ rows: [] });
+  const [query, setQuery] = useState("");
+  const [currentSiteOnly, setCurrentSiteOnly] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [comparison, setComparison] = useState<string[]>([]);
+  const [annotation, setAnnotation] = useState<Record<string, string>>({});
+  useEffect(() => { void load(); }, [currentSiteOnly, currentSite]);
+
+  async function load() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const params = new URLSearchParams({ limit: "150" });
+      if (currentSiteOnly && currentSite.trim()) params.set("site", currentSite.trim());
+      if (query.trim()) params.set("q", query.trim());
+      setHistory(await api.request<SetupRfHistory>(`${siteSetupApi}/rf-history?${params}`));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load experiment history.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleCompare(id: string, checked: boolean) {
+    setComparison(current => checked ? [...current.filter(value => value !== id), id].slice(-2) : current.filter(value => value !== id));
+  }
+
+  async function saveAnnotation(row: SetupRfHistoryRow) {
+    const text = (annotation[row.experiment.id] || "").trim();
+    if (!text) return;
+    try {
+      await api.request(`${siteSetupRfApi}/${encodeURIComponent(row.session.id)}/annotations`, { method: "POST", body: JSON.stringify({ text: `${row.experiment.name || label(row.experiment.type)} (${row.experiment.id}): ${text}` }) });
+      setAnnotation(current => ({ ...current, [row.experiment.id]: "" }));
+      setMessage("Annotation saved without changing the measurement.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save annotation.");
+    }
+  }
+
+  const compared = comparison.map(id => history.rows.find(row => row.experiment.id === id)).filter(Boolean) as SetupRfHistoryRow[];
+  return <div className="rf-history-viewer">
+    <div className="rf-history-filters">
+      <label><span>Search</span><input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void load(); }} placeholder="Name, type, hypothesis, physical change, or result" /></label>
+      <label className="compact-toggle"><input type="checkbox" checked={currentSiteOnly} onChange={event => setCurrentSiteOnly(event.currentTarget.checked)} /> Current site only</label>
+      <button type="button" disabled={busy} onClick={() => void load()}>{busy ? "Loading..." : "Search"}</button>
+    </div>
+    {message && <div className={message.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    {compared.length > 0 && <div className="rf-history-comparison">
+      {compared.map(row => <RfHistorySummary row={row} key={row.experiment.id} />)}
+    </div>}
+    <div className="rf-history-list">
+      {history.rows.map(row => <details className="rf-history-row" key={row.experiment.id}>
+        <summary>
+          <input type="checkbox" aria-label={`Compare ${row.experiment.name || row.experiment.type}`} checked={comparison.includes(row.experiment.id)} onClick={event => event.stopPropagation()} onChange={event => toggleCompare(row.experiment.id, event.currentTarget.checked)} />
+          <span><strong>{row.experiment.name || label(row.experiment.type)}</strong><small>{row.session.siteLabel} / {label(row.experiment.type)} / {new Date(row.experiment.createdAtUtc).toLocaleString()}</small></span>
+          <span className={`section-status ${row.experiment.status === "passed" ? "ok" : row.experiment.status === "failed" ? "error" : "warning"}`}>{label(row.experiment.status)}</span>
+          <span>{row.evidence.length} evidence file{row.evidence.length === 1 ? "" : "s"}</span>
+        </summary>
+        <RfHistorySummary row={row} />
+        <div className="rf-history-annotation"><input value={annotation[row.experiment.id] || ""} onChange={event => setAnnotation(current => ({ ...current, [row.experiment.id]: event.target.value }))} placeholder="Add an operator annotation" /><button type="button" disabled={!(annotation[row.experiment.id] || "").trim()} onClick={() => void saveAnnotation(row)}>Save annotation</button></div>
+      </details>)}
+      {!busy && history.rows.length === 0 && <div className="setup-note">No experiments match this view.</div>}
+    </div>
+  </div>;
+}
+
+function RfHistorySummary({ row }: { row: SetupRfHistoryRow }) {
+  return <div className="rf-history-summary">
+    <div><span>Result</span><strong>{row.experiment.resultSummary || row.experiment.blockingIssue || "No summary recorded"}</strong></div>
+    <div><span>Hypothesis</span><strong>{row.experiment.hypothesis || "Not recorded"}</strong></div>
+    <div><span>Physical change</span><strong>{row.experiment.physicalChange || "None recorded"}</strong></div>
+    <div><span>Captured</span><strong>{row.experiment.startedAtUtc ? new Date(row.experiment.startedAtUtc).toLocaleString() : new Date(row.experiment.createdAtUtc).toLocaleString()}</strong></div>
+    <div className="rf-history-evidence"><span>Evidence</span>{row.evidence.length ? row.evidence.map(item => <code title={item.contentHash} key={item.id}>{item.filePath} / {formatBytes(item.sizeBytes)} / {item.mediaType}</code>) : <strong>No indexed evidence</strong>}</div>
+    <small>RF path revision {row.evidence[0]?.rfPathRevision || "--"} / source plan revision {row.evidence[0]?.sourcePlanRevision || "--"}</small>
   </div>;
 }
 
@@ -1990,27 +2121,93 @@ function SiteSetupRfPreparationStage({ detail, systems, sources, inventory, inve
   </div>;
 }
 
-function SiteSetupRfCoverageStage({ setup, detail, onOpenSourceCoverage }: { setup: SiteSetup; detail: RfSurveyDetail; onOpenSourceCoverage: () => void }) {
-  const systems = setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : selectedSetupSystemNames(setup);
-  const sources = setup.desired.selectedSourceIndexes.length ? setup.desired.selectedSourceIndexes : siteSetupSources(setup).map(source => source.index);
-  const coverageMode = setup.desired.sourcePlanMode === "control" ? "Control channels only" : "Full known frequencies";
+function SiteSetupRfCoverageStage({ setup, detail, onServerSetupChanged }: { setup: SiteSetup; detail: RfSurveyDetail; onServerSetupChanged: (next: SiteSetup) => void }) {
   return <div className="rf-step-stack rf-stage-summary">
-    <div className="rf-recommended-action">
-      <div>
-        <span>Recommended next task</span>
-        <strong>Review source coverage</strong>
-        <small>{systems.length} site{systems.length === 1 ? "" : "s"} / {sources.length} source{sources.length === 1 ? "" : "s"} / {coverageMode}</small>
+    <div className="rf-stage-intro">Choose a server-calculated source plan that covers the selected sites with the detected SDR hardware.</div>
+    <ServerSourceCoverage setup={setup} onServerSetupChanged={onServerSetupChanged} />
+    {detail.session.sourcePlanSummary && <details className="rf-technical-details"><summary>Previously applied source-plan evidence</summary><div className="rf-evidence-line"><span>Recorded plan</span><strong>{detail.session.sourcePlanSummary}</strong></div></details>}
+  </div>;
+}
+
+function ServerSourceCoverage({ setup, onServerSetupChanged }: { setup: SiteSetup; onServerSetupChanged: (next: SiteSetup) => void }) {
+  const [projection, setProjection] = useState<SiteSetupSourcePlanProjection | null>(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let stopped = false;
+    async function load() {
+      setBusy("load");
+      setMessage("");
+      try {
+        const next = await api.request<SiteSetupSourcePlanProjection>(`${siteSetupApi}/source-plan`);
+        if (!stopped) setProjection(next);
+      } catch (error) {
+        if (!stopped) setMessage(error instanceof Error ? error.message : "Unable to calculate Source Coverage.");
+      } finally {
+        if (!stopped) setBusy("");
+      }
+    }
+    void load();
+    return () => { stopped = true; };
+  }, [setup.desired.desiredVersion]);
+
+  async function select(option: SiteSetupSourcePlanOption) {
+    if (!projection || !option.fits) return;
+    setBusy(option.id);
+    setMessage("");
+    try {
+      const next = await api.request<SiteSetup>(`${siteSetupApi}/source-plan/select`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: setup.desired.desiredVersion,
+          projectionVersion: projection.projectionVersion,
+          optionId: option.id,
+          sampleRateHz: projection.sampleRateHz,
+          sourceAssignments: option.sourceAssignments
+        })
+      });
+      onServerSetupChanged(next);
+      setMessage("Source plan saved for final review.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to select the source plan.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (busy === "load" && !projection) return <StepProgressIndicator label="Calculating Source Coverage on the server" />;
+  if (!projection) return <div className="settings-message error">{message || "Source Coverage is unavailable."}</div>;
+  const recommended = projection.options.find(option => option.id === projection.recommendedOptionId);
+  const selectedSystems = setup.desired.sourcePlanSystemShortNames;
+  const selectedMode = setup.desired.sourcePlanMode;
+  return <>
+    {projection.warnings.length > 0 && <div className="setup-warning-list">{projection.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+    {recommended
+      ? <SourcePlanProjectionCard option={recommended} projection={projection} selected={selectedMode === recommended.mode && sameStringSet(selectedSystems, recommended.systemShortNames)} busy={busy === recommended.id} onSelect={select} recommended />
+      : <div className="rf-recommended-action blocked"><div><span>Blocking issue</span><strong>No source plan fits</strong><small>Adjust selected sites, SDR hardware, or sample rate before continuing.</small></div></div>}
+    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("changed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    <details className="rf-technical-details"><summary>Alternatives, assumptions, and exact windows</summary>
+      <div className="rf-source-projection-list">
+        {projection.options.filter(option => option.id !== projection.recommendedOptionId).map(option => <SourcePlanProjectionCard key={option.id} option={option} projection={projection} selected={selectedMode === option.mode && sameStringSet(selectedSystems, option.systemShortNames)} busy={busy === option.id} onSelect={select} />)}
       </div>
-      <button type="button" className="primary" onClick={onOpenSourceCoverage}>Review Source Coverage</button>
+      <div className="setup-note">{projection.assumptions.join(" ")} Projection {projection.projectionVersion.slice(0, 12)} tied to Setup version {projection.desiredVersion}.</div>
+    </details>
+  </>;
+}
+
+function SourcePlanProjectionCard({ option, projection, selected, busy, onSelect, recommended = false }: { option: SiteSetupSourcePlanOption; projection: SiteSetupSourcePlanProjection; selected: boolean; busy: boolean; onSelect: (option: SiteSetupSourcePlanOption) => void; recommended?: boolean }) {
+  return <div className={`rf-source-projection-card ${option.fits ? "" : "blocked"} ${selected ? "selected" : ""}`.trim()}>
+    <div>
+      <span>{recommended ? "Recommended plan" : "Alternative"}</span>
+      <strong>{option.label}</strong>
+      <small>{option.siteLabels.join(", ")} / {option.mode === "control" ? "control channels only" : "full known frequencies"}</small>
     </div>
-    {detail.session.sourcePlanSummary
-      ? <div className="rf-evidence-line"><span>Recorded plan</span><strong>{detail.session.sourcePlanSummary}</strong></div>
-      : <div className="setup-note">Compare hardware assignments, calculated tuning windows, and any missed frequencies before final configuration.</div>}
-    <details className="rf-technical-details"><summary>Planning scope</summary><div className="rf-stage-status-list">
-      <div><span>Sites</span><strong>{systems.join(", ") || "None selected"}</strong></div>
-      <div><span>Sources</span><strong>{sources.map(index => `Source ${index}`).join(", ") || "None selected"}</strong></div>
-      <div><span>Coverage</span><strong>{coverageMode}</strong></div>
-    </div></details>
+    <div className="rf-source-projection-windows">
+      {option.windows.map((window, index) => <span key={`${option.id}-${index}`}><strong>Source {option.selectedSourceIndexes[index] ?? index}</strong><code>{formatRfHz(window.centerHz)}</code><small>{formatRfHz(window.lowHz)}-{formatRfHz(window.highHz)} / {window.frequencyCount} frequencies</small></span>)}
+    </div>
+    <div className={option.fits ? "section-status ok" : "section-status warning"}>{option.reason}</div>
+    <button type="button" className={recommended ? "primary" : ""} disabled={!option.fits || selected || busy} onClick={() => void onSelect(option)}>{busy ? "Saving..." : selected ? "Selected" : "Select plan"}</button>
+    <small>{option.coveredFrequenciesHz.length} covered / {option.missedFrequenciesHz.length} missed / {(projection.sampleRateHz / 1_000_000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")} MHz</small>
   </div>;
 }
 
@@ -4681,14 +4878,16 @@ const emptyRfPath = (): RfSurveyPathProfile => ({
   chain: [
     { type: "antenna", label: "Yagi", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorOutType: "unknown", connectorOutGender: "unknown", gainDb: "", groundPlane: "unknown" },
     { type: "sdr", label: "Configured SDR", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorInType: "unknown", connectorInGender: "unknown" }
-  ]
+  ],
+  branches: []
 });
 
 function normalizeRfPathProfile(value?: Partial<RfSurveyPathProfile> | null): RfSurveyPathProfile {
   return {
     ...emptyRfPath(),
     ...(value ?? {}),
-    chain: value?.chain?.length ? value.chain : emptyRfPath().chain
+    chain: value?.chain?.length ? value.chain : emptyRfPath().chain,
+    branches: value?.branches ?? []
   };
 }
 
@@ -4784,21 +4983,24 @@ function sourceCoversFrequency(source: Pick<RfSurveySource, "centerHz" | "sample
   return frequencyHz >= source.centerHz - rate / 2 && frequencyHz <= source.centerHz + rate / 2;
 }
 
-function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full" }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions" }) {
+function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full", sources = [] }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions"; sources?: RfSurveySource[] }) {
   const updateChain = (index: number, patch: Partial<RfSurveyPathProfile["chain"][number]>) => { onTouched(); setPath(current => ({ ...current, chain: current.chain.map((item, i) => i === index ? { ...item, ...patch } : item) })); };
   const updatePath = (patch: Partial<RfSurveyPathProfile>) => { onTouched(); setPath(current => ({ ...current, ...patch })); };
+  const updateBranch = (id: string, patch: Partial<RfSurveyPathProfile["branches"][number]>) => { onTouched(); setPath(current => ({ ...current, branches: current.branches.map(branch => branch.id === id ? { ...branch, ...patch } : branch) })); };
+  const addBranch = () => { onTouched(); setPath(current => ({ ...current, branches: [...current.branches, { id: createClientId(), label: `Branch ${current.branches.length + 1}`, chain: [], sdrSerial: "", sdrDevice: "", sdrIndex: null, unused: false }] })); };
+  const linkedKeys = new Set(path.branches.filter(branch => !branch.unused).map(branch => branch.sdrSerial || (branch.sdrIndex == null ? "" : `index:${branch.sdrIndex}`)).filter(Boolean));
   return <div className="rf-step-stack">
     {headerMode === "full" && <div className="rf-chain-head">
-      <div><strong>Ordered RF Chain</strong><span>Capture the exact hardware path from antenna to SDR. Order matters.</span></div>
+      <div><strong>RF path tree</strong><span>One upstream antenna signal may split into ordered branches, each ending at one detected SDR.</span></div>
       <div className="rf-primary-actions">
         <button disabled={busy === "load-rf-path"} onClick={() => void onLoadPrevious()}>{busy === "load-rf-path" ? "Loading..." : "Load Previous"}</button>
-        <button onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add Chain Item</button>
+        <button onClick={addBranch}>Add branch</button>
       </div>
     </div>}
     {headerMode === "actions" && <div className="rf-primary-actions">
-      <button type="button" onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add Chain Item</button>
+      <button type="button" onClick={addBranch}>Add branch</button>
     </div>}
-    {headerMode === "full" && <div className="setup-note">Use RF Path to document the physical antenna/coax/filter/SDR chain. Use SDR Inventory to choose hardware. Use RF Sweep to prove which source, control channel, gain, and frequency-correction settings can decode before Config Draft builds the monitoring plan.</div>}
+    {headerMode === "full" && <div className="setup-note">Document physical order here. RF Validation separately proves control channels, tuning, gain, and frequency correction.</div>}
     <div className="rf-path-notes-grid">
       <label>
         <span>Position notes</span>
@@ -4819,17 +5021,34 @@ function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode
         />
       </label>
     </div>
-    <div className="rf-chain-list">
-      <div className="rf-chain-column-header">
-        <span>#</span>
-        <span>Type</span>
-        <span>Description / model</span>
-        <span>Connector In</span>
-        <span>Connector Out</span>
-        <span>Details</span>
-        <span></span>
-      </div>
-      {path.chain.map((item, index) => <RfChainItemEditor item={normalizeRfChainItem(item)} index={index} key={index} update={patch => updateChain(index, patch)} remove={() => { onTouched(); setPath(current => ({ ...current, chain: current.chain.filter((_, i) => i !== index) })); }} />)}
+    <details className="rf-technical-details" open={path.chain.length > 0}>
+      <summary>Shared upstream components ({path.chain.length})</summary>
+      <div className="setup-note">Components before the signal splits into branches.</div>
+      <div className="rf-primary-actions"><button type="button" onClick={() => { onTouched(); setPath(current => ({ ...current, chain: [...current.chain, newRfChainItem()] })); }}>Add upstream component</button></div>
+      <div className="rf-chain-list">{path.chain.map((item, index) => <RfChainItemEditor item={normalizeRfChainItem(item)} index={index} key={index} update={patch => updateChain(index, patch)} remove={() => { onTouched(); setPath(current => ({ ...current, chain: current.chain.filter((_, i) => i !== index) })); }} />)}</div>
+    </details>
+    <div className="rf-path-branches">
+      {path.branches.map((branch, branchIndex) => {
+        const endpointKey = branch.sdrSerial || (branch.sdrIndex == null ? "" : `index:${branch.sdrIndex}`);
+        return <section className="rf-path-branch" key={branch.id}>
+          <div className="rf-path-branch-head">
+            <label><span>Branch name</span><input value={branch.label} onChange={event => updateBranch(branch.id, { label: event.target.value })} placeholder={`Branch ${branchIndex + 1}`} /></label>
+            <label><span>SDR endpoint</span><select disabled={branch.unused} value={endpointKey} onChange={event => {
+              const source = sources.find(row => (row.serial || `index:${row.index}`) === event.target.value);
+              updateBranch(branch.id, source ? { sdrSerial: source.serial || "", sdrDevice: source.device || source.sdrType, sdrIndex: source.index, unused: false } : { sdrSerial: "", sdrDevice: "", sdrIndex: null });
+            }}><option value="">Not linked</option>{sources.map(source => {
+              const key = source.serial || `index:${source.index}`;
+              const usedElsewhere = linkedKeys.has(key) && key !== endpointKey;
+              return <option key={key} value={key} disabled={usedElsewhere}>{source.sdrType || "SDR"} {source.serial || `Source ${source.index}`}{usedElsewhere ? " (already linked)" : ""}</option>;
+            })}</select></label>
+            <label className="compact-toggle"><input type="checkbox" checked={branch.unused} onChange={event => updateBranch(branch.id, { unused: event.currentTarget.checked, sdrSerial: event.currentTarget.checked ? "" : branch.sdrSerial, sdrDevice: event.currentTarget.checked ? "" : branch.sdrDevice, sdrIndex: event.currentTarget.checked ? null : branch.sdrIndex })} /> Unused output</label>
+            <button type="button" className="danger-button" disabled={path.branches.length === 1} onClick={() => { onTouched(); setPath(current => ({ ...current, branches: current.branches.filter(row => row.id !== branch.id) })); }}>Remove branch</button>
+          </div>
+          {!branch.unused && !endpointKey && <div className="setup-warning-list"><div>Link this branch to a detected SDR by serial number before final review.</div></div>}
+          <div className="rf-primary-actions"><button type="button" onClick={() => updateBranch(branch.id, { chain: [...branch.chain, newRfChainItem()] })}>Add branch component</button></div>
+          <div className="rf-chain-list">{branch.chain.map((item, index) => <RfChainItemEditor item={normalizeRfChainItem(item)} index={index} key={`${branch.id}-${index}`} update={patch => updateBranch(branch.id, { chain: branch.chain.map((value, itemIndex) => itemIndex === index ? { ...value, ...patch } : value) })} remove={() => updateBranch(branch.id, { chain: branch.chain.filter((_, itemIndex) => itemIndex !== index) })} />)}</div>
+        </section>;
+      })}
     </div>
   </div>;
 }
@@ -12250,7 +12469,9 @@ function normalizeSiteSetupArea(area: Partial<SiteSetupMonitoredArea>): SiteSetu
     south: finiteNumber(area.south),
     east: finiteNumber(area.east),
     west: finiteNumber(area.west),
-    aliases
+    aliases,
+    isOverride: area.isOverride === true,
+    contextKey: String(area.contextKey ?? "").trim()
   };
 }
 

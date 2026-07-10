@@ -1739,16 +1739,17 @@ public sealed class EngineDatabase
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO rf_survey_experiments (
-                id, survey_id, type, status, hypothesis, required_setup, result_summary,
+                id, survey_id, name, type, status, hypothesis, required_setup, result_summary,
                 blocking_issue, evidence_json, interpretation_json, created_at_utc,
-                started_at_utc, finished_at_utc)
+                started_at_utc, finished_at_utc, physical_change)
             VALUES (
-                $id, $survey_id, $type, $status, $hypothesis, $required_setup, $result_summary,
+                $id, $survey_id, $name, $type, $status, $hypothesis, $required_setup, $result_summary,
                 $blocking_issue, $evidence_json, $interpretation_json, $created_at_utc,
-                $started_at_utc, $finished_at_utc);
+                $started_at_utc, $finished_at_utc, $physical_change);
             """;
         Add(command, "$id", experiment.Id);
         Add(command, "$survey_id", surveyId);
+        Add(command, "$name", experiment.Name);
         Add(command, "$type", experiment.Type);
         Add(command, "$status", experiment.Status);
         Add(command, "$hypothesis", experiment.Hypothesis);
@@ -1760,6 +1761,7 @@ public sealed class EngineDatabase
         Add(command, "$created_at_utc", experiment.CreatedAtUtc.ToString("O"));
         Add(command, "$started_at_utc", experiment.StartedAtUtc?.ToString("O") ?? string.Empty);
         Add(command, "$finished_at_utc", experiment.FinishedAtUtc?.ToString("O") ?? string.Empty);
+        Add(command, "$physical_change", experiment.PhysicalChange);
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -1783,8 +1785,8 @@ public sealed class EngineDatabase
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, type, status, hypothesis, required_setup, result_summary, blocking_issue,
-                   evidence_json, interpretation_json, created_at_utc, started_at_utc, finished_at_utc
+            SELECT id, name, type, status, hypothesis, required_setup, result_summary, blocking_issue,
+                   evidence_json, interpretation_json, physical_change, created_at_utc, started_at_utc, finished_at_utc
             FROM rf_survey_experiments
             WHERE survey_id=$survey_id
             ORDER BY created_at_utc, id;
@@ -1797,6 +1799,7 @@ public sealed class EngineDatabase
             rows.Add(new RfSurveyExperimentDto
             {
                 Id = reader.GetString(reader.GetOrdinal("id")),
+                Name = reader.GetString(reader.GetOrdinal("name")),
                 Type = reader.GetString(reader.GetOrdinal("type")),
                 Status = reader.GetString(reader.GetOrdinal("status")),
                 Hypothesis = reader.GetString(reader.GetOrdinal("hypothesis")),
@@ -1805,11 +1808,83 @@ public sealed class EngineDatabase
                 BlockingIssue = reader.GetString(reader.GetOrdinal("blocking_issue")),
                 EvidenceJson = reader.GetString(reader.GetOrdinal("evidence_json")),
                 InterpretationJson = reader.GetString(reader.GetOrdinal("interpretation_json")),
+                PhysicalChange = reader.GetString(reader.GetOrdinal("physical_change")),
                 CreatedAtUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("created_at_utc"))),
                 StartedAtUtc = ParseDateOrNull(reader.GetString(reader.GetOrdinal("started_at_utc"))),
                 FinishedAtUtc = ParseDateOrNull(reader.GetString(reader.GetOrdinal("finished_at_utc")))
             });
         }
+        return rows;
+    }
+
+    public async Task AddSetupRfEvidenceAsync(SetupRfEvidenceDto evidence, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO setup_rf_evidence (
+                id, survey_id, experiment_id, site_label, stage, experiment_type, source_identity,
+                rf_path_revision, source_plan_revision, capture_started_at_utc, capture_finished_at_utc,
+                media_type, file_path, size_bytes, content_hash, created_at_utc)
+            VALUES ($id, $survey_id, $experiment_id, $site_label, $stage, $experiment_type, $source_identity,
+                $rf_path_revision, $source_plan_revision, $capture_started_at_utc, $capture_finished_at_utc,
+                $media_type, $file_path, $size_bytes, $content_hash, $created_at_utc);
+            """;
+        Add(command, "$id", evidence.Id);
+        Add(command, "$survey_id", evidence.SurveyId);
+        Add(command, "$experiment_id", evidence.ExperimentId);
+        Add(command, "$site_label", evidence.SiteLabel);
+        Add(command, "$stage", evidence.Stage);
+        Add(command, "$experiment_type", evidence.ExperimentType);
+        Add(command, "$source_identity", evidence.SourceIdentity);
+        Add(command, "$rf_path_revision", evidence.RfPathRevision);
+        Add(command, "$source_plan_revision", evidence.SourcePlanRevision);
+        Add(command, "$capture_started_at_utc", evidence.CaptureStartedAtUtc.ToString("O"));
+        Add(command, "$capture_finished_at_utc", evidence.CaptureFinishedAtUtc.ToString("O"));
+        Add(command, "$media_type", evidence.MediaType);
+        Add(command, "$file_path", evidence.FilePath);
+        Add(command, "$size_bytes", evidence.SizeBytes);
+        Add(command, "$content_hash", evidence.ContentHash);
+        Add(command, "$created_at_utc", evidence.CreatedAtUtc.ToString("O"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<SetupRfHistoryRowDto>> ListSetupRfHistoryAsync(string? siteLabel, string? query, int limit, CancellationToken ct)
+    {
+        var sessions = await ListRfSurveySessionsAsync(ct);
+        var rows = new List<SetupRfHistoryRowDto>();
+        foreach (var session in sessions.Where(session => string.IsNullOrWhiteSpace(siteLabel) || session.SiteLabel.Contains(siteLabel, StringComparison.OrdinalIgnoreCase)))
+        {
+            var experiments = await ListRfSurveyExperimentsAsync(session.Id, ct);
+            var evidence = await ListSetupRfEvidenceAsync(session.Id, ct);
+            foreach (var experiment in experiments.OrderByDescending(value => value.CreatedAtUtc))
+            {
+                if (!string.IsNullOrWhiteSpace(query) && !new[] { experiment.Name, experiment.Type, experiment.Hypothesis, experiment.PhysicalChange, experiment.ResultSummary, session.SiteLabel }
+                        .Any(value => value.Contains(query, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                rows.Add(new SetupRfHistoryRowDto(session, experiment, evidence.Where(item => item.ExperimentId == experiment.Id).ToList()));
+            }
+        }
+        return rows.OrderByDescending(row => row.Experiment.CreatedAtUtc).Take(Math.Clamp(limit, 1, 500)).ToList();
+    }
+
+    public async Task<IReadOnlyList<SetupRfEvidenceDto>> ListSetupRfEvidenceAsync(string surveyId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, survey_id, experiment_id, site_label, stage, experiment_type, source_identity,
+                   rf_path_revision, source_plan_revision, capture_started_at_utc, capture_finished_at_utc,
+                   media_type, file_path, size_bytes, content_hash, created_at_utc
+            FROM setup_rf_evidence WHERE survey_id=$survey_id ORDER BY created_at_utc DESC;
+            """;
+        Add(command, "$survey_id", surveyId);
+        var rows = new List<SetupRfEvidenceDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            rows.Add(new SetupRfEvidenceDto(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6),
+                reader.GetString(7), reader.GetString(8), DateTime.Parse(reader.GetString(9)), DateTime.Parse(reader.GetString(10)), reader.GetString(11), reader.GetString(12), reader.GetInt64(13), reader.GetString(14), DateTime.Parse(reader.GetString(15))));
         return rows;
     }
 
@@ -3702,6 +3777,8 @@ public sealed class EngineDatabase
             );
             """, ct);
         await ExecuteNonQueryAsync(connection, RfSurveySchemaSql, ct);
+        await AddColumnIfMissingAsync(connection, "rf_survey_experiments", "name", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "rf_survey_experiments", "physical_change", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "recommendation_baselines", "baseline_value", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "alert_matches", "dismissed_at_utc", "TEXT NOT NULL DEFAULT ''", ct);
         await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_key ON incidents(incident_key) WHERE incident_key IS NOT NULL AND incident_key <> '';", ct);
@@ -4252,6 +4329,7 @@ public sealed class EngineDatabase
         CREATE TABLE IF NOT EXISTS rf_survey_experiments (
             id TEXT PRIMARY KEY,
             survey_id TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
             type TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'planned',
             hypothesis TEXT NOT NULL DEFAULT '',
@@ -4263,6 +4341,7 @@ public sealed class EngineDatabase
             created_at_utc TEXT NOT NULL,
             started_at_utc TEXT NOT NULL DEFAULT '',
             finished_at_utc TEXT NOT NULL DEFAULT '',
+            physical_change TEXT NOT NULL DEFAULT '',
             FOREIGN KEY(survey_id) REFERENCES rf_survey_sessions(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_rf_survey_experiments_survey ON rf_survey_experiments(survey_id, created_at_utc);
@@ -4275,5 +4354,28 @@ public sealed class EngineDatabase
             FOREIGN KEY(survey_id) REFERENCES rf_survey_sessions(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_rf_survey_notes_survey ON rf_survey_notes(survey_id, created_at_utc);
+
+        CREATE TABLE IF NOT EXISTS setup_rf_evidence (
+            id TEXT PRIMARY KEY,
+            survey_id TEXT NOT NULL,
+            experiment_id TEXT NOT NULL,
+            site_label TEXT NOT NULL DEFAULT '',
+            stage TEXT NOT NULL DEFAULT '',
+            experiment_type TEXT NOT NULL DEFAULT '',
+            source_identity TEXT NOT NULL DEFAULT '',
+            rf_path_revision TEXT NOT NULL DEFAULT '',
+            source_plan_revision TEXT NOT NULL DEFAULT '',
+            capture_started_at_utc TEXT NOT NULL,
+            capture_finished_at_utc TEXT NOT NULL,
+            media_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+            file_path TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(survey_id) REFERENCES rf_survey_sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY(experiment_id) REFERENCES rf_survey_experiments(id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_setup_rf_evidence_content ON setup_rf_evidence(experiment_id, file_path, content_hash);
+        CREATE INDEX IF NOT EXISTS idx_setup_rf_evidence_site ON setup_rf_evidence(site_label, created_at_utc DESC);
         """;
 }

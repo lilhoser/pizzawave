@@ -37,6 +37,8 @@ public sealed class SiteSetupService
         var activity = await _database.ListSiteSetupActivityAsync(25, ct);
         var pending = BuildPendingChanges(desired, applied);
         var monitoring = MonitoringState();
+        var guidance = BuildGuidance(desired, applied, pending, monitoring.State, monitoring.Message);
+        var locationContext = BuildLocationContext(desired);
         return new SiteSetupDto(
             desired,
             applied,
@@ -48,7 +50,114 @@ public sealed class SiteSetupService
                 applied.ConfigHash,
                 desired.LastAppliedAtUtc),
             pending,
-            activity);
+            activity,
+            guidance,
+            locationContext);
+    }
+
+    private SiteSetupLocationContextDto BuildLocationContext(SiteSetupConfig desired)
+    {
+        var systems = desired.Systems ?? [];
+        var catalog = _talkgroups.Load().Items.Where(item => item.Enabled).ToList();
+        var rows = new List<SiteSetupDerivedLocationDto>();
+
+        foreach (var group in systems.GroupBy(
+                     system => string.IsNullOrWhiteSpace(system.TalkgroupSystemShortName) ? system.ShortName : system.TalkgroupSystemShortName,
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            var catalogSystem = group.Key.Trim();
+            var sites = group.ToList();
+            var siteShortNames = sites.Select(site => site.ShortName).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var siteLabels = sites.Select(site => site.SiteLabel).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var catalogRows = catalog.Where(item => string.Equals(item.SystemShortName, catalogSystem, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            foreach (var jurisdiction in catalogRows
+                         .Where(item => !string.IsNullOrWhiteSpace(item.Jurisdiction))
+                         .GroupBy(item => item.Jurisdiction.Trim(), StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(grouping => grouping.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                rows.Add(new SiteSetupDerivedLocationDto(
+                    $"rr:{catalogSystem}:{jurisdiction.Key}",
+                    jurisdiction.Key,
+                    "RadioReference talkgroup jurisdiction",
+                    catalogSystem,
+                    siteShortNames,
+                    siteLabels,
+                    jurisdiction.Count(),
+                    HasExplicitOverride(desired.MonitoredAreas, $"rr:{catalogSystem}:{jurisdiction.Key}", jurisdiction.Key, siteShortNames, catalogSystem)));
+            }
+
+            foreach (var site in sites.OrderBy(value => value.SiteLabel, StringComparer.OrdinalIgnoreCase))
+            {
+                var label = string.IsNullOrWhiteSpace(site.SiteLabel) ? site.ShortName : site.SiteLabel.Trim();
+                if (string.IsNullOrWhiteSpace(label))
+                    continue;
+                rows.Add(new SiteSetupDerivedLocationDto(
+                    $"site:{site.ShortName}:{label}",
+                    label,
+                    "Selected-site fallback",
+                    catalogSystem,
+                    [site.ShortName],
+                    [label],
+                    0,
+                    HasExplicitOverride(desired.MonitoredAreas, $"site:{site.ShortName}:{label}", label, [site.ShortName], catalogSystem)));
+            }
+        }
+
+        return new SiteSetupLocationContextDto(
+            rows.DistinctBy(row => row.Key, StringComparer.OrdinalIgnoreCase).ToList(),
+            desired.MonitoredAreas.Count(area => !area.IsOverride));
+    }
+
+    private static bool HasExplicitOverride(
+        IEnumerable<MonitoredAreaConfig> areas,
+        string contextKey,
+        string label,
+        IReadOnlyList<string> siteShortNames,
+        string catalogSystem) =>
+        areas.Where(area => area.IsOverride).Any(area =>
+            string.Equals(area.ContextKey, contextKey, StringComparison.OrdinalIgnoreCase) ||
+            (string.IsNullOrWhiteSpace(area.ContextKey) && (
+            string.Equals(area.AreaLabel, label, StringComparison.OrdinalIgnoreCase) ||
+            siteShortNames.Any(site => string.Equals(area.SystemShortName, site, StringComparison.OrdinalIgnoreCase)) ||
+            area.Aliases.Any(alias => string.Equals(alias, catalogSystem, StringComparison.OrdinalIgnoreCase) ||
+                                      siteShortNames.Any(site => string.Equals(alias, site, StringComparison.OrdinalIgnoreCase))))));
+
+    private static SiteSetupGuidanceDto BuildGuidance(
+        SiteSetupConfig desired,
+        SiteSetupAppliedConfigDto applied,
+        IReadOnlyList<SiteSetupPendingChangeDto> pending,
+        string monitoringState,
+        string monitoringMessage)
+    {
+        var systems = desired.Systems.Count;
+        var sources = desired.Sources.Count;
+        var scopeValue = systems == 0 ? "No sites selected" : $"{systems} site{(systems == 1 ? "" : "s")} / {sources} SDR{(sources == 1 ? "" : "s")}";
+        var scopeDetail = systems == 0
+            ? "Select the RadioReference sites this receiver should monitor."
+            : string.Join(", ", desired.Systems.Select(system => system.SiteLabel).Where(value => !string.IsNullOrWhiteSpace(value)).Take(3));
+
+        var validation = systems == 0
+            ? new SiteSetupGuidanceCardDto("warning", "Select sites", "Systems & Sites is the next required step.")
+            : sources == 0
+                ? new SiteSetupGuidanceCardDto("warning", "Inventory hardware", "Run SDR Inventory in RF Validation.")
+                : desired.SourceAssignments.Count == 0
+                    ? new SiteSetupGuidanceCardDto("warning", "Review source coverage", "Confirm the server-recommended source plan.")
+                    : desired.RfSelections.Count == 0
+                        ? new SiteSetupGuidanceCardDto("warning", "Validate RF", "Run the recommended control-channel proof.")
+                        : new SiteSetupGuidanceCardDto("ok", "RF choices recorded", "Review remaining proof and verdict stages.");
+
+        var apply = pending.Count > 0
+            ? new SiteSetupGuidanceCardDto("warning", $"{pending.Count} change{(pending.Count == 1 ? "" : "s")} to apply", "Review the final configuration before Apply & Resume.")
+            : new SiteSetupGuidanceCardDto(
+                monitoringState.Equals("active", StringComparison.OrdinalIgnoreCase) ? "ok" : "warning",
+                applied.ConfigExists ? "Configuration current" : "No applied configuration",
+                string.IsNullOrWhiteSpace(monitoringMessage) ? $"Monitoring is {monitoringState}." : monitoringMessage);
+
+        return new SiteSetupGuidanceDto(
+            new SiteSetupGuidanceCardDto(systems > 0 ? "info" : "warning", scopeValue, scopeDetail),
+            validation,
+            apply);
     }
 
     public async Task EnsureTalkgroupPolicyBaselineAsync(CancellationToken ct)
@@ -80,6 +189,7 @@ public sealed class SiteSetupService
                 throw new SiteSetupVersionConflictException(request.ExpectedVersion, before.DesiredVersion);
 
             var next = ApplyPatch(before, request.Patch);
+            ValidateRfPath(next.RfPath);
             next.DesiredVersion = Math.Max(before.DesiredVersion + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             next.UpdatedAtUtc = DateTime.UtcNow;
             next.LastAppliedAtUtc = before.LastAppliedAtUtc;
@@ -585,7 +695,9 @@ public sealed class SiteSetupService
                 South = area.South,
                 East = area.East,
                 West = area.West,
-                Aliases = NormalizeStrings(area.Aliases)
+                Aliases = NormalizeStrings(area.Aliases),
+                IsOverride = area.IsOverride,
+                ContextKey = area.ContextKey?.Trim() ?? string.Empty
             })
             .Where(area => !string.IsNullOrWhiteSpace(area.AreaLabel) || !string.IsNullOrWhiteSpace(area.SystemShortName))
             .OrderBy(area => area.SystemShortName, StringComparer.OrdinalIgnoreCase)
@@ -621,7 +733,7 @@ public sealed class SiteSetupService
 
     private static string MonitoredAreaSummary(IEnumerable<MonitoredAreaConfig>? areas) =>
         string.Join("|", NormalizeMonitoredAreas(areas)
-            .Select(area => $"{area.SystemShortName}:{area.AreaLabel}:{area.North:F5},{area.South:F5},{area.East:F5},{area.West:F5}:{string.Join(",", area.Aliases.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))}"));
+            .Select(area => $"{area.SystemShortName}:{area.AreaLabel}:{area.North:F5},{area.South:F5},{area.East:F5},{area.West:F5}:{string.Join(",", area.Aliases.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))}:{area.IsOverride}:{area.ContextKey}"));
 
     private static Dictionary<string, int> NormalizeSourceAssignments(IReadOnlyDictionary<string, int>? values) =>
         (values ?? new Dictionary<string, int>())
@@ -675,7 +787,7 @@ public sealed class SiteSetupService
     {
         if (path == null)
             return "";
-        var chain = string.Join(";", (path.Chain ?? [])
+        static string ChainSummary(IEnumerable<RfSurveyRfChainItemDto>? items) => string.Join(";", (items ?? [])
             .Select(item => string.Join(",", new[]
             {
                 item.Type,
@@ -697,6 +809,17 @@ public sealed class SiteSetupService
                 item.PowerMethod,
                 item.Passband
             }.Select(value => value?.Trim() ?? ""))));
+        var chain = ChainSummary(path.Chain);
+        var branches = string.Join("~", (path.Branches ?? []).Select(branch => string.Join("^", new[]
+        {
+            branch.Id?.Trim() ?? "",
+            branch.Label?.Trim() ?? "",
+            branch.SdrSerial?.Trim() ?? "",
+            branch.SdrDevice?.Trim() ?? "",
+            branch.SdrIndex?.ToString() ?? "",
+            branch.Unused.ToString(),
+            ChainSummary(branch.Chain)
+        })));
         return string.Join("|", new[]
         {
             path.Antenna,
@@ -712,8 +835,27 @@ public sealed class SiteSetupService
             path.Filters,
             path.SdrNotes,
             path.Observations,
-            chain
+            chain,
+            branches
         }.Select(value => value?.Trim() ?? ""));
+    }
+
+    private static void ValidateRfPath(RfSurveyPathProfileDto? path)
+    {
+        if (path?.Branches == null || path.Branches.Count == 0)
+            return;
+        var duplicateId = path.Branches.Where(branch => !string.IsNullOrWhiteSpace(branch.Id))
+            .GroupBy(branch => branch.Id.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1);
+        if (duplicateId != null)
+            throw new InvalidOperationException($"RF path branch ID '{duplicateId.Key}' is duplicated.");
+        var duplicateSerial = path.Branches.Where(branch => !branch.Unused && !string.IsNullOrWhiteSpace(branch.SdrSerial))
+            .GroupBy(branch => branch.SdrSerial.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1);
+        if (duplicateSerial != null)
+            throw new InvalidOperationException($"SDR serial '{duplicateSerial.Key}' cannot terminate more than one RF path branch.");
+        var duplicateIndex = path.Branches.Where(branch => !branch.Unused && string.IsNullOrWhiteSpace(branch.SdrSerial) && branch.SdrIndex.HasValue)
+            .GroupBy(branch => branch.SdrIndex!.Value).FirstOrDefault(group => group.Count() > 1);
+        if (duplicateIndex != null)
+            throw new InvalidOperationException($"SDR source {duplicateIndex.Key} cannot terminate more than one RF path branch.");
     }
 
     private static bool HasRfPathDetails(RfSurveyPathProfileDto? path) =>

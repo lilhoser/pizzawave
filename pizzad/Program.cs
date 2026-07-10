@@ -38,6 +38,7 @@ builder.Services.AddSingleton<TalkgroupResolver>();
 builder.Services.AddSingleton<CallAudioService>();
 builder.Services.AddSingleton<PoliceCodeService>();
 builder.Services.AddSingleton<TranscriptLocationService>();
+builder.Services.AddSingleton<SiteSetupSourcePlanService>();
 builder.Services.AddSingleton<CallAnchorExtractionService>();
 builder.Services.AddSingleton<TranscriptPostProcessingService>();
 builder.Services.AddSingleton<EmbeddingService>();
@@ -264,6 +265,55 @@ app.MapGet("/api/v1/setup/site/rf/{id}", async (HttpContext context, string id, 
         appliedConfigHash: setup.Status.AppliedConfigHash) ?? detail);
 })
 .WithName("SiteSetupRfGetById")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/rf-history", async (HttpContext context, string? site, string? q, int? limit, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(new SetupRfHistoryDto(await database.ListSetupRfHistoryAsync(site, q, limit ?? 100, context.RequestAborted)));
+})
+.WithName("SiteSetupRfHistory")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/rf/{id}/annotations", async (HttpContext context, string id, RfSurveyNoteRequest request, AuthService authService, RfSurveyService surveys) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try { return Results.Ok(await surveys.AddNoteAsync(id, request.Text, context.RequestAborted)); }
+    catch (Exception ex) { return Results.BadRequest(new { message = ex.Message }); }
+})
+.WithName("SiteSetupRfAnnotationAdd")
+.WithOpenApi();
+
+app.MapGet("/api/v1/setup/site/source-plan", async (HttpContext context, int? sampleRateHz, AuthService authService, SiteSetupService siteSetup, SiteSetupSourcePlanService planner) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var setup = await siteSetup.GetAsync(context.RequestAborted);
+    return Results.Ok(planner.Project(setup.Desired, sampleRateHz));
+})
+.WithName("SiteSetupSourcePlanProject")
+.WithOpenApi();
+
+app.MapPost("/api/v1/setup/site/source-plan/select", async (HttpContext context, SiteSetupSourcePlanSelectionRequest request, AuthService authService, SiteSetupService siteSetup, SiteSetupSourcePlanService planner) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        var current = await siteSetup.GetAsync(context.RequestAborted);
+        if (request.ExpectedVersion != current.Desired.DesiredVersion)
+            throw new SiteSetupVersionConflictException(request.ExpectedVersion, current.Desired.DesiredVersion);
+        var patch = planner.Select(current.Desired, request);
+        return Results.Ok(await siteSetup.UpdateDesiredAsync(new SiteSetupUpdateRequest(request.ExpectedVersion, patch, "ui:server-source-plan"), context.RequestAborted));
+    }
+    catch (SiteSetupVersionConflictException ex)
+    {
+        return Results.Conflict(new { message = ex.Message, expectedVersion = ex.ExpectedVersion, currentVersion = ex.CurrentVersion });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("SiteSetupSourcePlanSelect")
 .WithOpenApi();
 
 app.MapPost("/api/v1/setup/site/rf/{id}/software-check", async (HttpContext context, string id, bool? force, AuthService authService, SiteSetupService siteSetup, RfSurveyService surveys) =>

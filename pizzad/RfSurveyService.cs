@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 
 namespace pizzad;
 
@@ -1571,6 +1572,10 @@ public sealed class RfSurveyService
         var toolPrep = DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson) ?? EmptyToolPrep();
         var started = DateTime.UtcNow;
         var type = NormalizeExperimentType(request.Type);
+        var experimentId = $"rfx-{started:yyyyMMddHHmmss}-{Guid.NewGuid():N}"[..30];
+        var experimentName = string.IsNullOrWhiteSpace(request.Name) ? DefaultExperimentName(type, request) : request.Name.Trim();
+        var terminalActivityWritten = false;
+        await AddExperimentActivityAsync(sessionForRun, experimentId, experimentName, type, "started", "RF experiment started.", request, [], ct);
         SetupSdrDetectionDto? sdrDetection = null;
         var cancellable = type is "rf_power_scan" or "rf_validation_sweep" or "control_channel_p25_probe" or "voice_capture_trial";
         CancellationTokenSource? linkedRunCancellation = null;
@@ -1629,15 +1634,17 @@ public sealed class RfSurveyService
 
             var experiment = new RfSurveyExperimentDto
             {
-                Id = $"rfx-{started:yyyyMMddHHmmss}-{Guid.NewGuid():N}"[..30],
+                Id = experimentId,
+                Name = experimentName,
                 Type = type,
                 Status = outcome.Status,
-                Hypothesis = outcome.Hypothesis,
+                Hypothesis = string.IsNullOrWhiteSpace(request.Hypothesis) ? outcome.Hypothesis : request.Hypothesis.Trim(),
                 RequiredSetup = outcome.RequiredSetup,
                 ResultSummary = outcome.ResultSummary,
                 BlockingIssue = outcome.BlockingIssue,
                 EvidenceJson = JsonSerializer.Serialize(outcome.Evidence, EngineConfig.JsonOptions()),
                 InterpretationJson = JsonSerializer.Serialize(outcome.Interpretation, EngineConfig.JsonOptions()),
+                PhysicalChange = request.PhysicalChange?.Trim() ?? string.Empty,
                 CreatedAtUtc = started,
                 StartedAtUtc = started,
                 FinishedAtUtc = outcome.Status == "running" ? null : DateTime.UtcNow
@@ -1645,14 +1652,24 @@ public sealed class RfSurveyService
 
             var persistCt = ct.IsCancellationRequested ? CancellationToken.None : ct;
             await _database.AddRfSurveyExperimentAsync(id, experiment, experiment.EvidenceJson, experiment.InterpretationJson, persistCt);
+            var experimentArtifactPath = Path.Combine(sessionForRun.ArtifactPath, $"experiment-{experiment.Id}.json");
             await WriteArtifactAsync(sessionForRun.ArtifactPath, $"experiment-{experiment.Id}.json", experiment, persistCt);
+            var evidence = await RegisterExperimentEvidenceAsync(sessionForRun, profile, experiment, experimentArtifactPath, persistCt);
             var experiments = await _database.ListRfSurveyExperimentsAsync(id, persistCt);
             await WriteArtifactAsync(sessionForRun.ArtifactPath, "experiments.json", experiments, persistCt);
 
             var session = UpdateSessionFromExperiment(sessionForRun, experiment) with { SdrSummary = SummarizeSelectedSdrs(profile) };
             await _database.UpdateRfSurveySessionAsync(session, profileJson, row.ToolPrepJson, persistCt);
             await WriteArtifactAsync(sessionForRun.ArtifactPath, "survey.json", session, persistCt);
+            await AddExperimentActivityAsync(sessionForRun, experiment.Id, experiment.Name, experiment.Type, experiment.Status, experiment.ResultSummary, request, evidence, persistCt);
+            terminalActivityWritten = true;
             return experiment;
+        }
+        catch (Exception ex)
+        {
+            if (!terminalActivityWritten)
+                await AddExperimentActivityAsync(sessionForRun, experimentId, experimentName, type, "failed", ex.Message, request, [], CancellationToken.None);
+            throw;
         }
         finally
         {
@@ -6212,6 +6229,150 @@ public sealed class RfSurveyService
         return new RfSurveyToolStatusDto("p25", "P25 control-channel tooling", "p25", true, false, "", "rx.py / multi_rx.py / op25_rx.py", "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Install a validated OP25/P25 toolchain for this host architecture.");
     }
 
+    private async Task<IReadOnlyList<SetupRfEvidenceDto>> RegisterExperimentEvidenceAsync(
+        RfSurveySessionDto session,
+        RfSurveyProfileDto profile,
+        RfSurveyExperimentDto experiment,
+        string experimentArtifactPath,
+        CancellationToken ct)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { experimentArtifactPath };
+        try
+        {
+            using var json = JsonDocument.Parse(experiment.EvidenceJson);
+            CollectArtifactPaths(json.RootElement, session.ArtifactPath, paths);
+        }
+        catch (JsonException)
+        {
+        }
+        var rows = new List<SetupRfEvidenceDto>();
+        foreach (var path in paths.Where(File.Exists))
+        {
+            var fullPath = Path.GetFullPath(path);
+            var artifactRoot = Path.GetFullPath(session.ArtifactPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(artifactRoot, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var bytes = await File.ReadAllBytesAsync(fullPath, ct);
+            var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var row = new SetupRfEvidenceDto(
+                $"rfe-{Guid.NewGuid():N}",
+                session.Id,
+                experiment.Id,
+                session.SiteLabel,
+                ExperimentStage(experiment.Type),
+                experiment.Type,
+                string.Join(", ", profile.Sources.Where(source => profile.SelectedSourceIndexes.Count == 0 || profile.SelectedSourceIndexes.Contains(source.Index)).Select(source => source.Serial.Length > 0 ? source.Serial : $"source:{source.Index}")),
+                ShortRevision(session.RfPathSummary),
+                ShortRevision(session.SourcePlanSummary),
+                experiment.StartedAtUtc ?? experiment.CreatedAtUtc,
+                experiment.FinishedAtUtc ?? DateTime.UtcNow,
+                MediaTypeForPath(fullPath),
+                Path.GetRelativePath(session.ArtifactPath, fullPath),
+                bytes.LongLength,
+                hash,
+                DateTime.UtcNow);
+            await _database.AddSetupRfEvidenceAsync(row, ct);
+            rows.Add(row);
+        }
+        return rows;
+    }
+
+    private static void CollectArtifactPaths(JsonElement element, string artifactRoot, ISet<string> paths)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String && property.Name.Contains("path", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = property.Value.GetString() ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(value))
+                        paths.Add(Path.IsPathRooted(value) ? value : Path.Combine(artifactRoot, value));
+                }
+                else CollectArtifactPaths(property.Value, artifactRoot, paths);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var value in element.EnumerateArray()) CollectArtifactPaths(value, artifactRoot, paths);
+        }
+    }
+
+    private async Task AddExperimentActivityAsync(
+        RfSurveySessionDto session,
+        string experimentId,
+        string name,
+        string type,
+        string status,
+        string summary,
+        RfSurveyRunExperimentRequest request,
+        IReadOnlyList<SetupRfEvidenceDto> evidence,
+        CancellationToken ct)
+    {
+        var terminal = status != "started";
+        var details = JsonSerializer.Serialize(new
+        {
+            surveyId = session.Id,
+            experimentId,
+            name,
+            type,
+            stage = ExperimentStage(type),
+            status,
+            request.SourceIndex,
+            request.ControlChannelHz,
+            request.DurationSeconds,
+            request.Hypothesis,
+            request.PhysicalChange,
+            evidenceIds = evidence.Select(value => value.Id),
+            evidenceFiles = evidence.Select(value => value.FilePath)
+        }, EngineConfig.JsonOptions());
+        await _database.AddSiteSetupActivityAsync(new SiteSetupActivityDto(
+            0,
+            DateTime.UtcNow,
+            "rf_validation",
+            terminal ? "rf_experiment_finished" : "rf_experiment_started",
+            string.IsNullOrWhiteSpace(summary) ? $"{name}: {status}." : $"{name}: {summary}",
+            details,
+            _config.SiteSetup.DesiredVersion,
+            _config.SiteSetup.LastAppliedConfigHash,
+            "validation",
+            "server:rf-validation"), ct);
+    }
+
+    private static string DefaultExperimentName(string type, RfSurveyRunExperimentRequest request)
+    {
+        var label = string.Join(' ', type.Split('_', StringSplitOptions.RemoveEmptyEntries).Select(word => char.ToUpperInvariant(word[0]) + word[1..]));
+        if (request.ControlChannelHz is > 0)
+            return $"{label} {request.ControlChannelHz.Value / 1_000_000d:0.00000} MHz";
+        return label;
+    }
+
+    private static string ExperimentStage(string type) => type switch
+    {
+        "sdr_inventory" or "ground_truth_review" or "tr_stopped_check" => "preparation",
+        "rf_power_scan" => "spectrum",
+        "control_channel_quality" or "control_channel_p25_probe" or "error_gain_sweep" or "rf_validation_sweep" => "control",
+        "temp_tr_config_plan" => "coverage",
+        "voice_capture_trial" or "transcription_gate" => "calls",
+        "stability_verdict" => "verdict",
+        _ => "rf_validation"
+    };
+
+    private static string ShortRevision(string value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant()[..12];
+
+    private static string MediaTypeForPath(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".json" => "application/json",
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".wav" => "audio/wav",
+        ".csv" => "text/csv",
+        ".txt" or ".log" or ".md" => "text/plain",
+        _ => "application/octet-stream"
+    };
+
     private static async Task<RfSurveyToolStatusDto> SoftwareToolAsync(string id, string label, string category, bool required, string command, string purpose, string installHint, CancellationToken ct)
     {
         var exists = await CommandExistsAsync(command, ct);
@@ -6877,6 +7038,12 @@ public sealed class RfSurveyService
 
     private static string SummarizeRfPath(RfSurveyPathProfileDto path)
     {
+        if (path.Branches.Count > 0)
+        {
+            var active = path.Branches.Count(branch => !branch.Unused);
+            var linked = path.Branches.Count(branch => !branch.Unused && (!string.IsNullOrWhiteSpace(branch.SdrSerial) || branch.SdrIndex.HasValue));
+            return $"one upstream signal / {active} branch(es) / {linked} SDR endpoint(s)";
+        }
         if (path.Chain.Count > 0)
         {
             var antenna = string.IsNullOrWhiteSpace(path.AntennaType) ? "antenna" : path.AntennaType.Trim();
@@ -6918,6 +7085,13 @@ public sealed class RfSurveyService
             if (!string.IsNullOrWhiteSpace(item.PortCount))
                 return true;
         }
+        if (path.Branches.Any(branch =>
+                !string.IsNullOrWhiteSpace(branch.Label) ||
+                !string.IsNullOrWhiteSpace(branch.SdrSerial) ||
+                branch.SdrIndex.HasValue ||
+                branch.Unused ||
+                (branch.Chain?.Count ?? 0) > 0))
+            return true;
         return false;
     }
 

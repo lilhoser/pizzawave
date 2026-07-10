@@ -53,6 +53,47 @@ public sealed class TranscriptLocationServiceTests
 
         Assert.Contains("4510 Highway 58", locations);
     }
+
+    [Fact]
+    public async Task CallLocation_UsesTalkgroupJurisdictionAndIgnoresLegacyAreaAuthority()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pizzawave-location-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                Storage = new StorageConfig { AppDataRoot = root, AudioRoot = Path.Combine(root, "audio"), DatabasePath = Path.Combine(root, "test.db") },
+                TrunkRecorder = new TrunkRecorderConfig { TalkgroupCatalogPath = Path.Combine(root, "talkgroups.json") },
+                SiteSetup = new SiteSetupConfig
+                {
+                    Systems = [new RfSurveySystemDto("hinds", "Hinds County", [851_100_000], [], "123", "mswin")]
+                },
+                Locations = new LocationConfig
+                {
+                    MonitoredAreas = [new MonitoredAreaConfig { AreaId = "legacy-tn", AreaLabel = "Montgomery County, Tennessee", SystemShortName = "hinds", North = 37, South = 36, East = -86, West = -88 }]
+                }
+            };
+            await TestCatalogWriter.WriteAsync(config, new TalkgroupCatalogDocument
+            {
+                Items = [new TalkgroupCatalogItem { Key = TalkgroupCatalogService.CatalogKey("mswin", 101), SystemShortName = "mswin", Id = 101, AlphaTag = "Hinds Dispatch", Jurisdiction = "Hinds County, Mississippi", Enabled = true }]
+            });
+            var catalog = new TalkgroupCatalogService(config, NullLogger<TalkgroupCatalogService>.Instance);
+            var service = new TranscriptLocationService(config, catalog);
+            var rows = service.ExtractCallLocations(new EngineCall { Id = 7, SystemShortName = "hinds", Talkgroup = 101, Transcription = "Respond to 4510 Highway 58." });
+
+            Assert.Contains(rows, value => value.LocationText == "4510 Highway 58");
+            var row = rows.First(value => value.LocationText == "4510 Highway 58");
+            Assert.All(rows, value => Assert.Equal("Hinds County, Mississippi", value.AreaLabel));
+            Assert.Equal("Hinds County, Mississippi", row.AreaLabel);
+            Assert.StartsWith("rr-", row.AreaId);
+            Assert.Equal("Hinds County, Mississippi", service.ResolveAreaById(row.AreaId)?.AreaLabel);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
 }
 
 public sealed class DashboardServiceTests

@@ -192,9 +192,9 @@ Accepted design:
   The repeated six-stage status block becomes a compact progress stepper.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
-- [ ] Make source planning a server-owned, reviewable projection.
-- [ ] Support branched RF paths and source-linked SDR hardware.
-- [ ] Attach RF captures and reports to Setup evidence/activity.
+- [x] Make source planning a server-owned, reviewable projection.
+- [x] Support branched RF paths and source-linked SDR hardware.
+- [x] Attach RF captures and reports to Setup evidence/activity.
 - [ ] Deploy, verify, and obtain operator acceptance.
 
 ### 6. Profiles And Alerts
@@ -532,3 +532,22 @@ Status: pending
   list remained only the prior passed SDR Inventory; no RF capture, sweep,
   Apply, or desired-Setup mutation ran. Overall health remained degraded by the
   post-reset embedding state and live TR activity was stale.
+- 2026-07-10: Package 5 completion candidate replaces the legacy Location
+  authority with RadioReference talkgroup jurisdiction and selected-site
+  fallback, retains old area records only as inactive compatibility data, and
+  exposes explicit boundary overrides. Setup's persistent guidance now covers
+  current scope, validation next task, and apply plus monitoring state.
+- 2026-07-10: Source Coverage is now a versioned server projection with one
+  recommendation, alternatives, exact tuning windows, assignments,
+  assumptions, and stale-review rejection. Apply & Resume is limited to final
+  configuration review and guarded apply. RF paths now support one shared
+  upstream signal and multiple ordered branches linked to detected SDR serials;
+  duplicate hardware endpoints are rejected while incomplete drafts remain
+  valid.
+- 2026-07-10: Named RF experiments now record optional hypotheses and physical
+  changes, append started and terminal Setup activity, and hash-index retained
+  artifacts as first-class evidence. Experiments & Evidence provides
+  cross-session site filtering, search, two-run comparison, and separate
+  annotations. The completion candidate passes all 407 backend tests and the
+  production frontend build; deployment and live end-to-end verification
+  remain.

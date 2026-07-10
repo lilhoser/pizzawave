@@ -607,7 +607,7 @@ export type SetupTrConfigSite = { name: string; shortName: string; frequencyCoun
 export type SetupTrConfigSites = { radioReferenceSid: string; systemName: string; sites: SetupTrConfigSite[]; diagnostics: string };
 export type SetupAreaBoundaryCandidate = { label: string; kind: string; source: string; geoId: string; north: number; south: number; east: number; west: number };
 export type SetupAreaBoundaryResponse = { query: string; candidates: SetupAreaBoundaryCandidate[]; diagnostics: string };
-export type SiteSetupMonitoredArea = { areaId: string; areaLabel: string; systemShortName: string; north: number; south: number; east: number; west: number; aliases: string[] };
+export type SiteSetupMonitoredArea = { areaId: string; areaLabel: string; systemShortName: string; north: number; south: number; east: number; west: number; aliases: string[]; isOverride: boolean; contextKey: string };
 export type TrConfigEditorSource = { index: number; device: string; serial: string; centerFrequency: number; sampleRate: number; error: number; gain: string };
 export type TrConfigEditorSystem = { shortName: string; type: string; modulation: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; talkgroupsFile: string };
 export type TrConfigEditorSummary = { systems: TrConfigEditorSystem[]; sources: TrConfigEditorSource[]; warnings: string[] };
@@ -648,7 +648,14 @@ export type SiteSetupConfig = {
   lastAppliedTalkgroupPolicyJson: string;
   lastAppliedDesiredJson?: string;
 };
-export type SiteSetup = { desired: SiteSetupConfig; applied: SiteSetupAppliedConfig; status: SiteSetupStatus; pendingChanges: SiteSetupPendingChange[]; recentActivity: SiteSetupActivity[] };
+export type SiteSetupGuidanceCard = { state: string; value: string; detail: string };
+export type SiteSetupGuidance = { scope: SiteSetupGuidanceCard; validation: SiteSetupGuidanceCard; applyAndMonitoring: SiteSetupGuidanceCard };
+export type SiteSetupDerivedLocation = { key: string; label: string; source: string; catalogSystemShortName: string; siteShortNames: string[]; siteLabels: string[]; talkgroupCount: number; hasOverride: boolean };
+export type SiteSetupLocationContext = { derivedLocations: SiteSetupDerivedLocation[]; legacyAreaCount: number };
+export type SiteSetupSourcePlanWindow = { lowHz: number; centerHz: number; highHz: number; frequencyCount: number };
+export type SiteSetupSourcePlanOption = { id: string; label: string; mode: string; systemShortNames: string[]; siteLabels: string[]; coveredFrequenciesHz: number[]; missedFrequenciesHz: number[]; windows: SiteSetupSourcePlanWindow[]; selectedSourceIndexes: number[]; sourceAssignments: Record<string, number>; fits: boolean; reason: string };
+export type SiteSetupSourcePlanProjection = { projectionVersion: string; desiredVersion: number; sampleRateHz: number; detectedSourceCount: number; recommendedOptionId: string; options: SiteSetupSourcePlanOption[]; assumptions: string[]; warnings: string[] };
+export type SiteSetup = { desired: SiteSetupConfig; applied: SiteSetupAppliedConfig; status: SiteSetupStatus; pendingChanges: SiteSetupPendingChange[]; recentActivity: SiteSetupActivity[]; guidance: SiteSetupGuidance; locationContext: SiteSetupLocationContext };
 export type RfSurveyRfChainItem = {
   type: string;
   label: string;
@@ -684,7 +691,9 @@ export type RfSurveyPathProfile = {
   sdrNotes: string;
   observations: string;
   chain: RfSurveyRfChainItem[];
+  branches: RfSurveyRfBranch[];
 };
+export type RfSurveyRfBranch = { id: string; label: string; chain: RfSurveyRfChainItem[]; sdrSerial: string; sdrDevice: string; sdrIndex?: number | null; unused: boolean };
 export type RfSurveySource = { index: number; device: string; serial: string; sdrType: string; centerHz: number; sampleRate: number; errorHz: number; gain: string };
 export type RfSurveyDevice = { index: number; serial: string; label: string; sdrType: string; usbLine: string; warning: string; sampleRateOptions?: number[]; defaultSampleRate?: number };
 export type RfSurveySystem = { shortName: string; siteLabel: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; radioReferenceSid?: string; talkgroupSystemShortName?: string };
@@ -731,7 +740,10 @@ export type RfSurveySession = {
 };
 export type RfSurveyToolStatus = { id: string; label: string; category: string; required: boolean; installed: boolean; version: string; command: string; purpose: string; installHint: string };
 export type RfSurveyToolPrep = { generatedAtUtc: string; readyForGuidedSurvey: boolean; readyForControlChannelTests: boolean; readyForVoiceCapture: boolean; readyForTranscriptionGate: boolean; tools: RfSurveyToolStatus[]; warnings: string[]; appliedConfigHash: string };
-export type RfSurveyExperiment = { id: string; type: string; status: string; hypothesis: string; requiredSetup: string; resultSummary: string; blockingIssue: string; evidenceJson: string; interpretationJson: string; createdAtUtc: string; startedAtUtc?: string | null; finishedAtUtc?: string | null };
+export type RfSurveyExperiment = { id: string; name: string; type: string; status: string; hypothesis: string; physicalChange: string; requiredSetup: string; resultSummary: string; blockingIssue: string; evidenceJson: string; interpretationJson: string; createdAtUtc: string; startedAtUtc?: string | null; finishedAtUtc?: string | null };
+export type SetupRfEvidence = { id: string; surveyId: string; experimentId: string; siteLabel: string; stage: string; experimentType: string; sourceIdentity: string; rfPathRevision: string; sourcePlanRevision: string; captureStartedAtUtc: string; captureFinishedAtUtc: string; mediaType: string; filePath: string; sizeBytes: number; contentHash: string; createdAtUtc: string };
+export type SetupRfHistoryRow = { session: RfSurveySession; experiment: RfSurveyExperiment; evidence: SetupRfEvidence[] };
+export type SetupRfHistory = { rows: SetupRfHistoryRow[] };
 export type RfSurveyExperimentPlan = { type: string; label: string; purpose: string; enabled: boolean; blockingIssue: string; requiredSetup: string };
 export type RfSurveyCancelExperimentResult = { cancelRequested: boolean; message: string; cleanupOutput: string };
 export type RfSurveySweepProgressRow = { sourceIndex: number; controlChannelHz: number; gain: string; status: string; issue: string; snrDb?: number | null; peakOffsetHz?: number | null; overload: boolean };

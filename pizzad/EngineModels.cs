@@ -1075,7 +1075,30 @@ public sealed record SiteSetupDto(
     SiteSetupAppliedConfigDto Applied,
     SiteSetupStatusDto Status,
     IReadOnlyList<SiteSetupPendingChangeDto> PendingChanges,
-    IReadOnlyList<SiteSetupActivityDto> RecentActivity);
+    IReadOnlyList<SiteSetupActivityDto> RecentActivity,
+    SiteSetupGuidanceDto Guidance,
+    SiteSetupLocationContextDto LocationContext);
+
+public sealed record SiteSetupGuidanceDto(
+    SiteSetupGuidanceCardDto Scope,
+    SiteSetupGuidanceCardDto Validation,
+    SiteSetupGuidanceCardDto ApplyAndMonitoring);
+
+public sealed record SiteSetupGuidanceCardDto(string State, string Value, string Detail);
+
+public sealed record SiteSetupLocationContextDto(
+    IReadOnlyList<SiteSetupDerivedLocationDto> DerivedLocations,
+    int LegacyAreaCount);
+
+public sealed record SiteSetupDerivedLocationDto(
+    string Key,
+    string Label,
+    string Source,
+    string CatalogSystemShortName,
+    IReadOnlyList<string> SiteShortNames,
+    IReadOnlyList<string> SiteLabels,
+    int TalkgroupCount,
+    bool HasOverride);
 
 public sealed record SiteSetupStatusDto(
     string MonitoringState,
@@ -1104,6 +1127,39 @@ public sealed record SiteSetupAppliedSourceDto(
     string Gain);
 
 public sealed record SiteSetupPendingChangeDto(string Category, string Summary);
+
+public sealed record SiteSetupSourcePlanWindowDto(long LowHz, long CenterHz, long HighHz, int FrequencyCount);
+
+public sealed record SiteSetupSourcePlanOptionDto(
+    string Id,
+    string Label,
+    string Mode,
+    IReadOnlyList<string> SystemShortNames,
+    IReadOnlyList<string> SiteLabels,
+    IReadOnlyList<long> CoveredFrequenciesHz,
+    IReadOnlyList<long> MissedFrequenciesHz,
+    IReadOnlyList<SiteSetupSourcePlanWindowDto> Windows,
+    IReadOnlyList<int> SelectedSourceIndexes,
+    IReadOnlyDictionary<string, int> SourceAssignments,
+    bool Fits,
+    string Reason);
+
+public sealed record SiteSetupSourcePlanProjectionDto(
+    string ProjectionVersion,
+    long DesiredVersion,
+    int SampleRateHz,
+    int DetectedSourceCount,
+    string RecommendedOptionId,
+    IReadOnlyList<SiteSetupSourcePlanOptionDto> Options,
+    IReadOnlyList<string> Assumptions,
+    IReadOnlyList<string> Warnings);
+
+public sealed record SiteSetupSourcePlanSelectionRequest(
+    long ExpectedVersion,
+    string ProjectionVersion,
+    string OptionId,
+    int SampleRateHz,
+    IReadOnlyDictionary<string, int>? SourceAssignments = null);
 
 public sealed record SiteSetupUpdateRequest(long ExpectedVersion, SiteSetupDesiredPatch Patch, string Source = "ui");
 
@@ -1232,7 +1288,17 @@ public sealed record RfSurveyPathProfileDto
     public string SdrNotes { get; init; } = string.Empty;
     public string Observations { get; init; } = string.Empty;
     public IReadOnlyList<RfSurveyRfChainItemDto> Chain { get; init; } = [];
+    public IReadOnlyList<RfSurveyRfBranchDto> Branches { get; init; } = [];
 }
+
+public sealed record RfSurveyRfBranchDto(
+    string Id = "",
+    string Label = "",
+    IReadOnlyList<RfSurveyRfChainItemDto>? Chain = null,
+    string SdrSerial = "",
+    string SdrDevice = "",
+    int? SdrIndex = null,
+    bool Unused = false);
 
 public sealed record RfSurveySystemDto(
     string ShortName,
@@ -1285,6 +1351,7 @@ public sealed record RfSurveySdrDeviceDto(
 public sealed record RfSurveyExperimentDto
 {
     public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
     public string Type { get; init; } = string.Empty;
     public string Status { get; init; } = "planned";
     public string Hypothesis { get; init; } = string.Empty;
@@ -1293,6 +1360,7 @@ public sealed record RfSurveyExperimentDto
     public string BlockingIssue { get; init; } = string.Empty;
     public string EvidenceJson { get; init; } = "{}";
     public string InterpretationJson { get; init; } = "{}";
+    public string PhysicalChange { get; init; } = string.Empty;
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
     public DateTime? StartedAtUtc { get; init; }
     public DateTime? FinishedAtUtc { get; init; }
@@ -1311,7 +1379,35 @@ public sealed record RfSurveyRunExperimentRequest(
     int DurationSeconds = 30,
     long? ControlChannelHz = null,
     int? SourceIndex = null,
-    JsonElement? Parameters = null);
+    JsonElement? Parameters = null,
+    string Name = "",
+    string Hypothesis = "",
+    string PhysicalChange = "");
+
+public sealed record SetupRfEvidenceDto(
+    string Id,
+    string SurveyId,
+    string ExperimentId,
+    string SiteLabel,
+    string Stage,
+    string ExperimentType,
+    string SourceIdentity,
+    string RfPathRevision,
+    string SourcePlanRevision,
+    DateTime CaptureStartedAtUtc,
+    DateTime CaptureFinishedAtUtc,
+    string MediaType,
+    string FilePath,
+    long SizeBytes,
+    string ContentHash,
+    DateTime CreatedAtUtc);
+
+public sealed record SetupRfHistoryRowDto(
+    RfSurveySessionDto Session,
+    RfSurveyExperimentDto Experiment,
+    IReadOnlyList<SetupRfEvidenceDto> Evidence);
+
+public sealed record SetupRfHistoryDto(IReadOnlyList<SetupRfHistoryRowDto> Rows);
 
 public sealed record RfSurveyCancelExperimentResultDto(
     bool CancelRequested,

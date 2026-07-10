@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace pizzad;
@@ -21,10 +24,13 @@ public sealed class TranscriptLocationService
         "by the way", "the way", "the road", "county road", "street court"
     };
     private readonly EngineConfig _config;
+    private readonly TalkgroupCatalogService _talkgroups;
+    private readonly ConcurrentDictionary<string, MonitoredAreaConfig> _derivedAreas = new(StringComparer.OrdinalIgnoreCase);
 
-    public TranscriptLocationService(EngineConfig config)
+    public TranscriptLocationService(EngineConfig config, TalkgroupCatalogService talkgroups)
     {
         _config = config;
+        _talkgroups = talkgroups;
     }
 
     public IReadOnlyList<CallLocationRecord> ExtractCallLocations(EngineCall call)
@@ -32,7 +38,7 @@ public sealed class TranscriptLocationService
         if (string.IsNullOrWhiteSpace(call.Transcription))
             return [];
 
-        var area = ResolveArea(call.SystemShortName, _config.Locations.MonitoredAreas);
+        var area = ResolveCallArea(call);
         if (area == null)
             return [];
 
@@ -57,12 +63,63 @@ public sealed class TranscriptLocationService
             return null;
 
         var system = systemShortName.Trim();
-        return areas.FirstOrDefault(area =>
+        return areas.Where(area => area.IsOverride).FirstOrDefault(area =>
             string.Equals(area.SystemShortName, system, StringComparison.OrdinalIgnoreCase) ||
             area.Aliases.Any(alias => string.Equals(alias, system, StringComparison.OrdinalIgnoreCase))) ??
-            areas.FirstOrDefault(area => area.Aliases.Any(alias =>
+            areas.Where(area => area.IsOverride).FirstOrDefault(area => area.Aliases.Any(alias =>
                 !string.IsNullOrWhiteSpace(alias) &&
                 system.Contains(alias, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private MonitoredAreaConfig? ResolveCallArea(EngineCall call)
+    {
+        var catalog = _talkgroups.Resolve(call.SystemShortName, call.Talkgroup);
+        var system = (_config.SiteSetup.Systems ?? []).FirstOrDefault(value =>
+            string.Equals(value.ShortName, call.SystemShortName, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrWhiteSpace(catalog.SystemShortName) && string.Equals(value.TalkgroupSystemShortName, catalog.SystemShortName, StringComparison.OrdinalIgnoreCase)));
+        var catalogSystem = string.IsNullOrWhiteSpace(catalog.SystemShortName)
+            ? string.IsNullOrWhiteSpace(system?.TalkgroupSystemShortName) ? call.SystemShortName : system.TalkgroupSystemShortName
+            : catalog.SystemShortName;
+        var label = !string.IsNullOrWhiteSpace(catalog.Jurisdiction)
+            ? catalog.Jurisdiction.Trim()
+            : !string.IsNullOrWhiteSpace(system?.SiteLabel) ? system.SiteLabel.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(label))
+            return ResolveArea(call.SystemShortName, _config.Locations.MonitoredAreas);
+        var contextKey = !string.IsNullOrWhiteSpace(catalog.Jurisdiction)
+            ? $"rr:{catalogSystem}:{label}"
+            : $"site:{system?.ShortName ?? call.SystemShortName}:{label}";
+        var explicitOverride = _config.Locations.MonitoredAreas.FirstOrDefault(area =>
+            area.IsOverride && string.Equals(area.ContextKey, contextKey, StringComparison.OrdinalIgnoreCase))
+            ?? _config.Locations.MonitoredAreas.FirstOrDefault(area =>
+                area.IsOverride && string.IsNullOrWhiteSpace(area.ContextKey) && AreaMatchesSystem(area, call.SystemShortName, catalogSystem));
+        if (explicitOverride != null)
+            return explicitOverride;
+
+        var id = DerivedAreaId(contextKey);
+        return _derivedAreas.GetOrAdd(id, _ => new MonitoredAreaConfig
+        {
+            AreaId = id,
+            AreaLabel = label,
+            SystemShortName = call.SystemShortName,
+            North = 85,
+            South = -85,
+            West = -180,
+            East = 180,
+            Aliases = new[] { call.SystemShortName, catalogSystem }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            ContextKey = contextKey,
+            IsOverride = false
+        });
+    }
+
+    private static bool AreaMatchesSystem(MonitoredAreaConfig area, string siteSystem, string catalogSystem) =>
+        string.Equals(area.SystemShortName, siteSystem, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(area.SystemShortName, catalogSystem, StringComparison.OrdinalIgnoreCase) ||
+        area.Aliases.Any(alias => string.Equals(alias, siteSystem, StringComparison.OrdinalIgnoreCase) || string.Equals(alias, catalogSystem, StringComparison.OrdinalIgnoreCase));
+
+    private static string DerivedAreaId(string contextKey)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contextKey.ToLowerInvariant()))).ToLowerInvariant();
+        return $"rr-{hash[..16]}";
     }
 
     public MonitoredAreaConfig? ResolveAreaById(string areaId)
@@ -71,7 +128,8 @@ public sealed class TranscriptLocationService
             return null;
 
         return _config.Locations.MonitoredAreas.FirstOrDefault(area =>
-            string.Equals(area.AreaId, areaId, StringComparison.OrdinalIgnoreCase));
+                   area.IsOverride && string.Equals(area.AreaId, areaId, StringComparison.OrdinalIgnoreCase))
+               ?? (_derivedAreas.TryGetValue(areaId, out var derived) ? derived : null);
     }
 
     public static IEnumerable<string> ExtractLocations(string? transcription)

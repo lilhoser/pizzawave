@@ -517,6 +517,8 @@ public sealed class MonitoredAreaConfig
     public double West { get; set; }
     public double East { get; set; }
     public List<string> Aliases { get; set; } = new();
+    public bool IsOverride { get; set; }
+    public string ContextKey { get; set; } = string.Empty;
 }
 
 public sealed class ProcessingProfile
