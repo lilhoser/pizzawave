@@ -9,12 +9,12 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3B consolidated refresh ownership - preflight complete
+- Current milestone: 3B deployed and live-verified; awaiting operator inspection
 - Working branch: `codex/operator-ux-loading-status`
-- Last deployed commit: `fd16f1b`
+- Last deployed commit: `4263348`
 - Operator verification: Packages 1, 2, and 3A accepted
-- Next action: deploy the accepted 3B milestone with the automatic helper and
-  live-verify Settings and visible System panels.
+- Next action: operator inspection and acceptance of 3B before closing Package
+  3 and beginning Package 4.
 
 ## Working Rules
 
@@ -71,13 +71,13 @@ Status: in progress
 - [x] 3A. Give Dashboard, call-category pages, Setup, and System a shared
   retained-data refresh contract; separate monitoring state; scope automatic
   updates; and make search page-owned.
-- [ ] 3B. Apply the accepted refresh contract to Settings and specialized
+- [x] 3B. Apply the accepted refresh contract to Settings and specialized
   page-local data panels without preempting Package 4's independent System-tab
   architecture.
-- [ ] Add page-local loading, refreshing, error, retry, and last-updated state.
-- [ ] Keep last-good data visible during refresh.
-- [ ] Debounce search and stop unrelated full-page refreshes.
-- [ ] Separate API connectivity, TR monitoring state, and view-fetch failures.
+- [x] Add page-local loading, refreshing, error, retry, and last-updated state.
+- [x] Keep last-good data visible during refresh.
+- [x] Debounce search and stop unrelated full-page refreshes.
+- [x] Separate API connectivity, TR monitoring state, and view-fetch failures.
 - [ ] Deploy, verify, and obtain operator acceptance.
 
 ### 4. System Workspace
@@ -212,6 +212,9 @@ Status: pending
   inline with the title and sort controls, secondary controls live in a More
   menu, selection mode has a contextual action strip, and catalog imports
   preserve RadioReference jurisdiction for friendly talkgroup names.
+- `4263348`: Package 3B deployed; Settings uses one protected server-hydration
+  boundary, supporting inventories load only with their visible tab, and System
+  read-only panels retain last-good data behind one consolidated Refresh action.
 
 ## Verification Log
 
@@ -297,3 +300,11 @@ Status: pending
   production frontend build. Settings form hydration, supporting inventories,
   and visible System panels now use the accepted consolidated refresh
   boundaries; deployment and live verification remain.
+- 2026-07-09: Package 3B deployed through the automatic helper's web-only path
+  in 3.2 seconds without restarting `pizzad` or Trunk Recorder. The live health
+  endpoint reported healthy monitoring and a clear processing queue.
+- 2026-07-09: Live browser verification confirmed one Settings reload control,
+  no generic Settings Refresh controls, dirty-draft reload protection, no
+  Profiles reload control, and exactly one persistent System Refresh control on
+  Services, Backup, TR config restore, Queue, and Metrics/Bandwidth. Monitoring
+  remained active and no page or panel error notice appeared.
