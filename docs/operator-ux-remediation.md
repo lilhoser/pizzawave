@@ -9,14 +9,14 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 RF Validation clarity follow-up implemented and
-  tested; deployment withheld during unresolved live data-reset ingest pause
+- Current milestone: Package 5 RF Validation clarity follow-up deployed and
+  verified; awaiting operator inspection
 - Working branch: `codex/operator-ux-setup-ux`
-- Last deployed commit: `6b18b1a`
+- Last deployed commit: `b38269e`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: confirm the live data-reset/ingest-pause state is safe, then
-  deploy commit `b38269e` and perform read-only live verification before the
-  server-owned source-planning projection begins.
+- Next action: obtain operator acceptance of the RF Validation clarity
+  follow-up, then begin the reviewed Setup guidance-card and derived-location
+  milestone before the server-owned source-planning projection.
 
 ## Working Rules
 
@@ -379,6 +379,10 @@ Status: pending
   proof stages, preserves the existing diagnostic controls, and distinguishes
   saved frequency correction, measured signal offset, and trial correction
   change throughout the operator workflow.
+- `b38269e`: Package 5 RF Validation clarity follow-up deployed; Preparation
+  performs one software-only check per applied configuration, stage guidance is
+  concise and action-led, and advanced Spectrum and Control proof settings
+  remain available behind collapsed detail.
 
 ## Verification Log
 
@@ -512,3 +516,19 @@ Status: pending
   ingest still paused for a data-only reset, with no active job record and 159
   calls dropped during the pause. The three persisted pending Setup changes
   remained present; no RF experiment, apply, reset, or live mutation was run.
+- 2026-07-10: After the operator confirmed the reset was complete, `b38269e`
+  deployed through the automatic helper's full backend path in 70.9 seconds.
+  The ARM64 build completed with zero warnings and zero errors. Restart cleared
+  the stale ingest pause; the processing queue remained empty. The three
+  pending Setup changes, desired version, and applied configuration hash were
+  preserved exactly. Trunk Recorder was not restarted separately.
+- 2026-07-10: Live browser verification confirmed the compact stage stepper;
+  concise Preparation, Source Coverage, Call and Transcription Proof, and
+  Verdict guidance; primary Spectrum source/frequency/Start controls with
+  advanced capture settings collapsed; one recommended Control proof run with
+  advanced settings and permutation detail collapsed; and no browser console
+  errors. The first-open software check recorded eight available tools with no
+  warnings against the unchanged applied configuration hash. The experiment
+  list remained only the prior passed SDR Inventory; no RF capture, sweep,
+  Apply, or desired-Setup mutation ran. Overall health remained degraded by the
+  post-reset embedding state and live TR activity was stale.
