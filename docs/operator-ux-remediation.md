@@ -9,13 +9,13 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 operator interview in progress; RF validation
-  and server-owned source-planning designs accepted before implementation
+- Current milestone: Package 5 operator interview in progress; RF validation,
+  source-planning, and branched RF-path designs accepted before implementation
 - Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: review branched RF-path topology and source-linked SDR hardware
-  with the operator before changing behavior.
+- Next action: review how RF captures and reports attach to Setup evidence and
+  activity with the operator before changing behavior.
 
 ## Working Rules
 
@@ -137,6 +137,14 @@ Accepted design:
   server projection for review; stale projections are rejected and regenerated.
   Apply & Resume retains only final configuration comparison, Discard, and the
   guarded apply action.
+- RF-path topology is a tree limited to one upstream antenna signal that may
+  split through splitters or multicouplers into multiple downstream branches.
+  Each branch preserves ordered components and ends at a detected SDR linked by
+  stable hardware identity, preferably its serial number, or is marked unused.
+  Setup does not silently rebind missing hardware. The server rejects loops,
+  duplicate SDR endpoints, and impossible paths while allowing incomplete
+  drafts. Existing linear chains migrate to one branch. Multiple antennas,
+  combiners, switches, and rejoining branches are outside Package 5.
 
 - [ ] Clarify RF validation stages and absolute error terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -257,6 +265,11 @@ Status: pending
   alternatives, assignments, tuning windows, coverage, evidence, assumptions,
   and warnings; the browser supplies operator intent and constraints. Apply &
   Resume is limited to final comparison, discard, and guarded application.
+- 2026-07-10: Package 5 RF paths model one upstream antenna signal with ordered
+  shared components and splitter/multicoupler branches ending at stable,
+  detected SDR hardware identities or explicit unused outputs. Missing devices
+  are not silently rebound. Multiple antennas, combiners, switches, and branch
+  rejoining are deferred.
 
 ## Deployment Log
 
