@@ -665,3 +665,25 @@ Status: pending
   No RF run or Setup mutation occurred during verification. Desired version
   `1783696822034`, applied hash `e95b8867...`, retained selections, and pending
   Systems/Sites, Control Channels, and RF Path categories were unchanged.
+- 2026-07-10: Operator rerun `rfx-20260710155932-990ee246d6e` confirmed the
+  source-bound correction repair executed, but exposed a validation ownership
+  defect. The standalone OP25 probe opened source 0, detected repeated P25
+  synchronization patterns on ETV 773.781250 MHz, and discarded its frames
+  during error checking. RF Sweep reported the inaccurate generic "no P25
+  evidence" result and hard-gated the native Trunk Recorder proof. After the
+  sweep restored the unchanged live configuration, Trunk Recorder identified
+  ETV RFSS 002/site 008 and system 2AD and decoded 5 messages/second within six
+  seconds, proving the RF path was not the cause of that failure.
+- 2026-07-10: Native-proof remediation `07c3360` keeps standalone OP25 results
+  reviewable but lets every non-tool-failed candidate continue to the bounded,
+  source-scoped Trunk Recorder proof. Passing native decode metrics now owns the
+  monitorable P25 decision; a standalone tool failure still blocks safely.
+  Synchronization followed by discarded frames is reported explicitly instead
+  of as absent P25 evidence. The focused 43-test RF suite and all 419 backend
+  tests passed. The automatic backend deployment completed in 78.6 seconds with
+  zero build warnings or errors. Live PizzaWave and Trunk Recorder services and
+  health were `active`/`ok`. No RF experiment or Setup mutation was performed
+  during verification: the latest experiment remains the operator's failed
+  rerun, desired version `1783696822034`, applied hash `e95b8867...`, the two
+  source serials/corrections, selected systems, and pending changes are
+  unchanged.
