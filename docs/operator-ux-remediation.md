@@ -9,13 +9,13 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 operator interview complete; milestone 5A RF
-  Validation stage and terminology implementation ready to begin
+- Current milestone: Package 5 milestone 5A RF Validation stages and terminology
+  deployed and verified; awaiting operator inspection
 - Working branch: `codex/operator-ux-setup-ux`
-- Last deployed commit: `54c8fe3`
+- Last deployed commit: `6b18b1a`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: implement milestone 5A without changing source-planning,
-  RF-path, or evidence persistence ownership yet.
+- Next action: obtain operator acceptance of milestone 5A, then implement the
+  server-owned source-planning projection as milestone 5B.
 
 ## Working Rules
 
@@ -164,7 +164,7 @@ Accepted design:
   successful settings into reviewed pending Setup changes. Historical evidence
   never changes live monitoring directly.
 
-- [ ] Clarify RF validation stages and absolute error terminology.
+- [x] Clarify RF validation stages and frequency-correction terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
 - [ ] Support branched RF paths and source-linked SDR hardware.
 - [ ] Attach RF captures and reports to Setup evidence/activity.
@@ -328,6 +328,10 @@ Status: pending
 - `54c8fe3`: Package 4 deployed; System uses task-based noun navigation,
   remembers the last area/page, loads visible pages independently, refreshes
   only the visible page, and renders only server-declared job operations.
+- `6b18b1a`: Package 5 milestone 5A deployed; RF Validation uses six explicit
+  proof stages, preserves the existing diagnostic controls, and distinguishes
+  saved frequency correction, measured signal offset, and trial correction
+  change throughout the operator workflow.
 
 ## Verification Log
 
@@ -440,3 +444,17 @@ Status: pending
   on all 23 rows and no operations on the 23 terminal jobs.
 - 2026-07-09: Operator accepted Package 4 and authorized its closure. Package 5
   remains unstarted at its discovery and operator-interview boundary.
+- 2026-07-10: Package 5 milestone 5A passed the 402-case backend suite and the
+  production frontend build. The checked-in web assets were rebuilt from the
+  current source.
+- 2026-07-10: Milestone 5A deployed through the automatic helper's full backend
+  path in 78.5 seconds. The ARM64 build completed with zero warnings and zero
+  errors. `/api/v1/health` returned `ok` with clear processing queues; live
+  Trunk Recorder activity became active after deployment and later reported
+  stale after no new callstream or health data. Trunk Recorder was not
+  restarted separately.
+- 2026-07-10: Live browser verification confirmed all six RF Validation stages,
+  the existing Waterfall and RF Sweep controls in their reviewed stages,
+  preparation/source/call/verdict summaries, standardized correction and
+  signal-offset labels, Source Coverage routing into Apply & Resume, remembered
+  Source Coverage selection on return, and no browser console errors.
