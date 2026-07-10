@@ -723,3 +723,16 @@ Status: pending
   and Trunk Recorder were active. No new scan or Setup mutation was performed;
   desired version `1783696822034`, applied hash `e95b8867...`, and exact source
   corrections +3600/+4155 Hz remain unchanged.
+- 2026-07-10: Apply & Resume for the operator-selected ETV Raymond and Entergy
+  Jackson plan faulted because Config Draft generated a nonexistent site-level
+  `talkgroups.jackson-ms-hinds-ms.csv`. Catalog-ownership fix `60a566f` resolves
+  a selected site's RadioReference SID through the imported talkgroup catalog
+  owner (`4879` to `mswin`, `8202` to `entergy`) and refuses to install any
+  future draft whose referenced talkgroup file is missing. All 421 backend
+  tests passed and the automatic backend deployment completed in 103.6 seconds
+  with zero warnings or errors. The same already-selected plan was regenerated
+  and applied through the signed-in Setup workflow without changing systems,
+  sources, centers, gains, or corrections. Live config now references
+  `talkgroups.mswin.csv` and `talkgroups.entergy.csv`; Trunk Recorder is active
+  and decoded ETV RFSS 002/site 008/system 2AD and Jackson RFSS 002/site
+  080/system 64F immediately after restart.
