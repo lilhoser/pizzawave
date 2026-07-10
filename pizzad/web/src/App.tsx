@@ -5034,12 +5034,13 @@ function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode
           <div className="rf-path-branch-head">
             <label><span>Branch name</span><input value={branch.label} onChange={event => updateBranch(branch.id, { label: event.target.value })} placeholder={`Branch ${branchIndex + 1}`} /></label>
             <label><span>SDR endpoint</span><select disabled={branch.unused} value={endpointKey} onChange={event => {
-              const source = sources.find(row => (row.serial || `index:${row.index}`) === event.target.value);
-              updateBranch(branch.id, source ? { sdrSerial: source.serial || "", sdrDevice: source.device || source.sdrType, sdrIndex: source.index, unused: false } : { sdrSerial: "", sdrDevice: "", sdrIndex: null });
+              const source = sources.find(row => (rfSourceStableSerial(row) || `index:${row.index}`) === event.target.value);
+              updateBranch(branch.id, source ? { sdrSerial: rfSourceStableSerial(source), sdrDevice: source.device || source.sdrType, sdrIndex: source.index, unused: false } : { sdrSerial: "", sdrDevice: "", sdrIndex: null });
             }}><option value="">Not linked</option>{sources.map(source => {
-              const key = source.serial || `index:${source.index}`;
+              const serial = rfSourceStableSerial(source);
+              const key = serial || `index:${source.index}`;
               const usedElsewhere = linkedKeys.has(key) && key !== endpointKey;
-              return <option key={key} value={key} disabled={usedElsewhere}>{source.sdrType || "SDR"} {source.serial || `Source ${source.index}`}{usedElsewhere ? " (already linked)" : ""}</option>;
+              return <option key={key} value={key} disabled={usedElsewhere}>{source.sdrType || "SDR"} {serial || `Source ${source.index}`}{usedElsewhere ? " (already linked)" : ""}</option>;
             })}</select></label>
             <label className="compact-toggle"><input type="checkbox" checked={branch.unused} onChange={event => updateBranch(branch.id, { unused: event.currentTarget.checked, sdrSerial: event.currentTarget.checked ? "" : branch.sdrSerial, sdrDevice: event.currentTarget.checked ? "" : branch.sdrDevice, sdrIndex: event.currentTarget.checked ? null : branch.sdrIndex })} /> Unused output</label>
             <button type="button" className="danger-button" disabled={path.branches.length === 1} onClick={() => { onTouched(); setPath(current => ({ ...current, branches: current.branches.filter(row => row.id !== branch.id) })); }}>Remove branch</button>
@@ -5051,6 +5052,14 @@ function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode
       })}
     </div>
   </div>;
+}
+
+function rfSourceStableSerial(source: Pick<RfSurveySource, "serial" | "device">) {
+  const explicit = String(source.serial || "").trim();
+  if (explicit) return explicit;
+  const device = String(source.device || "").trim();
+  const marker = /(?:serial:|airspy=|rtl=)([a-z0-9_-]+)/i.exec(device);
+  return marker?.[1] || "";
 }
 
 const rfChainTypes = ["antenna", "coax", "splitter", "multicoupler", "lna", "filter", "sdr", "other"];
