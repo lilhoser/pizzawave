@@ -2606,7 +2606,7 @@ public sealed class RfSurveyService
             var metricIndexes = SelectRfValidationFollowUpIndexesBySite(
                 sweepProfile,
                 candidates,
-                candidates.Select((candidate, index) => new { candidate, index }).Where(row => row.candidate.P25Frames).Select(row => row.index),
+                candidates.Select((candidate, index) => new { candidate, index }).Where(row => IsEligibleForNativeTrProof(row.candidate)).Select(row => row.index),
                 metricsCandidateLimit);
             metricsCandidateLimit = Math.Max(metricsCandidateLimit, metricIndexes.Count);
 
@@ -2649,7 +2649,7 @@ public sealed class RfSurveyService
             var voiceIndexes = SelectRfValidationFollowUpIndexesBySite(
                 sweepProfile,
                 candidates,
-                candidates.Select((candidate, index) => new { candidate, index }).Where(row => row.candidate.P25Frames).Select(row => row.index),
+                candidates.Select((candidate, index) => new { candidate, index }).Where(row => IsEligibleForNativeTrProof(row.candidate)).Select(row => row.index),
                 voiceCandidateLimit,
                 preferMetricsPassed: runStandaloneMetrics);
             voiceCandidateLimit = Math.Max(voiceCandidateLimit, voiceIndexes.Count);
@@ -3573,6 +3573,13 @@ public sealed class RfSurveyService
                 return voicePassed;
         }
 
+        var nativeDecodePassed = candidates
+            .Where(candidate => string.Equals(candidate.MetricsStatus, "passed", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(candidate => candidate.Score)
+            .FirstOrDefault();
+        if (nativeDecodePassed != null)
+            return nativeDecodePassed;
+
         var p25Passed = candidates
             .Where(candidate => candidate.P25Frames)
             .OrderByDescending(candidate => candidate.Score)
@@ -3694,8 +3701,12 @@ public sealed class RfSurveyService
 
     private static bool IsMonitorableRfCandidate(RfValidationCandidate candidate) =>
         (string.Equals(candidate.RfStatus, "measured", StringComparison.OrdinalIgnoreCase) || candidate.SnrDb.HasValue) &&
-        (candidate.P25Frames || string.Equals(candidate.P25Status, "passed", StringComparison.OrdinalIgnoreCase)) &&
         string.Equals(candidate.MetricsStatus, "passed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEligibleForNativeTrProof(RfValidationCandidate candidate) =>
+        candidate.P25Frames ||
+        string.Equals(candidate.P25Status, "passed", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(candidate.P25Status, "failed", StringComparison.OrdinalIgnoreCase);
 
     private static bool CandidateMatchesLiveSource(RfSurveyProfileDto profile, RfValidationCandidate candidate, long? controlChannelHz = null)
     {
@@ -5319,15 +5330,17 @@ public sealed class RfSurveyService
         var toolFailure = HasP25ProbeToolFailure(result.Stdout);
         var frameEvidence = FindP25FrameEvidence(result.Stdout);
         var hasFrames = !string.IsNullOrWhiteSpace(frameEvidence);
+        var syncEvidence = FindP25SynchronizationEvidence(result.Stdout);
+        var hasSync = !string.IsNullOrWhiteSpace(syncEvidence);
         var restartFailed = !string.IsNullOrWhiteSpace(trRestartError);
         var status = restartFailed ? "failed" : hasFrames ? "passed" : toolFailure ? "blocked" : "failed";
         return new ExperimentOutcome(
             status,
             "A known control channel should produce P25 frame/sync evidence when the SDR path is viable.",
             "Setup temporarily paused TR if needed; configured P25 probe command; SDR available; known control channel.",
-            restartFailed ? "P25 probe ran, but trunk-recorder did not restart afterward." : hasFrames ? "P25 probe output contained frame/sync evidence." : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "P25 probe ran but did not contain recognizable P25 frame/sync evidence.",
-            restartFailed ? $"trunk-recorder did not restart after P25 probe: {trRestartError}" : hasFrames ? "" : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "No recognizable P25 frame/sync evidence was captured.",
-            new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, demod, frameEvidence, probeOverrides = ReadP25ProbeOverrides(request), staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
+            restartFailed ? "P25 probe ran, but trunk-recorder did not restart afterward." : hasFrames ? "P25 probe output contained decoded frame evidence." : toolFailure ? "P25 probe command failed before RF evidence could be measured." : hasSync ? "P25 synchronization was detected, but the standalone probe did not decode a valid frame. Native Trunk Recorder proof is still required." : "The standalone P25 probe did not decode recognizable synchronization or frames. Native Trunk Recorder proof is still required.",
+            restartFailed ? $"trunk-recorder did not restart after P25 probe: {trRestartError}" : hasFrames ? "" : toolFailure ? "P25 probe command failed before RF evidence could be measured." : hasSync ? "The standalone probe found P25 synchronization but discarded the frames during error checking." : "The standalone probe did not decode P25 evidence.",
+            new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, demod, frameEvidence, syncEvidence, probeOverrides = ReadP25ProbeOverrides(request), staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
             new
             {
                 recommendation = restartFailed
@@ -5336,12 +5349,12 @@ public sealed class RfSurveyService
                     ? "Proceed to a longer stability probe or voice capture trial."
                     : toolFailure
                     ? "Fix the P25 probe command/tooling, then re-run the same control-channel probe before changing RF assumptions."
-                    : "Try alternate control channel, gain, antenna aim/polarization, source center, or SDR path checks. Do not proceed to voice capture until P25 frame evidence is present.",
+                    : "Continue to the bounded native Trunk Recorder proof before changing RF assumptions.",
                 followUps = hasFrames
                     ? new[] { "Run a stability-duration control-channel probe.", "Run a voice capture trial." }
                     : toolFailure
                     ? new[] { "Review the P25 probe log.", "Fix the command template or rendered arguments.", "Re-run the same control-channel probe." }
-                    : new[] { "Probe an alternate control channel.", "Try a gain sweep.", "Verify antenna aim and polarization.", "Verify source center, sample rate, and frequency correction." }
+                    : new[] { "Run the bounded native Trunk Recorder proof.", "Change RF assumptions only if native decode metrics also fail." }
             });
     }
 
@@ -8135,6 +8148,19 @@ public sealed class RfSurveyService
         foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (strongMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                return TrimOutput(line, 500);
+        }
+        return string.Empty;
+    }
+
+    private static string FindP25SynchronizationEvidence(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return string.Empty;
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.Contains("p25_dibit::set_fs_index", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("frame sync", StringComparison.OrdinalIgnoreCase))
                 return TrimOutput(line, 500);
         }
         return string.Empty;

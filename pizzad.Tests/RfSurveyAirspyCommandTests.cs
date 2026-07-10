@@ -239,6 +239,15 @@ public sealed class RfSurveyAirspyCommandTests
     }
 
     [Fact]
+    public void FindP25SynchronizationEvidence_ReportsSyncWithoutClaimingDecodedFrame()
+    {
+        const string output = "p25_dibit::set_fs_index(): fs_type=4, fs=aa8a0a008800\np25_framer::rx_sym() error check failed, frame discarded";
+
+        Assert.Contains("set_fs_index", InvokeFindP25SynchronizationEvidence(output), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(string.Empty, InvokeFindP25FrameEvidence(output));
+    }
+
+    [Fact]
     public void FindTrControlChannelReadinessLine_RequiresScopedDecodeMeasurement()
     {
         var log = "[other-site] freq: 773.781250 MHz Control Channel Message Decode Rate: 20/sec\n" +
@@ -359,6 +368,13 @@ public sealed class RfSurveyAirspyCommandTests
     {
         var method = typeof(RfSurveyService).GetMethod("FindP25FrameEvidence", BindingFlags.Static | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "FindP25FrameEvidence");
+        return (string)(method.Invoke(null, [output]) ?? string.Empty);
+    }
+
+    private static string InvokeFindP25SynchronizationEvidence(string output)
+    {
+        var method = typeof(RfSurveyService).GetMethod("FindP25SynchronizationEvidence", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "FindP25SynchronizationEvidence");
         return (string)(method.Invoke(null, [output]) ?? string.Empty);
     }
 

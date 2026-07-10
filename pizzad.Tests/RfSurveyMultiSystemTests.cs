@@ -1025,6 +1025,25 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public void ValidationSweep_NativeTrMetricsCanProveP25WhenStandaloneProbeIsInconclusive()
+    {
+        var profile = new RfSurveyProfileDto
+        {
+            Systems = [new("alpha", "Alpha", [100], [])],
+            ControlChannelsHz = [100]
+        };
+        var candidates = NewValidationCandidateArray(
+            NewValidationCandidate(100, 16, systemShortName: "alpha", p25Status: "failed", metricsStatus: "passed", voiceStatus: "failed", voiceSummary: "No traffic occurred."));
+        var method = typeof(RfSurveyService).GetMethod("BuildRfValidationSiteReadiness", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "BuildRfValidationSiteReadiness");
+
+        var readiness = ((System.Collections.IEnumerable)method.Invoke(null, [profile, candidates])!).Cast<object>().Single();
+
+        Assert.True((bool)readiness.GetType().GetProperty("Monitorable")!.GetValue(readiness)!);
+        Assert.Equal("voice_inconclusive", readiness.GetType().GetProperty("Stage")!.GetValue(readiness));
+    }
+
+    [Fact]
     public void AppliedSourcePlanSummary_ReportsSystemsAndSourceWindows()
     {
         var root = JsonNode.Parse("""
