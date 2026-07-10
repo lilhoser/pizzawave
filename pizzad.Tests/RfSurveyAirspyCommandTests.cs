@@ -185,7 +185,24 @@ public sealed class RfSurveyAirspyCommandTests
         var issues = ((System.Collections.IEnumerable)GetProperty(plan, "Issues")).Cast<string>().ToList();
 
         Assert.Empty(issues);
-        Assert.Equal([4162, 4173], measurements.Select(row => (int?)GetProperty(row, "ErrorHz")).ToArray());
+        Assert.Equal([4155, 4155], measurements.Select(row => (int?)GetProperty(row, "ErrorHz")).ToArray());
+    }
+
+    [Fact]
+    public void ReconcilePowerScanSourceMeasurements_PreservesSavedCorrectionWithStrongSignalOffset()
+    {
+        using var doc = JsonDocument.Parse("""{"sourceMeasurements":[{"sourceIndex":0,"sourceSerial":"A0","controlChannelHz":773781250,"gain":"21","sampleRateHz":6000000,"measuredSignalOffsetHz":4395,"snrDb":24.2,"confidence":1}]}""");
+        var profile = new RfSurveyProfileDto
+        {
+            Sources = [new RfSurveySourceDto(0, "airspy=A0", "A0", "Airspy", 771_931_250, 6_000_000, 3_600, "21")]
+        };
+
+        var plan = InvokeReconcilePowerScanSourceMeasurements(profile, doc.RootElement);
+        var measurement = ((System.Collections.IEnumerable)GetProperty(plan, "Measurements")).Cast<object>().Single();
+        var correction = ((System.Collections.IEnumerable)GetProperty(plan, "Corrections")).Cast<object>().Single();
+
+        Assert.Equal(3600, GetProperty(measurement, "ErrorHz"));
+        Assert.Contains("saved source correction", (string)GetProperty(correction, "Basis"), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

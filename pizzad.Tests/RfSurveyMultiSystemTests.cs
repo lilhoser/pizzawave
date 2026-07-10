@@ -836,6 +836,8 @@ public sealed class RfSurveyMultiSystemTests
             Assert.True(rootElement.GetProperty("audioStreaming").GetBoolean());
             Assert.Equal("north-bradley", system.GetProperty("shortName").GetString());
             Assert.Equal([769606250L], system.GetProperty("control_channels").EnumerateArray().Select(value => value.GetInt64()).ToArray());
+            Assert.Equal(config.TrunkRecorder.TalkgroupsPath, system.GetProperty("talkgroupsFile").GetString());
+            Assert.False(system.GetProperty("hideUnknownTalkgroups").GetBoolean());
             Assert.Equal(0, system.GetProperty("minDuration").GetInt32());
             Assert.Equal(0, system.GetProperty("minTransmissionDuration").GetInt32());
             Assert.True(system.GetProperty("callLog").GetBoolean());

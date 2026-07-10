@@ -2950,21 +2950,31 @@ public sealed class RfSurveyService
                     issues.Add($"Source {source.Index} has reliable Waterfall offsets spanning {spreadPpm:F2} PPM; one SDR crystal cannot use conflicting corrections.");
                     continue;
                 }
-                correctionPpm = WeightedMedianCorrectionPpm(reliable);
-                var savedDifference = Math.Abs(correctionPpm - savedPpm);
+                var observedCorrectionPpm = WeightedMedianCorrectionPpm(reliable);
+                var savedDifference = Math.Abs(observedCorrectionPpm - savedPpm);
                 if (source.ErrorHz != 0 && savedDifference > maximumSavedCorrectionDisagreementPpm)
                 {
-                    issues.Add($"Source {source.Index} Waterfall correction {correctionPpm:+0.00;-0.00;0.00} PPM conflicts with its saved correction {savedPpm:+0.00;-0.00;0.00} PPM.");
+                    issues.Add($"Source {source.Index} Waterfall correction {observedCorrectionPpm:+0.00;-0.00;0.00} PPM conflicts with its saved correction {savedPpm:+0.00;-0.00;0.00} PPM.");
                     continue;
                 }
-                basis = reliable.Count == 1
-                    ? "one strong Waterfall observation"
-                    : $"{reliable.Count} agreeing strong Waterfall observations";
+                if (source.ErrorHz == 0)
+                {
+                    correctionPpm = observedCorrectionPpm;
+                    basis = reliable.Count == 1
+                        ? "one strong Waterfall observation; no saved source correction"
+                        : $"{reliable.Count} agreeing strong Waterfall observations; no saved source correction";
+                }
+                else
+                {
+                    basis = $"saved source correction; {reliable.Count} strong Waterfall observation(s) retained as signal-offset evidence";
+                }
             }
 
             foreach (var row in rows)
             {
-                var correctionHz = (int)Math.Round(correctionPpm * row.ControlChannelHz / 1_000_000d, MidpointRounding.AwayFromZero);
+                var correctionHz = source.ErrorHz != 0
+                    ? source.ErrorHz
+                    : (int)Math.Round(correctionPpm * row.ControlChannelHz / 1_000_000d, MidpointRounding.AwayFromZero);
                 resolved.Add(row with { ErrorHz = correctionHz });
             }
             corrections.Add(new RfPowerSourceCorrection(
@@ -5863,6 +5873,8 @@ public sealed class RfSurveyService
             voiceSystem["minTransmissionDuration"] = 0;
             voiceSystem["callLog"] = true;
             voiceSystem["recordUUVCalls"] = true;
+            voiceSystem["hideUnknownTalkgroups"] = false;
+            voiceSystem["talkgroupsFile"] = _config.TrunkRecorder.TalkgroupsPath;
         }
         if (IsAirspySource(profileSource))
         {
