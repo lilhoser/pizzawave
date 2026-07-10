@@ -163,6 +163,16 @@ Accepted design:
   comparison, repeat with changed-context warnings, annotations, and copying
   successful settings into reviewed pending Setup changes. Historical evidence
   never changes live monitoring directly.
+- Preparation runs one read-only required-software check on its first open for
+  each applied Setup revision. A successful Apply & Resume that persists
+  changes invalidates the prior result; navigation, discard, and failed apply
+  do not. Failed checks expose Recheck. SDR Inventory and any generated or
+  changed configuration remain separate explicit operations.
+- Location context normally comes from the RadioReference jurisdiction attached
+  to the call's talkgroup, with the selected site's RadioReference geography as
+  fallback. Manual geographic boundaries are explicit overrides only when the
+  imported data is missing or incorrect. Legacy Monitored Areas are not treated
+  as RF coverage and are not silently retained as active location authority.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -298,6 +308,14 @@ Status: pending
   search, filter, compare, annotate, repeat, and copy successful settings into
   pending Setup changes; immutable history never applies directly to live
   monitoring.
+- 2026-07-10: Package 5 Preparation performs one read-only required-software
+  check per applied Setup revision on first open and offers Recheck after a
+  failed result. Successful Apply & Resume changes invalidate the result; SDR
+  access and configuration changes remain separate explicit actions.
+- 2026-07-10: Package 5 location context uses imported RadioReference talkgroup
+  jurisdiction first and selected-site geography as fallback. Manual geography
+  is an explicit correction for missing or inaccurate source data, rather than
+  an independent active-area list or an RF-coverage model.
 
 ## Deployment Log
 
