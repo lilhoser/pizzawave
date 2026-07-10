@@ -9,13 +9,13 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 repository discovery complete; operator interview
-  started before milestone 5A design or implementation
+- Current milestone: Package 5 operator interview in progress; RF validation
+  stage and terminology design accepted before milestone 5A implementation
 - Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: review the RF validation stage model and operator-facing
-  frequency-error terminology with the operator before changing behavior.
+- Next action: review the server-owned source-planning projection with the
+  operator before changing behavior.
 
 ## Working Rules
 
@@ -117,6 +117,17 @@ Discovery findings:
   runs, captures, and generated reports are not attached as first-class Setup
   evidence/activity records; the waterfall image report is generated only in
   the browser.
+
+Accepted design:
+
+- RF Validation will present one visible staged workflow: Preparation,
+  Spectrum Inspection, Control-Channel Proof, Source Coverage, Call and
+  Transcription Proof, and Verdict. Existing controls remain available inside
+  the applicable stages.
+- `Frequency correction` is the signed value saved to an SDR source. `Measured
+  signal offset` is the observed displacement in spectrum evidence. `Correction
+  change` is a trial value relative to the saved correction. PPM is derived
+  technical information rather than a separate editable authority.
 
 - [ ] Clarify RF validation stages and absolute error terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -227,6 +238,11 @@ Status: pending
   per-row Delete control.
 - 2026-07-09: Operator accepted Package 4 after live inspection of the
   task-based System workspace.
+- 2026-07-10: Package 5 RF Validation uses the accepted Preparation, Spectrum
+  Inspection, Control-Channel Proof, Source Coverage, Call and Transcription
+  Proof, and Verdict stages while retaining existing controls within those
+  stages. Operator-facing tuning terms distinguish saved frequency correction,
+  measured signal offset, and trial correction change; PPM is derived only.
 
 ## Deployment Log
 
