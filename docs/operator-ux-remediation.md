@@ -8,12 +8,13 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 2 - Talkgroups
-- Current milestone: Package 2 operator verification
+- Active package: 3 - Loading And Status
+- Current milestone: Package 3 discovery and design confirmation
 - Working branch: `codex/operator-ux-review`
-- Last deployed commit: `28a6daa`
-- Operator verification: Package 1 accepted
-- Next action: ask the operator to inspect Package 2 and confirm acceptance.
+- Last deployed commit: `8bafece`
+- Operator verification: Packages 1 and 2 accepted
+- Next action: audit the current loading, refresh, error, and connectivity state
+  implementation before proposing the first Package 3 milestone.
 
 ## Working Rules
 
@@ -55,17 +56,17 @@ Acceptance:
 
 ### 2. Talkgroups
 
-Status: in progress
+Status: complete
 
 - [x] Move one-time RR import provenance to the server.
 - [x] Replace full-catalog writes with scoped, paged mutations.
 - [x] Route category and TR-exclusion changes through Setup activity and apply
   state.
-- [ ] Deploy, verify, and obtain operator acceptance.
+- [x] Deploy, verify, and obtain operator acceptance.
 
 ### 3. Loading And Status
 
-Status: pending
+Status: in progress
 
 - [ ] Add page-local loading, refreshing, error, retry, and last-updated state.
 - [ ] Keep last-good data visible during refresh.
@@ -132,6 +133,8 @@ Status: pending
 - 2026-07-09: RR talkgroups import automatically once per selected RR system.
   Later updates require the operator to use that system's refresh control;
   refresh preserves operator policy and manual fields.
+- 2026-07-09: Operator accepted Package 2 after the pagination stabilization
+  and deployment-efficiency follow-up.
 
 ## Deployment Log
 
@@ -199,3 +202,7 @@ Status: pending
   clean ARM64 backend build and reinstall, compared with the prior 202-261
   second full path. Checked-in web source provenance and incremental TypeScript
   metadata allow fresh worktrees to reuse verified generated assets.
+- 2026-07-09: Operator accepted Package 2. Server-owned RR import provenance,
+  paged/scoped catalog operations, Setup activity and apply-state integration,
+  preserved operator policy, and stable pagination are the accepted baseline
+  for subsequent packages.
