@@ -9,12 +9,11 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 3 - Loading And Status
-- Current milestone: 3A - Top-level Loading And Monitoring Status
+- Current milestone: 3A deployed; awaiting operator inspection
 - Working branch: `codex/operator-ux-loading-status`
-- Last deployed commit: `8bafece`
+- Last deployed commit: `2c56be5`
 - Operator verification: Packages 1 and 2 accepted
-- Next action: deploy milestone 3A with the automatic helper, verify the live
-  retained-data/search/monitoring workflow, and request operator inspection.
+- Next action: operator inspection of milestone 3A before beginning 3B.
 
 ## Working Rules
 
@@ -68,7 +67,7 @@ Status: complete
 
 Status: in progress
 
-- [ ] 3A. Give Dashboard, call-category pages, Setup, and System a shared
+- [x] 3A. Give Dashboard, call-category pages, Setup, and System a shared
   retained-data refresh contract; separate monitoring state; scope automatic
   updates; and make search page-owned.
 - [ ] 3B. Apply the accepted refresh contract to Settings and specialized
@@ -179,6 +178,11 @@ Status: pending
   summaries use stale-while-refresh caching instead of holding concurrent UI
   connections open. The deployment script now fails on native build, archive,
   upload, or remote-deploy errors instead of reusing stale artifacts.
+- `2c56be5`: Package 3A deployed; Dashboard, call-category pages, Setup, and
+  System retain last-good data, expose page-local freshness/error/retry state,
+  use indefinite bounded backoff for temporary failures, and no longer mix
+  browser transport with Trunk Recorder monitoring. Search is page-owned and
+  automatic event refreshes are scoped to affected views.
 
 ## Verification Log
 
@@ -235,3 +239,17 @@ Status: pending
   paged/scoped catalog operations, Setup activity and apply-state integration,
   preserved operator policy, and stable pagination are the accepted baseline
   for subsequent packages.
+- 2026-07-09: Package 3A passed the production frontend build. The existing
+  backend suite is presently blocked before execution by five unchanged tests
+  that still call the Package 2-removed `TalkgroupCatalogService.SaveAsync`;
+  the automatic deployment's production backend build completed with zero
+  warnings and zero errors.
+- 2026-07-09: Package 3A deployed with the automatic helper. After two normal
+  startup connection retries, `/api/v1/health` reported healthy on the live
+  RPI with active Trunk Recorder data; Trunk Recorder was not restarted as a
+  separate verification action.
+- 2026-07-09: Live browser verification confirmed an active monitoring pill
+  with a fresh checked time, no persistent PizzaWave connection or REST/SSE
+  badge, page-local update times and Refresh actions on Dashboard, Setup, and
+  System, immediate local Dashboard filtering, delayed Police server search,
+  retained Police results while refreshing, and no browser console errors.
