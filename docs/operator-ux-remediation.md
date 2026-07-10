@@ -181,6 +181,14 @@ Accepted design:
   site, source, control channel, estimated duration, and Run action, followed by
   live progress and measured results. Sample rate, gain sequence, correction
   changes, and candidate limits remain available under Advanced settings.
+- Every RF Validation stage uses the same concise hierarchy: one-sentence goal,
+  current status and single next action, primary working surface, measured
+  results/evidence, and collapsed advanced or technical detail. Preparation
+  collapses healthy tooling, Spectrum leads with capture and retained
+  candidates, Source Coverage leads with the recommended plan and exceptions,
+  Call and Transcription Proof exposes only the next eligible proof action, and
+  Verdict leads with the decision, decisive blockers, evidence, and next step.
+  The repeated six-stage status block becomes a compact progress stepper.
 
 - [x] Clarify RF validation stages and frequency-correction terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -332,6 +340,10 @@ Status: pending
   progress, and measured results. Sample rate, gain, correction changes, and
   candidate limits remain available as advanced settings rather than competing
   with the primary task.
+- 2026-07-10: Package 5 RF Validation subpages share a concise goal, status and
+  next-action, primary-task, evidence, and collapsed-details hierarchy. The
+  stage status block becomes a compact stepper and healthy or advanced detail
+  no longer competes with the operator's next task.
 
 ## Deployment Log
 
