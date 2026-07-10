@@ -3472,14 +3472,18 @@ public sealed class RfSurveyService
             {
                 SystemShortName = candidateSystem.ShortName,
                 SystemShortNames = [candidateSystem.ShortName],
-                ControlChannelsHz = candidateSystem.ControlChannelsHz,
+                ControlChannelsHz = controlChannelHz.HasValue && controlChannelHz.Value > 0
+                    ? [controlChannelHz.Value]
+                    : candidateSystem.ControlChannelsHz,
                 VoiceFrequenciesHz = candidateSystem.VoiceFrequenciesHz
             };
         }
 
-        var candidateControlChannels = candidateSystem?.ControlChannelsHz is { Count: > 0 }
-            ? candidateSystem.ControlChannelsHz
-            : controlChannelHz.HasValue && controlChannelHz.Value > 0 ? [controlChannelHz.Value] : scoped.ControlChannelsHz;
+        var candidateControlChannels = controlChannelHz.HasValue && controlChannelHz.Value > 0
+            ? [controlChannelHz.Value]
+            : candidateSystem?.ControlChannelsHz is { Count: > 0 }
+                ? candidateSystem.ControlChannelsHz
+                : scoped.ControlChannelsHz;
 
         return scoped with
         {
@@ -5848,8 +5852,7 @@ public sealed class RfSurveyService
         var controlChannels = system["control_channels"] as JsonArray ?? system["controlChannels"] as JsonArray;
         if (controlChannels != null && candidate.ControlChannelHz > 0)
         {
-            var existing = controlChannels.Select(ReadLongNode).Where(value => value > 0 && value != candidate.ControlChannelHz).ToList();
-            system["control_channels"] = new JsonArray(new[] { candidate.ControlChannelHz }.Concat(existing).Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
+            system["control_channels"] = new JsonArray(JsonValue.Create(candidate.ControlChannelHz));
             system.Remove("controlChannels");
         }
         PatchCallstreamStreams(root, string.IsNullOrWhiteSpace(systemName) ? [] : [systemName], changes);
