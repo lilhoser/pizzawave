@@ -6603,8 +6603,9 @@ function WaterfallStep({
       const positionedPeaks = positionSpectrumPeaks(consistentPeaks, spectrumScaleRef.current, axis);
       const nextCcSignalRows = buildWaterfallCcSignalRows(systems, controlChannelOptions, smoothed, frame, axis, ccSignalHistoryRef.current);
       const nextOtherDetectedCcRows = updateVisibleOtherDetectedCcRows(otherDetectedCcHistoryRef.current, positionedPeaks, systems, controlChannelOptions);
+      const nextSpectrumSuspectedCcRows = activeSpectrumSuspectedRows(otherDetectedCcHistoryRef.current);
       spectrumMarkersRef.current = showControlChannelLines
-        ? buildSpectrumMarkers(nextCcSignalRows, nextOtherDetectedCcRows, axis)
+        ? buildSpectrumMarkers(nextCcSignalRows, nextSpectrumSuspectedCcRows, axis)
         : [];
       const now = Date.now();
       if (now - lastWaterfallTableUiAtRef.current >= 750) {
@@ -6616,7 +6617,7 @@ function WaterfallStep({
         controlChannelsHz: controlChannelOptions,
         showControlChannels: showControlChannelLines,
         peaks: positionedPeaks,
-        suspectedControlChannels: nextOtherDetectedCcRows
+        suspectedControlChannels: nextSpectrumSuspectedCcRows
       });
       drawWaterfallFrame(canvasRef.current, smoothWaterfallBins(frame.powersDb), waterfallScaleRef.current);
     }
@@ -7834,6 +7835,13 @@ function updateVisibleOtherDetectedCcRows(history: Map<string, WaterfallDetected
     .filter(track => track.promoted && track.displayMisses <= retentionMisses)
     .sort((left, right) => right.snrDb - left.snrDb)
     .slice(0, 8);
+}
+
+function activeSpectrumSuspectedRows(history: Map<string, WaterfallDetectedCcTrack>) {
+  return [...history.values()]
+    .filter(track => track.displayHits > 0 && track.displayMisses <= 2)
+    .sort((left, right) => left.frequencyHz - right.frequencyHz)
+    .slice(0, 16);
 }
 
 function updateConsistentSpectrumPeaks(history: Map<string, SpectrumPeakTrack>, frame: NonNullable<RfSurveyWaterfallStatus["frame"]>, powers: number[], axis: SpectrumAxis) {
