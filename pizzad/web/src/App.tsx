@@ -7334,12 +7334,14 @@ function buildWaterfallCcSignalRows(systems: RfSurveySystem[], fallbackControlCh
   const uniqueTargets = new Map<string, (typeof targets)[number]>();
   for (const target of targets)
     uniqueTargets.set(`${target.systemShortName}:${target.frequencyHz}`, target);
-  const currentKeys = new Set(uniqueTargets.keys());
+  const visibleTargets = [...uniqueTargets.values()]
+    .filter(target => target.frequencyHz >= axis.startHz && target.frequencyHz <= axis.startHz + axis.sampleRate);
+  const currentKeys = new Set(visibleTargets.map(target => `${target.systemShortName}:${target.frequencyHz}`));
   for (const key of [...history.keys()]) {
     if (!currentKeys.has(key))
       history.delete(key);
   }
-  return [...uniqueTargets.values()].map(target => {
+  return visibleTargets.map(target => {
     const key = `${target.systemShortName}:${target.frequencyHz}`;
     const nearest = nearestPeakAroundFrequency(target.frequencyHz, powers, frame, axis, CONTROL_CHANNEL_MATCH_TOLERANCE_HZ);
     const previous = history.get(key);
