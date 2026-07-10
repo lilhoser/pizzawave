@@ -6252,8 +6252,9 @@ public sealed class RfSurveyService
             var artifactRoot = Path.GetFullPath(session.ArtifactPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (!fullPath.StartsWith(artifactRoot, StringComparison.OrdinalIgnoreCase))
                 continue;
-            var bytes = await File.ReadAllBytesAsync(fullPath, ct);
-            var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var file = new FileInfo(fullPath);
+            await using var stream = File.OpenRead(fullPath);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
             var row = new SetupRfEvidenceDto(
                 $"rfe-{Guid.NewGuid():N}",
                 session.Id,
@@ -6268,7 +6269,7 @@ public sealed class RfSurveyService
                 experiment.FinishedAtUtc ?? DateTime.UtcNow,
                 MediaTypeForPath(fullPath),
                 Path.GetRelativePath(session.ArtifactPath, fullPath),
-                bytes.LongLength,
+                file.Length,
                 hash,
                 DateTime.UtcNow);
             await _database.AddSetupRfEvidenceAsync(row, ct);
