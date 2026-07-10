@@ -7043,8 +7043,8 @@ function buildWaterfallCandidateRows(
       targetFrequencyHz: Math.round(row.frequencyHz),
       detectedFrequencyHz: detected,
       sweepFrequencyHz: Math.round(row.frequencyHz),
-      snrDb: Number.isFinite(row.snrDb) ? row.snrDb : Number.NEGATIVE_INFINITY,
-      offsetHz: Number.isFinite(row.offsetHz) ? Math.round(row.offsetHz) : 0,
+      snrDb: detected > 0 && Number.isFinite(row.snrDb) ? row.snrDb : Number.NaN,
+      offsetHz: detected > 0 && Number.isFinite(row.offsetHz) ? Math.round(row.offsetHz) : Number.NaN,
       confidence: clamp01(row.confidence),
       hits: Math.max(1, Math.round(row.confidence * 20)),
       identifyPeak,
@@ -7396,6 +7396,9 @@ function nearestPeakAroundFrequency(frequencyHz: number, powers: number[], frame
   const end = Math.min(powers.length - 1, centerIndex + radius);
   for (let index = start; index <= end; index++) {
     const value = powers[index];
+    const candidateFrequencyHz = axis.startHz + (index + 0.5) * binWidth;
+    if (Math.abs(candidateFrequencyHz - frequencyHz) > searchHz)
+      continue;
     if (Number.isFinite(value) && value > bestPower) {
       bestPower = value;
       bestIndex = index;
