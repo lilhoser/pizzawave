@@ -687,3 +687,20 @@ Status: pending
   rerun, desired version `1783696822034`, applied hash `e95b8867...`, the two
   source serials/corrections, selected systems, and pending changes are
   unchanged.
+- 2026-07-10: Operator rerun `rfx-20260710161343-608837722ea` reached native
+  proof and exposed a single-channel isolation defect. ETV passed standalone
+  P25, averaged 22 messages/second, and captured one real audio call, but the
+  temporary candidate config retained ETV's alternate control channels and
+  introduced retunes that produced 20% zero-decode samples. The 855.587500 MHz
+  Tylertown candidate was blocked because that same config construction also
+  retained 857.837500 MHz outside the temporary source window.
+- 2026-07-10: Candidate-isolation fix `f728256` makes both the proof profile and
+  generated temporary Trunk Recorder system contain exactly the candidate
+  control channel. Alternate channels can no longer create proof-window
+  retunes or source-coverage blockers. The focused 22-test multi-site suite and
+  all 419 backend tests passed. Automatic backend deployment completed in 88.2
+  seconds with zero build warnings or errors. Live health was `ok`; PizzaWave
+  and Trunk Recorder were active. No new scan or Setup mutation was performed:
+  latest evidence remains the operator's rerun, desired version
+  `1783696822034`, applied hash `e95b8867...`, and both source serials and
+  corrections are unchanged.
