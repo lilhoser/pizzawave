@@ -1,6 +1,6 @@
 # Operator UX Remediation
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 This is the canonical execution tracker for the operator-facing PizzaWave
 architecture review. Read it before beginning work and update it before ending
@@ -9,13 +9,13 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 operator interview in progress; RF validation,
-  source-planning, and branched RF-path designs accepted before implementation
+- Current milestone: Package 5 operator interview in progress; core workflow,
+  source-planning, RF-path, and evidence designs accepted before implementation
 - Working branch: `codex/operator-ux-setup-ux`
 - Last deployed commit: `54c8fe3`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: review how RF captures and reports attach to Setup evidence and
-  activity with the operator before changing behavior.
+- Next action: review the operator-requested named experiment and evidence-trail
+  viewer before changing behavior.
 
 ## Working Rules
 
@@ -145,6 +145,16 @@ Accepted design:
   duplicate SDR endpoints, and impossible paths while allowing incomplete
   drafts. Existing linear chains migrate to one branch. Multiple antennas,
   combiners, switches, and rejoining branches are outside Package 5.
+- Each RF run has a stable run identity and append-only started and terminal
+  activity events that the UI groups as one run. Terminal events reference
+  first-class evidence records indexed in the database and stored in the RF
+  artifact folder. Evidence records identify the site, stage, experiment,
+  source hardware, RF-path and source-plan revisions, capture window, media
+  type, size, and content hash. Measurements are immutable; operator notes are
+  separate annotations. The server owns durable waterfall images and reports.
+  Compact measurements, representative images, logs, configuration comparisons,
+  reports, and required audio persist by default. Raw IQ retention is explicit
+  opt-in with size and retention warnings.
 
 - [ ] Clarify RF validation stages and absolute error terminology.
 - [ ] Make source planning a server-owned, reviewable projection.
@@ -270,6 +280,11 @@ Status: pending
   detected SDR hardware identities or explicit unused outputs. Missing devices
   are not silently rebound. Multiple antennas, combiners, switches, and branch
   rejoining are deferred.
+- 2026-07-10: Package 5 RF runs create grouped append-only Setup activity and
+  first-class evidence metadata linked to immutable artifact files. Reports and
+  waterfall images are server-owned. Compact evidence and required audio are
+  retained by default; large raw IQ capture retention requires an explicit
+  operator choice with storage guidance.
 
 ## Deployment Log
 
