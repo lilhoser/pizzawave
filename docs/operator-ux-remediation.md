@@ -1,6 +1,6 @@
 # Operator UX Remediation
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This is the canonical execution tracker for the operator-facing PizzaWave
 architecture review. Read it before beginning work and update it before ending
@@ -9,14 +9,94 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 5 - Setup UX
-- Current milestone: Package 5 RF Sweep reliability remediation deployed and
-  verified; awaiting operator rerun and inspection
+- Current milestone: Package 5 implementation and fault recovery deployed;
+  final operator end-to-end acceptance and package closure remain
 - Working branch: `codex/operator-ux-setup-ux`
-- Last deployed commit: `5b37ac7`
+- Last deployed code commit: `60a566f`
+- Latest handoff commit before this update: `0d7328a`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
-- Next action: operator reruns Control-Channel Proof with the retained
-  source-bound measurements and verifies per-SDR correction reconciliation,
-  carrier-local RF evidence, and post-readiness TR proof timing.
+- Next action: verify monitoring status has advanced from post-restart stale to
+  active, perform one concise end-to-end review of the applied ETV Raymond plus
+  Entergy Jackson Setup, then record operator acceptance or the exact remaining
+  defect. Do not rerun Tylertown as a prerequisite for closure.
+
+## Package 5 Final Handoff
+
+Package 5 code is implemented, tested, deployed, and exercised against live
+hardware. The package is not yet marked operator-accepted only because the
+operator ended the session immediately after monitoring recovery. There is no
+known code change queued or uncommitted at this handoff.
+
+Final live state from 2026-07-10:
+
+- Desired Setup version `1783704270742` selects ETV Raymond Hinds and Entergy
+  Jackson Hinds on two serial-pinned Airspy Minis.
+- Source 0 is `637862DC2E3A19D7`, center 771.931250 MHz, 6 MHz sample rate,
+  gain 21, saved correction +3600 Hz. Source 1 is `637862DC2F5C0CD7`, center
+  855.287500 MHz, 6 MHz sample rate, gain 21, saved correction +4155 Hz.
+- RF Sweep `rfx-20260710172440-cd3af2279a6` passed both selected sites: ETV
+  Raymond at 773.781250 MHz and Entergy Jackson at 855.287500 MHz.
+- Apply & Resume initially faulted because the generated Jackson system pointed
+  at nonexistent `talkgroups.jackson-ms-hinds-ms.csv`. Commit `60a566f` now
+  resolves site RadioReference SID ownership through the imported catalog and
+  rejects a draft before install if any referenced talkgroup file is missing.
+- The same operator-selected plan was regenerated and applied without changing
+  site, RF, source, gain, center, or correction choices. Applied hash is
+  `4e70205f79b1aba9e8c8688ca36fae03da7a313e507babd0b14ada613b3817df`.
+  Live config uses `talkgroups.mswin.csv` for ETV and
+  `talkgroups.entergy.csv` for Jackson.
+- Trunk Recorder was active after recovery and immediately decoded ETV RFSS
+  002/site 008/system 2AD and Jackson RFSS 002/site 080/system 64F. The Setup
+  UI still said `stale` at the last read because its live-activity timer had not
+  yet received a fresh event; this is the first item to recheck, not evidence
+  that the config remained faulted.
+- Tylertown was correctly removed from the selected plan after genuine RF
+  failure. Its current RadioReference Entergy control channels were weak at the
+  Hinds installation, neither standalone demodulator decoded P25, and the
+  isolated native 855.587500 MHz trial stayed at 0 messages/second. Do not
+  weaken validation or force that remote site to pass.
+
+Implemented Package 5 outcomes to preserve:
+
+- RF Validation uses Preparation, Spectrum Inspection, Control-Channel Proof,
+  Source Coverage, Call and Transcription Proof, and Verdict with concise
+  operator guidance and standardized frequency-correction terminology.
+- Source planning is server-owned and reviewable. Apply & Resume is the only
+  live-config write boundary.
+- Hardware & RF Path is one simple ordered physical-hardware list. The operator
+  explicitly rejected upstream branches, trees, and SDR endpoint topology.
+- Waterfall/RF evidence is source- and serial-bound. Measured signal offset is
+  evidence and never silently replaces a saved SDR crystal correction.
+- Spectrum/waterfall plots share one frequency geometry; selected-site control
+  channels are red, persistent unidentified suspects are yellow, popup content
+  fits, and the candidate table has stable alphabetical ordering.
+- Candidate identity is not inferred from frequency-only matches across the
+  statewide catalog. Candidates are limited to the active SDR span and require
+  P25 evidence before acquiring a site identity.
+- RF proof isolates one control channel, permits native Trunk Recorder proof
+  after an inconclusive standalone OP25 probe, waits for scoped readiness before
+  timing metrics, and uses exact saved per-device corrections.
+- Setup owns append-only RF activity/evidence and the cross-session Experiments
+  & Evidence viewer. Preparation tooling checks are once per applied revision
+  with explicit Recheck after failure.
+- Location authority is derived from selected sites and talkgroup jurisdiction;
+  legacy Monitored Area records are compatibility data, not active Setup
+  authority and are not shown as editable Setup locations.
+
+Remaining closure work only:
+
+1. Read `/api/v1/health` and `/api/v1/setup/site`; confirm Trunk Recorder is no
+   longer faulted and the applied ETV/Jackson hash and desired version above are
+   unchanged. Do not restart Trunk Recorder merely to verify it.
+2. Ask the operator to inspect Setup once end to end, especially Apply & Resume,
+   Activity Log, Call and Transcription Proof, and Verdict. Preserve current
+   controls and wording unless the operator identifies a concrete defect.
+3. If monitoring is healthy and the operator accepts the workflow, change the
+   Package 5 status below to `complete and operator-accepted` and record the
+   acceptance in the dated log. Package 6 may then begin.
+4. If monitoring is still stale but systemd is active and scoped decode lines
+   continue, diagnose the live-activity status boundary separately; do not
+   alter the validated source plan or catalog ownership fix.
 
 ## Working Rules
 
@@ -95,7 +175,7 @@ Status: complete and operator-accepted
 
 ### 5. Setup UX
 
-Status: discovery complete; operator interview in progress
+Status: implementation complete and deployed; final operator acceptance pending
 
 Discovery findings:
 
