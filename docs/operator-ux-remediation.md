@@ -11,7 +11,7 @@ work so that progress does not depend on conversation history.
 - Active package: 5 - Setup UX
 - Current milestone: Package 5 implementation and fault recovery deployed;
   final operator end-to-end acceptance and package closure remain
-- Working branch: `codex/operator-ux-setup-ux`
+- Continuation branch: `main` after the final Package 5 integration
 - Last deployed code commit: `60a566f`
 - Latest handoff commit before this update: `0d7328a`
 - Operator verification: Packages 1, 2, 3, and 4 accepted
@@ -97,6 +97,72 @@ Remaining closure work only:
 4. If monitoring is still stale but systemd is active and scoped decode lines
    continue, diagnose the live-activity status boundary separately; do not
    alter the validated source plan or catalog ownership fix.
+
+### 2026-07-11 Operational Follow-Up
+
+This context was collected after the Package 5 worker handoff and must travel
+with it. It is diagnostic evidence, not a request to alter the validated source
+plan.
+
+- ETV Raymond was stable at approximately 39-40 control-channel messages per
+  second until 2026-07-10 19:13:20 EDT. It then fell through 26, 13, 11, 6,
+  and 5 messages per second. At 19:13:38 it began retuning among 773.031250,
+  773.531250, 773.281250, and 773.781250 MHz. Entergy remained near 38-40
+  messages per second at the same time.
+- Trunk Recorder remained one continuous process at the onset. There was no
+  source reopen, service restart, USB disconnect/reset, libusb transfer error,
+  overcurrent event, or Airspy-open failure in the available logs. ETV voice
+  tuning errors remained roughly +400 to +1100 Hz, which does not support a
+  large temperature-driven oscillator shift.
+- The operator manually rebooted the RPI around 2026-07-11 00:54 EDT. After
+  reboot, ETV averaged about 11.92 messages per second with a 34.45% zero rate,
+  approximately 2,367 retunes, 852 calls, 49 no-transmission calls, and no
+  source-coverage failures in the inspected overnight window. Entergy showed
+  no decode because the applied config retained only 854.062500 MHz while the
+  strong learned pre-reboot alternate had been 855.662500 MHz. Treat that as
+  control-channel evidence to review, not permission to mutate Setup silently.
+- A Data-only Reset was run around 2026-07-11 07:48 EDT. It preserved the
+  applied TR config hash `e95b8867...`, left ingestion paused, and removed the
+  Qdrant collection, which consequently returned 404 until normal reset
+  recovery/recreation. Much pre-reset operational history and the previous
+  boot's volatile kernel journal are no longer available.
+- Current hardware checks after reboot found both Airspy Minis enumerated at
+  480 Mbps on separate USB 2 root buses. Kernel USB autosuspend is disabled,
+  Raspberry Pi temperature was approximately 56-57 C, and
+  `vcgencmd get_throttled` returned `0x0`. These observations do not prove the
+  Airspy enclosure temperature stayed within its rated range before reboot,
+  because the Airspy exposes no temperature telemetry.
+- The evidence does not show an Airspy physically going offline at 19:13. The
+  failure is more consistent with an ETV-specific RF path, interference, site
+  behavior, or one receiver's analog front end than a host-wide USB or thermal
+  event. A future controlled diagnosis should swap receiver serials or RF
+  branches one variable at a time and persist USB/thermal telemetry across
+  boots.
+- A separate live software defect was observed around 07:52 and 07:53 EDT:
+  PizzaWave stopped Trunk Recorder, ran `airspy_info`, and restarted Trunk
+  Recorder. This matches `SetupJobService.DetectSdrsAsync`, which performs
+  disruptive inventory by design. No contemporaneous
+  `/api/v1/setup/sdrs` request appeared in HTTP logs, so an in-process RF
+  experiment or stale background operation is the likely caller but is not yet
+  proven. Inventory must not interrupt monitoring unless an explicit disruptive
+  Setup action owns the stop/restart boundary.
+- The same inspection found a Setup request storm, including roughly 680
+  `/api/v1/setup/status` requests in two minutes and approximately 494-496
+  requests to several general endpoints in a 70-second slice. The status route
+  itself does not run `airspy_info`, but the polling flood is a distinct
+  frontend/session-lifecycle defect worth resolving after Package 5 acceptance.
+
+Continuation order on the next machine:
+
+1. Pull `origin/main` and confirm a clean worktree before doing any work.
+2. Check post-reset health, ingestion state, Qdrant collection recovery, and
+   current TR decode/retune behavior without restarting services merely to
+   inspect them.
+3. Complete the concise Package 5 operator acceptance pass described above.
+4. Investigate disruptive SDR inventory ownership and the Setup polling storm
+   as separate defects. Do not conflate either with the original 19:13 signal
+   loss without new evidence.
+5. Once Package 5 is accepted, update this tracker and begin Package 6.
 
 ## Working Rules
 
