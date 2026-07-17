@@ -348,6 +348,8 @@ public sealed record SetupSdrDetectionDto(
     string RawOutput,
     string Message);
 
+public sealed record SetupSdrDetectionRequest(bool Confirmed = false);
+
 public sealed record SetupTalkgroupImportSourceRequest(string RadioReferenceSid, string? SystemShortName = null);
 
 public sealed record SetupTalkgroupSyncRequest(
@@ -1801,6 +1803,10 @@ public sealed record RfSurveyTrActionResultDto(
     string RestorePath,
     string ServiceOutput);
 
+public sealed record RfSurveyApplySourceDraftResponseDto(
+    RfSurveyTrActionResultDto Result,
+    SiteSetupDto Setup);
+
 public sealed record RfSurveyCandidateRequest(
     string TrialType = "control_channel",
     long? ControlChannelHz = null,
@@ -1824,7 +1830,8 @@ public sealed record RfSurveyRunCaptureTrialRequest(
     int DurationSeconds = 300);
 
 public sealed record RfSurveyApplySourceDraftRequest(
-    string ConfigJson,
+    long ExpectedVersion,
+    string DraftHash,
     bool RestartTr = true,
     bool PreserveRfValidationEvidence = true);
 
@@ -1839,6 +1846,8 @@ public sealed record RfSurveyConfigDraftDto(
     string DraftPath,
     string ConfigJson,
     string LiveConfigJson,
+    long DesiredVersion,
+    string DraftHash,
     RfSurveyConfigDraftSummaryDto Summary);
 
 public sealed record RfSurveyCaptureTrialResultDto(

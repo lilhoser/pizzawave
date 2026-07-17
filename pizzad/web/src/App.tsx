@@ -7,7 +7,7 @@ import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
-import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -190,6 +190,7 @@ function App() {
   const pageRef = useRef<Page>(page);
   const rangeHoursRef = useRef(rangeHours);
   const lastStatusRefreshAtRef = useRef(0);
+  const lastSummaryRefreshAtRef = useRef(0);
   const lastPageRefreshAtRef = useRef(0);
   const lastSetupStatusRefreshAtRef = useRef(0);
   const setupStatusRef = useRef<SetupStatus | null>(null);
@@ -295,7 +296,7 @@ function App() {
     }
   }
 
-  const refreshStatusData = useCallback(async () => {
+  const refreshMonitoringData = useCallback(async () => {
     if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
       return;
     let setup = setupStatusRef.current;
@@ -303,7 +304,6 @@ function App() {
     const shouldRefreshSetupStatus =
       !setup ||
       !setup.completed ||
-      pageRef.current === "setup" ||
       now - lastSetupStatusRefreshAtRef.current >= 60_000;
     if (shouldRefreshSetupStatus) {
       setup = await api.request<SetupStatus>("/api/v1/setup/status");
@@ -316,9 +316,11 @@ function App() {
     const healthStatus = await api.request<EngineHealth>("/api/v1/health");
     setEngineHealth(healthStatus);
     setMonitoringCheckedAt(Date.now());
-    if (!setup.completed) {
+  }, []);
+
+  const refreshSummaryData = useCallback(async () => {
+    if (!setupStatus?.completed)
       return;
-    }
 
     const [jobRows, summary, profiles, alertRows, alertConfig, cpu, recommendations] = await Promise.all([
       api.request<Job[]>("/api/v1/jobs"),
@@ -340,7 +342,7 @@ function App() {
     const latestActiveAlert = alertRows.find(alert => alert.active !== false && !alert.notificationSuppressed);
     if (latestActiveAlert && autoplayAllows(alertConfig.values ?? alertConfig, "alert"))
       playCallAudio(latestActiveAlert.callId, "alert", undefined, alertPlaybackLabel(latestActiveAlert));
-  }, [rangeHours]);
+  }, [rangeHours, setupStatus?.completed]);
   const currentSearch = pageSearches[page] ?? "";
   useEffect(() => {
     if (!categories.includes(page as any)) return;
@@ -349,14 +351,26 @@ function App() {
   }, [currentSearch, page]);
 
   const statusResource = usePersistentRefresh({
-    key: `shared-status|${rangeHours}`,
+    key: "monitoring-status",
     enabled: true,
     load: async () => {
       lastStatusRefreshAtRef.current = Date.now();
-      await refreshStatusData();
+      await refreshMonitoringData();
       return true;
     }
   });
+  const summaryResource = usePersistentRefresh({
+    key: `operational-summary|${rangeHours}`,
+    enabled: setupStatus?.completed === true,
+    load: async () => {
+      lastSummaryRefreshAtRef.current = Date.now();
+      await refreshSummaryData();
+      return true;
+    }
+  });
+  const refreshSharedStatus = useCallback(async () => {
+    await Promise.all([statusResource.refresh(), summaryResource.refresh()]);
+  }, [statusResource.refresh, summaryResource.refresh]);
   const dashboardResource = usePersistentRefresh({
     key: `dashboard|${rangeHours}`,
     enabled: page === "dashboard" && setupStatus?.completed !== false,
@@ -460,6 +474,7 @@ function App() {
     const events = new EventSource("/api/v1/events/stream");
     let connectedOnce = false;
     let statusTimer = 0;
+    let summaryTimer = 0;
     let pageTimer = 0;
     const scheduleStatus = (delayMs: number) => {
       if (pageRef.current === "setup" && setupWaterfallActiveRef.current)
@@ -469,6 +484,14 @@ function App() {
       delayMs = Math.max(delayMs, elapsed >= 5_000 ? 0 : 5_000 - elapsed);
       statusTimer = window.setTimeout(() => {
         void statusResource.refresh();
+      }, delayMs);
+    };
+    const scheduleSummary = (delayMs: number) => {
+      window.clearTimeout(summaryTimer);
+      const elapsed = Date.now() - lastSummaryRefreshAtRef.current;
+      delayMs = Math.max(delayMs, elapsed >= 30_000 ? 0 : 30_000 - elapsed);
+      summaryTimer = window.setTimeout(() => {
+        void summaryResource.refresh();
       }, delayMs);
     };
     const schedulePage = (delayMs: number) => {
@@ -484,17 +507,20 @@ function App() {
     };
     const refreshCallDataSoon = () => {
       scheduleStatus(900);
+      scheduleSummary(3000);
       if (pageRef.current === "dashboard" || categories.includes(pageRef.current as any))
         schedulePage(3000);
     };
     const refreshDashboardData = () => {
       scheduleStatus(500);
+      scheduleSummary(900);
       if (pageRef.current === "dashboard")
         schedulePage(900);
     };
     events.addEventListener("connected", () => {
       if (connectedOnce) {
         scheduleStatus(0);
+        scheduleSummary(0);
         if (pageRef.current !== "settings")
           schedulePage(0);
       }
@@ -514,14 +540,15 @@ function App() {
     });
     events.addEventListener("alert_matched", refreshDashboardData);
     events.addEventListener("summary_updated", refreshDashboardData);
-    events.addEventListener("job_updated", () => scheduleStatus(900));
+    events.addEventListener("job_updated", () => { scheduleStatus(900); scheduleSummary(900); });
     events.addEventListener("health_updated", () => scheduleStatus(900));
     return () => {
       window.clearTimeout(statusTimer);
+      window.clearTimeout(summaryTimer);
       window.clearTimeout(pageTimer);
       events.close();
     };
-  }, [load, statusResource.refresh]);
+  }, [load, statusResource.refresh, summaryResource.refresh]);
   const nav = useMemo(() => ["dashboard", ...categories, "setup", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
@@ -880,10 +907,10 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           setupWaterfallActiveRef.current = value.toLowerCase().includes("waterfall");
           setSetupTrOperation(value);
           if (!value)
-            void statusResource.refresh();
+            void refreshSharedStatus();
         }} /></div>}
         {setupStatus?.completed && page === "system" && <div className="refresh-page-shell">
-          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={statusResource.refresh} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onLiveResources={updateLiveCpuSnapshot} onOpenSetup={goSetup} onOpenIncident={incidentId => {
+          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={refreshSharedStatus} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onLiveResources={updateLiveCpuSnapshot} onOpenSetup={goSetup} onOpenIncident={incidentId => {
             setFocusedIncidentId(incidentId);
             setFocusedHashTarget(`incident-${incidentId}`);
             setDashboardMode("incidents");
@@ -896,7 +923,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         </div>}
         {setupStatus?.completed && page === "settings" && <div className="refresh-page-shell">
           <SettingsLoadNotice state={settingsResource.state} hasData={Object.keys(settingsSections).length > 0} dirty={settingsDirty} onReload={settingsResource.refresh} />
-          {Object.keys(settingsSections).length > 0 && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={async () => { await statusResource.refresh(); }} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} onDirtyChange={setSettingsDirty} />}
+          {Object.keys(settingsSections).length > 0 && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={refreshSharedStatus} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} onDirtyChange={setSettingsDirty} />}
         </div>}
       </main>
       {!inSetup && <footer className="statusbar">
@@ -1672,17 +1699,13 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     queueRfPathSave(rfPathRef.current);
   }
   async function runSdrInventory() {
+    if (!confirmAction("Pause monitoring for SDR inventory?", "This action stops trunk-recorder briefly, inventories connected receivers, and starts monitoring again. It will not change saved source selections.")) return;
     setSdrBusy(true);
     setSdrMessage("");
     try {
-      const result = await api.request<SetupSdrDetection>("/api/v1/setup/sdrs");
+      const result = await api.request<SetupSdrDetection>("/api/v1/setup/sdrs", { method: "POST", body: JSON.stringify({ confirmed: true }) });
       setSdrDetection(result);
-      const detectedSources = setupSourcesFromSdrDetection(setup, result);
-      if (detectedSources.length) {
-        const selectedSourceIndexes = detectedSources.map(source => source.index);
-        await onSave({ sources: detectedSources, selectedSourceIndexes }, "sources");
-      }
-      setSdrMessage(result.message);
+      setSdrMessage(`${result.message} Review the detected devices before using them as saved sources.`);
     } catch (error) {
       setSdrMessage(error instanceof Error ? error.message : "SDR inventory failed.");
     } finally {
@@ -1693,7 +1716,13 @@ function SiteSetupHardwareSection({ setup, saveState, onSave }: { setup: SiteSet
     <div className="site-setup-hardware-inventory">
       <div className="setup-job-head">
         <div><strong>SDR hardware</strong><small>Detect connected receivers before documenting or validating the RF path.</small></div>
-        <button type="button" className="primary" disabled={sdrBusy} onClick={() => void runSdrInventory()}>{sdrBusy ? "Running..." : sdrDetection ? "Rerun SDR Inventory" : "Run SDR Inventory"}</button>
+        <div className="rf-primary-actions">
+          <button type="button" className="primary" disabled={sdrBusy} onClick={() => void runSdrInventory()}>{sdrBusy ? "Monitoring paused; inspecting..." : sdrDetection ? "Rerun SDR Inventory" : "Pause Monitoring & Run SDR Inventory"}</button>
+          {sdrDetection && <button type="button" disabled={sdrBusy || sdrDetection.devices.length === 0} onClick={() => {
+            const detectedSources = setupSourcesFromSdrDetection(setup, sdrDetection);
+            void onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
+          }}>Use Detected SDRs</button>}
+        </div>
       </div>
       {sdrMessage && <span className={sdrMessage.toLowerCase().includes("fail") || sdrMessage.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{sdrMessage}</span>}
       {sdrDetection && <SetupSdrInventorySummary detection={sdrDetection} />}
@@ -1860,13 +1889,8 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
     await runExperiment("control_channel_p25_probe", "45 seconds", controlChannelHz);
   }
   async function runSdrInventoryExperiment() {
-    const experiment = await runExperiment("sdr_inventory", "about 15 seconds");
-    const evidence = experiment ? parseExperimentJson<any>(experiment.evidenceJson) : null;
-    const detection = evidence?.detection as SetupSdrDetection | undefined;
-    if (detection?.devices?.length) {
-      const detectedSources = setupSourcesFromSdrDetection(setup, detection);
-      await onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
-    }
+    if (!confirmAction("Pause monitoring for SDR inventory?", "This explicit RF Preparation action stops trunk-recorder briefly, inventories connected receivers, and starts monitoring again. The result is recorded as evidence and will not rewrite saved source selections.")) return;
+    await runExperiment("sdr_inventory", "about 15 seconds");
   }
   async function runSoftwareCheck(force = false) {
     if (!detail) return;
@@ -1920,17 +1944,6 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
   const effectiveSystems = detail?.profile.systems?.length ? detail.profile.systems : systems;
   const effectiveSources = detail?.profile.sources?.length ? detail.profile.sources : sources;
   const effectiveControlChannels = normalizeControlChannelSelection(effectiveSystems.flatMap(system => system.controlChannelsHz));
-  useEffect(() => {
-    if (!active)
-      return;
-    const detection = latestSetupSdrDetection(detail?.experiments ?? []);
-    if (!detection?.devices?.length || detection.devices.length <= sources.length)
-      return;
-    const detectedSources = setupSourcesFromSdrDetection(setup, detection);
-    if (detectedSources.length <= sources.length)
-      return;
-    void onSave({ sources: detectedSources, selectedSourceIndexes: detectedSources.map(source => source.index) }, "sources");
-  }, [active, detail?.session.id, detail?.experiments.map(experiment => `${experiment.id}:${experiment.type}:${experiment.createdAtUtc}`).join("|"), sources.length]);
   useEffect(() => {
     const desiredSelections = normalizeWaterfallSweepSelections(setup.desired.rfSelections ?? []);
     setWaterfallSweepSelections(desiredSelections);
@@ -2067,7 +2080,7 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
         />}
         {stage === "coverage" && <SiteSetupRfCoverageStage setup={setup} detail={detail} onServerSetupChanged={onServerSetupChanged} />}
         {stage === "calls" && <SiteSetupRfCallProofStage voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} nextExperiments={detail.nextExperiments ?? []} busy={busy === "call_transcription_proof"} onRunProof={runCallAndTranscriptionProof} />}
-        {stage === "verdict" && <SiteSetupRfVerdictStage detail={detail} stabilityVerdict={stabilityVerdict} />}
+        {stage === "verdict" && <SiteSetupRfVerdictStage detail={detail} stabilityVerdict={stabilityVerdict} busy={busy} onRunVerdict={() => void runExperiment("stability_verdict", "5 minutes", undefined, { durationSeconds: 300 })} />}
         {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
           <div className="rf-details-modal" onClick={event => event.stopPropagation()}>
             <div className="settings-header"><h3>{details.title}</h3><button onClick={() => setDetails(null)}>Close</button></div>
@@ -2345,10 +2358,11 @@ function SiteSetupRfCallProofStage({ voiceCapture, transcriptionGate, nextExperi
   </div>;
 }
 
-function SiteSetupRfVerdictStage({ detail, stabilityVerdict }: { detail: RfSurveyDetail; stabilityVerdict?: RfSurveyExperiment }) {
+function SiteSetupRfVerdictStage({ detail, stabilityVerdict, busy, onRunVerdict }: { detail: RfSurveyDetail; stabilityVerdict?: RfSurveyExperiment; busy: string; onRunVerdict: () => void }) {
   const verdict = detail.session.verdict && detail.session.verdict !== "not_started" ? label(detail.session.verdict) : "Not ready";
   const stability = detail.session.stability && detail.session.stability !== "unknown" ? label(detail.session.stability) : "Not proved";
   const blockers = Array.from(new Set(detail.nextExperiments.filter(plan => !plan.enabled && plan.blockingIssue).map(plan => plan.blockingIssue)));
+  const verdictPlan = detail.nextExperiments.find(plan => plan.type === "stability_verdict");
   return <div className="rf-step-stack rf-stage-summary">
     <div className="rf-verdict-summary">
       <div><span>Verdict</span><strong>{verdict}</strong></div>
@@ -2356,7 +2370,7 @@ function SiteSetupRfVerdictStage({ detail, stabilityVerdict }: { detail: RfSurve
     </div>
     {blockers.length > 0
       ? <div className="rf-recommended-action blocked"><div><span>Next blocker</span><strong>Complete the next required proof</strong><small>{blockers[0]}</small></div></div>
-      : <div className="rf-recommended-action"><div><span>Next task</span><strong>Review and apply the measured setup</strong><small>No server-declared blockers remain.</small></div></div>}
+      : <div className="rf-recommended-action"><div><span>Next task</span><strong>{stabilityVerdict?.status === "passed" ? "Verdict complete" : "Compute the stability verdict"}</strong><small>{stabilityVerdict?.resultSummary || verdictPlan?.purpose || "No server-declared blockers remain."}</small></div>{stabilityVerdict?.status !== "passed" && <button type="button" className="primary" disabled={!verdictPlan?.enabled || Boolean(busy)} onClick={onRunVerdict}>{busy === "stability_verdict" ? "Computing..." : "Compute Verdict"}</button>}</div>}
     {blockers.length > 1 && <details className="rf-technical-details"><summary>{blockers.length - 1} additional blocker{blockers.length === 2 ? "" : "s"}</summary><div className="setup-warning-list">{blockers.slice(1).map(blocker => <div key={blocker}>{blocker}</div>)}</div></details>}
     {stabilityVerdict && <details className="rf-technical-details"><summary>Verdict evidence</summary><ExperimentSummary experiment={stabilityVerdict} /></details>}
     <small className="muted">Updated {new Date(detail.session.updatedAtUtc).toLocaleString()}</small>
@@ -2551,31 +2565,17 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSave, onSetupChan
     setBusy("apply");
     setMessage("");
     try {
-      const result = await api.request<RfSurveyTrActionResult>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
+      const response = await api.request<RfSurveyApplySourceDraftResponse>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/tr/apply-source-draft`, {
         method: "POST",
         body: JSON.stringify({
-          configJson: draft.configJson,
+          expectedVersion: draft.desiredVersion,
+          draftHash: draft.draftHash,
           restartTr: true,
           preserveRfValidationEvidence: true
         })
       });
-      const next = await api.request<SiteSetup>(`${siteSetupApi}/mark-applied`, {
-        method: "POST",
-        body: JSON.stringify({
-          summary: result.message || "Applied Site Setup TR config and resumed monitoring.",
-          details: {
-            surveyId: detail.session.id,
-            candidatePath: result.candidatePath,
-            backupPath: result.backupPath,
-            restorePath: result.restorePath,
-            serviceOutput: result.serviceOutput,
-            draftSummary: draft.summary
-          },
-          source: "ui"
-        })
-      });
-      onApplied(next);
-      setMessage(`${result.message}${result.serviceOutput ? ` ${result.serviceOutput.trim()}` : ""}`);
+      onApplied(response.setup);
+      setMessage(`${response.result.message}${response.result.serviceOutput ? ` ${response.result.serviceOutput.trim()}` : ""}`);
       setDraft(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to apply Site Setup config.");
@@ -2883,19 +2883,6 @@ function setupSourcesFromSdrDetection(setup: SiteSetup, detection: SetupSdrDetec
       gain: normalizeSetupWaterfallGain({ gain, sdrType, device: deviceArgs })
     };
   }).sort((a, b) => a.index - b.index);
-}
-
-function latestSetupSdrDetection(experiments: RfSurveyExperiment[]): SetupSdrDetection | null {
-  const latest = [...experiments]
-    .filter(experiment => experiment.type === "sdr_inventory")
-    .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""))[0];
-  if (!latest)
-    return null;
-  const evidence = parseExperimentJson<any>(latest.evidenceJson);
-  const detection = evidence?.detection;
-  return detection && Array.isArray(detection.devices)
-    ? detection as SetupSdrDetection
-    : null;
 }
 
 function setupSdrTypeLabel(type: string, deviceArgs: string) {

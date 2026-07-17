@@ -169,6 +169,39 @@ public sealed class ApiFeatureTests : IClassFixture<PizzadApiFactory>
     }
 
     [Fact]
+    public async Task SdrInventoryRequiresPostAndExplicitConfirmation()
+    {
+        using var client = _factory.CreateClient();
+        using var get = await client.GetAsync("/api/v1/setup/sdrs");
+        Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
+
+        var token = await ReadTokenAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var unconfirmed = await client.PostAsJsonAsync("/api/v1/setup/sdrs", new { confirmed = false });
+        Assert.Equal(HttpStatusCode.BadRequest, unconfirmed.StatusCode);
+        Assert.Contains("explicit confirmation", await unconfirmed.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConfigDraftApplyRejectsStaleSetupVersionBeforeInstallation()
+    {
+        using var client = _factory.CreateClient();
+        var token = await ReadTokenAsync(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.PostAsJsonAsync("/api/v1/setup/site/rf/site-setup/tr/apply-source-draft", new
+        {
+            expectedVersion = -1,
+            draftHash = "stale",
+            restartTr = false,
+            preserveRfValidationEvidence = true
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("changed after this Config Draft", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AlertsSavePreservesExistingRulesWhenLegacyPayloadOmitsOrDefaultsThem()
     {
         using var client = _factory.CreateClient();

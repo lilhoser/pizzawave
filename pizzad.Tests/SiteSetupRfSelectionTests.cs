@@ -49,6 +49,29 @@ public sealed class SiteSetupRfSelectionTests
         Assert.Equal("637862DC2E3A19D7", normalized[0].Serial);
     }
 
+    [Fact]
+    public void Guidance_AcceptsImplicitAssignmentsFromSelectedServerPlan()
+    {
+        var method = typeof(SiteSetupService).GetMethod("BuildGuidance", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(SiteSetupService).FullName, "BuildGuidance");
+        var desired = new SiteSetupConfig
+        {
+            Systems = [new RfSurveySystemDto("hinds", "Hinds County", [851_100_000], [], "1", "mswin")],
+            Sources = [new RfSurveySourceDto(0, "airspy=ABC", "ABC", "airspy", 851_100_000, 6_000_000, 0, "21")],
+            SourcePlanSystemShortNames = ["hinds"],
+            SelectedSourceIndexes = [0],
+            SourceAssignments = new Dictionary<string, int>(),
+            RfSelections = [new SiteSetupRfSelection { FrequencyHz = 851_100_000, SourceIndex = 0, SourceSerial = "ABC" }]
+        };
+        var applied = new SiteSetupAppliedConfigDto("config.json", true, "hash", DateTime.UtcNow, ["hinds"], [851_100_000], []);
+
+        var guidance = (SiteSetupGuidanceDto)(method.Invoke(null, [desired, applied, Array.Empty<SiteSetupPendingChangeDto>(), "active", "Monitoring active."])
+            ?? throw new InvalidOperationException("BuildGuidance returned null."));
+
+        Assert.Equal("RF choices recorded", guidance.Validation.Value);
+        Assert.Equal("ok", guidance.Validation.State);
+    }
+
     private static IReadOnlyList<SiteSetupRfSelection> InvokeNormalize(IEnumerable<SiteSetupRfSelection> values, IEnumerable<RfSurveySourceDto> sources)
     {
         var method = typeof(SiteSetupService).GetMethod("NormalizeRfSelections", BindingFlags.Static | BindingFlags.NonPublic)

@@ -48,8 +48,9 @@ Setup desired/applied state:
 - `GET /api/v1/setup/site`: load current Setup desired/applied state.
 - `PATCH /api/v1/setup/site`: update desired location, systems/sites,
   talkgroups, hardware/RF path, selected source plan, or operator evidence.
-- `POST /api/v1/setup/site/mark-applied`: record that reviewed changes were
-  applied to the live monitoring configuration.
+- `POST /api/v1/setup/sdrs`: explicitly confirmed disruptive SDR inventory.
+  The operation may pause monitoring but does not change desired sources until
+  the operator separately accepts the detected hardware.
 - `GET /api/v1/setup/site/activity`: load Setup activity/audit log.
 
 RF validation state:
@@ -60,8 +61,10 @@ RF validation state:
   and next experiment recommendations for the current Setup RF session.
 - `GET /api/v1/setup/site/rf/{id}/config-draft`: build the TR config draft from
   Setup source planning and validated RF evidence.
-- `POST /api/v1/setup/site/rf/{id}/tr/apply-source-draft`: apply the reviewed
-  Setup TR config and clear the expert config editor draft.
+- `POST /api/v1/setup/site/rf/{id}/tr/apply-source-draft`: rebuild and verify
+  the reviewed server-owned draft against its Setup version and content hash,
+  apply it, atomically record the applied Setup snapshot, and clear the expert
+  config editor draft.
 
 Experiment execution:
 

@@ -222,21 +222,6 @@ app.MapPost("/api/v1/setup/site/activity", async (HttpContext context, SiteSetup
 .WithName("SiteSetupActivityAdd")
 .WithOpenApi();
 
-app.MapPost("/api/v1/setup/site/mark-applied", async (HttpContext context, SiteSetupMarkAppliedRequest request, AuthService authService, SiteSetupService siteSetup) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await siteSetup.MarkAppliedAsync(request, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SiteSetupMarkApplied")
-.WithOpenApi();
-
 app.MapPost("/api/v1/setup/site/discard", async (HttpContext context, SiteSetupDiscardRequest request, AuthService authService, SiteSetupService siteSetup) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
@@ -483,7 +468,7 @@ app.MapGet("/api/v1/setup/site/rf/{id}/config-draft", async (HttpContext context
     {
         var setup = await siteSetup.GetAsync(context.RequestAborted);
         var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
-        return Results.Ok(await surveys.BuildConfigDraftAsync(detail.Session.Id, context.RequestAborted));
+        return Results.Ok(await surveys.BuildConfigDraftAsync(detail.Session.Id, context.RequestAborted, setup.Desired.DesiredVersion));
     }
     catch (Exception ex)
     {
@@ -499,11 +484,26 @@ app.MapPost("/api/v1/setup/site/rf/{id}/tr/apply-source-draft", async (HttpConte
     try
     {
         var setup = await siteSetup.GetAsync(context.RequestAborted);
+        if (setup.Desired.DesiredVersion != request.ExpectedVersion)
+            return Results.Conflict(new { error = "Setup changed after this Config Draft was reviewed. Refresh the draft before applying.", currentVersion = setup.Desired.DesiredVersion });
         var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
         RfSurveyService.EnsureCallAndTranscriptionProof(detail);
         var result = await surveys.ApplySourceDraftAsync(detail.Session.Id, request, context.RequestAborted);
+        var applied = await siteSetup.MarkAppliedAsync(new SiteSetupMarkAppliedRequest(
+            result.Message,
+            JsonSerializer.SerializeToElement(new
+            {
+                surveyId = detail.Session.Id,
+                result.CandidatePath,
+                result.BackupPath,
+                result.RestorePath,
+                result.ServiceOutput,
+                request.ExpectedVersion,
+                request.DraftHash
+            }, EngineConfig.JsonOptions()),
+            "ui:apply-source-draft"), context.RequestAborted);
         await trConfig.ClearEditorDraftAsync(context.RequestAborted);
-        return Results.Ok(result);
+        return Results.Ok(new RfSurveyApplySourceDraftResponseDto(result, applied));
     }
     catch (Exception ex)
     {
@@ -544,9 +544,10 @@ app.MapGet("/api/v1/setup/tr-artifacts", (SetupJobService jobs, HttpContext cont
 .WithName("SetupTrArtifacts")
 .WithOpenApi();
 
-app.MapGet("/api/v1/setup/sdrs", async (SetupJobService jobs, HttpContext context, AuthService authService) =>
+app.MapPost("/api/v1/setup/sdrs", async (SetupSdrDetectionRequest request, SetupJobService jobs, HttpContext context, AuthService authService) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    if (!request.Confirmed) return Results.BadRequest(new { error = "SDR inventory requires explicit confirmation because monitoring may be paused." });
     return Results.Ok(await jobs.DetectSdrsAsync(context.RequestAborted));
 })
 .WithName("SetupSdrDetect")

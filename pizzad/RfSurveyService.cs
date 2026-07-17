@@ -994,8 +994,10 @@ public sealed class RfSurveyService
         var livePath = _config.TrunkRecorder.ConfigPath;
         if (string.IsNullOrWhiteSpace(livePath) || !File.Exists(livePath))
             throw new InvalidOperationException("Live trunk-recorder config was not found.");
-        if (string.IsNullOrWhiteSpace(request.ConfigJson))
-            throw new InvalidOperationException("No candidate TR config JSON was supplied.");
+        var serverDraft = await BuildConfigDraftAsync(id, ct, request.ExpectedVersion);
+        if (string.IsNullOrWhiteSpace(request.DraftHash) ||
+            !string.Equals(request.DraftHash, serverDraft.DraftHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Config Draft changed after it was reviewed. Refresh the draft before applying.");
 
         var selected = profile.SelectedSourceIndexes.Count > 0
             ? profile.SelectedSourceIndexes
@@ -1005,7 +1007,7 @@ public sealed class RfSurveyService
 
         var liveRoot = JsonNode.Parse(await File.ReadAllTextAsync(livePath, ct)) as JsonObject
             ?? throw new JsonException("Live TR config root must be a JSON object.");
-        var draftRoot = JsonNode.Parse(request.ConfigJson) as JsonObject
+        var draftRoot = JsonNode.Parse(serverDraft.ConfigJson) as JsonObject
             ?? throw new JsonException("Candidate TR config root must be a JSON object.");
         var liveSources = liveRoot["sources"] as JsonArray
             ?? throw new JsonException("Live TR config does not contain a sources array.");
@@ -1099,7 +1101,7 @@ public sealed class RfSurveyService
             ? configuredCenterHz
             : fallbackCenterHz;
 
-    public async Task<RfSurveyConfigDraftDto> BuildConfigDraftAsync(string id, CancellationToken ct)
+    public async Task<RfSurveyConfigDraftDto> BuildConfigDraftAsync(string id, CancellationToken ct, long desiredVersion = 0)
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
@@ -1199,6 +1201,7 @@ public sealed class RfSurveyService
         NormalizeRadioSetupTrConfig(draftRoot, changes, _config.TrunkRecorder.TalkgroupsPath);
 
         var draftJson = NormalizeJson(draftRoot);
+        var draftHash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(draftJson))).ToLowerInvariant();
         var draftPath = Path.Combine(row.Session.ArtifactPath, "config-draft.json");
         Directory.CreateDirectory(row.Session.ArtifactPath);
         await File.WriteAllTextAsync(draftPath, draftJson, ct);
@@ -1208,6 +1211,8 @@ public sealed class RfSurveyService
             changes,
             warnings,
             draftPath,
+            desiredVersion,
+            draftHash,
             createdAtUtc = DateTime.UtcNow
         }, ct);
 
@@ -1216,6 +1221,8 @@ public sealed class RfSurveyService
             draftPath,
             draftJson,
             liveJson,
+            desiredVersion,
+            draftHash,
             new RfSurveyConfigDraftSummaryDto(selected, changes, warnings, draftPath));
     }
 

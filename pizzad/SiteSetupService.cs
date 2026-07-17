@@ -142,7 +142,7 @@ public sealed class SiteSetupService
             ? new SiteSetupGuidanceCardDto("warning", "Select sites", "Systems & Sites is the next required step.")
             : sources == 0
                 ? new SiteSetupGuidanceCardDto("warning", "Inventory hardware", "Run SDR Inventory in RF Validation.")
-                : desired.SourceAssignments.Count == 0
+                : desired.SourcePlanSystemShortNames.Count == 0 || desired.SelectedSourceIndexes.Count == 0
                     ? new SiteSetupGuidanceCardDto("warning", "Review source coverage", "Confirm the server-recommended source plan.")
                     : desired.RfSelections.Count == 0
                         ? new SiteSetupGuidanceCardDto("warning", "Validate RF", "Run the recommended control-channel proof.")
