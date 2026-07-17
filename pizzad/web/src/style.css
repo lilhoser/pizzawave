@@ -2104,6 +2104,9 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .recommendation-card.severity-high { border-color: #c85b50; }
 .recommendation-card.severity-medium { border-color: #9b812e; }
 .recommendation-card.severity-low { border-color: #64717d; }
+.recommendation-card.is-dormant { opacity: .62; filter: saturate(.55); }
+.recommendation-card.is-dormant:hover,
+.recommendation-card.is-dormant:focus-within { opacity: .82; }
 .recommendation-head {
   display: flex;
   align-items: center;

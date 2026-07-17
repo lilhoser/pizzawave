@@ -10568,7 +10568,7 @@ function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommen
         <button type="button" className="secondary-button" onClick={() => { setActivityPage(1); setSelectedFindingId(group.latest.findingId); }}>Review</button>
       </article>)}</div> :
       <div className="recommendation-list">
-        {items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={`${item.findingId}-${item.id}`}>
+        {items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}${item.activityState === "quiet" ? " is-dormant" : ""}`} key={`${item.findingId}-${item.id}`}>
           <div className="recommendation-head"><div className="recommendation-type"><RecommendationTypeIcon item={item} /><span>{recommendationTypeLabel(item)}</span></div><div className="recommendation-state">{item.activityState === "quiet" && <span>Dormant</span>}{item.workflowStatus !== "new" && <span>{label(item.workflowStatus)}</span>}<strong>{label(item.severity)}</strong></div></div>
           <div className="recommendation-card-body"><h3>{item.title}</h3>
             <div className="recommendation-facts">{recommendationFacts(item).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div>

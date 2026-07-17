@@ -318,6 +318,8 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("\"ai\", \"bandwidth\"] as const", source, StringComparison.Ordinal);
         Assert.Contains("Review finding", source, StringComparison.Ordinal);
         Assert.Contains("item.activityState === \"quiet\" && <span>Dormant</span>", source, StringComparison.Ordinal);
+        Assert.Contains("item.activityState === \"quiet\" ? \" is-dormant\"", source, StringComparison.Ordinal);
+        Assert.Contains(".recommendation-card.is-dormant { opacity: .62", StyleSource(), StringComparison.Ordinal);
         Assert.Contains("formatRelativeAge(item.lastSeenUtc)", source, StringComparison.Ordinal);
         Assert.Contains("detail: formatShortDate(item.lastSeenUtc)", source, StringComparison.Ordinal);
         Assert.Contains("finding-drawer", source, StringComparison.Ordinal);
