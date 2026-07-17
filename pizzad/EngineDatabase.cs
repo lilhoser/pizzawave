@@ -599,6 +599,7 @@ public sealed partial class EngineDatabase
         foreach (var recommendation in activeRecommendations)
         {
             var desiredActivity = string.Equals(recommendation.ActivityState, "quiet", StringComparison.OrdinalIgnoreCase) ? "quiet" : "active";
+            var snapshot = recommendation with { Episodes = [], Audit = [], EpisodeCount = 0 };
             long findingId;
             string priorActivity = "";
             string priorSeverity = "";
@@ -647,7 +648,7 @@ public sealed partial class EngineDatabase
                 Add(insert, "$owner_key", recommendation.OwnerKey);
                 Add(insert, "$signature", recommendation.Signature);
                 Add(insert, "$parent", parentId);
-                Add(insert, "$snapshot", JsonSerializer.Serialize(recommendation));
+                Add(insert, "$snapshot", JsonSerializer.Serialize(snapshot));
                 findingId = Convert.ToInt64(await insert.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
                 await InsertRecommendationEventAsync(connection, transaction, findingId, "created", "pizzawave", "Finding created from current evidence.", JsonSerializer.Serialize(new { recommendation.Id, recommendation.Severity, recommendation.Confidence }), nowUtc, ct);
             }
@@ -667,7 +668,7 @@ public sealed partial class EngineDatabase
                 Add(update, "$owner_type", recommendation.OwnerType);
                 Add(update, "$owner_key", recommendation.OwnerKey);
                 Add(update, "$signature", recommendation.Signature);
-                Add(update, "$snapshot", JsonSerializer.Serialize(recommendation));
+                Add(update, "$snapshot", JsonSerializer.Serialize(snapshot));
                 Add(update, "$finding_id", findingId);
                 await update.ExecuteNonQueryAsync(ct);
                 if (!string.Equals(priorActivity, desiredActivity, StringComparison.OrdinalIgnoreCase))
@@ -676,7 +677,16 @@ public sealed partial class EngineDatabase
                     await InsertRecommendationEventAsync(connection, transaction, findingId, "severity_changed", "pizzawave", $"Severity changed from {priorSeverity} to {recommendation.Severity}.", JsonSerializer.Serialize(new { from = priorSeverity, to = recommendation.Severity }), nowUtc, ct);
             }
 
-            foreach (var episode in recommendation.Episodes)
+            var existingEpisodeKeys = new HashSet<string>(StringComparer.Ordinal);
+            await using (var existingEpisodes = connection.CreateCommand())
+            {
+                existingEpisodes.Transaction = transaction;
+                existingEpisodes.CommandText = "SELECT episode_key FROM recommendation_finding_episodes WHERE finding_id=$finding_id;";
+                Add(existingEpisodes, "$finding_id", findingId);
+                await using var reader = await existingEpisodes.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct)) existingEpisodeKeys.Add(reader.GetString(0));
+            }
+            foreach (var episode in recommendation.Episodes.Where(row => !existingEpisodeKeys.Contains(row.EpisodeKey)))
             {
                 await using var episodeInsert = connection.CreateCommand();
                 episodeInsert.Transaction = transaction;
@@ -750,7 +760,7 @@ public sealed partial class EngineDatabase
         {
             var recommendation = JsonSerializer.Deserialize<SystemRecommendationDto>(row.Snapshot);
             if (recommendation is null) continue;
-            var episodes = await LoadRecommendationEpisodesAsync(connection, transaction, row.Id, ct);
+            var (episodes, episodeCount) = await LoadRecommendationEpisodesAsync(connection, transaction, row.Id, nowUtc, ct);
             var audit = await LoadRecommendationEventsAsync(connection, transaction, row.Id, ct);
             var reviewDue = DateTime.TryParse(row.NextReview, out var reviewAt) && reviewAt.ToUniversalTime() <= nowUtc;
             recommendation = recommendation with
@@ -770,6 +780,7 @@ public sealed partial class EngineDatabase
                 ResolvedAtUtc = row.Resolved,
                 Resolution = row.Resolution,
                 Episodes = episodes,
+                EpisodeCount = episodeCount,
                 Audit = audit
             };
             if (!string.IsNullOrWhiteSpace(row.Resolved)) resolved.Add(recommendation);
@@ -929,12 +940,21 @@ public sealed partial class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task<IReadOnlyList<RfTemporalEpisodeDto>> LoadRecommendationEpisodesAsync(SqliteConnection connection, SqliteTransaction transaction, long findingId, CancellationToken ct)
+    private static async Task<(IReadOnlyList<RfTemporalEpisodeDto> Episodes, int TotalCount)> LoadRecommendationEpisodesAsync(SqliteConnection connection, SqliteTransaction transaction, long findingId, DateTime nowUtc, CancellationToken ct)
     {
+        var totalCount = 0;
+        await using (var count = connection.CreateCommand())
+        {
+            count.Transaction = transaction;
+            count.CommandText = "SELECT count(*) FROM recommendation_finding_episodes WHERE finding_id=$id;";
+            Add(count, "$id", findingId);
+            totalCount = Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT evidence_json FROM recommendation_finding_episodes WHERE finding_id=$id ORDER BY started_at_utc DESC;";
+        command.CommandText = "SELECT evidence_json FROM recommendation_finding_episodes WHERE finding_id=$id AND ended_at_utc >= $cutoff ORDER BY started_at_utc DESC;";
         Add(command, "$id", findingId);
+        Add(command, "$cutoff", nowUtc.AddDays(-28).ToUniversalTime().ToString("O"));
         var rows = new List<RfTemporalEpisodeDto>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -942,14 +962,14 @@ public sealed partial class EngineDatabase
             var episode = JsonSerializer.Deserialize<RfTemporalEpisodeDto>(reader.GetString(0));
             if (episode is not null) rows.Add(episode);
         }
-        return rows;
+        return (rows, totalCount);
     }
 
     private static async Task<IReadOnlyList<RecommendationFindingEventDto>> LoadRecommendationEventsAsync(SqliteConnection connection, SqliteTransaction transaction, long findingId, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT id, event_type, actor, detail, details_json, created_at_utc FROM recommendation_finding_events WHERE finding_id=$id ORDER BY created_at_utc DESC, id DESC;";
+        command.CommandText = "SELECT id, event_type, actor, detail, details_json, created_at_utc FROM recommendation_finding_events WHERE finding_id=$id ORDER BY created_at_utc DESC, id DESC LIMIT 100;";
         Add(command, "$id", findingId);
         var rows = new List<RecommendationFindingEventDto>();
         await using var reader = await command.ExecuteReaderAsync(ct);

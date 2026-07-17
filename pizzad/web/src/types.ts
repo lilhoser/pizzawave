@@ -406,6 +406,7 @@ export type SystemRecommendation = {
     conditions: string[];
     evidence: { windows: number; decodeSamples: number; averageDecodeRate: number; zeroDecodePercent: number; retunes: number; callsConcluded: number; noAudioPercent: number };
   }[];
+  episodeCount: number;
   audit: { id: number; eventType: string; actor: string; detail: string; detailsJson: string; createdAtUtc: string }[];
   hypotheses: { kind: string; label: string; status: string; confidence: string; rationale: string }[];
   target: { topTab: string; subTab: string; anchor: string };
@@ -489,6 +490,7 @@ export type SystemRecommendations = {
   recentlyResolved: SystemRecommendation[];
   history: SystemRecommendation[];
 };
+export type SystemRecommendationSummary = Pick<SystemRecommendations, "openCount" | "problemCount" | "improvementCount" | "highCount" | "mediumCount" | "lowCount"> & { knownIssueCount: number };
 export type TrHealth = {
   id: number;
   windowStartUtc: string;

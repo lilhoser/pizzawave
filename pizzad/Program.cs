@@ -1131,6 +1131,14 @@ app.MapGet("/api/v1/system/recommendations", async (HttpContext context, AuthSer
 .WithName("SystemRecommendations")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/recommendations/summary", async (HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await recommendations.BuildSummaryAsync(context.RequestAborted));
+})
+.WithName("SystemRecommendationsSummary")
+.WithOpenApi();
+
 app.MapPost("/api/v1/system/recommendations/{id}/reviewed", async (string id, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

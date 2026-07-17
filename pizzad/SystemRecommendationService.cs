@@ -9,7 +9,7 @@ public sealed class SystemRecommendationService
     private static readonly Regex RetuneTargetRegex = new(
         @"\[(?<scope>[^\]]+)\]\s+Retuning to Control Channel:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly TimeSpan RecommendationCacheTtl = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RecommendationCacheTtl = TimeSpan.FromMinutes(5);
     private const long CriticalRemoteBandwidthBytesPerDay = 1_000_000_000;
 
     private readonly EngineConfig _config;
@@ -81,6 +81,13 @@ public sealed class SystemRecommendationService
         }
 
         return result;
+    }
+
+    public async Task<SystemRecommendationSummaryDto> BuildSummaryAsync(CancellationToken ct)
+    {
+        var result = await BuildAsync(ct);
+        return new(result.OpenCount, result.ProblemCount, result.ImprovementCount,
+            result.HighCount, result.MediumCount, result.LowCount, result.KnownIssues.Count);
     }
 
     private async Task<SystemRecommendationsDto> BuildCoreAsync(CancellationToken ct)
@@ -1088,6 +1095,7 @@ public sealed record SystemRecommendationDto(
     public string NextReviewUtc { get; init; } = "";
     public bool ReviewDue { get; init; }
     public IReadOnlyList<RfTemporalEpisodeDto> Episodes { get; init; } = [];
+    public int EpisodeCount { get; init; }
     public IReadOnlyList<RecommendationFindingEventDto> Audit { get; init; } = [];
     public IReadOnlyList<RecommendationHypothesisDto> Hypotheses { get; init; } = [];
     public RecommendationRunbookDto? Runbook { get; init; }
@@ -1174,6 +1182,15 @@ public sealed record SystemRecommendationsDto(
     IReadOnlyList<SystemRecommendationDto> KnownIssues,
     IReadOnlyList<SystemRecommendationDto> RecentlyResolved,
     IReadOnlyList<SystemRecommendationDto> History);
+
+public sealed record SystemRecommendationSummaryDto(
+    int OpenCount,
+    int ProblemCount,
+    int ImprovementCount,
+    int HighCount,
+    int MediumCount,
+    int LowCount,
+    int KnownIssueCount);
 
 public sealed record RecommendationFindingSyncResult(
     IReadOnlyList<SystemRecommendationDto> Active,
