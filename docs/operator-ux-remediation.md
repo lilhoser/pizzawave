@@ -9,10 +9,10 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 9 - Temporal Pattern Analysis
-- Current milestone: Package 8 System Information Quality is complete,
-  deployed, live-verified, and operator-accepted. Package 7 is deferred as a
-  standalone outstanding feature outside this closeout sequence. Package 5 is
-  complete, deployed, live-verified, and operator-accepted.
+- Current milestone: Package 9 interview complete; the RF temporal-finding
+  vertical slice is active. Package 7 is deferred as a standalone outstanding
+  feature outside this closeout sequence. Packages 5 and 8 are complete,
+  deployed, live-verified, and operator-accepted.
 - Continuation branch: `main`
 - Last deployed code state: Package 5 closure remediation on the merged
   redesign, commit `8d6d5bd`, deployed 2026-07-17
@@ -630,7 +630,67 @@ Section acceptance checkpoints:
 
 ### 9. Temporal Pattern Analysis
 
-Status: pending; scoped during Package 8 interview
+Status: operator interview complete; RF vertical slice active
+
+Accepted design:
+
+- Store immutable measurements as evidence, typed signal interpretations as
+  conditions, correlated time-bounded behavior as episodes, recurrence or
+  persistence across episodes as patterns, and downstream consequences as
+  impacts. Operator-facing findings wrap episodes, patterns, or standing target
+  gaps. Relationships form an evidence graph rather than a strict tree.
+- Consolidate related conditions into one actionable parent Recommendation.
+  Contributing conditions remain visible in its evidence and on the owning
+  Performance charts, but do not appear as separate Recommendation cards.
+- Scope findings to the narrowest evidence-supported owner (site, SDR/source,
+  RF path, rig, or downstream subsystem) and roll upward only when correlation
+  supports it. Keep observed scope separate from cause hypotheses.
+- Represent repeated symptom signatures, cadence, schedule association,
+  persistence, and trends independently. A reliable twice-weekly signature is
+  meaningful even without a stable day or time. Materially different symptom
+  signatures remain separate patterns.
+- Keep community targets visible even when a mature local baseline is worse.
+  Local normality may prevent false anomaly claims but never turns a target gap
+  into healthy performance.
+- Use deterministic typed detectors as the authority for episodes, patterns,
+  severity, confidence, equivalence, and material change. AI may summarize or
+  phrase hypotheses but cannot invent evidence or own product behavior.
+- Separate operator workflow state from derived activity. Workflow states are
+  New, Unresolved, Investigating, Known Issue, Monitoring, Resolved, and
+  Dismissed. Only operators change workflow state after creation; PizzaWave
+  owns severity, confidence, activity, correlations, and evidence updates.
+- Audit every PizzaWave and operator action. Notes are append-only. Operators
+  can confirm or reject cause hypotheses, merge or split ambiguous patterns,
+  mark historical maintenance intervals, and adjust status without altering
+  measurements.
+- A Known Issue leaves the primary action queue, accumulates matching episodes,
+  and returns through a scheduled review summary or a material change. It is
+  promoted immediately only when severity, scope, cadence, signature, or
+  downstream impact materially changes. Dismissal can apply to one occurrence
+  or the same structured owner/signature; neither uses exact decimal equality.
+- Determine equivalence from typed condition/direction/co-occurrence features,
+  ownership, duration/recurrence shape, impact types, severity bands, and
+  baseline-aware statistical materiality. Raw decimal values remain evidence,
+  not identity keys.
+- Extend Recommendations with Active, Known Issues, and History views. Finding
+  detail owns episodes, pattern/cadence, impacts, hypotheses, notes, audit, and
+  diagnostic actions. Existing Performance charts remain the evidence owner;
+  finding deep links select the entity/time range and render structured episode
+  bands, condition markers, targets, and baselines rather than screenshots.
+- Treat severity, finding confidence, and cause-hypothesis confidence as
+  separate values. Cross-domain relationships distinguish co-occurrence,
+  precedence, correlation, suspected contribution, and operator-confirmed
+  cause; correlation is never stated as proof.
+- Evaluate active episodes every five minutes, patterns hourly, and deeper
+  calendar/baseline relationships daily. Exclude insufficient coverage from
+  denominators and report observable windows explicitly.
+- Preserve intentional maintenance and deployment periods as audited chart
+  evidence while excluding them from baseline learning. The deploy helper owns
+  an explicit start/end maintenance handshake; unexplained service restarts are
+  not excluded automatically.
+- Implement RF first end to end, then extend the same contracts to
+  transcription, queues/runtime, talkgroup traffic, incidents, USB, and
+  cross-domain relationships before Package 9 acceptance.
 
 - [ ] Detect sustained outages, recurring time-of-day/day-of-week patterns,
   trends, spikes, drops, and correlated signals across RF, transcription,
