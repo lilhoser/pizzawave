@@ -36,7 +36,7 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 - Use the automatic direct-deploy helper for development deployments:
 
 ```powershell
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
 - The helper hashes deployable inputs and compares them with the live manifest.

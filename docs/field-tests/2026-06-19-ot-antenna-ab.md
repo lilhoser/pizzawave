@@ -291,7 +291,7 @@ Status: Complete
 ```text
 Run: RPI-MOBILE-YAGI-RTLSDR-01
 RF path: Mobile yagi rig with one RTL-SDR
-Host: RPI PizzaWave API, http://192.168.2.42:8080
+Host: RPI PizzaWave API, http://100.105.110.92:8080/
 Setup RF validation session: rf-20260619190023-17be178afd6
 Started: 1781992965 / 2026-06-20T22:02:45Z / 2026-06-20 18:02:45 EDT
 Ended:   1781994765 / 2026-06-20T22:32:45Z / 2026-06-20 18:32:45 EDT
@@ -353,7 +353,7 @@ Status: Complete
 ```text
 Run: RPI-MOBILE-YAGI-AIRSPY-MINI-01
 RF path: Mobile yagi rig with Airspy Mini
-Host: RPI PizzaWave API, http://192.168.2.42:8080
+Host: RPI PizzaWave API, http://100.105.110.92:8080/
 Setup RF validation session: rf-20260621130654-dc2eae36859
 Started: 1782161922 / 2026-06-22T20:58:42Z / 2026-06-22 16:58:42 EDT
 Ended:   1782163722 / 2026-06-22T21:28:42Z / 2026-06-22 17:28:42 EDT
@@ -437,7 +437,7 @@ Status: Complete
 ```text
 Run: RPI-MOBILE-YAGI-DUAL-AIRSPY-MINI-01
 RF path: Mobile yagi rig with two Airspy Minis
-Host: RPI PizzaWave API, http://192.168.2.42:8080
+Host: RPI PizzaWave API, http://100.105.110.92:8080/
 Setup RF validation session: rf-20260623125453-f5655f48c99
 Started: 1782228246 / 2026-06-23T15:24:06Z / 2026-06-23 11:24:06 EDT
 Ended:   1782230046 / 2026-06-23T15:54:06Z / 2026-06-23 11:54:06 EDT
@@ -540,7 +540,7 @@ Status: Complete
 ```text
 Run: RPI-MOBILE-YAGI-AIRSPY-R2-01
 RF path: Mobile yagi rig with one Airspy R2
-Host: RPI PizzaWave API, http://192.168.2.42:8080
+Host: RPI PizzaWave API, http://100.105.110.92:8080/
 Setup RF validation session: rf-20260623163819-30c714b9080
 Started: 1782246286 / 2026-06-23T20:24:46Z / 2026-06-23 16:24:46 EDT
 Ended:   1782248086 / 2026-06-23T20:54:46Z / 2026-06-23 16:54:46 EDT
@@ -624,7 +624,7 @@ Status: Complete
 ```text
 Run: RPI-MOBILE-YAGI-AIRSPY-R2-EXTENDED-01
 RF path: Mobile yagi rig with one Airspy R2
-Host: RPI PizzaWave API, http://192.168.2.42:8080
+Host: RPI PizzaWave API, http://100.105.110.92:8080/
 Setup RF validation session: rf-20260623163819-30c714b9080
 Started: 1782246286 / 2026-06-23T20:24:46Z / 2026-06-23 16:24:46 EDT
 Ended:   1782303711 / 2026-06-24T12:21:51Z / 2026-06-24 08:21:51 EDT

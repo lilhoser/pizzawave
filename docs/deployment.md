@@ -99,7 +99,7 @@ The standard development command handles backend and frontend changes:
 
 ```powershell
 .\scripts\deploy_pizzad_tar.ps1 -HostName user@host -Rid linux-x64
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
 Its paths are:

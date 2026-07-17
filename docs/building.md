@@ -94,7 +94,7 @@ content, or one-off test outputs. The checked-in web assets under
 Use the automatic development deploy helper:
 
 ```powershell
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
 It compares local hashes with the live manifest and automatically selects a
