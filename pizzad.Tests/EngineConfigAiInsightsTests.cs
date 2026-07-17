@@ -23,4 +23,24 @@ public sealed class EngineConfigAiInsightsTests
         Assert.False(config.AiInsights.IncidentV3PlanExecutorEnabled);
         Assert.True(config.AiInsights.IncidentV3PlanExecutorDryRun);
     }
+
+    [Fact]
+    public void ApplyDefaults_ForcesRetiredIncidentV3ExecutorToDryRun()
+    {
+        var config = new EngineConfig
+        {
+            AiInsights = new AiInsightsConfig
+            {
+                IncidentV3FrameShadowEnabled = true,
+                IncidentV3PlanExecutorEnabled = true,
+                IncidentV3PlanExecutorDryRun = false
+            }
+        };
+
+        config.ApplyDefaults();
+
+        Assert.True(config.AiInsights.IncidentV3FrameShadowEnabled);
+        Assert.True(config.AiInsights.IncidentV3PlanExecutorEnabled);
+        Assert.True(config.AiInsights.IncidentV3PlanExecutorDryRun);
+    }
 }

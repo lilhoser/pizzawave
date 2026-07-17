@@ -162,8 +162,10 @@ public sealed class EngineConfig
         AiInsights.IncidentV2ShadowCandidateLimit = Math.Clamp(AiInsights.IncidentV2ShadowCandidateLimit, 6, 40);
         if (AiInsights.IncidentV3FrameCandidateLimit <= 0) AiInsights.IncidentV3FrameCandidateLimit = 18;
         AiInsights.IncidentV3FrameCandidateLimit = Math.Clamp(AiInsights.IncidentV3FrameCandidateLimit, 6, 40);
-        if (!AiInsights.IncidentV3PlanExecutorDryRun && !AiInsights.IncidentV3PlanExecutorEnabled)
-            AiInsights.IncidentV3PlanExecutorDryRun = true;
+        // Incident V3 is retained only as a read-only comparison baseline. Its
+        // semantic executor is retired and must not be enabled by deployed
+        // configuration left over from an earlier experiment.
+        AiInsights.IncidentV3PlanExecutorDryRun = true;
         if (AiInsights.IncidentNewVectorQueryLimit <= 0) AiInsights.IncidentNewVectorQueryLimit = 8;
         AiInsights.IncidentNewVectorQueryLimit = Math.Clamp(AiInsights.IncidentNewVectorQueryLimit, 0, 20);
         if (AiInsights.IncidentActiveVectorQueryLimit <= 0) AiInsights.IncidentActiveVectorQueryLimit = 6;
