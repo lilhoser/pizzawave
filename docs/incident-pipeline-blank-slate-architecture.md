@@ -373,12 +373,23 @@ These require explicit decisions during the contract phase:
 - What uncertainty should remain visible to operators rather than being collapsed
   into one projected story?
 
-## Immediate Next Work
+## Implementation Status On 2026-07-17
 
-The next engineering package is Phase 0 and the contract portion of Phase 1:
+The isolated development branch now contains the Phase 0 and Phase 1 safety
+boundary:
 
-1. audit and fail-close the current experimental write configuration;
-2. specify observation, proposal, critique, ledger, and projection schemas;
-3. verify that no semantic enums, labels, string lists, regexes, or score rules
-   enter those contracts;
-4. review the contracts before implementing model prompts or storage.
+- the V3 executor is retired to shadow-only behavior and cannot perform its
+  mutating actions;
+- open-world observation, proposal, critique, ledger, and projection contracts;
+- deterministic provenance and reference-integrity validation;
+- append-only, hash-verified shadow ledger and projection tables isolated from
+  `incidents` and `incident_calls`;
+- a neutral corpus adapter that retains source and application-derived metadata
+  with explicit origin rather than treating either as semantic authority;
+- separately invoked proposer and critic interfaces with validation before
+  append.
+
+Nothing schedules the new coordinator, calls a model, exposes an endpoint, or
+writes production incident state. The next step is to approve and freeze the
+selection and adjudication parameters in
+`docs/incident-event-state-corpus-protocol.md`, then extract an immutable corpus.
