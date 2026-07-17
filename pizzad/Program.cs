@@ -48,6 +48,7 @@ builder.Services.AddSingleton<AutomaticInsightsService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
 builder.Services.AddSingleton<EnginePipeline>();
 builder.Services.AddSingleton<DashboardService>();
+builder.Services.AddSingleton<TranscriptionCandidateService>();
 builder.Services.AddSingleton<TrConfigService>();
 builder.Services.AddSingleton<TrHealthTroubleshootService>();
 builder.Services.AddSingleton<SettingsValidationService>();
@@ -690,6 +691,20 @@ app.MapGet("/api/v1/system/quality-check", async (HttpContext context, long? sta
     return Results.Ok(await database.GetQualityCheckSnapshotAsync(range.Start, range.End, context.RequestAborted));
 })
 .WithName("QualityCheck")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/transcription-candidates", async (HttpContext context, long? start, long? end, int? hours, int? limit, bool? includeIncidentLinked, AuthService authService, TranscriptionCandidateService candidates) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = ResolveQualityCheckRange(start, end, hours);
+    return Results.Ok(await candidates.BuildReportAsync(
+        range.Start,
+        range.End,
+        Math.Clamp(limit ?? 100, 1, 500),
+        includeIncidentLinked ?? true,
+        context.RequestAborted));
+})
+.WithName("TranscriptionCandidates")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/runtime", async (HttpContext context, AuthService authService, SystemManagerService system) =>

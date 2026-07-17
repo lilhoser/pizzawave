@@ -227,6 +227,43 @@ public sealed record IncidentCallOwnerDto(
     string Title,
     string Status);
 
+public sealed record TranscriptionCandidateReportDto(
+    long Start,
+    long End,
+    int TotalCalls,
+    int CandidateCount,
+    string ScoringVersion,
+    IReadOnlyList<TranscriptionCandidateDto> Candidates);
+
+public sealed record TranscriptionCandidateDto(
+    long CallId,
+    long StartTime,
+    long StopTime,
+    string SystemShortName,
+    long Talkgroup,
+    string TalkgroupName,
+    string Category,
+    string TranscriptionStatus,
+    string QualityReason,
+    int Score,
+    string Severity,
+    bool IncidentLinked,
+    int NearbyIncidentCount,
+    bool HasAudio,
+    bool HasSymbolEvidence,
+    string AudioUrl,
+    string TranscriptPreview,
+    IReadOnlyList<string> Reasons,
+    IReadOnlyList<string> SeveritySignals,
+    IReadOnlyList<string> LocationSignals,
+    IReadOnlyList<string> SuspiciousLocationFragments,
+    IReadOnlyList<TranscriptionCandidateEvidenceDto> SymbolEvidence);
+
+public sealed record TranscriptionCandidateEvidenceDto(
+    string Kind,
+    string Value,
+    bool Exists);
+
 public sealed record JobDto
 {
     public long Id { get; init; }
