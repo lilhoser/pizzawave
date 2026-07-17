@@ -13,26 +13,22 @@ work so that progress does not depend on conversation history.
   deployed, live-verified, and operator-accepted. Package 7 discovery and its
   source, isolation, processing, and resource-policy interview are complete.
   The durable workspace catalog and per-stage timing foundation are implemented
-  and tested; support-package implementation is next. Package 5 remains
-  deployed with acceptance deferred.
-- Continuation branch: `codex/package5-fixes` pending integration
-- Last deployed code state: Package 8 global status and Runtime / Services
-  consistency pass, deployed 2026-07-16; commit pending at the time of this
-  tracker update.
-- Latest tracker commit before this implementation: `332cca7`
-- Operator verification: Packages 1, 2, 3, 4, and 6 accepted; Package 5
-  deferred before final acceptance
+  and tested; support-package implementation is next. Package 5 is complete,
+  deployed, live-verified, and operator-accepted.
+- Continuation branch: `main`
+- Last deployed code state: Package 5 closure remediation on the merged
+  redesign, commit `8d6d5bd`, deployed 2026-07-17
+- Latest tracker commit before closure: `5ac9854`
+- Operator verification: Packages 1, 2, 3, 4, 5, 6, and 8 accepted
 - Next action: implement the versioned support-package creator, validator,
   inventory, and isolated workspace store from the accepted contract below.
-  Do not run Package 5 RF or call-transcription proof, restart Trunk Recorder,
-  or otherwise disturb parallel RF experiments.
+  Do not restart Trunk Recorder or otherwise disturb parallel RF experiments.
 
 ## Package 5 Final Handoff
 
-Package 5 code is implemented, tested, deployed, and exercised against live
-hardware. The package is not yet marked operator-accepted only because the
-operator ended the session immediately after monitoring recovery. There is no
-known code change queued or uncommitted at this handoff.
+Package 5 code is implemented, tested, deployed, exercised against live
+hardware, and operator-accepted. The 2026-07-17 closure remediation was
+reconciled with the merged redesign and live-verified on the RPI.
 
 Final live state from 2026-07-10:
 
@@ -90,20 +86,10 @@ Implemented Package 5 outcomes to preserve:
   legacy Monitored Area records are compatibility data, not active Setup
   authority and are not shown as editable Setup locations.
 
-Remaining closure work only:
-
-1. Read `/api/v1/health` and `/api/v1/setup/site`; confirm Trunk Recorder is no
-   longer faulted and the applied ETV/Jackson hash and desired version above are
-   unchanged. Do not restart Trunk Recorder merely to verify it.
-2. Ask the operator to inspect Setup once end to end, especially Apply & Resume,
-   Activity Log, Call and Transcription Proof, and Verdict. Preserve current
-   controls and wording unless the operator identifies a concrete defect.
-3. If monitoring is healthy and the operator accepts the workflow, change the
-   Package 5 status below to `complete and operator-accepted` and record the
-   acceptance in the dated log. Package 6 may then begin.
-4. If monitoring is still stale but systemd is active and scoped decode lines
-   continue, diagnose the live-activity status boundary separately; do not
-   alter the validated source plan or catalog ownership fix.
+Closure completed 2026-07-17: the final safety and operator-action remediation
+passed all 498 backend tests and the production frontend build, was reconciled
+with the merged redesign, deployed to the RPI, and live-verified with healthy
+monitoring. The operator accepted Package 5 and directed that it be closed.
 
 ### 2026-07-11 Operational Follow-Up
 
@@ -159,17 +145,9 @@ plan.
   itself does not run `airspy_info`, but the polling flood is a distinct
   frontend/session-lifecycle defect worth resolving after Package 5 acceptance.
 
-Continuation order on the next machine:
-
-1. Pull `origin/main` and confirm a clean worktree before doing any work.
-2. Check post-reset health, ingestion state, Qdrant collection recovery, and
-   current TR decode/retune behavior without restarting services merely to
-   inspect them.
-3. Complete the concise Package 5 operator acceptance pass described above.
-4. Investigate disruptive SDR inventory ownership and the Setup polling storm
-   as separate defects. Do not conflate either with the original 19:13 signal
-   loss without new evidence.
-5. Once Package 5 is accepted, update this tracker and begin Package 6.
+The disruptive SDR inventory ownership and Setup polling storm described above
+were resolved by the closure remediation. Historical RF observations remain
+evidence only and do not reopen Package 5.
 
 ## Working Rules
 
@@ -248,7 +226,7 @@ Status: complete and operator-accepted
 
 ### 5. Setup UX
 
-Status: implementation complete and deployed; final operator acceptance deferred
+Status: complete and operator-accepted
 
 Discovery findings:
 
@@ -358,7 +336,8 @@ Accepted design:
 - [x] Make source planning a server-owned, reviewable projection.
 - [x] Keep RF-path documentation as one straightforward ordered hardware list.
 - [x] Attach RF captures and reports to Setup evidence/activity.
-- [ ] Deploy, verify, and obtain operator acceptance.
+- [x] Deploy and verify on the RPI.
+- [x] Obtain operator acceptance.
 
 ### 6. Profiles And Alerts
 
@@ -1952,3 +1931,5 @@ Status: pending
   `assets/index-DuGB3HdQ.css`, including the nested System / Performance UI.
   Health was `ok` with clear queues. Trunk Recorder remained PID 1595 with its
   unchanged July 11 start timestamp; no SDR inventory or Setup apply ran.
+- 2026-07-17: The operator accepted Package 5 and directed that it be marked
+  complete. Package 5 is closed; subsequent work resumes with active Package 7.

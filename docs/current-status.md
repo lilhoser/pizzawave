@@ -7,8 +7,8 @@ This is the handoff note for starting a new Codex session rooted at
 
 ## First Instruction For New Session
 
-Start in a new worktree from the pushed `codex/package5-fixes` branch, read this
-file, `docs/open-todo.md`, and `docs/operator-ux-remediation.md`, then
+Start in a new task-specific worktree from `main`, read this file,
+`docs/open-todo.md`, and `docs/operator-ux-remediation.md`, then
 run:
 
 ```powershell
@@ -17,15 +17,13 @@ git log -1 --oneline
 dotnet sln C:\projects\pizzawave\pizzawave.sln list
 ```
 
-The expected branch is `codex/package5-fixes`. The checkpoint commit is the
-latest pushed handoff commit on that branch. Do not resume from one of the old
+The expected base branch is `main`. Create a task-specific `codex/` branch in
+the new worktree before making changes. Do not resume from one of the old
 Package 5 or Package 8 worktree directories.
 
 ## 2026-07-17 Operator UX Handoff
 
-- Packages 1, 2, 3, 4, 6, and 8 are complete and operator-accepted.
-- Package 5 is implemented and deployed but its final RF/call proof remains
-  deferred while separate long-window RF experiments are active.
+- Packages 1, 2, 3, 4, 5, 6, and 8 are complete and operator-accepted.
 - Package 7, Offline And Archive Calls, is active. Its operator interview and
   feasibility study are complete. Imported evidence never merges into live
   operational data; SFTP call archives and support packages open only in
@@ -35,14 +33,14 @@ Package 5 or Package 8 worktree directories.
   tests pass. Continue with the support-package creator, validator, inventory,
   isolated store, Workspace Library, and read-only Summary vertical slice.
 - After Package 7, complete Package 9 Temporal Pattern Analysis, Package 10
-  Recovery Workflows, and Package 11 Cleanup, then return to Package 5 final
-  acceptance and the final regression pass.
+  Recovery Workflows, and Package 11 Cleanup, then run the final regression
+  pass.
 - Package 10 must include portable backup encryption. Existing full backups can
   include the PizzaWave authentication token and configured credentials;
   support packages are a separate secret-excluding format.
-- Do not restart Trunk Recorder or run Package 5 proof as a side effect of
-  Package 7 work. Package 7 deployment must wait for a complete
-  operator-visible slice and must preserve live capture priority.
+- Do not restart Trunk Recorder as a side effect of Package 7 work. Package 7
+  deployment must wait for a complete operator-visible slice and must preserve
+  live capture priority.
 
 ## Active Architecture
 
