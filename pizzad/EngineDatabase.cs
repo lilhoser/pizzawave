@@ -760,8 +760,15 @@ public sealed partial class EngineDatabase
         {
             var recommendation = JsonSerializer.Deserialize<SystemRecommendationDto>(row.Snapshot);
             if (recommendation is null) continue;
-            var (episodes, episodeCount) = await LoadRecommendationEpisodesAsync(connection, transaction, row.Id, nowUtc, ct);
-            var audit = await LoadRecommendationEventsAsync(connection, transaction, row.Id, ct);
+            recommendation = recommendation with { Episodes = [], Audit = [], EpisodeCount = 0 };
+            IReadOnlyList<RfTemporalEpisodeDto> episodes = [];
+            IReadOnlyList<RecommendationFindingEventDto> audit = [];
+            var episodeCount = 0;
+            if (string.IsNullOrWhiteSpace(row.Resolved))
+            {
+                (episodes, episodeCount) = await LoadRecommendationEpisodesAsync(connection, transaction, row.Id, nowUtc, ct);
+                audit = await LoadRecommendationEventsAsync(connection, transaction, row.Id, ct);
+            }
             var reviewDue = DateTime.TryParse(row.NextReview, out var reviewAt) && reviewAt.ToUniversalTime() <= nowUtc;
             recommendation = recommendation with
             {
