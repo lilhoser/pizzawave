@@ -2064,6 +2064,8 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   font-size: 24px;
 }
 .recommendations-summary p { margin: 0; }
+.recommendation-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.recommendation-tabs button.active { background: var(--accent); color: #08131b; }
 .recommendation-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px auto;
@@ -2119,6 +2121,8 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   text-transform: uppercase;
 }
 .recommendation-lifecycle.new { border-color: var(--accent); color: var(--text); }
+.recommendation-activity { border-radius: 999px; padding: 3px 7px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: #315744; }
+.recommendation-activity.quiet { background: #3b4650; color: #c4ced7; }
 .recommendation-window { margin: 0 0 8px; }
 .recommendation-severity {
   text-transform: uppercase;
@@ -2169,6 +2173,21 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   margin-top: 10px;
 }
 .recommendation-card .recommendation-buttons { margin-top: auto; padding-top: 12px; }
+.recommendation-detail { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.recommendation-detail > summary { cursor: pointer; font-weight: 700; }
+.recommendation-detail section { margin-top: 14px; }
+.recommendation-detail h4 { margin: 0 0 8px; }
+.finding-hypothesis, .finding-audit > div, .finding-episode-list > div { display: grid; gap: 3px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.finding-hypothesis span, .finding-audit span, .finding-episode-list span { color: var(--muted); font-size: 12px; }
+.finding-hypothesis p, .finding-audit p { margin: 2px 0 0; }
+.finding-workflow { display: flex; gap: 8px; align-items: center; }
+.finding-note { display: grid; gap: 8px; margin-top: 8px; }
+.finding-note textarea { min-height: 72px; resize: vertical; }
+.finding-note button { justify-self: start; }
+.rf-finding-context { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-color: #c58a3b; background: rgba(197, 138, 59, 0.10); }
+.rf-finding-context p { margin: 4px 0 0; }
+.finding-episode-band { fill: rgba(247, 201, 72, 0.15); stroke: rgba(247, 201, 72, 0.6); stroke-width: 1; }
+.finding-episode-band.severity-high, .finding-episode-band.severity-critical { fill: rgba(255, 107, 90, 0.18); stroke: rgba(255, 107, 90, 0.7); }
 
 .candidate-filter-banner {
   display: flex;

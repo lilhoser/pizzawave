@@ -598,49 +598,127 @@ public sealed partial class EngineDatabase
 
         foreach (var recommendation in activeRecommendations)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                INSERT INTO recommendation_findings (recommendation_id, first_seen_utc, last_seen_utc, snapshot_json)
-                VALUES ($id, $now, $now, $snapshot)
-                ON CONFLICT(recommendation_id) WHERE resolved_at_utc = '' DO UPDATE SET
-                    last_seen_utc=excluded.last_seen_utc,
-                    snapshot_json=excluded.snapshot_json;
-                """;
-            Add(command, "$id", recommendation.Id);
-            Add(command, "$now", nowUtc.ToString("O"));
-            Add(command, "$snapshot", JsonSerializer.Serialize(recommendation));
-            await command.ExecuteNonQueryAsync(ct);
+            var desiredActivity = string.Equals(recommendation.ActivityState, "quiet", StringComparison.OrdinalIgnoreCase) ? "quiet" : "active";
+            long findingId;
+            string priorActivity = "";
+            string priorSeverity = "";
+            await using (var find = connection.CreateCommand())
+            {
+                find.Transaction = transaction;
+                find.CommandText = "SELECT id, activity_state, snapshot_json FROM recommendation_findings WHERE recommendation_id=$id AND resolved_at_utc='' LIMIT 1;";
+                Add(find, "$id", recommendation.Id);
+                await using var reader = await find.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct))
+                {
+                    findingId = reader.GetInt64(0);
+                    priorActivity = reader.GetString(1);
+                    priorSeverity = JsonSerializer.Deserialize<SystemRecommendationDto>(reader.GetString(2))?.Severity ?? "";
+                }
+                else
+                {
+                    findingId = 0;
+                }
+            }
+
+            if (findingId == 0)
+            {
+                long? parentId = null;
+                await using (var parent = connection.CreateCommand())
+                {
+                    parent.Transaction = transaction;
+                    parent.CommandText = "SELECT id FROM recommendation_findings WHERE recommendation_id=$id AND resolved_at_utc<>'' ORDER BY resolved_at_utc DESC LIMIT 1;";
+                    Add(parent, "$id", recommendation.Id);
+                    var value = await parent.ExecuteScalarAsync(ct);
+                    if (value is long id) parentId = id;
+                }
+                await using var insert = connection.CreateCommand();
+                insert.Transaction = transaction;
+                insert.CommandText = """
+                    INSERT INTO recommendation_findings
+                        (recommendation_id, first_seen_utc, last_seen_utc, workflow_status, activity_state, confidence, owner_type, owner_key, signature, parent_finding_id, snapshot_json)
+                    VALUES ($id, $now, $now, 'new', $activity, $confidence, $owner_type, $owner_key, $signature, $parent, $snapshot);
+                    SELECT last_insert_rowid();
+                    """;
+                Add(insert, "$id", recommendation.Id);
+                Add(insert, "$now", nowUtc.ToString("O"));
+                Add(insert, "$activity", desiredActivity);
+                Add(insert, "$confidence", recommendation.Confidence);
+                Add(insert, "$owner_type", recommendation.OwnerType);
+                Add(insert, "$owner_key", recommendation.OwnerKey);
+                Add(insert, "$signature", recommendation.Signature);
+                Add(insert, "$parent", parentId);
+                Add(insert, "$snapshot", JsonSerializer.Serialize(recommendation));
+                findingId = Convert.ToInt64(await insert.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+                await InsertRecommendationEventAsync(connection, transaction, findingId, "created", "pizzawave", "Finding created from current evidence.", JsonSerializer.Serialize(new { recommendation.Id, recommendation.Severity, recommendation.Confidence }), nowUtc, ct);
+            }
+            else
+            {
+                await using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = """
+                    UPDATE recommendation_findings
+                    SET last_seen_utc=$now, activity_state=$activity, confidence=$confidence,
+                        owner_type=$owner_type, owner_key=$owner_key, signature=$signature, snapshot_json=$snapshot
+                    WHERE id=$finding_id;
+                    """;
+                Add(update, "$now", nowUtc.ToString("O"));
+                Add(update, "$activity", desiredActivity);
+                Add(update, "$confidence", recommendation.Confidence);
+                Add(update, "$owner_type", recommendation.OwnerType);
+                Add(update, "$owner_key", recommendation.OwnerKey);
+                Add(update, "$signature", recommendation.Signature);
+                Add(update, "$snapshot", JsonSerializer.Serialize(recommendation));
+                Add(update, "$finding_id", findingId);
+                await update.ExecuteNonQueryAsync(ct);
+                if (!string.Equals(priorActivity, desiredActivity, StringComparison.OrdinalIgnoreCase))
+                    await InsertRecommendationEventAsync(connection, transaction, findingId, "activity_changed", "pizzawave", desiredActivity == "active" ? "Matching evidence recurred." : "Current evidence is quiet; the recurring pattern remains tracked.", JsonSerializer.Serialize(new { from = priorActivity, to = desiredActivity }), nowUtc, ct);
+                if (!string.IsNullOrWhiteSpace(priorSeverity) && !string.Equals(priorSeverity, recommendation.Severity, StringComparison.OrdinalIgnoreCase))
+                    await InsertRecommendationEventAsync(connection, transaction, findingId, "severity_changed", "pizzawave", $"Severity changed from {priorSeverity} to {recommendation.Severity}.", JsonSerializer.Serialize(new { from = priorSeverity, to = recommendation.Severity }), nowUtc, ct);
+            }
+
+            foreach (var episode in recommendation.Episodes)
+            {
+                await using var episodeInsert = connection.CreateCommand();
+                episodeInsert.Transaction = transaction;
+                episodeInsert.CommandText = """
+                    INSERT OR IGNORE INTO recommendation_finding_episodes
+                        (finding_id, episode_key, started_at_utc, ended_at_utc, severity, evidence_json, created_at_utc)
+                    VALUES ($finding_id, $key, $start, $end, $severity, $evidence, $now);
+                    """;
+                Add(episodeInsert, "$finding_id", findingId);
+                Add(episodeInsert, "$key", episode.EpisodeKey);
+                Add(episodeInsert, "$start", episode.StartUtc.ToUniversalTime().ToString("O"));
+                Add(episodeInsert, "$end", episode.EndUtc.ToUniversalTime().ToString("O"));
+                Add(episodeInsert, "$severity", episode.Severity);
+                Add(episodeInsert, "$evidence", JsonSerializer.Serialize(episode));
+                Add(episodeInsert, "$now", nowUtc.ToString("O"));
+                if (await episodeInsert.ExecuteNonQueryAsync(ct) > 0)
+                    await InsertRecommendationEventAsync(connection, transaction, findingId, "episode_attached", "pizzawave", $"RF episode attached: {episode.StartUtc:u} to {episode.EndUtc:u}.", JsonSerializer.Serialize(new { episode.EpisodeKey, episode.Severity, episode.Conditions }), nowUtc, ct);
+            }
         }
 
-        await using (var resolve = connection.CreateCommand())
+        var quietIds = new List<long>();
+        await using (var inactive = connection.CreateCommand())
         {
-            resolve.Transaction = transaction;
+            inactive.Transaction = transaction;
             var inactiveFilter = activeIds.Count == 0
                 ? string.Empty
                 : $" AND recommendation_id NOT IN ({string.Join(',', activeIds.Select((_, index) => $"$active{index}"))})";
-            resolve.CommandText = $"""
-                UPDATE recommendation_findings
-                SET resolved_at_utc=$now,
-                    resolution=CASE
-                        WHEN $has_rf=1 AND (recommendation_id='tr-retunes' OR recommendation_id LIKE 'tr-decode-zero:%')
-                            THEN 'Superseded by the combined per-site RF stability finding.'
-                        WHEN $has_ai=1 AND recommendation_id IN ('ai-service-failures', 'ai-truncation-pressure')
-                            THEN 'Superseded by the combined AI incident-generation finding.'
-                        WHEN $has_queue=1 AND recommendation_id IN ('queue-audio-pressure', 'queue-drain-watch', 'ai-blocked-queue')
-                            THEN 'Superseded by the combined queue-pressure finding.'
-                        ELSE 'Automatically resolved because current evidence no longer met this finding''s activation threshold.'
-                    END
-                WHERE resolved_at_utc=''{inactiveFilter};
-                """;
-            Add(resolve, "$now", nowUtc.ToString("O"));
-            Add(resolve, "$has_rf", activeIds.Any(id => id.StartsWith("tr-rf-stability:", StringComparison.OrdinalIgnoreCase)) ? 1 : 0);
-            Add(resolve, "$has_ai", activeIds.Contains("ai-generation-health") ? 1 : 0);
-            Add(resolve, "$has_queue", activeIds.Contains("queue-pressure") ? 1 : 0);
+            inactive.CommandText = $"SELECT id FROM recommendation_findings WHERE resolved_at_utc='' AND activity_state<>'quiet'{inactiveFilter};";
             var index = 0;
             foreach (var id in activeIds)
-                Add(resolve, $"$active{index++}", id);
-            await resolve.ExecuteNonQueryAsync(ct);
+                Add(inactive, $"$active{index++}", id);
+            await using var reader = await inactive.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) quietIds.Add(reader.GetInt64(0));
+        }
+        foreach (var findingId in quietIds)
+        {
+            await using var quiet = connection.CreateCommand();
+            quiet.Transaction = transaction;
+            quiet.CommandText = "UPDATE recommendation_findings SET activity_state='quiet' WHERE id=$id;";
+            Add(quiet, "$id", findingId);
+            await quiet.ExecuteNonQueryAsync(ct);
+            await InsertRecommendationEventAsync(connection, transaction, findingId, "activity_changed", "pizzawave", "Current evidence is quiet; operator workflow status was not changed.", "{\"to\":\"quiet\"}", nowUtc, ct);
         }
 
         await using (var prune = connection.CreateCommand())
@@ -652,36 +730,55 @@ public sealed partial class EngineDatabase
         }
 
         var active = new List<SystemRecommendationDto>();
+        var known = new List<SystemRecommendationDto>();
         var resolved = new List<SystemRecommendationDto>();
+        var stored = new List<(long Id, string First, string Last, string Reviewed, string Resolved, string Resolution, string Workflow, string Activity, string Confidence, string OwnerType, string OwnerKey, string Signature, string NextReview, string Snapshot)>();
         await using (var query = connection.CreateCommand())
         {
             query.Transaction = transaction;
             query.CommandText = """
-                SELECT recommendation_id, first_seen_utc, last_seen_utc, reviewed_at_utc, resolved_at_utc, resolution, snapshot_json
+                SELECT id, first_seen_utc, last_seen_utc, reviewed_at_utc, resolved_at_utc, resolution,
+                       workflow_status, activity_state, confidence, owner_type, owner_key, signature, next_review_utc, snapshot_json
                 FROM recommendation_findings
                 ORDER BY CASE WHEN resolved_at_utc = '' THEN 0 ELSE 1 END, last_seen_utc DESC;
                 """;
             await using var reader = await query.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
+                stored.Add((reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetString(9), reader.GetString(10), reader.GetString(11), reader.GetString(12), reader.GetString(13)));
+        }
+        foreach (var row in stored)
+        {
+            var recommendation = JsonSerializer.Deserialize<SystemRecommendationDto>(row.Snapshot);
+            if (recommendation is null) continue;
+            var episodes = await LoadRecommendationEpisodesAsync(connection, transaction, row.Id, ct);
+            var audit = await LoadRecommendationEventsAsync(connection, transaction, row.Id, ct);
+            var reviewDue = DateTime.TryParse(row.NextReview, out var reviewAt) && reviewAt.ToUniversalTime() <= nowUtc;
+            recommendation = recommendation with
             {
-                var recommendation = JsonSerializer.Deserialize<SystemRecommendationDto>(reader.GetString(6));
-                if (recommendation is null) continue;
-                var reviewed = reader.GetString(3);
-                var resolvedAt = reader.GetString(4);
-                recommendation = recommendation with
-                {
-                    Lifecycle = string.IsNullOrWhiteSpace(resolvedAt) ? string.IsNullOrWhiteSpace(reviewed) ? "new" : "active" : "resolved",
-                    FirstSeenUtc = reader.GetString(1),
-                    LastSeenUtc = reader.GetString(2),
-                    ResolvedAtUtc = resolvedAt,
-                    Resolution = reader.GetString(5)
-                };
-                if (string.IsNullOrWhiteSpace(resolvedAt)) active.Add(recommendation); else resolved.Add(recommendation);
-            }
+                FindingId = row.Id,
+                Lifecycle = row.Workflow,
+                WorkflowStatus = row.Workflow,
+                ActivityState = row.Activity,
+                Confidence = row.Confidence,
+                OwnerType = row.OwnerType,
+                OwnerKey = row.OwnerKey,
+                Signature = row.Signature,
+                NextReviewUtc = row.NextReview,
+                ReviewDue = reviewDue,
+                FirstSeenUtc = row.First,
+                LastSeenUtc = row.Last,
+                ResolvedAtUtc = row.Resolved,
+                Resolution = row.Resolution,
+                Episodes = episodes,
+                Audit = audit
+            };
+            if (!string.IsNullOrWhiteSpace(row.Resolved)) resolved.Add(recommendation);
+            else if (string.Equals(row.Workflow, "known_issue", StringComparison.OrdinalIgnoreCase)) known.Add(recommendation);
+            else active.Add(recommendation);
         }
 
         await transaction.CommitAsync(ct);
-        return new RecommendationFindingSyncResult(active, resolved);
+        return new RecommendationFindingSyncResult(active, known, resolved);
     }
 
     public async Task MarkRecommendationReviewedAsync(string recommendationId, DateTime nowUtc, CancellationToken ct)
@@ -692,6 +789,176 @@ public sealed partial class EngineDatabase
         Add(command, "$now", nowUtc.ToString("O"));
         Add(command, "$id", recommendationId);
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> SetRecommendationWorkflowAsync(long findingId, RecommendationFindingStateRequest request, DateTime nowUtc, CancellationToken ct)
+    {
+        var status = (request.Status ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "new", "unresolved", "investigating", "known_issue", "monitoring", "resolved", "dismissed"
+        };
+        if (!allowed.Contains(status)) throw new ArgumentException($"Unsupported finding status '{request.Status}'.", nameof(request));
+
+        await using var connection = OpenConnection();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        string previous;
+        await using (var find = connection.CreateCommand())
+        {
+            find.Transaction = transaction;
+            find.CommandText = "SELECT workflow_status FROM recommendation_findings WHERE id=$id AND resolved_at_utc='';";
+            Add(find, "$id", findingId);
+            previous = Convert.ToString(await find.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        if (string.IsNullOrWhiteSpace(previous)) return false;
+
+        var terminal = status is "resolved" or "dismissed";
+        var reviewAt = status == "known_issue"
+            ? nowUtc.AddDays(Math.Clamp(request.ReviewInDays ?? 7, 1, 365)).ToString("O")
+            : string.Empty;
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE recommendation_findings
+                SET workflow_status=$status, next_review_utc=$review,
+                    resolved_at_utc=$resolved, resolution=$resolution, reviewed_at_utc=$now
+                WHERE id=$id AND resolved_at_utc='';
+                """;
+            Add(update, "$status", status);
+            Add(update, "$review", reviewAt);
+            Add(update, "$resolved", terminal ? nowUtc.ToString("O") : string.Empty);
+            Add(update, "$resolution", terminal ? (string.IsNullOrWhiteSpace(request.Note) ? status : request.Note.Trim()) : string.Empty);
+            Add(update, "$now", nowUtc.ToString("O"));
+            Add(update, "$id", findingId);
+            if (await update.ExecuteNonQueryAsync(ct) == 0) return false;
+        }
+        var detail = string.IsNullOrWhiteSpace(request.Note)
+            ? $"Workflow status changed from {previous} to {status}."
+            : request.Note.Trim();
+        await InsertRecommendationEventAsync(connection, transaction, findingId, "workflow_changed", "operator", detail,
+            JsonSerializer.Serialize(new { from = previous, to = status, nextReviewUtc = reviewAt }), nowUtc, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> AddRecommendationNoteAsync(long findingId, string note, DateTime nowUtc, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(note)) throw new ArgumentException("A note is required.", nameof(note));
+        await using var connection = OpenConnection();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await using var exists = connection.CreateCommand();
+        exists.Transaction = transaction;
+        exists.CommandText = "SELECT count(*) FROM recommendation_findings WHERE id=$id;";
+        Add(exists, "$id", findingId);
+        if (Convert.ToInt64(await exists.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) == 0) return false;
+        await InsertRecommendationEventAsync(connection, transaction, findingId, "note_added", "operator", note.Trim(), "{}", nowUtc, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    public async Task<IReadOnlyList<MaintenanceIntervalDto>> ListMaintenanceIntervalsAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, start_utc, end_utc, source, reason, exclude_from_baselines, details_json, created_at_utc
+            FROM maintenance_intervals
+            WHERE start_utc < $end AND (end_utc='' OR end_utc > $start)
+            ORDER BY start_utc;
+            """;
+        Add(command, "$start", startUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$end", endUtc.ToUniversalTime().ToString("O"));
+        var rows = new List<MaintenanceIntervalDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var start = DateTime.Parse(reader.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+            var endText = reader.GetString(2);
+            DateTime? end = string.IsNullOrWhiteSpace(endText) ? null : DateTime.Parse(endText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+            var created = DateTime.Parse(reader.GetString(7), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+            rows.Add(new(reader.GetInt64(0), start, end, reader.GetString(3), reader.GetString(4), reader.GetInt32(5) != 0, reader.GetString(6), created));
+        }
+        return rows;
+    }
+
+    public async Task<MaintenanceIntervalDto> CreateMaintenanceIntervalAsync(MaintenanceIntervalRequest request, DateTime nowUtc, CancellationToken ct)
+    {
+        var start = (request.StartUtc ?? nowUtc).ToUniversalTime();
+        var end = request.EndUtc?.ToUniversalTime();
+        if (end.HasValue && end.Value <= start) throw new ArgumentException("Maintenance end must be after its start.", nameof(request));
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO maintenance_intervals(start_utc, end_utc, source, reason, exclude_from_baselines, details_json, created_at_utc)
+            VALUES($start, $end, $source, $reason, $exclude, $details, $created);
+            SELECT last_insert_rowid();
+            """;
+        Add(command, "$start", start.ToString("O"));
+        Add(command, "$end", end?.ToString("O") ?? string.Empty);
+        Add(command, "$source", string.IsNullOrWhiteSpace(request.Source) ? "operator" : request.Source.Trim());
+        Add(command, "$reason", string.IsNullOrWhiteSpace(request.Reason) ? "Maintenance" : request.Reason.Trim());
+        Add(command, "$exclude", request.ExcludeFromBaselines ? 1 : 0);
+        Add(command, "$details", string.IsNullOrWhiteSpace(request.DetailsJson) ? "{}" : request.DetailsJson);
+        Add(command, "$created", nowUtc.ToUniversalTime().ToString("O"));
+        var id = Convert.ToInt64(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        return new(id, start, end, string.IsNullOrWhiteSpace(request.Source) ? "operator" : request.Source.Trim(), string.IsNullOrWhiteSpace(request.Reason) ? "Maintenance" : request.Reason.Trim(), request.ExcludeFromBaselines, string.IsNullOrWhiteSpace(request.DetailsJson) ? "{}" : request.DetailsJson, nowUtc.ToUniversalTime());
+    }
+
+    public async Task<bool> CloseMaintenanceIntervalAsync(long id, DateTime endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE maintenance_intervals SET end_utc=$end WHERE id=$id AND end_utc='' AND start_utc < $end;";
+        Add(command, "$end", endUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$id", id);
+        return await command.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    private static async Task InsertRecommendationEventAsync(SqliteConnection connection, SqliteTransaction transaction, long findingId, string eventType, string actor, string detail, string detailsJson, DateTime nowUtc, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT INTO recommendation_finding_events(finding_id, event_type, actor, detail, details_json, created_at_utc) VALUES($finding_id, $event_type, $actor, $detail, $details, $created);";
+        Add(command, "$finding_id", findingId);
+        Add(command, "$event_type", eventType);
+        Add(command, "$actor", actor);
+        Add(command, "$detail", detail);
+        Add(command, "$details", detailsJson);
+        Add(command, "$created", nowUtc.ToUniversalTime().ToString("O"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<IReadOnlyList<RfTemporalEpisodeDto>> LoadRecommendationEpisodesAsync(SqliteConnection connection, SqliteTransaction transaction, long findingId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT evidence_json FROM recommendation_finding_episodes WHERE finding_id=$id ORDER BY started_at_utc DESC;";
+        Add(command, "$id", findingId);
+        var rows = new List<RfTemporalEpisodeDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var episode = JsonSerializer.Deserialize<RfTemporalEpisodeDto>(reader.GetString(0));
+            if (episode is not null) rows.Add(episode);
+        }
+        return rows;
+    }
+
+    private static async Task<IReadOnlyList<RecommendationFindingEventDto>> LoadRecommendationEventsAsync(SqliteConnection connection, SqliteTransaction transaction, long findingId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT id, event_type, actor, detail, details_json, created_at_utc FROM recommendation_finding_events WHERE finding_id=$id ORDER BY created_at_utc DESC, id DESC;";
+        Add(command, "$id", findingId);
+        var rows = new List<RecommendationFindingEventDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var created = DateTime.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+            rows.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), created));
+        }
+        return rows;
     }
 
     public async Task AddAlertMatchAsync(AlertMatchDto match, CancellationToken ct)
@@ -4434,12 +4701,58 @@ public sealed partial class EngineDatabase
                 reviewed_at_utc TEXT NOT NULL DEFAULT '',
                 resolved_at_utc TEXT NOT NULL DEFAULT '',
                 resolution TEXT NOT NULL DEFAULT '',
+                workflow_status TEXT NOT NULL DEFAULT 'new',
+                activity_state TEXT NOT NULL DEFAULT 'active',
+                confidence TEXT NOT NULL DEFAULT 'medium',
+                owner_type TEXT NOT NULL DEFAULT 'system',
+                owner_key TEXT NOT NULL DEFAULT '',
+                signature TEXT NOT NULL DEFAULT '',
+                next_review_utc TEXT NOT NULL DEFAULT '',
+                parent_finding_id INTEGER,
                 snapshot_json TEXT NOT NULL
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_findings_active
                 ON recommendation_findings(recommendation_id) WHERE resolved_at_utc = '';
             CREATE INDEX IF NOT EXISTS idx_recommendation_findings_history
                 ON recommendation_findings(resolved_at_utc DESC, last_seen_utc DESC);
+            CREATE TABLE IF NOT EXISTS recommendation_finding_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                finding_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(finding_id) REFERENCES recommendation_findings(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_recommendation_finding_events
+                ON recommendation_finding_events(finding_id, created_at_utc);
+            CREATE TABLE IF NOT EXISTS recommendation_finding_episodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                finding_id INTEGER NOT NULL,
+                episode_key TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                ended_at_utc TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                evidence_json TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                FOREIGN KEY(finding_id) REFERENCES recommendation_findings(id) ON DELETE CASCADE,
+                UNIQUE(finding_id, episode_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_recommendation_finding_episodes
+                ON recommendation_finding_episodes(finding_id, started_at_utc);
+            CREATE TABLE IF NOT EXISTS maintenance_intervals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start_utc TEXT NOT NULL,
+                end_utc TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                exclude_from_baselines INTEGER NOT NULL DEFAULT 1,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at_utc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_maintenance_intervals_window
+                ON maintenance_intervals(start_utc, end_utc);
             CREATE TABLE IF NOT EXISTS remote_service_outages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 service_key TEXT NOT NULL,
@@ -4474,6 +4787,22 @@ public sealed partial class EngineDatabase
         await AddColumnIfMissingAsync(connection, "rf_survey_experiments", "physical_change", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "recommendation_baselines", "baseline_value", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "recommendation_findings", "resolution", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "workflow_status", "TEXT NOT NULL DEFAULT 'new'", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "activity_state", "TEXT NOT NULL DEFAULT 'active'", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "confidence", "TEXT NOT NULL DEFAULT 'medium'", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "owner_type", "TEXT NOT NULL DEFAULT 'system'", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "owner_key", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "signature", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "next_review_utc", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "parent_finding_id", "INTEGER", ct);
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE recommendation_findings
+            SET resolved_at_utc=CASE WHEN resolved_at_utc='' THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE resolved_at_utc END,
+                workflow_status='resolved', activity_state='quiet',
+                resolution='Superseded by the consolidated temporal RF site finding.'
+            WHERE resolved_at_utc=''
+              AND (recommendation_id LIKE 'tr-rf-stability:%' OR recommendation_id LIKE 'tr-rf-temporal:%:%');
+            """, ct);
         await ExecuteNonQueryAsync(connection, """
             UPDATE recommendation_findings AS old
             SET resolution='Superseded by the combined per-site RF stability finding.'

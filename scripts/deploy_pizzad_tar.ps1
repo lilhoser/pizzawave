@@ -300,6 +300,13 @@ HEALTH_TIMEOUT_SECONDS=$(ConvertTo-BashSingleQuoted ([string]$HealthTimeoutSecon
 DEPLOY_MANIFEST=$(ConvertTo-BashSingleQuoted $deployManifestJson)
 set -e
 work=/tmp/pizzad-web-deploy
+maintenance_start=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
+maintenance_token=`$(sudo cat /etc/pizzawave/pizzad.token 2>/dev/null || true)
+maintenance_response=""
+if [ -n "`$maintenance_token" ]; then
+  maintenance_response=`$(curl -fsS -H "Authorization: Bearer `$maintenance_token" -H 'Content-Type: application/json' -d '{"source":"deployment_helper","reason":"PizzaWave web deployment","excludeFromBaselines":true}' http://127.0.0.1:8080/api/v1/system/maintenance 2>/dev/null || true)
+fi
+maintenance_id=`$(printf '%s' "`$maintenance_response" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
 rm -rf "`$work"
 mkdir -p "`$work"
 tar -xzf "`$REMOTE_TAR" -C "`$work"
@@ -311,11 +318,21 @@ systemctl is-active pizzad
 deadline=`$((`$HEALTH_TIMEOUT_SECONDS * 2))
 for i in `$(seq 1 "`$deadline"); do
   if curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then
-    echo "pizzad web deploy complete"
-    exit 0
+    healthy=1
+    break
   fi
   sleep 0.5
 done
+if [ "`$healthy" = "1" ] && [ -n "`$maintenance_token" ]; then
+  if [ -n "`$maintenance_id" ]; then
+    curl -fsS -X POST -H "Authorization: Bearer `$maintenance_token" http://127.0.0.1:8080/api/v1/system/maintenance/`$maintenance_id/close >/dev/null
+  else
+    maintenance_end=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    curl -fsS -H "Authorization: Bearer `$maintenance_token" -H 'Content-Type: application/json' -d "{\"source\":\"deployment_helper\",\"reason\":\"PizzaWave web deployment\",\"startUtc\":\"`$maintenance_start\",\"endUtc\":\"`$maintenance_end\",\"excludeFromBaselines\":true}" http://127.0.0.1:8080/api/v1/system/maintenance >/dev/null
+  fi
+  echo "pizzad web deploy complete"
+  exit 0
+fi
 echo "pizzad health check did not pass within `$HEALTH_TIMEOUT_SECONDS seconds" >&2
 exit 1
 "@
@@ -409,6 +426,13 @@ RESTART_PIZZAD=$(ConvertTo-BashSingleQuoted $restartPizzad)
 HEALTH_TIMEOUT_SECONDS=$(ConvertTo-BashSingleQuoted ([string]$HealthTimeoutSeconds))
 set -e
 work=/tmp/pizzad-direct-deploy
+maintenance_start=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
+maintenance_token=`$(sudo cat /etc/pizzawave/pizzad.token 2>/dev/null || true)
+maintenance_response=""
+if [ -n "`$maintenance_token" ]; then
+  maintenance_response=`$(curl -fsS -H "Authorization: Bearer `$maintenance_token" -H 'Content-Type: application/json' -d '{"source":"deployment_helper","reason":"PizzaWave backend deployment","excludeFromBaselines":true}' http://127.0.0.1:8080/api/v1/system/maintenance 2>/dev/null || true)
+fi
+maintenance_id=`$(printf '%s' "`$maintenance_response" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
 rm -rf "`$work"
 mkdir -p "`$work"
 tar -xf "`$REMOTE_TAR" -C "`$work"
@@ -444,11 +468,21 @@ systemctl is-active pizzad
 deadline=`$((`$HEALTH_TIMEOUT_SECONDS * 2))
 for i in `$(seq 1 "`$deadline"); do
   if curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then
-    echo "pizzad direct tar deploy complete"
-    exit 0
+    healthy=1
+    break
   fi
   sleep 0.5
 done
+if [ "`$healthy" = "1" ] && [ -n "`$maintenance_token" ]; then
+  if [ -n "`$maintenance_id" ]; then
+    curl -fsS -X POST -H "Authorization: Bearer `$maintenance_token" http://127.0.0.1:8080/api/v1/system/maintenance/`$maintenance_id/close >/dev/null
+  else
+    maintenance_end=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    curl -fsS -H "Authorization: Bearer `$maintenance_token" -H 'Content-Type: application/json' -d "{\"source\":\"deployment_helper\",\"reason\":\"PizzaWave backend deployment\",\"startUtc\":\"`$maintenance_start\",\"endUtc\":\"`$maintenance_end\",\"excludeFromBaselines\":true}" http://127.0.0.1:8080/api/v1/system/maintenance >/dev/null
+  fi
+  echo "pizzad direct tar deploy complete"
+  exit 0
+fi
 echo "pizzad health check did not pass within `$HEALTH_TIMEOUT_SECONDS seconds" >&2
 exit 1
 "@

@@ -255,8 +255,8 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("Copy Config", source, StringComparison.Ordinal);
         Assert.DoesNotContain("danger-button\" onClick={onOpenSetup}>Open Setup", source, StringComparison.Ordinal);
         Assert.Contains("system-metrics-rf|${rfPerformanceHours}", source, StringComparison.Ordinal);
-        Assert.Contains("setRfPerformanceHours(2)", source, StringComparison.Ordinal);
-        Assert.Contains("pizzawave-system-rf-performance-hours\", \"2", source, StringComparison.Ordinal);
+        Assert.Contains("setRfPerformanceHours(chartHours)", source, StringComparison.Ordinal);
+        Assert.Contains("pizzawave-system-rf-performance-hours\", String(chartHours)", source, StringComparison.Ordinal);
         Assert.Contains("function RfHealthStatusPanel", source, StringComparison.Ordinal);
         Assert.Contains("<label>Window <select value={rangeHours}", source, StringComparison.Ordinal);
         Assert.Contains("tr-site-card-grid", source, StringComparison.Ordinal);
@@ -379,15 +379,16 @@ public sealed class SystemInformationUiContractTests
         var source = RecommendationServiceSource();
 
         Assert.Contains("BuildSystemAssessmentsAsync(healthStart", source, StringComparison.Ordinal);
-        Assert.Contains("system.IsIssue", source, StringComparison.Ordinal);
-        Assert.Contains("tr-rf-stability:{assessment.SystemShortName}", source, StringComparison.Ordinal);
-        Assert.Contains("RF performance needs review", source, StringComparison.Ordinal);
-        Assert.Contains("same localized assessment shown in RF Performance", source, StringComparison.Ordinal);
+        Assert.Contains("RfTemporalFindingAnalyzer.Analyze", source, StringComparison.Ordinal);
+        Assert.Contains("tr-rf-temporal:{finding.OwnerKey}", source, StringComparison.Ordinal);
+        Assert.Contains("recurring RF degradation", source, StringComparison.Ordinal);
+        Assert.Contains("GroupBy(row => row.OwnerKey", source, StringComparison.Ordinal);
+        Assert.Contains("RF Performance owns the underlying charts", source, StringComparison.Ordinal);
         Assert.Contains("40 msg/s remains the strong-system reference", source, StringComparison.Ordinal);
         Assert.Contains("BuildRfAssessmentDiagnostics(assessment)", source, StringComparison.Ordinal);
         Assert.Contains("Other monitored-system context:", source, StringComparison.Ordinal);
         Assert.Contains("BuildRetuneTargetDiagnosticsAsync(rfEvidenceStart, rfEvidenceEnd", source, StringComparison.Ordinal);
-        Assert.Contains("SystemDisplayName(assessment.SystemShortName)", source, StringComparison.Ordinal);
+        Assert.Contains("SystemDisplayName(finding.OwnerKey)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("var retuneProblem", source, StringComparison.Ordinal);
         Assert.DoesNotContain("var lowDecodeProblem", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Global periodic control-channel summary decode-zero rate", source, StringComparison.Ordinal);

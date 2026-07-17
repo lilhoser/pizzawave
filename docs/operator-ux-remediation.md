@@ -9,16 +9,18 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 9 - Temporal Pattern Analysis
-- Current milestone: Package 9 interview complete; the RF temporal-finding
-  vertical slice is active. Package 7 is deferred as a standalone outstanding
+- Current milestone: Package 9 RF temporal-finding vertical slice is implemented,
+  tested, deployed to the RPI, and live-verified. Package 7 is deferred as a standalone outstanding
   feature outside this closeout sequence. Packages 5 and 8 are complete,
   deployed, live-verified, and operator-accepted.
-- Continuation branch: `main`
-- Last deployed code state: Package 5 closure remediation on the merged
-  redesign, commit `8d6d5bd`, deployed 2026-07-17
+- Continuation branch: `codex/package9-temporal` in
+  `C:\projects\pizzawave-package9-temporal`
+- Last deployed code state: Package 9 consolidated RF temporal findings and
+  operator workflow, deployed to the RPI 2026-07-17
 - Latest tracker commit before closure: `5ac9854`
 - Operator verification: Packages 1, 2, 3, 4, 5, 6, and 8 accepted
-- Next action: complete Package 9 Temporal Pattern Analysis, then Package 10
+- Next action: extend the Package 9 contracts from RF to the remaining domains,
+  then complete Package 10
   Recovery Workflows and Package 11 Cleanup/final regression. Do not restart
   Trunk Recorder or otherwise disturb parallel RF experiments.
 
@@ -630,7 +632,7 @@ Section acceptance checkpoints:
 
 ### 9. Temporal Pattern Analysis
 
-Status: operator interview complete; RF vertical slice active
+Status: RF vertical slice implemented, deployed, and live-verified; remaining domains pending
 
 Accepted design:
 
@@ -691,6 +693,24 @@ Accepted design:
 - Implement RF first end to end, then extend the same contracts to
   transcription, queues/runtime, talkgroup traffic, incidents, USB, and
   cross-domain relationships before Package 9 acceptance.
+
+RF implementation delivered 2026-07-17:
+
+- Deterministic 28-day RF episode and recurrence analysis now groups decimal
+  variations by typed symptom signature and recognizes regular recurrence even
+  without consecutive days or a fixed schedule.
+- One parent RF finding per configured site consolidates decode loss, control
+  instability, general RF degradation, and capture degradation patterns. Typed
+  episodes remain distinct below the parent instead of flooding the action queue.
+- Active, Known Issues, and History views expose operator-owned workflow state,
+  derived activity, append-only notes, cause hypotheses, and a complete audit.
+- Direct links select the owning RF Performance page and render stored episode
+  intervals as chart overlays. Existing RF charts and the 40 msg/s reference remain.
+- The direct-deploy helper records explicit start/end maintenance intervals;
+  these remain audited evidence and are excluded from pattern baselines.
+- RPI live verification showed two parent RF findings for the two configured
+  sites, no legacy RF cards in Active, and 64 visible episode bands for the
+  selected ETV finding. Trunk Recorder remained PID 1595 with its July 11 start.
 
 - [ ] Detect sustained outages, recurring time-of-day/day-of-week patterns,
   trends, spikes, drops, and correlated signals across RF, transcription,

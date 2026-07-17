@@ -31,6 +31,13 @@ Package 5 or Package 8 worktree directories.
   implemented or deployed.
 - The active closeout sequence is Package 9 Temporal Pattern Analysis, Package
   10 Recovery Workflows, and Package 11 Cleanup plus final regression.
+- Package 9's RF-first vertical slice is implemented on
+  `codex/package9-temporal` in `C:\projects\pizzawave-package9-temporal` and is
+  deployed to the RPI. It provides consolidated per-site temporal findings,
+  operator workflow/audit, Known Issues handling, maintenance exclusion, and
+  RF chart episode overlays. Continue Package 9 by applying the same contracts
+  to transcription, queues/runtime, talkgroup traffic, incidents, USB, and
+  cross-domain relationships; Package 9 is not yet ready for acceptance.
 - Package 10 must include portable backup encryption. Existing full backups can
   include the PizzaWave authentication token and configured credentials;
   support packages are a separate secret-excluding format.

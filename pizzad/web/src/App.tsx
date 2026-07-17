@@ -4684,6 +4684,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   const [baseline, setBaseline] = useState("7d");
   const pageIdentity = systemPageIdentity(topTab, trTab, metricsTab);
   const [rfChartCategory, setRfChartCategory] = useState<RfChartCategory>("all");
+  const [selectedRfFinding, setSelectedRfFinding] = useState<SystemRecommendation | null>(null);
   const [rfPerformanceHours, setRfPerformanceHours] = useState(() => {
     const saved = Number(localStorage.getItem("pizzawave-system-rf-performance-hours"));
     return [2, 6, 24, 72, 168].includes(saved) ? saved : 2;
@@ -4907,7 +4908,6 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   function openRecommendationTarget(item: SystemRecommendations["items"][number]) {
     const target = item.target;
     const candidates = item.candidates;
-    void api.request(`/api/v1/system/recommendations/${encodeURIComponent(item.id)}/reviewed`, { method: "POST" }).catch(() => undefined);
     if (target.topTab === "recommendations") setTopTab("recommendations");
     if (target.topTab === "runtime") {
       if (target.subTab === "jobs") {
@@ -4931,7 +4931,14 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
       else setTopTab("services");
     }
     if (target.topTab === "tr") {
-      if (target.subTab === "metrics" || target.subTab === "rf") { setRfPerformanceHours(2); localStorage.setItem("pizzawave-system-rf-performance-hours", "2"); setRfChartCategory("all"); setTopTab("metrics"); setMetricsTab("rf"); }
+      if (target.subTab === "metrics" || target.subTab === "rf") {
+        const latestEpisode = [...(item.episodes ?? [])].sort((a, b) => new Date(b.endUtc).getTime() - new Date(a.endUtc).getTime())[0];
+        const ageHours = latestEpisode ? Math.max(0, (Date.now() - new Date(latestEpisode.startUtc).getTime()) / 3_600_000) : 2;
+        const chartHours = [2, 6, 24, 72, 168].find(hours => ageHours <= hours) ?? 168;
+        setSelectedRfFinding(item);
+        if (target.anchor) localStorage.setItem("pizzawave-system-rf-selected-site", target.anchor);
+        setRfPerformanceHours(chartHours); localStorage.setItem("pizzawave-system-rf-performance-hours", String(chartHours)); setRfChartCategory("all"); setTopTab("metrics"); setMetricsTab("rf");
+      }
       else { setTopTab("tr"); setTrTab(target.subTab === "logs" ? "logs" : "summary"); }
     }
     if (target.topTab === "qdrant") setTopTab("services");
@@ -4976,7 +4983,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
         <button className={topTab === "audit" ? "active" : ""} onClick={() => setTopTab("audit")}>Audit History</button>
       </div>}
       {topTab !== "tr" && topTab !== "metrics" && <SystemPageIdentity {...pageIdentity} />}
-      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="recommendations" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} onOpen={openRecommendationTarget} /></div>}
+      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="recommendations" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} onOpen={openRecommendationTarget} onChanged={recommendationsResource.refresh} /></div>}
       {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={servicesRuntimeResource.state} hasData={Boolean(servicesRuntime)} onRetry={servicesRuntimeResource.refresh} /><PanelLoadState label="resource status" state={cpuResource.state} hasData={Boolean(cpuSnapshot)} onRetry={cpuResource.refresh} /><PanelLoadState label="live service resources" state={liveServiceResource.state} hasData={serviceResourceHistory.length > 0} onRetry={liveServiceResource.refresh} />{servicesRuntime && <ServicesManager runtime={servicesRuntime} snapshot={cpuSnapshot} history={serviceResourceHistory} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} />}</div>}
       {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} refreshToken={panelRefreshToken} />}
       {topTab === "jobs" && <div className="trouble-panel"><PanelLoadState label="jobs" state={jobsResource.state} hasData={Boolean(jobs)} onRetry={jobsResource.refresh} />{jobs && <JobsPanel jobs={jobs} reload={async () => { await jobsResource.refresh(); }} />}</div>}
@@ -5008,7 +5015,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
         <SystemPageIdentity {...pageIdentity} />
         {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={callsDashboardResource.state} hasData={Boolean(callsDashboard)} onRetry={callsDashboardResource.refresh} /><DashboardStatisticsPanel data={callsDashboard} rangeHours={callsPerformanceHours} onRangeHoursChange={hours => { setCallsPerformanceHours(hours); localStorage.setItem("pizzawave-system-calls-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} /></>}
         {metricsTab === "transcription" && <><PanelLoadState label="transcription performance" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} />{performanceSummary && <TranscriptionPerformancePanel data={performanceSummary} rangeHours={transcriptionPerformanceHours} onRangeHoursChange={hours => { setTranscriptionPerformanceHours(hours); localStorage.setItem("pizzawave-system-transcription-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} onExcludeTalkgroup={row => { localStorage.setItem("pizzawave-setup-talkgroup-candidates", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); localStorage.setItem("pizzawave-setup-talkgroup-exclusion-targets", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); onOpenSetup?.("Talkgroups"); }} />}</>}
-        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} onOpenSetup={onOpenSetup} />}</>}
+        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} finding={selectedRfFinding} clearFinding={() => setSelectedRfFinding(null)} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} onOpenSetup={onOpenSetup} />}</>}
         {metricsTab === "incidents" && <><PanelLoadState label="incident output" state={incidentDashboardResource.state} hasData={Boolean(incidentDashboard)} onRetry={incidentDashboardResource.refresh} /><IncidentMetricsPanel dashboard={incidentDashboard} rangeHours={incidentPerformanceHours} refreshToken={panelRefreshToken} onRangeHoursChange={hours => { setIncidentPerformanceHours(hours); localStorage.setItem("pizzawave-system-incident-performance-hours", String(hours)); }} /></>}
         {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} rangeHours={aiPerformanceHours} onRangeHoursChange={hours => { setAiUsagePage(1); setAiPerformanceHours(hours); localStorage.setItem("pizzawave-system-ai-performance-hours", String(hours)); }} onPageChange={setAiUsagePage} /></>}
         {metricsTab === "bandwidth" && <><PanelLoadState label="PizzaWave bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} rangeHours={bandwidthPerformanceHours} onRangeHoursChange={hours => { setBandwidthUsagePage(1); setBandwidthPerformanceHours(hours); localStorage.setItem("pizzawave-system-bandwidth-performance-hours", String(hours)); }} onPageChange={setBandwidthUsagePage} /></>}
@@ -10053,7 +10060,7 @@ function formatRfHz(value: number) {
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(6)} MHz` : `${value.toLocaleString()} Hz`;
 }
 
-function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, setBaseline, setCategory, onOpenSetup }: { data: TrTroubleshoot; rangeHours: number; baseline: string; category: RfChartCategory; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void; onOpenSetup?: (section?: string) => void }) {
+function RfMetricsPanel({ data, rangeHours, baseline, category, finding, clearFinding, setRangeHours, setBaseline, setCategory, onOpenSetup }: { data: TrTroubleshoot; rangeHours: number; baseline: string; category: RfChartCategory; finding?: SystemRecommendation | null; clearFinding?: () => void; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void; onOpenSetup?: (section?: string) => void }) {
   const systems = data.health.systemSummaries ?? [];
   const initialSystem = systems.find(system => system.status !== "Healthy")?.systemShortName ?? systems[0]?.systemShortName ?? "";
   const [selectedSystem, setSelectedSystem] = useState(() => localStorage.getItem("pizzawave-system-rf-selected-site") || initialSystem);
@@ -10061,6 +10068,10 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, s
     if (systems.some(system => system.systemShortName === selectedSystem)) return;
     setSelectedSystem(initialSystem);
   }, [selectedSystem, initialSystem, systems]);
+  useEffect(() => {
+    if (!finding?.ownerKey || !systems.some(system => system.systemShortName.toLowerCase() === finding.ownerKey.toLowerCase())) return;
+    setSelectedSystem(finding.ownerKey);
+  }, [finding?.findingId, finding?.ownerKey, systems]);
   function selectSite(system: string, nextCategory?: RfChartCategory) {
     setSelectedSystem(system);
     localStorage.setItem("pizzawave-system-rf-selected-site", system);
@@ -10079,6 +10090,7 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, s
     .filter(chart => chart.title !== "Capture Interruptions" || chart.series.some(series => series.values.some(value => value > 0)));
   const baselineNote = scopedCharts.find(chart => chart.baselineNote)?.baselineNote;
   const selectedSummary = systems.find(system => system.systemShortName === selectedSystem);
+  const annotations = finding?.ownerKey.toLowerCase() === selectedSystem.toLowerCase() ? finding.episodes : [];
   return <div className="rf-metrics-panel">
     <RfHealthStatusPanel data={data} onOpenSetup={onOpenSetup} onSelectSite={system => selectSite(system)} onSelectCategory={setCategory} />
     <SystemPageHeaderControls><div className="metric-controls rf-chart-controls header-controls">
@@ -10087,9 +10099,10 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, s
       <label>Charts <select value={category} onChange={e => setCategory(e.target.value as RfChartCategory)}><option value="all">Primary</option><option value="decode">Signal</option><option value="activity">Capture</option><option value="events">Events</option></select></label>
       <label>Compare against baseline <select value={baseline} onChange={e => setBaseline(e.target.value)}><option>7d</option><option>14d</option><option>30d</option></select></label>
     </div></SystemPageHeaderControls>
+    {finding && <div className="card rf-finding-context"><div><strong>Finding evidence overlay</strong><p>{finding.title} · {finding.episodes.length.toLocaleString()} recorded episode(s). Shaded chart regions are immutable episode intervals linked to finding #{finding.findingId}.</p></div>{clearFinding && <button type="button" onClick={clearFinding}>Clear overlay</button>}</div>}
     {baselineNote && <p className="baseline-note rf-baseline-summary">{baselineNote}</p>}
     {selectedSummary && selectedSummary.status !== "Healthy" && <div className={`card rf-observed-pattern ${trSystemTone(selectedSummary.status)}`}><div><h3>Observed pattern</h3><p><strong>{trSystemDisplayName(selectedSummary.systemShortName)}</strong>: {selectedSummary.summary}</p></div>{onOpenSetup && <button onClick={() => openRfSetup(selectedSummary.systemShortName, onOpenSetup)}>Review this site in Setup</button>}</div>}
-    <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} showBaselineNote={false} key={chart.title} />)}</div>
+    <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} annotations={annotations} showBaselineNote={false} key={chart.title} />)}</div>
   </div>;
 }
 
@@ -10497,8 +10510,33 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
   </div>;
 }
 
-function RecommendationsPanel({ recommendations, onOpen }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendations["items"][number]) => void }) {
+function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendation) => void; onChanged: () => Promise<unknown> }) {
+  const [tab, setTab] = useState<"active" | "known" | "history">("active");
+  const [statusDraft, setStatusDraft] = useState<Record<number, string>>({});
+  const [noteDraft, setNoteDraft] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+  const [message, setMessage] = useState("");
   if (!recommendations) return <div className="card">Loading recommendations...</div>;
+  const items = tab === "active" ? recommendations.items : tab === "known" ? (recommendations.knownIssues ?? []) : recommendations.history;
+  async function changeState(item: SystemRecommendation) {
+    setBusy(item.findingId); setMessage("");
+    try {
+      await api.request(`/api/v1/system/recommendations/findings/${item.findingId}/state`, { method: "POST", body: JSON.stringify({ status: statusDraft[item.findingId] ?? item.workflowStatus, reviewInDays: (statusDraft[item.findingId] ?? item.workflowStatus) === "known_issue" ? 7 : null }) });
+      await onChanged();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to update the finding."); }
+    finally { setBusy(null); }
+  }
+  async function addNote(item: SystemRecommendation) {
+    const note = noteDraft[item.findingId]?.trim();
+    if (!note) return;
+    setBusy(item.findingId); setMessage("");
+    try {
+      await api.request(`/api/v1/system/recommendations/findings/${item.findingId}/notes`, { method: "POST", body: JSON.stringify({ note }) });
+      setNoteDraft(current => ({ ...current, [item.findingId]: "" }));
+      await onChanged();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to add the note."); }
+    finally { setBusy(null); }
+  }
   return <div className="trouble-panel recommendations-panel">
     <div className="recommendations-summary card">
       <div><span>Current findings</span><strong>{recommendations.openCount.toLocaleString()}</strong></div>
@@ -10506,18 +10544,27 @@ function RecommendationsPanel({ recommendations, onOpen }: { recommendations: Sy
       <div><span>Improvements</span><strong>{recommendations.improvementCount.toLocaleString()}</strong></div>
       <p>Current evidence from across PizzaWave. Open a finding to continue on the page that owns the evidence or decision.</p>
     </div>
-    {recommendations.items.length === 0 ? <div className="card"><h3>No Current Findings</h3><p className="settings-message ok">No current problem, risk, or improvement has been identified.</p></div> :
+    <div className="recommendation-tabs" role="tablist"><button className={tab === "active" ? "active" : ""} onClick={() => setTab("active")}>Active ({recommendations.items.length})</button><button className={tab === "known" ? "active" : ""} onClick={() => setTab("known")}>Known Issues ({recommendations.knownIssues?.length ?? 0})</button><button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>History ({recommendations.history.length})</button></div>
+    {message && <p className="settings-message error">{message}</p>}
+    {items.length === 0 ? <div className="card"><h3>No {tab === "active" ? "Active Findings" : tab === "known" ? "Known Issues" : "Finding History"}</h3><p className="settings-message ok">Nothing is in this view.</p></div> :
       <div className="recommendation-list">
-        {recommendations.items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={item.id}>
+        {items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={`${item.findingId}-${item.id}`}>
           <div className="recommendation-head">
-            <div><span className={`recommendation-lifecycle ${item.lifecycle}`}>{label(item.lifecycle)}</span><span className={`recommendation-kind ${item.kind}`}>{item.kind === "improvement" ? "Improvement" : "Problem"}</span><span className={`recommendation-severity ${item.severity}`}>{label(item.severity)} priority</span></div>
+            <div><span className={`recommendation-lifecycle ${item.workflowStatus}`}>{label(item.workflowStatus)}</span><span className={`recommendation-activity ${item.activityState}`}>{label(item.activityState)}</span><span className={`recommendation-kind ${item.kind}`}>{item.kind === "improvement" ? "Improvement" : "Problem"}</span><span className={`recommendation-severity ${item.severity}`}>{label(item.severity)} priority</span></div>
             <span className="recommendation-owner">{item.destinationLabel.split(" / ")[0]}</span>
           </div>
           <h3>{item.title}</h3>
-          <p className="recommendation-window">Evidence window: {item.evidenceWindow}</p>
+          <p className="recommendation-window">Evidence window: {item.evidenceWindow} · {label(item.confidence)} finding confidence{item.episodes.length ? ` · ${item.episodes.length} episode(s)` : ""}</p>
           <p>{item.detail}</p>
+          {item.reviewDue && <p className="settings-message warning">Known Issue review is due.</p>}
           <div className="recommendation-action"><strong>Recommended next step</strong><span>{item.action}</span></div>
           <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button></div>
+          <details className="recommendation-detail"><summary>Finding details and operator actions</summary>
+            {item.hypotheses.length > 0 && <section><h4>Cause hypotheses</h4>{item.hypotheses.map(row => <div className="finding-hypothesis" key={row.kind}><strong>{row.label}</strong><span>{row.status} · {row.confidence} cause confidence</span><p>{row.rationale}</p></div>)}</section>}
+            {item.episodes.length > 0 && <section><h4>Recorded episodes</h4><div className="finding-episode-list">{item.episodes.slice(0, 12).map(row => <div key={row.episodeKey}><strong>{formatShortDate(row.startUtc)}–{formatShortDate(row.endUtc)}</strong><span>{label(row.signature)} · {row.conditions.map(label).join(", ")}</span></div>)}</div></section>}
+            <section><h4>Workflow</h4><div className="finding-workflow"><select value={statusDraft[item.findingId] ?? item.workflowStatus} onChange={event => setStatusDraft(current => ({ ...current, [item.findingId]: event.target.value }))}><option value="new">New</option><option value="unresolved">Unresolved</option><option value="investigating">Investigating</option><option value="known_issue">Known Issue</option><option value="monitoring">Monitoring</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option></select><button disabled={busy === item.findingId} onClick={() => void changeState(item)}>Update status</button></div><div className="finding-note"><textarea value={noteDraft[item.findingId] ?? ""} onChange={event => setNoteDraft(current => ({ ...current, [item.findingId]: event.target.value }))} placeholder="Add an append-only operator note" /><button disabled={busy === item.findingId || !(noteDraft[item.findingId] ?? "").trim()} onClick={() => void addNote(item)}>Add note</button></div></section>
+            {item.audit.length > 0 && <section><h4>Audit trail</h4><div className="finding-audit">{item.audit.slice(0, 20).map(event => <div key={event.id}><strong>{label(event.eventType)}</strong><span>{event.actor} · {formatShortDate(event.createdAtUtc)}</span><p>{event.detail}</p></div>)}</div></section>}
+          </details>
         </article>)}
       </div>}
   </div>;
@@ -12217,7 +12264,7 @@ function MetricTable({ title, rows, issuesFirst = false, technicalNotes = false 
   return <div className="card"><h3>{title}</h3>{issuesFirst && issueRows.length === 0 ? <p className="settings-message ok">No issues detected.</p> : <table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(issuesFirst ? issueRows : rows)}</tbody></table>}{issuesFirst && normalRows.length > 0 && <details><summary>{normalRows.length} normal signal{normalRows.length === 1 ? "" : "s"}</summary><table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(normalRows)}</tbody></table></details>}</div>;
 }
 
-function TrHealthChartView({ chart, showBaselineNote = true, showTitle = true }: { chart: TrHealthChart; showBaselineNote?: boolean; showTitle?: boolean }) {
+function TrHealthChartView({ chart, annotations = [], showBaselineNote = true, showTitle = true }: { chart: TrHealthChart; annotations?: SystemRecommendation["episodes"]; showBaselineNote?: boolean; showTitle?: boolean }) {
   const colors = ["#62c6ff", "#ffcf5a", "#7ee081", "#ff6b5a"];
   const rawMax = Math.max(1, ...chart.series.flatMap(s => s.values));
   const magnitude = Math.pow(10, Math.floor(Math.log10(rawMax / 4 || 1)));
@@ -12230,12 +12277,18 @@ function TrHealthChartView({ chart, showBaselineNote = true, showTitle = true }:
   const y = (v: number) => top + plotH - (v / max) * plotH;
   const yTicks = Array.from({ length: 5 }, (_, index) => index * max / 4);
   const xIndexes = Array.from(new Set([0, .25, .5, .75, 1].map(position => Math.round(position * Math.max(0, chart.labels.length - 1)))));
+  const labelTimes = chart.labels.map(value => new Date(value).getTime());
+  const chartStart = labelTimes[0] ?? 0;
+  const chartEnd = labelTimes[labelTimes.length - 1] ?? chartStart;
+  const annotationBands = annotations.filter(row => new Date(row.endUtc).getTime() >= chartStart && new Date(row.startUtc).getTime() <= chartEnd);
+  const xTime = (value: string) => left + Math.max(0, Math.min(1, (new Date(value).getTime() - chartStart) / Math.max(1, chartEnd - chartStart))) * plotW;
   const seriesColor = (series: TrHealthChart["series"][number], index: number) => series.label === "Strong reference" ? "#9faab5" : series.isBaseline ? "#d7ecff" : colors[index % colors.length];
   return <div className="card tr-chart-card">
     {showTitle && <h3>{chart.title}</h3>}
     <p className="muted">{chart.yAxisLabel} · {chart.labels.length.toLocaleString()} time buckets</p>
     {showBaselineNote && chart.baselineNote && <p className="baseline-note">{chart.baselineNote}</p>}
     <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${chart.title} over time`}>
+      {annotationBands.map(row => { const startX = xTime(row.startUtc); const endX = xTime(row.endUtc); return <rect className={`finding-episode-band severity-${row.severity}`} x={startX} y={top} width={Math.max(3, endX - startX)} height={plotH} key={row.episodeKey}><title>Finding episode: {new Date(row.startUtc).toLocaleString()} to {new Date(row.endUtc).toLocaleString()} · {row.conditions.map(label).join(", ")}</title></rect>; })}
       <line className="axis" x1={left} y1={top} x2={left} y2={top + plotH} />
       <line className="axis" x1={left} y1={top + plotH} x2={left + plotW} y2={top + plotH} />
       {yTicks.map(value => <g key={value}><line className="chart-grid-line" x1={left} y1={y(value)} x2={left + plotW} y2={y(value)} /><text className="chart-label" x={left - 7} y={y(value) + 4} textAnchor="end">{formatChartValue(value, chart.valueFormat)}</text></g>)}
