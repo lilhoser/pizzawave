@@ -31,6 +31,7 @@ public sealed partial class EngineDatabase
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=ON;", ct);
         await ExecuteNonQueryAsync(connection, SchemaSql, ct);
         await ExecuteNonQueryAsync(connection, WorkspaceSchemaSql, ct);
+        await ExecuteNonQueryAsync(connection, IncidentEventStateShadowSchemaSql, ct);
         await EnsureSchemaMigrationsAsync(connection, ct);
         _logger.LogInformation("SQLite engine store ready at {Path}", _config.Storage.DatabasePath);
     }

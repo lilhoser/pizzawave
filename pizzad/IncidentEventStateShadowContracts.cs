@@ -84,12 +84,16 @@ public sealed record IncidentEventStateCritique(
 
 public sealed record IncidentEventStateLedgerEntry(
     string LedgerEntryId,
-    long Sequence,
     DateTimeOffset RecordedAtUtc,
-    string BundleId,
+    IncidentEventStateObservationBundle Bundle,
     IncidentEventStateProposal Proposal,
     IncidentEventStateCritique Critique,
     IReadOnlyList<string> SupersedesLedgerEntryIds);
+
+public sealed record IncidentEventStateStoredLedgerEntry(
+    long Sequence,
+    string ContentHash,
+    IncidentEventStateLedgerEntry Entry);
 
 public sealed record IncidentEventStateProjectedEvent(
     string ProjectionEventId,
@@ -107,6 +111,11 @@ public sealed record IncidentEventStateProjection(
     IReadOnlyList<string> LedgerEntryIds,
     IReadOnlyList<IncidentEventStateProjectedEvent> Events);
 
+public sealed record IncidentEventStateStoredProjection(
+    long Sequence,
+    string ContentHash,
+    IncidentEventStateProjection Projection);
+
 public sealed record IncidentEventStateContractValidationResult(
     bool IsValid,
     IReadOnlyList<string> Errors);
@@ -122,6 +131,87 @@ public static class IncidentEventStateContractValidator
         ValidateBundle(bundle, errors);
         ValidateProposal(bundle, proposal, errors);
         ValidateCritique(bundle, proposal, critique, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateLedgerEntry(
+        IncidentEventStateLedgerEntry entry)
+    {
+        var result = Validate(entry.Bundle, entry.Proposal, entry.Critique);
+        var errors = result.Errors.ToList();
+        RequireValue(entry.LedgerEntryId, "ledger entry id", errors);
+        if (entry.RecordedAtUtc == default)
+            errors.Add("ledger entry recorded timestamp is required");
+        RequireUniqueValues(entry.SupersedesLedgerEntryIds, "superseded ledger entry id", errors);
+        if (!entry.SupersedesLedgerEntryIds.SequenceEqual(
+                entry.Proposal.SupersedesLedgerEntryIds,
+                StringComparer.Ordinal))
+        {
+            errors.Add("ledger entry supersession references do not match the proposal");
+        }
+
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateProjection(
+        IncidentEventStateProjection projection)
+    {
+        var errors = new List<string>();
+        RequireValue(projection.ProjectionId, "projection id", errors);
+        if (projection.GeneratedAtUtc == default)
+            errors.Add("projection generated timestamp is required");
+        RequireUniqueValues(projection.LedgerEntryIds, "projection ledger entry id", errors);
+        RequireUniqueValues(
+            projection.Events.Select(projectedEvent => projectedEvent.ProjectionEventId),
+            "projected event id",
+            errors);
+        var ledgerEntryIds = projection.LedgerEntryIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var projectedEvent in projection.Events)
+        {
+            RequireValue(projectedEvent.ProjectionEventId, "projected event id", errors);
+            RequireValue(projectedEvent.Description, $"projected event description for '{projectedEvent.ProjectionEventId}'", errors);
+            ValidateUncertainty(
+                projectedEvent.Uncertainty,
+                $"projected event '{projectedEvent.ProjectionEventId}'",
+                errors);
+            RequireUniqueValues(
+                projectedEvent.ObservationIds,
+                $"observation id in projected event '{projectedEvent.ProjectionEventId}'",
+                errors);
+            RequireUniqueValues(
+                projectedEvent.SourceLedgerEntryIds,
+                $"source ledger entry id in projected event '{projectedEvent.ProjectionEventId}'",
+                errors);
+            foreach (var sourceLedgerEntryId in projectedEvent.SourceLedgerEntryIds)
+            {
+                if (!ledgerEntryIds.Contains(sourceLedgerEntryId))
+                {
+                    errors.Add($"projected event '{projectedEvent.ProjectionEventId}' references ledger entry '{sourceLedgerEntryId}' outside the projection");
+                }
+            }
+
+            foreach (var claim in projectedEvent.Claims)
+            {
+                RequireValue(claim.ClaimId, "projected claim id", errors);
+                RequireValue(claim.Statement, $"projected claim statement for '{claim.ClaimId}'", errors);
+                ValidateUncertainty(claim.Uncertainty, $"projected claim '{claim.ClaimId}'", errors);
+                if (claim.Provenance.Count == 0)
+                    errors.Add($"projected claim '{claim.ClaimId}' must include source provenance");
+            }
+
+            foreach (var alternative in projectedEvent.Alternatives)
+            {
+                RequireValue(alternative.AlternativeId, "projected alternative id", errors);
+                RequireValue(alternative.Statement, $"projected alternative statement for '{alternative.AlternativeId}'", errors);
+                ValidateUncertainty(
+                    alternative.Uncertainty,
+                    $"projected alternative '{alternative.AlternativeId}'",
+                    errors);
+                if (alternative.Provenance.Count == 0)
+                    errors.Add($"projected alternative '{alternative.AlternativeId}' must include source provenance");
+            }
+        }
+
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
