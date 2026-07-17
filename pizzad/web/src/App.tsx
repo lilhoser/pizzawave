@@ -10551,12 +10551,6 @@ function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommen
     finally { setBusy(null); }
   }
   return <div className="trouble-panel recommendations-panel">
-    <div className="recommendations-summary card">
-      <div><span>Current findings</span><strong>{recommendations.openCount.toLocaleString()}</strong></div>
-      <div><span>Problems</span><strong>{recommendations.problemCount.toLocaleString()}</strong></div>
-      <div><span>Improvements</span><strong>{recommendations.improvementCount.toLocaleString()}</strong></div>
-      <p>Current evidence from across PizzaWave. Open a finding to continue on the page that owns the evidence or decision.</p>
-    </div>
     <div className="recommendation-tabs" role="tablist"><button className={tab === "active" ? "active" : ""} onClick={() => setTab("active")}>Active ({recommendations.items.length})</button><button className={tab === "known" ? "active" : ""} onClick={() => setTab("known")}>Known Issues ({recommendations.knownIssues?.length ?? 0})</button><button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>History ({recommendations.history.length})</button></div>
     {message && <p className="settings-message error">{message}</p>}
     {items.length === 0 ? <div className="card"><h3>No {tab === "active" ? "Active Findings" : tab === "known" ? "Known Issues" : "Finding History"}</h3><p className="settings-message ok">Nothing is in this view.</p></div> : tab === "history" ?

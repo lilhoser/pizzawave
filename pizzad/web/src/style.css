@@ -2044,26 +2044,11 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   display: grid;
   gap: 12px;
 }
-.recommendations-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(110px, 150px)) minmax(260px, 1fr);
-  align-items: center;
-  gap: 16px;
-}
-.recommendations-summary > div {
-  display: grid;
-  gap: 2px;
-}
-.recommendations-summary span,
 .recommendation-window,
 .recommendation-owner {
   color: var(--muted);
   font-size: 12px;
 }
-.recommendations-summary strong {
-  font-size: 24px;
-}
-.recommendations-summary p { margin: 0; }
 .recommendation-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .recommendation-tabs button.active { background: var(--accent); color: #08131b; }
 .recommendation-summary {
@@ -2229,8 +2214,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .finding-history .table { margin-top: 12px; }
 
 @media (max-width: 760px) {
-  .recommendations-summary { grid-template-columns: repeat(3, 1fr); }
-  .recommendations-summary p { grid-column: 1 / -1; }
   .recommendation-history-row { grid-template-columns: minmax(0, 1fr) auto; }
   .recommendation-history-identity { grid-column: 1 / -1; }
   .recommendation-history-date:first-of-type { display: none; }
@@ -3428,7 +3411,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   .system-view .tr-chart-grid {
     grid-template-columns: 1fr;
   }
-  .system-view .recommendations-summary,
   .system-view .recommendation-summary,
   .system-view .runtime-evidence-row,
   .system-view .receiver-setup-handoff {

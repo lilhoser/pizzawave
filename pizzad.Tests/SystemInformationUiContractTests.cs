@@ -311,7 +311,8 @@ public sealed class SystemInformationUiContractTests
     {
         var source = AppSource();
 
-        Assert.Contains("Current evidence from across PizzaWave", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("recommendations-summary", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Current findings</span>", source, StringComparison.Ordinal);
         Assert.Contains("recommendationFacts(item)", source, StringComparison.Ordinal);
         Assert.Contains("Open {item.destinationLabel}", source, StringComparison.Ordinal);
         Assert.Contains("if (target.topTab === \"metrics\")", source, StringComparison.Ordinal);
