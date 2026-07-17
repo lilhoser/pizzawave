@@ -54,6 +54,11 @@ foreach (var split in plan.Splits)
     await File.WriteAllTextAsync(Path.Combine(splitRoot, "audio-manifest.json"), audioJson);
     var audioHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(audioJson)));
     await File.WriteAllTextAsync(Path.Combine(splitRoot, "audio-manifest.sha256"), audioHash + Environment.NewLine);
+    var blindPackage = IncidentEventStateAdjudicationPackageBuilder.BuildBlindPackage(corpus.Document);
+    var blindJson = JsonSerializer.Serialize(blindPackage, EngineConfig.JsonOptions());
+    await File.WriteAllTextAsync(Path.Combine(splitRoot, "blind-review-package.json"), blindJson);
+    var blindHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(blindJson)));
+    await File.WriteAllTextAsync(Path.Combine(splitRoot, "blind-review-package.sha256"), blindHash + Environment.NewLine);
     Console.WriteLine($"{split.Name}: {bundles.Count} blocks, {audioManifest.Count} calls, corpus {corpus.ContentHash}");
 }
 

@@ -168,6 +168,26 @@ public static class IncidentEventStateContractValidator
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
+    public static IncidentEventStateContractValidationResult ValidateObservationReferences(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<string> observationIds,
+        string owner)
+    {
+        var errors = new List<string>();
+        ValidateObservationReferences(bundle, observationIds, owner, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateProvenanceReferences(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateProvenance> provenance,
+        string owner)
+    {
+        var errors = new List<string>();
+        ValidateProvenance(bundle, provenance, owner, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
     public static IncidentEventStateContractValidationResult Validate(
         IncidentEventStateObservationBundle bundle,
         IncidentEventStateProposal proposal,
