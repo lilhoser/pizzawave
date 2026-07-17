@@ -4511,7 +4511,7 @@ public sealed partial class EngineDatabase
         }
     }
 
-    private static EngineCall ReadCall(SqliteDataReader reader) => new()
+    internal static EngineCall ReadCall(SqliteDataReader reader) => new()
     {
         Id = reader.GetInt64(reader.GetOrdinal("id")),
         UniqueKey = reader.GetString(reader.GetOrdinal("unique_key")),
