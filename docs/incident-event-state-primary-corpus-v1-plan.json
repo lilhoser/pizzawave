@@ -1,0 +1,91 @@
+{
+  "corpusId": "ot-ordinary-traffic-primary",
+  "corpusVersion": "v1",
+  "createdAtUtc": "2026-07-17T20:13:02Z",
+  "selectionProtocolIdentity": "incident-event-state-corpus-protocol-2026-07-17|utc-30m-four-six-hour-band-hash-winners-v1",
+  "softwareVersion": "d4d570e",
+  "source": {
+    "host": "OT",
+    "databasePath": "/var/lib/pizzawave/pizzad.db",
+    "audioRoot": "/var/lib/pizzawave/audio",
+    "snapshotSha256": "02A0F4F99D9B9344FD20ED2035D87BF0BB1ED24ADE1E198EA94C4456A613C143",
+    "snapshotBytes": 104800256,
+    "snapshotIntegrityCheck": "ok",
+    "firstCallUtc": "2026-07-10T13:42:48Z",
+    "lastCallUtc": "2026-07-17T20:12:50Z",
+    "callCount": 38807,
+    "audioReferencesChecked": 38807,
+    "missingAudioFiles": 0
+  },
+  "selection": {
+    "blockDurationMinutes": 30,
+    "developmentEligibleStartUtc": "2026-07-11T00:00:00Z",
+    "developmentEligibleEndUtc": "2026-07-15T00:00:00Z",
+    "separationBufferStartUtc": "2026-07-15T00:00:00Z",
+    "separationBufferEndUtc": "2026-07-16T00:00:00Z",
+    "heldoutEligibleStartUtc": "2026-07-16T00:00:00Z",
+    "heldoutEligibleEndUtc": "2026-07-17T20:00:00Z",
+    "developmentSeed": "pizzawave-incident-event-state-primary-v1|development",
+    "developmentSeedSha256": "F88E7D2A1DBB86B4A0C93BB2FA4497C51A7655850590ABC35319A777CCE53896",
+    "heldoutSeed": "pizzawave-incident-event-state-primary-v1|heldout",
+    "heldoutSeedSha256": "B569DF4DBE47BF07BE4DACE2EE22AE9D69D4FA60BE76D35FDEB957C0A676BB4D",
+    "selectionInputs": [
+      "UTC block timestamp",
+      "split seed",
+      "six-hour UTC time band"
+    ],
+    "semanticSelectionInputs": []
+  },
+  "splits": [
+    {
+      "name": "development",
+      "windows": [
+        {
+          "bundleId": "development-20260712T153000Z",
+          "startUtc": "2026-07-12T15:30:00Z",
+          "endUtc": "2026-07-12T16:00:00Z"
+        },
+        {
+          "bundleId": "development-20260713T003000Z",
+          "startUtc": "2026-07-13T00:30:00Z",
+          "endUtc": "2026-07-13T01:00:00Z"
+        },
+        {
+          "bundleId": "development-20260713T083000Z",
+          "startUtc": "2026-07-13T08:30:00Z",
+          "endUtc": "2026-07-13T09:00:00Z"
+        },
+        {
+          "bundleId": "development-20260713T110000Z",
+          "startUtc": "2026-07-13T11:00:00Z",
+          "endUtc": "2026-07-13T11:30:00Z"
+        },
+        {
+          "bundleId": "development-20260713T233000Z",
+          "startUtc": "2026-07-13T23:30:00Z",
+          "endUtc": "2026-07-14T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "heldout-sealed",
+      "windows": [
+        {
+          "bundleId": "heldout-20260716T140000Z",
+          "startUtc": "2026-07-16T14:00:00Z",
+          "endUtc": "2026-07-16T14:30:00Z"
+        },
+        {
+          "bundleId": "heldout-20260716T183000Z",
+          "startUtc": "2026-07-16T18:30:00Z",
+          "endUtc": "2026-07-16T19:00:00Z"
+        },
+        {
+          "bundleId": "heldout-20260717T053000Z",
+          "startUtc": "2026-07-17T05:30:00Z",
+          "endUtc": "2026-07-17T06:00:00Z"
+        }
+      ]
+    }
+  ]
+}
