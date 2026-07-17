@@ -1,0 +1,384 @@
+# Incident Pipeline Blank-Slate Architecture Decision
+
+Date: 2026-07-17
+
+Status: Accepted design baseline for the next incident-pipeline experiment.
+
+## Decision
+
+PizzaWave will not extend the semantic decision logic in the legacy, V2, or V3
+incident pipelines. The next experiment will use a new, learned, open-world
+event-state architecture running beside production in read-only shadow mode.
+
+Existing incident implementations remain available only as production behavior,
+comparison baselines, and sources of historical failure examples. They are not
+the design foundation for the new pipeline.
+
+The new pipeline must not use hard-coded words, regular expressions, event
+categories, talkgroup lists, role labels, or hand-tuned score combinations to
+decide:
+
+- whether an incident exists;
+- whether two observations describe the same event;
+- which calls belong to an event;
+- what an event means;
+- whether a call is routine, administrative, logistical, or emergency traffic;
+- which event should receive an update;
+- what operator-facing title, detail, or category is correct.
+
+Those decisions belong to learned event understanding and must remain explicit,
+uncertainty-bearing, and traceable to source observations.
+
+## Why A Blank Slate Is Required
+
+The existing pipelines divide semantic authority across model output, retrieval,
+regular expressions, extracted anchors, event-family tables, hand-tuned scores,
+current incident titles, final validators, reconciliation, and repair logic.
+V2 improved evidence visibility but retained fixed semantic policy. V3 introduced
+candidate frames and guarded execution, but its resolver became another large
+deterministic semantic policy engine and continued to depend on legacy
+validation.
+
+Historical replay scores do not prove that any of those semantic architectures
+generalize. The evaluated sets were small, selected partly from known failures,
+and repeatedly exposed to policy changes. Legacy decisions are also not ground
+truth. Therefore the new architecture will not treat agreement with legacy, V2,
+or V3 as correctness.
+
+## Semantic Boundary
+
+### Prohibited Semantic Authority
+
+The following may not determine semantic outcomes, individually or in a
+hand-authored combination:
+
+- transcript keyword or phrase matching;
+- regular-expression event detection;
+- static event, call-role, or incident-type taxonomies;
+- talkgroup allowlists, denylists, or talkgroup-to-event mappings;
+- static category-to-event mappings;
+- fixed lists of emergency, routine, transport, handoff, or administrative
+  language;
+- fixed compatibility matrices for people, vehicles, locations, or event types;
+- hand-selected resolver weights, score margins, or semantic time windows;
+- current titles or details treated as proof of event identity;
+- retrieval similarity treated as proof of membership;
+- legacy acceptance or rejection treated as truth.
+
+Talkgroup, category, timing, location, unit, transcript, and radio-system data may
+be provided to a learned model as observations. Their significance must be
+inferred in context rather than imposed by application policy.
+
+### Permitted Deterministic Controls
+
+Deterministic code remains required for non-semantic integrity and safety:
+
+- schema and type validation;
+- call, incident, and observation identifier validation;
+- source existence and referential integrity;
+- authorization and feature-flag enforcement;
+- transaction, concurrency, and idempotency controls;
+- append-only audit integrity;
+- model and prompt version recording;
+- exact provenance checks, such as confirming that a cited transcript quotation
+  or audio interval exists in its claimed source;
+- resource limits, timeouts, retries, and malformed-output handling;
+- fail-closed prevention of experimental production writes.
+
+These controls may reject malformed or unauthorized operations. They may not
+reinterpret evidence or make an incident decision.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Audio, transcript, and radio metadata"] --> B["Observation bundle"]
+    B --> C["Learned event-state proposer"]
+    C --> D["Proposed state changes with provenance and uncertainty"]
+    D --> E["Independent learned critic"]
+    E --> F["Append-only shadow event ledger"]
+    F --> G["Current event-state projection"]
+    G --> H["Incident Pipeline Inspector"]
+```
+
+### Observation Bundle
+
+The observation bundle is a lossless, bounded view of source material. It may
+include:
+
+- raw call audio or a stable reference to it;
+- one or more transcript candidates;
+- call start and stop times;
+- system and talkgroup metadata;
+- unit and radio identifiers when available;
+- available location observations;
+- recent learned event state;
+- broadly retrieved neighboring observations.
+
+Retrieval determines what the model can review. It does not establish event
+identity or membership.
+
+The bundle must preserve distinctions between source facts, derived metadata,
+prior model claims, and operator corrections. Prior event state is context, not
+proof.
+
+### Learned Event-State Proposer
+
+The proposer consumes observations and the prior projected event state. It
+returns open-world event hypotheses and proposed changes without choosing from a
+fixed public-safety taxonomy.
+
+Each proposal must express:
+
+- a natural-language account of the possible real-world event;
+- the observations believed to refer to it;
+- claims about the event, each with source provenance;
+- the proposed relationship between new observations and prior event state;
+- alternative plausible interpretations;
+- unresolved contradictions or missing information;
+- uncertainty for the hypothesis, individual claims, and relationships;
+- proposed additions, supersessions, or retractions to the event state.
+
+The proposer must be allowed to conclude that the evidence is unresolved. It
+must not be forced into a binary incident/non-incident answer.
+
+### Provenance
+
+Provenance points to source observations rather than application-owned semantic
+labels. Depending on the source, it may contain:
+
+- call identifier;
+- audio start and end offsets;
+- transcript identifier and exact quotation;
+- metadata field and observed value;
+- prior ledger entry when the proposal revises an earlier claim.
+
+Application code verifies that cited material exists. It does not decide what
+the cited material means.
+
+### Independent Learned Critic
+
+The critic evaluates a proposal using the source bundle and prior state. It must
+be invoked independently of the proposer response and should identify:
+
+- unsupported claims;
+- omitted plausible interpretations;
+- unjustified call relationships;
+- contradictions with source observations;
+- identity changes that are insufficiently supported;
+- uncertainty that the proposal understates;
+- potential merges or splits that require additional evidence.
+
+The critic returns an assessment with provenance and uncertainty, not a set of
+static semantic rejection reasons. Agreement between proposer and critic is
+evidence for evaluation; it is not by itself permission to write production
+incidents.
+
+### Append-Only Shadow Event Ledger
+
+The experiment records observations, proposals, critiques, and superseding
+decisions in an append-only ledger. It does not update `incidents` or
+`incident_calls`.
+
+The ledger must retain:
+
+- source observation references;
+- complete proposer output;
+- complete critic output;
+- model, prompt, configuration, and software versions;
+- timestamps and processing latency;
+- the prior state supplied to each model;
+- the resulting projected state;
+- operator adjudication when available;
+- explicit links between an entry and any entry it supersedes.
+
+No experimental decision is destructively overwritten. Corrections create new
+entries and a new projection.
+
+### Event-State Projection
+
+The projection materializes the best current shadow interpretation from the
+ledger. It exists for comparison and operator inspection only.
+
+The projection contains open-ended event descriptions, supported claims,
+observation membership, alternatives, contradictions, and uncertainty. Display
+titles and summaries are generated from that current state and are never fed
+back as authoritative identity evidence.
+
+## Relationship To Existing Work
+
+### Retained Infrastructure
+
+The following may be reused after confirming that it contains no semantic
+policy:
+
+- raw audio and call metadata access;
+- read-only corpus export;
+- replay orchestration;
+- shadow scheduling and feature flags;
+- model request accounting and health telemetry;
+- append-only audit storage patterns;
+- the Incident Pipeline Inspector presentation framework;
+- transcription bakeoff collection tooling;
+- deployment and health verification tooling.
+
+### Retired Semantic Implementations
+
+The following are not foundations for the new architecture:
+
+- `IncidentCandidateValidator` semantic decisions;
+- `IncidentEvidenceDecisionEngineV2` semantic policy;
+- `IncidentFrameBuilderV3` frame membership, resolver, lifecycle, and scoring;
+- V3 plan actions as the required model of incident behavior;
+- regex-derived anchors used as incident proof;
+- fixed call-role and event-type policies;
+- legacy verifier, reconciliation, or audit decisions used as correctness
+  labels.
+
+Existing paths remain untouched while they operate production. The new shadow
+experiment must not call them as an adjudication or validation stage.
+
+## Evaluation
+
+### Reference Outcomes
+
+Evaluation requires human-adjudicated reference outcomes, but those outcomes
+must not impose the old pipeline's categories. Reviewers describe, in ordinary
+language:
+
+- which real-world events appear to be present;
+- which observations appear to describe each event;
+- which claims are supported;
+- which interpretations remain uncertain;
+- where reviewers disagree.
+
+Reference outcomes are evaluation evidence, not application rules. Reviewer
+disagreement and unresolved cases remain part of the result rather than being
+forced into artificial consensus.
+
+### Corpus Discipline
+
+Before model or prompt tuning, create versioned development and held-out sets
+sampled from ordinary traffic as well as known failures. Include raw audio when
+available. Known legacy, V2, and V3 failures may be included, but they must not
+dominate the corpus.
+
+The held-out set must remain unavailable to implementation iteration. Evaluation
+criteria and rollout gates must be recorded before held-out results are viewed.
+
+### Comparisons
+
+Evaluate at least two new approaches over identical source observations:
+
+1. transcript plus radio metadata;
+2. audio plus transcript plus radio metadata.
+
+Run legacy, V2, and V3 only as descriptive baselines. Do not optimize the new
+system for agreement with them.
+
+### Outcome Measures
+
+Measure:
+
+- event discovery and missed-event rate;
+- observation membership precision and recall;
+- incorrect event merges and splits;
+- factual support and unsupported-claim rate;
+- handling of genuine uncertainty;
+- agreement with human reference outcomes and documented reviewer disagreement;
+- stability across repeated runs;
+- sensitivity to different transcript candidates;
+- proposer/critic disagreement;
+- latency, timeout, malformed-output, and cost behavior;
+- operator ability to understand and correct the projected state.
+
+Every reported improvement must identify regressions and held-out performance.
+Anecdotes, unit tests, plan counts, and agreement with legacy are insufficient.
+
+## Delivery Phases
+
+### Phase 0: Production Containment
+
+- Keep every experimental incident writer disabled.
+- Verify current runtime flags before any deployment from `main`.
+- Ensure a future deployment cannot enable an experimental writer through an
+  incomplete flag combination.
+
+This phase contains no semantic incident changes.
+
+### Phase 1: Contract And Ledger
+
+- Define the observation-bundle schema.
+- Define the open-world proposal and critic schemas.
+- Add append-only shadow-ledger storage.
+- Add provenance, versioning, and projection records.
+- Add deterministic integrity tests only.
+
+### Phase 2: Neutral Corpus
+
+- Sample ordinary traffic before reviewing model output.
+- Include known failures without allowing them to dominate selection.
+- Create an independent human-adjudication protocol.
+- Freeze development and held-out corpus versions.
+
+### Phase 3: Shadow Prototypes
+
+- Implement transcript-plus-metadata and audio-inclusive proposers.
+- Implement an independently invoked critic.
+- Write only to the shadow ledger.
+- Expose chronological evidence and state changes in the inspector.
+
+### Phase 4: Evaluation
+
+- Run repeated trials over development and held-out sets.
+- Compare complete event stories, not isolated accept/reject decisions.
+- Analyze proposer/critic correlation and shared failure modes.
+- Decide whether either approach merits live shadow observation.
+
+### Phase 5: Read-Only Live Shadow
+
+- Run the selected approach without production writes.
+- Define the observation period and gates before starting.
+- Review ordinary traffic, uncertain cases, regressions, latency, and cost.
+
+Production persistence is a separate future architecture decision. It is not an
+automatic final phase of this experiment.
+
+## Acceptance Conditions For This Experiment
+
+The blank-slate experiment may proceed when:
+
+- the schemas contain no fixed event, role, category, or talkgroup ontology;
+- application code contains no static semantic acceptance or membership policy;
+- source provenance is verifiable without interpreting its meaning;
+- every experiment output is append-only and shadow-only;
+- the corpus and human-adjudication procedure are versioned;
+- held-out gates are defined before results are viewed;
+- the proposer and critic can represent uncertainty and alternatives;
+- production incident tables are unreachable from the experiment path.
+
+## Open Questions
+
+These require explicit decisions during the contract phase:
+
+- Which audio-capable and transcript-only models should be compared?
+- How much prior event state can be supplied without causing the model to copy
+  stale interpretations?
+- How should stable event identity be represented without making the current
+  title or a model-generated identifier authoritative?
+- How independent must the critic be from the proposer model and prompt family?
+- What operator adjudication workflow is practical enough to produce reference
+  outcomes without biasing reviewers toward existing incidents?
+- What latency and cost envelope is acceptable for live shadow observation?
+- What uncertainty should remain visible to operators rather than being collapsed
+  into one projected story?
+
+## Immediate Next Work
+
+The next engineering package is Phase 0 and the contract portion of Phase 1:
+
+1. audit and fail-close the current experimental write configuration;
+2. specify observation, proposal, critique, ledger, and projection schemas;
+3. verify that no semantic enums, labels, string lists, regexes, or score rules
+   enter those contracts;
+4. review the contracts before implementing model prompts or storage.
