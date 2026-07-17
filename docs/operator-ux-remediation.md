@@ -1943,3 +1943,12 @@ Status: pending
   the web-only package deployed in 6.6 seconds with asset
   `assets/index-DerOlPIf.js` without restarting PizzaWave. Live selection loaded
   the seven-day view with no browser errors or page overflow.
+- 2026-07-17: Package 5 closure remediation was first deployed from a stale
+  pre-redesign branch and temporarily replaced the current web interface. The
+  fixes were reapplied on top of merged redesign commit `4468224`, all 498
+  backend tests and the production frontend build passed, and commit `8d6d5bd`
+  deployed to the RPI in 225.8 seconds. Live HTML and browser verification
+  confirmed redesigned assets `assets/index-CyjY3E38.js` and
+  `assets/index-DuGB3HdQ.css`, including the nested System / Performance UI.
+  Health was `ok` with clear queues. Trunk Recorder remained PID 1595 with its
+  unchanged July 11 start timestamp; no SDR inventory or Setup apply ran.
