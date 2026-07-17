@@ -24,23 +24,19 @@ Package 5 or Package 8 worktree directories.
 ## 2026-07-17 Operator UX Handoff
 
 - Packages 1, 2, 3, 4, 5, 6, and 8 are complete and operator-accepted.
-- Package 7, Offline And Archive Calls, is active. Its operator interview and
-  feasibility study are complete. Imported evidence never merges into live
-  operational data; SFTP call archives and support packages open only in
-  persistent, physically isolated workspaces.
-- The Package 7 workspace catalog and stage-timing persistence foundation is
-  implemented and tested but has no API/UI and is not deployed. All 495 backend
-  tests pass. Continue with the support-package creator, validator, inventory,
-  isolated store, Workspace Library, and read-only Summary vertical slice.
-- After Package 7, complete Package 9 Temporal Pattern Analysis, Package 10
-  Recovery Workflows, and Package 11 Cleanup, then run the final regression
-  pass.
+- Package 7, Offline And Archive Calls, is a standalone outstanding feature and
+  is no longer part of this operator-remediation closeout. Its accepted design
+  and implemented persistence/timing foundation remain documented, but its
+  API, UI, isolated store, processing scheduler, and SFTP workflow are not
+  implemented or deployed.
+- The active closeout sequence is Package 9 Temporal Pattern Analysis, Package
+  10 Recovery Workflows, and Package 11 Cleanup plus final regression.
 - Package 10 must include portable backup encryption. Existing full backups can
   include the PizzaWave authentication token and configured credentials;
   support packages are a separate secret-excluding format.
-- Do not restart Trunk Recorder as a side effect of Package 7 work. Package 7
-  deployment must wait for a complete operator-visible slice and must preserve
-  live capture priority.
+- Any future Package 7 task must begin from its documented handoff, deliver a
+  complete operator-visible slice before deployment, preserve live capture
+  priority, and avoid restarting Trunk Recorder as a side effect.
 
 ## Active Architecture
 

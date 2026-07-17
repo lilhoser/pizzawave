@@ -8,21 +8,19 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 7 - Offline And Archive Calls
+- Active package: 9 - Temporal Pattern Analysis
 - Current milestone: Package 8 System Information Quality is complete,
-  deployed, live-verified, and operator-accepted. Package 7 discovery and its
-  source, isolation, processing, and resource-policy interview are complete.
-  The durable workspace catalog and per-stage timing foundation are implemented
-  and tested; support-package implementation is next. Package 5 is complete,
-  deployed, live-verified, and operator-accepted.
+  deployed, live-verified, and operator-accepted. Package 7 is deferred as a
+  standalone outstanding feature outside this closeout sequence. Package 5 is
+  complete, deployed, live-verified, and operator-accepted.
 - Continuation branch: `main`
 - Last deployed code state: Package 5 closure remediation on the merged
   redesign, commit `8d6d5bd`, deployed 2026-07-17
 - Latest tracker commit before closure: `5ac9854`
 - Operator verification: Packages 1, 2, 3, 4, 5, 6, and 8 accepted
-- Next action: implement the versioned support-package creator, validator,
-  inventory, and isolated workspace store from the accepted contract below.
-  Do not restart Trunk Recorder or otherwise disturb parallel RF experiments.
+- Next action: complete Package 9 Temporal Pattern Analysis, then Package 10
+  Recovery Workflows and Package 11 Cleanup/final regression. Do not restart
+  Trunk Recorder or otherwise disturb parallel RF experiments.
 
 ## Package 5 Final Handoff
 
@@ -427,7 +425,8 @@ Historical/offline call audit:
 
 ### 7. Offline And Archive Calls
 
-Status: implementation interview complete
+Status: deferred standalone outstanding feature; no further work in this
+operator-remediation closeout
 
 Restore offline/archive calls as a first-class persistent-service and web
 workflow without allowing historical work to interfere with live monitoring.
@@ -517,7 +516,8 @@ Implementation handoff:
   attempt from being restarted. Focused lifecycle tests and all 495 backend
   tests pass.
 - This foundation has no API, UI, scheduler integration, or production
-  deployment yet. It cannot affect live capture. The next vertical slice is the
+  deployment yet. It cannot affect live capture. A future standalone Package 7
+  task should begin with the
   versioned support-package creator, validator, inventory, isolated filesystem
   store, Workspace Library, and read-only Summary view; deploy that complete
   operator-visible slice for review before adding processing or SFTP.
@@ -1932,4 +1932,8 @@ Status: pending
   Health was `ok` with clear queues. Trunk Recorder remained PID 1595 with its
   unchanged July 11 start timestamp; no SDR inventory or Setup apply ran.
 - 2026-07-17: The operator accepted Package 5 and directed that it be marked
-  complete. Package 5 is closed; subsequent work resumes with active Package 7.
+  complete. Package 5 is closed.
+- 2026-07-17: Package 7 was reclassified as a standalone outstanding feature.
+  Its accepted design and persistence/timing foundation remain the handoff, but
+  no additional Package 7 implementation will be done in this remediation
+  closeout. Active work advances to Packages 9, 10, and 11.
