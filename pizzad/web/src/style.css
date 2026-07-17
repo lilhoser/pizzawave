@@ -2123,6 +2123,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .recommendation-facts > div { display: grid; gap: 2px; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,.025); }
 .recommendation-facts span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .recommendation-facts strong { overflow-wrap: anywhere; font-size: 13px; }
+.recommendation-facts small { color: var(--muted); font-size: 10px; }
 .recommendation-baseline {
   display: flex;
   justify-content: space-between;
@@ -2161,7 +2162,7 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .finding-note textarea { min-height: 72px; resize: vertical; }
 .finding-note button { justify-self: start; }
 .finding-drawer-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: flex-end; background: rgba(3, 7, 10, .68); }
-.finding-drawer { width: min(570px, 94vw); height: 100%; overflow: hidden; border-left: 1px solid var(--border); background: var(--panel); box-shadow: -16px 0 36px rgba(0,0,0,.38); }
+.finding-drawer { width: min(570px, 94vw); height: 100%; overflow: hidden; border-left: 1px solid var(--border); background: #20252a; box-shadow: -16px 0 36px rgba(0,0,0,.38); }
 .finding-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 3px solid #64717d; background: #273039; }
 .finding-drawer-head.severity-critical { border-color: #ef4444; background: #5a2323; }
 .finding-drawer-head.severity-high { border-color: #c85b50; background: #4b2c29; }

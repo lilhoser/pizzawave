@@ -10557,9 +10557,9 @@ function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommen
     {items.length === 0 ? <div className="card"><h3>No {tab === "active" ? "Active Findings" : tab === "known" ? "Known Issues" : "Finding History"}</h3><p className="settings-message ok">Nothing is in this view.</p></div> :
       <div className="recommendation-list">
         {items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={`${item.findingId}-${item.id}`}>
-          <div className="recommendation-head"><div className="recommendation-type"><RecommendationTypeIcon item={item} /><span>{recommendationTypeLabel(item)}</span></div><div className="recommendation-state">{item.activityState === "quiet" && <span>Quiet</span>}{item.workflowStatus !== "new" && <span>{label(item.workflowStatus)}</span>}<strong>{label(item.severity)}</strong></div></div>
+          <div className="recommendation-head"><div className="recommendation-type"><RecommendationTypeIcon item={item} /><span>{recommendationTypeLabel(item)}</span></div><div className="recommendation-state">{item.activityState === "quiet" && <span>Dormant</span>}{item.workflowStatus !== "new" && <span>{label(item.workflowStatus)}</span>}<strong>{label(item.severity)}</strong></div></div>
           <div className="recommendation-card-body"><h3>{item.title}</h3>
-            <div className="recommendation-facts">{recommendationFacts(item).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong></div>)}</div>
+            <div className="recommendation-facts">{recommendationFacts(item).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div>
             {item.reviewDue && <p className="settings-message warning">Known Issue review is due.</p>}
             <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button><button className="secondary-button" onClick={() => setSelectedFindingId(item.findingId)}>Review finding</button></div>
           </div>
@@ -10568,7 +10568,7 @@ function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommen
     {selectedItem && createPortal(<div className="finding-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSelectedFindingId(null); }}><aside className="finding-drawer" role="dialog" aria-modal="true" aria-labelledby="finding-drawer-title">
       <header className={`finding-drawer-head severity-${selectedItem.severity}`}><div><span>{recommendationTypeLabel(selectedItem)} finding #{selectedItem.findingId}</span><h2 id="finding-drawer-title">{selectedItem.title}</h2></div><button type="button" className="icon-button" aria-label="Close finding" onClick={() => setSelectedFindingId(null)}><X size={18} /></button></header>
       <div className="finding-drawer-content">
-        <section><h3>Core facts</h3><div className="recommendation-facts drawer-facts">{recommendationFacts(selectedItem, 6).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong></div>)}</div></section>
+        <section><h3>Core facts</h3><div className="recommendation-facts drawer-facts">{recommendationFacts(selectedItem, 6).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div></section>
         <section><h3>Next step</h3><p>{selectedItem.action}</p><button onClick={() => { onOpen(selectedItem); setSelectedFindingId(null); }}>Open {selectedItem.destinationLabel}</button></section>
         {selectedItem.hypotheses.length > 0 && <section><h3>Cause hypotheses</h3>{selectedItem.hypotheses.slice(0, 4).map(row => <div className="finding-hypothesis" key={row.kind}><div><strong>{row.label}</strong><span>{label(row.status)} · {label(row.confidence)} confidence</span></div><p>{row.rationale}</p></div>)}</section>}
         {selectedItem.episodes.length > 0 && <section><h3>Episode patterns</h3><div className="finding-episode-list">{recommendationEpisodeGroups(selectedItem).map(row => <div key={row.signature}><strong>{row.count.toLocaleString()} × {label(row.signature)}</strong><span>Latest {formatShortDate(row.latest)}{row.conditions ? ` · ${row.conditions}` : ""}</span></div>)}</div>{selectedItem.episodeCount > selectedItem.episodes.length && <small className="muted">Pattern summaries use the latest {selectedItem.episodes.length.toLocaleString()} of {selectedItem.episodeCount.toLocaleString()} recorded episodes.</small>}</section>}
@@ -10598,7 +10598,7 @@ function recommendationTypeLabel(item: SystemRecommendation) {
 }
 
 function recommendationFacts(item: SystemRecommendation, limit = 4) {
-  const facts: { label: string; value: string }[] = [];
+  const facts: { label: string; value: string; detail?: string }[] = [];
   if (item.episodeCount > 0) facts.push({ label: "Episodes", value: item.episodeCount.toLocaleString() });
   facts.push({ label: "Confidence", value: label(item.confidence) });
   for (const diagnostic of item.runbook?.diagnostics ?? []) {
@@ -10607,8 +10607,20 @@ function recommendationFacts(item: SystemRecommendation, limit = 4) {
     if (facts.length >= limit) break;
   }
   if (facts.length < limit && item.evidenceWindow) facts.push({ label: "Evidence", value: item.evidenceWindow });
-  if (facts.length < limit && item.lastSeenUtc) facts.push({ label: "Last seen", value: formatShortDate(item.lastSeenUtc) });
+  if (facts.length < limit && item.lastSeenUtc) facts.push({ label: "Last seen", value: formatRelativeAge(item.lastSeenUtc), detail: formatShortDate(item.lastSeenUtc) });
   return facts.slice(0, limit);
+}
+
+function formatRelativeAge(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "Unknown";
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 function recommendationEpisodeGroups(item: SystemRecommendation) {

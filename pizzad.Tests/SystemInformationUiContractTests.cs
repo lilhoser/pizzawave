@@ -317,7 +317,12 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("if (target.topTab === \"metrics\")", source, StringComparison.Ordinal);
         Assert.Contains("\"ai\", \"bandwidth\"] as const", source, StringComparison.Ordinal);
         Assert.Contains("Review finding", source, StringComparison.Ordinal);
+        Assert.Contains("item.activityState === \"quiet\" && <span>Dormant</span>", source, StringComparison.Ordinal);
+        Assert.Contains("formatRelativeAge(item.lastSeenUtc)", source, StringComparison.Ordinal);
+        Assert.Contains("detail: formatShortDate(item.lastSeenUtc)", source, StringComparison.Ordinal);
         Assert.Contains("finding-drawer", source, StringComparison.Ordinal);
+        Assert.Contains(".finding-drawer { width: min(570px, 94vw)", StyleSource(), StringComparison.Ordinal);
+        Assert.Contains("background: #20252a", StyleSource(), StringComparison.Ordinal);
         Assert.DoesNotContain("Finding details and operator actions", source, StringComparison.Ordinal);
         Assert.DoesNotContain("service-issue-card", source, StringComparison.Ordinal);
         Assert.Contains("Recommendation candidates", source, StringComparison.Ordinal);
