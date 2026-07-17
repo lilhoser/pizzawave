@@ -112,9 +112,13 @@ public sealed class DashboardService
         var topProblemSystem = BuildTopProblemSystem(calls);
         var healthRows = await _database.ListHealthSamplesAsync(start, end, ct);
         var decodeKpis = BuildDecodeKpis(healthRows);
-        var busiest = calls
-            .GroupBy(c => DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour)
-            .OrderByDescending(g => g.Count())
+        var bucketSeconds = end - start <= 24 * 60 * 60 ? 15 * 60 : 60 * 60;
+        var callVolumeTimeline = BuildVolume(calls, bucketSeconds);
+        var busiestBucket = callVolumeTimeline
+            .GroupBy(row => row.Start)
+            .Select(group => new { Start = group.Key, Calls = group.Sum(row => row.Count) })
+            .OrderByDescending(row => row.Calls)
+            .ThenByDescending(row => row.Start)
             .FirstOrDefault();
 
         return new DashboardDto
@@ -130,10 +134,20 @@ public sealed class DashboardService
                 decodeKpis.Global,
                 decodeKpis.Rate,
                 decodeKpis.Systems,
-                new("Busiest Hour", busiest == null ? "--" : $"{busiest.Key:00}:00", busiest == null ? "No calls" : $"{busiest.Count():N0} calls"),
+                new("Busiest Hour", busiestBucket == null ? "--" : DateTimeOffset.FromUnixTimeSeconds(busiestBucket.Start).ToLocalTime().ToString("t", CultureInfo.CurrentCulture), busiestBucket == null ? "No calls" : $"{busiestBucket.Calls:N0} calls"),
                 new("Unique Talkgroups", calls.Select(c => c.Talkgroup).Distinct().Count().ToString("N0", CultureInfo.CurrentCulture), "Heard in selected range")
             ],
-            VolumeByHourCategory = BuildVolume(calls),
+            CallActivity = new CallActivitySummaryDto
+            {
+                TotalCalls = total,
+                UniqueTalkgroups = calls.Select(c => c.Talkgroup).Distinct().Count(),
+                RangeStart = start,
+                RangeEnd = end,
+                BucketSeconds = bucketSeconds,
+                BusiestBucketStart = busiestBucket?.Start ?? 0,
+                BusiestBucketCalls = busiestBucket?.Calls ?? 0
+            },
+            CallVolumeTimeline = callVolumeTimeline,
             CallsBySystem = BuildSystemCallBreakdown(calls),
             LocationHeat = await BuildLocationHeatAsync(calls, incidents, start, end, ct),
             QualityByHour = BuildQuality(calls),
@@ -460,10 +474,10 @@ public sealed class DashboardService
             : (string.Empty, 0);
     }
 
-    private static IReadOnlyList<HourCategoryDto> BuildVolume(List<EngineCall> calls) =>
-        calls.GroupBy(c => new { DateTimeOffset.FromUnixTimeSeconds(c.StartTime).ToLocalTime().Hour, c.Category })
-            .Select(g => new HourCategoryDto(g.Key.Hour, g.Key.Category, g.Count()))
-            .OrderBy(r => r.Hour)
+    private static IReadOnlyList<CallVolumeBucketDto> BuildVolume(List<EngineCall> calls, int bucketSeconds) =>
+        calls.GroupBy(c => new { Start = c.StartTime - c.StartTime % bucketSeconds, c.Category })
+            .Select(g => new CallVolumeBucketDto(g.Key.Start, g.Key.Category, g.Count()))
+            .OrderBy(r => r.Start)
             .ThenBy(r => r.Category)
             .ToList();
 
@@ -764,6 +778,7 @@ public sealed class DashboardService
                     g.Key,
                     first.SystemShortName,
                     first.Talkgroup,
+                    NormalizeCategory(first.Category),
                     g.Count(),
                     g.Count() / (double)total,
                     g.Max(c => c.StartTime),

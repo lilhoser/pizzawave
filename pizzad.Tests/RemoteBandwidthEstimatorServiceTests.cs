@@ -76,6 +76,45 @@ public sealed class RemoteBandwidthEstimatorServiceTests
         Assert.Contains(report.Entries, row => row.Activity == "AI insights" && row.Endpoint.Contains("10.0.0.200", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Report_UsesCompleteWindowWithServerPagedEntries()
+    {
+        using var temp = new TempStore();
+        var config = temp.CreateConfig(remoteTranscription: false);
+        var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+        await database.InitializeAsync(CancellationToken.None);
+        var now = DateTime.UtcNow;
+        for (var index = 0; index < 35; index++)
+        {
+            await database.UpsertRemoteBandwidthUsageAsync(new RemoteBandwidthUsageRecordDto(
+                $"test:{index}",
+                now.AddMinutes(-index),
+                index % 2 == 0 ? "remote transcription" : "AI insights",
+                "http://remote.example/v1",
+                1000 + index,
+                100,
+                1100 + index,
+                "test estimate",
+                true,
+                false), CancellationToken.None);
+        }
+        var service = new RemoteBandwidthEstimatorService(config, database, NullLogger<RemoteBandwidthEstimatorService>.Instance);
+
+        var report = await service.BuildReportAsync(
+            new DateTimeOffset(now.AddHours(-2)).ToUnixTimeSeconds(),
+            new DateTimeOffset(now.AddMinutes(1)).ToUnixTimeSeconds(),
+            CancellationToken.None,
+            page: 2,
+            pageSize: 10);
+
+        Assert.Equal(35, report.Summary.Requests);
+        Assert.Equal(35, report.EntryTotal);
+        Assert.Equal(2, report.EntryPage);
+        Assert.Equal(10, report.Entries.Count);
+        Assert.Equal(35, report.ByTimeActivity.Sum(row => row.Requests));
+        Assert.Equal(2, report.ByActivity.Count);
+    }
+
     private static void WritePcmWav(string path, int dataBytes, int sampleRate)
     {
         using var stream = File.Create(path);

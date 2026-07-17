@@ -21,14 +21,14 @@ public sealed class EngineAlertService
         _logger = logger;
     }
 
-    public EngineAlertMatchResult Evaluate(EngineCall call, string transcription, bool imported)
+    public EngineAlertMatchResult Evaluate(EngineCall call, string transcription, bool imported, bool suppressNotification = false)
     {
         if (!_config.Setup.Completed)
             return new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty);
 
         foreach (var rule in _config.Alerts.Rules.Where(r => r.Enabled))
         {
-            if (rule.Talkgroups.Count > 0 && !rule.Talkgroups.Contains(call.Talkgroup))
+            if (rule.Talkgroups.Count > 0 && !rule.Talkgroups.Any(talkgroup => AlertRulePolicy.MatchesTalkgroup(talkgroup, call)))
                 continue;
 
             if (!TryMatch(rule, transcription, out var type, out var detail))
@@ -36,7 +36,7 @@ public sealed class EngineAlertService
 
             var emailSent = false;
             var error = string.Empty;
-            if (!imported && _config.Alerts.EmailEnabled && !string.IsNullOrWhiteSpace(rule.Email))
+            if (!imported && !suppressNotification && _config.Alerts.EmailEnabled && !string.IsNullOrWhiteSpace(rule.Email))
             {
                 try
                 {
@@ -66,30 +66,36 @@ public sealed class EngineAlertService
         if (string.IsNullOrWhiteSpace(transcription))
             return false;
 
-        if (string.Equals(rule.MatchType, "police_code", StringComparison.OrdinalIgnoreCase))
+        var matchType = AlertRulePolicy.NormalizeMatchType(rule.MatchType);
+        if (matchType is AlertRulePolicy.PoliceCode or AlertRulePolicy.KeywordOrPoliceCode)
         {
             var configured = Split(rule.PoliceCodes).Select(NormalizeConfiguredCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (configured.Count == 0)
-                return false;
-            foreach (var annotation in _policeCodes.Detect(transcription))
+            if (configured.Count > 0)
             {
-                if (configured.Contains(annotation.NormalizedCode))
+                foreach (var annotation in _policeCodes.Detect(transcription))
                 {
-                    type = "police_code";
-                    detail = annotation.NormalizedCode;
-                    return true;
+                    if (configured.Contains(annotation.NormalizedCode))
+                    {
+                        type = AlertRulePolicy.PoliceCode;
+                        detail = annotation.NormalizedCode;
+                        return true;
+                    }
                 }
             }
-            return false;
+            if (matchType == AlertRulePolicy.PoliceCode)
+                return false;
         }
 
-        foreach (var keyword in Split(rule.Keywords))
+        if (matchType is AlertRulePolicy.Keyword or AlertRulePolicy.KeywordOrPoliceCode)
         {
-            if (transcription.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            foreach (var keyword in Split(rule.Keywords))
             {
-                type = "keyword";
-                detail = keyword;
-                return true;
+                if (transcription.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    type = AlertRulePolicy.Keyword;
+                    detail = keyword;
+                    return true;
+                }
             }
         }
 

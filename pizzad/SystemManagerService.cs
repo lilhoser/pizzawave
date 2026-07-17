@@ -51,13 +51,23 @@ public sealed class SystemManagerService
         var qdrantStorage = Directory.Exists(_config.Embeddings.QdrantStoragePath)
             ? DirectorySize(_config.Embeddings.QdrantStoragePath, maxFiles: 25000)
             : (Bytes: 0L, Files: 0, Truncated: false);
+        var aiCompletionHealth = await _database.GetAiCompletionHealthAsync(30, ct);
         return new
         {
             service = new
             {
                 pizzad = await SystemdStatusAsync("pizzad.service", ct),
                 trunkRecorder = await SystemdStatusAsync(trUnit, ct),
+                lmStudio = await SystemdStatusAsync("lmstudio.service", ct),
                 qdrant = await SystemdStatusAsync(qdrantUnit, ct)
+            },
+            aiCompletion = new
+            {
+                enabled = _config.AiInsights.Enabled,
+                executionMode = _config.AiInsights.ExecutionMode,
+                model = _config.AiInsights.OpenAiModel,
+                configured = !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl),
+                health = aiCompletionHealth
             },
             liveTrActivity = _liveTrActivity.GetStatus(now, TrServiceFaultReader.ReadLatest(), TrServiceControlStateReader.ReadLatest()),
             trunkRecorderFault = TrServiceFaultReader.ReadLatest(),
@@ -120,9 +130,48 @@ public sealed class SystemManagerService
         };
     }
 
+    public async Task<object> BuildStorageAsync(CancellationToken ct)
+    {
+        var started = Stopwatch.StartNew();
+        var dbPath = _config.Storage.DatabasePath;
+        var audioRoot = _config.Storage.AudioRoot;
+        var qdrantRoot = _config.Embeddings.QdrantStoragePath;
+        var audio = await Task.Run(() => DirectorySizeExact(audioRoot, ct), ct);
+        var qdrant = await Task.Run(() => DirectorySizeExact(qdrantRoot, ct), ct);
+        var databaseBytes = FileSize(dbPath) + FileSize(dbPath + "-wal") + FileSize(dbPath + "-shm");
+        var appDrive = DriveInfo.GetDrives().FirstOrDefault(d => d.IsReady && dbPath.StartsWith(d.RootDirectory.FullName, StringComparison.OrdinalIgnoreCase));
+        var tables = await TableCountsAsync(ct);
+        started.Stop();
+
+        return new
+        {
+            generatedAtUtc = DateTime.UtcNow,
+            scanDurationMs = started.ElapsedMilliseconds,
+            storage = new
+            {
+                databasePath = dbPath,
+                databaseBytes,
+                audioRoot,
+                audioBytes = audio.Bytes,
+                audioFiles = audio.Files,
+                audioReadErrors = audio.Errors,
+                qdrantPath = qdrantRoot,
+                qdrantBytes = qdrant.Bytes,
+                qdrantFiles = qdrant.Files,
+                qdrantReadErrors = qdrant.Errors,
+                pizzaWaveBytes = databaseBytes + audio.Bytes + qdrant.Bytes,
+                diskRoot = appDrive?.RootDirectory.FullName ?? string.Empty,
+                diskFreeBytes = appDrive?.AvailableFreeSpace ?? 0,
+                diskTotalBytes = appDrive?.TotalSize ?? 0,
+                diskUsedBytes = appDrive == null ? 0 : appDrive.TotalSize - appDrive.AvailableFreeSpace
+            },
+            tables
+        };
+    }
+
     private async Task<Dictionary<string, long>> TableCountsAsync(CancellationToken ct)
     {
-        var tables = new[] { "calls", "incidents", "incident_calls", "incident_operation_audit", "call_embedding_jobs", "alert_matches", "jobs", "tr_health_samples", "insight_windows", "insight_events", "lm_usage", "geocode_cache" };
+        var tables = new[] { "calls", "incidents", "incident_calls", "incident_operation_audit", "call_embedding_jobs", "incident_analysis_jobs", "alert_matches", "jobs", "remote_service_outages", "tr_health_samples", "insight_windows", "insight_events", "lm_usage", "geocode_cache" };
         var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         await using var connection = _database.OpenConnection();
         foreach (var table in tables)
@@ -145,7 +194,7 @@ public sealed class SystemManagerService
     {
         var active = await CaptureAsync("systemctl", ["is-active", unit], ct);
         var enabled = await CaptureAsync("systemctl", ["is-enabled", unit], ct);
-        var show = await CaptureAsync("systemctl", ["show", unit, "--property=ActiveEnterTimestamp,MainPID,SubState,LoadState,NRestarts", "--no-page"], ct);
+        var show = await CaptureAsync("systemctl", ["show", unit, "--property=ActiveEnterTimestamp,MainPID,SubState,Type,RemainAfterExit,LoadState,NRestarts", "--no-page"], ct);
         return new
         {
             unit,
@@ -208,5 +257,59 @@ public sealed class SystemManagerService
             try { bytes += new FileInfo(file).Length; } catch { }
         }
         return (bytes, files, false);
+    }
+
+    private static (long Bytes, int Files, int Errors) DirectorySizeExact(string root, CancellationToken ct)
+    {
+        if (!Directory.Exists(root))
+            return (0, 0, 0);
+
+        long bytes = 0;
+        var files = 0;
+        var errors = 0;
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var directory = pending.Pop();
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(directory))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        bytes += new FileInfo(file).Length;
+                        files++;
+                    }
+                    catch
+                    {
+                        errors++;
+                    }
+                }
+            }
+            catch (UnauthorizedAccessException) { errors++; }
+            catch (IOException) { errors++; }
+
+            try
+            {
+                foreach (var child in Directory.EnumerateDirectories(directory))
+                {
+                    try
+                    {
+                        if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0)
+                            pending.Push(child);
+                    }
+                    catch
+                    {
+                        errors++;
+                    }
+                }
+            }
+            catch (UnauthorizedAccessException) { errors++; }
+            catch (IOException) { errors++; }
+        }
+        return (bytes, files, errors);
     }
 }

@@ -39,6 +39,7 @@ public static class DownstreamProfilePolicy
             "fire" => profile.IncludeFire,
             "ems" => profile.IncludeEMS,
             "traffic" => profile.IncludeTraffic,
+            "utilities" => profile.IncludeUtilities,
             _ => profile.IncludeOther
         };
     }

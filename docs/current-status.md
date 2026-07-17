@@ -1,13 +1,14 @@
 # PizzaWave Current Status
 
-Last updated: 2026-05-24
+Last updated: 2026-07-17
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.
 
 ## First Instruction For New Session
 
-Start in `C:\projects\pizzawave`, read this file and `docs/open-todo.md`, then
+Start in a new worktree from the pushed `codex/package5-fixes` branch, read this
+file, `docs/open-todo.md`, and `docs/operator-ux-remediation.md`, then
 run:
 
 ```powershell
@@ -16,8 +17,32 @@ git log -1 --oneline
 dotnet sln C:\projects\pizzawave\pizzawave.sln list
 ```
 
-The expected branch is `codex/pizzawave-engine-cleanbreak`. The checkpoint
-commit is the latest pushed handoff/status commit on that branch.
+The expected branch is `codex/package5-fixes`. The checkpoint commit is the
+latest pushed handoff commit on that branch. Do not resume from one of the old
+Package 5 or Package 8 worktree directories.
+
+## 2026-07-17 Operator UX Handoff
+
+- Packages 1, 2, 3, 4, 6, and 8 are complete and operator-accepted.
+- Package 5 is implemented and deployed but its final RF/call proof remains
+  deferred while separate long-window RF experiments are active.
+- Package 7, Offline And Archive Calls, is active. Its operator interview and
+  feasibility study are complete. Imported evidence never merges into live
+  operational data; SFTP call archives and support packages open only in
+  persistent, physically isolated workspaces.
+- The Package 7 workspace catalog and stage-timing persistence foundation is
+  implemented and tested but has no API/UI and is not deployed. All 495 backend
+  tests pass. Continue with the support-package creator, validator, inventory,
+  isolated store, Workspace Library, and read-only Summary vertical slice.
+- After Package 7, complete Package 9 Temporal Pattern Analysis, Package 10
+  Recovery Workflows, and Package 11 Cleanup, then return to Package 5 final
+  acceptance and the final regression pass.
+- Package 10 must include portable backup encryption. Existing full backups can
+  include the PizzaWave authentication token and configured credentials;
+  support packages are a separate secret-excluding format.
+- Do not restart Trunk Recorder or run Package 5 proof as a side effect of
+  Package 7 work. Package 7 deployment must wait for a complete
+  operator-visible slice and must preserve live capture priority.
 
 ## Active Architecture
 
@@ -479,7 +504,8 @@ snapshots are no longer present in the workspace.
 
 ### RPI
 
-- Host: `10.0.0.115`
+- Current workstation route: Tailscale `100.105.110.92` (`sdr1861`)
+- Former Raymond LAN address: `10.0.0.115` (do not use from this workstation)
 - Hostname observed over SSH: `sdr1861`
 - SSH user: `ocroot`
 - SSH key currently used from this workstation:
@@ -488,7 +514,7 @@ snapshots are no longer present in the workspace.
 - Current transcription provider: remote/OpenAI-compatible faster-whisper
   endpoint on the LAN GPU host (`http://paxan:9187/v1` in the latest check).
 - Model: `small`, two live transcription workers.
-- PizzaWave URL: `http://10.0.0.115:8080`
+- PizzaWave URL from this workstation: `http://100.105.110.92:8080`
 - Latest direct deploy: 2026-05-24 from local workspace
   `C:\projects\pizzawave`, using the direct ARM64 tar helper and key
   `G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519`.
@@ -895,7 +921,7 @@ Health:
 
 ```powershell
 ssh -o BatchMode=yes -o IdentitiesOnly=yes lilhoser@192.168.1.173 'curl -fsS http://127.0.0.1:8080/api/v1/health'
-ssh -i 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -o BatchMode=yes -o IdentitiesOnly=yes ocroot@10.0.0.115 'curl -fsS http://127.0.0.1:8080/api/v1/health'
+ssh -i 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -o BatchMode=yes -o IdentitiesOnly=yes ocroot@100.105.110.92 'curl -fsS http://127.0.0.1:8080/api/v1/health'
 ```
 
 Deploy omicrontheta:
@@ -907,13 +933,13 @@ C:\projects\pizzawave\scripts\deploy_pizzad_tar.ps1 -HostName lilhoser@192.168.1
 Deploy RPI:
 
 ```powershell
-C:\projects\pizzawave\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+C:\projects\pizzawave\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
 
 For frontend-only RPI changes, prefer the web-only deploy helper:
 
 ```powershell
-C:\projects\pizzawave\scripts\deploy_pizzad_web.ps1 -HostName ocroot@10.0.0.115 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
+C:\projects\pizzawave\scripts\deploy_pizzad_web.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519'
 ```
 
 Rebuild the RPI-compatible native Qdrant binary if Qdrant is upgraded or the

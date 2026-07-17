@@ -123,6 +123,13 @@ and incident creation without a service restart.
 | Field | Meaning |
 | --- | --- |
 | `profiles.activeProfileId` | profile currently used for dashboard and downstream filtering |
+| `profiles.items[].includePolice` | include Police calls in views and downstream processing |
+| `profiles.items[].includeFire` | include Fire calls in views and downstream processing |
+| `profiles.items[].includeEMS` | include EMS calls in views and downstream processing |
+| `profiles.items[].includeTraffic` | include Traffic calls in views and downstream processing |
+| `profiles.items[].includeUtilities` | include Utilities calls independently from Other |
+| `profiles.items[].includeOther` | include remaining Other calls |
+| `profiles.items[].talkgroups[].systemShortName` | system half of the exact talkgroup identity |
 | `profiles.items[].talkgroups[].id` | decimal TG id being overridden by this profile |
 | `profiles.items[].talkgroups[].enabled` | optional profile-specific enable/disable state; false suppresses dashboard visibility, alerts, embeddings, and incidents but still captures/transcribes |
 | `profiles.items[].talkgroups[].label` | optional profile-specific display label |
@@ -132,6 +139,26 @@ and incident creation without a service restart.
 Setup > Talkgroups uses a draft-and-Apply model. Profile-only changes save
 without restarting services. Catalog/capture changes regenerate
 `trunkRecorder.talkgroupsPath` and require trunk-recorder/pizzad restart.
+
+Saving a profile and activating a profile are separate actions. Saving edits
+does not silently change the active runtime policy.
+
+## Alerts
+
+Alert rules run only for live calls allowed by the active profile. Historical
+or imported calls are not currently evaluated by the live alert pipeline.
+
+| Field | Meaning |
+| --- | --- |
+| `alerts.rules[].matchType` | `keyword`, `police_code`, or `keyword_or_police_code` |
+| `alerts.rules[].keywords` | comma-separated keywords or phrases |
+| `alerts.rules[].policeCodes` | comma-separated normalized police codes |
+| `alerts.rules[].talkgroups[].systemShortName` | required system scope for a selected talkgroup |
+| `alerts.rules[].talkgroups[].id` | required TG ID paired with the system; an empty list means all active-profile talkgroups |
+| `alerts.rules[].frequency` | `realtime`, `hourly`, or `daily` notification throttle |
+
+Numeric-only alert talkgroup entries are unsupported because TG IDs are not
+globally unique across systems.
 
 ## Talkgroups
 
@@ -147,7 +174,7 @@ Catalog rows include:
 | `mode` | trunk-recorder mode, usually `D` |
 | `alphaTag`, `description`, `tag` | source labels used to build display names |
 | `sourceCategory` | original imported category text |
-| `opsCategory` | PizzaWave category: `police`, `fire`, `ems`, `traffic`, or `other` |
+| `opsCategory` | PizzaWave category: `police`, `fire`, `ems`, `traffic`, `utilities`, or `other` |
 | `enabled` | when false, row stays in the catalog but is excluded from generated CSV |
 | `incidentEligible` | when false, routine calls from the talkgroup are excluded from incident extraction unless the call text contains a strong generic emergency/event signal |
 | `source`, `notes` | operator/source metadata |

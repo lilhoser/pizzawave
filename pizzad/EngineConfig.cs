@@ -212,7 +212,27 @@ public sealed class EngineConfig
         Alerts.EmailProvider = string.IsNullOrWhiteSpace(Alerts.EmailProvider) ? "gmail" : Alerts.EmailProvider.Trim();
         Alerts.EmailUser ??= string.Empty;
         Alerts.EmailPassword ??= string.Empty;
+        Alerts.AdministrativeEmailRecipients ??= string.Empty;
+        if (Alerts.AdministrativeOutageDelayMinutes <= 0) Alerts.AdministrativeOutageDelayMinutes = 2;
+        Alerts.AdministrativeOutageDelayMinutes = Math.Clamp(Alerts.AdministrativeOutageDelayMinutes, 1, 60);
         Alerts.Rules ??= new();
+        foreach (var rule in Alerts.Rules)
+        {
+            rule.Name = string.IsNullOrWhiteSpace(rule.Name) ? "Alert" : rule.Name.Trim();
+            rule.MatchType = AlertRulePolicy.NormalizeMatchType(rule.MatchType);
+            rule.Talkgroups ??= new();
+            if (rule.Talkgroups.Any(t => t.Id <= 0 || string.IsNullOrWhiteSpace(t.SystemShortName)))
+                throw new InvalidOperationException($"Alert rule '{rule.Name}' has an unsupported unscoped talkgroup. Every talkgroup requires systemShortName and a positive id.");
+            rule.Talkgroups = rule.Talkgroups
+                .Select(t => new AlertTalkgroupRef
+                {
+                    SystemShortName = TalkgroupCatalogService.NormalizeSystemShortName(t.SystemShortName),
+                    Id = t.Id
+                })
+                .GroupBy(AlertRulePolicy.TalkgroupKey, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
+        }
         Alerts.Playback ??= new();
         if (Alerts.Playback.CooldownSeconds <= 0) Alerts.Playback.CooldownSeconds = 15;
         if (Alerts.Playback.RepeatCount <= 0) Alerts.Playback.RepeatCount = 1;
@@ -225,7 +245,6 @@ public sealed class EngineConfig
         foreach (var profile in Profiles.Items)
         {
             profile.Name = string.IsNullOrWhiteSpace(profile.Name) ? "Profile" : profile.Name.Trim();
-            profile.AllowedTalkgroups ??= new();
             profile.Talkgroups ??= new();
             foreach (var talkgroup in profile.Talkgroups)
             {
@@ -452,6 +471,9 @@ public sealed class AlertConfig
     public string EmailProvider { get; set; } = "gmail";
     public string EmailUser { get; set; } = string.Empty;
     public string EmailPassword { get; set; } = string.Empty;
+    public bool AdministrativeEmailEnabled { get; set; }
+    public string AdministrativeEmailRecipients { get; set; } = string.Empty;
+    public int AdministrativeOutageDelayMinutes { get; set; } = 2;
     public List<EngineAlertRule> Rules { get; set; } = new();
     public AlertPlaybackConfig Playback { get; set; } = new();
 }
@@ -478,7 +500,13 @@ public sealed class EngineAlertRule
     public string Email { get; set; } = string.Empty;
     public string Frequency { get; set; } = "realtime";
     public bool Autoplay { get; set; } = true;
-    public List<long> Talkgroups { get; set; } = new();
+    public List<AlertTalkgroupRef> Talkgroups { get; set; } = new();
+}
+
+public sealed class AlertTalkgroupRef
+{
+    public string SystemShortName { get; set; } = string.Empty;
+    public long Id { get; set; }
 }
 
 public sealed class ProfileConfig
@@ -531,8 +559,8 @@ public sealed class ProcessingProfile
     public bool IncludeFire { get; set; } = true;
     public bool IncludeEMS { get; set; } = true;
     public bool IncludeTraffic { get; set; } = true;
+    public bool IncludeUtilities { get; set; } = true;
     public bool IncludeOther { get; set; } = true;
-    public List<long> AllowedTalkgroups { get; set; } = new();
     public List<ProfileTalkgroupSetting> Talkgroups { get; set; } = new();
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;

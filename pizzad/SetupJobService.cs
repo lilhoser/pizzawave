@@ -1,24 +1,53 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 
 namespace pizzad;
 
-public sealed class SetupJobService
+public sealed class SetupJobService : IHostedService
 {
     private readonly EngineDatabase _database;
     private readonly EventStream _events;
     private readonly ILogger<SetupJobService> _logger;
     private readonly IServiceProvider _services;
+    private readonly IHostApplicationLifetime _lifetime;
+    private readonly ConcurrentDictionary<long, CancellationTokenSource> _active = new();
+    private readonly SemaphoreSlim _startGate = new(1, 1);
+    private readonly SemaphoreSlim _executionGate = new(1, 1);
+    private static readonly HashSet<string> ManagedJobTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "setup_backup_existing_tr", "setup_prepare_existing_tr", "setup_remove_legacy_apps", "setup_restart_pizzad",
+        "system_restart_tr", "system_stop_tr", "system_restart_qdrant", "setup_lmstudio_prime", "setup_qdrant_prime",
+        "setup_faster_whisper_prime", "setup_sdr_prime", "setup_diagnostic_tools_prime", "setup_tr_stop_for_calibration",
+        "setup_tr_calibration_cancel", "setup_tr_calibration_prime", "setup_tr_calibration_sweep", "setup_tr_artifact_check",
+        "setup_tr_source_build"
+    };
     private sealed record CalibrationSweepTarget(int SourceIndex, string Serial, string TemplateSerial, int BaseErrorHz, int RangeHz, int StepHz, int WarmupSec, int DurationSec, string Gain, int PassCount);
 
-    public SetupJobService(EngineDatabase database, EventStream events, ILogger<SetupJobService> logger, IServiceProvider services)
+    public SetupJobService(EngineDatabase database, EventStream events, ILogger<SetupJobService> logger, IServiceProvider services, IHostApplicationLifetime lifetime)
     {
         _database = database;
         _events = events;
         _logger = logger;
         _services = services;
+        _lifetime = lifetime;
     }
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        foreach (var type in ManagedJobTypes)
+            await _database.CancelStaleActiveJobsAsync(type, TimeSpan.Zero, "Job was interrupted by a PizzaWave service restart. Start it again if it is still needed.", cancellationToken);
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        foreach (var cts in _active.Values)
+            cts.Cancel();
+        return Task.CompletedTask;
+    }
+
+    public static bool IsManagedJobType(string? type) => !string.IsNullOrWhiteSpace(type) && ManagedJobTypes.Contains(type);
 
     public SetupArtifactReportDto CheckTrArtifacts()
     {
@@ -134,9 +163,6 @@ public sealed class SetupJobService
             _ => throw new InvalidOperationException("Unknown setup job action.")
         };
 
-        if (await _database.HasActiveJobAsync(type, ct))
-            throw new InvalidOperationException("A setup job of this type is already running.");
-
         if (action == "tr-source-build")
         {
             var report = CheckTrArtifacts();
@@ -144,25 +170,59 @@ public sealed class SetupJobService
                 throw new InvalidOperationException("Existing TR install artifacts were found. Review the artifact list and confirm before starting the source build.");
         }
 
-        var job = new JobDto
+        await _startGate.WaitAsync(ct);
+        try
         {
-            Type = type,
-            Status = "queued",
-            Total = total,
-            Message = message,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-        var jobId = await _database.AddJobAsync(job, ct);
-        await _database.AddJobLogAsync(jobId, "info", message, ct);
-        _ = Task.Run(() => RunAsync(jobId, action, parameters, CancellationToken.None));
-        await _events.PublishAsync("job_updated", new { jobId, type, status = "queued" }, ct);
-        return job with { Id = jobId };
+            if (await _database.HasActiveJobAsync(type, ct))
+                throw new InvalidOperationException("A setup job of this type is already running.");
+
+            var job = new JobDto
+            {
+                Type = type,
+                Status = "queued",
+                Total = total,
+                Message = message,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            var jobId = await _database.AddJobAsync(job, ct);
+            await _database.AddJobLogAsync(jobId, "info", message, ct);
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.ApplicationStopping);
+            _active[jobId] = cts;
+            _ = Task.Run(() => RunAsync(jobId, action, parameters, cts.Token), CancellationToken.None);
+            await _events.PublishAsync("job_updated", new { jobId, type, status = "queued" }, ct);
+            return job with { Id = jobId };
+        }
+        finally
+        {
+            _startGate.Release();
+        }
+    }
+
+    public async Task<JobDto?> CancelAsync(long jobId, CancellationToken ct)
+    {
+        var job = await _database.GetJobAsync(jobId, ct);
+        if (job == null) return null;
+        if (!IsManagedJobType(job.Type))
+            throw new InvalidOperationException("This job is not owned by the setup job runner.");
+        if (job.Status is not ("queued" or "running" or "paused" or "canceling"))
+            return job;
+
+        await _database.UpdateJobAsync(jobId, "canceling", null, null, null, "Cancel requested. Waiting for the current safe cancellation boundary...", false, false, ct);
+        await _database.AddJobLogAsync(jobId, "warning", "Operator requested cancellation. Package and install commands finish their current transaction; calibration sweeps stop immediately and restore Trunk Recorder.", ct);
+        if (_active.TryGetValue(jobId, out var cts))
+            cts.Cancel();
+        else
+            await _database.UpdateJobAsync(jobId, "canceled", null, null, null, "Job worker is no longer active and was marked canceled.", false, true, ct);
+        return await _database.GetJobAsync(jobId, ct);
     }
 
     private async Task RunAsync(long jobId, string action, JsonElement? parameters, CancellationToken ct)
     {
+        var enteredExecutionGate = false;
         try
         {
+            await _executionGate.WaitAsync(ct);
+            enteredExecutionGate = true;
             await _database.UpdateJobAsync(jobId, "running", null, 0, 0, "Setup job running.", true, false, ct);
             await _events.PublishAsync("job_updated", new { jobId, status = "running" }, ct);
             switch (action)
@@ -223,12 +283,25 @@ public sealed class SetupJobService
                     break;
             }
         }
+        catch (OperationCanceledException)
+        {
+            await LogAsync(jobId, "warning", "Job canceled at a safe boundary.", CancellationToken.None);
+            await _database.UpdateJobAsync(jobId, "canceled", null, null, null, "Job canceled.", false, true, CancellationToken.None);
+            await _events.PublishAsync("job_updated", new { jobId, status = "canceled" }, CancellationToken.None);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Setup job {JobId} failed", jobId);
             await LogAsync(jobId, "error", ex.Message, CancellationToken.None);
             await _database.UpdateJobAsync(jobId, "failed", null, null, 1, ex.Message, false, true, CancellationToken.None);
             await _events.PublishAsync("job_updated", new { jobId, status = "failed" }, CancellationToken.None);
+        }
+        finally
+        {
+            if (enteredExecutionGate)
+                _executionGate.Release();
+            if (_active.TryRemove(jobId, out var cts))
+                cts.Dispose();
         }
     }
 
@@ -607,6 +680,7 @@ public sealed class SetupJobService
 
     private async Task RunCommandAsync(long jobId, string fileName, string arguments, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         await LogAsync(jobId, "cmd", $"{fileName} {arguments}", ct);
         var psi = new ProcessStartInfo(fileName, arguments)
         {
@@ -615,10 +689,11 @@ public sealed class SetupJobService
             UseShellExecute = false
         };
         using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Unable to start {fileName}.");
-        var stdout = ReadLinesAsync(jobId, "out", process.StandardOutput, ct);
-        var stderr = ReadLinesAsync(jobId, "err", process.StandardError, ct);
-        await process.WaitForExitAsync(ct);
+        var stdout = ReadLinesAsync(jobId, "out", process.StandardOutput, CancellationToken.None);
+        var stderr = ReadLinesAsync(jobId, "err", process.StandardError, CancellationToken.None);
+        await process.WaitForExitAsync(CancellationToken.None);
         await Task.WhenAll(stdout, stderr);
+        ct.ThrowIfCancellationRequested();
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"{fileName} exited with code {process.ExitCode}.");
     }
@@ -635,9 +710,19 @@ public sealed class SetupJobService
         foreach (var argument in arguments)
             psi.ArgumentList.Add(argument);
         using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Unable to start {fileName}.");
-        var stdout = ReadLinesAsync(jobId, "out", process.StandardOutput, ct);
-        var stderr = ReadLinesAsync(jobId, "err", process.StandardError, ct);
-        await process.WaitForExitAsync(ct);
+        var stdout = ReadLinesAsync(jobId, "out", process.StandardOutput, CancellationToken.None);
+        var stderr = ReadLinesAsync(jobId, "err", process.StandardError, CancellationToken.None);
+        try
+        {
+            await process.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            await process.WaitForExitAsync(CancellationToken.None);
+            await Task.WhenAll(stdout, stderr);
+            throw;
+        }
         await Task.WhenAll(stdout, stderr);
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"{fileName} exited with code {process.ExitCode}.");

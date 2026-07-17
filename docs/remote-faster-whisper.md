@@ -94,14 +94,28 @@ of using a LAN-only address.
 Recommended setup:
 
 1. Install and log in to Tailscale on the PizzaWave node and the GPU host.
-2. Confirm the node can resolve/reach the GPU host over the Tailnet:
+2. On a Windows GPU host, enable unattended mode so the Tailnet is available
+   after reboot and before an interactive user signs in:
+
+   ```powershell
+   tailscale up --unattended=true
+   ```
+
+   This changes Tailscale's persistent Windows service profile (`ForceDaemon`)
+   rather than only the current process. It is intended to survive reboot and
+   reconnect before login. Recheck it after logging out of Tailscale,
+   reinstalling Tailscale, resetting its profile, or applying machine policy;
+   unattended mode cannot compensate for expired authentication or unavailable
+   host networking.
+
+3. Confirm the node can resolve/reach the GPU host over the Tailnet:
 
    ```bash
    tailscale status
    curl -fsS http://<gpu-host-tailnet-name>:9187/health
    ```
 
-3. Set the PizzaWave transcription base URL to the Tailnet name or Tailscale IP:
+4. Set the PizzaWave transcription base URL to the Tailnet name or Tailscale IP:
 
    ```json
    {
@@ -114,7 +128,7 @@ Recommended setup:
    }
    ```
 
-4. Save the Transcription settings and restart `pizzad` if prompted.
+5. Save the Transcription settings and restart `pizzad` if prompted.
 
 Do not add a separate VPN stack for this. PizzaWave only needs an
 OpenAI-compatible HTTP endpoint; Tailscale should be treated as host networking.
@@ -138,9 +152,11 @@ On each node, set:
 }
 ```
 
-Restart `pizzad` after changing the provider. The node still persists call audio
-locally before transcription, so failed remote requests can be retried from the
-stored audio.
+Restart `pizzad` after changing the provider. The node persists call audio
+locally before transcription. Temporary endpoint, timeout, throttling, and
+server failures remain pending and are retried after the endpoint health check
+recovers; invalid requests still become terminal engine failures so
+configuration and payload defects remain visible.
 
 ## Model Selection
 
@@ -168,5 +184,21 @@ If the GPU host is unavailable or quality is unacceptable:
 - Do not run large unrelated GPU jobs without watching queue depth.
 - Keep LM Studio and remote faster-whisper on separate ports and treat them as
   separate services.
+- Configure administrative outage email in Settings > Alerts if the remote
+  endpoint is an operational dependency. PizzaWave sends one outage notice
+  after the configured delay and one recovery notice.
+- PizzaWave validates that `/health` returns `ok=true` and the configured model,
+  then stores each confirmed outage and recovery independently of the browser.
+  Endpoint outage history appears under System > Performance > Transcription.
+- Calls processed more than 60 minutes after ingest retain alert and incident
+  history with their original event timestamps, but real-time email and browser
+  playback are suppressed.
+- Eligible calls awaiting incident analysis are persisted independently of the
+  PizzaWave process. A restart or a backlog larger than the in-memory working
+  set no longer acknowledges those calls before analysis.
+- Terminal transcription failures are not retried automatically. System > Jobs
+  offers an explicit, cancellable recovery job. It processes one retained audio
+  call at a time and waits while live or existing backlog transcription work is
+  active; an already in-flight call is the cancellation boundary.
 - `liveTranscriptionWorkers` controls concurrent HTTP transcription requests
   from each node; increase cautiously because multiple nodes can multiply load.

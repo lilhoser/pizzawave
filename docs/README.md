@@ -38,6 +38,7 @@ UI.
   bearer auth, and Tailscale use.
 - [Quick Reference](quick-reference.md): commands, paths, and API probes.
 - [Operational Limits](operational-limits.md): queue pressure, AI limits, imports, and hardware notes.
+- [System Information Contract](system-information-contract.md): operator questions, evidence ownership, status language, and page inventory for System.
 - [Insights Behavior](insights-behavior-matrix.md): AI summaries, incidents, and alerts.
 - [Config Examples](config-examples-explained.md): trunk-recorder/callstream examples.
 - [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by Setup.
@@ -52,8 +53,8 @@ UI.
 2. `pizzad` persists call metadata and audio before doing expensive work.
 3. The transcription queue processes calls using the configured engine.
 4. Quality classification marks empty, inaudible, short, noisy, or failed calls.
-5. Alert matching runs for live and imported calls. Imported calls store matches
-   but suppress live/email notification.
+5. Alert matching runs for active-profile-eligible live calls. Historical or
+   imported calls are not currently evaluated by the live alert pipeline.
 6. Post-transcription metadata, embeddings, AI summaries, and incidents are
    generated within configured guardrails.
 7. The web UI receives live status through SSE and reads server-computed models

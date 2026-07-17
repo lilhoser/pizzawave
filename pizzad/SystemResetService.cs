@@ -5,6 +5,7 @@ namespace pizzad;
 
 public sealed class SystemResetService
 {
+    private readonly SemaphoreSlim _resetGate = new(1, 1);
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly EmbeddingService _embeddings;
@@ -34,62 +35,77 @@ public sealed class SystemResetService
             .ToList();
         if (presets.Count == 0)
             throw new InvalidOperationException("Choose at least one reset preset.");
+        if (presets.Count != 1)
+            throw new InvalidOperationException("Choose exactly one reset scope.");
+        if (presets[0] is not ("data-only" or "site-reset" or "full-reset"))
+            throw new InvalidOperationException($"Unsupported reset scope: {presets[0]}.");
         if (!string.IsNullOrWhiteSpace(_config.Setup.PendingRestorePath))
             throw new InvalidOperationException("Cancel or apply the pending restore before starting reset.");
+        if (!await _resetGate.WaitAsync(0, ct))
+            throw new InvalidOperationException("Another system reset is already running.");
 
-        var dataOnly = presets.Contains("data-only");
-        var siteReset = presets.Contains("site-reset");
-        var fullReset = presets.Contains("full-reset");
-        var customReset = presets.Contains("custom");
-        var clearOperationalData = dataOnly || siteReset || fullReset || customReset;
-        var clearSiteState = siteReset || fullReset;
-
-        var current = _config.Clone();
-        var warnings = new List<string>();
-        BackupCreateResultDto? backup = null;
-
-        _ingest.Pause(false, $"System reset started: {string.Join(", ", presets)}.", 0);
-        if (clearSiteState)
-            PreflightProtectedSiteFilesForReset();
-
-        if (request.CreateBackup)
-            backup = await _backups.CreateBackupAsync(new BackupCreateRequestDto(request.BackupAudioWindow), ct);
-
-        if (clearOperationalData)
+        try
         {
-            await _database.ClearOperationalDataAsync(request.PreserveAuditHistory && !clearSiteState, ct);
-            DeleteDirectoryContents(_config.Storage.AudioRoot, warnings);
-            var qdrant = await _embeddings.DeleteCollectionAsync(ct);
-            if (!qdrant.Ok)
-                warnings.Add(qdrant.Message);
-        }
+            var dataOnly = presets.Contains("data-only");
+            var siteReset = presets.Contains("site-reset");
+            var fullReset = presets.Contains("full-reset");
+            var clearOperationalData = dataOnly || siteReset || fullReset;
+            var clearSiteState = siteReset || fullReset;
 
-        if (clearSiteState)
+            var current = _config.Clone();
+            var warnings = new List<string>();
+            BackupCreateResultDto? backup = null;
+
+            if (clearSiteState)
+                PreflightProtectedSiteFilesForReset();
+
+            // A safety backup can be large. Keep accepting live calls until the
+            // archive is complete, then pause immediately before destructive work.
+            if (request.CreateBackup)
+                backup = await _backups.CreateBackupAsync(new BackupCreateRequestDto(request.BackupAudioWindow), ct);
+
+            _ingest.Pause(false, $"System reset started: {string.Join(", ", presets)}.", 0);
+
+            if (clearOperationalData)
+            {
+                await _database.ClearOperationalDataAsync(request.PreserveAuditHistory && !clearSiteState, ct);
+                DeleteDirectoryContents(_config.Storage.AudioRoot, warnings);
+                var qdrant = await _embeddings.DeleteCollectionAsync(ct);
+                if (!qdrant.Ok)
+                    warnings.Add(qdrant.Message);
+            }
+
+            if (clearSiteState)
+            {
+                DeleteFileIfExists(_config.TrunkRecorder.TalkgroupCatalogPath, warnings);
+                DeleteDirectoryContents(Path.Combine(_config.Storage.AppDataRoot, "rf-surveys"), warnings);
+                await ResetProtectedSiteFilesAsync(ct);
+                ApplyResetConfig(current, request.ToCarryForwardOptions(fullReset));
+                _config.Setup.RestoreAppliedAtUtc = null;
+                _config.Setup.PendingRestorePath = string.Empty;
+                _config.Setup.PendingRestoreManifestJson = string.Empty;
+                _config.Setup.CurrentStep = fullReset ? "tr" : "complete";
+                _config.Setup.Completed = !fullReset;
+                _config.Setup.CompletedAtUtc = fullReset ? null : DateTime.UtcNow;
+            }
+
+            if (fullReset)
+                _auth.RegenerateToken();
+
+            _config.ApplyDefaults();
+            await SaveConfigAsync(ct);
+
+            var message = fullReset
+                ? "Full reset complete. First-run prerequisites must be completed before returning to normal operation."
+                : clearSiteState
+                    ? "Site reset complete. Open Setup to choose location, systems, talkgroups, RF path, and TR source planning."
+                    : "Data reset complete. Current site/configuration was preserved.";
+            return new SystemResetResultDto(true, message, warnings, backup, fullReset ? "first-run" : clearSiteState ? "setup" : "backup");
+        }
+        finally
         {
-            DeleteFileIfExists(_config.TrunkRecorder.TalkgroupCatalogPath, warnings);
-            DeleteDirectoryContents(Path.Combine(_config.Storage.AppDataRoot, "rf-surveys"), warnings);
-            await ResetProtectedSiteFilesAsync(ct);
-            ApplyResetConfig(current, request.ToCarryForwardOptions(fullReset));
-            _config.Setup.RestoreAppliedAtUtc = null;
-            _config.Setup.PendingRestorePath = string.Empty;
-            _config.Setup.PendingRestoreManifestJson = string.Empty;
-            _config.Setup.CurrentStep = fullReset ? "tr" : "complete";
-            _config.Setup.Completed = !fullReset;
-            _config.Setup.CompletedAtUtc = fullReset ? null : DateTime.UtcNow;
+            _resetGate.Release();
         }
-
-        if (fullReset)
-            _auth.RegenerateToken();
-
-        _config.ApplyDefaults();
-        await SaveConfigAsync(ct);
-
-        var message = fullReset
-            ? "Full reset complete. First-run prerequisites must be completed before returning to normal operation."
-            : clearSiteState
-                ? "Site reset complete. Open Setup to choose location, systems, talkgroups, RF path, and TR source planning."
-                : "Data reset complete. Current site/configuration was preserved.";
-        return new SystemResetResultDto(true, message, warnings, backup, fullReset ? "first-run" : clearSiteState ? "setup" : "backup");
     }
 
     private void ApplyResetConfig(EngineConfig current, ResetCarryForwardOptions request)

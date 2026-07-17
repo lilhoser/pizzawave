@@ -49,8 +49,12 @@ builder.Services.AddSingleton<AutomaticInsightsService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
 builder.Services.AddSingleton<HealthStatusService>();
 builder.Services.AddSingleton<EnginePipeline>();
+builder.Services.AddSingleton<RemoteTranscriptionHealthService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RemoteTranscriptionHealthService>());
 builder.Services.AddSingleton<DashboardService>();
+builder.Services.AddSingleton<TrConfigArtifactProvenanceStore>();
 builder.Services.AddSingleton<TrConfigService>();
+builder.Services.AddSingleton<TrLogService>();
 builder.Services.AddSingleton<TrHealthTroubleshootService>();
 builder.Services.AddSingleton<SettingsValidationService>();
 builder.Services.AddSingleton<SystemManagerService>();
@@ -59,10 +63,15 @@ builder.Services.AddSingleton<SystemCpuSnapshotService>();
 builder.Services.AddSingleton<BackupRestoreService>();
 builder.Services.AddSingleton<BackupJobService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupJobService>());
+builder.Services.AddSingleton<StorageMaintenanceService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StorageMaintenanceService>());
+builder.Services.AddSingleton<TranscriptionRecoveryJobService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TranscriptionRecoveryJobService>());
 builder.Services.AddSingleton<SystemResetService>();
 builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<SiteSetupService>();
 builder.Services.AddSingleton<SetupJobService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SetupJobService>());
 builder.Services.AddHttpClient<SetupTalkgroupService>();
 builder.Services.AddHttpClient<SetupTrConfigBuilderService>();
 builder.Services.AddHttpClient<SetupAreaBoundaryService>();
@@ -491,6 +500,7 @@ app.MapPost("/api/v1/setup/site/rf/{id}/tr/apply-source-draft", async (HttpConte
     {
         var setup = await siteSetup.GetAsync(context.RequestAborted);
         var detail = await surveys.UpsertSiteSetupAsync(setup.Desired, context.RequestAborted);
+        RfSurveyService.EnsureCallAndTranscriptionProof(detail);
         var result = await surveys.ApplySourceDraftAsync(detail.Session.Id, request, context.RequestAborted);
         await trConfig.ClearEditorDraftAsync(context.RequestAborted);
         return Results.Ok(result);
@@ -636,6 +646,32 @@ app.MapGet("/api/v1/system/tr-config/editor", async (HttpContext context, AuthSe
 .WithName("SystemTrConfigEditor")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/tr-config/viewer", async (HttpContext context, string? artifactId, AuthService authService, TrConfigService trConfig, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var sessions = await database.ListRfSurveySessionsAsync(context.RequestAborted);
+    return Results.Ok(await trConfig.GetViewerAsync(sessions, artifactId, context.RequestAborted));
+})
+.WithName("SystemTrConfigViewer")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/tr-logs", async (HttpContext context, long? start, long? end, int? pageSize, string? cursor, AuthService authService, TrLogService logs) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var resolvedEnd = end ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    var resolvedStart = start ?? resolvedEnd - 3600;
+    try
+    {
+        return Results.Ok(await logs.ReadAsync(resolvedStart, resolvedEnd, pageSize ?? 250, cursor, context.RequestAborted));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+.WithName("SystemTrLogs")
+.WithOpenApi();
+
 app.MapPost("/api/v1/system/tr-config/editor/draft", async (TrConfigEditorSaveRequest request, HttpContext context, AuthService authService, TrConfigService trConfig) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
@@ -676,24 +712,6 @@ app.MapPost("/api/v1/system/tr-config/editor/apply", async (TrConfigEditorSaveRe
     }
 })
 .WithName("SystemTrConfigEditorApply")
-.WithOpenApi();
-
-app.MapGet("/api/v1/system/tr-config/backups", (HttpContext context, AuthService authService, TrConfigService trConfig) =>
-{
-    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(trConfig.ListConfigBackups());
-})
-.WithName("SystemTrConfigBackups")
-.WithOpenApi();
-
-app.MapPost("/api/v1/system/tr-config/restore", async (TrConfigRestoreRequest request, HttpContext context, AuthService authService, TrConfigService trConfig, RfSurveyService surveys) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    if (request.RestartTr)
-        await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
-    return Results.Ok(await trConfig.RestoreConfigBackupAsync(request, context.RequestAborted));
-})
-.WithName("SystemTrConfigRestore")
 .WithOpenApi();
 
 app.MapGet("/api/v1/status", async (HttpContext context, long? start, long? end, AuthService authService, DashboardService dashboard) =>
@@ -821,6 +839,30 @@ app.MapGet("/api/v1/incidents/audit", async (HttpContext context, int? hours, in
 .WithName("IncidentOperationAudit")
 .WithOpenApi();
 
+app.MapGet("/api/v1/incidents/performance", async (HttpContext context, int? hours, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var windowHours = Math.Clamp(hours ?? 24, 1, 168);
+    var end = DateTime.UtcNow;
+    var start = end.AddHours(-windowHours);
+    var bucketSeconds = windowHours <= 24 ? 3600 : windowHours <= 48 ? 7200 : 21600;
+    return Results.Ok(await database.GetIncidentDecisionPerformanceAsync(start, end, bucketSeconds, context.RequestAborted));
+})
+.WithName("IncidentPerformance")
+.WithOpenApi();
+
+app.MapGet("/api/v1/incidents/chains", async (HttpContext context, int? hours, int? page, int? pageSize, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var windowHours = Math.Clamp(hours ?? 24, 1, 168);
+    var end = DateTime.UtcNow;
+    var start = end.AddHours(-windowHours);
+    var bucketSeconds = windowHours <= 24 ? 3600 : windowHours <= 48 ? 7200 : 21600;
+    return Results.Ok(await database.ListIncidentDecisionChainsAsync(start, end, bucketSeconds, page ?? 1, pageSize ?? 20, context.RequestAborted));
+})
+.WithName("IncidentDecisionChains")
+.WithOpenApi();
+
 app.MapGet("/api/v1/troubleshoot/tr-health", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
@@ -837,6 +879,20 @@ app.MapGet("/api/v1/troubleshoot", async (HttpContext context, long? start, long
     return Results.Ok(await troubleshoot.BuildAsync(range.Start, range.End, bySystem ?? false, string.IsNullOrWhiteSpace(baseline) ? "7d" : baseline, context.RequestAborted));
 })
 .WithName("Troubleshoot")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/transcription-performance", async (HttpContext context, long? start, long? end, int? samplePage, int? samplePageSize, AuthService authService, TrHealthTroubleshootService troubleshoot, RemoteTranscriptionHealthService remoteHealth, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = new TimeRangeQuery(start, end).Resolve();
+    var result = await troubleshoot.BuildTranscriptionPerformanceAsync(range.Start, range.End, samplePage ?? 1, samplePageSize ?? 25, context.RequestAborted);
+    return Results.Ok(result with
+    {
+        EndpointHealth = remoteHealth.GetSnapshot(),
+        EndpointOutages = await database.ListRemoteServiceOutagesAsync(range.Start, range.End, 100, context.RequestAborted)
+    });
+})
+.WithName("SystemTranscriptionPerformance")
 .WithOpenApi();
 
 app.MapGet("/api/v1/troubleshoot/rf-analysis", async (HttpContext context, string? system, long? start, long? end, AuthService authService, TrHealthTroubleshootService troubleshoot) =>
@@ -867,7 +923,6 @@ app.MapGet("/api/v1/troubleshoot/tr-config", (HttpContext context, AuthService a
 app.MapGet("/api/v1/jobs", async (HttpContext context, AuthService authService, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    await database.PruneJobsOlderThanAsync(DateTime.UtcNow.AddDays(-30), context.RequestAborted);
     var jobs = await database.ListJobsAsync(context.RequestAborted);
     return Results.Ok(jobs.Select(JobControlPolicy.Describe));
 })
@@ -882,20 +937,20 @@ app.MapGet("/api/v1/jobs/{id:long}/logs", async (HttpContext context, long id, l
 .WithName("JobLogs")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/token-usage", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>
+app.MapGet("/api/v1/system/token-usage", async (HttpContext context, long? start, long? end, int? page, int? pageSize, AuthService authService, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
-    return Results.Ok(await database.GetTokenUsageAsync(range.Start, range.End, context.RequestAborted));
+    return Results.Ok(await database.GetTokenUsageAsync(range.Start, range.End, context.RequestAborted, page ?? 1, pageSize ?? 20));
 })
 .WithName("TokenUsage")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/remote-bandwidth", async (HttpContext context, long? start, long? end, AuthService authService, RemoteBandwidthEstimatorService bandwidth) =>
+app.MapGet("/api/v1/system/remote-bandwidth", async (HttpContext context, long? start, long? end, int? page, int? pageSize, AuthService authService, RemoteBandwidthEstimatorService bandwidth) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
-    return Results.Ok(await bandwidth.BuildReportAsync(range.Start, range.End, context.RequestAborted));
+    return Results.Ok(await bandwidth.BuildReportAsync(range.Start, range.End, context.RequestAborted, page ?? 1, pageSize ?? 20));
 })
 .WithName("RemoteBandwidth")
 .WithOpenApi();
@@ -915,6 +970,40 @@ app.MapGet("/api/v1/system/runtime", async (HttpContext context, AuthService aut
     return Results.Ok(await system.BuildAsync(context.RequestAborted));
 })
 .WithName("SystemRuntime")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/transcription-recovery", async (HttpContext context, int? hours, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var selectedHours = Math.Clamp(hours ?? 24, 1, 24 * 30);
+    var end = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    var start = end - selectedHours * 3600L;
+    return Results.Ok(new TranscriptionRecoveryAvailability(selectedHours, await database.CountTranscriptionErrorCallsAsync(start, end, context.RequestAborted)));
+})
+.WithName("TranscriptionRecoveryAvailability")
+.WithOpenApi();
+
+app.MapPost("/api/v1/jobs/transcription-recovery", async (HttpContext context, TranscriptionRecoveryRequest request, AuthService authService, TranscriptionRecoveryJobService recovery) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(JobControlPolicy.Describe(await recovery.StartRecoveryAsync(request.Hours, context.RequestAborted)));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("StartTranscriptionRecovery")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/storage", async (HttpContext context, AuthService authService, SystemManagerService system) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await system.BuildStorageAsync(context.RequestAborted));
+})
+.WithName("SystemStorage")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/backups", (HttpContext context, AuthService authService, BackupRestoreService backups) =>
@@ -1010,7 +1099,9 @@ app.MapGet("/api/v1/system/backups/restore/pending", (HttpContext context, AuthS
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var pending = backups.PendingRestore();
-    return pending == null ? Results.NotFound() : Results.Ok(pending);
+    return pending == null
+        ? Results.Text("null", "application/json")
+        : Results.Json(pending);
 })
 .WithName("SystemBackupsRestorePending")
 .WithOpenApi();
@@ -1031,40 +1122,21 @@ app.MapPost("/api/v1/system/backups/restore/cancel", async (HttpContext context,
 .WithName("SystemBackupsRestoreCancel")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/storage/maintenance/{action}", async (string action, HttpContext context, AuthService authService, EngineDatabase database) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        switch (action.Trim().ToLowerInvariant())
-        {
-            case "vacuum":
-                await database.VacuumAsync(context.RequestAborted);
-                return Results.Ok(new { ok = true, message = "Database vacuum completed." });
-            case "analyze":
-                await database.AnalyzeAsync(context.RequestAborted);
-                return Results.Ok(new { ok = true, message = "Database statistics optimized." });
-            case "prune-jobs":
-                var removed = await database.PruneJobsOlderThanAsync(DateTime.UtcNow.AddDays(-30), context.RequestAborted);
-                return Results.Ok(new { ok = true, message = $"Pruned {removed:N0} old job row(s) or log row(s)." });
-            default:
-                return Results.BadRequest(new { message = "Unsupported storage maintenance action." });
-        }
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
-})
-.WithName("SystemStorageMaintenance")
-.WithOpenApi();
-
 app.MapGet("/api/v1/system/recommendations", async (HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     return Results.Ok(await recommendations.BuildAsync(context.RequestAborted));
 })
 .WithName("SystemRecommendations")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/recommendations/{id}/reviewed", async (string id, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    await recommendations.MarkReviewedAsync(id, context.RequestAborted);
+    return Results.NoContent();
+})
+.WithName("SystemRecommendationReviewed")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/cpu", async (HttpContext context, AuthService authService, SystemCpuSnapshotService cpu) =>
@@ -1075,20 +1147,12 @@ app.MapGet("/api/v1/system/cpu", async (HttpContext context, AuthService authSer
 .WithName("SystemCpu")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/recommendations/{id}/state", async (string id, RecommendationStateRequest request, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+app.MapGet("/api/v1/system/resources/live", async (HttpContext context, AuthService authService, SystemCpuSnapshotService cpu) =>
 {
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        await recommendations.SetStateAsync(id, request.Action, context.RequestAborted);
-        return Results.Ok(await recommendations.BuildAsync(context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { message = ex.Message });
-    }
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await cpu.BuildLiveAsync(context.RequestAborted));
 })
-.WithName("SystemRecommendationState")
+.WithName("SystemLiveResources")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/queue", async (HttpContext context, AuthService authService, EngineConfig cfg, EnginePipeline pipeline, EngineDatabase database, IngestControlService ingestControl, EmbeddingService embeddings) =>
@@ -1224,7 +1288,7 @@ app.MapGet("/api/v1/profiles", (HttpContext context, AuthService authService, En
 .WithName("ProfilesRead")
 .WithOpenApi();
 
-app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest request, AuthService authService, EngineConfig cfg) =>
+app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest request, AuthService authService, EngineConfig cfg, SiteSetupService siteSetup) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var profiles = request.Profiles?.ToList() ?? [];
@@ -1241,7 +1305,6 @@ app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest 
             NormalizeDefaultProfile(profile);
             continue;
         }
-        profile.AllowedTalkgroups ??= new();
         profile.Talkgroups ??= new();
         profile.Talkgroups = profile.Talkgroups
             .Where(t => t.Id > 0)
@@ -1271,14 +1334,21 @@ app.MapPost("/api/v1/profiles", async (HttpContext context, SaveProfilesRequest 
         return Results.BadRequest(new { error = $"Unable to save profiles to {cfg.ConfigPath}.", detail = ex.Message });
     }
 
+    await TryAddAuditActivityAsync(siteSetup, new SiteSetupActivityRequest(
+        "settings",
+        "profiles_saved",
+        $"Saved {profiles.Count:N0} processing profile(s).",
+        JsonSerializer.SerializeToElement(new { profileCount = profiles.Count, activeProfileId = candidate.Profiles.ActiveProfileId }),
+        "ui"), app.Logger);
+
     return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, cfg.Profiles.Items, false, string.Empty, "Profile saved. Profile changes now affect dashboard filters, alerts, embeddings, and incident creation without restarting services."));
 })
 .WithName("ProfilesSave")
 .WithOpenApi();
 
-app.MapPost("/api/v1/profiles/active", async (HttpContext context, SetActiveProfileRequest request, AuthService authService, EngineConfig cfg) =>
+app.MapPost("/api/v1/profiles/active", async (HttpContext context, SetActiveProfileRequest request, AuthService authService, EngineConfig cfg, SiteSetupService siteSetup) =>
 {
-    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var profiles = cfg.Profiles.Items?.ToList() ?? [];
     var active = profiles.FirstOrDefault(p => p.Id == request.ActiveProfileId);
     if (active == null)
@@ -1301,14 +1371,20 @@ app.MapPost("/api/v1/profiles/active", async (HttpContext context, SetActiveProf
     }
 
     var selected = cfg.Profiles.Items.FirstOrDefault(p => p.Id == cfg.Profiles.ActiveProfileId);
+    await TryAddAuditActivityAsync(siteSetup, new SiteSetupActivityRequest(
+        "settings",
+        "active_profile_changed",
+        $"Activated processing profile {selected?.Name ?? active.Name}.",
+        JsonSerializer.SerializeToElement(new { activeProfileId = cfg.Profiles.ActiveProfileId }),
+        "ui"), app.Logger);
     return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, cfg.Profiles.Items ?? [], false, string.Empty, $"Profile active: {selected?.Name ?? active.Name}."));
 })
 .WithName("ProfilesSetActive")
 .WithOpenApi();
 
-app.MapPost("/api/v1/profiles/{profileId:guid}/talkgroups/hide", async (HttpContext context, Guid profileId, HideProfileTalkgroupsRequest request, AuthService authService, EngineConfig cfg) =>
+app.MapPost("/api/v1/profiles/{profileId:guid}/talkgroups/hide", async (HttpContext context, Guid profileId, HideProfileTalkgroupsRequest request, AuthService authService, EngineConfig cfg, SiteSetupService siteSetup) =>
 {
-    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var profiles = cfg.Profiles.Items?.ToList() ?? [];
     var target = profiles.FirstOrDefault(p => p.Id == profileId);
     if (target == null)
@@ -1360,6 +1436,13 @@ app.MapPost("/api/v1/profiles/{profileId:guid}/talkgroups/hide", async (HttpCont
         return Results.BadRequest(new { error = $"Unable to save profile rules to {cfg.ConfigPath}.", detail = ex.Message });
     }
 
+    await TryAddAuditActivityAsync(siteSetup, new SiteSetupActivityRequest(
+        "settings",
+        "profile_talkgroups_hidden",
+        $"Hid {settings.Count:N0} talkgroup rule(s) in processing profile {candidateTarget.Name}.",
+        JsonSerializer.SerializeToElement(new { profileId, talkgroupCount = settings.Count }),
+        "ui"), app.Logger);
+
     return Results.Ok(new ProfileStateDto(cfg.Profiles.ActiveProfileId, cfg.Profiles.Items ?? [], false, string.Empty, $"{settings.Count:N0} talkgroup rule(s) hidden in {candidateTarget.Name}."));
 })
 .WithName("ProfilesHideTalkgroups")
@@ -1393,11 +1476,11 @@ app.MapGet("/api/v1/talkgroups/catalog", (HttpContext context, AuthService authS
 .WithName("TalkgroupCatalogRead")
 .WithOpenApi();
 
-app.MapGet("/api/v1/talkgroups/catalog/page", (HttpContext context, string? query, string? state, string? category, string? sort, string? direction, int? page, int? pageSize, AuthService authService, TalkgroupCatalogService catalog) =>
+app.MapGet("/api/v1/talkgroups/catalog/page", (HttpContext context, string? query, string? state, string? category, string? sort, string? direction, int? page, int? pageSize, string? targets, AuthService authService, TalkgroupCatalogService catalog) =>
 {
     if (!authService.IsReadAllowed(context))
         return Results.Unauthorized();
-    return Results.Ok(catalog.QueryPage(query, state, category, sort, direction, page ?? 1, pageSize ?? 50));
+    return Results.Ok(catalog.QueryPage(query, state, category, sort, direction, page ?? 1, pageSize ?? 50, targets));
 })
 .WithName("TalkgroupCatalogPage")
 .WithOpenApi();
@@ -1443,7 +1526,7 @@ app.MapPost("/api/v1/talkgroups/catalog/policy", async (HttpContext context, Tal
 .WithName("TalkgroupCatalogPolicyUpdate")
 .WithOpenApi();
 
-app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, BackupJobService backups) =>
+app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, BackupJobService backups, SetupJobService setupJobs, TranscriptionRecoveryJobService transcriptionRecovery) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var job = await database.GetJobAsync(id, context.RequestAborted);
@@ -1456,6 +1539,8 @@ app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long i
         JobDto? updated = job.Type switch
         {
             BackupJobService.JobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await backups.CancelAsync(id, context.RequestAborted),
+            TranscriptionRecoveryJobService.JobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await transcriptionRecovery.CancelAsync(id, context.RequestAborted),
+            _ when SetupJobService.IsManagedJobType(job.Type) && string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await setupJobs.CancelAsync(id, context.RequestAborted),
             "sftp_import" or "local_import" => throw new InvalidOperationException("Historical import jobs are no longer supported from the web application."),
             _ => throw new InvalidOperationException("This job type does not support pause/resume/cancel.")
         };
@@ -1503,10 +1588,12 @@ app.MapGet("/api/v1/settings/{section}", (HttpContext context, string section, A
 .WithName("SettingsRead")
 .WithOpenApi();
 
-app.MapPost("/api/v1/settings/{section}", async (HttpContext context, string section, SaveSettingsRequest request, AuthService authService, EngineConfig cfg, CredentialStore credentials) =>
+app.MapPost("/api/v1/settings/{section}", async (HttpContext context, string section, SaveSettingsRequest request, AuthService authService, EngineConfig cfg, CredentialStore credentials, SiteSetupService siteSetup) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     section = section.Trim().ToLowerInvariant();
+    if (section == "alerts" && ValidateAlertSettings(request.Values) is { } alertError)
+        return Results.BadRequest(new { error = alertError });
     var candidate = cfg.Clone();
     if (!ApplySettingsSection(candidate, section, request.Values, credentials, persistSecrets: true))
         return Results.BadRequest("Unknown settings section.");
@@ -1549,6 +1636,13 @@ app.MapPost("/api/v1/settings/{section}", async (HttpContext context, string sec
     }
 
     var restartRequired = SettingsRestartRequired(section);
+    var changedFields = SettingsFieldNames(request.Values);
+    await TryAddAuditActivityAsync(siteSetup, new SiteSetupActivityRequest(
+        "settings",
+        "settings_saved",
+        $"Saved {SettingsSectionLabel(section)} settings.",
+        JsonSerializer.SerializeToElement(new { section, changedFields, restartRequired }),
+        "ui"), app.Logger);
     return Results.Ok(new { saved = section, restartRequired, message = restartRequired ? "Settings saved. Restart pizzad for all changes in this section to take effect." : "Settings saved." });
 })
 .WithName("SettingsSave")
@@ -1728,6 +1822,32 @@ static bool BoolProperty(JsonElement values, string name) =>
 static bool SettingsRestartRequired(string section) =>
     section.Trim().ToLowerInvariant() is "engine" or "transcription" or "embeddings" or "tr" or "auth";
 
+static string[] SettingsFieldNames(JsonElement values) =>
+    values.ValueKind == JsonValueKind.Object
+        ? values.EnumerateObject().Select(property => property.Name).Where(name => !name.StartsWith('_')).Order(StringComparer.OrdinalIgnoreCase).ToArray()
+        : [];
+
+static string SettingsSectionLabel(string section) => section.Trim().ToLowerInvariant() switch
+{
+    "ai-insights" => "AI Insights",
+    "rf-survey" => "RF Survey",
+    "tr" => "Trunk Recorder",
+    "auth" => "Authentication",
+    _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(section.Replace('-', ' '))
+};
+
+static async Task TryAddAuditActivityAsync(SiteSetupService siteSetup, SiteSetupActivityRequest request, ILogger logger)
+{
+    try
+    {
+        await siteSetup.AddActivityAsync(request, CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "The {AuditAction} change succeeded, but its audit-history record could not be saved.", request.Action);
+    }
+}
+
 static (long Start, long End) ResolveQualityCheckRange(long? start, long? end, int? hours)
 {
     if (start.HasValue || end.HasValue)
@@ -1748,10 +1868,53 @@ static void NormalizeDefaultProfile(ProcessingProfile profile)
     profile.IncludeFire = true;
     profile.IncludeEMS = true;
     profile.IncludeTraffic = true;
+    profile.IncludeUtilities = true;
     profile.IncludeOther = true;
-    profile.AllowedTalkgroups = new();
     profile.Talkgroups = new();
     profile.UpdatedAtUtc = DateTime.UtcNow;
+}
+
+static string? ValidateAlertSettings(JsonElement values)
+{
+    if (!values.TryGetProperty("rules", out var rules))
+        return null;
+    if (rules.ValueKind != JsonValueKind.Array)
+        return "Alert rules must be an array.";
+
+    foreach (var rule in rules.EnumerateArray())
+    {
+        if (rule.ValueKind != JsonValueKind.Object)
+            return "Each alert rule must be an object.";
+        if (rule.TryGetProperty("matchType", out var matchType) &&
+            matchType.ValueKind == JsonValueKind.String &&
+            !AlertRulePolicy.IsSupportedMatchType(matchType.GetString()))
+            return $"Unsupported alert match type: {matchType.GetString()}.";
+        var normalizedMatchType = AlertRulePolicy.NormalizeMatchType(rule.TryGetProperty("matchType", out matchType) && matchType.ValueKind == JsonValueKind.String ? matchType.GetString() : null);
+        var keywords = rule.TryGetProperty("keywords", out var keywordValue) && keywordValue.ValueKind == JsonValueKind.String ? keywordValue.GetString() : string.Empty;
+        var policeCodes = rule.TryGetProperty("policeCodes", out var policeCodeValue) && policeCodeValue.ValueKind == JsonValueKind.String ? policeCodeValue.GetString() : string.Empty;
+        if (normalizedMatchType == AlertRulePolicy.Keyword && string.IsNullOrWhiteSpace(keywords))
+            return "Keyword alert rules require at least one keyword or phrase.";
+        if (normalizedMatchType == AlertRulePolicy.PoliceCode && string.IsNullOrWhiteSpace(policeCodes))
+            return "Police-code alert rules require at least one police code.";
+        if (normalizedMatchType == AlertRulePolicy.KeywordOrPoliceCode && string.IsNullOrWhiteSpace(keywords) && string.IsNullOrWhiteSpace(policeCodes))
+            return "Combined alert rules require at least one keyword or police code.";
+        if (!rule.TryGetProperty("talkgroups", out var talkgroups))
+            continue;
+        if (talkgroups.ValueKind != JsonValueKind.Array)
+            return "Alert talkgroups must be an array of system and talkgroup objects.";
+        foreach (var talkgroup in talkgroups.EnumerateArray())
+        {
+            if (talkgroup.ValueKind != JsonValueKind.Object)
+                return "Numeric-only alert talkgroups are unsupported. Select a system and talkgroup ID.";
+            var system = talkgroup.TryGetProperty("systemShortName", out var systemValue) && systemValue.ValueKind == JsonValueKind.String
+                ? systemValue.GetString()?.Trim()
+                : string.Empty;
+            var id = talkgroup.TryGetProperty("id", out var idValue) && idValue.TryGetInt64(out var parsedId) ? parsedId : 0;
+            if (string.IsNullOrWhiteSpace(system) || id <= 0)
+                return "Every alert talkgroup must include a systemShortName and positive id.";
+        }
+    }
+    return null;
 }
 
 static async Task SaveConfigAsync(EngineConfig cfg, CancellationToken ct)

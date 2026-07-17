@@ -56,7 +56,8 @@ public sealed record AlertMatchDto
 public sealed record DashboardDto
 {
     public IReadOnlyList<KpiDto> Kpis { get; init; } = [];
-    public IReadOnlyList<HourCategoryDto> VolumeByHourCategory { get; init; } = [];
+    public CallActivitySummaryDto CallActivity { get; init; } = new();
+    public IReadOnlyList<CallVolumeBucketDto> CallVolumeTimeline { get; init; } = [];
     public IReadOnlyList<SystemCallBreakdownDto> CallsBySystem { get; init; } = [];
     public IReadOnlyList<LocationHeatDto> LocationHeat { get; init; } = [];
     public IReadOnlyList<QualityHourDto> QualityByHour { get; init; } = [];
@@ -71,7 +72,31 @@ public sealed record DashboardDto
 
 public sealed record KpiDto(string Label, string Value, string Subtext);
 
-public sealed record HourCategoryDto(int Hour, string Category, int Count);
+public sealed record CallActivitySummaryDto
+{
+    public int TotalCalls { get; init; }
+    public int UniqueTalkgroups { get; init; }
+    public long RangeStart { get; init; }
+    public long RangeEnd { get; init; }
+    public int BucketSeconds { get; init; }
+    public long BusiestBucketStart { get; init; }
+    public int BusiestBucketCalls { get; init; }
+}
+
+public sealed record RemoteServiceOutageDto(
+    long Id,
+    string ServiceKey,
+    string Endpoint,
+    string ExpectedModel,
+    string ReportedModel,
+    DateTime StartedAtUtc,
+    DateTime ConfirmedAtUtc,
+    DateTime? RecoveredAtUtc,
+    string LastError,
+    int FailureCount,
+    bool AdministrativeEmailSent);
+
+public sealed record CallVolumeBucketDto(long Start, string Category, int Count);
 
 public sealed record SystemCallBreakdownDto(
     string SystemShortName,
@@ -167,6 +192,7 @@ public sealed record TopTalkgroupDto(
     string TalkgroupKey,
     string SystemShortName,
     long Talkgroup,
+    string Category,
     int Count,
     double Share,
     long LastHeard,
@@ -279,6 +305,7 @@ public sealed record JobDto
     public int Failed { get; init; }
     public string Message { get; init; } = string.Empty;
     public DateTime CreatedAtUtc { get; init; }
+    public DateTime? UpdatedAtUtc { get; init; }
     public DateTime? StartedAtUtc { get; init; }
     public DateTime? FinishedAtUtc { get; init; }
     public IReadOnlyList<string> SupportedOperations { get; init; } = [];
@@ -290,6 +317,8 @@ public sealed record JobLogDto(
     DateTime TimestampUtc,
     string Stream,
     string Text);
+
+public sealed record JobPruneResult(int JobLogsRemoved, int JobsRemoved);
 
 public sealed record SetupJobRequest(string Action, bool Confirmed = false, JsonElement? Parameters = null);
 
@@ -448,6 +477,51 @@ public sealed record TrConfigEditorDto(
     string ParseMessage,
     TrConfigEditorSummaryDto Summary);
 
+public sealed record TrConfigArtifactCatalogDto(
+    string Id,
+    string Kind,
+    string State,
+    string Name,
+    string Path,
+    DateTime CreatedAtUtc,
+    long Bytes,
+    string Workflow,
+    string Reason,
+    string RelatedActivity,
+    bool HasRecordedOrigin,
+    bool IsActive);
+
+public sealed record TrConfigArtifactDetailDto(
+    TrConfigArtifactCatalogDto Artifact,
+    string ConfigJson,
+    bool ParseOk,
+    string ParseMessage,
+    TrConfigEditorSummaryDto Summary);
+
+public sealed record TrConfigViewerDto(
+    string ActiveArtifactId,
+    string SelectedArtifactId,
+    IReadOnlyList<TrConfigArtifactCatalogDto> Artifacts,
+    TrConfigArtifactDetailDto? Selected,
+    string ActiveConfigJson);
+
+public sealed record TrLogEntryDto(
+    string Cursor,
+    DateTime TimestampUtc,
+    string Host,
+    string Identifier,
+    string ProcessId,
+    string Message);
+
+public sealed record TrLogPageDto(
+    long Start,
+    long End,
+    int PageSize,
+    IReadOnlyList<TrLogEntryDto> Entries,
+    bool HasOlder,
+    string OlderCursor,
+    string Error);
+
 public sealed record RfSweepInsightRequest(
     string SurveyId,
     string SystemShortName,
@@ -535,7 +609,17 @@ public sealed record SystemCpuSnapshotDto(
     SystemCpuSampleDto Peaks,
     string Severity,
     string Summary,
-    IReadOnlyList<SystemCpuInsightDto> Insights);
+    IReadOnlyList<SystemCpuInsightDto> Insights,
+    double? HostCpuPercent,
+    SystemHostMemoryDto HostMemory,
+    IReadOnlyList<SystemProcessResourceDto> Processes,
+    SystemUsbEvidenceDto Usb);
+
+public sealed record SystemRuntimeResourceSampleDto(
+    DateTime GeneratedAtUtc,
+    double? HostCpuPercent,
+    SystemHostMemoryDto HostMemory,
+    IReadOnlyList<SystemProcessResourceDto> Processes);
 
 public sealed record SystemCpuSampleDto(
     DateTime? WindowEndUtc,
@@ -553,6 +637,32 @@ public sealed record SystemCpuInsightDto(
     string Value,
     string Status,
     string Detail);
+
+public sealed record SystemHostMemoryDto(
+    long TotalMb,
+    long AvailableMb,
+    long UsedMb,
+    double UsedPercent);
+
+public sealed record SystemProcessResourceDto(
+    string Component,
+    string Unit,
+    int Pid,
+    string Process,
+    double CpuPercent,
+    double HostCpuPercent,
+    double RssMb,
+    int ProcessCount,
+    string Status);
+
+public sealed record SystemUsbEvidenceDto(
+    string Status,
+    string Message,
+    IReadOnlyList<string> Devices,
+    IReadOnlyList<string> KernelErrors,
+    string KernelEvidenceSource,
+    int CurrentIssueCount,
+    string EvidencePeriod);
 
 public sealed record IngestControlStatusDto(
     bool Paused,
@@ -706,7 +816,11 @@ public sealed record TrSourcePlanDto(
     string Notes,
     bool IsIssue);
 
-public sealed record TrHealthSeriesDto(string Label, IReadOnlyList<double> Values, bool IsBaseline = false);
+public sealed record TrHealthSeriesDto(
+    string Label,
+    IReadOnlyList<double> Values,
+    bool IsBaseline = false,
+    string Scope = "");
 
 public sealed record TrHealthChartDto(
     string Title,
@@ -715,6 +829,36 @@ public sealed record TrHealthChartDto(
     IReadOnlyList<string> Labels,
     IReadOnlyList<TrHealthSeriesDto> Series,
     string BaselineNote);
+
+public sealed record TrMetricAssessmentDto(
+    string Tone,
+    string Basis,
+    double? BaselineValue,
+    string Detail);
+
+public sealed record TrSystemHealthDto(
+    string SystemShortName,
+    string Status,
+    string Summary,
+    int Windows,
+    int CcSummarySamples,
+    double CcSummaryAvgDecodeRate,
+    double CcSummaryDecodeZeroPercent,
+    int Retunes,
+    int CallsConcluded,
+    int NoTxRecorded,
+    int RecorderExhausted,
+    int SampleStops,
+    int UnableSource,
+    double CallsPerHour,
+    double RetunesPerHour,
+    TrMetricAssessmentDto DecodeAssessment,
+    TrMetricAssessmentDto ZeroDecodeAssessment,
+    TrMetricAssessmentDto CallsAssessment,
+    TrMetricAssessmentDto NoAudioAssessment,
+    TrMetricAssessmentDto RetunesAssessment,
+    DateTime LastWindowEndUtc,
+    bool IsIssue);
 
 public sealed record TrHealthSummaryDto
 {
@@ -725,6 +869,7 @@ public sealed record TrHealthSummaryDto
     public string SummaryText { get; init; } = string.Empty;
     public IReadOnlyList<TrHealthMetricDto> Metrics { get; init; } = [];
     public IReadOnlyList<TrHealthMetricDto> Systems { get; init; } = [];
+    public IReadOnlyList<TrSystemHealthDto> SystemSummaries { get; init; } = [];
     public IReadOnlyList<TrSourceCoverageDto> SourceCoverage { get; init; } = [];
     public IReadOnlyList<TrSourcePlanDto> SourcePlan { get; init; } = [];
     public IReadOnlyList<TrHealthMetricDto> Remedies { get; init; } = [];
@@ -766,7 +911,22 @@ public sealed record TokenUsageSummaryDto(
     int TimeoutFailures = 0,
     int NoValidResultFailures = 0);
 
-public sealed record TokenUsageBucketDto(string Label, long TotalTokens, long PromptTokens, long CompletionTokens, int Requests);
+public sealed record TokenUsageBucketDto(
+    string Label,
+    long TotalTokens,
+    long PromptTokens,
+    long CompletionTokens,
+    int Requests,
+    int Successes,
+    int Failures);
+
+public sealed record TokenUsageTimeBucketDto(
+    long Start,
+    int Requests,
+    int Successes,
+    int Failures,
+    long PromptTokens,
+    long CompletionTokens);
 
 public sealed record TokenUsageFailureBreakdownDto(
     string Kind,
@@ -820,7 +980,8 @@ public sealed record IncidentOperationAuditDto(
     string Reason,
     double Score,
     string CallIdsJson,
-    string MetadataJson);
+    string MetadataJson,
+    string CandidateTraceKey = "");
 
 public sealed record IncidentOperationAuditRowDto(
     long Id,
@@ -832,7 +993,70 @@ public sealed record IncidentOperationAuditRowDto(
     string Reason,
     double Score,
     IReadOnlyList<long> CallIds,
-    string MetadataJson);
+    string MetadataJson,
+    string CandidateTraceKey = "");
+
+public sealed record IncidentDecisionBucketDto(
+    long Start,
+    int Accepted,
+    int Rejected);
+
+public sealed record IncidentDecisionPerformanceDto(
+    long RangeStart,
+    long RangeEnd,
+    int BucketSeconds,
+    int Total,
+    int Accepted,
+    int Rejected,
+    IReadOnlyList<IncidentDecisionBucketDto> Buckets);
+
+public sealed record IncidentDecisionChainDto(
+    string ChainKey,
+    DateTime TimestampUtc,
+    string SystemShortName,
+    string IncidentKey,
+    string Outcome,
+    string Summary,
+    double Score,
+    IReadOnlyList<long> CallIds,
+    bool CompleteTrace,
+    IReadOnlyList<IncidentOperationAuditRowDto> Steps);
+
+public sealed record IncidentDecisionEvidenceCallDto(
+    long CallId,
+    long Timestamp,
+    string TalkgroupName,
+    long Talkgroup,
+    string Category,
+    string TranscriptSnippet);
+
+public sealed record IncidentDecisionGroupDto(
+    string GroupKey,
+    string DisplayTitle,
+    string SystemShortName,
+    string Category,
+    DateTime LatestTimestampUtc,
+    string Outcome,
+    int CreatedCount,
+    int UpdatedCount,
+    int DroppedCount,
+    IReadOnlyList<IncidentDecisionEvidenceCallDto> EvidenceCalls,
+    IReadOnlyList<IncidentDecisionChainDto> Chains);
+
+public sealed record IncidentDecisionChainPageDto(
+    long RangeStart,
+    long RangeEnd,
+    int BucketSeconds,
+    int Page,
+    int PageSize,
+    int TotalChains,
+    int Created,
+    int Updated,
+    int Dropped,
+    IReadOnlyList<IncidentDecisionBucketDto> Buckets,
+    IReadOnlyList<IncidentDecisionChainDto> Chains,
+    int TotalGroups,
+    IReadOnlyList<IncidentDecisionGroupDto> Groups);
 
 public sealed record EmbeddingJobDto(
     long CallId,
@@ -865,13 +1089,23 @@ public sealed record VectorSearchMatchDto(
 
 public sealed record TokenUsageReportDto(
     string Ledger,
+    long RangeStart,
+    long RangeEnd,
+    int BucketSeconds,
+    double OpenAiReferenceInputCostPerMillion,
+    double OpenAiReferenceOutputCostPerMillion,
     TokenUsageSummaryDto Summary,
     TokenUsageSummaryDto MonthlySummary,
     TokenUsageSummaryDto AllTimeSummary,
     IReadOnlyList<TokenUsageFailureBreakdownDto> FailuresByKind,
     IReadOnlyList<TokenUsageBucketDto> ByDay,
     IReadOnlyList<TokenUsageBucketDto> ByTrigger,
-    IReadOnlyList<TokenUsageEntryDto> Entries);
+    IReadOnlyList<TokenUsageTimeBucketDto> ByTime,
+    IReadOnlyList<TokenUsageEntryDto> RecentFailures,
+    IReadOnlyList<TokenUsageEntryDto> Entries,
+    int EntryPage,
+    int EntryPageSize,
+    int EntryTotal);
 
 public sealed record RemoteBandwidthSummaryDto(
     long RequestBytes = 0,
@@ -882,6 +1116,14 @@ public sealed record RemoteBandwidthSummaryDto(
 
 public sealed record RemoteBandwidthBucketDto(
     string Label,
+    string Activity,
+    long RequestBytes,
+    long ResponseBytes,
+    long TotalBytes,
+    int Requests);
+
+public sealed record RemoteBandwidthTimeActivityBucketDto(
+    long Start,
     string Activity,
     long RequestBytes,
     long ResponseBytes,
@@ -912,6 +1154,9 @@ public sealed record RemoteBandwidthUsageRecordDto(
 
 public sealed record RemoteBandwidthReportDto(
     string Ledger,
+    long RangeStart,
+    long RangeEnd,
+    int BucketSeconds,
     string RemoteHost,
     string TranscriptionEndpoint,
     string AiEndpoint,
@@ -922,7 +1167,11 @@ public sealed record RemoteBandwidthReportDto(
     RemoteBandwidthSummaryDto AllTimeSummary,
     IReadOnlyList<RemoteBandwidthBucketDto> ByDay,
     IReadOnlyList<RemoteBandwidthBucketDto> ByActivity,
-    IReadOnlyList<RemoteBandwidthEntryDto> Entries);
+    IReadOnlyList<RemoteBandwidthTimeActivityBucketDto> ByTimeActivity,
+    IReadOnlyList<RemoteBandwidthEntryDto> Entries,
+    int EntryPage,
+    int EntryPageSize,
+    int EntryTotal);
 
 public sealed record RemoteBandwidthUsageSnapshotDto(
     string RemoteHost,
@@ -1033,6 +1282,44 @@ public sealed record QualityAuditSampleDto(
     string QualityReason,
     string Transcription,
     string AudioUrl);
+
+public sealed record TranscriptionPerformanceDto
+{
+    public long RangeStart { get; init; }
+    public long RangeEnd { get; init; }
+    public int BucketSeconds { get; init; }
+    public int TotalCalls { get; init; }
+    public int CompletedCalls { get; init; }
+    public int UsableCalls { get; init; }
+    public int EngineFailureCalls { get; init; }
+    public int UnusableAudioCalls { get; init; }
+    public int OtherQualityCalls { get; init; }
+    public int PendingCalls { get; init; }
+    public double CompletionPercent { get; init; }
+    public double UsablePercent { get; init; }
+    public double EngineFailurePercent { get; init; }
+    public double UnusableAudioPercent { get; init; }
+    public double BaselineUsablePercent { get; init; }
+    public IReadOnlyList<TranscriptionOutcomeBucketDto> Outcomes { get; init; } = [];
+    public IReadOnlyList<TranscriptionThroughputBucketDto> Throughput { get; init; } = [];
+    public IReadOnlyList<TranscriptionLatencyBucketDto> Latency { get; init; } = [];
+    public IReadOnlyList<TranscriptionReasonDto> Reasons { get; init; } = [];
+    public IReadOnlyList<TranscriptionGroupDto> Systems { get; init; } = [];
+    public IReadOnlyList<TranscriptionGroupDto> Talkgroups { get; init; } = [];
+    public IReadOnlyList<QualityAuditSampleDto> Samples { get; init; } = [];
+    public int SamplePage { get; init; }
+    public int SamplePageSize { get; init; }
+    public int SampleTotal { get; init; }
+    public RemoteTranscriptionHealthSnapshot? EndpointHealth { get; init; }
+    public IReadOnlyList<RemoteServiceOutageDto> EndpointOutages { get; init; } = [];
+}
+
+public sealed record TranscriptionOutcomeBucketDto(long Start, int TotalCalls, int CompletedCalls, int UsableCalls, int EngineFailureCalls, int UnusableAudioCalls, int OtherQualityCalls, int PendingCalls);
+public sealed record TranscriptionThroughputBucketDto(long Start, long IngestedAudioSeconds, long CompletedAudioSeconds);
+public sealed record TranscriptionLatencyBucketDto(long Start, int Calls, double MedianSeconds, double P95Seconds);
+public sealed record TranscriptionReasonDto(string Reason, int Calls, double SharePercent);
+public sealed record TranscriptionGroupDto(string Label, string SystemShortName, long Talkgroup, string Category, int TotalCalls, int CompletedCalls, int UsableCalls, int EngineFailureCalls, int UnusableAudioCalls, int OtherQualityCalls, int PendingCalls, double CompletionPercent, double UsablePercent, double EngineFailurePercent, double UnusableAudioPercent, double BaselineUsablePercent);
+public sealed record TranscriptionCompletionPointDto(long CompletedAt, long AudioSeconds, double LatencySeconds, bool IsImported);
 
 public sealed record TimeRangeQuery(long? Start, long? End)
 {

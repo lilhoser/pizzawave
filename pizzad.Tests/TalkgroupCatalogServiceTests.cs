@@ -3,6 +3,40 @@ namespace pizzad.Tests;
 public sealed class TalkgroupCatalogServiceTests
 {
     [Fact]
+    public async Task QueryPage_FallsBackToTalkgroupIdWhenCallSiteAndCatalogSystemDiffer()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                Storage = new StorageConfig { AppDataRoot = root },
+                TrunkRecorder = new TrunkRecorderConfig { TalkgroupCatalogPath = Path.Combine(root, "talkgroups.json") }
+            };
+            var service = new TalkgroupCatalogService(config, Microsoft.Extensions.Logging.Abstractions.NullLogger<TalkgroupCatalogService>.Instance);
+            await TestCatalogWriter.WriteAsync(config, new TalkgroupCatalogDocument
+            {
+                Items =
+                [
+                    new TalkgroupCatalogItem { SystemShortName = "mswin", Id = 13541, AlphaTag = "Capitol Police" },
+                    new TalkgroupCatalogItem { SystemShortName = "entergy", Id = 76, AlphaTag = "Utility" }
+                ]
+            });
+
+            var page = service.QueryPage(null, null, null, null, null, 1, 50, "etv-raymond-hinds:13541");
+
+            var row = Assert.Single(page.Items);
+            Assert.Equal("mswin", row.SystemShortName);
+            Assert.Equal(13541, row.Id);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PreviewCsv_ExcludesEncryptedUnknownAndUnwantedRows()
     {
         const string csv = """
@@ -367,5 +401,32 @@ Decimal,Hex,Mode,Alpha Tag,Description,Tag,Category
 
         Assert.False(DownstreamProfilePolicy.Allows(config, "police", 1001));
         Assert.True(DownstreamProfilePolicy.Allows(config, "police", 1002));
+    }
+
+    [Fact]
+    public void DownstreamProfilePolicy_UtilitiesHasIndependentVisibility()
+    {
+        var profileId = Guid.NewGuid();
+        var config = new EngineConfig
+        {
+            Profiles = new ProfileConfig
+            {
+                ActiveProfileId = profileId,
+                Items =
+                [
+                    new ProcessingProfile
+                    {
+                        Id = profileId,
+                        Name = "Public safety only",
+                        IncludeUtilities = false,
+                        IncludeOther = true
+                    }
+                ]
+            }
+        };
+        config.ApplyDefaults();
+
+        Assert.False(DownstreamProfilePolicy.Allows(config, "utilities", "entergy", 76));
+        Assert.True(DownstreamProfilePolicy.Allows(config, "other", "entergy", 76));
     }
 }

@@ -1,9 +1,10 @@
 using Microsoft.Data.Sqlite;
+using System.Globalization;
 using System.Text.Json;
 
 namespace pizzad;
 
-public sealed class EngineDatabase
+public sealed partial class EngineDatabase
 {
     private readonly EngineConfig _config;
     private readonly ILogger<EngineDatabase> _logger;
@@ -29,6 +30,7 @@ public sealed class EngineDatabase
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode=WAL;", ct);
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=ON;", ct);
         await ExecuteNonQueryAsync(connection, SchemaSql, ct);
+        await ExecuteNonQueryAsync(connection, WorkspaceSchemaSql, ct);
         await EnsureSchemaMigrationsAsync(connection, ct);
         _logger.LogInformation("SQLite engine store ready at {Path}", _config.Storage.DatabasePath);
     }
@@ -556,6 +558,142 @@ public sealed class EngineDatabase
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<IReadOnlyList<TranscriptionCompletionPointDto>> ListTranscriptionCompletionPointsAsync(long startUnix, long endUnix, CancellationToken ct)
+    {
+        var startUtc = DateTimeOffset.FromUnixTimeSeconds(startUnix).UtcDateTime.ToString("O");
+        var endUtc = DateTimeOffset.FromUnixTimeSeconds(endUnix).UtcDateTime.ToString("O");
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT updated_at_utc, CASE WHEN stop_time > start_time THEN stop_time - start_time ELSE 0 END,
+                   created_at_utc, is_imported
+            FROM calls
+            WHERE updated_at_utc >= $start AND updated_at_utc <= $end
+              AND transcription_status IN ('complete', 'poor_quality', 'failed')
+              AND length(trim(audio_path)) > 0
+            ORDER BY updated_at_utc;
+            """;
+        Add(command, "$start", startUtc);
+        Add(command, "$end", endUtc);
+        var rows = new List<TranscriptionCompletionPointDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var completed))
+            {
+                var latency = DateTimeOffset.TryParse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var created)
+                    ? Math.Max(0, (completed - created).TotalSeconds)
+                    : 0;
+                rows.Add(new TranscriptionCompletionPointDto(completed.ToUnixTimeSeconds(), reader.GetInt64(1), latency, reader.GetInt32(3) != 0));
+            }
+        }
+        return rows;
+    }
+
+    public async Task<RecommendationFindingSyncResult> SyncRecommendationFindingsAsync(IReadOnlyList<SystemRecommendationDto> activeRecommendations, DateTime nowUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        var activeIds = activeRecommendations.Select(row => row.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var recommendation in activeRecommendations)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO recommendation_findings (recommendation_id, first_seen_utc, last_seen_utc, snapshot_json)
+                VALUES ($id, $now, $now, $snapshot)
+                ON CONFLICT(recommendation_id) WHERE resolved_at_utc = '' DO UPDATE SET
+                    last_seen_utc=excluded.last_seen_utc,
+                    snapshot_json=excluded.snapshot_json;
+                """;
+            Add(command, "$id", recommendation.Id);
+            Add(command, "$now", nowUtc.ToString("O"));
+            Add(command, "$snapshot", JsonSerializer.Serialize(recommendation));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var resolve = connection.CreateCommand())
+        {
+            resolve.Transaction = transaction;
+            var inactiveFilter = activeIds.Count == 0
+                ? string.Empty
+                : $" AND recommendation_id NOT IN ({string.Join(',', activeIds.Select((_, index) => $"$active{index}"))})";
+            resolve.CommandText = $"""
+                UPDATE recommendation_findings
+                SET resolved_at_utc=$now,
+                    resolution=CASE
+                        WHEN $has_rf=1 AND (recommendation_id='tr-retunes' OR recommendation_id LIKE 'tr-decode-zero:%')
+                            THEN 'Superseded by the combined per-site RF stability finding.'
+                        WHEN $has_ai=1 AND recommendation_id IN ('ai-service-failures', 'ai-truncation-pressure')
+                            THEN 'Superseded by the combined AI incident-generation finding.'
+                        WHEN $has_queue=1 AND recommendation_id IN ('queue-audio-pressure', 'queue-drain-watch', 'ai-blocked-queue')
+                            THEN 'Superseded by the combined queue-pressure finding.'
+                        ELSE 'Automatically resolved because current evidence no longer met this finding''s activation threshold.'
+                    END
+                WHERE resolved_at_utc=''{inactiveFilter};
+                """;
+            Add(resolve, "$now", nowUtc.ToString("O"));
+            Add(resolve, "$has_rf", activeIds.Any(id => id.StartsWith("tr-rf-stability:", StringComparison.OrdinalIgnoreCase)) ? 1 : 0);
+            Add(resolve, "$has_ai", activeIds.Contains("ai-generation-health") ? 1 : 0);
+            Add(resolve, "$has_queue", activeIds.Contains("queue-pressure") ? 1 : 0);
+            var index = 0;
+            foreach (var id in activeIds)
+                Add(resolve, $"$active{index++}", id);
+            await resolve.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var prune = connection.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = "DELETE FROM recommendation_findings WHERE resolved_at_utc <> '' AND resolved_at_utc < $cutoff;";
+            Add(prune, "$cutoff", nowUtc.AddDays(-90).ToString("O"));
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+
+        var active = new List<SystemRecommendationDto>();
+        var resolved = new List<SystemRecommendationDto>();
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = """
+                SELECT recommendation_id, first_seen_utc, last_seen_utc, reviewed_at_utc, resolved_at_utc, resolution, snapshot_json
+                FROM recommendation_findings
+                ORDER BY CASE WHEN resolved_at_utc = '' THEN 0 ELSE 1 END, last_seen_utc DESC;
+                """;
+            await using var reader = await query.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var recommendation = JsonSerializer.Deserialize<SystemRecommendationDto>(reader.GetString(6));
+                if (recommendation is null) continue;
+                var reviewed = reader.GetString(3);
+                var resolvedAt = reader.GetString(4);
+                recommendation = recommendation with
+                {
+                    Lifecycle = string.IsNullOrWhiteSpace(resolvedAt) ? string.IsNullOrWhiteSpace(reviewed) ? "new" : "active" : "resolved",
+                    FirstSeenUtc = reader.GetString(1),
+                    LastSeenUtc = reader.GetString(2),
+                    ResolvedAtUtc = resolvedAt,
+                    Resolution = reader.GetString(5)
+                };
+                if (string.IsNullOrWhiteSpace(resolvedAt)) active.Add(recommendation); else resolved.Add(recommendation);
+            }
+        }
+
+        await transaction.CommitAsync(ct);
+        return new RecommendationFindingSyncResult(active, resolved);
+    }
+
+    public async Task MarkRecommendationReviewedAsync(string recommendationId, DateTime nowUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE recommendation_findings SET reviewed_at_utc=$now WHERE recommendation_id=$id AND resolved_at_utc='';";
+        Add(command, "$now", nowUtc.ToString("O"));
+        Add(command, "$id", recommendationId);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task AddAlertMatchAsync(AlertMatchDto match, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -573,6 +711,116 @@ public sealed class EngineDatabase
         Add(command, "$dismissed_at_utc", match.DismissedAtUtc ?? string.Empty);
         await command.ExecuteNonQueryAsync(ct);
     }
+
+    public async Task<RemoteServiceOutageDto?> GetOpenRemoteServiceOutageAsync(string serviceKey, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM remote_service_outages WHERE service_key=$service_key AND recovered_at_utc='' ORDER BY id DESC LIMIT 1;";
+        Add(command, "$service_key", serviceKey);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadRemoteServiceOutage(reader) : null;
+    }
+
+    public async Task<RemoteServiceOutageDto> UpsertRemoteServiceOutageAsync(
+        string serviceKey,
+        string endpoint,
+        string expectedModel,
+        string reportedModel,
+        DateTime startedAtUtc,
+        DateTime confirmedAtUtc,
+        string lastError,
+        int failureCount,
+        CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO remote_service_outages (
+                service_key, endpoint, expected_model, reported_model, started_at_utc, confirmed_at_utc,
+                recovered_at_utc, last_error, failure_count, administrative_email_sent)
+            VALUES ($service_key, $endpoint, $expected_model, $reported_model, $started_at_utc, $confirmed_at_utc,
+                '', $last_error, $failure_count, 0)
+            ON CONFLICT(service_key) WHERE recovered_at_utc=''
+            DO UPDATE SET endpoint=excluded.endpoint,
+                          expected_model=excluded.expected_model,
+                          reported_model=excluded.reported_model,
+                          last_error=excluded.last_error,
+                          failure_count=MAX(remote_service_outages.failure_count, excluded.failure_count);
+            SELECT * FROM remote_service_outages WHERE service_key=$service_key AND recovered_at_utc='' ORDER BY id DESC LIMIT 1;
+            """;
+        Add(command, "$service_key", serviceKey);
+        Add(command, "$endpoint", endpoint);
+        Add(command, "$expected_model", expectedModel);
+        Add(command, "$reported_model", reportedModel);
+        Add(command, "$started_at_utc", startedAtUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$confirmed_at_utc", confirmedAtUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$last_error", lastError);
+        Add(command, "$failure_count", failureCount);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            throw new InvalidOperationException("The remote service outage record could not be persisted.");
+        return ReadRemoteServiceOutage(reader);
+    }
+
+    public async Task ResolveRemoteServiceOutageAsync(string serviceKey, string reportedModel, DateTime recoveredAtUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE remote_service_outages
+            SET recovered_at_utc=$recovered_at_utc,
+                reported_model=CASE WHEN $reported_model='' THEN reported_model ELSE $reported_model END
+            WHERE service_key=$service_key AND recovered_at_utc='';
+            """;
+        Add(command, "$service_key", serviceKey);
+        Add(command, "$reported_model", reportedModel);
+        Add(command, "$recovered_at_utc", recoveredAtUtc.ToUniversalTime().ToString("O"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task MarkRemoteServiceOutageEmailSentAsync(long outageId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE remote_service_outages SET administrative_email_sent=1 WHERE id=$id;";
+        Add(command, "$id", outageId);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<RemoteServiceOutageDto>> ListRemoteServiceOutagesAsync(long start, long end, int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM remote_service_outages
+            WHERE unixepoch(started_at_utc) <= $end
+              AND (recovered_at_utc='' OR unixepoch(recovered_at_utc) >= $start)
+            ORDER BY started_at_utc DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        Add(command, "$limit", Math.Clamp(limit, 1, 500));
+        var rows = new List<RemoteServiceOutageDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            rows.Add(ReadRemoteServiceOutage(reader));
+        return rows;
+    }
+
+    private static RemoteServiceOutageDto ReadRemoteServiceOutage(SqliteDataReader reader) => new(
+        reader.GetInt64(reader.GetOrdinal("id")),
+        reader.GetString(reader.GetOrdinal("service_key")),
+        reader.GetString(reader.GetOrdinal("endpoint")),
+        reader.GetString(reader.GetOrdinal("expected_model")),
+        reader.GetString(reader.GetOrdinal("reported_model")),
+        DateTime.Parse(reader.GetString(reader.GetOrdinal("started_at_utc"))).ToUniversalTime(),
+        DateTime.Parse(reader.GetString(reader.GetOrdinal("confirmed_at_utc"))).ToUniversalTime(),
+        string.IsNullOrWhiteSpace(reader.GetString(reader.GetOrdinal("recovered_at_utc"))) ? null : DateTime.Parse(reader.GetString(reader.GetOrdinal("recovered_at_utc"))).ToUniversalTime(),
+        reader.GetString(reader.GetOrdinal("last_error")),
+        reader.GetInt32(reader.GetOrdinal("failure_count")),
+        reader.GetInt64(reader.GetOrdinal("administrative_email_sent")) != 0);
 
     public async Task AddLmUsageAsync(TokenUsageEntryDto entry, CancellationToken ct)
     {
@@ -641,9 +889,9 @@ public sealed class EngineDatabase
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO incident_operation_audit (
-                timestamp_utc, system_short_name, incident_key, operation, accepted, reason, score, call_ids_json, metadata_json)
+                timestamp_utc, system_short_name, incident_key, operation, accepted, reason, score, call_ids_json, metadata_json, candidate_trace_key)
             VALUES (
-                $timestamp_utc, $system_short_name, $incident_key, $operation, $accepted, $reason, $score, $call_ids_json, $metadata_json);
+                $timestamp_utc, $system_short_name, $incident_key, $operation, $accepted, $reason, $score, $call_ids_json, $metadata_json, $candidate_trace_key);
             """;
         Add(command, "$timestamp_utc", entry.TimestampUtc.ToUniversalTime().ToString("O"));
         Add(command, "$system_short_name", entry.SystemShortName);
@@ -654,6 +902,7 @@ public sealed class EngineDatabase
         Add(command, "$score", entry.Score);
         Add(command, "$call_ids_json", entry.CallIdsJson);
         Add(command, "$metadata_json", entry.MetadataJson);
+        Add(command, "$candidate_trace_key", entry.CandidateTraceKey);
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -662,7 +911,7 @@ public sealed class EngineDatabase
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, timestamp_utc, system_short_name, incident_key, operation, accepted, reason, score, call_ids_json, metadata_json
+            SELECT id, timestamp_utc, system_short_name, incident_key, operation, accepted, reason, score, call_ids_json, metadata_json, candidate_trace_key
             FROM incident_operation_audit
             WHERE timestamp_utc >= $since
             ORDER BY timestamp_utc DESC, id DESC
@@ -685,9 +934,208 @@ public sealed class EngineDatabase
                 reader.GetString(reader.GetOrdinal("reason")),
                 reader.GetDouble(reader.GetOrdinal("score")),
                 ParseCallIds(callIdsJson),
-                reader.GetString(reader.GetOrdinal("metadata_json"))));
+                reader.GetString(reader.GetOrdinal("metadata_json")),
+                reader.GetString(reader.GetOrdinal("candidate_trace_key"))));
         }
         return rows;
+    }
+
+    public async Task<IncidentDecisionChainPageDto> ListIncidentDecisionChainsAsync(DateTime startUtc, DateTime endUtc, int bucketSeconds, int page, int pageSize, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, timestamp_utc, system_short_name, incident_key, operation, accepted, reason, score, call_ids_json, metadata_json, candidate_trace_key
+            FROM incident_operation_audit
+            WHERE timestamp_utc >= $start AND timestamp_utc < $end
+            ORDER BY timestamp_utc, id;
+            """;
+        Add(command, "$start", startUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$end", endUtc.ToUniversalTime().ToString("O"));
+        var rows = new List<IncidentOperationAuditRowDto>();
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                rows.Add(new IncidentOperationAuditRowDto(
+                    reader.GetInt64(reader.GetOrdinal("id")),
+                    DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc")), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    reader.GetString(reader.GetOrdinal("system_short_name")),
+                    reader.GetString(reader.GetOrdinal("incident_key")),
+                    reader.GetString(reader.GetOrdinal("operation")),
+                    reader.GetInt32(reader.GetOrdinal("accepted")) != 0,
+                    reader.GetString(reader.GetOrdinal("reason")),
+                    reader.GetDouble(reader.GetOrdinal("score")),
+                    ParseCallIds(reader.GetString(reader.GetOrdinal("call_ids_json"))),
+                    reader.GetString(reader.GetOrdinal("metadata_json")),
+                    reader.GetString(reader.GetOrdinal("candidate_trace_key"))));
+            }
+        }
+
+        static string Outcome(IncidentOperationAuditRowDto row)
+        {
+            if (!row.Accepted || row.Operation.Equals("reject_incident", StringComparison.OrdinalIgnoreCase)) return "dropped";
+            if (row.Reason.StartsWith("accepted:create incident", StringComparison.OrdinalIgnoreCase)) return "created";
+            if (row.Reason.StartsWith("accepted:update incident", StringComparison.OrdinalIgnoreCase) ||
+                row.Reason.StartsWith("accepted:server sibling merge repair", StringComparison.OrdinalIgnoreCase)) return "updated";
+            return string.Empty;
+        }
+
+        static string Summary(IncidentOperationAuditRowDto row) => row.Reason
+            .Replace("accepted:", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("rejected:", string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        var traced = rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.CandidateTraceKey))
+            .GroupBy(row => row.CandidateTraceKey, StringComparer.Ordinal)
+            .Select(group => new { Key = group.Key, Rows = group.ToList(), Terminal = group.LastOrDefault(row => Outcome(row).Length > 0) })
+            .Where(group => group.Terminal is not null)
+            .Select(group => new IncidentDecisionChainDto(
+                group.Key, group.Terminal!.TimestampUtc, group.Terminal.SystemShortName, group.Terminal.IncidentKey,
+                Outcome(group.Terminal), Summary(group.Terminal), group.Terminal.Score, group.Terminal.CallIds, true, group.Rows))
+            .ToList();
+        var legacy = rows
+            .Where(row => string.IsNullOrWhiteSpace(row.CandidateTraceKey) && Outcome(row).Length > 0)
+            .Select(row => new IncidentDecisionChainDto(
+                $"legacy-{row.Id}", row.TimestampUtc, row.SystemShortName, row.IncidentKey, Outcome(row), Summary(row),
+                row.Score, row.CallIds, false, new[] { row }));
+        var chains = traced.Concat(legacy)
+            .OrderByDescending(chain => chain.TimestampUtc)
+            .ThenByDescending(chain => chain.ChainKey, StringComparer.Ordinal)
+            .ToList();
+        var safePageSize = Math.Clamp(pageSize, 10, 50);
+        var safePage = Math.Max(1, page);
+        var incidentFacts = new Dictionary<string, (string Title, string Category)>(StringComparer.OrdinalIgnoreCase);
+        await using (var incidentCommand = connection.CreateCommand())
+        {
+            incidentCommand.CommandText = "SELECT incident_key, title, category FROM incidents WHERE incident_key IS NOT NULL AND incident_key <> '';";
+            await using var incidentReader = await incidentCommand.ExecuteReaderAsync(ct);
+            while (await incidentReader.ReadAsync(ct))
+                incidentFacts[incidentReader.GetString(0)] = (incidentReader.GetString(1), incidentReader.GetString(2));
+        }
+
+        static string MetadataText(IncidentDecisionChainDto chain, string property)
+        {
+            foreach (var step in chain.Steps.Reverse())
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(step.MetadataJson);
+                    if (document.RootElement.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String)
+                    {
+                        var text = value.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(text)) return text;
+                    }
+                }
+                catch (JsonException) { }
+            }
+            return string.Empty;
+        }
+
+        var groupedChains = chains
+            .GroupBy(chain => chain.IncidentKey.Equals("new", StringComparison.OrdinalIgnoreCase) ? $"candidate:{chain.ChainKey}" : $"incident:{chain.IncidentKey}", StringComparer.Ordinal)
+            .Select(group => new { Key = group.Key, Chains = group.OrderBy(chain => chain.TimestampUtc).ToList(), Latest = group.Max(chain => chain.TimestampUtc) })
+            .OrderByDescending(group => group.Latest)
+            .ThenBy(group => group.Key, StringComparer.Ordinal)
+            .ToList();
+        var pageGroups = groupedChains.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToList();
+        var evidenceCalls = await ListCallsByIdsAsync(pageGroups.SelectMany(group => group.Chains).SelectMany(chain => chain.CallIds), ct);
+        var callsById = evidenceCalls.ToDictionary(call => call.Id);
+        static string Snippet(string text)
+        {
+            var normalized = string.Join(" ", (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            return normalized.Length <= 180 ? normalized : $"{normalized[..177]}...";
+        }
+        var groups = pageGroups.Select(group =>
+        {
+            var latest = group.Chains[^1];
+            var calls = group.Chains.SelectMany(chain => chain.CallIds).Distinct().Select(id => callsById.GetValueOrDefault(id)).Where(call => call is not null).Cast<EngineCall>().OrderBy(call => call.StartTime).ToList();
+            var fact = (Title: string.Empty, Category: string.Empty);
+            var persisted = !latest.IncidentKey.Equals("new", StringComparison.OrdinalIgnoreCase) && incidentFacts.TryGetValue(latest.IncidentKey, out fact);
+            var candidateTitle = group.Chains.Select(chain => MetadataText(chain, "title")).LastOrDefault(title => !string.IsNullOrWhiteSpace(title)) ?? string.Empty;
+            var talkgroupFallback = calls.Select(call => call.TalkgroupName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
+            var displayTitle = persisted ? fact.Title : !string.IsNullOrWhiteSpace(candidateTitle) ? candidateTitle : !string.IsNullOrWhiteSpace(talkgroupFallback) ? $"Candidate from {talkgroupFallback}" : "Unpersisted candidate";
+            var category = persisted ? fact.Category : group.Chains.Select(chain => MetadataText(chain, "category")).LastOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? calls.Select(call => call.Category).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "other";
+            return new IncidentDecisionGroupDto(
+                group.Key, displayTitle, latest.SystemShortName, category, group.Latest, latest.Outcome,
+                group.Chains.Count(chain => chain.Outcome == "created"),
+                group.Chains.Count(chain => chain.Outcome == "updated"),
+                group.Chains.Count(chain => chain.Outcome == "dropped"),
+                calls.Select(call => new IncidentDecisionEvidenceCallDto(call.Id, call.StartTime, call.TalkgroupName, call.Talkgroup, call.Category, Snippet(call.Transcription))).ToList(),
+                group.Chains);
+        }).ToList();
+        var start = new DateTimeOffset(startUtc.ToUniversalTime()).ToUnixTimeSeconds();
+        var end = new DateTimeOffset(endUtc.ToUniversalTime()).ToUnixTimeSeconds();
+        var bucket = Math.Clamp(bucketSeconds, 900, 21600);
+        var firstBucket = start - start % bucket;
+        var buckets = new List<IncidentDecisionBucketDto>();
+        for (var timestamp = firstBucket; timestamp < end; timestamp += bucket)
+        {
+            var bucketEnd = timestamp + bucket;
+            var matches = chains.Where(chain =>
+            {
+                var observed = new DateTimeOffset(chain.TimestampUtc.ToUniversalTime()).ToUnixTimeSeconds();
+                return observed >= timestamp && observed < bucketEnd;
+            }).ToList();
+            buckets.Add(new IncidentDecisionBucketDto(timestamp, matches.Count(chain => chain.Outcome == "created"), matches.Count(chain => chain.Outcome == "dropped")));
+        }
+        return new IncidentDecisionChainPageDto(
+            start, end, bucket, safePage, safePageSize, chains.Count,
+            chains.Count(chain => chain.Outcome == "created"),
+            chains.Count(chain => chain.Outcome == "updated"),
+            chains.Count(chain => chain.Outcome == "dropped"),
+            buckets,
+            groups.SelectMany(group => group.Chains).ToList(),
+            groupedChains.Count,
+            groups);
+    }
+
+    public async Task<IncidentDecisionPerformanceDto> GetIncidentDecisionPerformanceAsync(DateTime startUtc, DateTime endUtc, int bucketSeconds, CancellationToken ct)
+    {
+        var start = new DateTimeOffset(startUtc.ToUniversalTime()).ToUnixTimeSeconds();
+        var end = new DateTimeOffset(endUtc.ToUniversalTime()).ToUnixTimeSeconds();
+        var bucket = Math.Clamp(bucketSeconds, 900, 21600);
+        var firstBucket = start - start % bucket;
+        var counts = new Dictionary<long, (int Accepted, int Rejected)>();
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                (CAST(strftime('%s', timestamp_utc) AS INTEGER) / $bucket_seconds) * $bucket_seconds AS bucket_start,
+                SUM(CASE WHEN accepted = 1 THEN 1 ELSE 0 END) AS accepted_count,
+                SUM(CASE WHEN accepted = 0 THEN 1 ELSE 0 END) AS rejected_count
+            FROM incident_operation_audit
+            WHERE timestamp_utc >= $start AND timestamp_utc < $end
+            GROUP BY bucket_start
+            ORDER BY bucket_start;
+            """;
+        Add(command, "$bucket_seconds", bucket);
+        Add(command, "$start", startUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$end", endUtc.ToUniversalTime().ToString("O"));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var bucketStart = reader.GetInt64(reader.GetOrdinal("bucket_start"));
+            counts[bucketStart] = (
+                reader.GetInt32(reader.GetOrdinal("accepted_count")),
+                reader.GetInt32(reader.GetOrdinal("rejected_count")));
+        }
+
+        var rows = new List<IncidentDecisionBucketDto>();
+        for (var timestamp = firstBucket; timestamp < end; timestamp += bucket)
+        {
+            counts.TryGetValue(timestamp, out var value);
+            rows.Add(new IncidentDecisionBucketDto(timestamp, value.Accepted, value.Rejected));
+        }
+        return new IncidentDecisionPerformanceDto(
+            start,
+            end,
+            bucket,
+            rows.Sum(row => row.Accepted + row.Rejected),
+            rows.Sum(row => row.Accepted),
+            rows.Sum(row => row.Rejected),
+            rows);
     }
 
     public async Task AddSiteSetupActivityAsync(SiteSetupActivityDto entry, CancellationToken ct)
@@ -1299,7 +1747,66 @@ public sealed class EngineDatabase
         return Convert.ToInt64(await command.ExecuteScalarAsync(ct));
     }
 
-    public async Task<List<EngineCall>> ListTranscriptionErrorCallsAsync(int limit, CancellationToken ct)
+    public async Task QueueIncidentAnalysisAsync(long callId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO incident_analysis_jobs (call_id, status, attempts, error, created_at_utc, updated_at_utc)
+            VALUES ($call_id, 'pending', 0, '', $now, $now)
+            ON CONFLICT(call_id) DO UPDATE SET status='pending', error='', updated_at_utc=excluded.updated_at_utc;
+            """;
+        Add(command, "$call_id", callId);
+        Add(command, "$now", DateTime.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<EngineCall>> ListPendingIncidentAnalysisCallsAsync(int limit, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.* FROM incident_analysis_jobs j
+            JOIN calls c ON c.id=j.call_id
+            WHERE j.status='pending'
+            ORDER BY c.start_time ASC, c.id ASC
+            LIMIT $limit;
+            """;
+        Add(command, "$limit", Math.Max(1, limit));
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) calls.Add(ReadCall(reader));
+        return calls;
+    }
+
+    public async Task MarkIncidentAnalysisCompletedAsync(IEnumerable<long> callIds, CancellationToken ct)
+    {
+        var ids = callIds.Distinct().ToList();
+        if (ids.Count == 0) return;
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        var parameters = ids.Select((_, index) => $"$id{index}").ToList();
+        command.CommandText = $"UPDATE incident_analysis_jobs SET status='completed', error='', updated_at_utc=$now WHERE call_id IN ({string.Join(",", parameters)});";
+        Add(command, "$now", DateTime.UtcNow.ToString("O"));
+        for (var index = 0; index < ids.Count; index++) Add(command, parameters[index], ids[index]);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task MarkIncidentAnalysisAttemptFailedAsync(IEnumerable<long> callIds, string error, CancellationToken ct)
+    {
+        var ids = callIds.Distinct().ToList();
+        if (ids.Count == 0) return;
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        var parameters = ids.Select((_, index) => $"$id{index}").ToList();
+        command.CommandText = $"UPDATE incident_analysis_jobs SET attempts=attempts+1, error=$error, updated_at_utc=$now WHERE call_id IN ({string.Join(",", parameters)});";
+        Add(command, "$error", error.Length <= 500 ? error : error[..500]);
+        Add(command, "$now", DateTime.UtcNow.ToString("O"));
+        for (var index = 0; index < ids.Count; index++) Add(command, parameters[index], ids[index]);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<EngineCall>> ListTranscriptionErrorCallsAsync(int limit, CancellationToken ct, long? start = null, long? end = null)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
@@ -1308,15 +1815,35 @@ public sealed class EngineDatabase
             WHERE transcription_status='failed'
               AND quality_reason='transcription_error'
               AND length(trim(audio_path)) > 0
+              AND ($start IS NULL OR start_time >= $start)
+              AND ($end IS NULL OR start_time <= $end)
             ORDER BY start_time DESC, id DESC
             LIMIT $limit;
             """;
         Add(command, "$limit", Math.Max(1, limit));
+        Add(command, "$start", start.HasValue ? start.Value : DBNull.Value);
+        Add(command, "$end", end.HasValue ? end.Value : DBNull.Value);
         var calls = new List<EngineCall>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
             calls.Add(ReadCall(reader));
         return calls;
+    }
+
+    public async Task<int> CountTranscriptionErrorCallsAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM calls
+            WHERE transcription_status='failed'
+              AND quality_reason='transcription_error'
+              AND length(trim(audio_path)) > 0
+              AND start_time >= $start AND start_time <= $end;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct));
     }
 
     public async Task<StatusSummaryDto> BuildStatusSummaryAsync(long start, long end, CancellationToken ct)
@@ -1462,8 +1989,8 @@ public sealed class EngineDatabase
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO jobs (type, status, total, completed, failed, message, created_at_utc)
-            VALUES ($type, $status, $total, $completed, $failed, $message, $created_at_utc);
+            INSERT INTO jobs (type, status, total, completed, failed, message, created_at_utc, updated_at_utc)
+            VALUES ($type, $status, $total, $completed, $failed, $message, $created_at_utc, $created_at_utc);
             SELECT last_insert_rowid();
             """;
         Add(command, "$type", job.Type);
@@ -1488,6 +2015,7 @@ public sealed class EngineDatabase
                 completed = COALESCE($completed, completed),
                 failed = COALESCE($failed, failed),
                 message = COALESCE($message, message),
+                updated_at_utc = $now,
                 started_at_utc = CASE WHEN $set_started = 1 THEN COALESCE(started_at_utc, $now) ELSE started_at_utc END,
                 finished_at_utc = CASE WHEN $set_finished = 1 THEN $now ELSE finished_at_utc END
             WHERE id = $id;
@@ -1544,6 +2072,7 @@ public sealed class EngineDatabase
             UPDATE jobs
             SET status = 'canceled',
                 message = $message,
+                updated_at_utc = $now,
                 finished_at_utc = $now
             WHERE type = $type
               AND status IN ('queued', 'running', 'paused')
@@ -1560,7 +2089,7 @@ public sealed class EngineDatabase
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT * FROM jobs WHERE created_at_utc >= $cutoff ORDER BY id DESC LIMIT 200;";
+        command.CommandText = "SELECT * FROM jobs WHERE created_at_utc >= $cutoff ORDER BY id DESC LIMIT 1000;";
         Add(command, "$cutoff", DateTime.UtcNow.AddDays(-30).ToString("O"));
         var jobs = new List<JobDto>();
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -1576,6 +2105,7 @@ public sealed class EngineDatabase
                 Failed = reader.GetInt32(reader.GetOrdinal("failed")),
                 Message = reader.GetString(reader.GetOrdinal("message")),
                 CreatedAtUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("created_at_utc"))),
+                UpdatedAtUtc = ParseNullableDate(reader, "updated_at_utc"),
                 StartedAtUtc = ParseNullableDate(reader, "started_at_utc"),
                 FinishedAtUtc = ParseNullableDate(reader, "finished_at_utc")
             });
@@ -1583,8 +2113,9 @@ public sealed class EngineDatabase
         return jobs;
     }
 
-    public async Task<int> PruneJobsOlderThanAsync(DateTime cutoffUtc, CancellationToken ct)
+    public async Task<JobPruneResult> PruneJobsOlderThanAsync(DateTime cutoffUtc, CancellationToken ct)
     {
+        var logsRemoved = 0;
         await using var connection = OpenConnection();
         await using (var logs = connection.CreateCommand())
         {
@@ -1597,7 +2128,7 @@ public sealed class EngineDatabase
                 );
                 """;
             Add(logs, "$cutoff", cutoffUtc.ToUniversalTime().ToString("O"));
-            await logs.ExecuteNonQueryAsync(ct);
+            logsRemoved = await logs.ExecuteNonQueryAsync(ct);
         }
 
         await using var command = connection.CreateCommand();
@@ -1607,7 +2138,19 @@ public sealed class EngineDatabase
               AND status NOT IN ('queued', 'running', 'paused', 'canceling');
             """;
         Add(command, "$cutoff", cutoffUtc.ToUniversalTime().ToString("O"));
-        return await command.ExecuteNonQueryAsync(ct);
+        var jobsRemoved = await command.ExecuteNonQueryAsync(ct);
+        return new JobPruneResult(logsRemoved, jobsRemoved);
+    }
+
+    public async Task<JobDto?> GetLatestJobByTypeAsync(string type, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM jobs WHERE type=$type ORDER BY id DESC LIMIT 1;";
+        Add(command, "$type", type);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        return ReadJob(reader);
     }
 
     public async Task AddRfSurveySessionAsync(RfSurveySessionDto session, string profileJson, string toolPrepJson, CancellationToken ct)
@@ -1926,11 +2469,10 @@ public sealed class EngineDatabase
         await ExecuteNonQueryAsync(connection, "VACUUM;", ct);
     }
 
-    public async Task AnalyzeAsync(CancellationToken ct)
+    public async Task OptimizeAsync(CancellationToken ct)
     {
         await using var connection = OpenConnection();
         await ExecuteNonQueryAsync(connection, "PRAGMA optimize;", ct);
-        await ExecuteNonQueryAsync(connection, "ANALYZE;", ct);
     }
 
     public async Task ClearOperationalDataAsync(bool preserveAuditHistory, CancellationToken ct)
@@ -2061,54 +2603,142 @@ public sealed class EngineDatabase
             ct);
     }
 
-    public async Task<IReadOnlyList<RemoteBandwidthEntryDto>> ListRemoteBandwidthEntriesAsync(DateTime startUtc, DateTime endUtc, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<RemoteBandwidthTimeActivityBucketDto>> ListRemoteBandwidthTimeActivityBucketsAsync(DateTime startUtc, DateTime endUtc, int bucketSeconds, CancellationToken ct)
     {
+        await using var connection = OpenConnection();
+        return await ReadListAsync(connection, """
+            SELECT (CAST(strftime('%s', timestamp_utc) AS INTEGER) / $bucket) * $bucket AS bucket_start,
+                   activity,
+                   COALESCE(SUM(request_bytes), 0) AS request_bytes,
+                   COALESCE(SUM(response_bytes), 0) AS response_bytes,
+                   COALESCE(SUM(total_bytes), 0) AS total_bytes,
+                   COUNT(*) AS requests
+            FROM remote_bandwidth_usage
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end
+            GROUP BY bucket_start, activity
+            ORDER BY bucket_start, activity;
+            """,
+            command =>
+            {
+                Add(command, "$start", startUtc.ToString("O"));
+                Add(command, "$end", endUtc.ToString("O"));
+                Add(command, "$bucket", Math.Max(300, bucketSeconds));
+            },
+            reader => new RemoteBandwidthTimeActivityBucketDto(
+                reader.GetInt64(reader.GetOrdinal("bucket_start")),
+                reader.GetString(reader.GetOrdinal("activity")),
+                reader.GetInt64(reader.GetOrdinal("request_bytes")),
+                reader.GetInt64(reader.GetOrdinal("response_bytes")),
+                reader.GetInt64(reader.GetOrdinal("total_bytes")),
+                Convert.ToInt32(reader.GetInt64(reader.GetOrdinal("requests")))),
+            ct);
+    }
+
+    public async Task<int> CountRemoteBandwidthEntriesAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM remote_bandwidth_usage
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end;
+            """;
+        Add(command, "$start", startUtc.ToString("O"));
+        Add(command, "$end", endUtc.ToString("O"));
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct) ?? 0);
+    }
+
+    public async Task<IReadOnlyList<RemoteBandwidthEntryDto>> ListRemoteBandwidthEntriesAsync(DateTime startUtc, DateTime endUtc, int page, int pageSize, CancellationToken ct)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 10, 100);
         await using var connection = OpenConnection();
         return await ReadListAsync(connection, """
             SELECT timestamp_utc, activity, endpoint, request_bytes, response_bytes, total_bytes, basis, estimated
             FROM remote_bandwidth_usage
             WHERE timestamp_utc >= $start AND timestamp_utc <= $end
             ORDER BY timestamp_utc DESC
-            LIMIT $limit;
+            LIMIT $limit OFFSET $offset;
             """,
             command =>
             {
                 Add(command, "$start", startUtc.ToString("O"));
                 Add(command, "$end", endUtc.ToString("O"));
-                Add(command, "$limit", Math.Max(1, limit));
+                Add(command, "$limit", pageSize);
+                Add(command, "$offset", (page - 1) * pageSize);
             },
             ReadRemoteBandwidthEntry,
             ct);
     }
 
-    public async Task<TokenUsageReportDto> GetTokenUsageAsync(long start, long end, CancellationToken ct)
+    private const double OpenAiReferenceInputCostPerMillion = 2.00;
+    private const double OpenAiReferenceOutputCostPerMillion = 8.00;
+
+    public async Task<TokenUsageReportDto> GetTokenUsageAsync(long start, long end, CancellationToken ct, int page = 1, int pageSize = 20)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 10, 100);
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT * FROM lm_usage
             WHERE timestamp_utc >= $start AND timestamp_utc <= $end
             ORDER BY timestamp_utc DESC
-            LIMIT 500;
+            LIMIT $limit OFFSET $offset;
             """;
         var startUtc = DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime;
         var endUtc = DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime;
         Add(command, "$start", startUtc.ToString("O"));
         Add(command, "$end", endUtc.ToString("O"));
+        Add(command, "$limit", pageSize);
+        Add(command, "$offset", (page - 1) * pageSize);
         var rows = new List<TokenUsageEntryDto>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
             rows.Add(ReadLmUsage(reader));
+        var rangeRows = await ListLmUsageEntriesAsync(startUtc, endUtc, ct);
         var summary = await SummarizeTokenUsageAsync(connection, startUtc, endUtc, ct);
         var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
         var monthlySummary = await SummarizeTokenUsageAsync(connection, monthStart, null, ct);
         var allTimeSummary = await SummarizeTokenUsageAsync(connection, null, null, ct);
-        var failuresByKind = TokenFailureBreakdown(rows);
-        var byDay = rows.GroupBy(r => r.TimestampUtc.ToLocalTime().ToString("MM/dd"))
+        var failuresByKind = TokenFailureBreakdown(rangeRows);
+        var byDay = rangeRows.GroupBy(r => r.TimestampUtc.ToLocalTime().ToString("MM/dd"))
             .Select(g => TokenBucket(g.Key, g)).OrderBy(x => x.Label).ToList();
-        var byTrigger = rows.GroupBy(r => string.IsNullOrWhiteSpace(r.TriggerActivity) ? "other" : r.TriggerActivity)
+        var byTrigger = rangeRows.GroupBy(r => string.IsNullOrWhiteSpace(r.TriggerActivity) ? "other" : r.TriggerActivity)
             .Select(g => TokenBucket(g.Key, g)).OrderByDescending(x => x.TotalTokens).ToList();
-        return new TokenUsageReportDto("sqlite:lm_usage", summary, monthlySummary, allTimeSummary, failuresByKind, byDay, byTrigger, rows);
+        var rangeSeconds = Math.Max(1, end - start);
+        var bucketSeconds = rangeSeconds <= 24 * 3600 ? 3600 : rangeSeconds <= 48 * 3600 ? 2 * 3600 : 6 * 3600;
+        var byTime = rangeRows
+            .GroupBy(row => DateTimeOffset.FromUnixTimeSeconds(
+                new DateTimeOffset(DateTime.SpecifyKind(row.TimestampUtc, DateTimeKind.Utc)).ToUnixTimeSeconds() / bucketSeconds * bucketSeconds))
+            .OrderBy(group => group.Key)
+            .Select(group => new TokenUsageTimeBucketDto(
+                group.Key.ToUnixTimeSeconds(),
+                group.Count(),
+                group.Count(row => row.Success),
+                group.Count(row => !row.Success),
+                group.Sum(row => (long)row.PromptTokens),
+                group.Sum(row => (long)row.CompletionTokens)))
+            .ToList();
+        return new TokenUsageReportDto(
+            "sqlite:lm_usage",
+            start,
+            end,
+            bucketSeconds,
+            OpenAiReferenceInputCostPerMillion,
+            OpenAiReferenceOutputCostPerMillion,
+            summary,
+            monthlySummary,
+            allTimeSummary,
+            failuresByKind,
+            byDay,
+            byTrigger,
+            byTime,
+            rangeRows.Where(row => !row.Success).Take(12).ToList(),
+            rows,
+            page,
+            pageSize,
+            rangeRows.Count);
     }
 
     public async Task<AiCompletionHealthDto> GetAiCompletionHealthAsync(int windowMinutes, CancellationToken ct)
@@ -2411,6 +3041,7 @@ public sealed class EngineDatabase
             Failed = reader.GetInt32(reader.GetOrdinal("failed")),
             Message = reader.GetString(reader.GetOrdinal("message")),
             CreatedAtUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("created_at_utc"))),
+            UpdatedAtUtc = ParseNullableDate(reader, "updated_at_utc"),
             StartedAtUtc = ParseNullableDate(reader, "started_at_utc"),
             FinishedAtUtc = ParseNullableDate(reader, "finished_at_utc")
         };
@@ -3339,6 +3970,21 @@ public sealed class EngineDatabase
         return reader.IsDBNull(ordinal) ? null : DateTime.Parse(reader.GetString(ordinal));
     }
 
+    private static JobDto ReadJob(SqliteDataReader reader) => new()
+    {
+        Id = reader.GetInt64(reader.GetOrdinal("id")),
+        Type = reader.GetString(reader.GetOrdinal("type")),
+        Status = reader.GetString(reader.GetOrdinal("status")),
+        Total = reader.GetInt32(reader.GetOrdinal("total")),
+        Completed = reader.GetInt32(reader.GetOrdinal("completed")),
+        Failed = reader.GetInt32(reader.GetOrdinal("failed")),
+        Message = reader.GetString(reader.GetOrdinal("message")),
+        CreatedAtUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("created_at_utc"))),
+        UpdatedAtUtc = ParseNullableDate(reader, "updated_at_utc"),
+        StartedAtUtc = ParseNullableDate(reader, "started_at_utc"),
+        FinishedAtUtc = ParseNullableDate(reader, "finished_at_utc")
+    };
+
     private static DateTime? ParseDateOrNull(string value) =>
         string.IsNullOrWhiteSpace(value)
             ? null
@@ -3551,7 +4197,9 @@ public sealed class EngineDatabase
             list.Sum(r => (long)(r.TotalTokens > 0 ? r.TotalTokens : r.PromptTokens + r.CompletionTokens)),
             list.Sum(r => (long)r.PromptTokens),
             list.Sum(r => (long)r.CompletionTokens),
-            list.Count);
+            list.Count,
+            list.Count(r => r.Success),
+            list.Count(r => !r.Success));
     }
 
     private static TokenUsageSummaryDto SummarizeTokenUsage(IEnumerable<TokenUsageEntryDto> rows)
@@ -3577,7 +4225,7 @@ public sealed class EngineDatabase
             prompt,
             completion,
             total,
-            (prompt / 1_000_000d * 2.00) + (completion / 1_000_000d * 8.00),
+            (prompt / 1_000_000d * OpenAiReferenceInputCostPerMillion) + (completion / 1_000_000d * OpenAiReferenceOutputCostPerMillion),
             timeout,
             noValidResult);
     }
@@ -3656,7 +4304,7 @@ public sealed class EngineDatabase
             prompt,
             completion,
             total,
-            (prompt / 1_000_000d * 2.00) + (completion / 1_000_000d * 8.00),
+            (prompt / 1_000_000d * OpenAiReferenceInputCostPerMillion) + (completion / 1_000_000d * OpenAiReferenceOutputCostPerMillion),
             timeout,
             noValidResult);
     }
@@ -3737,6 +4385,9 @@ public sealed class EngineDatabase
         await AddColumnIfMissingAsync(connection, "incidents", "category", "TEXT NOT NULL DEFAULT 'other'", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "status", "TEXT NOT NULL DEFAULT 'active'", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "updated_at_utc", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "jobs", "updated_at_utc", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "incident_operation_audit", "candidate_trace_key", "TEXT NOT NULL DEFAULT ''", ct);
+        await ExecuteNonQueryAsync(connection, "UPDATE jobs SET updated_at_utc=COALESCE(NULLIF(finished_at_utc, ''), NULLIF(started_at_utc, ''), created_at_utc) WHERE updated_at_utc='';", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
         await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_calls_system_tg_start ON calls(system_short_name, talkgroup, start_time DESC);", ct);
         await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_calls_quality_start ON calls(quality_reason, start_time DESC);", ct);
@@ -3775,11 +4426,86 @@ public sealed class EngineDatabase
                 active_observations INTEGER NOT NULL DEFAULT 0,
                 baseline_value TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS recommendation_findings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recommendation_id TEXT NOT NULL,
+                first_seen_utc TEXT NOT NULL,
+                last_seen_utc TEXT NOT NULL,
+                reviewed_at_utc TEXT NOT NULL DEFAULT '',
+                resolved_at_utc TEXT NOT NULL DEFAULT '',
+                resolution TEXT NOT NULL DEFAULT '',
+                snapshot_json TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_findings_active
+                ON recommendation_findings(recommendation_id) WHERE resolved_at_utc = '';
+            CREATE INDEX IF NOT EXISTS idx_recommendation_findings_history
+                ON recommendation_findings(resolved_at_utc DESC, last_seen_utc DESC);
+            CREATE TABLE IF NOT EXISTS remote_service_outages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service_key TEXT NOT NULL,
+                endpoint TEXT NOT NULL DEFAULT '',
+                expected_model TEXT NOT NULL DEFAULT '',
+                reported_model TEXT NOT NULL DEFAULT '',
+                started_at_utc TEXT NOT NULL,
+                confirmed_at_utc TEXT NOT NULL,
+                recovered_at_utc TEXT NOT NULL DEFAULT '',
+                last_error TEXT NOT NULL DEFAULT '',
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                administrative_email_sent INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_service_outages_open
+                ON remote_service_outages(service_key) WHERE recovered_at_utc='';
+            CREATE INDEX IF NOT EXISTS idx_remote_service_outages_history
+                ON remote_service_outages(started_at_utc DESC);
+            CREATE TABLE IF NOT EXISTS incident_analysis_jobs (
+                call_id INTEGER PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL,
+                FOREIGN KEY(call_id) REFERENCES calls(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_incident_analysis_jobs_status
+                ON incident_analysis_jobs(status, updated_at_utc);
             """, ct);
         await ExecuteNonQueryAsync(connection, RfSurveySchemaSql, ct);
         await AddColumnIfMissingAsync(connection, "rf_survey_experiments", "name", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "rf_survey_experiments", "physical_change", "TEXT NOT NULL DEFAULT ''", ct);
         await AddColumnIfMissingAsync(connection, "recommendation_baselines", "baseline_value", "TEXT NOT NULL DEFAULT ''", ct);
+        await AddColumnIfMissingAsync(connection, "recommendation_findings", "resolution", "TEXT NOT NULL DEFAULT ''", ct);
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE recommendation_findings AS old
+            SET resolution='Superseded by the combined per-site RF stability finding.'
+            WHERE old.resolved_at_utc<>'' AND old.resolution=''
+              AND (old.recommendation_id='tr-retunes' OR old.recommendation_id LIKE 'tr-decode-zero:%')
+              AND EXISTS (
+                  SELECT 1 FROM recommendation_findings AS replacement
+                  WHERE replacement.recommendation_id LIKE 'tr-rf-stability:%'
+                    AND ABS(julianday(replacement.first_seen_utc) - julianday(old.resolved_at_utc)) * 1440 <= 10
+              );
+            UPDATE recommendation_findings AS old
+            SET resolution='Superseded by the combined AI incident-generation finding.'
+            WHERE old.resolved_at_utc<>'' AND old.resolution=''
+              AND old.recommendation_id IN ('ai-service-failures', 'ai-truncation-pressure')
+              AND EXISTS (
+                  SELECT 1 FROM recommendation_findings AS replacement
+                  WHERE replacement.recommendation_id='ai-generation-health'
+                    AND ABS(julianday(replacement.first_seen_utc) - julianday(old.resolved_at_utc)) * 1440 <= 10
+              );
+            UPDATE recommendation_findings AS old
+            SET resolution='Superseded by the combined queue-pressure finding.'
+            WHERE old.resolved_at_utc<>'' AND old.resolution=''
+              AND old.recommendation_id IN ('queue-audio-pressure', 'queue-drain-watch', 'ai-blocked-queue')
+              AND EXISTS (
+                  SELECT 1 FROM recommendation_findings AS replacement
+                  WHERE replacement.recommendation_id='queue-pressure'
+                    AND ABS(julianday(replacement.first_seen_utc) - julianday(old.resolved_at_utc)) * 1440 <= 10
+              );
+            UPDATE recommendation_findings
+            SET resolution='Automatically resolved because current evidence no longer met this finding''s activation threshold.'
+            WHERE resolved_at_utc<>'' AND resolution='';
+            """, ct);
         await AddColumnIfMissingAsync(connection, "alert_matches", "dismissed_at_utc", "TEXT NOT NULL DEFAULT ''", ct);
         await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_key ON incidents(incident_key) WHERE incident_key IS NOT NULL AND incident_key <> '';", ct);
         await ExecuteNonQueryAsync(connection, """
@@ -3862,7 +4588,8 @@ public sealed class EngineDatabase
                 reason TEXT NOT NULL,
                 score REAL NOT NULL DEFAULT 0,
                 call_ids_json TEXT NOT NULL DEFAULT '[]',
-                metadata_json TEXT NOT NULL DEFAULT '{}'
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                candidate_trace_key TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_time ON incident_operation_audit(timestamp_utc DESC);
             CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_key ON incident_operation_audit(incident_key, timestamp_utc DESC);
@@ -4115,6 +4842,7 @@ public sealed class EngineDatabase
             failed INTEGER NOT NULL DEFAULT 0,
             message TEXT NOT NULL DEFAULT '',
             created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL DEFAULT '',
             started_at_utc TEXT NULL,
             finished_at_utc TEXT NULL,
             payload_json TEXT NOT NULL DEFAULT '{}'
@@ -4196,7 +4924,8 @@ public sealed class EngineDatabase
             reason TEXT NOT NULL,
             score REAL NOT NULL DEFAULT 0,
             call_ids_json TEXT NOT NULL DEFAULT '[]',
-            metadata_json TEXT NOT NULL DEFAULT '{}'
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            candidate_trace_key TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_time ON incident_operation_audit(timestamp_utc DESC);
         CREATE INDEX IF NOT EXISTS idx_incident_operation_audit_key ON incident_operation_audit(incident_key, timestamp_utc DESC);

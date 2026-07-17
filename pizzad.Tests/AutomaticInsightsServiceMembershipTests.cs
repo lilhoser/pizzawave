@@ -6,6 +6,26 @@ namespace pizzad.Tests;
 public sealed class AutomaticInsightsServiceMembershipTests
 {
     [Fact]
+    public void IncidentProcessingSlicesPreserveHistoricalCallsAndBoundEachPrompt()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var calls = Enumerable.Range(0, 45).Select(index => new EngineCall
+        {
+            Id = index + 1,
+            SystemShortName = index < 30 ? "site-a" : "site-b",
+            StartTime = now - 8 * 3600 + index * 60,
+            StopTime = now - 8 * 3600 + index * 60 + 10
+        }).ToList();
+
+        var slices = AutomaticInsightsService.BuildIncidentProcessingSlices(calls, 10, now);
+
+        Assert.True(slices.Count >= 5);
+        Assert.All(slices, slice => Assert.InRange(slice.Calls.Count, 1, 10));
+        Assert.Equal(calls.Select(call => call.Id).Order(), slices.SelectMany(slice => slice.Calls).Select(call => call.Id).Order());
+        Assert.All(slices, slice => Assert.True(slice.Start <= slice.Calls.Min(call => call.StartTime)));
+        Assert.All(slices, slice => Assert.True(slice.End >= slice.Calls.Max(call => call.StopTime)));
+    }
+    [Fact]
     public void ParseIncidentExtractionResponse_RemovesMalformedCallIdsFromIncidentState()
     {
         const string response = """

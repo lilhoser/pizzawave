@@ -86,6 +86,67 @@ public sealed class SystemResetServiceTests
         Assert.Empty(temp.Config.Alerts.Rules);
     }
 
+    [Fact]
+    public async Task FailedSafetyBackup_DoesNotPauseLiveIngest()
+    {
+        using var temp = new TempMigrationStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var service = temp.CreateService(database, ingest);
+
+        Directory.Delete(temp.AppDataRoot, recursive: true);
+        await File.WriteAllTextAsync(temp.AppDataRoot, "blocks backup directory creation");
+
+        await Assert.ThrowsAnyAsync<IOException>(() => service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = ["data-only"],
+            CreateBackup = true
+        }, CancellationToken.None));
+
+        Assert.False(ingest.Paused);
+    }
+
+    [Theory]
+    [InlineData("custom")]
+    [InlineData("unknown")]
+    public async Task UnsupportedResetScope_IsRejectedWithoutPausingIngest(string scope)
+    {
+        using var temp = new TempMigrationStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var service = temp.CreateService(database, ingest);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = [scope],
+            CreateBackup = false
+        }, CancellationToken.None));
+
+        Assert.Contains("Unsupported reset scope", error.Message);
+        Assert.False(ingest.Paused);
+    }
+
+    [Fact]
+    public async Task MultipleResetScopes_AreRejectedWithoutPausingIngest()
+    {
+        using var temp = new TempMigrationStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var service = temp.CreateService(database, ingest);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = ["data-only", "full-reset"],
+            CreateBackup = false
+        }, CancellationToken.None));
+
+        Assert.Contains("exactly one reset scope", error.Message);
+        Assert.False(ingest.Paused);
+    }
+
     private sealed class TempMigrationStore : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "pizzawave-migration-test-" + Guid.NewGuid().ToString("N"));
@@ -124,7 +185,7 @@ public sealed class SystemResetServiceTests
                 },
                 Profiles = new ProfileConfig
                 {
-                    Items = [new ProcessingProfile { Name = "Old profile", AllowedTalkgroups = [1001] }]
+                    Items = [new ProcessingProfile { Name = "Old profile", Talkgroups = [new ProfileTalkgroupSetting { SystemShortName = "old", Id = 1001, Enabled = false }] }]
                 },
                 Locations = new LocationConfig
                 {
@@ -147,12 +208,12 @@ public sealed class SystemResetServiceTests
 
         public EngineDatabase CreateDatabase() => new(Config, NullLogger<EngineDatabase>.Instance);
 
-        public SystemResetService CreateService(EngineDatabase database)
+        public SystemResetService CreateService(EngineDatabase database, IngestControlService? ingest = null)
         {
             var events = new EventStream();
             var catalog = new TalkgroupCatalogService(Config, NullLogger<TalkgroupCatalogService>.Instance);
             var embeddings = new EmbeddingService(Config, database, events, catalog, NullLogger<EmbeddingService>.Instance);
-            var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+            ingest ??= new IngestControlService(NullLogger<IngestControlService>.Instance);
             var auth = new AuthService(Config, NullLogger<AuthService>.Instance);
             var backups = new BackupRestoreService(Config, NullLogger<BackupRestoreService>.Instance);
             return new SystemResetService(Config, database, embeddings, ingest, auth, backups, NullLogger<SystemResetService>.Instance);

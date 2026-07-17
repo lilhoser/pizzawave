@@ -1,16 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
+import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Database, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
-import type { AlertMatch, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CategoryPage, Dashboard, EngineCall, EngineHealth, HourCategory, Incident, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendations, SystemResetResult, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TrConfigBackup, TrConfigEditor, TrConfigEditorApplyResult, TrConfigRestoreResult, TrHealthChart, TrHealthMetric, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
+import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyTrActionResult, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
 const talkgroupCategoryOptions = [...categories];
+const themeOptions = [
+  { value: "blue", label: "Blue" },
+  { value: "orange", label: "Orange" },
+  { value: "red", label: "Red" },
+  { value: "purple", label: "Purple" },
+  { value: "green", label: "Green" }
+] as const;
+type Theme = typeof themeOptions[number]["value"];
+function normalizeTheme(value: string | null): Theme {
+  return themeOptions.some(option => option.value === value) ? value as Theme : "blue";
+}
 const siteSetupApi = "/api/v1/setup/site";
 const siteSetupRfApi = `${siteSetupApi}/rf`;
 const rfDetailUrl = (apiBase: string, id: string, compact = true) => `${apiBase}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
@@ -144,7 +156,7 @@ function PageSearch({ value, onChange, placeholder }: { value: string; onChange:
 function App() {
   const [page, setPageState] = useState<Page>(() => normalizePage(localStorage.getItem("pizzawave-page")));
   const [rangeHours, setRangeHours] = useState(24);
-  const [theme, setTheme] = useState(() => localStorage.getItem("pizzawave-theme") || "blue");
+  const [theme, setTheme] = useState<Theme>(() => normalizeTheme(localStorage.getItem("pizzawave-theme")));
   const [appNotice, setAppNotice] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [engineHealth, setEngineHealth] = useState<EngineHealth | null>(null);
@@ -158,6 +170,7 @@ function App() {
   const [settingsLoadState, setSettingsLoadState] = useState<{ loading: boolean; version: number; message: string; error: boolean }>({ loading: false, version: 0, message: "", error: false });
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [activeAlertCount, setActiveAlertCount] = useState(0);
+  const [systemProblemCount, setSystemProblemCount] = useState(0);
   const [alertSettings, setAlertSettings] = useState<any>(null);
   const [autoplayMuted, setAutoplayMuted] = useState(() => localStorage.getItem("pizzawave-autoplay-muted") === "1");
   const [autoplayMenuOpen, setAutoplayMenuOpen] = useState(false);
@@ -307,13 +320,14 @@ function App() {
       return;
     }
 
-    const [jobRows, summary, profiles, alertRows, alertConfig, cpu] = await Promise.all([
+    const [jobRows, summary, profiles, alertRows, alertConfig, cpu, recommendations] = await Promise.all([
       api.request<Job[]>("/api/v1/jobs"),
       api.request<StatusSummary>(`/api/v1/status?${rangeQuery(rangeHours)}`),
       api.request<ProfileState>("/api/v1/profiles"),
       api.request<AlertMatch[]>(`/api/v1/alerts?${rangeQuery(rangeHours)}`),
       api.request<any>("/api/v1/settings/alerts"),
-      api.request<SystemCpuSnapshot>("/api/v1/system/cpu").catch(() => null)
+      api.request<SystemCpuSnapshot>("/api/v1/system/cpu").catch(() => null),
+      api.request<SystemRecommendations>("/api/v1/system/recommendations").catch(() => null)
     ]);
     setCpuSnapshot(cpu);
     setJobs(jobRows);
@@ -321,7 +335,9 @@ function App() {
     setProfileState(profiles);
     setAlertSettings(alertConfig.values ?? alertConfig);
     setActiveAlertCount(alertRows.filter(alert => alert.active !== false).length);
-    const latestActiveAlert = alertRows.find(alert => alert.active !== false);
+    if (recommendations)
+      setSystemProblemCount(recommendations.problemCount);
+    const latestActiveAlert = alertRows.find(alert => alert.active !== false && !alert.notificationSuppressed);
     if (latestActiveAlert && autoplayAllows(alertConfig.values ?? alertConfig, "alert"))
       playCallAudio(latestActiveAlert.callId, "alert", undefined, alertPlaybackLabel(latestActiveAlert));
   }, [rangeHours]);
@@ -489,7 +505,7 @@ function App() {
       refreshCallDataSoon();
       try {
         const payload = JSON.parse((event as MessageEvent).data || "{}");
-        if (payload.callId && autoplayAllows(alertSettingsRef.current, "police"))
+        if (payload.callId && !payload.notificationSuppressed && autoplayAllows(alertSettingsRef.current, "police"))
           void api.request<EngineCall>(`/api/v1/calls/${payload.callId}`).then(call => {
             if (call.category === "police")
               playCallAudio(call.id, "police", undefined, callPlaybackLabel(call));
@@ -521,12 +537,6 @@ function App() {
   const queueHealth = aiCompletionIssue || embeddingIssue ? "blocked" : queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
   const audioTranscribedPerMinute = engineHealth?.recentAudioSecondsTranscribedPerMinute ?? 0;
   const audioIngestedPerMinute = engineHealth?.recentAudioSecondsIngestedPerMinute ?? 0;
-  const queueRateSuffix = engineHealth ? ` (${audioTranscribedPerMinute.toFixed(0)}s audio/min)` : "";
-  const queuePressureNote = queueBlockedNotes.length ? `; ${[
-    engineHealth?.aiWorkBlockedReason ? "AI paused" : "",
-    aiCompletionIssue ? "AI completion issue" : "",
-    embeddingIssue ? "embedding issue" : ""
-  ].filter(Boolean).join(", ")}` : "";
   const ingestPaused = Boolean(engineHealth?.ingest?.paused);
   const liveTrActivity = engineHealth?.liveTrActivity;
   const trIntentionallyStopped = liveTrActivity?.status === "stopped";
@@ -562,21 +572,29 @@ function App() {
     : liveTrActivity?.message || "Waiting for the first monitoring health result."} Last checked: ${formatRefreshTime(monitoringCheckedAt)}.`;
   const cpuPillClass = ["pill", "status-pill-button", `cpu-health-${cpuSnapshot?.severity ?? "unknown"}`].join(" ");
   const cpuPillText = cpuSnapshot?.latest
-    ? `CPU ${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
+    ? `CPU ${cpuSnapshot.hostCpuPercent?.toFixed(0) ?? "--"}% / ${cpuSnapshot.latest.hostTempC.toFixed(0)}C`
     : "CPU --";
   const cpuPillTitle = cpuSnapshot?.latest
-    ? `${cpuSnapshot.summary} TR CPU ${cpuSnapshot.latest.trCpuPercent.toFixed(0)}% (${cpuSnapshot.latest.trCpuHostPercent.toFixed(0)}% of host), load ${cpuSnapshot.latest.hostLoad1.toFixed(2)}, temp ${cpuSnapshot.latest.hostTempC.toFixed(1)} C.`
-    : "No recent TR CPU/resource sample.";
+    ? `Host CPU ${cpuSnapshot.hostCpuPercent?.toFixed(0) ?? "--"}%, load ${cpuSnapshot.latest.hostLoad1.toFixed(2)}, temperature ${cpuSnapshot.latest.hostTempC.toFixed(1)} C.`
+    : "No recent host resource sample.";
   const queueHealthText = queueHealth === "blocked"
-    ? `Queue blocked ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
+    ? `Queue blocked ${queueDepth.toLocaleString()}`
     : queueHealth === "clear"
-      ? `Queue OK ${queueDepth.toLocaleString()}${queueRateSuffix}`
+      ? `Queue OK ${queueDepth.toLocaleString()}`
       : queueHealth === "pressure"
-        ? `Queue pressure ${queueDepth.toLocaleString()}${queueRateSuffix}${queuePressureNote}`
-        : `Queue draining ${queueDepth.toLocaleString()}${queueRateSuffix}`;
+        ? `Queue pressure ${queueDepth.toLocaleString()}`
+        : `Queue draining ${queueDepth.toLocaleString()}`;
   const queueHealthTitle = engineHealth
     ? `${engineHealth.recentAudioSecondsTranscribed.toLocaleString()} audio seconds transcribed (${audioTranscribedPerMinute.toFixed(0)}s/min) and ${engineHealth.recentAudioSecondsIngested.toLocaleString()} audio seconds ingested (${audioIngestedPerMinute.toFixed(0)}s/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Calls: ${engineHealth.recentCallsTranscribed.toLocaleString()} done (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min), ${engineHealth.recentCallsIngested.toLocaleString()} in (${engineHealth.recentIngestPerMinute.toFixed(1)}/min). Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${queueBlockedNotes.join(" ")}`.trim()
     : "Transcription queue is clear.";
+  const updateLiveCpuSnapshot = useCallback((sample: SystemRuntimeResourceSample) => {
+    setCpuSnapshot(current => current ? {
+      ...current,
+      hostCpuPercent: sample.hostCpuPercent,
+      hostMemory: sample.hostMemory,
+      processes: sample.processes
+    } : current);
+  }, []);
 
   const activePageRefresh = page === "dashboard"
     ? { label: "Dashboard", state: dashboardResource.state }
@@ -691,9 +709,10 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
       if (!firstCall) continue;
       if (!known.has(incident.id)) {
         if (known.size > 0) {
-          if (autoplayAllows(alertSettingsRef.current, "incident"))
+          const recentEnoughForNotification = Date.now() - incident.lastSeen * 1000 <= 60 * 60 * 1000;
+          if (recentEnoughForNotification && autoplayAllows(alertSettingsRef.current, "incident"))
             playCallAudio(firstCall.callId, "incident", incident.id, incident.title);
-          else if (incident.category === "traffic" && autoplayAllows(alertSettingsRef.current, "traffic"))
+          else if (recentEnoughForNotification && incident.category === "traffic" && autoplayAllows(alertSettingsRef.current, "traffic"))
             playCallAudio(firstCall.callId, "traffic-incident", incident.id, incident.title);
         }
         known.add(incident.id);
@@ -774,14 +793,13 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           <img src="/logo-small.png" alt="" />
           <span className="brand-text"><strong>PizzaWave</strong><small>{engineHealth?.stackName ?? "PizzaWave"}</small></span>
         </div>
-        <select value={rangeHours} onChange={e => setRangeHours(Number(e.target.value))}>
+        <select aria-label="Call data window" title="Call, incident, and related dashboard window" value={rangeHours} onChange={e => setRangeHours(Number(e.target.value))}>
           <option value={24}>24h</option>
           <option value={48}>2d</option>
           <option value={168}>Week</option>
         </select>
-        <select aria-label="Color scheme" value={theme} onChange={e => setTheme(e.target.value)}>
-          <option value="blue">Blue</option>
-          <option value="orange">Orange</option>
+        <select aria-label="Color scheme" value={theme} onChange={e => setTheme(normalizeTheme(e.target.value))}>
+          {themeOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}
         </select>
         {profileState && profileState.profiles.length > 0 && <select aria-label="Active profile" value={profileState.activeProfileId} onChange={e => void switchActiveProfile(e.target.value)}>
           {profileState.profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}
@@ -791,7 +809,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           <button disabled={settingsLoadState.loading} onClick={() => settingsFileInputRef.current?.click()}>{settingsLoadState.loading ? "Loading..." : "Load Settings"}</button>
           <button disabled={settingsLoadState.loading} onClick={() => void exportSettingsFile()}>Export Settings</button>
         </>}
-        <span className={livePillClass} title={livePillTitle}>{livePillText}</span>
+        <button type="button" className={`${livePillClass} status-pill-button`} title={livePillTitle} onClick={() => goSystem("services")}>{livePillText}</button>
         {delayedResources.length > 0 && <div className="autoplay-menu-wrap update-delay-wrap">
           <button type="button" className="pill live-status-warning status-pill-button" onClick={() => setUpdateDelayOpen(value => !value)}>Updates delayed · {updateDelayMinutes}m</button>
           {updateDelayOpen && <div className="autoplay-menu update-delay-menu">
@@ -826,6 +844,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
               {navIcon(item)} {label(item)}
               {item === "dashboard" && activeAlertCount > 0 && <span className="nav-badge high">{activeAlertCount}</span>}
               {item === "setup" && (siteSetup?.pendingChanges.length ?? 0) > 0 && <span className="nav-badge medium">{siteSetup?.pendingChanges.length}</span>}
+              {item === "system" && systemProblemCount > 0 && <span className="nav-badge problem" aria-label={`${systemProblemCount} System problem${systemProblemCount === 1 ? "" : "s"}`}>{systemProblemCount}</span>}
             </button>
           </React.Fragment>
         ))}
@@ -864,7 +883,16 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             void statusResource.refresh();
         }} /></div>}
         {setupStatus?.completed && page === "system" && <div className="refresh-page-shell">
-          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={statusResource.refresh} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onOpenSetup={goSetup} />
+          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={statusResource.refresh} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onLiveResources={updateLiveCpuSnapshot} onOpenSetup={goSetup} onOpenIncident={incidentId => {
+            setFocusedIncidentId(incidentId);
+            setFocusedHashTarget(`incident-${incidentId}`);
+            setDashboardMode("incidents");
+            setPage("dashboard");
+          }} onOpenTalkgroup={row => {
+            const category = categories.includes(row.category as any) ? row.category as typeof categories[number] : "other";
+            setPageSearches(searches => ({ ...searches, [category]: String(row.talkgroup) }));
+            setPage(category);
+          }} />
         </div>}
         {setupStatus?.completed && page === "settings" && <div className="refresh-page-shell">
           <SettingsLoadNotice state={settingsResource.state} hasData={Object.keys(settingsSections).length > 0} dirty={settingsDirty} onReload={settingsResource.refresh} />
@@ -872,14 +900,12 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         </div>}
       </main>
       {!inSetup && <footer className="statusbar">
-        <button type="button" className="pill status-pill-button" onClick={() => goSetup("Talkgroups")}>Profile: {profileState?.profiles.find(p => p.id === profileState.activeProfileId)?.name ?? "Default"}</button>
-        <span className="status-separator">|</span>
-        <span className="pill">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
-        <button type="button" className="pill status-pill-button" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
-        <button type="button" className="pill status-pill-button" onClick={() => goDashboard("alerts")}>Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</button>
+        <span className="pill" title="Calls in the selected call-data window">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
+        <button type="button" className="pill status-pill-button" title="Open incidents" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
+        <button type="button" className="pill status-pill-button" title="Open alerts" onClick={() => goDashboard("alerts")}>Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</button>
         <button type="button" className={`pill status-pill-button queue-health queue-${queueHealth}`} title={queueHealthTitle} onClick={() => goSystem("queue")}>{queueHealthText}</button>
-        <button type="button" className={cpuPillClass} title={cpuPillTitle} onClick={() => goSystem("cpu")}>{cpuPillText}</button>
-        {activeJobCount > 0 && <span className="pill">Jobs {activeJobCount}</span>}
+        <button type="button" className={cpuPillClass} title={cpuPillTitle} onClick={() => goSystem("services")}>{cpuPillText}</button>
+        {activeJobCount > 0 && <button type="button" className="pill status-pill-button" title="Open active jobs" onClick={() => goSystem("jobs")}>Jobs {activeJobCount}</button>}
       </footer>}
     </div>
   );
@@ -909,8 +935,8 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [saveState, setSaveState] = useState<{ field: string; status: "idle" | "saving" | "saved" | "error"; message: string }>({ field: "", status: "idle", message: "" });
   const [localPendingChanges, setLocalPendingChanges] = useState<SiteSetupPendingChange[]>([]);
-  const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"];
-  const enabledSections = new Set(["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume", "Activity Log"]);
+  const sections = ["Location", "Systems & Sites", "Talkgroups", "Hardware & RF Path", "RF Validation", "Apply & Resume"];
+  const enabledSections = new Set(sections);
   const [section, setSectionState] = useState(() => {
     const saved = localStorage.getItem("pizzawave-site-setup-section") || "Location";
     return enabledSections.has(saved) ? saved : "Location";
@@ -937,6 +963,7 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
   useEffect(() => {
     if (!targetSection) return;
     setSection(targetSection);
+    if (targetSection === "RF Validation") setRfValidationStage(storedSiteSetupRfStage());
     clearTargetSection?.();
   }, [targetSection, clearTargetSection]);
   if (!current) return null;
@@ -1013,7 +1040,6 @@ function SiteSetupView({ setup, reload, targetSection, clearTargetSection, onTrO
             />
           </div>
           {section === "Apply & Resume" && <SiteSetupApplySection setup={current} subPage="review" setSubPage={setApplySubPage} onSave={saveDesired} onSetupChanged={(next) => { currentRef.current = next; setCurrent(next); }} onApplied={(next) => { currentRef.current = next; setCurrent(next); void reload(); }} />}
-          {section === "Activity Log" && <SiteSetupActivityLogSection setup={current} />}
         </section>
       </div>
     </section>
@@ -1055,48 +1081,145 @@ function siteSetupMonitoringTone(state: string) {
   return "neutral";
 }
 
-function SiteSetupActivityLogSection({ setup }: { setup: SiteSetup }) {
-  const [rows, setRows] = useState(setup.recentActivity);
+type AuditHistoryCategory = "change" | "job" | "finding";
+type AuditHistoryEntry = {
+  key: string;
+  timestampUtc: string;
+  category: AuditHistoryCategory;
+  event: string;
+  summary: string;
+  outcome: string;
+  tone: "ok" | "warning" | "danger" | "neutral";
+  detailsJson?: string;
+  findingId?: string;
+  evidenceStartUtc?: string;
+  evidenceEndUtc?: string;
+  findingKind?: string;
+  findingSeverity?: string;
+};
+
+function AuditHistoryPanel({ refreshToken, onOpenJobs }: { refreshToken: number; onOpenJobs: () => void }) {
+  const [entries, setEntries] = useState<AuditHistoryEntry[]>([]);
+  const [windowHours, setWindowHours] = useState(24 * 7);
+  const [category, setCategory] = useState<"all" | AuditHistoryCategory>("all");
+  const [page, setPage] = useState(1);
+  const [openEntryKey, setOpenEntryKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  useEffect(() => setRows(setup.recentActivity), [setup.recentActivity]);
-  useEffect(() => { void loadActivity(); }, []);
+  const pageSize = 25;
+  useEffect(() => { void loadHistory(); }, [refreshToken]);
+  useEffect(() => { setPage(1); setOpenEntryKey(null); }, [windowHours, category]);
+  useEffect(() => setOpenEntryKey(null), [page]);
 
-  async function loadActivity() {
+  async function loadHistory() {
     setBusy(true);
     setMessage("");
     try {
-      setRows(await api.request<SiteSetup["recentActivity"]>(`${siteSetupApi}/activity?limit=100`));
+      const [activities, jobs, recommendations] = await Promise.all([
+        api.request<SiteSetupActivity[]>(`${siteSetupApi}/activity?limit=500`),
+        api.request<Job[]>("/api/v1/jobs"),
+        api.request<SystemRecommendations>("/api/v1/system/recommendations")
+      ]);
+      const activityEntries = activities.map(activityAuditEntry);
+      const jobEntries = jobs.filter(job => isTerminalJob(job)).map(jobAuditEntry);
+      const findingEntries = recommendations.history.map(findingAuditEntry);
+      setEntries([...activityEntries, ...jobEntries, ...findingEntries].sort((a, b) => new Date(b.timestampUtc).getTime() - new Date(a.timestampUtc).getTime()));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load Setup activity.");
+      setMessage(error instanceof Error ? error.message : "Unable to load audit history.");
     } finally {
       setBusy(false);
     }
   }
 
-  return <div className="site-setup-form site-setup-activity">
-    <div className="site-setup-activity-toolbar">
-      <span>{rows.length.toLocaleString()} event{rows.length === 1 ? "" : "s"}</span>
-      <button type="button" onClick={() => void loadActivity()} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
-    </div>
+  const cutoff = Date.now() - windowHours * 60 * 60 * 1000;
+  const matching = entries.filter(entry => {
+    const timestamp = new Date(entry.timestampUtc).getTime();
+    return Number.isFinite(timestamp) && timestamp >= cutoff && (category === "all" || entry.category === category);
+  });
+  const filtered = compactAuditFindings(matching);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  return <div className="audit-history-panel">
+    <SystemPageHeaderControls><div className="audit-history-controls header-controls">
+      <label>History window<select value={windowHours} onChange={event => setWindowHours(Number(event.target.value))}>
+        <option value={24}>Last 24 hours</option><option value={48}>Last 2 days</option><option value={168}>Last 7 days</option><option value={720}>Last 30 days</option><option value={2160}>Last 90 days</option>
+      </select></label>
+      <label>Event type<select value={category} onChange={event => setCategory(event.target.value as typeof category)}>
+        <option value="all">All important events</option><option value="change">Setup and settings</option><option value="job">Job outcomes</option><option value="finding">Resolved findings</option>
+      </select></label>
+      <span>{matching.length === filtered.length ? `${filtered.length.toLocaleString()} matching event${filtered.length === 1 ? "" : "s"}` : `${matching.length.toLocaleString()} events consolidated into ${filtered.length.toLocaleString()} rows`}{busy ? " · Refreshing..." : ""}</span>
+      <button onClick={onOpenJobs}>Open Jobs</button>
+    </div></SystemPageHeaderControls>
     {message && <div className="settings-message error">{message}</div>}
-    <div className="site-setup-activity-table">
-      <table className="table compact-table">
-        <thead><tr><th>Time</th><th>Category</th><th>Action</th><th>Summary</th><th>State</th><th>Details</th></tr></thead>
-        <tbody>
-          {rows.map(row => <tr key={row.id || `${row.timestampUtc}-${row.action}`}>
-            <td>{formatActivityDate(row.timestampUtc)}</td>
-            <td>{label(row.category)}</td>
-            <td>{label(row.action)}</td>
-            <td>{row.summary || "--"}</td>
-            <td><span className={`section-status ${siteSetupMonitoringTone(row.monitoringState)}`}>{label(row.monitoringState)}</span></td>
-            <td>{activityDetails(row.detailsJson)}</td>
-          </tr>)}
-          {rows.length === 0 && <tr><td colSpan={6}>No setup activity has been recorded yet.</td></tr>}
-        </tbody>
+    <div className="card audit-history-table-wrap">
+      {pageCount > 1 && <div className="pagination-row table-top-pagination">
+        <button disabled={safePage <= 1} onClick={() => setPage(1)}>First</button><button disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>Prev</button><span>Page {safePage} of {pageCount}</span><button disabled={safePage >= pageCount} onClick={() => setPage(safePage + 1)}>Next</button><button disabled={safePage >= pageCount} onClick={() => setPage(pageCount)}>Last</button>
+      </div>}
+      <table className="table compact-table audit-history-table">
+        <thead><tr><th>Time</th><th>Type</th><th>Event</th><th>What happened</th><th>Outcome</th></tr></thead>
+        <tbody>{visible.flatMap(entry => {
+          const open = openEntryKey === entry.key;
+          return [<tr className={`audit-history-row${open ? " open" : ""}`} key={entry.key} role="button" tabIndex={0} aria-expanded={open} onClick={() => setOpenEntryKey(open ? null : entry.key)} onKeyDown={event => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            setOpenEntryKey(open ? null : entry.key);
+          }}>
+            <td>{formatActivityDate(entry.timestampUtc)}</td><td>{auditCategoryLabel(entry.category)}</td><td>{entry.event}</td><td>{entry.summary}</td><td><span className={`section-status ${entry.tone}`}>{entry.outcome}</span></td>
+          </tr>, ...(open ? [<tr className="audit-evidence-detail" key={`${entry.key}-evidence`}><td colSpan={5}><div className="audit-evidence-shelf"><strong>Evidence</strong>{auditEvidenceContent(entry)}</div></td></tr>] : [])];
+        })}
+        {!visible.length && <tr><td colSpan={5}>No matching audit events were recorded in this history window.</td></tr>}</tbody>
       </table>
     </div>
   </div>;
+}
+
+function activityAuditEntry(row: SiteSetupActivity): AuditHistoryEntry {
+  return { key: `activity-${row.id}`, timestampUtc: row.timestampUtc, category: "change", event: label(row.action), summary: row.summary || "Configuration activity recorded.", outcome: "Recorded", tone: "neutral", detailsJson: row.detailsJson };
+}
+
+function jobAuditEntry(job: Job): AuditHistoryEntry {
+  const outcome = label(job.status);
+  return { key: `job-${job.id}`, timestampUtc: job.finishedAtUtc || job.updatedAtUtc || job.createdAtUtc, category: "job", event: `${jobDisplayName(job.type)} #${job.id}`, summary: job.message || `${jobDisplayName(job.type)} ${outcome.toLowerCase()}.`, outcome, tone: job.status === "completed" ? "ok" : job.status === "failed" ? "danger" : "warning" };
+}
+
+function findingAuditEntry(item: SystemRecommendation): AuditHistoryEntry {
+  const resolution = item.resolution || "Current evidence no longer meets the activation threshold.";
+  return { key: `finding-${item.id}-${item.resolvedAtUtc}`, timestampUtc: item.resolvedAtUtc, category: "finding", event: item.title, summary: resolution, outcome: "Resolved", tone: "ok", findingId: item.id, evidenceStartUtc: item.firstSeenUtc, evidenceEndUtc: item.lastSeenUtc, findingKind: label(item.kind), findingSeverity: label(item.severity), detailsJson: JSON.stringify({ type: label(item.kind), priority: label(item.severity), evidencePeriod: `${formatActivityDate(item.firstSeenUtc)} – ${formatActivityDate(item.lastSeenUtc)}` }) };
+}
+
+function compactAuditFindings(entries: AuditHistoryEntry[]) {
+  const ordinary = entries.filter(entry => !entry.findingId);
+  const groups = new Map<string, AuditHistoryEntry[]>();
+  entries.filter(entry => entry.findingId).forEach(entry => groups.set(entry.findingId!, [...(groups.get(entry.findingId!) ?? []), entry]));
+  const findings = Array.from(groups.values()).map(group => {
+    const ordered = [...group].sort((a, b) => new Date(b.timestampUtc).getTime() - new Date(a.timestampUtc).getTime());
+    const latest = ordered[0];
+    if (ordered.length === 1) return latest;
+    const evidenceStarts = ordered.map(entry => new Date(entry.evidenceStartUtc || entry.timestampUtc).getTime()).filter(Number.isFinite);
+    const evidenceEnds = ordered.map(entry => new Date(entry.evidenceEndUtc || entry.timestampUtc).getTime()).filter(Number.isFinite);
+    const firstEvidence = evidenceStarts.length ? new Date(Math.min(...evidenceStarts)).toISOString() : latest.timestampUtc;
+    const lastEvidence = evidenceEnds.length ? new Date(Math.max(...evidenceEnds)).toISOString() : latest.timestampUtc;
+    return {
+      ...latest,
+      key: `finding-group-${latest.findingId}`,
+      summary: `Resolved ${ordered.length.toLocaleString()} times in this window. Latest resolution: ${latest.summary}`,
+      outcome: `Resolved ×${ordered.length.toLocaleString()}`,
+      detailsJson: JSON.stringify({ type: latest.findingKind, priority: latest.findingSeverity, occurrences: ordered.length, evidenceSpan: `${formatActivityDate(firstEvidence)} – ${formatActivityDate(lastEvidence)}` })
+    };
+  });
+  return [...ordinary, ...findings].sort((a, b) => new Date(b.timestampUtc).getTime() - new Date(a.timestampUtc).getTime());
+}
+
+function auditCategoryLabel(category: AuditHistoryCategory) {
+  if (category === "change") return "Setup / settings";
+  if (category === "job") return "Job";
+  return "Finding";
+}
+
+function isTerminalJob(job: Job) {
+  return job.status === "completed" || job.status === "failed" || job.status === "canceled" || job.status === "cancelled";
 }
 
 function formatActivityDate(value: string) {
@@ -1104,16 +1227,16 @@ function formatActivityDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function activityDetails(detailsJson: string) {
-  const text = (detailsJson || "").trim();
-  if (!text || text === "{}") return <span className="muted">--</span>;
+function auditEvidenceContent(entry: AuditHistoryEntry) {
+  const text = (entry.detailsJson || "").trim();
+  if (!text || text === "{}") return <p className="muted">No additional evidence is stored for this event. Open Runtime / Jobs for detailed job progress and logs.</p>;
   let pretty = text;
   try {
     pretty = JSON.stringify(JSON.parse(text), null, 2);
   } catch {
     // Keep raw detail if it is not JSON.
   }
-  return <details className="site-setup-activity-details"><summary>View</summary><pre>{pretty}</pre></details>;
+  return <pre>{pretty}</pre>;
 }
 
 function SiteSetupLocationSection({ setup, saveState, onSave }: { setup: SiteSetup; saveState: { field: string; status: "idle" | "saving" | "saved" | "error"; message: string }; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void> }) {
@@ -1638,6 +1761,7 @@ function SetupSdrInventorySummary({ detection }: { detection: SetupSdrDetection 
 }
 
 function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperationChange, onServerSetupChanged }: { setup: SiteSetup; active: boolean; stage: SiteSetupRfStage; onSave: (patch: Partial<SiteSetupConfig>, field: string) => Promise<void>; onTrOperationChange: (value: string) => void; onServerSetupChanged: (next: SiteSetup) => void }) {
+  const [targetSystem] = useState(() => localStorage.getItem("pizzawave-site-setup-rf-target-system") || "");
   const [detail, setDetail] = useState<RfSurveyDetail | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -1676,8 +1800,11 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
         const current = await prepareSiteSetupRfWorkspace();
         if (!stopped) {
           setDetail(current);
-          const firstCc = normalizeControlChannelSelection(current.profile.systems.flatMap(system => system.controlChannelsHz))[0] ?? controlChannels[0] ?? 0;
+          const targetSystem = localStorage.getItem("pizzawave-site-setup-rf-target-system") || "";
+          const targetCc = current.profile.systems.find(system => system.shortName.toLowerCase() === targetSystem.toLowerCase())?.controlChannelsHz[0];
+          const firstCc = targetCc ?? normalizeControlChannelSelection(current.profile.systems.flatMap(system => system.controlChannelsHz))[0] ?? controlChannels[0] ?? 0;
           setActiveControlChannelHz(currentValue => currentValue || firstCc);
+          if (targetSystem) localStorage.removeItem("pizzawave-site-setup-rf-target-system");
         }
       } catch (error) {
         if (!stopped)
@@ -1754,6 +1881,39 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
       setBusy("");
     }
   }
+  async function runCallAndTranscriptionProof(rerun = false) {
+    if (!detail) return;
+    setBusy("call_transcription_proof");
+    setMessage("");
+    try {
+      let voice = voiceCapture;
+      if (rerun || voice?.status !== "passed") {
+        voice = await api.request<RfSurveyExperiment>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
+          method: "POST",
+          body: JSON.stringify({ type: "voice_capture_trial", durationSeconds: 180 })
+        });
+      }
+      if (voice?.status !== "passed") {
+        setMessage(voice?.blockingIssue || voice?.resultSummary || "Call capture did not pass. Transcription was not checked.");
+        await refreshWorkspace();
+        return;
+      }
+      setMessage("Call capture passed. Checking transcription...");
+      const transcription = await api.request<RfSurveyExperiment>(`${siteSetupRfApi}/${encodeURIComponent(detail.session.id)}/experiments/run`, {
+        method: "POST",
+        body: JSON.stringify({ type: "transcription_gate", durationSeconds: 120 })
+      });
+      setMessage(transcription.status === "passed"
+        ? "Call and transcription proof passed. Continue to Verdict."
+        : transcription.blockingIssue || transcription.resultSummary || "Transcription proof did not pass.");
+      await refreshWorkspace();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Call and transcription proof failed.");
+      await refreshWorkspace();
+    } finally {
+      setBusy("");
+    }
+  }
   const handleWaterfallStatusChange = useCallback((status: RfSurveyWaterfallStatus | null) => {
     onTrOperationChange(waterfallTrOperationText(status));
   }, [onTrOperationChange]);
@@ -1825,17 +1985,18 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
     void runSoftwareCheck();
   }, [active, stage, detail?.session.id, detail?.toolPrep?.tools.length, setup.status.appliedConfigHash]);
   return <div className="site-setup-form site-setup-rf-validation">
+    {targetSystem && <div className="setup-note"><strong>Reviewing {trSystemDisplayName(targetSystem)}</strong><span>Control-channel evidence is preselected for this site; other configured sites remain visible for comparison.</span></div>}
     {busy === "workspace" && <div className="setup-note">Preparing RF validation session...</div>}
-    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") ? "settings-message error" : "settings-message ok"}>{message}</div>}
-    <div className="rf-history-toolbar">
+    {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("failed") || message.toLowerCase().includes("blocked") || message.toLowerCase().includes("did not pass") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    {stage !== "calls" && <div className="rf-history-toolbar">
       <button type="button" className={showHistory ? "primary" : ""} onClick={() => setShowHistory(value => !value)}>{showHistory ? "Back to validation" : "Experiments & Evidence"}</button>
       {!showHistory && <details className="rf-experiment-context"><summary>Name or describe the next experiment</summary><div className="rf-experiment-context-fields">
         <label><span>Name</span><input value={experimentName} onChange={event => setExperimentName(event.target.value)} placeholder="Automatic descriptive name" /></label>
         <label><span>Hypothesis</span><input value={experimentHypothesis} onChange={event => setExperimentHypothesis(event.target.value)} placeholder="What are you testing?" /></label>
         <label><span>Physical change</span><input value={experimentPhysicalChange} onChange={event => setExperimentPhysicalChange(event.target.value)} placeholder="Antenna, cable, filter, placement, or none" /></label>
       </div></details>}
-    </div>
-    {showHistory
+    </div>}
+    {showHistory && stage !== "calls"
       ? <SetupRfHistoryViewer currentSite={setup.desired.siteLabel} />
       : detail
       ? <>
@@ -1905,7 +2066,7 @@ function SiteSetupRfValidationSection({ setup, active, stage, onSave, onTrOperat
           inventoryRequired={false}
         />}
         {stage === "coverage" && <SiteSetupRfCoverageStage setup={setup} detail={detail} onServerSetupChanged={onServerSetupChanged} />}
-        {stage === "calls" && <SiteSetupRfCallProofStage validationSweep={validationSweep} voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} nextExperiments={detail.nextExperiments ?? []} />}
+        {stage === "calls" && <SiteSetupRfCallProofStage voiceCapture={voiceCapture} transcriptionGate={transcriptionGate} nextExperiments={detail.nextExperiments ?? []} busy={busy === "call_transcription_proof"} onRunProof={runCallAndTranscriptionProof} />}
         {stage === "verdict" && <SiteSetupRfVerdictStage detail={detail} stabilityVerdict={stabilityVerdict} />}
         {details && <div className="modal-backdrop" onClick={() => setDetails(null)}>
           <div className="rf-details-modal" onClick={event => event.stopPropagation()}>
@@ -2156,25 +2317,26 @@ function SourcePlanProjectionCard({ option, projection, selected, busy, onSelect
   </div>;
 }
 
-function SiteSetupRfCallProofStage({ validationSweep, voiceCapture, transcriptionGate, nextExperiments }: { validationSweep?: RfSurveyExperiment; voiceCapture?: RfSurveyExperiment; transcriptionGate?: RfSurveyExperiment; nextExperiments: RfSurveyExperimentPlan[] }) {
-  const sweepCandidates = validationSweep ? rfValidationCandidates(validationSweep) : [];
-  const voiceCandidates = sweepCandidates.filter((candidate: any) => candidate.voiceStatus);
-  const realCalls = voiceCandidates.reduce((total: number, candidate: any) => total + Number(candidate.voiceRealCalls ?? 0), 0);
+function SiteSetupRfCallProofStage({ voiceCapture, transcriptionGate, nextExperiments, busy, onRunProof }: { voiceCapture?: RfSurveyExperiment; transcriptionGate?: RfSurveyExperiment; nextExperiments: RfSurveyExperimentPlan[]; busy: boolean; onRunProof: (rerun?: boolean) => Promise<void> }) {
   const voicePlan = nextExperiments.find(plan => plan.type === "voice_capture_trial");
   const transcriptionPlan = nextExperiments.find(plan => plan.type === "transcription_gate");
   const nextPlan = !voiceCapture || voiceCapture.status !== "passed" ? voicePlan : transcriptionPlan;
+  const proofPassed = voiceCapture?.status === "passed" && transcriptionGate?.status === "passed";
+  const actionBlocked = nextPlan?.enabled === false;
   return <div className="rf-step-stack rf-stage-summary">
-    <div className={`rf-recommended-action ${nextPlan?.enabled === false ? "blocked" : ""}`.trim()}>
+    <div className={`rf-recommended-action ${actionBlocked ? "blocked" : ""}`.trim()}>
       <div>
-        <span>{nextPlan?.enabled === false ? "Current blocker" : "Recommended next task"}</span>
-        <strong>{nextPlan?.label || (transcriptionGate ? "Review proof evidence" : "Complete Control-Channel Proof")}</strong>
-        <small>{nextPlan?.blockingIssue || nextPlan?.purpose || "Measured call and transcription evidence will appear here."}</small>
+        <span>{actionBlocked ? "Current blocker" : proofPassed ? "Proof complete" : "Required next task"}</span>
+        <strong>{actionBlocked ? "Resolve the prerequisite before running proof" : proofPassed ? "Call and transcription proof passed" : "Run call and transcription proof"}</strong>
+        <small>{nextPlan?.blockingIssue || (proofPassed ? "Both required checks passed. Continue to Verdict." : "PizzaWave listens for calls for up to 3 minutes, then checks completed transcription. Monitoring stays active. Allow about 5 minutes total.")}</small>
       </div>
     </div>
     <div className="rf-stage-status-list">
-      <div><span>RF Sweep call evidence</span><strong>{voiceCandidates.length ? `${voiceCandidates.length} candidate${voiceCandidates.length === 1 ? "" : "s"}` : "None"}</strong><small>{realCalls ? `${realCalls} real call${realCalls === 1 ? "" : "s"} with audio observed.` : "No real call audio has been proved."}</small></div>
-      <div><span>Call capture</span><strong>{voiceCapture ? label(voiceCapture.status) : "Not run"}</strong><small>{voiceCapture?.resultSummary || voiceCapture?.blockingIssue || "Required when traffic is available."}</small></div>
-      <div><span>Transcription</span><strong>{transcriptionGate ? label(transcriptionGate.status) : "Not run"}</strong><small>{transcriptionGate?.resultSummary || transcriptionGate?.blockingIssue || "Useful completed transcripts are required."}</small></div>
+      <div><span>Call audio</span><strong>{voiceCapture ? label(voiceCapture.status) : "Not run"}</strong><small>{voiceCapture?.resultSummary || voiceCapture?.blockingIssue || "PizzaWave will wait for live call audio."}</small></div>
+      <div><span>Transcription</span><strong>{transcriptionGate ? label(transcriptionGate.status) : "Not run"}</strong><small>{transcriptionGate?.resultSummary || transcriptionGate?.blockingIssue || "Runs automatically after call audio passes."}</small></div>
+    </div>
+    <div className="rf-primary-actions">
+      <button type="button" className="primary" disabled={busy || actionBlocked} onClick={() => void onRunProof(proofPassed)}>{busy ? "Running proof..." : proofPassed ? "Rerun proof" : voiceCapture?.status === "passed" ? "Continue transcription proof" : "Run call & transcription proof"}</button>
     </div>
     {(voiceCapture || transcriptionGate) && <details className="rf-technical-details"><summary>Proof evidence</summary>
       {voiceCapture && <ExperimentSummary experiment={voiceCapture} />}
@@ -2253,6 +2415,16 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSave, onSetupChan
   const draftWarnings = useMemo(() => siteSetupDraftWarningGroups(draft?.summary.warnings ?? []), [draft?.summary.warnings]);
   const draftReviewRows = useMemo(() => buildSiteSetupConfigReviewRows(parsedLiveDraft, parsedDraft), [parsedLiveDraft, parsedDraft]);
   const discardInProgressRef = useRef(false);
+  const callProofBlockers = useMemo(() => {
+    if (!detail) return ["RF Validation has not loaded yet."];
+    const latest = (type: string) => [...detail.experiments]
+      .filter(experiment => experiment.type === type)
+      .sort((a, b) => (b.createdAtUtc || "").localeCompare(a.createdAtUtc || ""))[0];
+    const blockers: string[] = [];
+    if (latest("voice_capture_trial")?.status !== "passed") blockers.push("Call capture proof must pass in RF Validation Step 5.");
+    if (latest("transcription_gate")?.status !== "passed") blockers.push("Transcription proof must pass in RF Validation Step 5.");
+    return blockers;
+  }, [detail?.session.id, detail?.experiments]);
 
   useEffect(() => {
     setSelectedSourceIndexes(defaultSelectedSources);
@@ -2446,7 +2618,8 @@ function SiteSetupApplySection({ setup, subPage, setSubPage, onSave, onSetupChan
     <div className="site-setup-apply-toolbar">
       {subPage === "review" && <button type="button" onClick={() => void reloadDraft()} disabled={busy !== ""}>{busy === "load" ? "Refreshing..." : "Refresh Draft"}</button>}
       {subPage === "review" && <button type="button" onClick={() => void discardPendingChanges()} disabled={busy !== "" || setup.pendingChanges.length === 0}>{busy === "discard" ? "Discarding..." : "Discard"}</button>}
-      {subPage === "review" && <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>}
+      {subPage === "review" && callProofBlockers.length > 0 && <div className="settings-message error" role="status"><strong>Apply blocked.</strong> {callProofBlockers.join(" ")}</div>}
+      {subPage === "review" && <button type="button" className="danger-button" onClick={() => void applyDraft()} disabled={busy !== "" || !detail || !draft || callProofBlockers.length > 0}>{busy === "apply" ? "Applying..." : "Apply & Resume Monitoring"}</button>}
     </div>
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("fail") || message.toLowerCase().includes("denied") ? "settings-message error" : "settings-message ok"}>{message}</div>}
     {subPage === "source" && detail && <SourcePlannerStep
@@ -2884,12 +3057,6 @@ function radioReferenceSidForSetupSystem(system: Pick<RfSurveySystem, "shortName
   return "";
 }
 
-function talkgroupSourceImportSignature(sources: SiteSetupTalkgroupSource[]) {
-  return sources
-    .map(row => `${row.siteShortName || row.siteLabel || row.key}:${row.radioReferenceSid.trim()}`)
-    .join("|");
-}
-
 function uniqueTalkgroupImportSources(sources: SiteSetupTalkgroupSource[]) {
   const seen = new Set<string>();
   const unique: SiteSetupTalkgroupSource[] = [];
@@ -2910,21 +3077,12 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [catalogReloadToken, setCatalogReloadToken] = useState(0);
-  const synchronizedSourceKeyRef = useRef("");
   const setupSourceKey = initialTalkgroupSources(setup).map(row => `${row.siteShortName || row.siteLabel || row.key}:${row.radioReferenceSid}:${row.catalogSystem}`).join("|");
   useEffect(() => {
     const next = initialTalkgroupSources(setup);
     setRrSources(next);
     setMessage("");
-    synchronizedSourceKeyRef.current = "";
   }, [setupSourceKey]);
-  useEffect(() => {
-    const key = talkgroupSourceImportSignature(rrSources);
-    if (!key || !rrSources.some(row => row.radioReferenceSid.trim()) || synchronizedSourceKeyRef.current === key)
-      return;
-    synchronizedSourceKeyRef.current = key;
-    void synchronizeTalkgroups();
-  }, [talkgroupSourceImportSignature(rrSources)]);
 
   function synchronizationSources() {
     return uniqueTalkgroupImportSources(rrSources
@@ -2981,7 +3139,6 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
         await reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "RadioReference talkgroup synchronization failed.");
-      synchronizedSourceKeyRef.current = "";
     } finally {
       setBusy("");
     }
@@ -3128,22 +3285,81 @@ function Kpi({ label, value, subtext, status = "neutral", onClick }: { label: st
   </div>;
 }
 
-function DashboardStatisticsPanel({ data }: { data: Dashboard | null }) {
+function DashboardStatisticsPanel({ data, rangeHours, onRangeHoursChange, onOpenTalkgroup }: { data: Dashboard | null; rangeHours: number; onRangeHoursChange: (hours: number) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void }) {
   if (!data) return <div className="card">Loading statistics...</div>;
-  const hiddenKpis = new Set(["alert rate", "token usage", "incidents", "top problem system", "tr decode 0%", "tr worst decode", "busiest hour", "unique talkgroups"]);
-  const visibleKpis = data.kpis.filter(k => !hiddenKpis.has(k.label.trim().toLowerCase()));
+  const activity = data.callActivity;
+  const durationHours = Math.max(1, (activity.rangeEnd - activity.rangeStart) / 3600);
+  const busiestLabel = activity.busiestBucketStart
+    ? new Date(activity.busiestBucketStart * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : "--";
   return <div className="dashboard-stats-panel">
-    <div className="section kpis">{visibleKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
-    <SystemCallBreakdownTable rows={data.callsBySystem ?? []} />
-    <VolumeByHourChart rows={data.volumeByHourCategory} />
+    <SystemPageHeaderControls>
+      <div className="segmented" role="group" aria-label="Call history window">
+        {[{ hours: 24, text: "24h" }, { hours: 48, text: "2d" }, { hours: 168, text: "Week" }].map(option => <button type="button" key={option.hours} className={rangeHours === option.hours ? "active" : ""} onClick={() => onRangeHoursChange(option.hours)}>{option.text}</button>)}
+      </div>
+    </SystemPageHeaderControls>
+    <div className="section kpis">
+      <Kpi label="Total Calls" value={activity.totalCalls.toLocaleString()} subtext="Calls in this window" />
+      <Kpi label="Calls per Hour" value={(activity.totalCalls / durationHours).toLocaleString(undefined, { maximumFractionDigits: 1 })} subtext="Average across the window" />
+      <Kpi label="Unique Talkgroups" value={activity.uniqueTalkgroups.toLocaleString()} subtext="Heard in this window" />
+      <Kpi label="Busiest Time Bucket" value={busiestLabel} subtext={activity.busiestBucketCalls ? `${activity.busiestBucketCalls.toLocaleString()} calls in ${activity.bucketSeconds / 60} minutes` : "No calls in this window"} />
+    </div>
+    <SystemCallBreakdownTable rows={data.callsBySystem ?? []} totalCalls={activity.totalCalls} />
+    <CallVolumeTimelineChart rows={data.callVolumeTimeline} rangeStart={activity.rangeStart} rangeEnd={activity.rangeEnd} bucketSeconds={activity.bucketSeconds} />
+    <TopCallTalkgroupsChart rows={data.topTalkgroups ?? []} onOpenTalkgroup={onOpenTalkgroup} />
+    {rangeHours > 24 && <CallActivityHeatmap rows={data.callVolumeTimeline} rangeStart={activity.rangeStart} rangeEnd={activity.rangeEnd} />}
   </div>;
 }
 
-function SystemCallBreakdownTable({ rows }: { rows: NonNullable<Dashboard["callsBySystem"]> }) {
+function TopCallTalkgroupsChart({ rows, onOpenTalkgroup }: { rows: TopTalkgroup[]; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void }) {
+  const visible = rows.slice(0, 10);
+  const max = Math.max(1, ...visible.map(row => row.count));
+  return <div className="card chart-card calls-top-talkgroups">
+    <h4>Top Talkgroups by Call Volume</h4>
+    {visible.length ? <div className="calls-top-talkgroup-list">{visible.map(row => <button type="button" key={row.talkgroupKey} onClick={() => onOpenTalkgroup(row)} title={`Open ${row.label} in ${label(row.category)}`}>
+      <span className="calls-top-talkgroup-label"><strong>{row.label}</strong><small>{row.systemShortName} · TG {row.talkgroup}</small></span>
+      <span className="calls-top-talkgroup-bar"><i style={{ width: `${row.count / max * 100}%` }} /></span>
+      <span className="calls-top-talkgroup-value"><strong>{row.count.toLocaleString()}</strong><small>{(row.share * 100).toFixed(1)}%</small></span>
+    </button>)}</div> : <span className="muted">No talkgroup activity in this window.</span>}
+  </div>;
+}
+
+function CallActivityHeatmap({ rows, rangeStart, rangeEnd }: { rows: CallVolumeBucket[]; rangeStart: number; rangeEnd: number }) {
+  const totals = new Map<number, number>();
+  rows.forEach(row => totals.set(row.start, (totals.get(row.start) ?? 0) + row.count));
+  const firstHour = rangeStart - rangeStart % 3600;
+  const hours = Array.from({ length: Math.max(0, Math.ceil((rangeEnd - firstHour) / 3600)) }, (_, index) => firstHour + index * 3600);
+  const dayMap = new Map<string, { label: string; values: Array<{ hour: number; count: number; timestamp: number }> }>();
+  hours.forEach(timestamp => {
+    const date = new Date(timestamp * 1000);
+    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    if (!dayMap.has(key)) dayMap.set(key, { label: date.toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" }), values: [] });
+    dayMap.get(key)!.values.push({ hour: date.getHours(), count: totals.get(timestamp) ?? 0, timestamp });
+  });
+  const days = Array.from(dayMap.values());
+  const max = Math.max(1, ...days.flatMap(day => day.values.map(value => value.count)));
+  return <div className="card chart-card calls-activity-heatmap-card">
+    <h4>Activity by Day and Hour</h4>
+    <div className="calls-activity-heatmap-scroll">
+      <div className="calls-activity-heatmap" role="img" aria-label="Hourly call activity heatmap">
+        <span />{Array.from({ length: 24 }, (_, hour) => <span className="calls-heatmap-hour" key={hour}>{hour % 6 === 0 ? (hour === 0 ? "12a" : hour === 12 ? "12p" : hour > 12 ? `${hour - 12}p` : `${hour}a`) : ""}</span>)}
+        {days.map(day => <React.Fragment key={day.label}><strong>{day.label}</strong>{Array.from({ length: 24 }, (_, hour) => {
+          const value = day.values.find(item => item.hour === hour);
+          const count = value?.count ?? 0;
+          const hourLabel = new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: "numeric" });
+          return <span className="calls-heatmap-cell" key={hour} style={{ backgroundColor: count ? `color-mix(in srgb, var(--accent) ${Math.round((0.16 + count / max * 0.84) * 100)}%, transparent)` : undefined }} title={`${day.label}, ${hourLabel}: ${count.toLocaleString()} calls`} aria-label={`${day.label}, ${hourLabel}: ${count} calls`} />;
+        })}</React.Fragment>)}
+      </div>
+    </div>
+    <div className="calls-heatmap-scale muted"><span>Fewer calls</span><i /><i /><i /><i /><span>More calls</span></div>
+  </div>;
+}
+
+function SystemCallBreakdownTable({ rows, totalCalls }: { rows: NonNullable<Dashboard["callsBySystem"]>; totalCalls: number }) {
   return <div className="card">
     <h4>Calls by Site/System</h4>
-    {rows.length ? <table className="table compact-table">
-      <thead><tr><th>Site/System</th><th>Calls</th><th>Talkgroups</th><th>Sources</th><th>Frequency span</th><th>Transcription</th><th>Categories</th><th>Last heard</th></tr></thead>
+    {rows.length ? <table className="table compact-table calls-site-table">
+      <thead><tr><th>Site/System</th><th>Calls</th><th>Share</th><th>Talkgroups</th><th>Sources</th><th>Frequency span</th><th>Category mix</th><th>Last heard</th></tr></thead>
       <tbody>{rows.map(row => {
         const categoryText = Object.entries(row.categories ?? {})
           .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -3158,10 +3374,10 @@ function SystemCallBreakdownTable({ rows }: { rows: NonNullable<Dashboard["calls
         return <tr key={row.systemShortName || "unknown"}>
           <td><strong>{row.systemShortName || "unknown"}</strong></td>
           <td>{row.calls.toLocaleString()}</td>
+          <td>{totalCalls ? `${(row.calls * 100 / totalCalls).toFixed(1)}%` : "--"}</td>
           <td>{row.uniqueTalkgroups.toLocaleString()}</td>
           <td>{row.sources.length ? row.sources.map(source => `#${source}`).join(", ") : "--"}</td>
           <td>{freqText}</td>
-          <td>{row.completeCalls.toLocaleString()} complete / {row.pendingCalls.toLocaleString()} pending / {row.failedCalls.toLocaleString()} failed{row.problemCalls ? ` / ${row.problemCalls.toLocaleString()} problem` : ""}</td>
           <td>{categoryText || "--"}</td>
           <td>{row.lastHeard ? relativeTime(row.lastHeard) : "--"}</td>
         </tr>;
@@ -3170,21 +3386,25 @@ function SystemCallBreakdownTable({ rows }: { rows: NonNullable<Dashboard["calls
   </div>;
 }
 
-function Bars({ title, rows }: { title: string; rows: BarStat[] }) {
-  return <div className="card"><h4>{title}</h4>{rows.length ? rows.map(r => <div className="bar-row" key={r.label}><span>{r.label}</span><div className="bar"><span style={{ width: `${Math.round(r.ratio * 100)}%` }} /></div><span>{r.valueText}</span></div>) : <span className="muted">No data</span>}</div>;
+function Bars({ title, rows, showTitle = true }: { title: string; rows: BarStat[]; showTitle?: boolean }) {
+  return <div className="card">{showTitle && <h4>{title}</h4>}{rows.length ? rows.map(r => <div className="bar-row" key={r.label}><span>{r.label}</span><div className="bar"><span style={{ width: `${Math.round(r.ratio * 100)}%` }} /></div><span>{r.valueText}</span></div>) : <span className="muted">No data</span>}</div>;
 }
 
-function VolumeByHourChart({ rows }: { rows: HourCategory[] }) {
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const byCategory = categories.map(category => ({
-    category,
-    values: hours.map(hour => rows.find(r => r.hour === hour && r.category === category)?.count ?? 0)
-  }));
+function CallVolumeTimelineChart({ rows, rangeStart, rangeEnd, bucketSeconds }: { rows: CallVolumeBucket[]; rangeStart: number; rangeEnd: number; bucketSeconds: number }) {
+  const firstBucket = rangeStart - rangeStart % bucketSeconds;
+  const starts = Array.from({ length: Math.max(0, Math.ceil((rangeEnd - firstBucket) / bucketSeconds)) }, (_, index) => firstBucket + index * bucketSeconds);
+  const hasCalls = rows.length > 0;
+  const byCategory = categories.map(category => ({ category, values: starts.map(start => rows.find(row => row.start === start && row.category === category)?.count ?? 0) }));
   const max = Math.max(1, ...byCategory.flatMap(c => c.values));
   const points = (values: number[]) => values
-    .map((value, hour) => `${36 + hour * 19},${158 - value / max * 118}`)
+    .map((value, index) => `${36 + (starts[index] - firstBucket) / Math.max(1, rangeEnd - firstBucket) * 446},${158 - value / max * 118}`)
     .join(" ");
-  return <div className="card chart-card"><h4>Calls by Hour and Category</h4><div className="chart-with-legend"><svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Calls by hour and category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div></div>;
+  const labelTimes = Array.from(new Set([0, .25, .5, .75, 1].map(ratio => Math.round(rangeStart + (rangeEnd - rangeStart) * ratio))));
+  const labelX = (timestamp: number) => 36 + (timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart) * 446;
+  const formatTime = (timestamp: number) => new Date(timestamp * 1000).toLocaleString([], rangeEnd - rangeStart <= 86400
+    ? { hour: "numeric", minute: "2-digit" }
+    : { month: "numeric", day: "numeric", hour: "numeric" });
+  return <div className="card chart-card"><h4>Call Volume by Time and Category</h4>{hasCalls ? <div className="chart-with-legend"><svg className="chart calls-timeline-chart" viewBox="0 0 500 196" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Call volume over time by category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{labelTimes.map(timestamp => <text className="chart-label" textAnchor={timestamp === rangeStart ? "start" : timestamp === rangeEnd ? "end" : "middle"} x={labelX(timestamp)} y="181" key={timestamp}>{formatTime(timestamp)}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div> : <span className="muted">No calls in this window.</span>}</div>;
 }
 
 function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
@@ -3880,6 +4100,7 @@ function StandaloneAlertCard({ alert, expanded, onDismissAlert, searchQuery = ""
       </span>
       <span className="incident-summary-meta">
         <span className={active ? "alert-badge active" : "alert-badge"} title={`${alert.ruleName}: ${alert.detail}`}>{active ? "Active alert" : "Alert"}</span>
+        {alert.notificationSuppressed && <span className="section-status neutral" title="The match was processed more than 60 minutes after the call. Real-time email and playback were suppressed.">Recovered history</span>}
         {active && <button type="button" className="dismiss-alert-button" onClick={dismissAlert}>Dismiss</button>}
         <span className="incident-time">{relativeTime(alert.matchedAt)}</span>
         <span className="muted">Call {alert.callId}</span>
@@ -4379,29 +4600,29 @@ function confidenceClass(score: number) {
   return "confidence-low";
 }
 
-type SystemTopTab = "recommendations" | "services" | "cpu" | "queue" | "jobs" | "storage" | "backup" | "tr" | "metrics";
-type SystemTrTab = "summary" | "config" | "restore" | "logs";
-type SystemArea = "health" | "processing" | "data" | "receiver" | "performance";
+type SystemTopTab = "recommendations" | "services" | "queue" | "jobs" | "storage" | "backup" | "reset" | "audit" | "tr" | "metrics";
+type SystemTrTab = "summary" | "config" | "logs";
+type SystemArea = "recommendations" | "runtime" | "data" | "trunk-recorder" | "performance";
 
 function normalizeSystemTopTab(value: string | null): SystemTopTab {
-  if (value === "service" || value === "qdrant") return "services";
-  return ["recommendations", "services", "cpu", "queue", "jobs", "storage", "backup", "tr", "metrics"].includes(value ?? "")
+  if (value === "service" || value === "qdrant" || value === "cpu") return "services";
+  return ["recommendations", "services", "queue", "jobs", "storage", "backup", "reset", "audit", "tr", "metrics"].includes(value ?? "")
     ? value as SystemTopTab
     : "recommendations";
 }
 
 function systemAreaForTab(tab: SystemTopTab): SystemArea {
-  if (["services", "cpu", "queue", "jobs"].includes(tab)) return "processing";
-  if (["storage", "backup"].includes(tab)) return "data";
-  if (tab === "tr") return "receiver";
+  if (["services", "queue", "jobs"].includes(tab)) return "runtime";
+  if (["storage", "backup", "reset", "audit"].includes(tab)) return "data";
+  if (tab === "tr") return "trunk-recorder";
   if (tab === "metrics") return "performance";
-  return "health";
+  return "recommendations";
 }
 
 function defaultSystemAreaTab(area: SystemArea): SystemTopTab {
-  if (area === "processing") return "services";
+  if (area === "runtime") return "services";
   if (area === "data") return "storage";
-  if (area === "receiver") return "tr";
+  if (area === "trunk-recorder") return "tr";
   if (area === "performance") return "metrics";
   return "recommendations";
 }
@@ -4411,33 +4632,102 @@ function rememberedSystemAreaTab(area: SystemArea): SystemTopTab {
   return systemAreaForTab(saved) === area ? saved : defaultSystemAreaTab(area);
 }
 
-function visibleSystemPageLabel(topTab: SystemTopTab, trTab: SystemTrTab, metricsTab: string) {
-  if (topTab === "recommendations") return "Health";
-  if (topTab === "cpu") return "Processor";
-  if (topTab === "backup") return "Backup and Restore";
-  if (topTab === "tr") return trTab === "config" ? "Active Configuration" : trTab === "restore" ? "Configuration Restore" : trTab === "logs" ? "Receiver Logs" : "Receiver Summary";
-  if (topTab === "metrics") return metricsTab === "rf" ? "Radio Frequency Performance" : metricsTab === "ai" ? "Artificial Intelligence Usage" : label(metricsTab);
-  return label(topTab);
+function systemPageIdentity(topTab: SystemTopTab, trTab: SystemTrTab, metricsTab: string) {
+  if (topTab === "recommendations") return { area: "System", title: "Recommendations", purpose: "Current problems and worthwhile improvements across the PizzaWave stack.", icon: Gauge, tone: "recommendations" };
+  if (topTab === "services") return { area: "Runtime", title: "Services", purpose: "Live service state, host resources, and safe service controls in one place.", icon: Activity, tone: "runtime" };
+  if (topTab === "queue") return { area: "Runtime", title: "Queue", purpose: "Current transcription flow, backlog composition, throughput, and ingest controls.", icon: Activity, tone: "runtime" };
+  if (topTab === "jobs") return { area: "Runtime", title: "Jobs", purpose: "Explicit background operations, safe cancellation, recovery tools, and retained outcomes.", icon: Wrench, tone: "runtime" };
+  if (topTab === "storage") return { area: "Data", title: "Storage", purpose: "PizzaWave disk use, retained datasets, and automatic maintenance history.", icon: Database, tone: "data" };
+  if (topTab === "backup") return { area: "Data", title: "Backup and Restore", purpose: "Create, inspect, and deliberately restore complete PizzaWave backups.", icon: Database, tone: "data" };
+  if (topTab === "reset") return { area: "Data", title: "Reset", purpose: "Guarded recovery actions with explicit scope and confirmation.", icon: Wrench, tone: "data" };
+  if (topTab === "audit") return { area: "Data", title: "Audit History", purpose: "Important setup, settings, and operational changes without duplicating job history.", icon: Search, tone: "data" };
+  if (topTab === "tr") {
+    if (trTab === "config") return { area: "Trunk Recorder", title: "Configuration Viewer", purpose: "Compare the active configuration with drafts, backups, and experimental artifacts.", icon: Settings, tone: "tr" };
+    if (trTab === "logs") return { area: "Trunk Recorder", title: "Logs", purpose: "Paginated raw Trunk Recorder logs with an independent time window.", icon: Search, tone: "tr" };
+    return { area: "Trunk Recorder", title: "Summary", purpose: "Explore configured sites, source assignments, and active Trunk Recorder structure.", icon: Radio, tone: "tr" };
+  }
+  if (metricsTab === "transcription") return { area: "Performance", title: "Transcription", purpose: "Completion, quality, latency, affected talkgroups, and endpoint availability over time.", icon: Gauge, tone: "performance" };
+  if (metricsTab === "rf") return { area: "Performance", title: "Radio Frequency", purpose: "Per-site RF stability, decode behavior, retunes, and capture evidence.", icon: Radio, tone: "performance" };
+  if (metricsTab === "incidents") return { area: "Performance", title: "Incidents", purpose: "Incident-pipeline decisions and the quality of generated operator output.", icon: Info, tone: "performance" };
+  if (metricsTab === "ai") return { area: "Performance", title: "AI Usage", purpose: "Model requests, failures, token consumption, and completion behavior.", icon: Gauge, tone: "performance" };
+  if (metricsTab === "bandwidth") return { area: "Performance", title: "Bandwidth", purpose: "PizzaWave-attributed remote transcription and AI network use.", icon: Activity, tone: "performance" };
+  return { area: "Performance", title: "Calls", purpose: "Call volume, timing, categories, sites, and talkgroup activity patterns.", icon: Activity, tone: "performance" };
 }
 
-function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSignal, targetTab, clearTargetTab, onOpenSetup }: { rangeHours: number; engineHealth: EngineHealth | null; refreshSharedStatus: () => Promise<unknown>; refreshSignal: number; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onOpenSetup?: (section?: string) => void }) {
+function SystemPageIdentity({ area, title, purpose, icon: Icon, tone }: ReturnType<typeof systemPageIdentity>) {
+  return <header className={`system-page-identity tone-${tone}`}>
+    <span className="system-page-identity-icon" aria-hidden="true"><Icon size={20} /></span>
+    <div className="system-page-identity-copy"><span className="system-page-identity-area">{area}</span><h2>{title}</h2><p>{purpose}</p></div>
+    <div id="system-page-identity-controls" className="system-page-identity-controls" />
+  </header>;
+}
+
+function SystemPageHeaderControls({ children }: { children: React.ReactNode }) {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => setTarget(document.getElementById("system-page-identity-controls")), []);
+  return target ? createPortal(children, target) : null;
+}
+
+function SystemHistoryWindow({ value, label: ariaLabel, onChange }: { value: number; label: string; onChange: (hours: number) => void }) {
+  return <div className="segmented" role="group" aria-label={ariaLabel}>{[
+    { hours: 24, text: "24h" }, { hours: 48, text: "2d" }, { hours: 168, text: "Week" }
+  ].map(option => <button type="button" key={option.hours} className={value === option.hours ? "active" : ""} onClick={() => onChange(option.hours)}>{option.text}</button>)}</div>;
+}
+
+function SystemSectionHeader({ title, description, meta, actions }: { title: string; description?: string; meta?: React.ReactNode; actions?: React.ReactNode }) {
+  return <div className="system-section-header">
+    <div><h3>{title}</h3>{description && <p>{description}</p>}</div>
+    {meta && <div className="system-section-header-meta">{meta}</div>}
+    {actions && <div className="system-section-header-actions">{actions}</div>}
+  </div>;
+}
+
+type RfChartCategory = "all" | "decode" | "activity" | "events";
+
+function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSignal, targetTab, clearTargetTab, onLiveResources, onOpenSetup, onOpenTalkgroup, onOpenIncident }: { rangeHours: number; engineHealth: EngineHealth | null; refreshSharedStatus: () => Promise<unknown>; refreshSignal: number; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onLiveResources?: (sample: SystemRuntimeResourceSample) => void; onOpenSetup?: (section?: string) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void; onOpenIncident: (incidentId: number) => void }) {
   const [topTab, setTopTabState] = useState<SystemTopTab>(() => normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
   const [trTab, setTrTabState] = useState<SystemTrTab>(() => {
     const saved = localStorage.getItem("pizzawave-system-tr-tab");
-    return saved === "logs" || saved === "restore" || saved === "config" ? saved : "summary";
+    return saved === "logs" || saved === "config" ? saved : "summary";
   });
-  const [metricsTab, setMetricsTabState] = useState<"overview" | "calls" | "transcription" | "rf" | "incidents" | "ai" | "bandwidth">(() => {
+  const [metricsTab, setMetricsTabState] = useState<"calls" | "transcription" | "rf" | "incidents" | "ai" | "bandwidth">(() => {
     const saved = localStorage.getItem("pizzawave-system-metrics-tab");
-    return (saved === "usage" ? "calls" : saved as any) || "overview";
+    return (["calls", "transcription", "rf", "incidents", "ai", "bandwidth"].includes(saved ?? "") ? saved as any : "calls");
   });
-  const [bySystem, setBySystem] = useState(false);
   const [baseline, setBaseline] = useState("7d");
-  const [insightText, setInsightText] = useState("");
+  const pageIdentity = systemPageIdentity(topTab, trTab, metricsTab);
+  const [rfChartCategory, setRfChartCategory] = useState<RfChartCategory>("all");
+  const [rfPerformanceHours, setRfPerformanceHours] = useState(() => {
+    const saved = Number(localStorage.getItem("pizzawave-system-rf-performance-hours"));
+    return [2, 6, 24, 72, 168].includes(saved) ? saved : 2;
+  });
+  const [callsPerformanceHours, setCallsPerformanceHours] = useState(() => {
+    const saved = Number(localStorage.getItem("pizzawave-system-calls-performance-hours"));
+    return [24, 48, 168].includes(saved) ? saved : 24;
+  });
+  const [transcriptionPerformanceHours, setTranscriptionPerformanceHours] = useState(() => {
+    const saved = Number(localStorage.getItem("pizzawave-system-transcription-performance-hours"));
+    return [24, 48, 168].includes(saved) ? saved : 24;
+  });
+  const [incidentPerformanceHours, setIncidentPerformanceHours] = useState(() => {
+    const saved = Number(localStorage.getItem("pizzawave-system-incident-performance-hours"));
+    return [24, 48, 168].includes(saved) ? saved : 24;
+  });
+  const [aiPerformanceHours, setAiPerformanceHours] = useState(() => {
+    const saved = Number(localStorage.getItem("pizzawave-system-ai-performance-hours"));
+    return [24, 48, 168].includes(saved) ? saved : 24;
+  });
+  const [aiUsagePage, setAiUsagePage] = useState(1);
+  const [bandwidthPerformanceHours, setBandwidthPerformanceHours] = useState(() => {
+    const saved = Number(localStorage.getItem("pizzawave-system-bandwidth-performance-hours"));
+    return [24, 48, 168].includes(saved) ? saved : 24;
+  });
+  const [bandwidthUsagePage, setBandwidthUsagePage] = useState(1);
+  const [serviceResourceHistory, setServiceResourceHistory] = useState<SystemRuntimeResourceSample[]>([]);
   const [restartBusy, setRestartBusy] = useState<"" | "pizzad" | "trunk-recorder" | "qdrant">("");
   const [restartMessages, setRestartMessages] = useState<Record<string, string>>({});
   const [ingestBusy, setIngestBusy] = useState(false);
   const [ingestMessage, setIngestMessage] = useState("");
-  const [recommendationBusy, setRecommendationBusy] = useState(false);
   const [panelRefreshToken, setPanelRefreshToken] = useState(0);
   const observedRefreshSignal = useRef(refreshSignal);
   const setTopTab = (value: typeof topTab) => {
@@ -4467,15 +4757,15 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
     enabled: topTab === "services",
     load: () => api.request<any>("/api/v1/system/runtime")
   });
-  const servicesSummaryResource = usePersistentRefresh({
-    key: `system-services-summary|${rangeHours}`,
-    enabled: topTab === "services",
-    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
-  });
   const cpuResource = usePersistentRefresh({
     key: "system-processor",
-    enabled: topTab === "cpu",
+    enabled: topTab === "services",
     load: () => api.request<SystemCpuSnapshot>("/api/v1/system/cpu")
+  });
+  const liveServiceResource = usePersistentRefresh({
+    key: "system-services-live-resources",
+    enabled: topTab === "services",
+    load: () => api.request<SystemRuntimeResourceSample>("/api/v1/system/resources/live")
   });
   const jobsResource = usePersistentRefresh({
     key: "system-jobs",
@@ -4485,72 +4775,94 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   const storageResource = usePersistentRefresh({
     key: "system-storage",
     enabled: topTab === "storage",
-    load: () => api.request<any>("/api/v1/system/runtime")
+    load: async () => {
+      const [snapshot, jobs] = await Promise.all([
+        api.request<any>("/api/v1/system/storage"),
+        api.request<Job[]>("/api/v1/jobs")
+      ]);
+      return { snapshot, jobs: jobs.filter(job => job.type === "system_storage_maintenance").slice(0, 10) };
+    }
   });
   const receiverSummaryResource = usePersistentRefresh({
-    key: `system-receiver-${trTab}|${rangeHours}`,
-    enabled: topTab === "tr" && (trTab === "summary" || trTab === "logs"),
-    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
+    key: "system-tr-summary|24",
+    enabled: topTab === "tr" && trTab === "summary",
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(24)}&bySystem=false&baseline=7d`)
   });
   const performanceSummaryResource = usePersistentRefresh({
-    key: `system-performance-${metricsTab}|${rangeHours}`,
-    enabled: topTab === "metrics" && (metricsTab === "overview" || metricsTab === "transcription"),
-    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=false&baseline=7d`)
+    key: `system-performance-transcription|${transcriptionPerformanceHours}`,
+    enabled: topTab === "metrics" && metricsTab === "transcription",
+    load: () => api.request<TranscriptionPerformance>(`/api/v1/system/transcription-performance?${rangeQuery(transcriptionPerformanceHours)}`)
   });
   const metricsDataResource = usePersistentRefresh({
-    key: `system-metrics-rf|${rangeHours}|${bySystem}|${baseline}`,
+    key: `system-metrics-rf|${rfPerformanceHours}|${baseline}`,
     enabled: topTab === "metrics" && metricsTab === "rf",
-    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rangeHours)}&bySystem=${bySystem}&baseline=${baseline}`)
+    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rfPerformanceHours)}&bySystem=true&baseline=${baseline}`)
   });
-  const dashboardStatsResource = usePersistentRefresh({
-    key: `system-metrics-dashboard|${rangeHours}`,
-    enabled: topTab === "metrics" && ["overview", "calls", "incidents"].includes(metricsTab),
-    load: () => api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`)
+  const callsDashboardResource = usePersistentRefresh({
+    key: `system-metrics-calls|${callsPerformanceHours}`,
+    enabled: topTab === "metrics" && metricsTab === "calls",
+    load: () => api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(callsPerformanceHours)}`)
   });
-  const incidentAuditResource = usePersistentRefresh({
-    key: `system-metrics-incidents|${rangeHours}`,
+  const incidentDashboardResource = usePersistentRefresh({
+    key: `system-metrics-incidents-dashboard|${incidentPerformanceHours}`,
     enabled: topTab === "metrics" && metricsTab === "incidents",
-    load: () => api.request<IncidentOperationAuditRow[]>(`/api/v1/incidents/audit?hours=${Math.max(1, rangeHours)}&limit=80`)
+    load: () => api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(incidentPerformanceHours)}`)
   });
   const tokenUsageResource = usePersistentRefresh({
-    key: `system-metrics-ai|${rangeHours}`,
+    key: `system-metrics-ai|${aiPerformanceHours}|${aiUsagePage}`,
     enabled: topTab === "metrics" && metricsTab === "ai",
-    load: () => api.request<TokenUsageReport>(`/api/v1/system/token-usage?${rangeQuery(rangeHours)}`)
+    load: () => api.request<TokenUsageReport>(`/api/v1/system/token-usage?${rangeQuery(aiPerformanceHours)}&page=${aiUsagePage}&pageSize=20`)
   });
   const bandwidthUsageResource = usePersistentRefresh({
-    key: `system-metrics-bandwidth|${rangeHours}`,
+    key: `system-metrics-bandwidth|${bandwidthPerformanceHours}|${bandwidthUsagePage}`,
     enabled: topTab === "metrics" && metricsTab === "bandwidth",
-    load: () => api.request<RemoteBandwidthReport>(`/api/v1/system/remote-bandwidth?${rangeQuery(rangeHours)}`)
+    load: () => api.request<RemoteBandwidthReport>(`/api/v1/system/remote-bandwidth?${rangeQuery(bandwidthPerformanceHours)}&page=${bandwidthUsagePage}&pageSize=20`)
   });
 
   const recommendations = recommendationsResource.data;
   const servicesRuntime = servicesRuntimeResource.data;
-  const servicesSummary = servicesSummaryResource.data;
   const cpuSnapshot = cpuResource.data;
   const jobs = jobsResource.data;
   const storageRuntime = storageResource.data;
   const receiverSummary = receiverSummaryResource.data;
   const performanceSummary = performanceSummaryResource.data;
   const metricsData = metricsDataResource.data;
-  const dashboardStats = dashboardStatsResource.data;
-  const incidentAudit = incidentAuditResource.data;
+  const callsDashboard = callsDashboardResource.data;
+  const incidentDashboard = incidentDashboardResource.data;
   const tokenUsage = tokenUsageResource.data;
   const bandwidthUsage = bandwidthUsageResource.data;
   const systemArea = systemAreaForTab(topTab);
+  useEffect(() => {
+    if (topTab !== "services" || !liveServiceResource.data) return;
+    const sample = liveServiceResource.data;
+    onLiveResources?.(sample);
+    setServiceResourceHistory(current => {
+      if (current.at(-1)?.generatedAtUtc === sample.generatedAtUtc) return current;
+      return [...current, sample].slice(-60);
+    });
+  }, [topTab, liveServiceResource.data, onLiveResources]);
+  useEffect(() => {
+    if (topTab !== "services") return;
+    const liveTimer = window.setInterval(() => void liveServiceResource.refresh(), 5000);
+    const stateTimer = window.setInterval(() => void servicesRuntimeResource.refresh(), 15000);
+    return () => {
+      window.clearInterval(liveTimer);
+      window.clearInterval(stateTimer);
+    };
+  }, [topTab, liveServiceResource.refresh, servicesRuntimeResource.refresh]);
   async function refreshVisibleSystemPanel() {
     const refreshes: Promise<unknown>[] = [];
     if (topTab === "recommendations") refreshes.push(recommendationsResource.refresh());
-    if (topTab === "services") refreshes.push(servicesRuntimeResource.refresh(), servicesSummaryResource.refresh());
-    if (topTab === "cpu") refreshes.push(cpuResource.refresh());
+    if (topTab === "services") refreshes.push(servicesRuntimeResource.refresh(), cpuResource.refresh(), liveServiceResource.refresh());
     if (topTab === "jobs") refreshes.push(jobsResource.refresh());
     if (topTab === "storage") refreshes.push(storageResource.refresh());
-    if (topTab === "queue" || topTab === "backup" || (topTab === "tr" && (trTab === "config" || trTab === "restore")))
+    if (topTab === "queue" || topTab === "backup" || topTab === "reset" || topTab === "audit" || (topTab === "tr" && ["config", "logs"].includes(trTab)))
       setPanelRefreshToken(current => current + 1);
-    if (topTab === "tr" && (trTab === "summary" || trTab === "logs")) refreshes.push(receiverSummaryResource.refresh());
-    if (topTab === "metrics" && (metricsTab === "overview" || metricsTab === "transcription")) refreshes.push(performanceSummaryResource.refresh());
+    if (topTab === "tr" && trTab === "summary") refreshes.push(receiverSummaryResource.refresh());
+    if (topTab === "metrics" && metricsTab === "transcription") refreshes.push(performanceSummaryResource.refresh());
     if (topTab === "metrics" && metricsTab === "rf") refreshes.push(metricsDataResource.refresh());
-    if (topTab === "metrics" && ["overview", "calls", "incidents"].includes(metricsTab)) refreshes.push(dashboardStatsResource.refresh());
-    if (topTab === "metrics" && metricsTab === "incidents") refreshes.push(incidentAuditResource.refresh());
+    if (topTab === "metrics" && metricsTab === "calls") refreshes.push(callsDashboardResource.refresh());
+    if (topTab === "metrics" && metricsTab === "incidents") { refreshes.push(incidentDashboardResource.refresh()); setPanelRefreshToken(current => current + 1); }
     if (topTab === "metrics" && metricsTab === "ai") refreshes.push(tokenUsageResource.refresh());
     if (topTab === "metrics" && metricsTab === "bandwidth") refreshes.push(bandwidthUsageResource.refresh());
     await Promise.all(refreshes);
@@ -4562,7 +4874,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
     try {
       const job = await api.request<Job>(`/api/v1/system/services/${service}/restart`, { method: "POST" });
       setRestartMessages(current => ({ ...current, [service]: `Restart queued as job ${job.id}.` }));
-      setTimeout(() => void Promise.all([servicesRuntimeResource.refresh(), servicesSummaryResource.refresh(), refreshSharedStatus()]), service === "pizzad" ? 6000 : 1500);
+      setTimeout(() => void Promise.all([servicesRuntimeResource.refresh(), liveServiceResource.refresh(), refreshSharedStatus()]), service === "pizzad" ? 6000 : 1500);
     } catch (error) {
       setRestartMessages(current => ({ ...current, [service]: error instanceof Error ? error.message : "Restart failed." }));
     } finally {
@@ -4576,7 +4888,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
     try {
       const job = await api.request<Job>("/api/v1/system/services/trunk-recorder/stop", { method: "POST" });
       setRestartMessages(current => ({ ...current, "trunk-recorder": `Stop queued as job ${job.id}.` }));
-      setTimeout(() => void Promise.all([servicesRuntimeResource.refresh(), servicesSummaryResource.refresh(), refreshSharedStatus()]), 1500);
+      setTimeout(() => void Promise.all([servicesRuntimeResource.refresh(), liveServiceResource.refresh(), refreshSharedStatus()]), 1500);
     } catch (error) {
       setRestartMessages(current => ({ ...current, "trunk-recorder": error instanceof Error ? error.message : "Stop failed." }));
     } finally {
@@ -4605,13 +4917,26 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
       setIngestBusy(false);
     }
   }
-  function openRecommendationTarget(target: { topTab: string; subTab: string }) {
+  function openRecommendationTarget(item: SystemRecommendations["items"][number]) {
+    const target = item.target;
+    const candidates = item.candidates;
+    void api.request(`/api/v1/system/recommendations/${encodeURIComponent(item.id)}/reviewed`, { method: "POST" }).catch(() => undefined);
     if (target.topTab === "recommendations") setTopTab("recommendations");
+    if (target.topTab === "runtime") {
+      if (target.subTab === "jobs") {
+        if (target.anchor === "transcription-recovery-tools") localStorage.setItem("pizzawave-system-open-recovery-tools", "1");
+        setTopTab("jobs");
+      } else if (target.subTab === "queue") setTopTab("queue");
+      else setTopTab("services");
+    }
     if (target.topTab === "setup") {
+      if (target.subTab === "talkgroups" && candidates.length > 0) {
+        localStorage.setItem("pizzawave-setup-talkgroup-candidates", JSON.stringify(candidates.map(row => ({ systemShortName: row.systemShortName, id: row.talkgroup }))));
+      }
       onOpenSetup?.(target.subTab === "talkgroups" ? "Talkgroups" : target.subTab);
       return;
     }
-    if (target.topTab === "cpu") setTopTab("cpu");
+    if (target.topTab === "cpu") setTopTab("services");
     if (target.topTab === "pizzad") {
       if (target.subTab === "storage") setTopTab("storage");
       else if (target.subTab === "jobs") setTopTab("queue");
@@ -4619,55 +4944,13 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
       else setTopTab("services");
     }
     if (target.topTab === "tr") {
-      if (target.subTab === "metrics" || target.subTab === "rf") { setTopTab("metrics"); setMetricsTab("rf"); }
+      if (target.subTab === "metrics" || target.subTab === "rf") { setRfPerformanceHours(2); localStorage.setItem("pizzawave-system-rf-performance-hours", "2"); setRfChartCategory("all"); setTopTab("metrics"); setMetricsTab("rf"); }
       else { setTopTab("tr"); setTrTab(target.subTab === "logs" ? "logs" : "summary"); }
     }
     if (target.topTab === "qdrant") setTopTab("services");
     if (target.topTab === "stats") { setTopTab("metrics"); setMetricsTab("calls"); }
     if (target.topTab === "tokens") { setTopTab("metrics"); setMetricsTab("ai"); }
     if (target.topTab === "bandwidth") { setTopTab("metrics"); setMetricsTab("bandwidth"); }
-  }
-  async function setRecommendationState(id: string, action: "ignore" | "restore" | "reset-baseline") {
-    setRecommendationBusy(true);
-    try {
-      recommendationsResource.setData(await api.request<SystemRecommendations>(`/api/v1/system/recommendations/${encodeURIComponent(id)}/state`, {
-        method: "POST",
-        body: JSON.stringify({ action })
-      }));
-    } finally {
-      setRecommendationBusy(false);
-    }
-  }
-  async function excludeTalkgroupsFromTr(targets: { systemShortName?: string | null; talkgroup: number }[]) {
-    const normalizedTargets = targets
-      .map(target => ({ systemShortName: normalizeTalkgroupSystem(target.systemShortName || ""), talkgroup: Number(target.talkgroup) }))
-      .filter(target => Number.isFinite(target.talkgroup) && target.talkgroup > 0);
-    if (normalizedTargets.length === 0) return;
-    const targetLabel = normalizedTargets.length === 1 ? `TG ${normalizedTargets[0].talkgroup}` : `${normalizedTargets.length} noisy talkgroup candidates`;
-    if (!confirmAction(`Exclude ${targetLabel} from TR?`, "This disables matching talkgroup catalog rows and regenerates TR CSV files. Trunk Recorder must reload the generated CSV before live capture policy changes.")) return;
-
-    setRecommendationBusy(true);
-    setInsightText("");
-    try {
-      const result = await api.request<{ updated: number; message?: string; save?: { generatedCsvPath?: string } }>("/api/v1/talkgroups/catalog/policy", {
-        method: "POST",
-        body: JSON.stringify({
-          targets: normalizedTargets,
-          enabled: false
-        })
-      });
-      if (!result.updated) {
-        setInsightText(result.message || "No matching enabled talkgroup catalog rows were found for those noise candidates.");
-        return;
-      }
-      const path = result.save?.generatedCsvPath ? ` (${result.save.generatedCsvPath})` : "";
-      setInsightText(`${result.updated.toLocaleString()} talkgroup catalog row(s) excluded from generated TR CSVs${path}. Apply/restart TR for capture policy to consume the change.`);
-      recommendationsResource.setData(await api.request<SystemRecommendations>("/api/v1/system/recommendations"));
-    } catch (error) {
-      setInsightText(error instanceof Error ? error.message : "Unable to exclude talkgroup candidates.");
-    } finally {
-      setRecommendationBusy(false);
-    }
   }
   useEffect(() => {
     if (observedRefreshSignal.current === refreshSignal) return;
@@ -4679,52 +4962,55 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
     setTopTab(rememberedSystemAreaTab(area));
   }
 
+  function openRfPerformance(category: RfChartCategory) {
+    setRfChartCategory(category);
+    setTopTab("metrics");
+    setMetricsTab("rf");
+  }
+
   return (
-    <div className="trouble-page">
+    <div className="trouble-page system-view">
       <div className="trouble-tabs">
-        <button className={systemArea === "health" ? "active" : ""} onClick={() => selectSystemArea("health")}>Health{recommendations && recommendations.openCount > 0 ? ` (${recommendations.openCount})` : ""}</button>
-        <button className={systemArea === "processing" ? "active" : ""} onClick={() => selectSystemArea("processing")}>Processing</button>
+        <button className={systemArea === "recommendations" ? "active" : ""} onClick={() => selectSystemArea("recommendations")}>Recommendations{recommendations && recommendations.openCount > 0 ? ` (${recommendations.openCount})` : ""}</button>
+        <button className={systemArea === "runtime" ? "active" : ""} onClick={() => selectSystemArea("runtime")}>Runtime</button>
         <button className={systemArea === "data" ? "active" : ""} onClick={() => selectSystemArea("data")}>Data</button>
-        <button className={systemArea === "receiver" ? "active" : ""} onClick={() => selectSystemArea("receiver")}>Receiver</button>
+        <button className={systemArea === "trunk-recorder" ? "active" : ""} onClick={() => selectSystemArea("trunk-recorder")}>Trunk Recorder</button>
         <button className={systemArea === "performance" ? "active" : ""} onClick={() => selectSystemArea("performance")}>Performance</button>
-        <button onClick={() => void refreshVisibleSystemPanel()}>Refresh {visibleSystemPageLabel(topTab, trTab, metricsTab)}</button>
       </div>
-      {systemArea === "processing" && <div className="trouble-tabs nested">
+      {systemArea === "runtime" && <div className="trouble-tabs nested">
         <button className={topTab === "services" ? "active" : ""} onClick={() => setTopTab("services")}>Services</button>
-        <button className={topTab === "cpu" ? "active" : ""} onClick={() => setTopTab("cpu")}>Processor</button>
         <button className={topTab === "queue" ? "active" : ""} onClick={() => setTopTab("queue")}>Queue</button>
         <button className={topTab === "jobs" ? "active" : ""} onClick={() => setTopTab("jobs")}>Jobs</button>
       </div>}
       {systemArea === "data" && <div className="trouble-tabs nested">
         <button className={topTab === "storage" ? "active" : ""} onClick={() => setTopTab("storage")}>Storage</button>
         <button className={topTab === "backup" ? "active" : ""} onClick={() => setTopTab("backup")}>Backup and Restore</button>
+        <button className={topTab === "reset" ? "active" : ""} onClick={() => setTopTab("reset")}>Reset</button>
+        <button className={topTab === "audit" ? "active" : ""} onClick={() => setTopTab("audit")}>Audit History</button>
       </div>}
-      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="system health" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} busy={recommendationBusy || ingestBusy} message={insightText} onOpen={openRecommendationTarget} onState={setRecommendationState} onExcludeTalkgroups={excludeTalkgroupsFromTr} onAction={async action => {
-        if (action.kind === "pause-ingest") await setIngestPaused(true, false);
-        if (action.kind === "exclude-talkgroups-from-tr") await excludeTalkgroupsFromTr((action.talkgroups ?? []).map(talkgroup => ({ talkgroup })));
-      }} /></div>}
-      {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={servicesRuntimeResource.state} hasData={Boolean(servicesRuntime)} onRetry={servicesRuntimeResource.refresh} /><PanelLoadState label="receiver health summary" state={servicesSummaryResource.state} hasData={Boolean(servicesSummary)} onRetry={servicesSummaryResource.refresh} />{servicesRuntime && <ServicesManager runtime={servicesRuntime} data={servicesSummary} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} />}</div>}
-      {topTab === "cpu" && <div className="trouble-panel"><PanelLoadState label="processor status" state={cpuResource.state} hasData={Boolean(cpuSnapshot)} onRetry={cpuResource.refresh} />{cpuSnapshot && <CpuPanel snapshot={cpuSnapshot} />}</div>}
+      {topTab !== "tr" && topTab !== "metrics" && <SystemPageIdentity {...pageIdentity} />}
+      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="recommendations" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} onOpen={openRecommendationTarget} /></div>}
+      {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={servicesRuntimeResource.state} hasData={Boolean(servicesRuntime)} onRetry={servicesRuntimeResource.refresh} /><PanelLoadState label="resource status" state={cpuResource.state} hasData={Boolean(cpuSnapshot)} onRetry={cpuResource.refresh} /><PanelLoadState label="live service resources" state={liveServiceResource.state} hasData={serviceResourceHistory.length > 0} onRetry={liveServiceResource.refresh} />{servicesRuntime && <ServicesManager runtime={servicesRuntime} snapshot={cpuSnapshot} history={serviceResourceHistory} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} />}</div>}
       {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} refreshToken={panelRefreshToken} />}
       {topTab === "jobs" && <div className="trouble-panel"><PanelLoadState label="jobs" state={jobsResource.state} hasData={Boolean(jobs)} onRetry={jobsResource.refresh} />{jobs && <JobsPanel jobs={jobs} reload={async () => { await jobsResource.refresh(); }} />}</div>}
-      {topTab === "storage" && <div className="trouble-panel"><PanelLoadState label="storage status" state={storageResource.state} hasData={Boolean(storageRuntime)} onRetry={storageResource.refresh} />{storageRuntime && <PizzadStorageManager runtime={storageRuntime} reload={async () => { await storageResource.refresh(); }} />}</div>}
+      {topTab === "storage" && <div className="trouble-panel"><PanelLoadState label="storage status" state={storageResource.state} hasData={Boolean(storageRuntime)} onRetry={storageResource.refresh} />{storageRuntime && <PizzadStorageManager snapshot={storageRuntime.snapshot} maintenanceJobs={storageRuntime.jobs} />}</div>}
       {topTab === "backup" && <div className="trouble-panel"><BackupRestorePanel reload={async () => { await refreshSharedStatus(); }} refreshToken={panelRefreshToken} /></div>}
+      {topTab === "reset" && <div className="trouble-panel"><SystemResetPanel reload={async () => { await refreshSharedStatus(); }} /></div>}
+      {topTab === "audit" && <div className="trouble-panel"><AuditHistoryPanel refreshToken={panelRefreshToken} onOpenJobs={() => setTopTab("jobs")} /></div>}
       {topTab === "tr" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
           <button className={trTab === "summary" ? "active" : ""} onClick={() => setTrTab("summary")}>Summary</button>
-          <button className={trTab === "config" ? "active" : ""} onClick={() => setTrTab("config")}>Active Config</button>
-          <button className={trTab === "restore" ? "active" : ""} onClick={() => setTrTab("restore")}>Restore Config</button>
+          <button className={trTab === "config" ? "active" : ""} onClick={() => setTrTab("config")}>Config</button>
           <button className={trTab === "logs" ? "active" : ""} onClick={() => setTrTab("logs")}>Logs</button>
         </div>
-        {(trTab === "summary" || trTab === "logs") && <PanelLoadState label={trTab === "logs" ? "receiver logs" : "receiver summary"} state={receiverSummaryResource.state} hasData={Boolean(receiverSummary)} onRetry={receiverSummaryResource.refresh} />}
-        {trTab === "summary" && receiverSummary && <TrHealthSummaryView data={receiverSummary} />}
-        {trTab === "config" && <TrConfigReadOnlyPanel onOpenSetup={onOpenSetup} refreshToken={panelRefreshToken} />}
-        {trTab === "restore" && <TrConfigRestorePanel refreshToken={panelRefreshToken} />}
-        {trTab === "logs" && receiverSummary && <pre className="log-box">{receiverSummary.logOutput}</pre>}
+        <SystemPageIdentity {...pageIdentity} />
+        {trTab === "summary" && <PanelLoadState label="Trunk Recorder summary" state={receiverSummaryResource.state} hasData={Boolean(receiverSummary)} onRetry={receiverSummaryResource.refresh} />}
+        {trTab === "summary" && receiverSummary && <TrConfigurationSummaryView data={receiverSummary} onOpenSetup={onOpenSetup} />}
+        {trTab === "config" && <TrConfigViewerPanel onOpenSetup={onOpenSetup} refreshToken={panelRefreshToken} />}
+        {trTab === "logs" && <TrLogsPanel refreshToken={panelRefreshToken} />}
       </div>}
       {topTab === "metrics" && <div className="trouble-panel">
         <div className="trouble-tabs nested">
-          <button className={metricsTab === "overview" ? "active" : ""} onClick={() => setMetricsTab("overview")}>Overview</button>
           <button className={metricsTab === "calls" ? "active" : ""} onClick={() => setMetricsTab("calls")}>Calls</button>
           <button className={metricsTab === "transcription" ? "active" : ""} onClick={() => setMetricsTab("transcription")}>Transcription</button>
           <button className={metricsTab === "rf" ? "active" : ""} onClick={() => setMetricsTab("rf")}>Radio Frequency</button>
@@ -4732,76 +5018,220 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
           <button className={metricsTab === "ai" ? "active" : ""} onClick={() => setMetricsTab("ai")}>AI Usage</button>
           <button className={metricsTab === "bandwidth" ? "active" : ""} onClick={() => setMetricsTab("bandwidth")}>Bandwidth</button>
         </div>
-        {metricsTab === "overview" && <><PanelLoadState label="performance summary" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} /><PanelLoadState label="call and incident metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} />{performanceSummary && dashboardStats && <MetricsOverviewPanel data={performanceSummary} dashboard={dashboardStats} engineHealth={engineHealth} tokenUsage={tokenUsage} bandwidthUsage={bandwidthUsage} navigate={(top, sub) => { setTopTab(top); if (top === "metrics" && sub) setMetricsTab(sub as any); }} />}</>}
-        {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><DashboardStatisticsPanel data={dashboardStats} /></>}
-        {metricsTab === "transcription" && <><PanelLoadState label="transcription performance" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} />{performanceSummary && <QualityAuditView data={performanceSummary} rangeHours={rangeHours} />}</>}
-        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rangeHours} bySystem={bySystem} baseline={baseline} setBySystem={setBySystem} setBaseline={setBaseline} />}</>}
-        {metricsTab === "incidents" && <><PanelLoadState label="incident metrics" state={dashboardStatsResource.state} hasData={Boolean(dashboardStats)} onRetry={dashboardStatsResource.refresh} /><PanelLoadState label="incident audit" state={incidentAuditResource.state} hasData={Boolean(incidentAudit)} onRetry={incidentAuditResource.refresh} /><IncidentMetricsPanel dashboard={dashboardStats} audit={incidentAudit} /></>}
-        {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} /></>}
-        {metricsTab === "bandwidth" && <><PanelLoadState label="remote bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} /></>}
+        <SystemPageIdentity {...pageIdentity} />
+        {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={callsDashboardResource.state} hasData={Boolean(callsDashboard)} onRetry={callsDashboardResource.refresh} /><DashboardStatisticsPanel data={callsDashboard} rangeHours={callsPerformanceHours} onRangeHoursChange={hours => { setCallsPerformanceHours(hours); localStorage.setItem("pizzawave-system-calls-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} /></>}
+        {metricsTab === "transcription" && <><PanelLoadState label="transcription performance" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} />{performanceSummary && <TranscriptionPerformancePanel data={performanceSummary} rangeHours={transcriptionPerformanceHours} onRangeHoursChange={hours => { setTranscriptionPerformanceHours(hours); localStorage.setItem("pizzawave-system-transcription-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} onExcludeTalkgroup={row => { localStorage.setItem("pizzawave-setup-talkgroup-candidates", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); localStorage.setItem("pizzawave-setup-talkgroup-exclusion-targets", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); onOpenSetup?.("Talkgroups"); }} />}</>}
+        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} onOpenSetup={onOpenSetup} />}</>}
+        {metricsTab === "incidents" && <><PanelLoadState label="incident output" state={incidentDashboardResource.state} hasData={Boolean(incidentDashboard)} onRetry={incidentDashboardResource.refresh} /><IncidentMetricsPanel dashboard={incidentDashboard} rangeHours={incidentPerformanceHours} refreshToken={panelRefreshToken} onRangeHoursChange={hours => { setIncidentPerformanceHours(hours); localStorage.setItem("pizzawave-system-incident-performance-hours", String(hours)); }} /></>}
+        {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} rangeHours={aiPerformanceHours} onRangeHoursChange={hours => { setAiUsagePage(1); setAiPerformanceHours(hours); localStorage.setItem("pizzawave-system-ai-performance-hours", String(hours)); }} onPageChange={setAiUsagePage} /></>}
+        {metricsTab === "bandwidth" && <><PanelLoadState label="PizzaWave bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} rangeHours={bandwidthPerformanceHours} onRangeHoursChange={hours => { setBandwidthUsagePage(1); setBandwidthPerformanceHours(hours); localStorage.setItem("pizzawave-system-bandwidth-performance-hours", String(hours)); }} onPageChange={setBandwidthUsagePage} /></>}
       </div>}
     </div>
   );
 }
 
-function TrConfigReadOnlyPanel({ onOpenSetup, refreshToken }: { onOpenSetup?: () => void; refreshToken: number }) {
-  const editorResource = usePersistentRefresh({
-    key: `system-tr-config|${refreshToken}`,
+function TrConfigViewerPanel({ onOpenSetup, refreshToken }: { onOpenSetup?: (section?: string) => void; refreshToken: number }) {
+  const [artifactId, setArtifactId] = useState("");
+  const [artifactKind, setArtifactKind] = useState("active");
+  const [artifactSearch, setArtifactSearch] = useState("");
+  const [copied, setCopied] = useState(false);
+  const viewerResource = usePersistentRefresh({
+    key: `system-tr-config-viewer|${refreshToken}|${artifactId}`,
     enabled: true,
-    load: () => api.request<TrConfigEditor>("/api/v1/system/tr-config/editor")
+    load: () => api.request<TrConfigViewer>(`/api/v1/system/tr-config/viewer${artifactId ? `?artifactId=${encodeURIComponent(artifactId)}` : ""}`)
   });
-  const editor = editorResource.data;
+  const viewer = viewerResource.data;
+  const selected = viewer?.selected;
+  const groups = [
+    { kind: "active", label: "Active" },
+    { kind: "draft", label: "Drafts" },
+    { kind: "backup", label: "Safety backups" },
+    { kind: "experiment", label: "Experiments" }
+  ];
+  const comparison = viewer && selected && !selected.artifact.isActive
+    ? summarizeTrConfigDiff(viewer.activeConfigJson, selected.configJson)
+    : [];
+  const kindArtifacts = viewer?.artifacts.filter(row => row.kind === artifactKind) ?? [];
+  const normalizedSearch = artifactSearch.trim().toLowerCase();
+  const visibleArtifacts = normalizedSearch
+    ? kindArtifacts.filter(row => `${row.name} ${row.path} ${row.workflow} ${row.reason} ${row.relatedActivity}`.toLowerCase().includes(normalizedSearch))
+    : kindArtifacts;
 
-  const liveConfig = editor?.liveConfigJson ?? "";
+  function selectArtifactKind(kind: string) {
+    setArtifactKind(kind);
+    setArtifactSearch("");
+    const first = viewer?.artifacts.find(row => row.kind === kind);
+    if (first) setArtifactId(first.id);
+  }
 
-  if (!editor) return <PanelLoadState label="active Trunk Recorder configuration" state={editorResource.state} hasData={false} onRetry={editorResource.refresh} />;
-  return <div className="tr-config-readonly">
-    <PanelLoadState label="active Trunk Recorder configuration" state={editorResource.state} hasData={true} onRetry={editorResource.refresh} />
-    <div className="setup-job-head">
-      <div>
-        <h3>Active TR Config</h3>
-        <p className="muted">Read-only view of the config currently installed at {editor?.livePath || "--"}.</p>
-        {editor?.hasDraft && <p className="settings-message">A standalone editor draft exists at {editor.draftPath}, but this page is showing the live TR config.</p>}
-      </div>
-      {onOpenSetup && <button className="danger-button" onClick={onOpenSetup}>Open Setup</button>}
-    </div>
-    <div className="setup-note">Use Setup for site changes, source planning, RF validation, and applying monitored TR configuration changes.</div>
-    {editor && <div className="setup-review">
-      <div><span>Systems</span><code>{editor.summary.systems.length.toLocaleString()}</code></div>
-      <div><span>Sources</span><code>{editor.summary.sources.length.toLocaleString()}</code></div>
-      <div><span>Warnings</span><code>{editor.summary.warnings.length.toLocaleString()}</code></div>
-      <div><span>Live path</span><code>{editor.livePath || "--"}</code></div>
-    </div>}
-    {editor?.summary.warnings.length ? <div className="setup-warning-list">{editor.summary.warnings.map(warning => <div key={warning}>{warning}</div>)}</div> : null}
-    <div className="tr-config-raw readonly">
-      <div className="card">
-        <h3>Full JSON</h3>
-        <textarea readOnly value={liveConfig} spellCheck={false} />
-      </div>
-    </div>
+  async function copyConfig() {
+    if (!selected?.configJson) return;
+    try {
+      await navigator.clipboard.writeText(selected.configJson);
+    } catch {
+      const field = document.createElement("textarea");
+      field.value = selected.configJson;
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand("copy");
+      field.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  if (!viewer) return <PanelLoadState label="Trunk Recorder configuration viewer" state={viewerResource.state} hasData={false} onRetry={viewerResource.refresh} />;
+  return <div className="tr-config-viewer">
+    <PanelLoadState label="Trunk Recorder configuration viewer" state={viewerResource.state} hasData={true} onRetry={viewerResource.refresh} />
+    <SystemPageHeaderControls><div className="config-viewer-controls header-controls">
+      <label>Config class
+        <select aria-label="Config class" value={artifactKind} onChange={event => selectArtifactKind(event.target.value)}>
+          {groups.map(group => <option key={group.kind} value={group.kind} disabled={!viewer.artifacts.some(row => row.kind === group.kind)}>{group.label} ({viewer.artifacts.filter(row => row.kind === group.kind).length.toLocaleString()})</option>)}
+        </select>
+      </label>
+      <label className="config-viewer-search">Find within {groups.find(group => group.kind === artifactKind)?.label.toLowerCase() || "artifacts"}
+        <input type="search" value={artifactSearch} onChange={event => setArtifactSearch(event.target.value)} placeholder="Name, workflow, activity, or path" disabled={kindArtifacts.length <= 1} />
+      </label>
+      <label className="config-viewer-selector">Select a config
+        <select aria-label="Select a config" value={viewer.selectedArtifactId} onChange={event => setArtifactId(event.target.value)}>
+          {!visibleArtifacts.some(row => row.id === viewer.selectedArtifactId) && selected && <option value={selected.artifact.id}>Current selection · {selected.artifact.name}</option>}
+          {visibleArtifacts.map(row => {
+            const artifactFile = row.path.split(/[\\/]/).filter(Boolean).at(-1) || "";
+            return <option key={row.id} value={row.id}>{row.name}{row.relatedActivity ? ` · ${row.relatedActivity}` : ""}{row.kind === "experiment" && artifactFile ? ` · ${artifactFile}` : ""} · {new Date(row.createdAtUtc).toLocaleString()}</option>;
+          })}
+        </select>
+      </label>
+      <button disabled={!selected?.configJson} onClick={() => void copyConfig()}>{copied ? "Copied" : "Copy Config"}</button>
+      {onOpenSetup && <button onClick={() => onOpenSetup("Systems & Sites")}>Open Setup</button>}
+    </div></SystemPageHeaderControls>
+
+    {selected && <>
+      <section className="card config-viewer-metadata system-content-section">
+        <SystemSectionHeader title={selected.artifact.name} description={selected.artifact.reason} meta={<span className={`section-status ${selected.artifact.kind === "active" ? "ok" : selected.artifact.kind === "backup" ? "info" : "warning"}`}>{selected.artifact.state}</span>} />
+        <div className="config-viewer-facts">
+          <div><span>File date</span><strong>{new Date(selected.artifact.createdAtUtc).toLocaleString()}</strong></div>
+          <div><span>Workflow</span><strong>{selected.artifact.workflow}</strong></div>
+          <div><span>Related activity</span><strong>{selected.artifact.relatedActivity || (selected.artifact.hasRecordedOrigin ? "Not applicable" : "Origin unavailable")}</strong></div>
+          <div><span>File</span><code title={selected.artifact.path}>{selected.artifact.path}</code></div>
+        </div>
+        <div className="config-viewer-summary"><span>{selected.summary.systems.length.toLocaleString()} systems</span><span>{selected.summary.sources.length.toLocaleString()} sources</span><span>{formatBytes(selected.artifact.bytes)}</span><span className={selected.parseOk ? "ok-text" : "error-text"}>{selected.parseOk ? "Valid JSON" : selected.parseMessage}</span></div>
+      </section>
+      {selected.summary.warnings.length ? <div className="setup-warning-list">{selected.summary.warnings.map(warning => <div key={warning}>{warning}</div>)}</div> : null}
+      {comparison.length > 0 && <section className="card config-viewer-comparison system-content-section"><SystemSectionHeader title="Changes from active" /><pre>{comparison.join("\n")}</pre></section>}
+      <section className="card config-viewer-json system-content-section"><SystemSectionHeader title="Configuration JSON" meta={<span>Read only</span>} /><pre>{selected.configJson || "No configuration content was returned."}</pre></section>
+    </>}
   </div>;
 }
 
-function MetricsOverviewPanel({ data, dashboard, engineHealth, tokenUsage, bandwidthUsage, navigate }: { data: TrTroubleshoot; dashboard: Dashboard | null; engineHealth: EngineHealth | null; tokenUsage: TokenUsageReport | null; bandwidthUsage: RemoteBandwidthReport | null; navigate: (top: SystemTopTab, sub?: string) => void }) {
+function TrLogsPanel({ refreshToken }: { refreshToken: number }) {
+  const initialEnd = Math.floor(Date.now() / 1000);
+  const [preset, setPreset] = useState("1");
+  const [range, setRange] = useState({ start: initialEnd - 3600, end: initialEnd });
+  const [customStart, setCustomStart] = useState(() => trLogDateTimeLocal(initialEnd - 3600));
+  const [customEnd, setCustomEnd] = useState(() => trLogDateTimeLocal(initialEnd));
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+  const observedRefresh = useRef(refreshToken);
+  const cursor = cursorStack.at(-1) ?? "";
+  const logsResource = usePersistentRefresh({
+    key: `system-tr-logs|${refreshToken}|${range.start}|${range.end}|${cursor}`,
+    enabled: true,
+    load: () => {
+      const query = new URLSearchParams({ start: String(range.start), end: String(range.end), pageSize: "250" });
+      if (cursor) query.set("cursor", cursor);
+      return api.request<TrLogPage>(`/api/v1/system/tr-logs?${query.toString()}`);
+    }
+  });
+  const page = logsResource.data;
+  const visibleText = (page?.entries ?? []).map(trLogDisplayLine).join("\n");
+
+  useEffect(() => {
+    if (observedRefresh.current === refreshToken) return;
+    observedRefresh.current = refreshToken;
+    setCursorStack([]);
+    if (preset !== "custom") {
+      const end = Math.floor(Date.now() / 1000);
+      setRange({ start: end - Number(preset) * 3600, end });
+    }
+  }, [refreshToken]);
+
+  function changePreset(value: string) {
+    setPreset(value);
+    setCursorStack([]);
+    if (value === "custom") return;
+    const end = Math.floor(Date.now() / 1000);
+    const next = { start: end - Number(value) * 3600, end };
+    setRange(next);
+    setCustomStart(trLogDateTimeLocal(next.start));
+    setCustomEnd(trLogDateTimeLocal(next.end));
+  }
+
+  function applyCustomRange() {
+    const start = Math.floor(new Date(customStart).getTime() / 1000);
+    const end = Math.floor(new Date(customEnd).getTime() / 1000);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+    setCursorStack([]);
+    setRange({ start, end });
+  }
+
+  async function copyVisibleLogs() {
+    if (!visibleText) return;
+    try {
+      await navigator.clipboard.writeText(visibleText);
+    } catch {
+      const field = document.createElement("textarea");
+      field.value = visibleText;
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand("copy");
+      field.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  return <div className="tr-log-viewer">
+    <PanelLoadState label="Trunk Recorder logs" state={logsResource.state} hasData={Boolean(page)} onRetry={logsResource.refresh} />
+    <SystemPageHeaderControls><div className="tr-log-toolbar header-controls">
+      <div className="tr-log-controls">
+        <label>Range<select aria-label="Log range" value={preset} onChange={event => changePreset(event.target.value)}><option value="1">Last hour</option><option value="6">Last 6 hours</option><option value="24">Last 24 hours</option><option value="custom">Custom</option></select></label>
+        {preset === "custom" && <><label>Start<input aria-label="Log start" type="datetime-local" value={customStart} onChange={event => setCustomStart(event.target.value)} /></label><label>End<input aria-label="Log end" type="datetime-local" value={customEnd} onChange={event => setCustomEnd(event.target.value)} /></label><button onClick={applyCustomRange}>Apply</button></>}
+      </div>
+      <div className="tr-log-actions"><span>Page {cursorStack.length + 1} · {(page?.entries.length ?? 0).toLocaleString()} lines</span><button disabled={!visibleText} onClick={() => void copyVisibleLogs()}>{copied ? "Copied" : "Copy"}</button><button disabled={cursorStack.length === 0 || logsResource.state.loading} onClick={() => setCursorStack(current => current.slice(0, -1))}>Newer</button><button disabled={!page?.hasOlder || !page.olderCursor || logsResource.state.loading} onClick={() => page?.olderCursor && setCursorStack(current => [...current, page.olderCursor])}>Older</button></div>
+    </div></SystemPageHeaderControls>
+    {page?.error && <p className="settings-message error">{page.error}</p>}
+    {page && page.entries.length > 0 ? <pre className="log-box tr-log-output">{visibleText}</pre> : !logsResource.state.loading && <p className="muted">No Trunk Recorder log lines were returned for this range.</p>}
+  </div>;
+}
+
+function trLogDateTimeLocal(unixSeconds: number) {
+  const date = new Date(unixSeconds * 1000);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function trLogDisplayLine(entry: TrLogPage["entries"][number]) {
+  const timestamp = new Date(entry.timestampUtc).toLocaleString();
+  const process = entry.identifier ? `${entry.identifier}${entry.processId ? `[${entry.processId}]` : ""}:` : "";
+  return [timestamp, entry.host, process, entry.message].filter(Boolean).join(" ");
+}
+
+function MetricsOverviewPanel({ data, dashboard, engineHealth, navigate }: { data: TrTroubleshoot; dashboard: Dashboard | null; engineHealth: EngineHealth | null; navigate: (top: SystemTopTab, sub?: string) => void }) {
   const audit = data.qualityAudit;
   const rfIssues = data.health.metrics.filter(row => row.isIssue).length + data.health.systems.filter(row => row.isIssue).length;
   const queueDepth = engineHealth?.queueDepth ?? 0;
   const queueState = engineHealth?.ingest?.paused ? "Paused" : queueDepth <= 0 ? "OK" : engineHealth?.queueUnderPressure ? "Pressure" : "Draining";
   const incidentCount = dashboard?.incidents.length ?? 0;
-  const aiFailures = tokenUsage?.summary.failures ?? 0;
-  const aiOtherFailures = tokenUsage?.summary.httpOrOtherErrors ?? 0;
-  const aiTimeoutFailures = tokenUsage?.summary.timeoutFailures ?? 0;
-  const aiNoValidFailures = tokenUsage?.summary.noValidResultFailures ?? 0;
-  const aiServiceFailures = aiOtherFailures + aiTimeoutFailures + aiNoValidFailures;
-  const aiTruncated = tokenUsage?.summary.truncated ?? 0;
   return <div className="metrics-overview">
     <div className="audit-kpis">
       <Kpi label="Live Queue" value={queueState} status={queueState === "OK" ? "ok" : queueState === "Pressure" || queueState === "Paused" ? "error" : "warning"} subtext={`${queueDepth.toLocaleString()} queued, ${formatDurationMinutes((engineHealth?.pendingAudioSeconds ?? 0) / 60)} pending audio`} onClick={() => navigate("queue")} />
       <Kpi label="Transcript Quality" value={`${audit.problemPercent.toFixed(1)}% problem`} status={audit.problemPercent > 25 ? "error" : audit.problemPercent > 10 ? "warning" : "ok"} subtext={`${audit.problemCalls.toLocaleString()} of ${audit.totalCalls.toLocaleString()} calls flagged`} onClick={() => navigate("metrics", "transcription")} />
       <Kpi label="RF Health" value={rfIssues > 0 ? "Watch" : "OK"} status={rfIssues > 0 ? "warning" : "ok"} subtext={`${rfIssues.toLocaleString()} health issue row(s)`} onClick={() => navigate("metrics", "rf")} />
       <Kpi label="Incidents" value={incidentCount.toLocaleString()} subtext="incident volume in selected range" onClick={() => navigate("metrics", "incidents")} />
-      <Kpi label="AI" value={aiFailures > 0 ? aiServiceFailures > 0 ? "Errors" : "Truncated" : tokenUsage ? "OK" : "Open"} status={aiServiceFailures > 0 ? "error" : aiTruncated > 0 ? "warning" : tokenUsage ? "ok" : "neutral"} subtext={tokenUsage ? `${aiTimeoutFailures.toLocaleString()} timeout, ${aiNoValidFailures.toLocaleString()} no result, ${aiTruncated.toLocaleString()} truncated, ${formatCompact(tokenUsage.summary.totalTokens)} tokens` : "Open AI metrics for usage details"} onClick={() => navigate("metrics", "ai")} />
-      <Kpi label="Bandwidth" value={bandwidthUsage ? formatBytes(bandwidthUsage.summary.totalBytes) : "Open"} status={bandwidthUsage?.summary.missingAudioFiles ? "warning" : bandwidthUsage ? "ok" : "neutral"} subtext={bandwidthUsage ? `${bandwidthUsage.remoteHost || "no remote host"} - ${bandwidthUsage.summary.requests.toLocaleString()} estimated request(s)` : "Open bandwidth metrics for the slow report"} onClick={() => navigate("metrics", "bandwidth")} />
     </div>
   </div>;
 }
@@ -7903,7 +8333,7 @@ function drawReportImage(ctx: CanvasRenderingContext2D, title: string, source: H
   ctx.font = "700 18px Segoe UI, Arial, sans-serif";
   ctx.fillText(title, x, y + 18);
   y += 28;
-  ctx.fillStyle = "#00356f";
+  ctx.fillStyle = "#171a1d";
   ctx.fillRect(x, y, width, height);
   ctx.drawImage(source, x, y, width, height);
   ctx.strokeStyle = "#30363d";
@@ -7929,7 +8359,7 @@ function drawReportTable(ctx: CanvasRenderingContext2D, title: string, headers: 
     ctx.strokeStyle = "#30363d";
     ctx.fillRect(left, y, columnWidth, headerHeight);
     ctx.strokeRect(left, y, columnWidth, headerHeight);
-    ctx.fillStyle = "#d7ecff";
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent-strong").trim() || "#d7ecff";
     ctx.fillText(headers[index] ?? "", left + 8, y + 20);
     left += columnWidth;
   }
@@ -9190,6 +9620,8 @@ function rfValidationSiteReadiness(candidates: any[], systems: RfSurveySystem[])
   const unknown = new Map<string, { key: string; label: string; system?: RfSurveySystem; candidates: any[] }>();
   for (const candidate of candidates) {
     const system = rfValidationCandidateSystem(candidate, systems);
+    if (systems.length > 0 && !system)
+      continue;
     const key = system?.shortName || String(candidate.systemShortName || candidate.siteLabel || "unknown");
     let group = systemKeys.find(row => row.key === key);
     if (!group) {
@@ -9634,155 +10066,345 @@ function formatRfHz(value: number) {
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(6)} MHz` : `${value.toLocaleString()} Hz`;
 }
 
-function RfMetricsPanel({ data, rangeHours, bySystem, baseline, setBySystem, setBaseline }: { data: TrTroubleshoot; rangeHours: number; bySystem: boolean; baseline: string; setBySystem: (value: boolean) => void; setBaseline: (value: string) => void }) {
+function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, setBaseline, setCategory, onOpenSetup }: { data: TrTroubleshoot; rangeHours: number; baseline: string; category: RfChartCategory; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void; onOpenSetup?: (section?: string) => void }) {
+  const systems = data.health.systemSummaries ?? [];
+  const initialSystem = systems.find(system => system.status !== "Healthy")?.systemShortName ?? systems[0]?.systemShortName ?? "";
+  const [selectedSystem, setSelectedSystem] = useState(() => localStorage.getItem("pizzawave-system-rf-selected-site") || initialSystem);
+  useEffect(() => {
+    if (systems.some(system => system.systemShortName === selectedSystem)) return;
+    setSelectedSystem(initialSystem);
+  }, [selectedSystem, initialSystem, systems]);
+  function selectSite(system: string, nextCategory?: RfChartCategory) {
+    setSelectedSystem(system);
+    localStorage.setItem("pizzawave-system-rf-selected-site", system);
+    if (nextCategory) setCategory(nextCategory);
+  }
+  const scopedCharts = data.health.charts.map(chart => {
+    const series = chart.series.filter(row => !row.scope || row.scope.toLowerCase() === selectedSystem.toLowerCase());
+    if (chart.title === "Decode Rate" && chart.labels.length) {
+      series.push({ label: "Strong reference", values: chart.labels.map(() => 40), isBaseline: true, scope: selectedSystem });
+    }
+    return { ...chart, series };
+  });
+  const primaryTitles = new Set(["Decode Rate", "Zero-Decode Samples", "Calls Without Audio", "Control-Channel Retunes"]);
+  const visibleCharts = scopedCharts
+    .filter(chart => category === "all" ? primaryTitles.has(chart.title) : rfChartCategoryForTitle(chart.title) === category)
+    .filter(chart => chart.title !== "Capture Interruptions" || chart.series.some(series => series.values.some(value => value > 0)));
+  const baselineNote = scopedCharts.find(chart => chart.baselineNote)?.baselineNote;
+  const selectedSummary = systems.find(system => system.systemShortName === selectedSystem);
   return <div className="rf-metrics-panel">
-    <div className="metric-controls">
-      <label><input type="checkbox" checked={bySystem} onChange={e => setBySystem(e.target.checked)} /> By system</label>
+    <RfHealthStatusPanel data={data} onOpenSetup={onOpenSetup} onSelectSite={system => selectSite(system)} onSelectCategory={setCategory} />
+    <SystemPageHeaderControls><div className="metric-controls rf-chart-controls header-controls">
+      <label>Window <select value={rangeHours} onChange={event => setRangeHours(Number(event.target.value))}><option value={2}>Last 2 hours</option><option value={6}>Last 6 hours</option><option value={24}>Last 24 hours</option><option value={72}>Last 3 days</option><option value={168}>Last 7 days</option></select></label>
+      <label>Site <select value={selectedSystem} onChange={event => selectSite(event.target.value)}>{systems.map(system => <option value={system.systemShortName} key={system.systemShortName}>{trSystemDisplayName(system.systemShortName)}</option>)}</select></label>
+      <label>Charts <select value={category} onChange={e => setCategory(e.target.value as RfChartCategory)}><option value="all">Primary</option><option value="decode">Signal</option><option value="activity">Capture</option><option value="events">Events</option></select></label>
       <label>Compare against baseline <select value={baseline} onChange={e => setBaseline(e.target.value)}><option>7d</option><option>14d</option><option>30d</option></select></label>
-    </div>
-    <div className="tr-chart-grid">{data.health.charts.map(c => <TrHealthChartView chart={c} key={c.title} />)}</div>
-    <RfAnalysisPanel data={data} rangeHours={rangeHours} />
+    </div></SystemPageHeaderControls>
+    {baselineNote && <p className="baseline-note rf-baseline-summary">{baselineNote}</p>}
+    {selectedSummary && selectedSummary.status !== "Healthy" && <div className={`card rf-observed-pattern ${trSystemTone(selectedSummary.status)}`}><div><h3>Observed pattern</h3><p><strong>{trSystemDisplayName(selectedSummary.systemShortName)}</strong>: {selectedSummary.summary}</p></div>{onOpenSetup && <button onClick={() => openRfSetup(selectedSummary.systemShortName, onOpenSetup)}>Review this site in Setup</button>}</div>}
+    <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} showBaselineNote={false} key={chart.title} />)}</div>
   </div>;
 }
 
-function IncidentMetricsPanel({ dashboard, audit }: { dashboard: Dashboard | null; audit: IncidentOperationAuditRow[] | null }) {
-  if (!dashboard) return <div className="card">Loading incident metrics...</div>;
-  const unmapped = dashboard.incidents.filter(incident => !dashboard.locationHeat.some(row => (row.incidentLinks ?? []).some(link => link.incidentId === incident.id))).length;
-  const weakEvidence = dashboard.incidents.filter(incident => incident.calls.length < 2).length;
-  const lowConfidence = dashboard.incidents.filter(incident => incident.confidence < 0.55).length;
-  const shortEvidence = dashboard.incidents.filter(incident => incident.calls.some(call => (call.transcript ?? "").trim().length < 40)).length;
-  const issueRows = dashboard.incidents
-    .map(incident => {
-      const issues = [
-        incident.calls.length < 2 ? "weak evidence" : "",
-        incident.confidence < 0.55 ? "low confidence" : "",
-        !dashboard.locationHeat.some(row => (row.incidentLinks ?? []).some(link => link.incidentId === incident.id)) ? "unmapped" : "",
-        incident.calls.some(call => (call.transcript ?? "").trim().length < 40) ? "short transcript evidence" : ""
-      ].filter(Boolean);
-      return { incident, issues };
-    })
-    .filter(row => row.issues.length)
-    .slice(0, 20);
+function rfChartCategoryForTitle(title: string): Exclude<RfChartCategory, "all"> {
+  if (/decode/i.test(title)) return "decode";
+  if (/calls/i.test(title)) return "activity";
+  return "events";
+}
+
+function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHoursChange }: { dashboard: Dashboard | null; rangeHours: number; refreshToken: number; onRangeHoursChange: (hours: number) => void }) {
+  const [page, setPage] = useState(1);
+  const [openChain, setOpenChain] = useState<string | null>(null);
+  useEffect(() => { setPage(1); setOpenChain(null); }, [rangeHours]);
+  const chainResource = usePersistentRefresh({
+    key: `incident-chains|${rangeHours}|${page}|${refreshToken}`,
+    enabled: true,
+    load: () => api.request<IncidentDecisionChainPage>(`/api/v1/incidents/chains?hours=${rangeHours}&page=${page}&pageSize=20`)
+  });
+  const chains = chainResource.data;
+  if (!dashboard || !chains) return <div className="card">Loading incident performance...</div>;
+
+  const categoryCounts = Array.from(new Set(dashboard.incidents.map(incident => incident.category))).map(category => ({ label: label(category), value: dashboard.incidents.filter(incident => incident.category === category).length })).sort((a, b) => b.value - a.value);
+  const categoryBars: BarStat[] = categoryCounts.map(row => ({ label: row.label, value: row.value, ratio: dashboard.incidents.length ? row.value / dashboard.incidents.length : 0, valueText: row.value.toLocaleString() }));
+  const callBands = [
+    { label: "1 call", value: dashboard.incidents.filter(incident => incident.calls.length === 1).length },
+    { label: "2-3 calls", value: dashboard.incidents.filter(incident => incident.calls.length >= 2 && incident.calls.length <= 3).length },
+    { label: "4-6 calls", value: dashboard.incidents.filter(incident => incident.calls.length >= 4 && incident.calls.length <= 6).length },
+    { label: "7+ calls", value: dashboard.incidents.filter(incident => incident.calls.length >= 7).length }
+  ];
+  const callBars: BarStat[] = callBands.map(row => ({ label: row.label, value: row.value, ratio: dashboard.incidents.length ? row.value / dashboard.incidents.length : 0, valueText: row.value.toLocaleString() }));
+  const creationChart: TrHealthChart = {
+    title: "Incident Creation Volume", yAxisLabel: "Created incidents", valueFormat: "F0",
+    labels: chains.buckets.map(bucket => new Date(bucket.start * 1000).toISOString()),
+    series: [{ label: "Created", values: chains.buckets.map(bucket => bucket.accepted), isBaseline: false, scope: "" }], baselineNote: ""
+  };
+  const pageCount = Math.max(1, Math.ceil(chains.totalGroups / chains.pageSize));
+
   return <div className="incident-metrics-panel">
-    <div className="audit-kpis">
-      <Kpi label="Incidents" value={dashboard.incidents.length.toLocaleString()} subtext="Generated in selected range" />
-      <Kpi label="Unmapped" value={unmapped.toLocaleString()} status={unmapped > 0 ? "warning" : "ok"} subtext="No dashboard map link" />
-      <Kpi label="Weak Evidence" value={weakEvidence.toLocaleString()} status={weakEvidence > 0 ? "warning" : "ok"} subtext="Fewer than 2 source calls" />
-      <Kpi label="Low Confidence" value={lowConfidence.toLocaleString()} status={lowConfidence > 0 ? "warning" : "ok"} subtext="LLM confidence below 55%" />
-      <Kpi label="Short Evidence" value={shortEvidence.toLocaleString()} status={shortEvidence > 0 ? "warning" : "ok"} subtext="Incident includes very short transcripts" />
+    <SystemPageHeaderControls><div className="segmented" role="group" aria-label="Incident performance window">{[24, 48, 168].map(hours => <button className={rangeHours === hours ? "active" : ""} onClick={() => onRangeHoursChange(hours)} key={hours}>{hours === 24 ? "24h" : hours === 48 ? "2d" : "Week"}</button>)}</div></SystemPageHeaderControls>
+    <div className="incident-outcome-summary" aria-label="Incident pipeline outcomes">
+      <span><strong>{chains.created.toLocaleString()}</strong> created</span><span><strong>{chains.updated.toLocaleString()}</strong> updated</span><span><strong>{chains.dropped.toLocaleString()}</strong> dropped</span><span><strong>{chains.totalGroups.toLocaleString()}</strong> grouped outcomes</span>
     </div>
-    <div className="card">
-      <h3>Incident Association Watchlist</h3>
-      {issueRows.length ? issueRows.map(({ incident, issues }) => <div className="incident-quality-row" key={incident.id}>
-        <strong>{incident.title}</strong>
-        <span className="muted">{issues.join(", ")} / {label(incident.category)} / {incident.calls.length.toLocaleString()} source call(s) / confidence {(incident.confidence * 100).toFixed(0)}%</span>
-      </div>) : <p className="muted">No incident association issues detected in this range.</p>}
+    <section className="incident-performance-section system-content-section"><SystemSectionHeader title="Incident Creation Volume" /><TrHealthChartView chart={creationChart} showBaselineNote={false} showTitle={false} /></section>
+    <div className="incident-distribution-grid">
+      <section className="system-content-section"><SystemSectionHeader title="Incident Categories" /><Bars title="Incident Categories" rows={categoryBars} showTitle={false} /></section>
+      <section className="system-content-section"><SystemSectionHeader title="Retained Calls per Incident" /><Bars title="Retained Calls per Incident" rows={callBars} showTitle={false} /></section>
     </div>
-    <div className="card">
-      <h3>Recent Incident Decisions</h3>
-      {!audit ? <p className="muted">Loading incident audit decisions...</p> : audit.length === 0 ? <p className="muted">No recent incident audit decisions.</p> :
-        <table className="table compact-ai-table"><thead><tr><th>Time</th><th>System</th><th>Decision</th><th>Reason</th><th>Score</th><th>Calls</th></tr></thead><tbody>{audit.slice(0, 40).map(row => <tr key={row.id}>
-          <td>{new Date(row.timestampUtc).toLocaleString()}</td>
-          <td>{row.systemShortName}</td>
-          <td><span className={row.accepted ? "section-status ok" : "section-status error"}>{row.accepted ? "Accepted" : "Rejected"}</span></td>
-          <td>{row.reason.replace(/^accepted:|^rejected:/, "")}</td>
-          <td>{row.score.toFixed(2)}</td>
-          <td>{row.callIds.length ? row.callIds.join(", ") : "--"}</td>
-        </tr>)}</tbody></table>}
-    </div>
+    <section className="card incident-chain-card system-content-section">
+      <SystemSectionHeader title="Incident Pipeline Inspector" description="Persisted incidents and dropped candidates, grouped by operator-facing outcome. Open a row to follow each call through the recorded decisions to its result." actions={pageCount > 1 ? <div className="pagination-row table-top-pagination"><button disabled={page <= 1} onClick={() => setPage(1)}>First</button><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button><span>Page {page} of {pageCount}</span><button disabled={page >= pageCount} onClick={() => setPage(page + 1)}>Next</button><button disabled={page >= pageCount} onClick={() => setPage(pageCount)}>Last</button></div> : null} />
+      <PanelLoadState label="incident decision chains" state={chainResource.state} hasData={Boolean(chains)} onRetry={chainResource.refresh} />
+      <div className="incident-chain-list">{chains.groups.map(group => {
+        const preview = group.evidenceCalls.find(call => call.transcriptSnippet) ?? group.evidenceCalls[0];
+        const persisted = group.createdCount + group.updatedCount > 0;
+        const activity = persisted ? [group.createdCount ? `${group.createdCount} creation` : "", group.updatedCount ? `${group.updatedCount} update${group.updatedCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") : "Dropped before persistence";
+        return <React.Fragment key={group.groupKey}><button type="button" className="incident-chain-row" aria-expanded={openChain === group.groupKey} onClick={() => setOpenChain(openChain === group.groupKey ? null : group.groupKey)}><span className={`section-status ${persisted ? "ok" : "warning"}`}>{persisted ? "Incident" : "Dropped"}</span><span className="incident-chain-identity"><strong>{group.displayTitle}</strong><small>{label(group.category)} · {trSystemDisplayName(group.systemShortName)} · {new Date(group.latestTimestampUtc).toLocaleString()}</small>{preview && <em>{preview.talkgroupName || `TG ${preview.talkgroup}`} · “{preview.transcriptSnippet || "No transcript text recorded"}”</em>}</span><span className="incident-chain-activity"><strong>{activity}</strong><small>{group.evidenceCalls.length.toLocaleString()} evidence call{group.evidenceCalls.length === 1 ? "" : "s"}</small></span></button>{openChain === group.groupKey && <IncidentEvidenceDag group={group} />}</React.Fragment>;
+      })}</div>
+      {!chains.groups.length && <p className="muted">No terminal incident outcomes were recorded in this window.</p>}
+    </section>
   </div>;
 }
 
-function CpuPanel({ snapshot }: { snapshot: SystemCpuSnapshot | null }) {
-  if (!snapshot) return <div className="card">Loading CPU/resource status...</div>;
+function IncidentEvidenceDag({ group }: { group: IncidentDecisionGroup }) {
+  const chains = [...group.chains].sort((left, right) => new Date(left.timestampUtc).getTime() - new Date(right.timestampUtc).getTime());
+  const startsWithExistingIncident = chains[0]?.outcome === "updated";
+  let priorCallIds = new Set<number>(startsWithExistingIncident ? chains[0].callIds : []);
+  let priorSaved = { title: "", detail: "" };
+  const events = chains.map(chain => {
+    const currentCallIds = new Set(chain.callIds);
+    const addedCallIds = chain.callIds.filter(callId => !priorCallIds.has(callId));
+    const removedCallIds = [...priorCallIds].filter(callId => !currentCallIds.has(callId));
+    const metadata = chain.steps.map(step => parseIncidentStoryMetadata(step.metadataJson));
+    const proposed = metadata.find(row => row.title || row.detail) ?? { title: "", detail: "" };
+    const saved = [...metadata].reverse().find(row => row.title || row.detail) ?? proposed;
+    const savedWordingChanged = Boolean(priorSaved.title || priorSaved.detail) && (saved.title !== priorSaved.title || saved.detail !== priorSaved.detail);
+    const proposedWordingChanged = Boolean(proposed.title && saved.title && proposed.title !== saved.title);
+    const addedCalls = addedCallIds.map(callId => group.evidenceCalls.find(call => call.callId === callId)).filter((call): call is IncidentDecisionGroup["evidenceCalls"][number] => Boolean(call));
+    const event = { chain, addedCallIds, removedCallIds, addedCalls, priorCount: priorCallIds.size, saved, proposed, savedWordingChanged, proposedWordingChanged };
+    priorCallIds = currentCallIds;
+    if (saved.title || saved.detail) priorSaved = saved;
+    return event;
+  });
+  const createdEvent = events.find(event => event.chain.outcome === "created");
+  const laterAdded = events.reduce((sum, event) => sum + (event === createdEvent ? 0 : event.addedCallIds.length), 0);
+  const unchangedReviews = events.filter((event, index) => index > 0 && event.addedCallIds.length === 0 && event.removedCallIds.length === 0 && !event.savedWordingChanged).length;
+  const storyEvents = events.reduce<Array<{ signature: string; events: typeof events }>>((groups, event) => {
+    const signature = JSON.stringify({
+      outcome: event.chain.outcome,
+      calls: event.chain.callIds,
+      added: event.addedCallIds,
+      removed: event.removedCallIds,
+      priorCount: event.priorCount,
+      proposedTitle: event.proposed.title,
+      saved: event.saved,
+      savedWordingChanged: event.savedWordingChanged,
+      proposedWordingChanged: event.proposedWordingChanged,
+      decisions: event.chain.steps.map((step, index) => ({ label: incidentStoryDecisionLabel(step.reason, index === event.chain.steps.length - 1, event.chain.outcome), text: incidentStoryDecisionText(step.reason) }))
+    });
+    const prior = groups.at(-1);
+    if (prior?.signature === signature) prior.events.push(event);
+    else groups.push({ signature, events: [event] });
+    return groups;
+  }, []);
+  const storySummary = createdEvent
+    ? `Created from ${createdEvent?.chain.callIds.length ?? 0} call${createdEvent?.chain.callIds.length === 1 ? "" : "s"}.${laterAdded ? ` ${laterAdded} later call${laterAdded === 1 ? " was" : "s were"} added.` : ""}${unchangedReviews ? ` Re-evaluated ${unchangedReviews} time${unchangedReviews === 1 ? "" : "s"} without an operator-visible change.` : ""} The current incident contains ${chains.at(-1)?.callIds.length ?? 0} calls.`
+    : group.updatedCount
+      ? `This incident already existed before the selected window. It was re-evaluated ${events.length} time${events.length === 1 ? "" : "s"} here and currently contains ${chains.at(-1)?.callIds.length ?? 0} calls.`
+    : `This candidate was evaluated from ${chains.at(-1)?.callIds.length ?? 0} call${chains.at(-1)?.callIds.length === 1 ? "" : "s"} and was not persisted.`;
+  return <div className="incident-evidence-shelf incident-dag-shelf">
+    <p className="incident-story-summary"><strong>What happened</strong><span>{storySummary}</span></p>
+    <div className="incident-story-timeline">{storyEvents.map((storyEvent, index) => {
+      const event = storyEvent.events.at(-1)!;
+      const { chain } = event;
+      const noMembershipChange = (index > 0 || startsWithExistingIncident) && event.addedCallIds.length === 0 && event.removedCallIds.length === 0;
+      const eventCount = storyEvent.events.length;
+      const firstEventTime = new Date(storyEvent.events[0].chain.timestampUtc).toLocaleString();
+      const lastEventTime = new Date(chain.timestampUtc).toLocaleString();
+      const resultTitle = chain.outcome === "created"
+        ? "Incident created"
+        : chain.outcome === "dropped"
+          ? "Candidate dropped"
+          : event.addedCallIds.length
+            ? `${event.addedCallIds.length} call${event.addedCallIds.length === 1 ? "" : "s"} added`
+            : event.removedCallIds.length
+              ? `${event.removedCallIds.length} call${event.removedCallIds.length === 1 ? "" : "s"} removed`
+              : event.savedWordingChanged
+                ? "Incident wording updated"
+                : "No operator-visible change";
+      const resultDetail = chain.outcome === "dropped"
+        ? "Nothing was saved to the incident dashboard."
+        : `${chain.callIds.length} call${chain.callIds.length === 1 ? "" : "s"} attached${event.proposedWordingChanged ? "; existing wording retained" : ""}.`;
+      return <article className="incident-dag-attempt" key={chain.chainKey}>
+        <div className="incident-dag-attempt-head"><strong>{index + 1}. {chain.outcome === "created" ? "Created" : chain.outcome === "dropped" ? "Rejected" : noMembershipChange ? "Re-evaluated" : "Updated"}{eventCount > 1 ? ` ${eventCount} times` : ""}</strong><span>{eventCount > 1 ? `${firstEventTime}–${lastEventTime}` : lastEventTime}</span></div>
+        {!chain.completeTrace && <p className="muted incident-dag-legacy">Only the final recorded decision is available for this historical event.</p>}
+        <div className="incident-dag-attempt-path" aria-label={`${chain.outcome} evidence path for ${group.displayTitle}`}>
+          <div className="incident-dag-call-stack"><small>Evidence change</small>{event.addedCalls.map(call => <div className="incident-dag-node call" key={call.callId}><strong>{call.talkgroupName || `TG ${call.talkgroup}`}</strong><span>New call · TG {call.talkgroup} · {new Date(call.timestamp * 1000).toLocaleTimeString()}</span><p>{call.transcriptSnippet || "No transcript text recorded."}</p></div>)}{!event.addedCalls.length && <div className="incident-dag-node call quiet"><strong>No new retained call</strong><span>{event.priorCount.toLocaleString()} existing call{event.priorCount === 1 ? " was" : "s were"} reconsidered.</span></div>}{event.removedCallIds.length > 0 && <div className="incident-dag-node call removed"><strong>{event.removedCallIds.length} prior call{event.removedCallIds.length === 1 ? "" : "s"} removed</strong></div>}</div>
+          <div className="incident-dag-arrow" aria-hidden="true">→</div>
+          <div className="incident-dag-gates"><small>Why PizzaWave chose this</small>{chain.steps.map((step, stepIndex) => <React.Fragment key={step.id}><div className="incident-dag-node gate"><strong>{incidentStoryDecisionLabel(step.reason, stepIndex === chain.steps.length - 1, chain.outcome)}</strong><p>{incidentStoryDecisionText(step.reason)}</p></div>{stepIndex < chain.steps.length - 1 && <div className="incident-dag-stage-arrow" aria-hidden="true">↓</div>}</React.Fragment>)}{event.proposedWordingChanged && <div className="incident-story-wording"><span>Candidate wording</span><strong>{event.proposed.title}</strong><span>Saved wording</span><strong>{event.saved.title}</strong></div>}</div>
+          <div className="incident-dag-arrow" aria-hidden="true">→</div>
+          <div className={`incident-dag-node outcome ${chain.outcome}`}><small>Effect</small><strong>{resultTitle}</strong><p>{resultDetail}</p></div>
+        </div>
+      </article>;
+    })}</div>
+  </div>;
+}
+
+function parseIncidentStoryMetadata(value: string) {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return { title: typeof parsed.title === "string" ? parsed.title.trim() : "", detail: typeof parsed.detail === "string" ? parsed.detail.trim() : "" };
+  } catch {
+    return { title: "", detail: "" };
+  }
+}
+
+function incidentStoryDecisionLabel(reason: string, terminal: boolean, outcome: "created" | "updated" | "dropped") {
+  const value = reason.replace(/^accepted:|^rejected:/i, "");
+  if (/^assembler retained/i.test(value)) return "Candidate selection";
+  if (/^final membership retained/i.test(value)) return "Call membership check";
+  if (terminal) return outcome === "created" ? "Creation decision" : outcome === "updated" ? "Existing-incident match" : "Rejection decision";
+  return "Pipeline decision";
+}
+
+function incidentStoryDecisionText(reason: string) {
+  const value = reason.replace(/^accepted:|^rejected:/i, "");
+  const assembler = /^assembler retained (\d+)\/(\d+) verifier call\(s\):.*?(?:excluded weak\/unrelated calls (.+))?$/i.exec(value);
+  if (assembler) {
+    const excluded = Number(assembler[2]) - Number(assembler[1]);
+    return `Kept ${assembler[1]} of ${assembler[2]} candidate calls${excluded > 0 ? ` and excluded ${excluded} as weak or unrelated` : ""}.`;
+  }
+  const membership = /^final membership retained (\d+)\/(\d+) assembler call\(s\):.*?validator matched (\d+)\/(\d+) call\(s\) but did not rewrite membership/i.exec(value);
+  if (membership) return `Kept all ${membership[1]} retained calls. A secondary check supported ${membership[3]} of them but did not find enough reason to remove the others.`;
+  if (/^create incident/i.test(value)) return /rewrote unsupported model narrative/i.test(value)
+    ? "Created a new incident from the retained calls and replaced unsupported generated wording with wording grounded in the transcripts."
+    : "Created a new incident from the retained calls.";
+  if (/^update incident/i.test(value)) return "Matched the retained calls to this existing incident and regenerated its saved title and detail from that evidence.";
+  if (/unsupported narrative lacked a specific evidence-backed fallback/i.test(value)) return "Rejected the candidate because its description was not supported by a specific transcript passage.";
+  return value
+    .replace(/server-owned/gi, "PizzaWave-selected")
+    .replace(/incident_id/gi, "incident")
+    .replace(/final membership/gi, "final call-membership check")
+    .replace(/assembler/gi, "candidate selection")
+    .replace(/verifier/gi, "evidence check")
+    .replace(/retained/gi, "kept")
+    .replace(/narrative/gi, "wording")
+    .replace(/call\(s\)/gi, "calls");
+}
+
+function ResourceSummary({ snapshot, live }: { snapshot: SystemCpuSnapshot; live?: SystemRuntimeResourceSample | null }) {
   const latest = snapshot.latest;
   const peak = snapshot.peaks;
-  const statusClass = (status: string) => status === "error" ? "error" : status === "warning" ? "warning" : status === "ok" ? "ok" : "";
   const throttle = snapshot.insights.find(i => i.label === "Throttle flags");
-  return <div className="system-cpu-panel">
-    <div className={`settings-message ${snapshot.severity === "error" ? "error" : snapshot.severity === "warning" ? "warning" : "ok"}`}>
-      {snapshot.summary}
-    </div>
-    <div className="section kpis">
-      <Kpi label="TR CPU" value={latest ? `${latest.trCpuHostPercent.toFixed(0)}%` : "--"} status={!latest ? "neutral" : latest.trCpuHostPercent >= 90 ? "error" : latest.trCpuHostPercent >= 75 ? "warning" : "ok"} subtext={latest ? `${latest.trCpuPercent.toFixed(0)}% process CPU across ${snapshot.processorCount} core(s)` : "No resource sample"} />
-      <Kpi label="Host Load" value={latest ? latest.hostLoad1.toFixed(2) : "--"} status={!latest ? "neutral" : latest.hostLoadHostPercent >= 150 ? "warning" : "ok"} subtext={latest ? `${latest.hostLoadHostPercent.toFixed(0)}% of host` : "No resource sample"} />
-      <Kpi label="Temperature" value={latest ? `${latest.hostTempC.toFixed(1)} C` : "--"} status={!latest ? "neutral" : latest.hostTempC >= 80 ? "error" : latest.hostTempC >= 70 ? "warning" : "ok"} subtext={latest ? `2h peak ${peak.hostTempC.toFixed(1)} C` : "No thermal sample"} />
-      <Kpi label="TR Memory" value={latest ? `${latest.trRssMb.toFixed(0)} MB` : "--"} status={!latest ? "neutral" : latest.trRssMb >= 2048 ? "warning" : "ok"} subtext={latest ? `2h peak ${peak.trRssMb.toFixed(0)} MB RSS` : "No RSS sample"} />
-      <Kpi label="TR Threads" value={latest ? latest.trThreadCount.toLocaleString() : "--"} status={!latest ? "neutral" : latest.trThreadCount >= 250 ? "warning" : "ok"} subtext={latest ? `2h peak ${peak.trThreadCount.toLocaleString()} thread(s)` : "No thread sample"} />
+  const memory = live?.hostMemory ?? snapshot.hostMemory;
+  const hostCpuPercent = live?.hostCpuPercent ?? snapshot.hostCpuPercent;
+  const usb = snapshot.usb;
+  return <div className="audit-kpis runtime-kpis">
+      <Kpi label="Host CPU" value={hostCpuPercent == null ? "--" : `${hostCpuPercent.toFixed(0)}%`} status={hostCpuPercent == null ? "neutral" : hostCpuPercent >= 90 ? "error" : hostCpuPercent >= 75 ? "warning" : "ok"} subtext="Current total use across all processors" />
+      <Kpi label="1-Minute Load" value={latest ? latest.hostLoad1.toFixed(2) : "--"} status={!latest ? "neutral" : latest.hostLoadHostPercent >= 150 ? "warning" : "ok"} subtext={latest ? `${snapshot.processorCount.toLocaleString()} logical CPUs; above ${snapshot.processorCount.toFixed(2)} indicates queued or I/O-blocked work` : "No resource sample"} />
+      <Kpi label="Temperature" value={latest ? `${latest.hostTempC.toFixed(1)} °C` : "--"} status={!latest ? "neutral" : latest.hostTempC >= 80 ? "error" : latest.hostTempC >= 70 ? "warning" : "ok"} subtext={latest ? `2h peak ${peak.hostTempC.toFixed(1)} °C` : "No thermal sample"} />
+      <Kpi label="Host Memory" value={memory?.totalMb ? `${memory.usedPercent.toFixed(0)}%` : "--"} status={!memory?.totalMb ? "neutral" : memory.availableMb / memory.totalMb <= 0.1 ? "error" : memory.availableMb / memory.totalMb <= 0.2 ? "warning" : "ok"} subtext={memory?.totalMb ? `${memory.availableMb.toLocaleString()} MB available of ${memory.totalMb.toLocaleString()} MB` : "Host memory unavailable"} />
       <Kpi label="Throttle" value={latest?.hostThrottledFlags || "none"} status={throttle?.status === "error" ? "error" : throttle?.status === "warning" ? "warning" : "ok"} subtext="Pi thermal/power flags when available" />
-    </div>
-    <div className="card">
-      <div className="card-heading-row">
-        <h3>Operator Readout</h3>
-      </div>
-      <table className="table"><thead><tr><th>Signal</th><th>Value</th><th>Status</th><th>Meaning</th></tr></thead><tbody>
-        {snapshot.insights.map(row => <tr key={row.label}>
-          <td>{row.label}</td>
-          <td>{row.value}</td>
-          <td><span className={`section-status ${statusClass(row.status)}`.trim()}>{label(row.status)}</span></td>
-          <td>{row.detail}</td>
-        </tr>)}
-      </tbody></table>
-    </div>
-    <div className="card">
-      <h3>Two-Hour Peaks</h3>
-      <table className="table compact-ai-table"><tbody>
-        <tr><td>TR CPU</td><td>{peak.trCpuPercent.toFixed(0)}% process CPU</td><td>{peak.trCpuHostPercent.toFixed(0)}% of host</td></tr>
-        <tr><td>Host load</td><td>{peak.hostLoad1.toFixed(2)}</td><td>{peak.hostLoadHostPercent.toFixed(0)}% of host</td></tr>
-        <tr><td>Temperature</td><td>{peak.hostTempC.toFixed(1)} C</td><td>peak thermal sample</td></tr>
-        <tr><td>Memory</td><td>{peak.trRssMb.toFixed(0)} MB RSS</td><td>resident memory</td></tr>
-        <tr><td>Threads</td><td>{peak.trThreadCount.toLocaleString()}</td><td>capture/DSP worker count</td></tr>
-      </tbody></table>
-    </div>
+      <Kpi label="USB Errors" value={(usb?.kernelErrors.length ?? 0).toLocaleString()} status={usb?.status === "warning" ? "warning" : usb?.status === "unavailable" ? "neutral" : "ok"} subtext={usb?.message ?? "Passive kernel evidence unavailable"} />
   </div>;
 }
 
-function ServicesManager({ runtime, data, restartBusy, restartMessages, onRestart, onStopTr }: { runtime: any | null; data: TrTroubleshoot | null; restartBusy: "" | "pizzad" | "trunk-recorder" | "qdrant"; restartMessages: Record<string, string>; onRestart: (service: "pizzad" | "trunk-recorder" | "qdrant") => void; onStopTr: () => void }) {
+function ResourceEvidence({ snapshot }: { snapshot: SystemCpuSnapshot }) {
+  const usb = snapshot.usb;
+  return <details className="card" open={(usb?.currentIssueCount ?? 0) > 0}>
+      <summary>USB evidence ({usb?.devices.length ?? 0} devices, {usb?.kernelErrors.length ?? 0} event(s) {usb?.evidencePeriod || "in available evidence"})</summary>
+      <p>{usb?.message}</p>
+      <p className="muted">Read-only evidence only. PizzaWave does not open, reset, probe, or detach USB devices on this page.</p>
+      <h4>Kernel USB warnings and errors</h4>
+      {usb?.kernelErrors.length ? <pre className="runtime-usb-log">{usb.kernelErrors.join("\n")}</pre> : <p className="muted">No USB-related warning or error lines found.</p>}
+      <p className="muted">Source: {usb?.kernelEvidenceSource}</p>
+      <h4>lsusb facts</h4>
+      {usb?.devices.length ? <pre className="runtime-usb-log">{usb.devices.join("\n")}</pre> : <p className="muted">No lsusb output is available.</p>}
+    </details>;
+}
+
+const serviceResourceColors: Record<string, string> = {
+  "PizzaWave": "#5aa7ff",
+  "Trunk Recorder": "#54d68a",
+  "Local LM Studio service": "#b18cff",
+  "Qdrant": "#f7c948"
+};
+
+function ServiceResourceChart({ history }: { history: SystemRuntimeResourceSample[] }) {
+  const components = Object.keys(serviceResourceColors);
+  const points = history.length > 0 ? history : [];
+  const resources = points.flatMap(sample => sample.processes);
+  const maxCpu = Math.max(25, Math.ceil(Math.max(0, ...resources.map(row => row.hostCpuPercent)) / 25) * 25);
+  const maxMemory = Math.max(256, Math.ceil(Math.max(0, ...resources.map(row => row.rssMb)) / 256) * 256);
+  const left = 54;
+  const right = 742;
+  const cpuTop = 24;
+  const cpuBottom = 126;
+  const memoryTop = 164;
+  const memoryBottom = 266;
+  const tickRatios = [1, 0.75, 0.5, 0.25, 0];
+  const tickY = (ratio: number, top: number, bottom: number) => bottom - ratio * (bottom - top);
+  const x = (index: number) => points.length <= 1 ? right : left + index / (points.length - 1) * (right - left);
+  const linePoints = (component: string, value: (row: SystemRuntimeResourceSample["processes"][number]) => number, top: number, bottom: number, max: number) => points.map((sample, index) => {
+    const row = sample.processes.find(resource => resource.component === component);
+    const amount = row?.status === "running" ? value(row) : 0;
+    return `${x(index)},${bottom - Math.min(max, amount) / max * (bottom - top)}`;
+  }).join(" ");
+  const timeLabels = points.length < 2 ? points.map((sample, index) => ({ index, label: "Now" })) : [0, Math.floor((points.length - 1) / 2), points.length - 1].map(index => ({
+    index,
+    label: new Date(points[index].generatedAtUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })
+  }));
+  return <div className="service-resource-plot">
+    {points.length === 0 ? <p className="muted">Waiting for the first live resource sample.</p> : <svg viewBox="0 0 760 298" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Near-real-time CPU and memory use by PizzaWave service">
+      <line className="axis" x1={left} y1={cpuTop} x2={left} y2={cpuBottom}/><line className="axis" x1={left} y1={cpuBottom} x2={right} y2={cpuBottom}/>
+      <line className="axis" x1={left} y1={memoryTop} x2={left} y2={memoryBottom}/><line className="axis" x1={left} y1={memoryBottom} x2={right} y2={memoryBottom}/>
+      <text className="chart-label service-axis-title" x="5" y="18">CPU</text>
+      {tickRatios.map(ratio => <g key={`cpu-${ratio}`}><line className="service-chart-gridline" x1={left} y1={tickY(ratio, cpuTop, cpuBottom)} x2={right} y2={tickY(ratio, cpuTop, cpuBottom)}/><text className="chart-label" textAnchor="end" x={left - 6} y={tickY(ratio, cpuTop, cpuBottom) + 4}>{Math.round(maxCpu * ratio)}%</text></g>)}
+      <text className="chart-label service-axis-title" x="5" y={memoryTop - 7}>Memory</text>
+      {tickRatios.map(ratio => <g key={`memory-${ratio}`}><line className="service-chart-gridline" x1={left} y1={tickY(ratio, memoryTop, memoryBottom)} x2={right} y2={tickY(ratio, memoryTop, memoryBottom)}/><text className="chart-label" textAnchor="end" x={left - 6} y={tickY(ratio, memoryTop, memoryBottom) + 4}>{Math.round(maxMemory * ratio)} MB</text></g>)}
+      {components.map(component => <React.Fragment key={component}>
+        <polyline fill="none" stroke={serviceResourceColors[component]} strokeWidth="2.5" points={linePoints(component, row => row.hostCpuPercent, cpuTop, cpuBottom, maxCpu)}/>
+        <polyline fill="none" stroke={serviceResourceColors[component]} strokeWidth="2.5" points={linePoints(component, row => row.rssMb, memoryTop, memoryBottom, maxMemory)}/>
+      </React.Fragment>)}
+      {timeLabels.map(({ index, label: timeLabel }) => <text className="chart-label" textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} x={x(index)} y="290" key={`${index}-${timeLabel}`}>{timeLabel}</text>)}
+    </svg>}
+  </div>;
+}
+
+function ServicesManager({ runtime, snapshot, history, restartBusy, restartMessages, onRestart, onStopTr }: { runtime: any | null; snapshot: SystemCpuSnapshot | null; history: SystemRuntimeResourceSample[]; restartBusy: "" | "pizzad" | "trunk-recorder" | "qdrant"; restartMessages: Record<string, string>; onRestart: (service: "pizzad" | "trunk-recorder" | "qdrant") => void; onStopTr: () => void }) {
   if (!runtime) return <div className="card">Loading service status...</div>;
   const embeddings = runtime.queues?.embeddings;
+  const aiCompletion = runtime.aiCompletion;
+  const aiHealth = aiCompletion?.health;
   const trIntentionallyStopped = runtime.liveTrActivity?.status === "stopped";
-  const healthIssues = data ? data.health.metrics.filter(row => row.isIssue).length + data.health.systems.filter(row => row.isIssue).length : null;
-  const services = [
-    { key: "pizzad" as const, title: "Pizzad", button: "Restart Pizzad", svc: runtime.service?.pizzad },
-    { key: "trunk-recorder" as const, title: "Trunk Recorder", button: "Restart TR", svc: runtime.service?.trunkRecorder },
-    { key: "qdrant" as const, title: "Qdrant", button: "Restart Qdrant", svc: runtime.service?.qdrant }
+  const aiStatus = !aiCompletion?.enabled ? "Disabled" : aiHealth?.status === "ok" || runtime.service?.lmStudio?.ok ? "Running" : aiHealth?.status === "error" ? "Unavailable" : "No recent activity";
+  const vectorStatus = runtime.service?.qdrant?.ok && embeddings?.qdrantOk ? "Running" : embeddings?.enabled ? "Unavailable" : "Disabled";
+  const latest = history.at(-1);
+  const currentResource = (component: string) => latest?.processes.find(row => row.component === component) ?? snapshot?.processes.find(row => row.component === component);
+  const statusClass = (status: string) => status === "Running" ? "status-completed" : status === "Unavailable" ? "status-failed" : "status-paused";
+  const serviceRows = [
+    { component: "PizzaWave", title: "PizzaWave", status: runtime.service?.pizzad?.ok ? "Running" : "Unavailable", detail: embeddings?.enabled ? `Embeddings: ${embeddings.queueDepth ?? 0} queued, ${(embeddings.failedCalls ?? 0).toLocaleString()} failed` : "Embeddings disabled", action: <button className="danger-button" disabled={restartBusy === "pizzad"} onClick={() => onRestart("pizzad")}>{restartBusy === "pizzad" ? "Restarting..." : "Restart"}</button>, message: restartMessages.pizzad },
+    { component: "Trunk Recorder", title: "Trunk Recorder", status: trIntentionallyStopped ? "Stopped" : runtime.service?.trunkRecorder?.ok ? "Running" : "Unavailable", detail: trIntentionallyStopped ? "Stopped by operator" : "Live capture service", action: <><button className="danger-button" disabled={restartBusy === "trunk-recorder"} onClick={() => onRestart("trunk-recorder")}>{restartBusy === "trunk-recorder" ? "Restarting..." : "Restart"}</button><button className="danger-button secondary" disabled={restartBusy === "trunk-recorder"} onClick={onStopTr}>{restartBusy === "trunk-recorder" ? "Working..." : "Stop"}</button></>, message: restartMessages["trunk-recorder"] },
+    { component: "Local LM Studio service", title: "LM Studio / AI", status: aiStatus, detail: !aiCompletion?.enabled ? "AI Insights disabled" : `${label(aiCompletion.executionMode || "local")} execution; ${aiHealth?.requests ?? 0} requests over ${aiHealth?.windowMinutes ?? 30}m`, action: null, message: "" },
+    { component: "Qdrant", title: "Vector Search", status: vectorStatus, detail: embeddings?.enabled ? `${embeddings.collection || "Collection"}; search ${Number(embeddings.lastSearchMs || 0).toFixed(0)}ms` : "Embedding search disabled", action: <button className="danger-button" disabled={restartBusy === "qdrant"} onClick={() => onRestart("qdrant")}>{restartBusy === "qdrant" ? "Restarting..." : "Restart"}</button>, message: restartMessages.qdrant }
   ];
-  const serviceStatusClass = (row: typeof services[number]) =>
-    row.key === "trunk-recorder" && trIntentionallyStopped
-      ? "status-paused"
-      : row.svc?.ok ? "status-completed" : "status-failed";
   return <div className="system-manager-grid">
-    <div className="service-action-grid">
-      {services.map(row => <div className="service-action-card" key={row.key}>
-        <div>
-          <strong>{row.title}</strong>
-          <span className={`job-status ${serviceStatusClass(row)}`}>{row.svc?.active || "unknown"}</span>
-        </div>
-        <button className="danger-button" disabled={restartBusy === row.key} onClick={() => onRestart(row.key)}>{restartBusy === row.key ? "Restarting..." : row.button}</button>
-        {row.key === "trunk-recorder" && <button className="danger-button secondary" disabled={restartBusy === row.key} onClick={onStopTr}>{restartBusy === row.key ? "Working..." : "Stop TR"}</button>}
-        {restartMessages[row.key] && <span className={restartMessages[row.key].includes("failed") || restartMessages[row.key].includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessages[row.key]}</span>}
-      </div>)}
-    </div>
-    <div className="audit-kpis">
-      <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} status={runtime.service?.pizzad?.ok ? "ok" : "error"} subtext={`${formatBytes(runtime.process?.workingSetBytes || 0)} RSS, ${runtime.process?.threadCount ?? 0} thread(s)`} />
-      <Kpi label="Trunk Recorder" value={runtime.service?.trunkRecorder?.active || "unknown"} status={trIntentionallyStopped ? "warning" : runtime.service?.trunkRecorder?.ok ? "ok" : "error"} subtext={trIntentionallyStopped ? "Stopped by operator" : healthIssues === null ? "Receiver health summary unavailable" : healthIssues > 0 ? `${healthIssues} RF/resource issue row(s)` : "RF/resource health OK"} />
-      <Kpi label="Qdrant" value={runtime.service?.qdrant?.active || "unknown"} status={runtime.service?.qdrant?.ok && embeddings?.qdrantOk ? "ok" : embeddings?.enabled ? "error" : "neutral"} subtext={embeddings?.collection || "collection"} />
-      <Kpi label="Embeddings" value={embeddings?.enabled ? label(embeddings.status || "unknown") : "Disabled"} status={!embeddings?.enabled ? "neutral" : embeddings.status === "ok" ? "ok" : "warning"} subtext={`${embeddings?.queueDepth ?? 0} queued, ${(embeddings?.pendingCalls ?? 0).toLocaleString()} pending, ${(embeddings?.failedCalls ?? 0).toLocaleString()} failed`} />
-      <Kpi label="Vector Latency" value={`${Number(embeddings?.lastSearchMs || 0).toFixed(0)}ms`} status="ok" subtext={`upsert ${Number(embeddings?.lastUpsertMs || 0).toFixed(0)}ms, dim ${embeddings?.vectorSize || "--"}`} />
-      <Kpi label="Storage" value={formatBytes(Number(runtime.storage?.databaseBytes || 0) + Number(runtime.storage?.qdrantBytes || 0))} status="ok" subtext="database + Qdrant" />
-    </div>
-    {embeddings?.lastError && <div className="card"><h3>Embedding Pipeline</h3><p className="settings-message error">{embeddings.lastError}</p></div>}
-    <div className="card">
-      <h3>Service Details</h3>
-      <table className="table"><thead><tr><th>Unit</th><th>Active</th><th>Enabled</th><th>Substate</th><th>Main PID</th><th>Started</th></tr></thead><tbody>{services.filter(row => row.svc).map(row => <tr key={row.key}>
-        <td>{row.svc.unit}</td>
-        <td><span className={`job-status ${serviceStatusClass(row)}`}>{row.svc.active || "unknown"}</span></td>
-        <td>{row.svc.enabled || "--"}</td>
-        <td>{row.svc.detail?.SubState || "--"}</td>
-        <td>{row.svc.detail?.MainPID || "--"}</td>
-        <td>{row.svc.detail?.ActiveEnterTimestamp || "--"}</td>
-      </tr>)}</tbody></table>
-    </div>
+    {snapshot && <ResourceSummary snapshot={snapshot} live={latest} />}
+    <section className="card service-resource-card">
+      <SystemSectionHeader title="Service Resource Use" description="CPU and resident memory across the local PizzaWave stack." />
+      <div className="service-resource-content">
+        <ServiceResourceChart history={history} />
+        <div className="service-resource-table-wrap"><table className="service-resource-table"><thead><tr><th>Service</th><th>State</th><th>CPU</th><th>Memory</th><th>Controls</th></tr></thead><tbody>{serviceRows.map(row => {
+          const resource = currentResource(row.component);
+          return <React.Fragment key={row.component}><tr>
+            <td><div className="service-resource-name"><span><i className="service-resource-swatch" style={{ background: serviceResourceColors[row.component] }}/><strong>{row.title}</strong></span><small>{row.detail}</small></div></td>
+            <td><span className={`job-status ${statusClass(row.status)}`}>{row.status}</span></td>
+            <td className="service-resource-value">{resource?.status === "running" ? `${resource.hostCpuPercent.toFixed(1)}%` : "--"}</td>
+            <td className="service-resource-value">{resource?.status === "running" ? `${resource.rssMb.toFixed(0)} MB` : "--"}</td>
+            <td><div className="service-card-actions">{row.action}</div></td>
+          </tr>{row.message && <tr className="service-resource-message"><td colSpan={5}><span className={row.message.includes("failed") || row.message.includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{row.message}</span></td></tr>}</React.Fragment>;
+        })}</tbody></table></div>
+      </div>
+    </section>
+    {snapshot && <ResourceEvidence snapshot={snapshot} />}
   </div>;
 }
 
@@ -9888,159 +10510,29 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
   </div>;
 }
 
-function RecommendationsPanel({ recommendations, busy, message, onOpen, onState, onAction, onExcludeTalkgroups }: { recommendations: SystemRecommendations | null; busy: boolean; message: string; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void>; onAction: (action: SystemRecommendations["items"][number]["actions"][number]) => Promise<void>; onExcludeTalkgroups: (targets: { systemShortName?: string | null; talkgroup: number }[]) => Promise<void> }) {
-  const [activeRunbookId, setActiveRunbookId] = useState<string | null>(null);
+function RecommendationsPanel({ recommendations, onOpen }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendations["items"][number]) => void }) {
   if (!recommendations) return <div className="card">Loading recommendations...</div>;
-  const ignoredItems = recommendations.ignoredItems ?? [];
-  const activeRunbook = [...recommendations.items, ...ignoredItems].find(item => item.id === activeRunbookId);
   return <div className="trouble-panel recommendations-panel">
-    {message && <div className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{message}</div>}
-    {activeRunbook?.runbook && <RunbookDetail item={activeRunbook} busy={busy} onClose={() => setActiveRunbookId(null)} onOpen={onOpen} onState={onState} onExcludeTalkgroups={onExcludeTalkgroups} />}
-    {!activeRunbook && recommendations.items.length === 0 ? <div className="card"><h3>No Open Recommendations</h3><p className="muted">No system-level issues or priority candidates were detected.</p></div> :
-      !activeRunbook &&
+    <div className="recommendations-summary card">
+      <div><span>Current findings</span><strong>{recommendations.openCount.toLocaleString()}</strong></div>
+      <div><span>Problems</span><strong>{recommendations.problemCount.toLocaleString()}</strong></div>
+      <div><span>Improvements</span><strong>{recommendations.improvementCount.toLocaleString()}</strong></div>
+      <p>Current evidence from across PizzaWave. Open a finding to continue on the page that owns the evidence or decision.</p>
+    </div>
+    {recommendations.items.length === 0 ? <div className="card"><h3>No Current Findings</h3><p className="settings-message ok">No current problem, risk, or improvement has been identified.</p></div> :
       <div className="recommendation-list">
-        {recommendations.items.map(item => <div className={`card recommendation-card severity-${item.severity}`} key={item.id}>
+        {recommendations.items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={item.id}>
           <div className="recommendation-head">
-            <span className={`recommendation-severity ${item.severity}`}>{item.severity}</span>
-            <span className="muted">{label(item.section)}</span>
+            <div><span className={`recommendation-lifecycle ${item.lifecycle}`}>{label(item.lifecycle)}</span><span className={`recommendation-kind ${item.kind}`}>{item.kind === "improvement" ? "Improvement" : "Problem"}</span><span className={`recommendation-severity ${item.severity}`}>{label(item.severity)} priority</span></div>
+            <span className="recommendation-owner">{item.destinationLabel.split(" / ")[0]}</span>
           </div>
           <h3>{item.title}</h3>
+          <p className="recommendation-window">Evidence window: {item.evidenceWindow}</p>
           <p>{item.detail}</p>
-          {item.baseline && <RecommendationBaseline item={item} busy={busy} onReset={() => onState(item.id, "reset-baseline")} />}
-          <div className="recommendation-action">{item.action}</div>
-          {item.actions?.length > 0 && <div className="recommendation-buttons recommendation-primary-actions">
-            {item.actions.map(action => <button key={action.kind} className={action.kind === "pause-ingest" ? "danger-button" : ""} disabled={busy} title={action.description} onClick={() => void onAction(action)}>{action.label}</button>)}
-          </div>}
-          {item.runbook && <div className="recommendation-buttons">
-            {item.runbook && <button disabled={busy} onClick={() => setActiveRunbookId(item.id)}>Troubleshoot Now</button>}
-          </div>}
-          <div className="recommendation-buttons muted-actions">
-            <button disabled={busy} onClick={() => void onState(item.id, "ignore")}>Ignore</button>
-          </div>
-        </div>)}
+          <div className="recommendation-action"><strong>Recommended next step</strong><span>{item.action}</span></div>
+          <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button></div>
+        </article>)}
       </div>}
-    {!activeRunbook && ignoredItems.length > 0 && <div className="card">
-      <h3>Ignored Findings</h3>
-      <div className="recommendation-list">
-        {ignoredItems.map(item => <div className={`card recommendation-card severity-${item.severity}`} key={item.id}>
-          <div className="recommendation-head">
-            <span className={`recommendation-severity ${item.severity}`}>{item.severity}</span>
-            <span className="muted">{label(item.section)}</span>
-          </div>
-          <h3>{item.title}</h3>
-          <p>{item.detail}</p>
-          <div className="recommendation-buttons">
-            {item.runbook && <button disabled={busy} onClick={() => setActiveRunbookId(item.id)}>Details</button>}
-            <button disabled={busy} onClick={() => void onState(item.id, "restore")}>Restore</button>
-          </div>
-        </div>)}
-      </div>
-    </div>}
-  </div>;
-}
-
-function RecommendationBaseline({ item, busy, onReset }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onReset: () => Promise<void> }) {
-  const baseline = item.baseline;
-  if (!baseline) return null;
-  const first = new Date(baseline.firstSeenUtc);
-  const last = new Date(baseline.lastSeenUtc);
-  return <div className={`recommendation-baseline ${baseline.priorityDemoted ? "demoted" : ""}`}>
-    <div>
-      <strong>{baseline.priorityDemoted ? `Baseline: demoted from ${baseline.originalSeverity}` : "Baseline observation"}</strong>
-      <span>{baseline.baselineValue || "No baseline value recorded"}</span>
-      <small>First {Number.isNaN(first.getTime()) ? baseline.firstSeenUtc : first.toLocaleString()} / last {Number.isNaN(last.getTime()) ? baseline.lastSeenUtc : last.toLocaleString()} / {Math.round(baseline.ageHours).toLocaleString()}h observed</small>
-    </div>
-    <button disabled={busy} onClick={() => void onReset()}>Reset Baseline</button>
-  </div>;
-}
-
-function RunbookDetail({ item, busy, onClose, onOpen, onState, onExcludeTalkgroups }: { item: NonNullable<SystemRecommendations["items"][number]>; busy: boolean; onClose: () => void; onOpen: (target: { topTab: string; subTab: string; anchor?: string }) => void; onState: (id: string, action: "ignore" | "restore" | "reset-baseline") => Promise<void>; onExcludeTalkgroups: (targets: { systemShortName?: string | null; talkgroup: number }[]) => Promise<void> }) {
-  const runbook = item.runbook;
-  if (!runbook) return null;
-  const issueDiagnostics = (runbook.diagnostics ?? []).filter(row => row.status === "issue");
-  const contextDiagnostics = (runbook.diagnostics ?? []).filter(row => row.status !== "issue").slice(0, 6);
-  const visibleDiagnostics = [...issueDiagnostics, ...contextDiagnostics].slice(0, 8);
-  return <div className={`card runbook-detail severity-${item.severity}`}>
-    <div className="recommendation-head">
-      <div>
-        <span className={`recommendation-severity ${item.severity}`}>{item.severity}</span>
-        <h3>{runbook.title}</h3>
-      </div>
-      <button onClick={onClose}>Back to Recommendations</button>
-    </div>
-    <p>{runbook.goal}</p>
-    {item.baseline && <RecommendationBaseline item={item} busy={busy} onReset={() => onState(item.id, "reset-baseline")} />}
-    {runbook.evidence.length > 0 && <div className="runbook-evidence">
-      <strong>Use this evidence</strong>
-      <ul>{runbook.evidence.map(row => <li key={row}>{row}</li>)}</ul>
-    </div>}
-    {runbook.diagnostics?.length > 0 && <div className="runbook-diagnostics">
-      <div className="recommendation-head">
-        <div>
-          <h3>What Needs Attention</h3>
-          <p className="muted">{issueDiagnostics.length ? `${issueDiagnostics.length} issue signal(s) found; showing the strongest supporting context.` : "No active issue signals remain in this snapshot; the finding may clear on the next health refresh."}</p>
-        </div>
-      </div>
-      <div className="diagnostic-grid">
-        {visibleDiagnostics.map(row => <div className={`diagnostic-tile ${row.status}`} key={`${row.label}-${row.value}`}>
-          <span>{row.label}</span>
-          <strong>{row.value}</strong>
-          <p>{row.detail}</p>
-        </div>)}
-      </div>
-      {runbook.diagnostics.length > visibleDiagnostics.length && <details className="runbook-all-diagnostics">
-        <summary>Show all diagnostic context ({runbook.diagnostics.length})</summary>
-        <div className="diagnostic-grid">
-          {runbook.diagnostics.map(row => <div className={`diagnostic-tile ${row.status}`} key={`all-${row.label}-${row.value}`}>
-            <span>{row.label}</span>
-            <strong>{row.value}</strong>
-            <p>{row.detail}</p>
-          </div>)}
-        </div>
-      </details>}
-    </div>}
-    {runbook.talkgroupCandidates?.length > 0 && <div className="runbook-workbench">
-      <div className="recommendation-head">
-        <div>
-          <h3>Talkgroup Noise Candidates</h3>
-          <p className="muted">Ranked by recent volume, weak-call rate, transcription failures, repetition hints, pending load, category, and incident yield.</p>
-        </div>
-        <button type="button" className="danger-button" disabled={busy} onClick={() => void onExcludeTalkgroups(runbook.talkgroupCandidates.map(row => ({ systemShortName: row.systemShortName, talkgroup: row.talkgroup })))}>Exclude all candidates</button>
-      </div>
-      <table className="table runbook-tg-table">
-        <thead><tr><th>Talkgroup</th><th>Score</th><th>Recent Load</th><th>Quality</th><th>Incident Yield</th><th>Reason</th><th>Action</th></tr></thead>
-        <tbody>{runbook.talkgroupCandidates.map(row => <tr key={`${row.systemShortName}-${row.talkgroup}`}>
-          <td>{row.talkgroupName || `TG ${row.talkgroup}`}<br /><span className="muted">{row.systemShortName} / {row.talkgroup}{row.alreadyDeferred ? " / already deferred" : ""}</span></td>
-          <td><strong>{(row.score ?? 0).toFixed(0)}</strong><br /><span className={`category-chip category-${row.category}`}>{label(row.category)}</span></td>
-          <td>{formatDurationMinutes(row.audioSeconds / 60)}<br /><span className="muted">{row.calls.toLocaleString()} calls, {row.averageAudioSeconds.toFixed(1)}s avg</span>{row.pendingCalls > 0 && <><br /><span className="muted">{row.pendingCalls.toLocaleString()} pending / {formatDurationMinutes(row.pendingAudioSeconds / 60)}</span></>}</td>
-          <td>{(row.weakPct ?? 0).toFixed(0)}% weak<br /><span className="muted">{(row.failedPct ?? 0).toFixed(0)}% failed, {(row.repetitivePct ?? 0).toFixed(0)}% repetitive</span></td>
-          <td>{(row.incidentYieldPct ?? 0).toFixed(0)}%<br /><span className="muted">{(row.incidentCalls ?? 0).toLocaleString()} incident calls</span></td>
-          <td>{row.reason}</td>
-          <td>
-            <div className="runbook-row-actions">
-              <button type="button" className="danger-button" disabled={busy} onClick={() => void onExcludeTalkgroups([{ systemShortName: row.systemShortName, talkgroup: row.talkgroup }])}>Exclude</button>
-              <button type="button" disabled={busy} onClick={() => {
-                localStorage.setItem("pizzawave-setup-talkgroup-filter", String(row.talkgroup));
-                onOpen({ topTab: "setup", subTab: "talkgroups", anchor: String(row.talkgroup) });
-              }}>Open TG</button>
-            </div>
-          </td>
-        </tr>)}</tbody>
-      </table>
-    </div>}
-    <div className="runbook-steps">
-      {runbook.steps.map((step, index) => <div className="runbook-step" key={`${step.title}-${index}`}>
-        <span className="runbook-step-index">{index + 1}</span>
-        <div>
-          <h4>{step.title}</h4>
-          <p>{step.detail}</p>
-        </div>
-      </div>)}
-    </div>
-    {runbook.caveat && <div className="settings-message">{runbook.caveat}</div>}
-    <div className="recommendation-buttons muted-actions">
-      <button disabled={busy} onClick={() => void onState(item.id, "ignore")}>Ignore</button>
-    </div>
   </div>;
 }
 
@@ -10050,22 +10542,26 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
   const [message, setMessage] = useState("");
   const [backupJob, setBackupJob] = useState<Job | null>(null);
   const [preview, setPreview] = useState<BackupRestorePreview | null>(null);
-  const [showHelp, setShowHelp] = useState(false);
-  const [resetPresets, setResetPresets] = useState<string[]>(["data-only"]);
-  const [resetCreateBackup, setResetCreateBackup] = useState(true);
-  const [resetPreserveAudit, setResetPreserveAudit] = useState(true);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const handledBackupJobId = useRef<number | null>(null);
   const inventoryResource = usePersistentRefresh({
     key: `system-backups|${audioWindow}|${refreshToken}`,
     enabled: true,
     load: async () => {
-      const [rows, estimate] = await Promise.all([api.request<BackupArchive[]>("/api/v1/system/backups"), loadBackupEstimateValue()]);
-      return { rows, estimate };
+      const [rows, estimate, pending] = await Promise.all([
+        api.request<BackupArchive[]>("/api/v1/system/backups"),
+        loadBackupEstimateValue(),
+        api.request<BackupRestorePreview | null>("/api/v1/system/backups/restore/pending")
+      ]);
+      return { rows, estimate, pending };
     }
   });
   const rows = inventoryResource.data?.rows ?? [];
   const estimate = inventoryResource.data?.estimate ?? null;
+  useEffect(() => {
+    if (!preview && inventoryResource.data?.pending)
+      setPreview(inventoryResource.data.pending);
+  }, [inventoryResource.data?.pending, preview]);
   useEffect(() => {
     let canceled = false;
     const pollMs = backupJob && isActiveJob(backupJob) ? 2000 : 5000;
@@ -10244,50 +10740,6 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
     }
   }
 
-  function toggleResetPreset(id: string, checked: boolean) {
-    setResetPresets(current => checked
-      ? Array.from(new Set([...current, id]))
-      : current.filter(value => value !== id));
-  }
-
-  function resetPresetLabel(id: string) {
-    if (id === "data-only") return "Data Only";
-    if (id === "site-reset") return "Site Reset";
-    if (id === "full-reset") return "Full Reset";
-    if (id === "custom") return "Custom";
-    return label(id);
-  }
-
-  async function runReset() {
-    if (resetPresets.length === 0) {
-      setMessage("Choose at least one reset preset.");
-      return;
-    }
-    const names = resetPresets.map(preset => resetPresetLabel(preset)).join(", ");
-    const destructive = resetPresets.includes("site-reset") || resetPresets.includes("full-reset");
-    if (!confirmAction("Run reset?", `${names} will ${destructive ? "stop ingest and clear site/operational state according to the selected presets" : "clear historical operating data while preserving current setup"}. ${resetCreateBackup ? "A backup will be created first." : "No backup will be created first."} Continue?`)) return;
-    setBusy("reset");
-    setMessage("Running reset...");
-    try {
-      const result = await api.request<SystemResetResult>("/api/v1/system/reset", {
-        method: "POST",
-        body: JSON.stringify({
-          presets: resetPresets,
-          createBackup: resetCreateBackup,
-          backupAudioWindow: audioWindow,
-          preserveAuditHistory: resetPreserveAudit
-        })
-      });
-      const backupText = result.backup ? ` Backup: ${result.backup.name}.` : "";
-      setMessage(`${result.message}${backupText}${result.warnings.length ? " Warnings: " + result.warnings.join(" ") : ""}`);
-      await reload();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Reset failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
   return <>
   <PanelLoadState label="backup inventory" state={inventoryResource.state} hasData={Boolean(inventoryResource.data)} onRetry={inventoryResource.refresh} />
   {(message || backupJob) && <div className={`backup-job-banner section-status ${jobTone(backupJob)}`}>
@@ -10300,92 +10752,50 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
     </div>
     {backupJob && isActiveJob(backupJob) && <button className="danger-button" disabled={Boolean(busy)} onClick={() => void stopBackupJob()}>{busy === "cancel-backup" ? "Stopping..." : "Stop Backup"}</button>}
   </div>}
-  <div className="system-manager-grid">
-    <div className="card">
-      <h3>Backup</h3>
-      <p className="muted">Create a portable archive of PizzaWave state for relocation, cloning, or disaster recovery.</p>
+  {preview ? <section className="card staged-restore-card">
+    <div className="jobs-card-head">
+      <div><h3>Staged Restore Review</h3><p>Nothing has been overwritten. Verify this archive before applying it to the live PizzaWave stack.</p></div>
+      <div className="setup-button-row">
+        <button className="danger-button" disabled={locked || preview.checks.some(check => !check.ok)} onClick={() => void applyRestore()}>{busy === "apply-restore" ? "Applying..." : "Apply Staged Restore"}</button>
+        <button disabled={locked} onClick={() => void cancelRestore()}>{busy === "cancel-restore" ? "Canceling..." : "Cancel Staged Restore"}</button>
+      </div>
+    </div>
+    <BackupRestorePreviewCard preview={preview} />
+  </section> : <div className="system-manager-grid backup-restore-layout">
+    <section className="card backup-create-card">
+      <div className="jobs-card-head">
+        <div><h3>Create Backup</h3><p>Creates a portable full-state archive; only recorded-audio history is windowed.</p></div>
+        <button disabled={locked} onClick={() => void createBackup()}>{busy === "create" ? "Starting..." : "Create Backup"}</button>
+      </div>
       <label className="setting-field compact-setting">
-        <span>Recorded audio<small>SQLite and configuration are always backed up fully. This controls recorded call audio by file timestamp.</small></span>
+        <span>Recorded audio scope<small>Database, configuration, app data, Qdrant, Trunk Recorder config, and talkgroups are always included in full.</small></span>
         <select disabled={locked} value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioWindowOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
       </label>
-      <div className="setup-button-row">
-        <button disabled={locked} onClick={() => void createBackup()}>{busy === "create" ? "Starting..." : "Create Backup"}</button>
-        <button type="button" disabled={locked} onClick={() => setShowHelp(true)}>Help</button>
-      </div>
       {estimate && <div className="backup-preview">
-        <div className="audit-kpis">
-          <Kpi label="Estimated Size" value={formatBytes(estimate.bytes)} status="ok" subtext={`${estimate.fileCount.toLocaleString()} source file(s); archive compression may differ`} />
-          <Kpi label="Largest Area" value={estimate.kinds.length ? estimate.kinds.slice().sort((a, b) => b.bytes - a.bytes)[0].kind : "None"} status="ok" subtext={estimate.kinds.length ? formatBytes(estimate.kinds.slice().sort((a, b) => b.bytes - a.bytes)[0].bytes) : "No files found"} />
+        <div className="audit-kpis backup-estimate-kpis">
+          <Kpi label="Estimated Source Size" value={formatBytes(estimate.bytes)} status="ok" subtext={`${estimate.fileCount.toLocaleString()} source file(s); compressed size may differ`} />
+          <Kpi label="Recorded Audio" value={audioWindowLabel} status="ok" subtext="Selected by audio file timestamp" />
         </div>
-        {estimate.kinds.length > 0 && <table className="table compact-table"><thead><tr><th>Area</th><th>Files</th><th>Source Size</th></tr></thead><tbody>{estimate.kinds.map(kind => <tr key={kind.kind}>
-          <td>{kind.kind}</td>
-          <td>{kind.fileCount.toLocaleString()}</td>
-          <td>{formatBytes(kind.bytes)}</td>
-        </tr>)}</tbody></table>}
+        {estimate.kinds.length > 0 && <details><summary>Backup contents by area</summary><table className="table compact-table"><thead><tr><th>Area</th><th>Files</th><th>Source Size</th></tr></thead><tbody>{estimate.kinds.map(kind => <tr key={kind.kind}>
+          <td>{label(kind.kind)}</td><td>{kind.fileCount.toLocaleString()}</td><td>{formatBytes(kind.bytes)}</td>
+        </tr>)}</tbody></table></details>}
         {estimate.warnings.length > 0 && <div className="setup-warning-list">{estimate.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
       </div>}
-    </div>
-    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
-      <div className="modal-card" onClick={event => event.stopPropagation()}>
-        <div className="recommendation-head">
-          <h3>Backup / Restore Guardrails</h3>
-          <button onClick={() => setShowHelp(false)}>Close</button>
-        </div>
-        <div className="maintenance-help">
-          <p><strong>Backup scope</strong> is intentionally simple: PizzaWave creates a full backup of the configured database, app data, Qdrant storage, TR config/talkgroups, PizzaWave config, and token when those files exist. Recorded call audio can be limited to a preset recent window.</p>
-          <p><strong>Estimated size</strong> is shown before backup creation as a rough source-size total. The final compressed archive can differ.</p>
-          <p><strong>Audio window</strong> uses the recorded audio file timestamp. The SQLite database remains a full snapshot so restore has coherent call metadata, incidents, jobs, settings state, and audit history.</p>
-          <p><strong>Configuration and setup assets</strong> are included when present: PizzaWave config/token, TR config, generated talkgroups, app data, and Qdrant storage.</p>
-          <p><strong>Restore</strong> is staged first and reviewed on this page. Applying restore overwrites backed-up files and may restart services, then PizzaWave returns here with the result.</p>
-        </div>
-      </div>
-    </div>}
-    <div className="card">
-      <h3>Restore</h3>
-      <p className="muted">Stage a backup, review verification, then apply it from this page.</p>
-      <input ref={fileRef} disabled={locked} type="file" accept=".zip,application/zip" />
-      <div className="setup-button-row">
-        <button className="danger-button" disabled={locked} onClick={() => void stageRestore()}>{busy === "restore" ? "Staging..." : "Stage Restore"}</button>
-        {preview && <button className="danger-button" disabled={locked || preview.checks.some(check => !check.ok)} onClick={() => void applyRestore()}>{busy === "apply-restore" ? "Applying..." : "Apply Staged Restore"}</button>}
-        {preview && <button disabled={locked} onClick={() => void cancelRestore()}>{busy === "cancel-restore" ? "Canceling..." : "Cancel Restore"}</button>}
-      </div>
-      {preview && <BackupRestorePreviewCard preview={preview} />}
-    </div>
-    <div className="card">
-      <h3>Reset</h3>
-      <p className="muted">Choose one or more reset presets, then confirm. Reset is the replacement for the old clean-install and relocation entry points.</p>
-      <div className="settings-fields">
-        <label className="setup-check option-row">
-          <input type="checkbox" disabled={locked} checked={resetPresets.includes("data-only")} onChange={event => toggleResetPreset("data-only", event.currentTarget.checked)} />
-          <span><strong>Data Only</strong><span> Clear calls, audio, incidents, transcripts, AI/vector history, jobs, metrics, and recommendations. Current site/config stays in place.</span></span>
-        </label>
-        <label className="setup-check option-row">
-          <input type="checkbox" disabled={locked} checked={resetPresets.includes("site-reset")} onChange={event => toggleResetPreset("site-reset", event.currentTarget.checked)} />
-          <span><strong>Site Reset</strong><span> Clear site/location state, TR config, generated TG files/catalog policy, RF evidence/activity, and all historical operating data.</span></span>
-        </label>
-        <label className="setup-check option-row">
-          <input type="checkbox" disabled={locked} checked={resetPresets.includes("full-reset")} onChange={event => toggleResetPreset("full-reset", event.currentTarget.checked)} />
-          <span><strong>Full Reset</strong><span> Return to first-run prerequisite mode. Backup archives are preserved.</span></span>
-        </label>
-        <SettingCheckbox label="Create backup before reset" description={`Uses the Backup audio window currently set to ${audioWindowLabel}.`} checked={resetCreateBackup} onChange={setResetCreateBackup} disabled={locked} />
-        <SettingCheckbox label="Preserve audit/setup history for Data Only" description="Site Reset and Full Reset clear setup/RF activity history regardless of this option." checked={resetPreserveAudit} onChange={setResetPreserveAudit} disabled={locked} />
-      </div>
-      <div className="setup-button-row">
-        <button className="danger-button" disabled={locked || resetPresets.length === 0} onClick={() => void runReset()}>{busy === "reset" ? "Resetting..." : "Run Reset"}</button>
-      </div>
-    </div>
-    <div className="card">
-      <h3>Available Backups</h3>
-      {rows.length === 0 ? <p className="muted">No local backups found.</p> :
-        <table className="table compact-table"><thead><tr><th>Name</th><th>Full Path</th><th>Created</th><th>Size</th><th>Action</th></tr></thead><tbody>{rows.map(row => <tr key={row.name}>
-          <td>{row.name}</td>
-          <td><code>{row.path}</code></td>
-          <td>{new Date(row.createdUtc).toLocaleString()}</td>
-          <td>{formatBytes(row.bytes)}</td>
-          <td><a href={`/api/v1/system/backups/${encodeURIComponent(row.name)}`}>Download</a> <button disabled={locked} onClick={() => void stageLocalRestore(row)}>{busy === `restore-${row.name}` ? "Staging..." : "Restore"}</button> <button className="danger-button" disabled={locked} onClick={() => void deleteBackup(row.name)}>Delete</button></td>
-        </tr>)}</tbody></table>}
-    </div>
-  </div>
+    </section>
+    <section className="card available-backups-card">
+      <div className="jobs-card-head"><div><h3>Available Backups</h3><p>Download an archive for safekeeping or stage one for deliberate review.</p></div><span className="job-status status-completed">{rows.length.toLocaleString()} local</span></div>
+      {rows.length === 0 ? <p className="muted">No local backups found.</p> : <div className="table-scroll"><table className="table backups-table"><thead><tr><th>Backup</th><th>Created</th><th>Size</th><th>Actions</th></tr></thead><tbody>{rows.map(row => <tr key={row.name}>
+        <td><strong>{row.name}</strong><small>{row.path}</small></td>
+        <td>{new Date(row.createdUtc).toLocaleString()}</td>
+        <td>{formatBytes(row.bytes)}</td>
+        <td><div className="table-action-row"><a className="button-link" href={`/api/v1/system/backups/${encodeURIComponent(row.name)}`}>Download</a><button disabled={locked} onClick={() => void stageLocalRestore(row)}>{busy === `restore-${row.name}` ? "Staging..." : "Stage Restore"}</button><button className="danger-button" disabled={locked} onClick={() => void deleteBackup(row.name)}>Delete</button></div></td>
+      </tr>)}</tbody></table></div>}
+    </section>
+    <section className="card upload-backup-card">
+      <div><h3>Upload Backup Archive</h3><p>Upload a PizzaWave archive from another location. Staging validates it without changing live files.</p></div>
+      <div className="backup-upload-controls"><input ref={fileRef} disabled={locked} type="file" accept=".zip,application/zip" /><button disabled={locked} onClick={() => void stageRestore()}>{busy === "restore" ? "Staging..." : "Stage Uploaded Archive"}</button></div>
+    </section>
+  </div>}
   </>;
 
   async function deleteBackup(name: string) {
@@ -10404,6 +10814,74 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
   }
 }
 
+function SystemResetPanel({ reload }: { reload: () => Promise<void> }) {
+  const [preset, setPreset] = useState("data-only");
+  const [createBackup, setCreateBackup] = useState(true);
+  const [preserveAudit, setPreserveAudit] = useState(true);
+  const [audioWindow, setAudioWindow] = useState("7d");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const audioOptions = [
+    { value: "24h", label: "Last 24h" },
+    { value: "7d", label: "Last 7d" },
+    { value: "30d", label: "Last 30d" },
+    { value: "60d", label: "Last 60d" },
+    { value: "all", label: "All" }
+  ];
+  const presets = [
+    { id: "data-only", title: "Data Only", detail: "Clears calls, audio, incidents, transcripts, AI/vector history, jobs, metrics, and recommendations. Current site and configuration remain." },
+    { id: "site-reset", title: "Site Reset", detail: "Also clears site/location state, Trunk Recorder configuration, generated talkgroups, catalog policy, and RF evidence. Host and processing settings remain." },
+    { id: "full-reset", title: "Full Reset", detail: "Returns PizzaWave to first-run prerequisite mode and regenerates the admin token. Existing backup archives remain available." }
+  ];
+  const selected = presets.find(row => row.id === preset) ?? presets[0];
+
+  async function runReset() {
+    const backupText = createBackup ? ` A backup with ${audioOptions.find(row => row.value === audioWindow)?.label.toLowerCase() ?? "selected"} recorded audio will be created first.` : " No backup will be created first.";
+    if (!confirmAction(`Run ${selected.title}?`, `${selected.detail}${backupText} PizzaWave ingest will pause immediately before data removal; Trunk Recorder will continue. Recovery requires restoring an archive from Backup and Restore.`)) return;
+    setBusy(true);
+    setMessage(`Running ${selected.title}...`);
+    try {
+      const result = await api.request<SystemResetResult>("/api/v1/system/reset", {
+        method: "POST",
+        body: JSON.stringify({
+          presets: [preset],
+          createBackup,
+          backupAudioWindow: audioWindow,
+          preserveAuditHistory: preset === "data-only" && preserveAudit
+        })
+      });
+      const backupResult = result.backup ? ` Backup: ${result.backup.name}.` : "";
+      setMessage(`${result.message}${backupResult}${result.warnings.length ? " Warnings: " + result.warnings.join(" ") : ""}`);
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Reset failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="system-manager-grid reset-page-layout">
+    {message && <div className={`section-status ${message.toLowerCase().includes("fail") ? "error" : "warning"}`}>{message}</div>}
+    <section className="card reset-scope-card">
+      <div className="jobs-card-head"><div><h3>Choose Reset Scope</h3><p>Reset scopes are mutually exclusive. Review exactly what will be removed before continuing.</p></div></div>
+      <div className="reset-option-grid">{presets.map(row => <label className={`reset-option ${preset === row.id ? "selected" : ""}`} key={row.id}>
+        <input type="radio" name="reset-scope" value={row.id} checked={preset === row.id} disabled={busy} onChange={() => setPreset(row.id)} />
+        <span><strong>{row.title}</strong><small>{row.detail}</small></span>
+      </label>)}</div>
+      <p className="reset-live-impact"><strong>Live-operation impact:</strong> PizzaWave ingest pauses immediately before data removal and remains paused afterward. Trunk Recorder is not stopped. Resume ingest from Runtime / Queue after reset and any required setup are complete.</p>
+      <div className="reset-safety-panel">
+        <div className="jobs-card-head"><div><h3>Recovery Safeguard</h3><p>Confirm the recovery boundary before running the selected reset.</p></div><button className="danger-button" disabled={busy} onClick={() => void runReset()}>{busy ? "Resetting..." : `Run ${selected.title}`}</button></div>
+        <div className="reset-safety-controls">
+          <SettingCheckbox label="Create backup before reset" description="Recommended. Backup creation finishes before PizzaWave pauses ingest or removes data." checked={createBackup} onChange={setCreateBackup} disabled={busy} />
+          {createBackup && <label className="setting-field compact-setting reset-audio-window"><span>Recorded audio in backup<small>All non-audio state is backed up in full.</small></span><select disabled={busy} value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
+          {preset === "data-only" && <SettingCheckbox label="Preserve audit and setup history" description="Keeps configuration/setup activity history while operational history is cleared." checked={preserveAudit} onChange={setPreserveAudit} disabled={busy} />}
+        </div>
+        {!createBackup && <p className="section-status warning">No recovery archive will be created before this reset.</p>}
+      </div>
+    </section>
+  </div>;
+}
+
 function BackupRestorePreviewCard({ preview }: { preview: BackupRestorePreview }) {
   const failed = preview.checks.filter(check => !check.ok).length;
   const byKind = preview.manifest.entries.reduce<Record<string, number>>((acc, entry) => {
@@ -10417,81 +10895,56 @@ function BackupRestorePreviewCard({ preview }: { preview: BackupRestorePreview }
       <Kpi label="Verification" value={failed ? `${failed} failed` : "OK"} status={failed ? "error" : "ok"} subtext={`${preview.checks.length.toLocaleString()} checksum check(s)`} />
     </div>
     {preview.manifest.warnings.length > 0 && <div className="setup-warning-list">{preview.manifest.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
+    <div className="restore-review-grid">
+      <div><h4>Included Areas</h4><table className="table compact-table"><thead><tr><th>Area</th><th>Files</th></tr></thead><tbody>{Object.entries(byKind).map(([kind, count]) => <tr key={kind}><td>{label(kind)}</td><td>{count.toLocaleString()}</td></tr>)}</tbody></table></div>
+      <div><h4>Verification Checks</h4><table className="table compact-table"><thead><tr><th>Check</th><th>Result</th><th>Evidence</th></tr></thead><tbody>{preview.checks.map(check => <tr className={check.ok ? "" : "issue-row"} key={check.name}><td>{check.name}</td><td><span className={`job-status ${check.ok ? "status-completed" : "status-failed"}`}>{check.ok ? "Passed" : "Failed"}</span></td><td>{check.message}</td></tr>)}</tbody></table></div>
+    </div>
+    <details><summary>Technical archive paths</summary><p className="muted">Source host: <code>{preview.manifest.hostname}</code>; database: <code>{preview.manifest.databasePath}</code>; audio: <code>{preview.manifest.audioRoot}</code>; Trunk Recorder config: <code>{preview.manifest.trConfigPath}</code>.</p></details>
   </div>;
 }
 
-function PizzadStorageManager({ runtime, reload }: { runtime: any | null; reload: () => Promise<void> }) {
-  const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState("");
-  if (!runtime) return <div className="card">Loading storage status...</div>;
-  const tables = Object.entries(runtime.tables ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const diskTotal = Number(runtime.storage?.diskTotalBytes || 0);
-  const diskFree = Number(runtime.storage?.diskFreeBytes || 0);
+function PizzadStorageManager({ snapshot, maintenanceJobs }: { snapshot: any | null; maintenanceJobs: Job[] }) {
+  if (!snapshot) return <div className="card">Loading storage status...</div>;
+  const tables = Object.entries(snapshot.tables ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const storage = snapshot.storage ?? {};
+  const diskTotal = Number(storage.diskTotalBytes || 0);
+  const diskFree = Number(storage.diskFreeBytes || 0);
   const diskFreePercent = diskTotal > 0 ? diskFree / diskTotal * 100 : 100;
-  async function runMaintenance(action: "vacuum" | "analyze" | "prune-jobs" | "recount") {
-    if (action === "recount") {
-      setBusy(action);
-      setMessage("Refreshing storage counts...");
-      await reload();
-      setMessage("Storage counts refreshed.");
-      setBusy("");
-      return;
-    }
-    const descriptions = {
-      vacuum: "This rewrites the SQLite database to reclaim space and can make the database busy during the operation.",
-      analyze: "This refreshes SQLite planner statistics. It does not delete data.",
-      "prune-jobs": "This deletes completed or canceled jobs and job logs older than 30 days. Active jobs are kept."
-    } as Record<string, string>;
-    if (!confirmAction(`${label(action)}?`, descriptions[action] ?? "Run maintenance action?")) return;
-    setBusy(action);
-    setMessage(`${label(action)} running...`);
-    try {
-      const result = await api.request<{ ok: boolean; message: string }>(`/api/v1/system/storage/maintenance/${action}`, { method: "POST" });
-      setMessage(result.message);
-      await reload();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Maintenance action failed.");
-    } finally {
-      setBusy("");
-    }
-  }
+  const readErrors = Number(storage.audioReadErrors || 0) + Number(storage.qdrantReadErrors || 0);
+  const storageStatus = readErrors > 0 ? "warning" : "ok";
   return <div className="system-manager-grid">
-    <div className="audit-kpis">
-      <Kpi label="Database" value={formatBytes(runtime.storage?.databaseBytes || 0)} status="ok" subtext={runtime.storage?.databasePath || "SQLite WAL store"} />
-      <Kpi label="Audio Store" value={formatBytes(runtime.storage?.sampledAudioBytes || 0)} status={runtime.storage?.audioSampleTruncated ? "warning" : "ok"} subtext={`${(runtime.storage?.sampledAudioFiles || 0).toLocaleString()} sampled file(s)${runtime.storage?.audioSampleTruncated ? " (sample capped)" : ""}`} />
-      <Kpi label="Disk Free" value={formatBytes(diskFree)} status={diskFreePercent < 10 ? "error" : diskFreePercent < 20 ? "warning" : "ok"} subtext={`${diskFreePercent.toFixed(0)}% free on ${runtime.storage?.diskRoot || "application volume"}`} />
+    <div className="audit-kpis storage-kpis">
+      <Kpi label="PizzaWave Data" value={formatBytes(storage.pizzaWaveBytes || 0)} status={storageStatus} subtext={readErrors > 0 ? `${readErrors.toLocaleString()} file read error(s); total is partial` : "Database, recorded audio, and vector data"} />
+      <Kpi label="Recorded Audio" value={formatBytes(storage.audioBytes || 0)} status={Number(storage.audioReadErrors || 0) > 0 ? "warning" : "ok"} subtext={`${Number(storage.audioFiles || 0).toLocaleString()} file(s)`} />
+      <Kpi label="Database" value={formatBytes(storage.databaseBytes || 0)} status="ok" subtext="SQLite database, WAL, and shared-memory files" />
+      <Kpi label="Vector Data" value={formatBytes(storage.qdrantBytes || 0)} status={Number(storage.qdrantReadErrors || 0) > 0 ? "warning" : "ok"} subtext={`${Number(storage.qdrantFiles || 0).toLocaleString()} Qdrant file(s)`} />
+      <Kpi label="Disk Free" value={formatBytes(diskFree)} status={diskFreePercent < 10 ? "error" : diskFreePercent < 20 ? "warning" : "ok"} subtext={`${diskFreePercent.toFixed(0)}% free on ${storage.diskRoot || "application volume"}`} />
     </div>
-    <div className="card">
-      <h3>Maintenance</h3>
-      <div className="setup-button-row">
-        <button disabled={Boolean(busy)} onClick={() => void runMaintenance("vacuum")}>{busy === "vacuum" ? "Vacuuming..." : "Vacuum Database"}</button>
-        <button disabled={Boolean(busy)} onClick={() => void runMaintenance("analyze")}>{busy === "analyze" ? "Optimizing..." : "Optimize Statistics"}</button>
-        <button disabled={Boolean(busy)} onClick={() => void runMaintenance("prune-jobs")}>{busy === "prune-jobs" ? "Pruning..." : "Prune Old Jobs"}</button>
-        <button disabled={Boolean(busy)} onClick={() => void runMaintenance("recount")}>{busy === "recount" ? "Refreshing..." : "Recount Storage"}</button>
-      </div>
-      <div className="maintenance-help">
-        <p><strong>Vacuum Database</strong> rewrites the SQLite file to reclaim free pages. It can briefly make the database busier; use it only during quiet periods.</p>
-        <p><strong>Optimize Statistics</strong> refreshes SQLite planner statistics so common queries pick better indexes. It does not delete data.</p>
-        <p><strong>Prune Old Jobs</strong> deletes completed/canceled job rows and job logs older than 30 days. Active jobs are kept.</p>
-        <p><strong>Recount Storage</strong> reloads this panel's size and table counts. It does not change data.</p>
-      </div>
-      {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unsupported") ? "section-status error" : "section-status ok"}>{message}</span>}
+    <div className="card storage-maintenance-card">
+      <h3>Automatic Maintenance</h3>
+      <p>PizzaWave runs lightweight SQLite optimization and removes completed job history older than 30 days once per day.</p>
+      {maintenanceJobs.length === 0 ? <p className="muted">No automatic maintenance run has been recorded yet.</p> :
+        <table className="table compact-table storage-maintenance-table"><thead><tr><th>Run</th><th>Status</th><th>Duration</th><th>Outcome</th></tr></thead><tbody>{maintenanceJobs.map(job => <tr key={job.id}>
+          <td>{new Date(job.startedAtUtc || job.createdAtUtc).toLocaleString()}</td>
+          <td><span className={`job-status status-${job.status}`}>{label(job.status)}</span></td>
+          <td>{jobDurationSummary(job)}</td>
+          <td>{job.message}</td>
+        </tr>)}</tbody></table>}
     </div>
-    <div className="card">
-      <h3>Database Tables</h3>
+    <details className="card">
+      <summary>Technical database table counts</summary>
       <table className="table compact-table"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>{tables.map(([name, count]) => <tr key={name}><td>{name}</td><td>{Number(count).toLocaleString()}</td></tr>)}</tbody></table>
-    </div>
+      <p className="muted">Measured {new Date(snapshot.generatedAtUtc).toLocaleString()} in {Number(snapshot.scanDurationMs || 0).toLocaleString()} ms. Database: <code>{storage.databasePath}</code>; audio: <code>{storage.audioRoot}</code>; vectors: <code>{storage.qdrantPath}</code>.</p>
+    </details>
   </div>;
 }
 
-function TokenUsagePanel({ report }: { report: TokenUsageReport | null }) {
-  const [page, setPage] = useState(1);
+function TokenUsagePanel({ report, rangeHours, onRangeHoursChange, onPageChange }: { report: TokenUsageReport | null; rangeHours: number; onRangeHoursChange: (hours: number) => void; onPageChange: (page: number) => void }) {
   if (!report) return <div className="trouble-panel"><div className="card">Loading token usage...</div></div>;
-  const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(report.entries.length / pageSize));
-  const pageSafe = Math.min(page, totalPages);
-  const rows = report.entries.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
-  const failures = report.entries.filter(row => !row.success).slice(0, 12);
+  const totalPages = Math.max(1, Math.ceil(report.entryTotal / Math.max(1, report.entryPageSize)));
+  const pageSafe = Math.min(report.entryPage, totalPages);
+  const rows = report.entries;
+  const failures = report.recentFailures;
   const failureKind = (row: TokenUsageReport["entries"][number]) => {
     if (row.success) return "OK";
     if (row.finishReason?.toLowerCase() === "length" || row.error?.toLowerCase().includes("truncat")) return "Truncated";
@@ -10500,53 +10953,60 @@ function TokenUsagePanel({ report }: { report: TokenUsageReport | null }) {
     if (row.error?.toLowerCase().includes("cancel")) return "Canceled";
     return "Error";
   };
+  const successRate = report.summary.requests ? report.summary.successes / report.summary.requests * 100 : 100;
+  const healthStatus = successRate < 95 ? "error" : successRate < 99 ? "warning" : "ok";
   const usageSummary = (title: string, summary: TokenUsageReport["summary"]) =>
-    <Kpi label={title} value={formatCompact(summary.totalTokens)} status={summary.timeoutFailures > 0 || summary.noValidResultFailures > 0 || summary.httpOrOtherErrors > 0 ? "error" : summary.truncated > 0 ? "warning" : "ok"} subtext={`${summary.requests.toLocaleString()} request(s), ${summary.timeoutFailures.toLocaleString()} timeout, ${summary.noValidResultFailures.toLocaleString()} no result, ${summary.truncated.toLocaleString()} truncated, est. $${summary.estimatedStandardCost.toFixed(2)}`} />;
+    <Kpi label={title} value={formatCompact(summary.totalTokens)} subtext={`${summary.requests.toLocaleString()} requests · OpenAI equivalent $${summary.estimatedStandardCost.toFixed(2)}`} />;
   return <div className="trouble-panel token-usage-panel">
-    <div className="audit-kpis">
+    <SystemPageHeaderControls><SystemHistoryWindow value={rangeHours} label="AI usage window" onChange={onRangeHoursChange} /></SystemPageHeaderControls>
+    <div className="audit-kpis ai-usage-kpis">
       {usageSummary("Selected Range", report.summary)}
+      <Kpi label="Request Health" value={`${successRate.toFixed(1)}%`} status={healthStatus} subtext={`${report.summary.successes.toLocaleString()} succeeded · ${report.summary.failures.toLocaleString()} failed`} />
       {usageSummary("This Month", report.monthlySummary)}
       {usageSummary("All Time", report.allTimeSummary)}
-      <Kpi label="Prompt Tokens" value={formatCompact(report.summary.promptTokens)} subtext="Input/context tokens" />
-      <Kpi label="Completion Tokens" value={formatCompact(report.summary.completionTokens)} subtext="Generated output tokens" />
     </div>
-    {report.failuresByKind.length > 0 && <div className="card">
-      <h3>AI Failure Classes</h3>
-      <table className="table compact-ai-table"><thead><tr><th>Class</th><th>Requests</th><th>Tokens</th><th>Latest</th><th>Example</th></tr></thead><tbody>{report.failuresByKind.map(row => <tr key={row.kind}>
-        <td>{label(row.kind)}</td>
-        <td>{row.requests.toLocaleString()}</td>
-        <td>{formatCompact(row.totalTokens)}</td>
-        <td>{new Date(row.latestUtc).toLocaleString()}</td>
-        <td>{row.example || row.kind}</td>
-      </tr>)}</tbody></table>
-    </div>}
-    {failures.length > 0 && <div className="card">
-      <h3>Recent AI Failures</h3>
-      <table className="table compact-ai-table"><thead><tr><th>Time</th><th>Activity</th><th>Class</th><th>Model</th><th>Error</th></tr></thead><tbody>{failures.map(row => <tr key={row.id}>
-        <td>{new Date(row.timestampUtc).toLocaleString()}</td>
-        <td>{row.triggerActivity}</td>
-        <td>{failureKind(row)}</td>
-        <td>{row.responseModel || row.requestModel}</td>
-        <td>{row.error || row.finishReason || "failed"}</td>
-      </tr>)}</tbody></table>
-    </div>}
-    <div className="tr-chart-grid">
-      <TokenBarChart title="Tokens by Day" rows={report.byDay} />
-      <TokenBarChart title="Tokens by Activity" rows={report.byTrigger} />
-    </div>
-    <div className="card">
-      <div className="jobs-card-head">
-        <h3>Recorded Usage</h3>
-        <p>{report.ledger}</p>
+    <section className="system-content-section">
+      <SystemSectionHeader title="AI Activity Over Time" description={`Requests and token use in ${report.bucketSeconds / 3600}-hour buckets across the complete selected window.`} />
+      <div className="tr-chart-grid ai-usage-chart-grid">
+        <AiRequestOutcomeChart report={report} />
+        <AiTokenTimelineChart report={report} />
+      </div>
+    </section>
+    <section className="system-content-section">
+      <SystemSectionHeader title="Usage by Activity" description="Which PizzaWave workflows consumed model capacity in this window." />
+      <TokenBarChart title="Tokens and Requests" rows={report.byTrigger} />
+    </section>
+    {report.failuresByKind.length > 0 && <section className="system-content-section">
+      <SystemSectionHeader title="AI Failures" description="Grouped failure conditions with recent individual evidence available below." meta={<span>{report.summary.failures.toLocaleString()} failed</span>} />
+      <div className="card ai-failure-card">
+        <table className="table compact-ai-table"><thead><tr><th>Class</th><th>Requests</th><th>Latest</th><th>Example</th></tr></thead><tbody>{report.failuresByKind.map(row => <tr key={row.kind}>
+          <td>{label(row.kind)}</td>
+          <td>{row.requests.toLocaleString()}</td>
+          <td>{new Date(row.latestUtc).toLocaleString()}</td>
+          <td>{row.example || row.kind}</td>
+        </tr>)}</tbody></table>
+        {failures.length > 0 && <details className="ai-failure-occurrences"><summary>Recent individual failures ({failures.length.toLocaleString()})</summary><div className="ai-failure-scroll"><table className="table compact-ai-table"><thead><tr><th>Time</th><th>Activity</th><th>Class</th><th>Model</th><th>Error</th></tr></thead><tbody>{failures.map(row => <tr key={row.id}>
+          <td>{new Date(row.timestampUtc).toLocaleString()}</td>
+          <td>{row.triggerActivity}</td>
+          <td>{failureKind(row)}</td>
+          <td>{row.responseModel || row.requestModel}</td>
+          <td>{row.error || row.finishReason || "failed"}</td>
+        </tr>)}</tbody></table></div></details>}
+      </div>
+    </section>}
+    <details className="card ai-usage-ledger">
+      <summary>Recorded Usage <small>{report.entryTotal.toLocaleString()} request{report.entryTotal === 1 ? "" : "s"} in this window</small></summary>
+      <div className="jobs-card-head ai-ledger-head">
+        <p className="muted">Request-level token evidence and completion status.</p>
         <div className="pagination-row table-top-pagination">
-          <button disabled={pageSafe <= 1} onClick={() => setPage(1)}>First</button>
-          <button disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>Prev</button>
+          <button disabled={pageSafe <= 1} onClick={() => onPageChange(1)}>First</button>
+          <button disabled={pageSafe <= 1} onClick={() => onPageChange(pageSafe - 1)}>Prev</button>
           <span>Page {pageSafe} of {totalPages}</span>
-          <button disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next</button>
-          <button disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)}>Last</button>
+          <button disabled={pageSafe >= totalPages} onClick={() => onPageChange(pageSafe + 1)}>Next</button>
+          <button disabled={pageSafe >= totalPages} onClick={() => onPageChange(totalPages)}>Last</button>
         </div>
       </div>
-      <table className="table jobs-table ai-usage-table"><thead><tr><th>Time</th><th>Activity</th><th>Status</th><th>Model</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Finish</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
+      <div className="ai-ledger-table-wrap"><table className="table jobs-table ai-usage-table"><thead><tr><th>Time</th><th>Activity</th><th>Status</th><th>Model</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Finish</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
         <td>{new Date(row.timestampUtc).toLocaleString()}</td>
         <td>{row.triggerActivity}</td>
         <td>{failureKind(row)}</td>
@@ -10555,60 +11015,110 @@ function TokenUsagePanel({ report }: { report: TokenUsageReport | null }) {
         <td>{row.completionTokens.toLocaleString()}</td>
         <td>{(row.totalTokens || row.promptTokens + row.completionTokens).toLocaleString()}</td>
         <td>{row.finishReason}</td>
-      </tr>)}</tbody></table>
-    </div>
+      </tr>)}</tbody></table></div>
+      <details><summary>Technical provenance</summary><p className="muted">{report.ledger}</p></details>
+    </details>
   </div>;
 }
 
-function RemoteBandwidthPanel({ report }: { report: RemoteBandwidthReport | null }) {
-  const [page, setPage] = useState(1);
+function AiRequestOutcomeChart({ report }: { report: TokenUsageReport }) {
+  const left = 44;
+  const right = 664;
+  const top = 18;
+  const bottom = 170;
+  const max = Math.max(1, ...report.byTime.map(row => row.requests));
+  const slot = (right - left) / Math.max(1, Math.ceil((report.rangeEnd - report.rangeStart) / report.bucketSeconds));
+  const barWidth = Math.max(2, slot - 2);
+  const x = (start: number) => left + (start - report.rangeStart) / Math.max(1, report.rangeEnd - report.rangeStart) * (right - left);
+  const height = (value: number) => value / max * (bottom - top);
+  return <div className="card tr-chart-card ai-usage-chart-card"><h3>Request Outcomes</h3><p className="muted">Successful and failed model requests per bucket.</p><svg className="chart" viewBox="0 0 690 215" preserveAspectRatio="none" role="img" aria-label="AI request outcomes over time"><line className="axis" x1={left} y1={top} x2={left} y2={bottom}/><line className="axis" x1={left} y1={bottom} x2={right} y2={bottom}/><text className="chart-label" x="8" y="23">{max}</text><text className="chart-label" x="24" y="174">0</text>{report.byTime.map(row => { const successHeight = height(row.successes); const failureHeight = height(row.failures); const barX = x(row.start); return <g key={row.start}><rect x={barX} y={bottom - successHeight} width={barWidth} height={successHeight} fill="#54d68a"><title>{transcriptionChartTime(row.start, report.rangeStart, report.rangeEnd)} · {row.successes} succeeded</title></rect><rect x={barX} y={bottom - successHeight - failureHeight} width={barWidth} height={failureHeight} fill="#f05d5e"><title>{transcriptionChartTime(row.start, report.rangeStart, report.rangeEnd)} · {row.failures} failed</title></rect></g>; })}{transcriptionChartLabels(report.rangeStart, report.rangeEnd).map(timestamp => <text className="chart-label" textAnchor={timestamp === report.rangeStart ? "start" : timestamp === report.rangeEnd ? "end" : "middle"} x={left + (timestamp - report.rangeStart) / Math.max(1, report.rangeEnd - report.rangeStart) * (right - left)} y="198" key={timestamp}>{roundedTranscriptionChartTime(timestamp, report.rangeStart, report.rangeEnd)}</text>)}</svg><Legend items={[["Succeeded", "#54d68a"], ["Failed", "#f05d5e"]]} /></div>;
+}
+
+function AiTokenTimelineChart({ report }: { report: TokenUsageReport }) {
+  const left = 44;
+  const right = 664;
+  const top = 18;
+  const bottom = 170;
+  const max = Math.max(1, ...report.byTime.map(row => row.promptTokens + row.completionTokens));
+  const slot = (right - left) / Math.max(1, Math.ceil((report.rangeEnd - report.rangeStart) / report.bucketSeconds));
+  const barWidth = Math.max(2, slot - 2);
+  const x = (start: number) => left + (start - report.rangeStart) / Math.max(1, report.rangeEnd - report.rangeStart) * (right - left);
+  const height = (value: number) => value / max * (bottom - top);
+  return <div className="card tr-chart-card ai-usage-chart-card"><h3>Token Use</h3><p className="muted">Input/context and generated output tokens per bucket.</p><svg className="chart" viewBox="0 0 690 215" preserveAspectRatio="none" role="img" aria-label="AI token use over time"><line className="axis" x1={left} y1={top} x2={left} y2={bottom}/><line className="axis" x1={left} y1={bottom} x2={right} y2={bottom}/><text className="chart-label" x="3" y="23">{formatCompact(max)}</text><text className="chart-label" x="24" y="174">0</text>{report.byTime.map(row => { const promptHeight = height(row.promptTokens); const completionHeight = height(row.completionTokens); const barX = x(row.start); return <g key={row.start}><rect x={barX} y={bottom - promptHeight} width={barWidth} height={promptHeight} fill="var(--accent)"><title>{transcriptionChartTime(row.start, report.rangeStart, report.rangeEnd)} · {row.promptTokens.toLocaleString()} prompt tokens</title></rect><rect x={barX} y={bottom - promptHeight - completionHeight} width={barWidth} height={completionHeight} fill="#8f7cf4"><title>{transcriptionChartTime(row.start, report.rangeStart, report.rangeEnd)} · {row.completionTokens.toLocaleString()} completion tokens</title></rect></g>; })}{transcriptionChartLabels(report.rangeStart, report.rangeEnd).map(timestamp => <text className="chart-label" textAnchor={timestamp === report.rangeStart ? "start" : timestamp === report.rangeEnd ? "end" : "middle"} x={left + (timestamp - report.rangeStart) / Math.max(1, report.rangeEnd - report.rangeStart) * (right - left)} y="198" key={timestamp}>{roundedTranscriptionChartTime(timestamp, report.rangeStart, report.rangeEnd)}</text>)}</svg><Legend items={[["Prompt", "var(--accent)"], ["Completion", "#8f7cf4"]]} /></div>;
+}
+
+function RemoteBandwidthPanel({ report, rangeHours, onRangeHoursChange, onPageChange }: { report: RemoteBandwidthReport | null; rangeHours: number; onRangeHoursChange: (hours: number) => void; onPageChange: (page: number) => void }) {
   if (!report) return <div className="trouble-panel"><div className="card">Loading bandwidth usage...</div></div>;
-  const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(report.entries.length / pageSize));
-  const pageSafe = Math.min(page, totalPages);
-  const rows = report.entries.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+  const totalPages = Math.max(1, Math.ceil(report.entryTotal / Math.max(1, report.entryPageSize)));
+  const pageSafe = Math.min(report.entryPage, totalPages);
+  const rows = report.entries;
   const usageSummary = (title: string, summary: RemoteBandwidthReport["summary"]) =>
     <Kpi label={title} value={formatBytes(summary.totalBytes)} status={summary.missingAudioFiles > 0 ? "warning" : "ok"} subtext={`${summary.requests.toLocaleString()} request(s), ${formatBytes(summary.requestBytes)} up, ${formatBytes(summary.responseBytes)} down`} />;
 
   return <div className="trouble-panel token-usage-panel">
+    <SystemPageHeaderControls><SystemHistoryWindow value={rangeHours} label="Bandwidth window" onChange={onRangeHoursChange} /></SystemPageHeaderControls>
     <div className="audit-kpis">
       {usageSummary("Selected Range", report.summary)}
       {usageSummary("This Month", report.monthlySummary)}
       {usageSummary("All Time", report.allTimeSummary)}
-      <Kpi label="Remote Host" value={report.remoteHost || "None"} status={report.remoteHost ? "ok" : "warning"} subtext={report.aiEndpoint || report.transcriptionEndpoint || "No remote endpoint configured"} />
-      <Kpi label="Transcription" value={report.transcriptionIncluded ? "Included" : "Skipped"} status={report.transcriptionIncluded ? "ok" : "neutral"} subtext={report.transcriptionEndpoint || "No transcription endpoint"} />
     </div>
-    <div className="card">
-      <h3>Estimator Notes</h3>
-      <p>{report.notes}</p>
-      <p className="muted">{report.ledger}</p>
-    </div>
-    <div className="tr-chart-grid">
-      <BandwidthBarChart title="Bytes by Day" rows={report.byDay} />
-      <BandwidthBarChart title="Bytes by Activity" rows={report.byActivity} />
-    </div>
-    <div className="card">
-      <div className="jobs-card-head">
-        <h3>Estimated Remote Traffic</h3>
-        <p>{report.remoteHost || "Remote host not configured"}</p>
+    <section className="system-content-section">
+      <SystemSectionHeader title="Bandwidth Over Time" description={`PizzaWave-attributed transfer and request volume in ${report.bucketSeconds / 3600}-hour buckets.`} />
+      <div className="tr-chart-grid bandwidth-chart-grid">
+        <BandwidthTimelineChart report={report} value="bytes" />
+        <BandwidthTimelineChart report={report} value="requests" />
+      </div>
+    </section>
+    <section className="system-content-section">
+      <SystemSectionHeader title="Usage by Activity" description="Remote transcription and AI traffic attributed by the PizzaWave workflow that produced it." />
+      <BandwidthBarChart title="Transferred Bytes and Requests" rows={report.byActivity} />
+    </section>
+    <details className="card bandwidth-ledger">
+      <summary>Bandwidth Activity <small>{report.entryTotal.toLocaleString()} request{report.entryTotal === 1 ? "" : "s"} in this window</small></summary>
+      <div className="jobs-card-head bandwidth-ledger-head">
+        <p className="muted">Request-level upload, download, and estimation evidence.</p>
         <div className="pagination-row table-top-pagination">
-          <button disabled={pageSafe <= 1} onClick={() => setPage(1)}>First</button>
-          <button disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>Prev</button>
+          <button disabled={pageSafe <= 1} onClick={() => onPageChange(1)}>First</button>
+          <button disabled={pageSafe <= 1} onClick={() => onPageChange(pageSafe - 1)}>Prev</button>
           <span>Page {pageSafe} of {totalPages}</span>
-          <button disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next</button>
-          <button disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)}>Last</button>
+          <button disabled={pageSafe >= totalPages} onClick={() => onPageChange(pageSafe + 1)}>Next</button>
+          <button disabled={pageSafe >= totalPages} onClick={() => onPageChange(totalPages)}>Last</button>
         </div>
       </div>
-      <table className="table jobs-table ai-usage-table"><thead><tr><th>Time</th><th>Activity</th><th>Upload</th><th>Download</th><th>Total</th><th>Basis</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.timestampUtc}-${row.activity}-${index}`}>
+      <div className="bandwidth-ledger-table-wrap"><table className="table jobs-table ai-usage-table"><thead><tr><th>Time</th><th>Activity</th><th>Upload</th><th>Download</th><th>Total</th><th>Basis</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.timestampUtc}-${row.activity}-${index}`}>
         <td>{new Date(row.timestampUtc).toLocaleString()}</td>
         <td>{row.activity}</td>
         <td>{formatBytes(row.requestBytes)}</td>
         <td>{formatBytes(row.responseBytes)}</td>
         <td>{formatBytes(row.totalBytes)}</td>
         <td>{row.basis}</td>
-      </tr>)}</tbody></table>
-    </div>
+      </tr>)}</tbody></table></div>
+    </details>
+    <details className="card"><summary>Measurement basis and technical provenance</summary><p>{report.notes}</p><p className="muted">Source: {report.ledger}</p><p className="muted">Configured endpoints: {report.aiEndpoint || "AI local/not configured"}; {report.transcriptionEndpoint || "transcription local/not configured"}</p></details>
   </div>;
+}
+
+function bandwidthActivityColor(activity: string) {
+  if (activity.toLowerCase().includes("transcription")) return "var(--accent)";
+  if (activity.toLowerCase().includes("ai")) return "#8f7cf4";
+  return "#7f8c98";
+}
+
+function BandwidthTimelineChart({ report, value }: { report: RemoteBandwidthReport; value: "bytes" | "requests" }) {
+  const left = 44;
+  const right = 664;
+  const top = 18;
+  const bottom = 170;
+  const starts = Array.from(new Set(report.byTimeActivity.map(row => row.start))).sort((a, b) => a - b);
+  const activities = Array.from(new Set(report.byTimeActivity.map(row => row.activity)));
+  const totals = starts.map(start => report.byTimeActivity.filter(row => row.start === start).reduce((sum, row) => sum + (value === "bytes" ? row.totalBytes : row.requests), 0));
+  const max = Math.max(1, ...totals);
+  const slot = (right - left) / Math.max(1, Math.ceil((report.rangeEnd - report.rangeStart) / report.bucketSeconds));
+  const barWidth = Math.max(2, slot - 2);
+  const x = (start: number) => left + (start - report.rangeStart) / Math.max(1, report.rangeEnd - report.rangeStart) * (right - left);
+  const height = (amount: number) => amount / max * (bottom - top);
+  const title = value === "bytes" ? "Data Transferred" : "Request Volume";
+  return <div className="card tr-chart-card bandwidth-timeline-card"><h3>{title}</h3><p className="muted">{value === "bytes" ? "Estimated upload and response payloads" : "Attributed remote operations"} by activity.</p><svg className="chart" viewBox="0 0 690 215" preserveAspectRatio="none" role="img" aria-label={`${title} over time`}><line className="axis" x1={left} y1={top} x2={left} y2={bottom}/><line className="axis" x1={left} y1={bottom} x2={right} y2={bottom}/><text className="chart-label" x="3" y="23">{value === "bytes" ? formatBytes(max) : max.toLocaleString()}</text><text className="chart-label" x="24" y="174">0</text>{starts.map(start => { let y = bottom; return report.byTimeActivity.filter(row => row.start === start).map(row => { const amount = value === "bytes" ? row.totalBytes : row.requests; const segmentHeight = height(amount); y -= segmentHeight; return <rect key={`${start}-${row.activity}`} x={x(start)} y={y} width={barWidth} height={segmentHeight} fill={bandwidthActivityColor(row.activity)}><title>{transcriptionChartTime(start, report.rangeStart, report.rangeEnd)} · {row.activity}: {value === "bytes" ? formatBytes(amount) : `${amount.toLocaleString()} requests`}</title></rect>; }); })}{transcriptionChartLabels(report.rangeStart, report.rangeEnd).map(timestamp => <text className="chart-label" textAnchor={timestamp === report.rangeStart ? "start" : timestamp === report.rangeEnd ? "end" : "middle"} x={left + (timestamp - report.rangeStart) / Math.max(1, report.rangeEnd - report.rangeStart) * (right - left)} y="198" key={timestamp}>{roundedTranscriptionChartTime(timestamp, report.rangeStart, report.rangeEnd)}</text>)}</svg><Legend items={activities.map(activity => [activity, bandwidthActivityColor(activity)])} /></div>;
 }
 
 function BandwidthBarChart({ title, rows }: { title: string; rows: { label: string; totalBytes: number; requests: number }[] }) {
@@ -10623,15 +11133,56 @@ function TokenBarChart({ title, rows }: { title: string; rows: { label: string; 
 
 function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> }) {
   const [message, setMessage] = useState("");
-  const [page, setPage] = useState(1);
+  const [historyHours, setHistoryHours] = useState(24);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [outcomeFilter, setOutcomeFilter] = useState("all");
+  const [recoveryHours, setRecoveryHours] = useState(24);
+  const [recoveryAvailable, setRecoveryAvailable] = useState<number | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryToolsOpen, setRecoveryToolsOpen] = useState(() => localStorage.getItem("pizzawave-system-open-recovery-tools") === "1");
   const pageSize = 12;
-  const totalPages = Math.max(1, Math.ceil(jobs.length / pageSize));
-  const pageSafe = Math.min(page, totalPages);
-  const pageJobs = jobs.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+  const activeJobs = jobs.filter(isActiveJob);
+  const terminalJobs = jobs.filter(job => !isActiveJob(job));
+  const historyCutoff = Date.now() - historyHours * 60 * 60 * 1000;
+  const historyJobs = terminalJobs.filter(job => new Date(job.finishedAtUtc ?? job.createdAtUtc).getTime() >= historyCutoff);
+  const operationTypes = Array.from(new Set(terminalJobs.map(job => job.type))).sort((a, b) => jobDisplayName(a).localeCompare(jobDisplayName(b)));
+  const filteredHistory = historyJobs.filter(job =>
+    (typeFilter === "all" || job.type === typeFilter) &&
+    (outcomeFilter === "all" || job.status === outcomeFilter));
+  const totalPages = Math.max(1, Math.ceil(filteredHistory.length / pageSize));
+  const pageSafe = Math.min(historyPage, totalPages);
+  const pageJobs = filteredHistory.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+  const runningCount = activeJobs.filter(job => job.status === "running" || job.status === "canceling").length;
+  const waitingCount = activeJobs.filter(job => job.status === "queued" || job.status === "paused").length;
+  const needsAttention = jobs.filter(job => jobNeedsAttention(job, jobs));
+  const recentCompleted = historyJobs.filter(job => job.status === "completed").length;
+  const recentFailed = historyJobs.filter(job => job.status === "failed").length;
 
   useEffect(() => {
-    setPage(current => Math.min(current, totalPages));
+    setHistoryPage(current => Math.min(current, totalPages));
   }, [totalPages]);
+
+  useEffect(() => setHistoryPage(1), [historyHours, typeFilter, outcomeFilter]);
+
+  useEffect(() => {
+    if (!recoveryToolsOpen) return;
+    localStorage.removeItem("pizzawave-system-open-recovery-tools");
+    window.requestAnimationFrame(() => document.getElementById("transcription-recovery-tools")?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  }, [recoveryToolsOpen]);
+
+  useEffect(() => {
+    let canceled = false;
+    api.request<{ hours: number; failedCalls: number }>(`/api/v1/system/transcription-recovery?hours=${recoveryHours}`)
+      .then(result => { if (!canceled) setRecoveryAvailable(result.failedCalls); })
+      .catch(() => { if (!canceled) setRecoveryAvailable(null); });
+    return () => { canceled = true; };
+  }, [recoveryHours, jobs]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void reload(), activeJobs.length > 0 ? 2000 : 10000);
+    return () => window.clearInterval(timer);
+  }, [activeJobs.length, reload]);
 
   async function control(id: number, action: string) {
     const actionLabel = action === "cancel" ? "Stop" : label(action);
@@ -10646,35 +11197,74 @@ function JobsPanel({ jobs, reload }: { jobs: Job[]; reload: () => Promise<void> 
     }
   }
 
+  async function startTranscriptionRecovery() {
+    if (!recoveryAvailable || recoveryBusy) return;
+    if (!confirmAction(`Retry ${recoveryAvailable.toLocaleString()} failed transcription(s)?`, "Recovery uses retained audio and GPU capacity. It runs one call at a time, yields while live or existing backlog work is waiting, and may still contend briefly with a live call already arriving.")) return;
+    setRecoveryBusy(true);
+    setMessage("Starting failed-transcription recovery...");
+    try {
+      const job = await api.request<Job>("/api/v1/jobs/transcription-recovery", { method: "POST", body: JSON.stringify({ hours: recoveryHours }) });
+      setMessage(`Started ${jobDisplayName(job.type)} #${job.id}.`);
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
   return <div className="trouble-panel jobs-panel">
-    <div className="card jobs-card">
-        <div className="jobs-card-head">
-          <h3>Jobs</h3>
-          <p>Background work created by service restarts, maintenance, diagnostics, and summary generation.</p>
-          <span className="muted">{jobs.length.toLocaleString()} total</span>
-          {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "section-status error" : "section-status ok"}>{message}</span>}
-          <div className="pagination-row table-top-pagination">
-            <button disabled={pageSafe <= 1} onClick={() => setPage(1)}>First</button>
-            <button disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>Prev</button>
-            <span>Page {pageSafe} of {totalPages}</span>
-            <button disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next</button>
-            <button disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)}>Last</button>
-          </div>
+    <div className="audit-kpis runtime-kpis">
+      <Kpi label="Running" value={runningCount.toLocaleString()} status="ok" subtext="Executing or finishing a safe cancellation" />
+      <Kpi label="Waiting" value={waitingCount.toLocaleString()} status={waitingCount > 0 ? "neutral" : "ok"} subtext="Queued or intentionally paused" />
+      <Kpi label="Needs Attention" value={needsAttention.length.toLocaleString()} status={needsAttention.length > 0 ? "error" : "ok"} subtext="Unsuperseded failures or stalled cancellation" />
+      <Kpi label="Recent Completion" value={`${recentCompleted.toLocaleString()} / ${recentFailed.toLocaleString()}`} status={recentFailed > 0 ? "warning" : "ok"} subtext={`Completed / failed in the selected ${formatJobWindow(historyHours)}`} />
+    </div>
+    {needsAttention.length > 0 && <div className="card job-attention-card">
+      <h3>Job attention required</h3>
+      <p>{needsAttention.map(job => `${jobDisplayName(job.type)} #${job.id}: ${job.message || label(job.status)}`).join(" ")}</p>
+      <p><strong>Next action:</strong> Open the affected job details. A later successful run of the same operation clears the earlier failure from this current-attention summary.</p>
+    </div>}
+    {message && <div className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "settings-message error" : "settings-message ok"}>{message}</div>}
+    <div className="card jobs-card active-jobs-card">
+      <div className="jobs-card-head"><div><h3>Active Jobs</h3><p>Running work is normal. Stop appears only where the producer owns a safe cancellation boundary.</p></div><span className="muted">{activeJobs.length.toLocaleString()} active</span></div>
+      <div className="jobs-table-wrap"><JobsTable jobs={activeJobs} onControl={control} emptyMessage="No active jobs." /></div>
+    </div>
+    <details id="transcription-recovery-tools" className="card recovery-tools" open={recoveryToolsOpen} onToggle={event => setRecoveryToolsOpen(event.currentTarget.open)}>
+      <summary>Recovery Tools{recoveryAvailable ? ` (${recoveryAvailable.toLocaleString()} failed transcription${recoveryAvailable === 1 ? "" : "s"} in the selected window)` : ""}</summary>
+      <div className="transcription-recovery-card">
+        <div><h3>Failed transcription recovery</h3><p>Optionally retry terminal engine failures that still have audio. Recovery is low priority, processes one call at a time, and yields to queued live and backlog work.</p></div>
+        <div className="transcription-recovery-controls"><label>Failed-call window<select value={recoveryHours} onChange={event => setRecoveryHours(Number(event.target.value))}><option value={24}>24 hours</option><option value={48}>2 days</option><option value={168}>7 days</option><option value={720}>30 days</option></select></label><button className="danger-button" disabled={recoveryBusy || !recoveryAvailable || jobs.some(job => job.type === "transcription_failure_recovery" && isActiveJob(job))} onClick={() => void startTranscriptionRecovery()}>{recoveryBusy ? "Starting..." : `Retry ${recoveryAvailable?.toLocaleString() ?? "--"} failed`}</button></div>
+        {recoveryAvailable === 0 && <p className="recovery-window-empty muted">No recoverable failures in the selected window.{recoveryHours < 720 ? ` Older failures may be available; select ${recoveryHours < 48 ? "2 days, 7 days, or 30 days" : recoveryHours < 168 ? "7 days or 30 days" : "30 days"}.` : ""}</p>}
+        <small>This is intentionally not automatic or required. Recovered calls retain their original event times; notifications older than 60 minutes are suppressed.</small>
+      </div>
+    </details>
+    <div className="card jobs-card job-history-card">
+      <div className="jobs-card-head job-history-head">
+        <div><h3>Job History</h3><p>Completed job records are retained for 30 days. Automatic maintenance appears here with setup, backup, and service operations.</p></div>
+        <div className="job-history-controls">
+          <label>History window<select value={historyHours} onChange={event => setHistoryHours(Number(event.target.value))}>
+            <option value={24}>24 hours</option><option value={48}>2 days</option><option value={168}>7 days</option><option value={720}>30 days</option>
+          </select></label>
+          <label>Operation<select value={typeFilter} onChange={event => setTypeFilter(event.target.value)}><option value="all">All operations</option>{operationTypes.map(type => <option value={type} key={type}>{jobDisplayName(type)}</option>)}</select></label>
+          <label>Outcome<select value={outcomeFilter} onChange={event => setOutcomeFilter(event.target.value)}><option value="all">All outcomes</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="canceled">Canceled</option></select></label>
         </div>
-        <div className="jobs-table-wrap">
-          <JobsTable jobs={pageJobs} onControl={control} />
-        </div>
+        <span className="muted">{filteredHistory.length.toLocaleString()} in the selected {formatJobWindow(historyHours)}</span>
+        {totalPages > 1 && <div className="pagination-row table-top-pagination">
+          <button disabled={pageSafe <= 1} onClick={() => setHistoryPage(1)}>First</button>
+          <button disabled={pageSafe <= 1} onClick={() => setHistoryPage(pageSafe - 1)}>Prev</button>
+          <span>Page {pageSafe} of {totalPages}</span>
+          <button disabled={pageSafe >= totalPages} onClick={() => setHistoryPage(pageSafe + 1)}>Next</button>
+          <button disabled={pageSafe >= totalPages} onClick={() => setHistoryPage(totalPages)}>Last</button>
+        </div>}
+      </div>
+      <div className="jobs-table-wrap"><JobsTable jobs={pageJobs} onControl={control} emptyMessage={`No job history in the selected ${formatJobWindow(historyHours)}${typeFilter !== "all" || outcomeFilter !== "all" ? " with the current filters" : ""}.`} /></div>
     </div>
   </div>;
 }
 
 function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused, refreshToken }: { engineHealth: EngineHealth | null; ingestBusy: boolean; ingestMessage: string; onSetIngestPaused: (pause: boolean, untilQueueClear?: boolean) => Promise<void>; refreshToken: number }) {
-  const [detail, setDetail] = useState<QueueDetailKey>("status");
-  const [issuePage, setIssuePage] = useState(1);
-  const showDetail = (next: QueueDetailKey) => {
-    setDetail(next);
-    setIssuePage(1);
-  };
+  const [pendingPage, setPendingPage] = useState(1);
   const queueResource = usePersistentRefresh({
     key: `system-queue|${engineHealth?.serverTimeUtc ?? "initial"}|${refreshToken}`,
     enabled: true,
@@ -10686,318 +11276,252 @@ function QueuePanel({ engineHealth, ingestBusy, ingestMessage, onSetIngestPaused
   const live = q?.liveQueueDepth ?? engineHealth?.liveQueueDepth ?? 0;
   const priority = q?.priorityLiveQueueDepth ?? engineHealth?.priorityLiveQueueDepth ?? 0;
   const backlog = q?.backlogQueueDepth ?? engineHealth?.backlogQueueDepth ?? 0;
-  const transcribed = q?.recentTranscribedPerMinute ?? engineHealth?.recentTranscribedPerMinute ?? 0;
+  const deferred = q?.deferredLiveQueueDepth ?? engineHealth?.deferredLiveQueueDepth ?? 0;
+  const standardLive = Math.max(0, live - priority - deferred);
   const ingested = q?.recentIngestPerMinute ?? engineHealth?.recentIngestPerMinute ?? 0;
   const recentCallsIngested = q?.recentCallsIngested ?? engineHealth?.recentCallsIngested ?? 0;
-  const recentCallsTranscribed = q?.recentCallsTranscribed ?? engineHealth?.recentCallsTranscribed ?? 0;
   const recentAudioSecondsIngested = q?.recentAudioSecondsIngested ?? engineHealth?.recentAudioSecondsIngested ?? 0;
-  const recentAudioSecondsTranscribed = q?.recentAudioSecondsTranscribed ?? engineHealth?.recentAudioSecondsTranscribed ?? 0;
   const audioIn = q?.recentAudioSecondsIngestedPerMinute ?? engineHealth?.recentAudioSecondsIngestedPerMinute ?? 0;
   const audioOut = q?.recentAudioSecondsTranscribedPerMinute ?? engineHealth?.recentAudioSecondsTranscribedPerMinute ?? 0;
   const throughputWindowMinutes = q?.throughputWindowMinutes ?? engineHealth?.throughputWindowMinutes ?? 10;
   const pendingAudioSeconds = q?.pendingAudioSeconds ?? engineHealth?.pendingAudioSeconds ?? 0;
-  const aiCompletionHealth = q?.aiCompletionHealth ?? engineHealth?.aiCompletionHealth;
-  const aiCompletionIssue = aiCompletionHealth && !["ok", "unknown"].includes(aiCompletionHealth.status) ? aiCompletionHealth.message : "";
-  const embeddingHealth = q?.embeddingHealth ?? engineHealth?.embeddingHealth;
-  const embeddingIssue = embeddingHealth?.enabled && !["ok", "disabled", "unknown"].includes(embeddingHealth.status)
-    ? (embeddingHealth.lastError || (embeddingHealth.embeddingEndpointOk ? "Embedding pipeline health is degraded." : "Embedding endpoint health check failed."))
-    : "";
-  const queueState = aiCompletionIssue || embeddingIssue ? "Blocked" : depth <= 0 ? "OK" : q?.queueUnderPressure || engineHealth?.queueUnderPressure ? "Pressure" : audioOut >= audioIn ? "Draining" : "Growing";
+  const pressure = Boolean(q?.queueUnderPressure || engineHealth?.queueUnderPressure);
+  const ingest = q?.ingest ?? engineHealth?.ingest;
+  const queueState = ingest?.paused ? "Ingest Paused" : depth <= 0 ? "OK" : pressure ? "Pressure" : audioOut >= audioIn ? "Draining" : "Growing";
   const queueStatus = queueState === "OK" || queueState === "Draining" ? "ok" : queueState === "Growing" ? "warning" : "error";
   const liveTrActivity = engineHealth?.liveTrActivity;
   const etaMinutes = pendingAudioSeconds > 0 && audioOut > audioIn ? pendingAudioSeconds / Math.max(0.1, audioOut - audioIn) : 0;
-  const ingest = q?.ingest ?? engineHealth?.ingest;
   const ingestStatus = liveTrActivity?.stale || ingest?.paused ? "error" : recentCallsIngested > 0 ? "ok" : "neutral";
-  const ingestSubtext = `${recentCallsIngested.toLocaleString()} call${recentCallsIngested === 1 ? "" : "s"} / ${recentAudioSecondsIngested.toLocaleString()} audio seconds over ${throughputWindowMinutes}m`;
-  const blockerRows: QueueIssueRow[] = [
-    q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason
-      ? { severity: "Blocker", source: "AI work", message: q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason ?? "", status: "error", details: ["status", "ai"] }
-      : null,
-    aiCompletionIssue
-      ? { severity: "Blocker", source: "AI completions", message: aiCompletionIssue, status: "error", details: ["status", "ai"] }
-      : null,
-    embeddingIssue
-      ? { severity: "Blocker", source: "Embedding link", message: embeddingIssue, status: "error", details: ["status", "embedding"] }
-      : null
-  ].filter((row): row is QueueIssueRow => Boolean(row));
-  const warningRows: QueueIssueRow[] = [
-    q?.queueUnderPressure || engineHealth?.queueUnderPressure
-      ? { severity: "Warning", source: "Queue depth", message: `Queue depth is above the pressure threshold of ${(q?.queuePressureThreshold ?? engineHealth?.queuePressureThreshold ?? 0).toLocaleString()}.`, status: "warning", details: ["status", "queued", "composition"] }
-      : null,
-    depth > 0 && audioOut < audioIn
-      ? { severity: "Warning", source: "Throughput", message: "Recent audio ingest is faster than transcription throughput.", status: "warning", details: ["status", "throughput"] }
-      : null,
-    ingest?.paused
-      ? { severity: "Warning", source: "Live ingest", message: `Live ingest is paused${ingest.untilQueueClear ? " until the queue clears" : ""}.`, status: "warning", details: ["status", "queued"] }
-      : null,
-    liveTrActivity?.stale
-      ? { severity: "Warning", source: "Live TR activity", message: liveTrActivity.message, status: "warning", details: ["status"] }
-      : null,
-    aiCompletionHealth?.status === "ok" && aiCompletionHealth.failures > 0
-      ? { severity: "Warning", source: "AI completions", message: aiCompletionHealth.message, status: "warning", details: ["status", "ai"] }
-      : null,
-    embeddingHealth?.enabled && embeddingHealth.failedCalls > 0
-      ? { severity: "Warning", source: "Embedding history", message: `${embeddingHealth.failedCalls.toLocaleString()} embedding job(s) have failed historically.`, status: "warning", details: ["status", "embedding"] }
-      : null
-  ].filter((row): row is QueueIssueRow => Boolean(row));
-  const issueRows = [...blockerRows, ...warningRows];
-  const relatedIssueRows = queueIssuesForDetail(detail, issueRows);
-  const blockers = blockerRows.map(row => row.message);
-  const warnings = warningRows.map(row => row.message);
-  const latestFailure = aiCompletionHealth?.latestFailureUtc ? `${formatJobDate(aiCompletionHealth.latestFailureUtc)} ${aiCompletionHealth.latestFailureKind ? `(${aiCompletionHealth.latestFailureKind})` : ""}` : "None";
-  const details = queueDetailRows(detail, {
-    queueState,
-    blockers,
-    warnings,
-    depth,
-    pending,
-    pendingAudioSeconds,
-    live,
-    priority,
-    backlog,
-    audioIn,
-    audioOut,
-    ingested,
-    transcribed,
-    etaMinutes,
-    aiCompletionHealth,
-    latestFailure,
-    embeddingHealth,
-    ingest,
-    queue: q,
-    engineHealth
-  });
+  const ingestSubtext = liveTrActivity?.stale
+    ? liveTrActivity.message
+    : `${recentCallsIngested.toLocaleString()} call${recentCallsIngested === 1 ? "" : "s"} / ${recentAudioSecondsIngested.toLocaleString()} audio seconds over ${throughputWindowMinutes}m`;
+  const aiPauseNote = q?.aiWorkBlockedReason ?? engineHealth?.aiWorkBlockedReason;
+  const queueCondition = ingest?.paused
+    ? {
+      tone: "error",
+      title: "Live ingest is paused",
+      detail: `New incoming calls are being discarded while Trunk Recorder continues running. ${(ingest.droppedCallsThisPause ?? 0).toLocaleString()} call(s) have been dropped during this pause.`,
+      action: ingest.untilQueueClear ? "PizzaWave will resume ingest automatically when the queue clears." : "Resume ingest when you are ready to accept new calls."
+    }
+    : pressure
+      ? {
+        tone: "error",
+        title: "The transcription queue is under pressure",
+        detail: `${depth.toLocaleString()} item(s) are queued against a pressure threshold of ${(q?.queuePressureThreshold ?? engineHealth?.queuePressureThreshold ?? 0).toLocaleString()}; audio is entering at ${audioIn.toFixed(0)}s/min and completing at ${audioOut.toFixed(0)}s/min.${aiPauseNote ? ` ${aiPauseNote}` : ""}`,
+        action: audioOut < audioIn ? "If growth continues, pause ingest until the queue clears." : "The queue is currently draining; continue monitoring it."
+      }
+      : depth > 0 && audioOut < audioIn
+        ? {
+          tone: "warning",
+          title: "The transcription backlog is growing",
+          detail: `${depth.toLocaleString()} item(s) and ${formatDurationMinutes(pendingAudioSeconds / 60)} of audio are pending. Audio is entering at ${audioIn.toFixed(0)}s/min and completing at ${audioOut.toFixed(0)}s/min.${aiPauseNote ? ` ${aiPauseNote}` : ""}`,
+          action: "Monitor the trend; pause ingest until clear if preserving transcription capacity becomes more important than accepting new calls."
+        }
+        : null;
+  const pendingCalls = q?.pendingCalls ?? [];
+  const pendingPageSize = 10;
+  const pendingPages = Math.max(1, Math.ceil(pendingCalls.length / pendingPageSize));
+  const pendingPageSafe = Math.min(Math.max(1, pendingPage), pendingPages);
+  const visiblePendingCalls = pendingCalls.slice((pendingPageSafe - 1) * pendingPageSize, pendingPageSafe * pendingPageSize);
   return <div className="queue-jobs-layout">
+    <SystemPageHeaderControls><div className="queue-action-bar header-controls">
+      {ingest?.paused
+        ? <button disabled={ingestBusy} onClick={() => void onSetIngestPaused(false)}>{ingestBusy ? "Updating..." : "Resume Live Ingest"}</button>
+        : <><button className="danger-button" disabled={ingestBusy || depth <= 0} onClick={() => void onSetIngestPaused(true, true)}>{ingestBusy ? "Updating..." : "Pause Until Queue Clear"}</button><button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, false)}>Pause Until Resumed</button></>}
+      <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? "Paused" : "Accepting Calls"}</span>
+    </div></SystemPageHeaderControls>
     <div className="card queue-card">
       <div className="jobs-card-head">
         <h3>Transcription Queue</h3>
-        <span className={`job-status status-${queueState === "Pressure" || queueState === "Growing" || queueState === "Blocked" ? "failed" : queueState === "Draining" ? "running" : "completed"}`}>{queueState}</span>
+        <span className={`job-status status-${queueState === "Pressure" || queueState === "Growing" || queueState === "Ingest Paused" ? "failed" : queueState === "Draining" ? "running" : "completed"}`}>{queueState}</span>
       </div>
       <PanelLoadState label="queue details" state={queueResource.state} hasData={Boolean(q)} onRetry={queueResource.refresh} />
-      <div className="audit-kpis queue-kpis">
-        <Kpi label="Queued" value={depth.toLocaleString()} status={queueStatus} subtext={`${pending.toLocaleString()} pending in database`} onClick={() => showDetail("queued")} />
-        <Kpi label="Pending Audio" value={formatDurationMinutes(pendingAudioSeconds / 60)} status={queueStatus} subtext={`${pendingAudioSeconds.toLocaleString()} audio seconds queued`} onClick={() => showDetail("queued")} />
-        <Kpi label="Composition" value={`${live.toLocaleString()} live`} subtext={`${priority.toLocaleString()} priority, ${backlog.toLocaleString()} backlog`} onClick={() => showDetail("composition")} />
-        <Kpi label="Live Ingest" value={`${ingested.toFixed(1)}/min`} status={ingestStatus} subtext={ingestSubtext} onClick={() => showDetail("status")} />
-        <Kpi label="Audio Throughput" value={`${audioOut.toFixed(0)}s/min`} status={depth > 0 && audioOut < audioIn ? "warning" : "ok"} subtext={`${audioIn.toFixed(0)}s/min in over ${q?.throughputWindowMinutes ?? engineHealth?.throughputWindowMinutes ?? 10}m`} onClick={() => showDetail("throughput")} />
-        <Kpi label="Call Throughput" value={`${transcribed.toFixed(1)}/min`} subtext={`${ingested.toFixed(1)}/min in; useful but duration-blind`} onClick={() => showDetail("throughput")} />
-        <Kpi label="AI Completions" value={aiCompletionHealth ? label(aiCompletionHealth.status) : "Unknown"} status={aiCompletionHealth?.status === "error" ? "error" : aiCompletionHealth?.status === "warning" ? "warning" : aiCompletionHealth?.status === "ok" ? "ok" : "neutral"} subtext={aiCompletionHealth ? `${aiCompletionHealth.timeoutFailures.toLocaleString()} timeout, ${aiCompletionHealth.noValidResultFailures.toLocaleString()} no result over ${aiCompletionHealth.windowMinutes}m` : "No AI health sample"} onClick={() => showDetail("ai")} />
-        <Kpi label="Embedding Link" value={embeddingHealth ? label(embeddingHealth.status) : "Unknown"} status={embeddingHealth?.status === "degraded" ? "error" : embeddingHealth?.status === "ok" ? "ok" : embeddingHealth?.status === "disabled" ? "neutral" : "warning"} subtext={embeddingHealth ? `${embeddingHealth.embeddingEndpointOk ? "endpoint OK" : "endpoint issue"}, ${embeddingHealth.qdrantOk ? "Qdrant OK" : "Qdrant issue"}` : "No embedding health sample"} onClick={() => showDetail("embedding")} />
-        <Kpi label="Latency" value={`${Number(q?.averageTranscriptionSeconds ?? engineHealth?.averageTranscriptionSeconds ?? 0).toFixed(1)}s`} subtext={`${Number(q?.averageAudioSeconds ?? engineHealth?.averageAudioSeconds ?? 0).toFixed(1)}s avg audio`} onClick={() => showDetail("workers")} />
-        <Kpi label="Workers" value={`${q?.liveTranscriptionWorkers ?? engineHealth?.liveTranscriptionWorkers ?? 0} x ${q?.whisperThreadsPerWorker ?? engineHealth?.whisperThreadsPerWorker ?? 0}`} subtext="workers x threads" onClick={() => showDetail("workers")} />
-        <Kpi label="ETA" value={etaMinutes > 0 ? formatDurationMinutes(etaMinutes) : depth > 0 ? "Unknown" : "Clear"} subtext={depth > 0 && audioOut <= audioIn ? "Audio queue is not currently outrunning ingest" : "Based on recent net audio drain"} onClick={() => showDetail("throughput")} />
-      </div>
-      <div className="queue-detail-panel">
-        <div className="queue-detail-head">
-          <strong>{queueDetailTitle(detail)}</strong>
-          <span className={blockers.length > 0 ? "section-status error" : warnings.length > 0 ? "section-status warning" : "section-status ok"}>
-            {blockers.length > 0 ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"}` : warnings.length > 0 ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : "Normal"}
-          </span>
-        </div>
-        <div className="queue-detail-rows">
-          {details.map((row, i) => <div className={`queue-detail-row ${row.status ? `queue-detail-${row.status}` : ""}`} key={`${row.label}-${i}`}>
-            <span>{row.label}</span>
-            <strong>{row.value}</strong>
-          </div>)}
-        </div>
-      </div>
-      <QueueIssueTable rows={relatedIssueRows} detail={detail} page={issuePage} setPage={setIssuePage} />
-      <div className="system-action-bar">
-        <strong>Live Ingest</strong>
-        {ingest?.paused
-          ? <button disabled={ingestBusy} onClick={() => void onSetIngestPaused(false)}>{ingestBusy ? "Updating..." : "Resume Live Ingest"}</button>
-          : <>
-            <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, true)}>{ingestBusy ? "Updating..." : "Pause Until Queue Clear"}</button>
-            <button className="danger-button" disabled={ingestBusy} onClick={() => void onSetIngestPaused(true, false)}>Pause Live Ingest</button>
-          </>}
-        <span className={ingest?.paused ? "section-status error" : "section-status ok"}>{ingest?.paused ? "Paused" : "Running"}</span>
+      <div className="queue-ingest-note">
+        <small>Pausing discards new incoming calls; Trunk Recorder continues running.</small>
         {ingestMessage && <span className={ingestMessage.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{ingestMessage}</span>}
       </div>
-      {ingest?.paused && <div className="settings-message error">Live ingest is paused{ingest.untilQueueClear ? " until the queue clears" : ""}. Dropped this pause: {(ingest.droppedCallsThisPause ?? 0).toLocaleString()} ({ingest.droppedCalls.toLocaleString()} total since service start).</div>}
+      <div className="audit-kpis queue-kpis">
+        <Kpi label="Queued" value={depth.toLocaleString()} status={queueStatus} subtext={`${pending.toLocaleString()} pending in database`} />
+        <Kpi label="Pending Audio" value={formatDurationMinutes(pendingAudioSeconds / 60)} status={queueStatus} subtext={`${pendingAudioSeconds.toLocaleString()} audio seconds queued`} />
+        <Kpi label="Live Ingest" value={`${ingested.toFixed(1)}/min`} status={ingestStatus} subtext={ingestSubtext} />
+        <Kpi label="Audio Throughput" value={`${audioOut.toFixed(0)}s/min`} status={depth > 0 && audioOut < audioIn ? "warning" : "ok"} subtext={`${audioIn.toFixed(0)}s/min in over ${throughputWindowMinutes}m`} />
+        <Kpi label="ETA" value={etaMinutes > 0 ? formatDurationMinutes(etaMinutes) : depth > 0 ? "Unknown" : "Clear"} subtext={depth > 0 && audioOut <= audioIn ? "Queue is not currently draining faster than ingest" : "Based on recent net audio drain"} />
+      </div>
+      {queueCondition && <div className={`card queue-condition queue-condition-${queueCondition.tone}`}>
+        <h3>{queueCondition.title}</h3>
+        <p>{queueCondition.detail}</p>
+        <p><strong>Next action:</strong> {queueCondition.action}</p>
+      </div>}
+      <div className="card queue-composition-card">
+        <h3>Queue Composition</h3>
+        <table className="table compact-table queue-composition-table"><thead><tr><th>Lane</th><th>Count</th><th>Purpose</th></tr></thead><tbody>
+          <tr><td>Priority live</td><td>{priority.toLocaleString()}</td><td>New live calls promoted while the live queue is under pressure.</td></tr>
+          <tr><td>Standard live</td><td>{standardLive.toLocaleString()}</td><td>Normal incoming calls waiting for live transcription workers.</td></tr>
+          <tr><td>Deferred live</td><td>{deferred.toLocaleString()}</td><td>Configured deferred talkgroups waiting behind standard live work.</td></tr>
+          <tr><td>Backlog</td><td>{backlog.toLocaleString()}</td><td>Imported, retry, or older persisted calls assigned to backlog workers.</td></tr>
+          <tr><td>Database pending</td><td>{pending.toLocaleString()}</td><td>Persisted calls without completed transcription; this can overlap the in-memory lanes.</td></tr>
+        </tbody></table>
+      </div>
+      {pendingCalls.length > 0 && <div className="card queue-pending-card">
+        <div className="queue-detail-head"><h3>Oldest Pending Transcriptions</h3><span className="muted">Showing the oldest {pendingCalls.length.toLocaleString()} of {pending.toLocaleString()}</span></div>
+        {pendingPages > 1 && <div className="pagination-row table-top-pagination">
+          <button disabled={pendingPageSafe <= 1} onClick={() => setPendingPage(1)}>First</button>
+          <button disabled={pendingPageSafe <= 1} onClick={() => setPendingPage(pendingPageSafe - 1)}>Prev</button>
+          <span>Page {pendingPageSafe} of {pendingPages}</span>
+          <button disabled={pendingPageSafe >= pendingPages} onClick={() => setPendingPage(pendingPageSafe + 1)}>Next</button>
+          <button disabled={pendingPageSafe >= pendingPages} onClick={() => setPendingPage(pendingPages)}>Last</button>
+        </div>}
+        <table className="table compact-table queue-pending-table"><thead><tr><th>Age</th><th>System</th><th>Talkgroup</th><th>Category</th><th>Source</th></tr></thead><tbody>{visiblePendingCalls.map(call => <tr key={call.callId}>
+          <td>{formatPendingAge(call.startTime)}</td><td>{call.systemShortName}</td><td>{call.talkgroupName || `TG ${call.talkgroup}`}</td><td>{label(call.category)}</td><td>{call.isImported ? "Imported/offline" : "Live"}</td>
+        </tr>)}</tbody></table>
+      </div>}
     </div>
   </div>;
 }
 
-type QueueDetailKey = "status" | "queued" | "composition" | "throughput" | "ai" | "embedding" | "workers";
-type QueueDetailRow = { label: string; value: string; status?: "ok" | "warning" | "error" };
-type QueueIssueRow = { severity: "Blocker" | "Warning"; source: string; message: string; status: "warning" | "error"; details: QueueDetailKey[] };
-
-function QueueIssueTable({ rows, detail, page, setPage }: { rows: QueueIssueRow[]; detail: QueueDetailKey; page: number; setPage: (page: number) => void }) {
-  const pageSize = 5;
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-  const pageSafe = Math.min(Math.max(1, page), totalPages);
-  const visibleRows = rows.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
-  const startRow = rows.length === 0 ? 0 : (pageSafe - 1) * pageSize + 1;
-  const endRow = Math.min(rows.length, pageSafe * pageSize);
-  return <div className="queue-issue-panel">
-    <div className="queue-detail-head">
-      <strong>{detail === "status" ? "All Queue Warnings And Blockers" : `${queueDetailTitle(detail)} Warnings And Blockers`}</strong>
-      <span className={rows.some(row => row.status === "error") ? "section-status error" : rows.length ? "section-status warning" : "section-status ok"}>
-        {rows.length ? `${rows.length} active` : "None"}
-      </span>
-    </div>
-    {rows.length > pageSize && <div className="pagination-row table-top-pagination">
-      <button disabled={pageSafe <= 1} onClick={() => setPage(1)}>First</button>
-      <button disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>Prev</button>
-      <span>{startRow}-{endRow} of {rows.length}</span>
-      <button disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next</button>
-      <button disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)}>Last</button>
-    </div>}
-    <table className="table queue-issue-table">
-      <thead>
-        <tr><th>Severity</th><th>Source</th><th>Current condition</th></tr>
-      </thead>
-      <tbody>
-        {visibleRows.length
-          ? visibleRows.map((row, i) => <tr className={`queue-issue-${row.status}`} key={`${row.source}-${startRow + i}`}>
-            <td><span className={`section-status ${row.status}`}>{row.severity}</span></td>
-            <td>{row.source}</td>
-            <td>{row.message}</td>
-          </tr>)
-          : <tr className="queue-issue-ok"><td><span className="section-status ok">Normal</span></td><td>{queueDetailTitle(detail)}</td><td>No active warnings or blockers for this view.</td></tr>}
-      </tbody>
-    </table>
-  </div>;
-}
-
-function queueIssuesForDetail(detail: QueueDetailKey, rows: QueueIssueRow[]) {
-  return rows.filter(row => row.details.includes(detail));
-}
-
-function queueDetailTitle(detail: QueueDetailKey) {
-  return detail === "queued" ? "Queued Work"
-    : detail === "composition" ? "Queue Composition"
-      : detail === "throughput" ? "Throughput"
-        : detail === "ai" ? "AI Completion Health"
-          : detail === "embedding" ? "Embedding Health"
-            : detail === "workers" ? "Workers And Latency"
-              : "Current Status";
-}
-
-function queueDetailRows(detail: QueueDetailKey, data: {
-  queueState: string;
-  blockers: string[];
-  warnings: string[];
-  depth: number;
-  pending: number;
-  pendingAudioSeconds: number;
-  live: number;
-  priority: number;
-  backlog: number;
-  audioIn: number;
-  audioOut: number;
-  ingested: number;
-  transcribed: number;
-  etaMinutes: number;
-  aiCompletionHealth?: EngineHealth["aiCompletionHealth"];
-  latestFailure: string;
-  embeddingHealth?: EngineHealth["embeddingHealth"];
-  ingest?: EngineHealth["ingest"];
-  queue: QueueSnapshot | null;
-  engineHealth: EngineHealth | null;
-}): QueueDetailRow[] {
-  const status = data.blockers.length > 0 ? "error" : data.warnings.length > 0 ? "warning" : "ok";
-  const common: QueueDetailRow[] = [
-    { label: "Queue state", value: data.queueState, status },
-    { label: "Blockers", value: data.blockers.length ? data.blockers.join(" ") : "None", status: data.blockers.length ? "error" : "ok" },
-    { label: "Warnings", value: data.warnings.length ? data.warnings.join(" ") : "None", status: data.warnings.length ? "warning" : "ok" }
-  ];
-  if (detail === "queued") {
-    const pendingCalls = data.queue?.pendingCalls ?? [];
-    return [
-      { label: "Queued calls", value: data.depth.toLocaleString(), status },
-      { label: "Pending transcriptions", value: data.pending.toLocaleString(), status },
-      { label: "Pending audio", value: `${data.pendingAudioSeconds.toLocaleString()} seconds` },
-      { label: "Oldest pending call", value: pendingCalls[0] ? `${pendingCalls[0].systemShortName} ${pendingCalls[0].callId}` : "None", status: pendingCalls.length ? "warning" : "ok" },
-      ...common
-    ];
-  }
-  if (detail === "composition") {
-    const topTalkgroups = (data.queue?.topAudioTalkgroups ?? []).slice(0, 3).map(row => `${row.systemShortName} ${row.talkgroupName}: ${row.pendingCalls} pending`).join("; ");
-    return [
-      { label: "Live queue", value: data.live.toLocaleString() },
-      { label: "Priority live queue", value: data.priority.toLocaleString() },
-      { label: "Backlog queue", value: data.backlog.toLocaleString() },
-      { label: "Top pending talkgroups", value: topTalkgroups || "None" },
-      ...common
-    ];
-  }
-  if (detail === "throughput") {
-    return [
-      { label: "Audio in", value: `${data.audioIn.toFixed(1)} seconds per minute` },
-      { label: "Audio out", value: `${data.audioOut.toFixed(1)} seconds per minute`, status: data.depth > 0 && data.audioOut < data.audioIn ? "warning" : "ok" },
-      { label: "Calls in", value: `${data.ingested.toFixed(1)} per minute` },
-      { label: "Calls out", value: `${data.transcribed.toFixed(1)} per minute` },
-      { label: "Estimated clear time", value: data.etaMinutes > 0 ? formatDurationMinutes(data.etaMinutes) : data.depth > 0 ? "Unknown" : "Clear" },
-      ...common
-    ];
-  }
-  if (detail === "ai") {
-    const ai = data.aiCompletionHealth;
-    return [
-      { label: "Status", value: ai ? label(ai.status) : "Unknown", status: ai?.status === "error" ? "error" : ai?.status === "warning" ? "warning" : ai?.status === "ok" ? "ok" : undefined },
-      { label: "Message", value: ai?.message ?? "No AI health sample" },
-      { label: "Requests", value: ai ? ai.requests.toLocaleString() : "0" },
-      { label: "Failures", value: ai ? ai.failures.toLocaleString() : "0", status: ai && ai.failures > 0 ? "warning" : "ok" },
-      { label: "Consecutive failures", value: ai ? ai.consecutiveFailures.toLocaleString() : "0", status: ai && ai.consecutiveFailures > 0 ? "error" : "ok" },
-      { label: "Latest failure", value: data.latestFailure, status: ai?.latestFailureUtc ? "warning" : "ok" },
-      { label: "Latest failure detail", value: ai?.latestFailure || "None" }
-    ];
-  }
-  if (detail === "embedding") {
-    const embedding = data.embeddingHealth;
-    return [
-      { label: "Status", value: embedding ? label(embedding.status) : "Unknown", status: embedding?.status === "degraded" ? "error" : embedding?.status === "ok" ? "ok" : undefined },
-      { label: "Endpoint", value: embedding ? embedding.embeddingEndpointOk ? "OK" : "Issue" : "Unknown", status: embedding?.embeddingEndpointOk ? "ok" : "error" },
-      { label: "Qdrant", value: embedding ? embedding.qdrantOk ? "OK" : "Issue" : "Unknown", status: embedding?.qdrantOk ? "ok" : "error" },
-      { label: "Queue depth", value: embedding ? embedding.queueDepth.toLocaleString() : "0" },
-      { label: "Pending calls", value: embedding ? embedding.pendingCalls.toLocaleString() : "0" },
-      { label: "Last error", value: embedding?.lastError || "None" }
-    ];
-  }
-  if (detail === "workers") {
-    return [
-      { label: "Live workers", value: `${data.queue?.liveTranscriptionWorkers ?? data.engineHealth?.liveTranscriptionWorkers ?? 0}` },
-      { label: "Threads per worker", value: `${data.queue?.whisperThreadsPerWorker ?? data.engineHealth?.whisperThreadsPerWorker ?? 0}` },
-      { label: "Average transcription time", value: `${Number(data.queue?.averageTranscriptionSeconds ?? data.engineHealth?.averageTranscriptionSeconds ?? 0).toFixed(2)} seconds` },
-      { label: "Average audio length", value: `${Number(data.queue?.averageAudioSeconds ?? data.engineHealth?.averageAudioSeconds ?? 0).toFixed(2)} seconds` },
-      { label: "Realtime factor", value: `${Number(data.queue?.averageTranscriptionRealtimeFactor ?? data.engineHealth?.averageTranscriptionRealtimeFactor ?? 0).toFixed(3)}` },
-      ...common
-    ];
-  }
-  return common;
-}
-
-function JobsTable({ jobs, onControl }: { jobs: Job[]; onControl: (id: number, action: string) => Promise<void> }) {
-  if (!jobs.length) return <span className="muted">No jobs</span>;
+function JobsTable({ jobs, onControl, emptyMessage }: { jobs: Job[]; onControl: (id: number, action: string) => Promise<void>; emptyMessage: string }) {
+  const [openJobId, setOpenJobId] = useState<number | null>(null);
+  if (!jobs.length) return <div className="jobs-empty-state"><strong>{emptyMessage}</strong><span>Jobs are created by setup and calibration, backups, service operations, and automatic maintenance.</span></div>;
   return <table className="table jobs-table">
-    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Timestamps</th><th>Message</th><th>Actions</th></tr></thead>
-    <tbody>{jobs.map(job => {
+    <thead><tr><th>Operation</th><th>Status</th><th>Progress</th><th>Timing</th><th>Result</th><th>Actions</th></tr></thead>
+    <tbody>{jobs.flatMap(job => {
       const supported = new Set(job.supportedOperations ?? []);
-      return <tr key={job.id}>
-        <td>{job.id}</td>
-        <td>{label(job.type)}</td>
-        <td><span className={`job-status status-${job.status}`}>{job.status}</span></td>
-        <td>{job.completed.toLocaleString()}/{job.total.toLocaleString()}<br /><span className="muted">{job.failed.toLocaleString()} failed</span></td>
-        <td className="job-times">
-          <span>Created {formatJobDate(job.createdAtUtc)}</span>
-          {job.startedAtUtc && <span>Started {formatJobDate(job.startedAtUtc)}</span>}
-          {job.finishedAtUtc && <span>Finished {formatJobDate(job.finishedAtUtc)}</span>}
-        </td>
-        <td>{job.message}</td>
+      const open = openJobId === job.id;
+      return [<tr key={job.id}>
+        <td><strong>{jobDisplayName(job.type)}</strong><span className="job-secondary">Job #{job.id}</span></td>
+        <td><span className={`job-status status-${job.status}`}>{label(job.status)}</span></td>
+        <td><JobProgress job={job} /></td>
+        <td className="job-times">{jobTimingSummary(job)}<span>{jobDurationSummary(job)}</span></td>
+        <td className="job-result-cell">{job.message || "No result message recorded."}</td>
         <td className="job-actions-cell"><div>
+          <button onClick={() => setOpenJobId(open ? null : job.id)}>{open ? "Hide Details" : "Details"}</button>
           {supported.has("pause") && <button onClick={() => void onControl(job.id, "pause")}>Pause</button>}
           {supported.has("resume") && <button onClick={() => void onControl(job.id, "resume")}>Resume</button>}
-          {supported.has("cancel") && <button onClick={() => void onControl(job.id, "cancel")}>Stop</button>}
-          {supported.size === 0 && <span className="muted">--</span>}
+          {supported.has("cancel") && <button className="danger-button" disabled={job.status === "canceling"} onClick={() => void onControl(job.id, "cancel")}>{job.status === "canceling" ? "Canceling" : "Stop"}</button>}
         </div></td>
-      </tr>;
+      </tr>,
+      ...(open ? [<tr className="job-detail-row" key={`${job.id}-details`}><td colSpan={6}><JobDetails job={job} /></td></tr>] : [])];
     })}</tbody>
   </table>;
 }
 
+function JobProgress({ job }: { job: Job }) {
+  if (job.total <= 0) return <span className="muted">Not measured</span>;
+  const percent = Math.min(100, Math.max(0, (job.completed + job.failed) / job.total * 100));
+  return <div className="job-progress"><span>{job.completed.toLocaleString()} of {job.total.toLocaleString()}</span><progress max={100} value={percent} />{job.failed > 0 && <span className="job-progress-failed">{job.failed.toLocaleString()} failed</span>}</div>;
+}
+
+function JobDetails({ job }: { job: Job }) {
+  const [logPage, setLogPage] = useState(1);
+  const logsResource = usePersistentRefresh({
+    key: `job-details-${job.id}-${job.status}`,
+    enabled: true,
+    load: () => loadCompleteJobLog(job.id)
+  });
+  const logs = logsResource.data ?? [];
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(logs.length / pageSize));
+  const pageSafe = Math.min(logPage, totalPages);
+  const visibleLogs = logs.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+  useEffect(() => setLogPage(current => Math.min(current, totalPages)), [totalPages]);
+  return <div className="job-detail-panel">
+    <div className="job-detail-facts">
+      <div><span>Initiated from</span><strong>{jobOrigin(job.type)}</strong></div>
+      <div><span>Request summary</span><strong>{logs[0]?.text || job.message || "No request summary recorded."}</strong></div>
+      <div><span>Created</span><strong>{formatJobDate(job.createdAtUtc)}</strong></div>
+      <div><span>Started</span><strong>{formatJobDate(job.startedAtUtc)}</strong></div>
+      <div><span>Finished</span><strong>{formatJobDate(job.finishedAtUtc)}</strong></div>
+      <div><span>Cancellation behavior</span><strong>{jobCancellationBehavior(job)}</strong></div>
+    </div>
+    <PanelLoadState label={`logs for job ${job.id}`} state={logsResource.state} hasData={Boolean(logsResource.data)} onRetry={logsResource.refresh} />
+    <div className="job-log-head"><h4>Raw Job Log</h4>{totalPages > 1 && <div className="pagination-row table-top-pagination"><button disabled={pageSafe <= 1} onClick={() => setLogPage(pageSafe - 1)}>Prev</button><span>Page {pageSafe} of {totalPages}</span><button disabled={pageSafe >= totalPages} onClick={() => setLogPage(pageSafe + 1)}>Next</button></div>}</div>
+    {visibleLogs.length ? <table className="table compact-table job-log-table"><thead><tr><th>Time</th><th>Stream</th><th>Entry</th></tr></thead><tbody>{visibleLogs.map(log => <tr key={log.id}><td>{formatJobDate(log.timestampUtc)}</td><td><span className={`section-status ${log.stream === "error" ? "error" : log.stream === "warning" ? "warning" : "ok"}`}>{label(log.stream)}</span></td><td>{log.text}</td></tr>)}</tbody></table> : <span className="muted">No job log entries were recorded.</span>}
+  </div>;
+}
+
+async function loadCompleteJobLog(jobId: number) {
+  const logs: JobLog[] = [];
+  let afterId = 0;
+  for (let page = 0; page < 20; page += 1) {
+    const batch = await api.request<JobLog[]>(`/api/v1/jobs/${jobId}/logs?afterId=${afterId}`);
+    logs.push(...batch);
+    if (batch.length < 500) break;
+    afterId = batch[batch.length - 1].id;
+  }
+  return logs;
+}
+
 function isActiveJob(job: Job) {
   return job.status === "queued" || job.status === "running" || job.status === "paused" || job.status === "canceling";
+}
+
+function jobNeedsAttention(job: Job, allJobs: Job[]) {
+  if (job.status === "canceling") {
+    const updated = new Date(job.updatedAtUtc ?? job.createdAtUtc).getTime();
+    return Number.isFinite(updated) && Date.now() - updated > 5 * 60 * 1000;
+  }
+  if (job.status !== "failed") return false;
+  return !allJobs.some(other => other.type === job.type && other.status === "completed" && other.id > job.id);
+}
+
+function jobDisplayName(type: string) {
+  const names: Record<string, string> = {
+    system_backup: "System Backup",
+    system_storage_maintenance: "Automatic Storage Maintenance",
+    system_restart_tr: "Restart Trunk Recorder",
+    system_stop_tr: "Stop Trunk Recorder",
+    system_restart_qdrant: "Restart Vector Search",
+    setup_restart_pizzad: "Restart PizzaWave",
+    setup_tr_calibration_sweep: "TR Calibration Sweep",
+    setup_tr_source_build: "Build Trunk Recorder",
+    setup_backup_existing_tr: "Back Up Existing TR",
+    setup_prepare_existing_tr: "Prepare Existing TR",
+    setup_remove_legacy_apps: "Remove Legacy Apps",
+    setup_lmstudio_prime: "Prepare LM Studio",
+    setup_qdrant_prime: "Prepare Vector Search",
+    setup_faster_whisper_prime: "Prepare Faster Whisper",
+    setup_sdr_prime: "Prepare SDR Tools",
+    setup_diagnostic_tools_prime: "Prepare Diagnostic Tools",
+    transcription_failure_recovery: "Failed Transcription Recovery"
+  };
+  return names[type] ?? label(type);
+}
+
+function jobOrigin(type: string) {
+  if (type === "transcription_failure_recovery") return "System / Jobs";
+  if (type === "system_backup") return "System / Backup";
+  if (type.startsWith("system_restart_") || type === "system_stop_tr" || type === "setup_restart_pizzad") return "System / Runtime / Services";
+  if (type.includes("maintenance")) return "Automatic maintenance";
+  if (type.includes("calibration") || type.includes("sdr") || type.includes("tr_")) return "Radio Setup";
+  if (type.startsWith("setup_")) return "Setup";
+  return "PizzaWave background operation";
+}
+
+function jobCancellationBehavior(job: Job) {
+  if (job.type === "transcription_failure_recovery") return "Stop prevents additional failed calls from being queued. One in-flight transcription may finish.";
+  if (job.type === "setup_tr_calibration_sweep") return "Stop ends the calibration process tree immediately and restores Trunk Recorder.";
+  if (job.type === "system_backup") return "Stop cancels archive creation and records any partial-file cleanup outcome.";
+  if (job.type.startsWith("setup_") || job.type.startsWith("system_")) return "Stop waits for the current package or install transaction to reach a safe cancellation boundary.";
+  return "This job producer does not declare a safe cancellation operation.";
+}
+
+function jobTimingSummary(job: Job) {
+  if (isActiveJob(job)) return job.startedAtUtc ? `Started ${formatJobDate(job.startedAtUtc)}` : `Queued ${formatJobDate(job.createdAtUtc)}`;
+  return job.finishedAtUtc ? `Finished ${formatJobDate(job.finishedAtUtc)}` : `Created ${formatJobDate(job.createdAtUtc)}`;
+}
+
+function jobDurationSummary(job: Job) {
+  const start = new Date(job.startedAtUtc ?? job.createdAtUtc).getTime();
+  const end = job.finishedAtUtc ? new Date(job.finishedAtUtc).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "Duration unavailable";
+  const seconds = Math.max(0, Math.round((end - start) / 1000));
+  if (seconds < 60) return `${seconds}s duration`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m duration`;
+  return `${Math.floor(seconds / 3600)}h ${Math.round(seconds % 3600 / 60)}m duration`;
+}
+
+function formatJobWindow(hours: number) {
+  return hours === 24 ? "24 hours" : hours === 48 ? "2 days" : hours === 168 ? "7 days" : hours === 720 ? "30 days" : `${hours} hours`;
 }
 
 function formatJobDate(value?: string | null) {
@@ -11010,6 +11534,10 @@ function formatDurationMinutes(minutes: number) {
   if (minutes < 1) return "<1m";
   if (minutes < 90) return `${Math.round(minutes)}m`;
   return `${Math.floor(minutes / 60)}h ${Math.round(minutes % 60)}m`;
+}
+
+function formatPendingAge(startTime: number) {
+  return formatDurationMinutes(Math.max(0, (Date.now() / 1000 - startTime) / 60));
 }
 
 function TrConfigEditorPanel({
@@ -11320,57 +11848,6 @@ function readTrFrequencyHz(value: unknown) {
   return Math.round(numeric > 0 && numeric < 1_000_000 ? numeric * 1_000_000 : numeric);
 }
 
-function TrConfigRestorePanel({ refreshToken }: { refreshToken: number }) {
-  const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState("");
-  const backupsResource = usePersistentRefresh({
-    key: `system-tr-config-backups|${refreshToken}`,
-    enabled: true,
-    load: () => api.request<TrConfigBackup[]>("/api/v1/system/tr-config/backups")
-  });
-  const rows = backupsResource.data ?? [];
-  async function loadBackups() {
-    await backupsResource.refresh();
-  }
-  async function restore(row: TrConfigBackup) {
-    if (!confirmAction("Restore TR config backup?", `This installs ${row.name}, creates a backup of the current TR config first, and restarts trunk-recorder.`)) return;
-    setBusy(row.path);
-    setMessage("");
-    try {
-      const result = await api.request<TrConfigRestoreResult>("/api/v1/system/tr-config/restore", {
-        method: "POST",
-        body: JSON.stringify({ backupPath: row.path, restartTr: true })
-      });
-      setMessage(`${result.message} ${result.serviceOutput}`.trim());
-      await loadBackups();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "TR config restore failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-  return <div className="card">
-    <div className="settings-header">
-      <div>
-        <h3>Restore TR Config</h3>
-        <p className="muted">Timestamped config backups are created before Setup applies source changes and before TR config editor saves.</p>
-      </div>
-    </div>
-    <PanelLoadState label="Trunk Recorder configuration backups" state={backupsResource.state} hasData={Boolean(backupsResource.data)} onRetry={backupsResource.refresh} />
-    {message && <p className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "settings-message error" : "settings-message ok"}>{message}</p>}
-    {rows.length === 0 && !backupsResource.state.loading ? <p className="muted">No TR config backups found.</p> :
-      <table className="table">
-        <thead><tr><th>Backup</th><th>Created</th><th>Size</th><th></th></tr></thead>
-        <tbody>{rows.map(row => <tr key={row.path}>
-          <td><code>{row.name}</code><br /><span className="muted">{row.path}</span></td>
-          <td>{new Date(row.createdAtUtc).toLocaleString()}</td>
-          <td>{formatBytes(row.bytes)}</td>
-          <td><button className="danger-button" disabled={Boolean(busy)} onClick={() => void restore(row)}>{busy === row.path ? "Restoring..." : "Restore"}</button></td>
-        </tr>)}</tbody>
-      </table>}
-  </div>;
-}
-
 function parseTrConfig(text: string): { ok: true; value: any } | { ok: false; error: string } {
   try {
     const value = JSON.parse(text || "{}");
@@ -11458,118 +11935,211 @@ function numericOrText(value: string) {
   return Number.isFinite(numeric) ? numeric : value;
 }
 
-function TrHealthSummaryView({ data }: { data: TrTroubleshoot }) {
-  const cfg = data.config;
-  return <div className="tr-summary">
-    <div className="card">
-      <h2>{data.health.title}</h2>
-      <p className="muted">{data.health.window}</p>
-      <p className="muted">{data.health.lastWindow}</p>
-      <p className="muted">{data.health.source}</p>
-      <p className="muted">Health summary is computed from the last 24 hours only.</p>
-    </div>
-    <div className="card">
-      <h3>Configuration</h3>
-      <div>{cfg?.ok ? "OK" : "Problem"}: {cfg?.path}</div>
-      <div className="muted">Callstream target {cfg?.callstreamTarget}; configured {cfg?.callstreamConfigured ? "yes" : "no"}</div>
-    </div>
-    <MetricTable title="Health Metrics" rows={data.health.metrics} />
-    <MetricTable title="Systems" rows={data.health.systems} />
-    <SourcePlanTable rows={data.health.sourcePlan ?? []} />
-    <SourceCoverageTable rows={data.health.sourceCoverage ?? []} />
-    <div className="remedy-list"><h3>Suggested Remedies</h3>{data.health.remedies.map(r => <div className={`remedy ${r.isIssue ? "issue" : ""}`} key={r.metric}><strong>{r.metric}</strong><p>{r.notes}</p></div>)}</div>
-    <details className="card"><summary>Raw health samples</summary><table className="table"><thead><tr><th>Window</th><th>Scope</th><th>CC summary</th><th>CC zero</th><th>Msg-rate samples</th><th>Msg-rate zero</th><th>Retunes</th><th>No TX</th><th>Recorder exhausted</th><th>Stops</th></tr></thead><tbody>{data.health.samples.map(r => <tr key={r.id}><td>{new Date(r.windowStartUtc).toLocaleString()}</td><td>{r.scope}</td><td>{r.ccSummaryDecodeLines ? r.ccSummaryAvgDecodeRate.toFixed(2) : "N/A"}</td><td>{r.ccSummaryDecodeLines ? `${r.ccSummaryDecodeZeroPct.toFixed(1)}%` : "N/A"}</td><td>{r.lowDecodeWarningLines.toLocaleString()}</td><td>{r.lowDecodeWarningLines ? `${r.lowDecodeWarningZeroPct.toFixed(1)}%` : "N/A"}</td><td>{r.retunes}</td><td>{r.noTxRecorded}</td><td>{r.recorderExhausted}</td><td>{r.sampleStops}</td></tr>)}</tbody></table></details>
+function TrConfigurationSummaryView({ data, onOpenSetup }: { data: TrTroubleshoot; onOpenSetup?: (section?: string) => void }) {
+  const cfg: any = data.config ?? {};
+  const configSources: any[] = cfg.sourceCoverage?.sources ?? [];
+  const configSystems: any[] = cfg.systems ?? [];
+  const coverageSystems: any[] = cfg.sourceCoverage?.systems ?? [];
+  const planIssues = data.health.sourcePlan.filter(plan => plan.isIssue);
+  const assignedSiteCount = data.health.sourcePlan.filter(plan => plan.assignedSourceIndex != null).length;
+  return <div className="tr-config-summary">
+    <section className="system-content-section"><SystemSectionHeader title="Source Assignments" description="How configured SDR tuning windows, recorder capacity, and monitored sites fit together." meta={<><span>{data.health.sourceCoverage.length.toLocaleString()} source{data.health.sourceCoverage.length === 1 ? "" : "s"}</span><span>{assignedSiteCount.toLocaleString()} of {data.health.sourcePlan.length.toLocaleString()} sites assigned</span></>} actions={onOpenSetup ? <button onClick={() => { localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", "coverage"); onOpenSetup("RF Validation"); }}>Edit in Setup</button> : null} />
+      <div className="tr-source-topology">{data.health.sourceCoverage.map(source => {
+        const configured = configSources.find(row => row.index === source.index);
+        const assigned = data.health.sourcePlan.filter(plan => plan.assignedSourceIndex === source.index);
+        return <article className="card tr-source-topology-card" key={source.index}>
+          <div className="tr-source-topology-head"><div><h3>Source {source.index}</h3><span>{trDeviceLabel(source.device)}</span></div><strong>{source.digitalRecorders.toLocaleString()} recorders</strong></div>
+          <div className="tr-source-topology-facts"><div><span>Center</span><strong>{source.centerMhz.toFixed(6)} MHz</strong></div><div><span>Sample rate</span><strong>{configured?.sampleRate ? `${(configured.sampleRate / 1_000_000).toFixed(1)} MHz` : `${(source.highMhz - source.lowMhz).toFixed(1)} MHz`}</strong></div><div><span>Usable window</span><strong>{configured?.lowHz ? `${(configured.lowHz / 1_000_000).toFixed(3)}–${(configured.highHz / 1_000_000).toFixed(3)} MHz` : `${source.lowMhz.toFixed(3)}–${source.highMhz.toFixed(3)} MHz`}</strong></div></div>
+          <div className="tr-source-site-list">{assigned.map(plan => {
+            const configSystem = configSystems.find(row => row.shortName === plan.systemShortName);
+            const coverageSystem = coverageSystems.find(row => row.shortName === plan.systemShortName);
+            const channels = (coverageSystem?.controlChannelsHz ?? []).map((hz: number) => `${(hz / 1_000_000).toFixed(6)} MHz`).join(", ");
+            const talkgroupsFile = String(configSystem?.talkgroupsFile ?? "");
+            const talkgroupsName = talkgroupsFile.split(/[\\/]/).filter(Boolean).at(-1) || "--";
+            return <div key={plan.systemShortName}>
+              <strong>{trSystemDisplayName(plan.systemShortName)}</strong>
+              <div className="tr-source-site-facts">
+                <span><small>Type</small><b>{String(configSystem?.type ?? "--").toUpperCase()}</b></span>
+                <span><small>Control channel</small><b>{channels || "--"}</b></span>
+                <span><small>Observed range</small><b>{plan.lowMhz.toFixed(3)}–{plan.highMhz.toFixed(3)} MHz</b></span>
+              </div>
+              <small title={talkgroupsFile}>Talkgroup file: {talkgroupsName}</small>
+              <small>{plan.notes}</small>
+            </div>;
+          })}{assigned.length === 0 && <p className="muted">No monitored site is assigned to this source.</p>}</div>
+        </article>;
+      })}</div>
+    </section>
+    {(!cfg.ok || planIssues.length > 0) && <div className="card warning"><h3>Configuration needs review</h3><p>{cfg.error || planIssues.map(plan => `${trSystemDisplayName(plan.systemShortName)}: ${plan.notes}`).join(" ")}</p></div>}
   </div>;
 }
 
-function RfAnalysisPanel({ data, rangeHours }: { data: TrTroubleshoot; rangeHours: number }) {
-  const systems = Array.from(new Set((data.health.systems ?? []).map(row => row.metric).filter(Boolean)));
-  const [system, setSystem] = useState(systems[0] ?? "");
-  const [hours, setHours] = useState(String(Math.min(Math.max(rangeHours, 2), 72)));
-  const [analysis, setAnalysis] = useState<TrRfAnalysis | null>(null);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!system && systems[0]) setSystem(systems[0]);
-  }, [system, systems]);
-  async function run() {
-    if (!system) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const end = Math.floor(Date.now() / 1000);
-      const start = end - Math.max(1, Number(hours) || 24) * 3600;
-      const result = await api.request<TrRfAnalysis>(`/api/v1/troubleshoot/rf-analysis?system=${encodeURIComponent(system)}&start=${start}&end=${end}`);
-      setAnalysis(result);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return <div className="rf-analysis">
-    <div className="card">
-      <h3>RF Analysis</h3>
-      <p className="muted">Uses stored TR health rows for corrected CC summary decode metrics, plus bounded journald parsing for recent retune target detail.</p>
-      <div className="settings-grid">
-        <label>System <select value={system} onChange={e => setSystem(e.target.value)}>{systems.map(s => <option key={s}>{s}</option>)}</select></label>
-        <label>Window <select value={hours} onChange={e => setHours(e.target.value)}><option value="2">Last 2h</option><option value="6">Last 6h</option><option value="24">Last 24h</option><option value="72">Last 3d</option></select></label>
+function openRfSetup(systemShortName: string, onOpenSetup: (section?: string) => void) {
+  localStorage.setItem("pizzawave-site-setup-rf-target-system", systemShortName);
+  localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", "control");
+  onOpenSetup("RF Validation");
+}
+
+function RfHealthStatusPanel({ data, onOpenSetup, onSelectSite, onSelectCategory }: { data: TrTroubleshoot; onOpenSetup?: (section?: string) => void; onSelectSite: (system: string) => void; onSelectCategory: (category: RfChartCategory) => void }) {
+  const systems = data.health.systemSummaries ?? [];
+  return <div className="tr-summary rf-health-status-panel">
+    <div className="tr-site-card-grid">{systems.map(system => {
+      return <article className={`card tr-site-card ${trSystemTone(system.status)}`} key={system.systemShortName} onClickCapture={() => onSelectSite(system.systemShortName)}>
+        <div className="tr-site-card-head"><div><h3>{trSystemDisplayName(system.systemShortName)}</h3></div><div className="tr-site-card-actions"><strong className={`section-status ${trSystemTone(system.status)}`}>{system.status}</strong>{system.status !== "Healthy" && onOpenSetup && <button type="button" className="tiny-button" onClick={() => openRfSetup(system.systemShortName, onOpenSetup)}>Review in Setup</button>}</div></div>
+        <p>{system.summary}</p>
+        <div className="tr-site-facts">
+          <TrSiteFact label="Decode" value={system.ccSummarySamples ? `${system.ccSummaryAvgDecodeRate.toFixed(1)} msg/s` : "N/A"} caption={system.decodeAssessment.baselineValue != null ? `Local ${system.decodeAssessment.baselineValue.toFixed(1)} · strong 40 msg/s` : "40 msg/s strong reference"} assessment={system.decodeAssessment} onClick={() => onSelectCategory("decode")} />
+          <TrSiteFact label="Zero decode" value={system.ccSummarySamples ? `${system.ccSummaryDecodeZeroPercent.toFixed(1)}%` : "N/A"} caption={system.zeroDecodeAssessment.baselineValue != null ? `Local ${system.zeroDecodeAssessment.baselineValue.toFixed(1)}% · ${system.ccSummarySamples.toLocaleString()} samples` : `${system.ccSummarySamples.toLocaleString()} summary samples`} assessment={system.zeroDecodeAssessment} onClick={() => onSelectCategory("decode")} />
+          <TrSiteFact label="Calls" value={system.callsConcluded.toLocaleString()} caption={system.callsAssessment.baselineValue != null ? `${system.callsPerHour.toFixed(1)}/hr · local ${system.callsAssessment.baselineValue.toFixed(1)}/hr` : `${system.callsPerHour.toFixed(1)}/hr in window`} assessment={system.callsAssessment} onClick={() => onSelectCategory("activity")} />
+          <TrSiteFact label="No audio" value={system.noTxRecorded.toLocaleString()} caption={system.callsConcluded ? `${(system.noTxRecorded * 100 / system.callsConcluded).toFixed(1)}%${system.noAudioAssessment.baselineValue != null ? ` · local ${system.noAudioAssessment.baselineValue.toFixed(1)}%` : " of calls"}` : "no concluded calls"} assessment={system.noAudioAssessment} onClick={() => onSelectCategory("activity")} />
+          <TrSiteFact label="Retunes" value={system.retunes.toLocaleString()} caption={system.retunesAssessment.baselineValue != null ? `${system.retunesPerHour.toFixed(1)}/hr · local ${system.retunesAssessment.baselineValue.toFixed(1)}/hr` : `${system.retunesPerHour.toFixed(1)}/hr in window`} assessment={system.retunesAssessment} onClick={() => onSelectCategory("events")} />
+        </div>
+        <small className="tr-site-freshness">Latest evidence: {new Date(system.lastWindowEndUtc).toLocaleString()}</small>
+      </article>;
+    })}{systems.length === 0 && <div className="card"><p className="muted">No system-scoped Trunk Recorder health samples are available for this window.</p></div>}</div>
+  </div>;
+}
+
+function TrSiteFact({ label: factLabel, value, caption, assessment, onClick }: { label: string; value: string; caption: string; assessment: TrMetricAssessment; onClick: () => void }) {
+  return <button type="button" className={`tr-site-fact ${assessment.tone}`} title={assessment.detail} aria-label={`${factLabel}: ${value}. ${assessment.detail} Open matching Performance charts.`} onClick={onClick}><span>{factLabel}</span><strong>{value}</strong><small>{caption}</small></button>;
+}
+
+function trSystemTone(status: string) {
+  if (status === "Unavailable" || status === "Critical") return "error";
+  if (status === "Needs review") return "warning";
+  if (status === "Healthy") return "ok";
+  return "neutral";
+}
+
+function trSystemDisplayName(value: string) {
+  return value.split("-").filter(Boolean).map(word => ["ms", "etv"].includes(word.toLowerCase()) ? word.toUpperCase() : word[0]?.toUpperCase() + word.slice(1)).join(" ");
+}
+
+function trDeviceLabel(value: string) {
+  return value.replace(/^airspy=/i, "Airspy ").replace(/^rtl=/i, "RTL-SDR ");
+}
+
+function TranscriptionPerformancePanel({ data, rangeHours, onRangeHoursChange, onOpenTalkgroup, onExcludeTalkgroup }: { data: TranscriptionPerformance; rangeHours: number; onRangeHoursChange: (hours: number) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void; onExcludeTalkgroup: (row: TranscriptionGroup) => void }) {
+  const usableStatus = transcriptionUsableStatus(data.usablePercent, data.baselineUsablePercent, data.totalCalls);
+  const endpoint = data.endpointHealth;
+  const outageMinutes = endpoint?.outageStartedAtUtc ? Math.max(1, Math.floor((Date.now() - new Date(endpoint.outageStartedAtUtc).getTime()) / 60000)) : 0;
+  const emptyOutageHint = rangeHours < 168 ? ` Older outages may be available; select ${rangeHours < 48 ? "2d or Week" : "Week"}.` : "";
+  return <div className="transcription-performance-panel">
+    <SystemPageHeaderControls><div className="calls-performance-toolbar header-controls">
+      {endpoint?.configured && <span className={`section-status ${endpoint.outageConfirmed ? "error" : endpoint.healthy ? "ok" : "info"}`}>{endpoint.outageConfirmed ? "Endpoint unavailable" : endpoint.healthy ? "Endpoint healthy" : "Checking endpoint"}</span>}
+      <div className="segmented" role="group" aria-label="Transcription history window">
+        {[{ hours: 24, text: "24h" }, { hours: 48, text: "2d" }, { hours: 168, text: "Week" }].map(option => <button type="button" key={option.hours} className={rangeHours === option.hours ? "active" : ""} onClick={() => onRangeHoursChange(option.hours)}>{option.text}</button>)}
       </div>
-      <div className="setup-button-row"><button disabled={busy || !system} onClick={() => void run()}>{busy ? "Analyzing..." : "Run Analysis"}</button></div>
-      {message && <p className="settings-message error">{message}</p>}
-      {analysis && <p className={analysis.hasEnoughPostChangeData ? "settings-message ok" : "settings-message"}>{analysis.summary}</p>}
-      {analysis && !analysis.hasEnoughPostChangeData && <p className="muted">Post-change RF analysis is more useful after at least a few hours of corrected health rows; for configuration changes, prefer 48-72h before drawing conclusions.</p>}
+    </div></SystemPageHeaderControls>
+    {endpoint?.outageConfirmed && <div className="card service-issue-card"><strong>Remote transcription has been unavailable for about {outageMinutes} minute(s).</strong><p>{endpoint.lastError || "The configured endpoint did not answer its health check."}</p><span className="muted">New calls remain pending and will be retried after recovery.</span></div>}
+    <details className="card transcription-outage-history"><summary>Endpoint Outage History ({data.endpointOutages?.length ?? 0} in this window)</summary>{data.endpointOutages?.length ? <div className="transcription-table-scroll"><table className="table compact-table"><thead><tr><th>Started</th><th>Duration</th><th>State</th><th>Model</th><th>Administrative email</th><th>Last evidence</th></tr></thead><tbody>{data.endpointOutages.map(outage => { const started = new Date(outage.startedAtUtc); const recovered = outage.recoveredAtUtc ? new Date(outage.recoveredAtUtc) : null; const durationMinutes = Math.max(0, ((recovered?.getTime() ?? Date.now()) - started.getTime()) / 60000); return <tr key={outage.id}><td>{started.toLocaleString()}</td><td>{formatDurationMinutes(durationMinutes)}</td><td><span className={`section-status ${recovered ? "ok" : "error"}`}>{recovered ? "Recovered" : "Active"}</span></td><td>{outage.reportedModel || outage.expectedModel || "--"}</td><td>{outage.administrativeEmailSent ? "Sent" : "Not sent"}</td><td>{outage.lastError || "--"}</td></tr>; })}</tbody></table></div> : <p className="muted">No remote transcription endpoint outages were recorded in the selected window.{emptyOutageHint}</p>}</details>
+    <div className="section kpis transcription-kpis">
+      <Kpi label="Transcription Completion" value={`${data.completedCalls.toLocaleString()} / ${data.totalCalls.toLocaleString()}`} status={data.totalCalls < 10 ? "neutral" : data.completionPercent >= 99 ? "ok" : data.completionPercent >= 95 ? "warning" : "error"} subtext={`${data.completionPercent.toFixed(1)}% · PizzaWave reference ≥99%`} />
+      <Kpi label="Usable Transcripts" value={`${data.usableCalls.toLocaleString()} / ${data.totalCalls.toLocaleString()}`} status={usableStatus} subtext={`${data.usablePercent.toFixed(1)}% · local ${data.baselineUsablePercent.toFixed(1)}% · strong reference ≥80%`} />
+      <Kpi label="Engine Failures" value={data.engineFailureCalls.toLocaleString()} status={data.totalCalls < 10 ? "neutral" : data.engineFailurePercent <= 1 ? "ok" : data.engineFailurePercent <= 5 ? "warning" : "error"} subtext={`${data.engineFailurePercent.toFixed(1)}% · expected ≤1%`} />
+      <Kpi label="Unusable Audio" value={data.unusableAudioCalls.toLocaleString()} status={data.totalCalls < 10 ? "neutral" : data.unusableAudioPercent > 20 ? "error" : data.unusableAudioPercent > 10 ? "warning" : "ok"} subtext={`${data.unusableAudioPercent.toFixed(1)}% inaudible, blank, or marker-only`} />
     </div>
-    {analysis && <div className="system-manager-grid">
-      <MetricTable title="RF Metrics" rows={analysis.metrics} />
-      <MetricTable title="Previous Window Comparison" rows={analysis.comparison} />
-      <MetricTable title="Retune Targets" rows={analysis.retuneTargets} />
-      <MetricTable title="Recommended Next Checks" rows={analysis.recommendations} />
-    </div>}
+    <div className="transcription-chart-grid">
+      <TranscriptionOutcomeChart rows={data.outcomes} rangeStart={data.rangeStart} rangeEnd={data.rangeEnd} bucketSeconds={data.bucketSeconds} />
+      <TranscriptionLatencyChart rows={data.latency} rangeStart={data.rangeStart} rangeEnd={data.rangeEnd} />
+    </div>
+    <div className="transcription-detail-grid">
+      <TranscriptionReasonTable rows={data.reasons} />
+      <TranscriptionGroupTable title="Site/System Comparison" rows={data.systems} />
+      <div className="transcription-detail-wide">
+        <TranscriptionGroupTable title="Affected Talkgroups" rows={data.talkgroups} talkgroups samples={data.samples} onOpenTalkgroup={onOpenTalkgroup} onExcludeTalkgroup={onExcludeTalkgroup} />
+      </div>
+    </div>
   </div>;
 }
 
-function SourcePlanTable({ rows }: { rows: NonNullable<TrTroubleshoot["health"]["sourcePlan"]> }) {
-  if (!rows.length) return null;
-  return <div className="card">
-    <h3>Suggested Source Plan</h3>
-    <p className="muted">Built from TR control channels, any configured voice frequencies, and observed call frequencies in the selected range. Ranges use the same 90% sample-rate windowing logic as Setup.</p>
-    <table className="table">
-      <thead><tr><th>System</th><th>Desired range</th><th>Center</th><th>Assigned source</th><th>Notes</th></tr></thead>
-      <tbody>{rows.map((row, i) => <tr className={row.isIssue ? "issue-row" : ""} key={`${row.systemShortName}-${row.lowMhz}-${i}`}>
-        <td>{row.systemShortName}</td>
-        <td>{row.lowMhz.toFixed(3)}-{row.highMhz.toFixed(3)} MHz</td>
-        <td>{row.recommendedCenterMhz.toFixed(3)} MHz</td>
-        <td>{row.assignedSourceIndex == null ? "None" : `Source ${row.assignedSourceIndex}`}<br /><span className="muted">{row.assignedDevice}</span></td>
-        <td>{row.notes}</td>
-      </tr>)}</tbody>
-    </table>
-  </div>;
+function transcriptionUsableStatus(rate: number, baseline: number, total: number): "ok" | "warning" | "error" | "neutral" {
+  if (total < 10) return "neutral";
+  if (rate < 60 || (baseline > 0 && baseline - rate >= 15)) return "error";
+  if (rate >= 80 && (baseline <= 0 || rate >= baseline - 5)) return "ok";
+  return "warning";
 }
 
-function SourceCoverageTable({ rows }: { rows: NonNullable<TrTroubleshoot["health"]["sourceCoverage"]> }) {
-  if (!rows.length) return null;
-  return <div className="card">
-    <h3>SDR Source Coverage</h3>
-    <p className="muted">Calls are assigned to the first configured source window that covers their frequency. A source with coverable calls but no first-match calls is probably shadowed by an earlier overlapping source.</p>
-    <table className="table">
-      <thead><tr><th>Source</th><th>Window</th><th>Recorders</th><th>First-match calls</th><th>Coverable calls</th><th>Unique freqs</th><th>Notes</th></tr></thead>
-      <tbody>{rows.map(row => <tr className={row.isIssue ? "issue-row" : ""} key={row.index}>
-        <td>{row.index >= 0 ? `Source ${row.index}` : "Uncovered"}<br /><span className="muted">{row.device}</span></td>
-        <td>{row.index >= 0 ? `${row.lowMhz.toFixed(3)}-${row.highMhz.toFixed(3)} MHz` : "--"}<br />{row.index >= 0 && <span className="muted">center {row.centerMhz.toFixed(3)} MHz</span>}</td>
-        <td>{row.digitalRecorders}</td>
-        <td>{row.firstMatchCalls.toLocaleString()}</td>
-        <td>{row.coverableCalls.toLocaleString()}</td>
-        <td>{row.uniqueFrequencies.toLocaleString()}</td>
-        <td>{row.notes}</td>
-      </tr>)}</tbody>
-    </table>
-  </div>;
+function qualityReasonLabel(reason: string) {
+  const labels: Record<string, string> = { transcription_error: "Engine failure", inaudible: "Inaudible audio", blank_audio: "Blank audio", marker_only: "Marker-only audio", empty: "Empty transcript", too_short: "Too short", numeric_noise: "Numeric noise", repetitive: "Repetitive output", low_information: "Low-information output", overexpanded: "Overexpanded output" };
+  return labels[reason] ?? label(reason || "unknown");
+}
+
+function qualityReasonAction(reason: string) {
+  if (reason === "transcription_error") return "Review provider availability and Queue/Jobs evidence.";
+  if (["inaudible", "blank_audio", "marker_only"].includes(reason)) return "Review source audio and the affected site or talkgroup.";
+  if (reason === "empty") return "Confirm audio contains speech and inspect the selected model.";
+  if (reason === "too_short") return "Often brief radio traffic; review concentration before acting.";
+  return "Review samples for a repeated model or audio pattern.";
+}
+
+function TranscriptionReasonTable({ rows }: { rows: TranscriptionPerformance["reasons"] }) {
+  return <div className="card transcription-table-card"><h3>Outcome Breakdown</h3>{rows.length ? <table className="table transcription-reason-table"><thead><tr><th>Outcome</th><th>Calls</th><th>Share</th><th>Operator action</th></tr></thead><tbody>{rows.map(row => <tr key={row.reason}><td>{qualityReasonLabel(row.reason)}</td><td>{row.calls.toLocaleString()}</td><td>{row.sharePercent.toFixed(1)}%</td><td>{qualityReasonAction(row.reason)}</td></tr>)}</tbody></table> : <p className="muted">No unusable or failed outcomes in this window.</p>}</div>;
+}
+
+function TranscriptionGroupTable({ title, rows, talkgroups = false, samples = [], onOpenTalkgroup, onExcludeTalkgroup }: { title: string; rows: TranscriptionGroup[]; talkgroups?: boolean; samples?: QualityAuditSample[]; onOpenTalkgroup?: (row: { category: string; talkgroup: number }) => void; onExcludeTalkgroup?: (row: TranscriptionGroup) => void }) {
+  const storageKey = "pizzawave-system-transcription-open-talkgroup";
+  const [openGroup, setOpenGroup] = useState(() => talkgroups ? localStorage.getItem(storageKey) || "" : "");
+  const [openSample, setOpenSample] = useState<number | null>(null);
+  function rememberOpenGroup(key: string) {
+    setOpenGroup(key);
+    if (!talkgroups) return;
+    if (key) localStorage.setItem(storageKey, key);
+    else localStorage.removeItem(storageKey);
+  }
+  useEffect(() => {
+    if (!talkgroups || !openGroup || !rows.some(row => `${row.systemShortName.toLowerCase()}:${row.talkgroup}` === openGroup)) return;
+    let secondHandle = 0;
+    const firstHandle = window.requestAnimationFrame(() => {
+      secondHandle = window.requestAnimationFrame(() => {
+        const row = document.querySelector<HTMLElement>(`[data-transcription-group-key="${CSS.escape(openGroup)}"]`);
+        const container = row?.closest<HTMLElement>(".trouble-page.system-view");
+        if (!row || !container) return;
+        const top = row.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - Math.max(20, container.clientHeight * .2);
+        container.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+      });
+    });
+    return () => { window.cancelAnimationFrame(firstHandle); window.cancelAnimationFrame(secondHandle); };
+  }, [talkgroups, openGroup, rows]);
+  return <div className="card transcription-table-card"><h3>{title}</h3>{rows.length ? <div className="transcription-table-scroll"><table className="table transcription-group-table"><thead><tr><th>{talkgroups ? "Talkgroup" : "Site/System"}</th><th>Calls</th><th>Completion</th><th>Usable</th><th>Engine failures</th><th>Unusable audio</th><th>Local usable</th>{talkgroups && <th>Actions</th>}</tr></thead><tbody>{rows.map(row => { const key = `${row.systemShortName.toLowerCase()}:${row.talkgroup}`; const evidence = samples.filter(sample => sample.systemShortName.toLowerCase() === row.systemShortName.toLowerCase() && sample.talkgroup === row.talkgroup); const problemCount = row.engineFailureCalls + row.unusableAudioCalls + row.otherQualityCalls; return <React.Fragment key={key}><tr data-transcription-group-key={key} className={talkgroups ? "clickable-table-row" : ""} tabIndex={talkgroups ? 0 : undefined} onClick={() => talkgroups && rememberOpenGroup(openGroup === key ? "" : key)} onKeyDown={event => { if (talkgroups && (event.key === "Enter" || event.key === " ")) rememberOpenGroup(openGroup === key ? "" : key); }}><td><strong>{row.label}</strong>{talkgroups && <small>{row.systemShortName} · TG {row.talkgroup} · {problemCount.toLocaleString()} problem calls</small>}</td><td>{row.totalCalls.toLocaleString()}</td><td>{row.completionPercent.toFixed(1)}%</td><td><span className={`metric-value-${transcriptionUsableStatus(row.usablePercent, row.baselineUsablePercent, row.totalCalls)}`}>{row.usablePercent.toFixed(1)}%</span></td><td>{row.engineFailureCalls.toLocaleString()} ({row.engineFailurePercent.toFixed(1)}%)</td><td>{row.unusableAudioCalls.toLocaleString()} ({row.unusableAudioPercent.toFixed(1)}%)</td><td>{row.baselineUsablePercent ? `${row.baselineUsablePercent.toFixed(1)}%` : "Insufficient"}</td>{talkgroups && <td><div className="table-action-row"><button type="button" className="tiny-button" onClick={event => { event.stopPropagation(); rememberOpenGroup(key); onOpenTalkgroup?.(row); }}>View calls</button><button type="button" className="tiny-button danger-button" onClick={event => { event.stopPropagation(); rememberOpenGroup(key); onExcludeTalkgroup?.(row); }}>Exclude</button></div></td>}</tr>{talkgroups && openGroup === key && <tr className="transcription-group-evidence-row"><td colSpan={8}><div className="transcription-group-evidence"><div className="card-heading-row"><strong>Problem call evidence</strong><span className="muted">Showing {evidence.length} of {problemCount.toLocaleString()}</span></div>{evidence.length ? <table className="table compact-table transcription-evidence-table"><thead><tr><th>Time</th><th>Classification</th><th>Source</th><th>Audio duration</th></tr></thead><tbody>{evidence.map(sample => <React.Fragment key={sample.callId}><tr className="clickable-table-row" onClick={() => setOpenSample(current => current === sample.callId ? null : sample.callId)}><td>{new Date(sample.startTime * 1000).toLocaleString()}</td><td>{qualityReasonLabel(sample.qualityReason)}</td><td>#{sample.source}</td><td>{sample.durationSeconds < 1 ? `${sample.durationSeconds.toFixed(1)}s` : formatDuration(sample.durationSeconds)}</td></tr>{openSample === sample.callId && <tr className="transcription-evidence-detail-row"><td colSpan={4}><div className="transcription-evidence-shelf"><div><strong>{qualityReasonLabel(sample.qualityReason)}</strong><span className="muted">{sample.transcriptionStatus} · call {sample.callId}</span></div><p>{sample.transcription || "No transcript was produced."}</p><PlayableAudio src={sample.audioUrl} /></div></td></tr>}</React.Fragment>)}</tbody></table> : <p className="muted">No sample rows are available for this talkgroup.</p>}</div></td></tr>}</React.Fragment>; })}</tbody></table></div> : <p className="muted">No eligible calls in this window.</p>}</div>;
+}
+
+function transcriptionChartLabels(rangeStart: number, rangeEnd: number) {
+  return Array.from(new Set([0, .25, .5, .75, 1].map(ratio => Math.round(rangeStart + (rangeEnd - rangeStart) * ratio))));
+}
+
+function roundedTranscriptionChartTime(timestamp: number, rangeStart: number, rangeEnd: number) {
+  return transcriptionChartTime(Math.ceil(timestamp / 3600) * 3600, rangeStart, rangeEnd);
+}
+
+function transcriptionChartTime(timestamp: number, rangeStart: number, rangeEnd: number) {
+  return new Date(timestamp * 1000).toLocaleString([], rangeEnd - rangeStart <= 86400 ? { hour: "numeric", minute: "2-digit" } : { month: "numeric", day: "numeric", hour: "numeric" });
+}
+
+function TranscriptionOutcomeChart({ rows, rangeStart, rangeEnd, bucketSeconds }: { rows: TranscriptionOutcomeBucket[]; rangeStart: number; rangeEnd: number; bucketSeconds: number }) {
+  const first = rangeStart - rangeStart % bucketSeconds;
+  const starts = Array.from({ length: Math.max(0, Math.ceil((rangeEnd - first) / bucketSeconds)) }, (_, index) => first + index * bucketSeconds);
+  const byStart = new Map(rows.map(row => [row.start, row]));
+  const colors = { usable: "#54d68a", audio: "#5aa7ff", quality: "#f7c948", failure: "#ff6b5a", pending: "#9faab5" };
+  const x = (timestamp: number) => 44 + (timestamp - first) / Math.max(1, rangeEnd - first) * 620;
+  const width = Math.max(2, 620 / Math.max(1, starts.length) - 1);
+  return <div className="card tr-chart-card transcription-chart-card"><h3>Transcription Outcomes Over Time</h3><p className="muted">Percentage of eligible calls in each {bucketSeconds / 60}-minute bucket.</p><svg className="chart" viewBox="0 0 690 215" preserveAspectRatio="none" role="img" aria-label="Transcription outcomes over time"><line className="axis" x1="44" y1="18" x2="44" y2="170"/><line className="axis" x1="44" y1="170" x2="664" y2="170"/><text className="chart-label" x="8" y="23">100%</text><text className="chart-label" x="24" y="174">0</text>{starts.map(start => { const row = byStart.get(start); const total = row?.totalCalls ?? 0; const segments = [{ key: "usable", value: row?.usableCalls ?? 0 }, { key: "audio", value: row?.unusableAudioCalls ?? 0 }, { key: "quality", value: row?.otherQualityCalls ?? 0 }, { key: "failure", value: row?.engineFailureCalls ?? 0 }, { key: "pending", value: row?.pendingCalls ?? 0 }]; let y = 170; return segments.map(segment => { const height = total ? segment.value / total * 152 : 0; y -= height; return <rect key={`${start}-${segment.key}`} x={x(start)} y={y} width={width} height={height} fill={colors[segment.key as keyof typeof colors]}><title>{transcriptionChartTime(start, rangeStart, rangeEnd)} · {qualityReasonLabel(segment.key)}: {segment.value}/{total}</title></rect>; }); })}{transcriptionChartLabels(rangeStart, rangeEnd).map(timestamp => <text className="chart-label" textAnchor={timestamp === rangeStart ? "start" : timestamp === rangeEnd ? "end" : "middle"} x={44 + (timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart) * 620} y="198" key={timestamp}>{roundedTranscriptionChartTime(timestamp, rangeStart, rangeEnd)}</text>)}</svg><Legend items={[["Usable", colors.usable], ["Unusable audio", colors.audio], ["Other quality", colors.quality], ["Engine failure", colors.failure], ["Pending", colors.pending]]} /></div>;
+}
+
+function TranscriptionLatencyChart({ rows, rangeStart, rangeEnd }: { rows: TranscriptionLatencyBucket[]; rangeStart: number; rangeEnd: number }) {
+  const max = Math.max(1, ...rows.map(row => row.p95Seconds));
+  const x = (timestamp: number) => 44 + (timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart) * 620;
+  const y = (value: number) => 170 - value / max * 145;
+  const points = (pick: (row: TranscriptionLatencyBucket) => number) => rows.map(row => `${x(row.start)},${y(pick(row))}`).join(" ");
+  const scaleLabel = max >= 120 ? `${(max / 60).toFixed(1)}m` : `${max.toFixed(0)}s`;
+  return <div className="card tr-chart-card transcription-chart-card"><h3>Transcription Latency Over Time</h3><p className="muted">PizzaWave ingest to completed transcription for live calls; imported/offline calls are excluded.</p><svg className="chart" viewBox="0 0 690 215" preserveAspectRatio="none" role="img" aria-label="Median and 95th percentile transcription latency over time"><line className="axis" x1="44" y1="18" x2="44" y2="170"/><line className="axis" x1="44" y1="170" x2="664" y2="170"/><text className="chart-label" x="5" y="23">{scaleLabel}</text><text className="chart-label" x="24" y="174">0</text><polyline points={points(row => row.p95Seconds)} fill="none" stroke="#f7c948" strokeWidth="2"/><polyline points={points(row => row.medianSeconds)} fill="none" stroke="#54d68a" strokeWidth="2.5"/>{rows.map(row => <circle key={row.start} cx={x(row.start)} cy={y(row.p95Seconds)} r="2.5" fill="#f7c948"><title>{transcriptionChartTime(row.start, rangeStart, rangeEnd)} · p95 {formatDuration(row.p95Seconds)} · median {formatDuration(row.medianSeconds)} · {row.calls} calls</title></circle>)}{transcriptionChartLabels(rangeStart, rangeEnd).map(timestamp => <text className="chart-label" textAnchor={timestamp === rangeStart ? "start" : timestamp === rangeEnd ? "end" : "middle"} x={44 + (timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart) * 620} y="198" key={timestamp}>{roundedTranscriptionChartTime(timestamp, rangeStart, rangeEnd)}</text>)}</svg><Legend items={[["Median", "#54d68a"], ["95th percentile", "#f7c948"]]} /></div>;
 }
 
 function QualityAuditView({ data, rangeHours }: { data: TrTroubleshoot; rangeHours: number }) {
   const audit = data.qualityAudit;
   const [previous, setPrevious] = useState<TrTroubleshoot["qualityAudit"] | null>(null);
+  const [showAllSamples, setShowAllSamples] = useState(false);
+  const visibleSamples = showAllSamples ? audit.samples : audit.samples.slice(0, 10);
   useEffect(() => {
     let canceled = false;
     const end = Math.floor(Date.now() / 1000) - Math.max(1, rangeHours) * 3600;
@@ -11586,7 +12156,7 @@ function QualityAuditView({ data, rangeHours }: { data: TrTroubleshoot; rangeHou
       <Kpi label="Problem Calls" value={`${audit.problemCalls.toLocaleString()} / ${audit.totalCalls.toLocaleString()}`} status={audit.problemPercent > 25 ? "error" : audit.problemPercent > 10 ? "warning" : "ok"} subtext={`${audit.problemPercent.toFixed(1)}% poor-quality, failed, empty, short, or inaudible`} />
       <Kpi label="Inaudible Calls" value={audit.inaudibleCalls.toLocaleString()} status={audit.inaudiblePercent > 15 ? "error" : audit.inaudiblePercent > 5 ? "warning" : "ok"} subtext={`${audit.inaudiblePercent.toFixed(1)}% of calls in selected range`} />
       <Kpi label="Previous Window" value={previous ? `${problemDelta >= 0 ? "+" : ""}${problemDelta.toFixed(1)} pts` : "Loading"} status={!previous ? "neutral" : problemDelta > 5 ? "warning" : problemDelta < -5 ? "ok" : "neutral"} subtext={previous ? `problem rate vs prior ${rangeHours}h window; inaudible ${inaudibleDelta >= 0 ? "+" : ""}${inaudibleDelta.toFixed(1)} pts` : "equal lookback comparison"} />
-      <Kpi label="Review Samples" value={audit.samples.length.toLocaleString()} status={audit.samples.length > 0 ? "warning" : "ok"} subtext="problem evidence shown by default" />
+      <Kpi label="Review Samples" value={audit.samples.length.toLocaleString()} status={audit.samples.length > 0 ? "warning" : "ok"} subtext="collapsed evidence available for review" />
     </div>
     <div className="audit-grid">
       <AuditTable title="Reasons" rows={audit.byReason} mode="reason" />
@@ -11595,8 +12165,9 @@ function QualityAuditView({ data, rangeHours }: { data: TrTroubleshoot; rangeHou
       <QualityAuditHourChart rows={audit.byHour} />
     </div>
     <div className="card">
-      <h3>Sample problem calls</h3>
-      {audit.samples.length ? audit.samples.map(sample => <QualityAuditSampleCard sample={sample} key={sample.callId} />) : <p className="muted">No problem calls in the selected range.</p>}
+      <div className="card-heading-row"><h3>Sample Problem Calls</h3>{audit.samples.length > 10 && <button onClick={() => setShowAllSamples(current => !current)}>{showAllSamples ? "Show first 10" : `Show all ${audit.samples.length}`}</button>}</div>
+      <p className="muted">Open only the samples needed to confirm the dominant quality pattern.</p>
+      {audit.samples.length ? visibleSamples.map(sample => <QualityAuditSampleCard sample={sample} key={sample.callId} />) : <p className="muted">No problem calls in the selected range.</p>}
     </div>
   </div>;
 }
@@ -11652,32 +12223,53 @@ function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
   </details>;
 }
 
-function MetricTable({ title, rows }: { title: string; rows: TrHealthMetric[] }) {
-  return <div className="card"><h3>{title}</h3><table className="table metric-table"><thead><tr><th>Metric</th><th>Value</th><th>Notes</th></tr></thead><tbody>{rows.map(r => <tr className={r.isIssue ? "issue-row" : ""} key={r.metric}><td>{r.metric}</td><td>{r.value}</td><td>{r.notes}</td></tr>)}</tbody></table></div>;
+function MetricTable({ title, rows, issuesFirst = false, technicalNotes = false }: { title: string; rows: TrHealthMetric[]; issuesFirst?: boolean; technicalNotes?: boolean }) {
+  const issueRows = rows.filter(row => row.isIssue);
+  const normalRows = rows.filter(row => !row.isIssue);
+  const renderRows = (items: TrHealthMetric[]) => items.map(row => <tr className={row.isIssue ? "issue-row" : ""} key={row.metric}><td>{row.metric}</td><td>{row.value}</td><td>{technicalNotes ? <details><summary>View metrics</summary><p>{row.notes}</p></details> : row.notes}</td></tr>);
+  return <div className="card"><h3>{title}</h3>{issuesFirst && issueRows.length === 0 ? <p className="settings-message ok">No issues detected.</p> : <table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(issuesFirst ? issueRows : rows)}</tbody></table>}{issuesFirst && normalRows.length > 0 && <details><summary>{normalRows.length} normal signal{normalRows.length === 1 ? "" : "s"}</summary><table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(normalRows)}</tbody></table></details>}</div>;
 }
 
-function TrHealthChartView({ chart }: { chart: TrHealthChart }) {
+function TrHealthChartView({ chart, showBaselineNote = true, showTitle = true }: { chart: TrHealthChart; showBaselineNote?: boolean; showTitle?: boolean }) {
   const colors = ["#62c6ff", "#ffcf5a", "#7ee081", "#ff6b5a"];
-  const max = Math.max(1, ...chart.series.flatMap(s => s.values));
-  const w = 680, h = 190, left = 44, top = 18, bottom = 38, right = 16;
+  const rawMax = Math.max(1, ...chart.series.flatMap(s => s.values));
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawMax / 4 || 1)));
+  const normalized = rawMax / 4 / magnitude;
+  const tickStep = (normalized <= 1.5 ? 1 : normalized <= 3 ? 2 : normalized <= 7 ? 5 : 10) * magnitude;
+  const max = Math.max(tickStep, Math.ceil(rawMax / tickStep) * tickStep);
+  const w = 680, h = 215, left = 54, top = 18, bottom = 48, right = 16;
   const plotW = w - left - right, plotH = h - top - bottom;
   const x = (i: number, len: number) => left + (len <= 1 ? 0 : (i / (len - 1)) * plotW);
   const y = (v: number) => top + plotH - (v / max) * plotH;
+  const yTicks = Array.from({ length: 5 }, (_, index) => index * max / 4);
+  const xIndexes = Array.from(new Set([0, .25, .5, .75, 1].map(position => Math.round(position * Math.max(0, chart.labels.length - 1)))));
+  const seriesColor = (series: TrHealthChart["series"][number], index: number) => series.label === "Strong reference" ? "#9faab5" : series.isBaseline ? "#d7ecff" : colors[index % colors.length];
   return <div className="card tr-chart-card">
-    <h3>{chart.title}</h3>
-    <p className="muted">{chart.yAxisLabel}</p>
-    {chart.baselineNote && <p className="baseline-note">{chart.baselineNote}</p>}
-    <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    {showTitle && <h3>{chart.title}</h3>}
+    <p className="muted">{chart.yAxisLabel} · {chart.labels.length.toLocaleString()} time buckets</p>
+    {showBaselineNote && chart.baselineNote && <p className="baseline-note">{chart.baselineNote}</p>}
+    <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${chart.title} over time`}>
       <line className="axis" x1={left} y1={top} x2={left} y2={top + plotH} />
       <line className="axis" x1={left} y1={top + plotH} x2={left + plotW} y2={top + plotH} />
-      <text className="chart-label" x={left - 6} y={top + 4} textAnchor="end">{formatChartValue(max, chart.valueFormat)}</text>
-      <text className="chart-label" x={left - 6} y={top + plotH} textAnchor="end">0</text>
-      {chart.series.map((s, si) => <polyline key={s.label || si} points={s.values.map((v, i) => `${x(i, s.values.length)},${y(v)}`).join(" ")} fill="none" stroke={s.isBaseline ? "#d7ecff" : colors[si % colors.length]} strokeWidth={s.isBaseline ? "2.5" : "2"} strokeDasharray={s.isBaseline ? "6 5" : undefined} />)}
-      <text className="chart-label" x={left} y={h - 10}>{chart.labels[0] ?? ""}</text>
-      <text className="chart-label" x={left + plotW} y={h - 10} textAnchor="end">{chart.labels[chart.labels.length - 1] ?? ""}</text>
+      {yTicks.map(value => <g key={value}><line className="chart-grid-line" x1={left} y1={y(value)} x2={left + plotW} y2={y(value)} /><text className="chart-label" x={left - 7} y={y(value) + 4} textAnchor="end">{formatChartValue(value, chart.valueFormat)}</text></g>)}
+      {chart.series.map((s, si) => <React.Fragment key={`${s.scope}-${s.label}-${si}`}><polyline points={s.values.map((v, i) => `${x(i, s.values.length)},${y(v)}`).join(" ")} fill="none" stroke={seriesColor(s, si)} strokeWidth={s.isBaseline ? "2.5" : "2"} strokeDasharray={s.isBaseline ? "6 5" : undefined} />{!s.isBaseline && s.values.map((value, index) => <circle className="chart-point" key={index} cx={x(index, s.values.length)} cy={y(value)} r="3.5" fill={seriesColor(s, si)}><title>{formatRfChartTime(chart.labels[index], chart.labels)} · {s.label}: {formatChartValue(value, chart.valueFormat)} {chart.yAxisLabel.toLowerCase()}</title></circle>)}</React.Fragment>)}
+      {xIndexes.map((index, position) => <text className="chart-label" x={x(index, chart.labels.length)} y={h - 14} textAnchor={position === 0 ? "start" : position === xIndexes.length - 1 ? "end" : "middle"} key={index}>{formatRfChartTime(chart.labels[index], chart.labels)}</text>)}
     </svg>
-    <div className="legend">{chart.series.map((s, i) => <span className={s.isBaseline ? "baseline-legend" : ""} key={s.label || i}><i style={{ background: s.isBaseline ? "#d7ecff" : colors[i % colors.length] }} />{s.label || "current"}</span>)}</div>
+    <div className="legend">{chart.series.map((s, i) => <span className={s.isBaseline ? "baseline-legend" : ""} key={`${s.scope}-${s.label}-${i}`}><i style={{ background: seriesColor(s, i) }} />{s.label || "Current"}</span>)}</div>
   </div>;
+}
+
+function formatRfChartTime(value: string, labels: string[]) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return value;
+  const parsed = labels.map(label => new Date(label).getTime()).filter(Number.isFinite);
+  const step = parsed.length > 1 ? Math.max(15 * 60_000, parsed[1] - parsed[0]) : 60 * 60_000;
+  let roundedTimestamp = Math.ceil(timestamp / step) * step;
+  if (parsed.length > 1 && timestamp === parsed[0] && roundedTimestamp === Math.ceil(parsed[1] / step) * step)
+    roundedTimestamp = Math.floor(timestamp / step) * step;
+  const rounded = new Date(roundedTimestamp);
+  const spansDays = parsed.length > 1 && new Date(parsed[0]).toLocaleDateString() !== new Date(parsed[parsed.length - 1]).toLocaleDateString();
+  return rounded.toLocaleString([], spansDays ? { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" } : { hour: "numeric", minute: "2-digit" });
 }
 
 function formatChartValue(value: number, format: string) {
@@ -12378,6 +12970,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
   const [testingSection, setTestingSection] = useState("");
   const [showAiHelp, setShowAiHelp] = useState(false);
   const [modelBusy, setModelBusy] = useState("");
+  const [profilesDirty, setProfilesDirty] = useState(false);
 
   useEffect(() => {
     const next = withSettingsDefaults(settingsSections);
@@ -12413,23 +13006,24 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
     return names.filter(section => JSON.stringify(sections[section] ?? {}) !== JSON.stringify(baselineSections[section] ?? {}));
   }, [sections, baselineSections]);
   const hasUnsavedSectionChanges = dirtySections.length > 0;
+  const hasUnsavedSettingsChanges = hasUnsavedSectionChanges || profilesDirty;
   useEffect(() => {
-    if (hasUnsavedSectionChanges)
+    if (hasUnsavedSettingsChanges)
       localStorage.setItem("pizzawave-unapplied-settings", "1");
     else
       localStorage.removeItem("pizzawave-unapplied-settings");
-    if (!hasUnsavedSectionChanges) return;
+    if (!hasUnsavedSettingsChanges) return;
     const handler = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "You have unapplied settings changes.";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [hasUnsavedSectionChanges]);
+  }, [hasUnsavedSettingsChanges]);
   useEffect(() => {
-    onDirtyChange(hasUnsavedSectionChanges);
+    onDirtyChange(hasUnsavedSettingsChanges);
     return () => onDirtyChange(false);
-  }, [hasUnsavedSectionChanges, onDirtyChange]);
+  }, [hasUnsavedSettingsChanges, onDirtyChange]);
 
   const engine = sections.engine ?? {};
   const transcription = sections.transcription ?? {};
@@ -12574,7 +13168,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
     <div className="settings-header">
       <h2>Settings</h2>
       <div className="settings-header-actions">
-        {hasUnsavedSectionChanges && <span className="section-status info">Unsaved: {dirtySections.map(label).join(", ")}</span>}
+        {hasUnsavedSettingsChanges && <span className="section-status info">Unsaved: {[...dirtySections.map(label), ...(profilesDirty ? ["Profiles"] : [])].join(", ")}</span>}
         <span className={messageKind === "error" ? "settings-message error" : "settings-message"}>{message || "Changes save by section."}</span>
       </div>
     </div>
@@ -12669,6 +13263,12 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
         <SettingSelect label="Email provider" description="SMTP preset used by the alert sender." value={alerts.emailProvider} options={["gmail", "yahoo"]} onChange={v => update("alerts", ["emailProvider"], v)} />
         <SettingInput label="Email address" description="Sender account used for alert delivery." value={alerts.emailUser} onChange={v => update("alerts", ["emailUser"], v)} />
         <SettingInput label="App password" description="Provider-specific app password or SMTP credential." type="password" value={alerts.emailPassword} onChange={v => update("alerts", ["emailPassword"], v)} />
+        <div className="settings-subsection">
+          <h4>Administrative outage alerts</h4>
+          <SettingCheckbox label="Email on infrastructure outages" description="Emails an administrator when the configured remote transcription endpoint remains unavailable." checked={!!alerts.administrativeEmailEnabled} onChange={v => update("alerts", ["administrativeEmailEnabled"], v)} />
+          <SettingInput label="Administrator recipients" description="Comma-separated email addresses for outage and recovery notices." value={alerts.administrativeEmailRecipients ?? ""} onChange={v => update("alerts", ["administrativeEmailRecipients"], v)} />
+          <SettingInput className="three-digit-input" label="Outage delay (minutes)" description="Wait this long before sending one outage notice. Recovery sends a second notice." type="number" value={alerts.administrativeOutageDelayMinutes ?? 2} onChange={v => update("alerts", ["administrativeOutageDelayMinutes"], Math.max(1, Math.min(60, numberOrZero(v))))} />
+        </div>
         <div className="settings-subsection playback-settings">
           <h4>Autoplay</h4>
           <SettingCheckbox label="Enable autoplay" description="Browser-side playback for selected live events. Use the bell in the top bar to mute/unmute locally." checked={!!alerts.playback?.enabled} onChange={v => update("alerts", ["playback", "enabled"], v)} />
@@ -12682,7 +13282,7 @@ function SettingsView({ settingsSections, settingsLoadState, reload, pendingProf
         <AlertRulesEditor rules={alerts.rules ?? []} baselineRules={baselineSections.alerts?.rules ?? []} onChange={rules => update("alerts", ["rules"], rules)} />
       </SettingsCard>}
 
-      {settingsTab === "profiles" && <ProfilesSettingsCard reload={reload} pendingHides={pendingProfileHides} setPendingHides={setPendingProfileHides} />}
+      {settingsTab === "profiles" && <ProfilesSettingsCard reload={reload} pendingHides={pendingProfileHides} setPendingHides={setPendingProfileHides} onDirtyChange={setProfilesDirty} />}
 
       {settingsTab === "admin" && <SettingsCard title="Security" description="Protects write, setup, and service-control actions. Dashboard reads stay open unless read auth is enabled." busy={savingSection === "auth"} status={sectionStatus.auth} onSave={() => save("auth")}>
         <SettingSelect label="Mode" description="Use token for normal deployments. None disables PizzaWave API authorization." value={auth.mode ?? "token"} options={["token", "none"]} onChange={v => update("auth", ["mode"], v)} />
@@ -12735,9 +13335,10 @@ function SettingsCard({ title, description, children, busy, testing, status, onS
   </div>;
 }
 
-function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reload: () => Promise<void>; pendingHides: ProfileTalkgroupSetting[]; setPendingHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>> }) {
+function ProfilesSettingsCard({ reload, pendingHides, setPendingHides, onDirtyChange }: { reload: () => Promise<void>; pendingHides: ProfileTalkgroupSetting[]; setPendingHides: React.Dispatch<React.SetStateAction<ProfileTalkgroupSetting[]>>; onDirtyChange: (dirty: boolean) => void }) {
   type ProfileTalkgroupSetting = NonNullable<ProcessingProfile["talkgroups"]>[number];
   const [profileState, setProfileState] = useState<ProfileState | null>(null);
+  const [baselineProfileState, setBaselineProfileState] = useState<ProfileState | null>(null);
   const [catalog, setCatalog] = useState<TalkgroupCatalogDocument | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [filter, setFilter] = useState("");
@@ -12760,6 +13361,7 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
     },
     onSuccess: result => {
       setProfileState(result.profiles);
+      setBaselineProfileState(cloneSettings(result.profiles));
       setCatalog(result.catalog);
       setSelectedProfileId(result.profiles.activeProfileId || result.profiles.profiles[0]?.id || "");
       setMessage("");
@@ -12783,8 +13385,8 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
           includeFire: true,
           includeEMS: true,
           includeTraffic: true,
+          includeUtilities: true,
           includeOther: true,
-          allowedTalkgroups: [],
           talkgroups: []
         }),
         id: newClientGuid(),
@@ -12844,6 +13446,11 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
   const hiddenCount = selectedProfile?.talkgroups?.filter(setting => setting.enabled === false).length ?? 0;
   const trExcludedCount = catalogItems.filter(item => !item.enabled).length;
   const defaultSelected = isDefaultProfile(selectedProfile);
+  const profilesDirty = Boolean(profileState && baselineProfileState && JSON.stringify(profileState) !== JSON.stringify(baselineProfileState));
+  useEffect(() => {
+    onDirtyChange(profilesDirty);
+    return () => onDirtyChange(false);
+  }, [profilesDirty, onDirtyChange]);
 
   function updateSelectedProfile(update: (profile: ProcessingProfile) => ProcessingProfile) {
     if (!profileState || !selectedProfile || defaultSelected) return;
@@ -12862,8 +13469,8 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
         includeFire: true,
         includeEMS: true,
         includeTraffic: true,
+        includeUtilities: true,
         includeOther: true,
-        allowedTalkgroups: [],
         talkgroups: []
       }),
       id: newClientGuid(),
@@ -12877,19 +13484,18 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
   }
 
   function deleteProfile() {
-    if (!profileState || !selectedProfile || defaultSelected || profileState.profiles.length <= 1) return;
+    if (!profileState || !selectedProfile || defaultSelected || selectedProfile.id === profileState.activeProfileId || profileState.profiles.length <= 1) return;
     if (!confirmAction("Delete profile?", `Delete ${selectedProfile.name}? Profile-local hidden talkgroup rules for this profile will be removed.`)) return;
     const remaining = profileState.profiles.filter(profile => profile.id !== selectedProfile.id);
-    const activeProfileId = profileState.activeProfileId === selectedProfile.id ? remaining[0].id : profileState.activeProfileId;
-    setProfileState({ ...profileState, activeProfileId, profiles: remaining });
-    setSelectedProfileId(activeProfileId);
+    setProfileState({ ...profileState, profiles: remaining });
+    setSelectedProfileId(profileState.activeProfileId);
   }
 
   function renameProfile(name: string) {
     updateSelectedProfile(profile => ({ ...profile, name, updatedAtUtc: new Date().toISOString() }));
   }
 
-  function setProfileCategory(category: keyof Pick<ProcessingProfile, "includePolice" | "includeFire" | "includeEMS" | "includeTraffic" | "includeOther">, value: boolean) {
+  function setProfileCategory(category: keyof Pick<ProcessingProfile, "includePolice" | "includeFire" | "includeEMS" | "includeTraffic" | "includeUtilities" | "includeOther">, value: boolean) {
     updateSelectedProfile(profile => ({ ...profile, [category]: value, updatedAtUtc: new Date().toISOString() }));
   }
 
@@ -12931,13 +13537,15 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
     if (!profileState) return;
     setBusy("save");
     try {
-      const activeProfileId = selectedProfileId || profileState.activeProfileId || profileState.profiles[0]?.id;
+      const editedProfileId = selectedProfileId;
+      const activeProfileId = profileState.activeProfileId || profileState.profiles[0]?.id;
       const saved = await api.request<ProfileState>("/api/v1/profiles", {
         method: "POST",
         body: JSON.stringify({ activeProfileId, profiles: profileState.profiles })
       });
       setProfileState(saved);
-      setSelectedProfileId(saved.activeProfileId);
+      setBaselineProfileState(cloneSettings(saved));
+      setSelectedProfileId(saved.profiles.some(profile => profile.id === editedProfileId) ? editedProfileId : saved.activeProfileId);
       setDraftProfileId("");
       appliedPendingKeyRef.current = "";
       setPendingHides([]);
@@ -12962,9 +13570,9 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
     <PanelLoadState label="profiles and talkgroups" state={profilesResource.state} hasData={Boolean(profileState && catalog)} onRetry={profilesResource.refresh} />
     {!selectedProfile ? <p className="muted">No profiles loaded.</p> : <div className="settings-fields">
       <div className="profile-editor-grid">
-        <label className="setting-field"><span>Profile</span><div><select value={selectedProfile.id} onChange={event => setSelectedProfileId(event.target.value)}>{profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></div></label>
+        <label className="setting-field"><span>Profile</span><div><select value={selectedProfile.id} onChange={event => setSelectedProfileId(event.target.value)}>{profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}{profile.id === profileState?.activeProfileId ? " (active)" : ""}</option>)}</select></div></label>
         <label className={`setting-field profile-name-field ${!defaultSelected && selectedProfile.id === draftProfileId ? "needs-name" : ""}`}>
-          <span>Name<small>{defaultSelected ? "Default is read-only. Duplicate it to create an editable profile." : selectedProfile.id === draftProfileId ? "Type a name for this new profile before saving." : "Display name for this profile."}</small></span>
+          <span>Name{!defaultSelected && <small>{selectedProfile.id === draftProfileId ? "Type a name for this new profile before saving." : "Display name for this profile."}</small>}</span>
           <div>
             <input value={selectedProfile.name} disabled={defaultSelected} autoFocus={!defaultSelected && selectedProfile.id === draftProfileId} onChange={event => renameProfile(event.target.value)} />
             {!defaultSelected && selectedProfile.id === draftProfileId && <span className="info-tip" tabIndex={0}>i<span>Rename this draft to describe what it hides, then save the profile.</span></span>}
@@ -12972,10 +13580,9 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
         </label>
         <div className="setting-inline-actions">
           <button type="button" onClick={createProfile}>Duplicate</button>
-          <button type="button" className="danger-button" disabled={defaultSelected || profiles.length <= 1} onClick={deleteProfile}>Delete</button>
+          <button type="button" className="danger-button" disabled={defaultSelected || selectedProfile.id === profileState?.activeProfileId || profiles.length <= 1} title={selectedProfile.id === profileState?.activeProfileId ? "Activate another profile before deleting this one." : undefined} onClick={deleteProfile}>Delete</button>
         </div>
       </div>
-      {defaultSelected && <div className="settings-message info">Default is read-only and always shows all non-TR-excluded talkgroups. Duplicate it before hiding TGs or changing categories.</div>}
       {!defaultSelected && <ProfileHiddenTalkgroupsReview profile={selectedProfile} catalogItems={catalogItems} onShow={setting => {
         const key = profileSettingKey(setting);
         setPendingHides(current => current.filter(row => profileSettingKey(row) !== key));
@@ -12992,6 +13599,7 @@ function ProfilesSettingsCard({ reload, pendingHides, setPendingHides }: { reloa
           <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeFire} onChange={event => setProfileCategory("includeFire", event.currentTarget.checked)} /> Fire</label>
           <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeEMS} onChange={event => setProfileCategory("includeEMS", event.currentTarget.checked)} /> EMS</label>
           <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeTraffic} onChange={event => setProfileCategory("includeTraffic", event.currentTarget.checked)} /> Traffic</label>
+          <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeUtilities} onChange={event => setProfileCategory("includeUtilities", event.currentTarget.checked)} /> Utilities</label>
           <label><input type="checkbox" disabled={defaultSelected} checked={selectedProfile.includeOther} onChange={event => setProfileCategory("includeOther", event.currentTarget.checked)} /> Other</label>
         </div>
       </div>
@@ -13127,10 +13735,40 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
     email: "",
     frequency: "realtime",
     autoplay: true,
-    talkgroupsText: ""
+    talkgroups: [] as AlertTalkgroupRef[]
   };
   const [draft, setDraft] = useState<any>(emptyDraft);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [talkgroupSearch, setTalkgroupSearch] = useState("");
+  const [talkgroupCandidateKey, setTalkgroupCandidateKey] = useState("");
+  const scopeResource = usePersistentRefresh({
+    key: "settings-alert-scope",
+    enabled: true,
+    load: async () => {
+      const [profiles, catalogResponse] = await Promise.all([
+        api.request<ProfileState>("/api/v1/profiles"),
+        api.request<TalkgroupCatalogResponse>("/api/v1/talkgroups/catalog")
+      ]);
+      return { profiles, catalog: catalogResponse.document };
+    }
+  });
+  const activeProfile = scopeResource.data?.profiles.profiles.find(profile => profile.id === scopeResource.data?.profiles.activeProfileId);
+  const catalogItems = (scopeResource.data?.catalog.items ?? []).filter(item => item.enabled);
+  const selectedTalkgroupKeys = new Set((draft.talkgroups as AlertTalkgroupRef[]).map(alertTalkgroupKey));
+  const talkgroupCandidates = catalogItems
+    .filter(item => {
+      const needle = talkgroupSearch.trim().toLowerCase();
+      return !needle || [item.systemShortName, item.id, item.alphaTag, item.description].some(value => String(value ?? "").toLowerCase().includes(needle));
+    })
+    .filter(item => !selectedTalkgroupKeys.has(talkgroupCatalogKey(item)))
+    .sort((left, right) => (left.systemShortName || "").localeCompare(right.systemShortName || "", undefined, { sensitivity: "base" }) || left.id - right.id)
+    .slice(0, 100);
+  const normalizedDraftMatchType = normalizeAlertMatchType(draft.matchType);
+  const draftHasCriteria = normalizedDraftMatchType === "keyword"
+    ? Boolean(String(draft.keywords ?? "").trim())
+    : normalizedDraftMatchType === "police_code"
+      ? Boolean(String(draft.policeCodes ?? "").trim())
+      : Boolean(String(draft.keywords ?? "").trim() || String(draft.policeCodes ?? "").trim());
 
   useEffect(() => {
     if (editingIndex !== null && editingIndex >= rules.length) {
@@ -13147,15 +13785,8 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
     setDraft((current: any) => ({ ...current, ...patch }));
   }
 
-  function parseTalkgroups(value: string) {
-    return value
-      .split(",")
-      .map(part => Number(part.trim()))
-      .filter(value => Number.isFinite(value));
-  }
-
   function normalizeDraftRule(existing?: any) {
-    const matchType = draft.matchType || "keyword";
+    const matchType = normalizeAlertMatchType(draft.matchType);
     return {
       ...(existing ?? {}),
       id: existing?.id ?? createClientId(),
@@ -13167,7 +13798,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
       email: draft.email ?? "",
       frequency: draft.frequency || "realtime",
       autoplay: draft.autoplay !== false,
-      talkgroups: parseTalkgroups(draft.talkgroupsText ?? "")
+      talkgroups: (draft.talkgroups ?? []).map((talkgroup: AlertTalkgroupRef) => ({ systemShortName: talkgroup.systemShortName, id: talkgroup.id }))
     };
   }
 
@@ -13187,19 +13818,30 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
     setDraft({
       name: rule.name ?? "",
       enabled: rule.enabled !== false,
-      matchType: rule.matchType ?? "keyword",
+      matchType: normalizeAlertMatchType(rule.matchType),
       keywords: rule.keywords ?? "",
       policeCodes: rule.policeCodes ?? "",
       email: rule.email ?? "",
       frequency: rule.frequency ?? "realtime",
       autoplay: rule.autoplay !== false,
-      talkgroupsText: Array.isArray(rule.talkgroups) ? rule.talkgroups.join(", ") : ""
+      talkgroups: normalizeAlertTalkgroups(rule.talkgroups)
     });
   }
 
   function clearForm() {
     setEditingIndex(null);
     setDraft(emptyDraft);
+  }
+
+  function addTalkgroup() {
+    const item = catalogItems.find(row => talkgroupCatalogKey(row) === talkgroupCandidateKey);
+    if (!item) return;
+    patchDraft({ talkgroups: [...normalizeAlertTalkgroups(draft.talkgroups), { systemShortName: item.systemShortName, id: item.id }] });
+    setTalkgroupCandidateKey("");
+  }
+
+  function removeTalkgroup(talkgroup: AlertTalkgroupRef) {
+    patchDraft({ talkgroups: normalizeAlertTalkgroups(draft.talkgroups).filter(row => alertTalkgroupKey(row) !== alertTalkgroupKey(talkgroup)) });
   }
 
   function deleteRule(index: number) {
@@ -13212,6 +13854,8 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
     <div className="recommendation-head">
       <h4>Alert rules</h4>
     </div>
+    <PanelLoadState label="alert scope" state={scopeResource.state} hasData={Boolean(scopeResource.data)} onRetry={scopeResource.refresh} />
+    <div className="settings-message info">Alert rules apply only to calls allowed by the active profile: <strong>{activeProfile?.name ?? "Unavailable"}</strong>.</div>
     <div className="alert-rule-form">
       <div className="settings-subsection-title">
         <strong>{editingIndex === null ? "New alert" : "Edit alert"}</strong>
@@ -13220,18 +13864,35 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
       <div className="alert-rule-grid">
         <SettingInput label="Name" description="Short operator-facing label." value={draft.name} onChange={value => patchDraft({ name: value })} />
         <SettingInput label="Email recipient" description="Optional. Leave empty for UI-only alerts." value={draft.email} onChange={value => patchDraft({ email: value })} />
-        <SettingSelect label="Match type" description="Keyword, police-code, or both." value={draft.matchType} options={["keyword", "police-code", "both"]} onChange={value => patchDraft({ matchType: value })} />
+        <SettingSelect label="Match type" description="Match a keyword, a police code, or either configured criterion." value={draft.matchType} options={["keyword", "police_code", "keyword_or_police_code"]} onChange={value => patchDraft({ matchType: value })} />
         <SettingSelect label="Frequency" description="Limits repeated notification delivery." value={draft.frequency} options={["realtime", "hourly", "daily"]} onChange={value => patchDraft({ frequency: value })} />
-        {(draft.matchType === "keyword" || draft.matchType === "both") && <SettingTextarea label="Keywords" description="Comma-separated keywords or phrases." value={draft.keywords} onChange={value => patchDraft({ keywords: value })} />}
-        {(draft.matchType === "police-code" || draft.matchType === "both") && <SettingTextarea label="Police codes" description="Comma-separated codes, for example 10-50, 10-80." value={draft.policeCodes} onChange={value => patchDraft({ policeCodes: value })} />}
-        <SettingInput label="Talkgroups" description="Optional comma-separated TG IDs. Leave blank for all profile-eligible TGs." value={draft.talkgroupsText} onChange={value => patchDraft({ talkgroupsText: value })} />
+        {(draft.matchType === "keyword" || draft.matchType === "keyword_or_police_code") && <SettingTextarea label="Keywords" description="Comma-separated keywords or phrases." value={draft.keywords} onChange={value => patchDraft({ keywords: value })} />}
+        {(draft.matchType === "police_code" || draft.matchType === "keyword_or_police_code") && <SettingTextarea label="Police codes" description="Comma-separated codes, for example 10-50, 10-80." value={draft.policeCodes} onChange={value => patchDraft({ policeCodes: value })} />}
+      </div>
+      <div className="settings-subsection">
+        <h4>Talkgroup scope</h4>
+        <p className="setting-note">Leave empty for every talkgroup allowed by the active profile. Scoped rules require both system and TG identity.</p>
+        <div className="setting-inline-actions">
+          <input placeholder="Search system, TG ID, or name" value={talkgroupSearch} onChange={event => setTalkgroupSearch(event.target.value)} />
+          <select value={talkgroupCandidateKey} onChange={event => setTalkgroupCandidateKey(event.target.value)}>
+            <option value="">Choose talkgroup</option>
+            {talkgroupCandidates.map(item => <option value={talkgroupCatalogKey(item)} key={talkgroupCatalogKey(item)}>{item.systemShortName} / TG {item.id} / {item.alphaTag || item.description || "Unnamed"}</option>)}
+          </select>
+          <button type="button" disabled={!talkgroupCandidateKey} onClick={addTalkgroup}>Add</button>
+        </div>
+        {normalizeAlertTalkgroups(draft.talkgroups).length > 0 && <div className="profile-hidden-pill-list">
+          {normalizeAlertTalkgroups(draft.talkgroups).map(talkgroup => {
+            const item = catalogItems.find(row => talkgroupCatalogKey(row) === alertTalkgroupKey(talkgroup));
+            return <span className="profile-hidden-pill" key={alertTalkgroupKey(talkgroup)}><strong>{item?.alphaTag || item?.description || `TG ${talkgroup.id}`}</strong><small>{talkgroup.systemShortName} / TG {talkgroup.id}</small><button type="button" title="Remove talkgroup scope" onClick={() => removeTalkgroup(talkgroup)}>x</button></span>;
+          })}
+        </div>}
       </div>
       <div className="alert-rule-checks">
         <label><input type="checkbox" checked={draft.enabled !== false} onChange={event => patchDraft({ enabled: event.currentTarget.checked })} /> Enabled</label>
         <label><input type="checkbox" checked={draft.autoplay !== false} onChange={event => patchDraft({ autoplay: event.currentTarget.checked })} /> Autoplay when globally enabled</label>
       </div>
       <div className="alert-rule-form-actions">
-        <button type="button" className="danger-button" onClick={addOrUpdateRule}>{editingIndex === null ? "Add Alert" : "Update Alert"}</button>
+        <button type="button" className="danger-button" disabled={!draftHasCriteria} title={!draftHasCriteria ? "Add at least one criterion for the selected match type." : undefined} onClick={addOrUpdateRule}>{editingIndex === null ? "Add Alert" : "Update Alert"}</button>
         <button type="button" onClick={clearForm}>Clear Form</button>
       </div>
     </div>
@@ -13245,6 +13906,7 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
           <div>
             <strong>{rule.name || "Unnamed alert"}</strong>
             <span>{matchText}</span>
+            <small>{normalizeAlertTalkgroups(rule.talkgroups).length ? normalizeAlertTalkgroups(rule.talkgroups).map(alertTalkgroupKey).join(", ") : "All active-profile talkgroups"}</small>
           </div>
           <div className="alert-rule-meta">
             {isDraft ? <span className="draft-badge">Draft</span> : <span className="muted">Saved</span>}
@@ -13261,9 +13923,45 @@ function AlertRulesEditor({ rules, baselineRules, onChange }: { rules: any[]; ba
   </div>;
 }
 
+function normalizeAlertMatchType(value: unknown) {
+  const normalized = String(value ?? "keyword").trim().toLowerCase().replaceAll("-", "_");
+  if (normalized === "police_code") return "police_code";
+  if (normalized === "both" || normalized === "keyword_or_police_code") return "keyword_or_police_code";
+  return "keyword";
+}
+
+function normalizeAlertTalkgroups(value: unknown): AlertTalkgroupRef[] {
+  if (!Array.isArray(value)) return [];
+  const byKey = new Map<string, AlertTalkgroupRef>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const row = candidate as Partial<AlertTalkgroupRef>;
+    const systemShortName = normalizeTalkgroupSystem(row.systemShortName ?? "");
+    const id = Number(row.id ?? 0);
+    if (!systemShortName || !Number.isSafeInteger(id) || id <= 0) continue;
+    const talkgroup = { systemShortName, id };
+    byKey.set(alertTalkgroupKey(talkgroup), talkgroup);
+  }
+  return Array.from(byKey.values());
+}
+
+function alertTalkgroupKey(talkgroup: AlertTalkgroupRef) {
+  return `${normalizeTalkgroupSystem(talkgroup.systemShortName)}:${talkgroup.id}`;
+}
+
 function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allowSystemExclusions = false, onCatalogChanged }: { reloadToken?: number; embedded?: boolean; allowSystemExclusions?: boolean; onCatalogChanged?: () => Promise<void> }) {
   const [catalogPage, setCatalogPage] = useState<TalkgroupCatalogPage | null>(null);
   const [filter, setFilterState] = useState(() => embedded ? localStorage.getItem("pizzawave-setup-talkgroup-filter") || "" : "");
+  const [candidateTargets, setCandidateTargets] = useState<AlertTalkgroupRef[]>(() => {
+    if (!embedded) return [];
+    try { return normalizeAlertTalkgroups(JSON.parse(localStorage.getItem("pizzawave-setup-talkgroup-candidates") || "[]")); }
+    catch { return []; }
+  });
+  const [exclusionTargets, setExclusionTargets] = useState<AlertTalkgroupRef[]>(() => {
+    if (!embedded) return [];
+    try { return normalizeAlertTalkgroups(JSON.parse(localStorage.getItem("pizzawave-setup-talkgroup-exclusion-targets") || "[]")); }
+    catch { return []; }
+  });
   const [debouncedFilter, setDebouncedFilter] = useState(filter);
   const [enabledFilter, setEnabledFilter] = useState<"all" | "included" | "excluded">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -13271,7 +13969,7 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [showAllRows, setShowAllRows] = useState(false);
-  const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
+  const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set(exclusionTargets.map(alertTalkgroupKey)));
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const loadSerialRef = useRef(0);
@@ -13280,9 +13978,9 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     const handle = window.setTimeout(() => setDebouncedFilter(filter), 250);
     return () => window.clearTimeout(handle);
   }, [filter]);
-  useEffect(() => { setPage(1); }, [debouncedFilter, enabledFilter, categoryFilter, sortKey, sortDir, showAllRows]);
+  useEffect(() => { setPage(1); }, [debouncedFilter, enabledFilter, categoryFilter, sortKey, sortDir, showAllRows, candidateTargets]);
   useEffect(() => { setSelectedTalkgroupKeys(new Set()); }, [reloadToken]);
-  useEffect(() => { void loadCatalog(); }, [reloadToken, debouncedFilter, enabledFilter, categoryFilter, sortKey, sortDir, page, showAllRows]);
+  useEffect(() => { void loadCatalog(); }, [reloadToken, debouncedFilter, enabledFilter, categoryFilter, sortKey, sortDir, page, showAllRows, candidateTargets]);
 
   function setFilter(value: string) {
     setFilterState(value);
@@ -13303,6 +14001,8 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
         page: String(page),
         pageSize: String(showAllRows ? 10_000 : 50)
       });
+      if (candidateTargets.length > 0)
+        parameters.set("targets", candidateTargets.map(target => `${normalizeTalkgroupSystem(target.systemShortName)}:${target.id}`).join(","));
       const path = `/api/v1/talkgroups/catalog/page?${parameters}`;
       let loaded: TalkgroupCatalogPage;
       try {
@@ -13318,6 +14018,8 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
       }
       if (serial === loadSerialRef.current) {
         setCatalogPage(loaded);
+        if (exclusionTargets.length > 0)
+          setSelectedTalkgroupKeys(new Set(loaded.items.map(talkgroupCatalogKey)));
         setMessage("");
       }
     } catch (error) {
@@ -13425,6 +14127,13 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
       return next;
     });
   }
+  function clearCandidateFilter() {
+    localStorage.removeItem("pizzawave-setup-talkgroup-candidates");
+    localStorage.removeItem("pizzawave-setup-talkgroup-exclusion-targets");
+    setCandidateTargets([]);
+    setExclusionTargets([]);
+    setSelectedTalkgroupKeys(new Set());
+  }
   function setVisibleTalkgroupsSelected(selected: boolean) {
     setSelectedTalkgroupKeys(current => {
       const next = new Set(current);
@@ -13441,6 +14150,10 @@ function TalkgroupCatalogSettingsCard({ reloadToken = 0, embedded = false, allow
     <div className="settings-fields">
       {message && <span className={message.toLowerCase().includes("fail") || message.toLowerCase().includes("unable") ? "section-status error" : "section-status ok"}>{message}</span>}
       <div className="talkgroup-catalog-table" aria-busy={loadingCatalog}>
+        {candidateTargets.length > 0 && <div className="candidate-filter-banner">
+          <span><strong>{exclusionTargets.length ? "Exclusion review" : "Recommendation candidates"}</strong> {exclusionTargets.length ? "The requested talkgroup is selected. Review it, choose Exclude from TR, then use Apply & Resume when you are ready to change live monitoring." : `Showing only the ${candidateTargets.length.toLocaleString()} noisy talkgroup candidate(s) identified by current evidence.`}</span>
+          <button type="button" onClick={clearCandidateFilter}>Clear candidate filter</button>
+        </div>}
         {topCategoryCounts.length > 0 && <div className="talkgroup-category-summary">
           {topCategoryCounts.map(([category, count]) => <span className={`pill talkgroup-category-pill category-${normalizeTalkgroupSystem(category) || "other"}`} key={category}>{label(category)} {count.toLocaleString()}</span>)}
         </div>}
@@ -13701,6 +14414,9 @@ function withSettingsDefaults(value: Record<string, any>) {
     emailProvider: "gmail",
     emailUser: "",
     emailPassword: "",
+    administrativeEmailEnabled: false,
+    administrativeEmailRecipients: "",
+    administrativeOutageDelayMinutes: 2,
     rules: [],
     playback: {
       enabled: false,
@@ -13843,6 +14559,9 @@ function setupDraftFromStatus(status: SetupStatus) {
     emailProvider: "gmail",
     emailUser: "",
     emailPassword: "",
+    administrativeEmailEnabled: false,
+    administrativeEmailRecipients: "",
+    administrativeOutageDelayMinutes: 2,
     rules: [],
     ...(values.alerts ?? {})
   };

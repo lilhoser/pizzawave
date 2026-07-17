@@ -328,6 +328,19 @@ print(backup)
 PY
 }
 
+read_tr_config_artifact() {
+  local path="${2:?TR config artifact path required}"
+  case "$path" in
+    /etc/trunk-recorder/config.json|/etc/trunk-recorder/config.json.*) ;;
+    *) echo "Refusing TR config artifact outside the approved config family: $path" >&2; return 2 ;;
+  esac
+  [[ -f "$path" && ! -L "$path" ]] || { echo "TR config artifact is not a regular file: $path" >&2; return 2; }
+  local bytes
+  bytes="$(stat -c %s -- "$path")"
+  (( bytes > 0 && bytes <= 4194304 )) || { echo "TR config artifact size is outside the viewer limit: $bytes bytes" >&2; return 2; }
+  cat -- "$path"
+}
+
 restart_pizzad() {
   nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-restart-pizzad.log 2>&1 &
   echo "Scheduled pizzad.service restart."
@@ -698,6 +711,9 @@ case "$ACTION" in
   install-tr-file)
     install_tr_file "$@"
     ;;
+  read-tr-config-artifact)
+    read_tr_config_artifact "$@"
+    ;;
   restart-pizzad)
     restart_pizzad
     ;;
@@ -723,7 +739,7 @@ case "$ACTION" in
     install_auth_token "$@"
     ;;
   *)
-    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|reset-site-files|install-auth-token}" >&2
+    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|read-tr-config-artifact|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|reset-site-files|install-auth-token}" >&2
     exit 2
     ;;
 esac

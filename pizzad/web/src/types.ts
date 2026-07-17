@@ -46,6 +46,7 @@ export type TopTalkgroup = {
   talkgroupKey: string;
   systemShortName: string;
   talkgroup: number;
+  category: string;
   count: number;
   share: number;
   lastHeard: number;
@@ -56,7 +57,16 @@ export type TopTalkgroup = {
   trendBucketLabel: string;
   trendEndLabel: string;
 };
-export type HourCategory = { hour: number; category: string; count: number };
+export type CallVolumeBucket = { start: number; category: string; count: number };
+export type CallActivitySummary = {
+  totalCalls: number;
+  uniqueTalkgroups: number;
+  rangeStart: number;
+  rangeEnd: number;
+  bucketSeconds: number;
+  busiestBucketStart: number;
+  busiestBucketCalls: number;
+};
 export type SystemCallBreakdown = {
   systemShortName: string;
   calls: number;
@@ -96,7 +106,8 @@ export type LocationHeat = {
 export type QualityHour = { hour: number; empty: number; failure: number; inaudible: number; short: number };
 export type Dashboard = {
   kpis: Kpi[];
-  volumeByHourCategory: HourCategory[];
+  callActivity: CallActivitySummary;
+  callVolumeTimeline: CallVolumeBucket[];
   callsBySystem: SystemCallBreakdown[];
   locationHeat: LocationHeat[];
   qualityByHour: QualityHour[];
@@ -140,6 +151,7 @@ export type Job = {
   failed: number;
   message: string;
   createdAtUtc: string;
+  updatedAtUtc?: string | null;
   startedAtUtc?: string | null;
   finishedAtUtc?: string | null;
   supportedOperations: string[];
@@ -171,6 +183,7 @@ export type EngineHealth = {
   queueDepth: number;
   liveQueueDepth: number;
   priorityLiveQueueDepth: number;
+  deferredLiveQueueDepth: number;
   backlogQueueDepth: number;
   queueUnderPressure: boolean;
   queuePressureThreshold: number;
@@ -250,6 +263,7 @@ export type QueueSnapshot = {
   queueDepth: number;
   liveQueueDepth: number;
   priorityLiveQueueDepth: number;
+  deferredLiveQueueDepth: number;
   backlogQueueDepth: number;
   queueUnderPressure: boolean;
   queuePressureThreshold: number;
@@ -295,6 +309,16 @@ export type SystemCpuSnapshot = {
   severity: "ok" | "warning" | "error" | string;
   summary: string;
   insights: SystemCpuInsight[];
+  hostCpuPercent?: number | null;
+  hostMemory: { totalMb: number; availableMb: number; usedMb: number; usedPercent: number };
+  processes: SystemProcessResource[];
+  usb: SystemUsbEvidence;
+};
+export type SystemRuntimeResourceSample = {
+  generatedAtUtc: string;
+  hostCpuPercent?: number | null;
+  hostMemory: { totalMb: number; availableMb: number; usedMb: number; usedPercent: number };
+  processes: SystemProcessResource[];
 };
 export type SystemCpuSample = {
   windowEndUtc?: string | null;
@@ -312,6 +336,26 @@ export type SystemCpuInsight = {
   value: string;
   status: "ok" | "warning" | "error" | string;
   detail: string;
+};
+export type SystemProcessResource = {
+  component: string;
+  unit: string;
+  pid: number;
+  process: string;
+  cpuPercent: number;
+  hostCpuPercent: number;
+  rssMb: number;
+  processCount: number;
+  status: string;
+};
+export type SystemUsbEvidence = {
+  status: string;
+  message: string;
+  devices: string[];
+  kernelErrors: string[];
+  kernelEvidenceSource: string;
+  currentIssueCount: number;
+  evidencePeriod: string;
 };
 export type QueueTalkgroupLoad = {
   systemShortName: string;
@@ -335,6 +379,14 @@ export type SystemRecommendation = {
   title: string;
   detail: string;
   action: string;
+  kind: "problem" | "improvement";
+  evidenceWindow: string;
+  destinationLabel: string;
+  lifecycle: "new" | "active" | "resolved";
+  firstSeenUtc: string;
+  lastSeenUtc: string;
+  resolvedAtUtc: string;
+  resolution: string;
   target: { topTab: string; subTab: string; anchor: string };
   actions: { kind: string; label: string; description: string; talkgroups?: number[] | null }[];
   baseline?: {
@@ -381,14 +433,39 @@ export type SystemRecommendation = {
       incidentYieldPct: number;
     }[];
   } | null;
+  candidates: {
+    systemShortName: string;
+    talkgroup: number;
+    talkgroupName: string;
+    category: string;
+    calls: number;
+    audioSeconds: number;
+    averageAudioSeconds: number;
+    pendingCalls: number;
+    pendingAudioSeconds: number;
+    alreadyDeferred: boolean;
+    reason: string;
+    score: number;
+    weakCalls: number;
+    weakPct: number;
+    failedCalls: number;
+    failedPct: number;
+    repetitiveCalls: number;
+    repetitivePct: number;
+    incidentCalls: number;
+    incidentYieldPct: number;
+  }[];
 };
 export type SystemRecommendations = {
   openCount: number;
+  problemCount: number;
+  improvementCount: number;
   highCount: number;
   mediumCount: number;
   lowCount: number;
   items: SystemRecommendation[];
-  ignoredItems: SystemRecommendation[];
+  recentlyResolved: SystemRecommendation[];
+  history: SystemRecommendation[];
 };
 export type TrHealth = {
   id: number;
@@ -422,6 +499,31 @@ export type TrHealth = {
   tuningErrMaxAbsHz: number;
 };
 export type TrHealthMetric = { metric: string; value: string; notes: string; isIssue: boolean };
+export type TrMetricAssessment = { tone: "ok" | "warning" | "error"; basis: string; baselineValue?: number | null; detail: string };
+export type TrSystemHealth = {
+  systemShortName: string;
+  status: string;
+  summary: string;
+  windows: number;
+  ccSummarySamples: number;
+  ccSummaryAvgDecodeRate: number;
+  ccSummaryDecodeZeroPercent: number;
+  retunes: number;
+  callsConcluded: number;
+  noTxRecorded: number;
+  recorderExhausted: number;
+  sampleStops: number;
+  unableSource: number;
+  callsPerHour: number;
+  retunesPerHour: number;
+  decodeAssessment: TrMetricAssessment;
+  zeroDecodeAssessment: TrMetricAssessment;
+  callsAssessment: TrMetricAssessment;
+  noAudioAssessment: TrMetricAssessment;
+  retunesAssessment: TrMetricAssessment;
+  lastWindowEndUtc: string;
+  isIssue: boolean;
+};
 export type TrSourceCoverage = {
   index: number;
   device: string;
@@ -445,7 +547,7 @@ export type TrSourcePlan = {
   notes: string;
   isIssue: boolean;
 };
-export type TrHealthSeries = { label: string; values: number[]; isBaseline: boolean };
+export type TrHealthSeries = { label: string; values: number[]; isBaseline: boolean; scope: string };
 export type TrHealthChart = { title: string; yAxisLabel: string; valueFormat: string; labels: string[]; series: TrHealthSeries[]; baselineNote: string };
 export type TrHealthSummary = {
   title: string;
@@ -455,6 +557,7 @@ export type TrHealthSummary = {
   summaryText: string;
   metrics: TrHealthMetric[];
   systems: TrHealthMetric[];
+  systemSummaries: TrSystemHealth[];
   sourceCoverage: TrSourceCoverage[];
   sourcePlan: TrSourcePlan[];
   remedies: TrHealthMetric[];
@@ -508,6 +611,21 @@ export type QualityAudit = {
   byHour: QualityAuditHour[];
   samples: QualityAuditSample[];
 };
+export type TranscriptionOutcomeBucket = { start: number; totalCalls: number; completedCalls: number; usableCalls: number; engineFailureCalls: number; unusableAudioCalls: number; otherQualityCalls: number; pendingCalls: number };
+export type TranscriptionThroughputBucket = { start: number; ingestedAudioSeconds: number; completedAudioSeconds: number };
+export type TranscriptionLatencyBucket = { start: number; calls: number; medianSeconds: number; p95Seconds: number };
+export type TranscriptionReason = { reason: string; calls: number; sharePercent: number };
+export type TranscriptionGroup = { label: string; systemShortName: string; talkgroup: number; category: string; totalCalls: number; completedCalls: number; usableCalls: number; engineFailureCalls: number; unusableAudioCalls: number; otherQualityCalls: number; pendingCalls: number; completionPercent: number; usablePercent: number; engineFailurePercent: number; unusableAudioPercent: number; baselineUsablePercent: number };
+export type RemoteTranscriptionHealth = { configured: boolean; healthy: boolean; outageConfirmed: boolean; consecutiveFailures: number; lastSuccessAtUtc?: string | null; outageStartedAtUtc?: string | null; lastRecoveredAtUtc?: string | null; lastError: string; endpoint: string };
+export type RemoteServiceOutage = { id: number; serviceKey: string; endpoint: string; expectedModel: string; reportedModel: string; startedAtUtc: string; confirmedAtUtc: string; recoveredAtUtc?: string | null; lastError: string; failureCount: number; administrativeEmailSent: boolean };
+export type TranscriptionPerformance = {
+  rangeStart: number; rangeEnd: number; bucketSeconds: number; totalCalls: number; completedCalls: number; usableCalls: number; engineFailureCalls: number; unusableAudioCalls: number; otherQualityCalls: number; pendingCalls: number;
+  completionPercent: number; usablePercent: number; engineFailurePercent: number; unusableAudioPercent: number; baselineUsablePercent: number;
+  outcomes: TranscriptionOutcomeBucket[]; throughput: TranscriptionThroughputBucket[]; latency: TranscriptionLatencyBucket[]; reasons: TranscriptionReason[]; systems: TranscriptionGroup[]; talkgroups: TranscriptionGroup[];
+  samples: QualityAuditSample[]; samplePage: number; samplePageSize: number; sampleTotal: number;
+  endpointHealth?: RemoteTranscriptionHealth | null;
+  endpointOutages: RemoteServiceOutage[];
+};
 export type TrTroubleshoot = {
   health: TrHealthSummary;
   qualityAudit: QualityAudit;
@@ -517,18 +635,27 @@ export type TrTroubleshoot = {
   insightsText: string;
 };
 export type TokenUsageSummary = { requests: number; successes: number; failures: number; truncated: number; canceled: number; httpOrOtherErrors: number; promptTokens: number; completionTokens: number; totalTokens: number; estimatedStandardCost: number; timeoutFailures: number; noValidResultFailures: number };
-export type TokenUsageBucket = { label: string; totalTokens: number; promptTokens: number; completionTokens: number; requests: number };
+export type TokenUsageBucket = { label: string; totalTokens: number; promptTokens: number; completionTokens: number; requests: number; successes: number; failures: number };
+export type TokenUsageTimeBucket = { start: number; requests: number; successes: number; failures: number; promptTokens: number; completionTokens: number };
 export type TokenUsageFailureBreakdown = { kind: string; requests: number; promptTokens: number; completionTokens: number; totalTokens: number; latestUtc: string; example: string };
 export type TokenUsageEntry = { id: number; timestampUtc: string; triggerActivity: string; requestKind: string; success: boolean; error: string; endpoint: string; requestModel: string; responseModel: string; finishReason: string; inputChars: number; payloadChars: number; promptTokens: number; completionTokens: number; totalTokens: number };
-export type TokenUsageReport = { ledger: string; summary: TokenUsageSummary; monthlySummary: TokenUsageSummary; allTimeSummary: TokenUsageSummary; failuresByKind: TokenUsageFailureBreakdown[]; byDay: TokenUsageBucket[]; byTrigger: TokenUsageBucket[]; entries: TokenUsageEntry[] };
+export type TokenUsageReport = { ledger: string; rangeStart: number; rangeEnd: number; bucketSeconds: number; openAiReferenceInputCostPerMillion: number; openAiReferenceOutputCostPerMillion: number; summary: TokenUsageSummary; monthlySummary: TokenUsageSummary; allTimeSummary: TokenUsageSummary; failuresByKind: TokenUsageFailureBreakdown[]; byDay: TokenUsageBucket[]; byTrigger: TokenUsageBucket[]; byTime: TokenUsageTimeBucket[]; recentFailures: TokenUsageEntry[]; entries: TokenUsageEntry[]; entryPage: number; entryPageSize: number; entryTotal: number };
 export type RemoteBandwidthSummary = { requestBytes: number; responseBytes: number; totalBytes: number; requests: number; missingAudioFiles: number };
 export type RemoteBandwidthBucket = { label: string; activity: string; requestBytes: number; responseBytes: number; totalBytes: number; requests: number };
+export type RemoteBandwidthTimeActivityBucket = { start: number; activity: string; requestBytes: number; responseBytes: number; totalBytes: number; requests: number };
 export type RemoteBandwidthEntry = { timestampUtc: string; activity: string; endpoint: string; requestBytes: number; responseBytes: number; totalBytes: number; basis: string; estimated: boolean };
-export type RemoteBandwidthReport = { ledger: string; remoteHost: string; transcriptionEndpoint: string; aiEndpoint: string; transcriptionIncluded: boolean; notes: string; summary: RemoteBandwidthSummary; monthlySummary: RemoteBandwidthSummary; allTimeSummary: RemoteBandwidthSummary; byDay: RemoteBandwidthBucket[]; byActivity: RemoteBandwidthBucket[]; entries: RemoteBandwidthEntry[] };
+export type RemoteBandwidthReport = { ledger: string; rangeStart: number; rangeEnd: number; bucketSeconds: number; remoteHost: string; transcriptionEndpoint: string; aiEndpoint: string; transcriptionIncluded: boolean; notes: string; summary: RemoteBandwidthSummary; monthlySummary: RemoteBandwidthSummary; allTimeSummary: RemoteBandwidthSummary; byDay: RemoteBandwidthBucket[]; byActivity: RemoteBandwidthBucket[]; byTimeActivity: RemoteBandwidthTimeActivityBucket[]; entries: RemoteBandwidthEntry[]; entryPage: number; entryPageSize: number; entryTotal: number };
 export type IncidentOperationAuditRow = { id: number; timestampUtc: string; systemShortName: string; incidentKey: string; operation: string; accepted: boolean; reason: string; score: number; callIds: number[]; metadataJson: string };
+export type IncidentDecisionBucket = { start: number; accepted: number; rejected: number };
+export type IncidentDecisionPerformance = { rangeStart: number; rangeEnd: number; bucketSeconds: number; total: number; accepted: number; rejected: number; buckets: IncidentDecisionBucket[] };
+export type IncidentDecisionChain = { chainKey: string; timestampUtc: string; systemShortName: string; incidentKey: string; outcome: "created" | "updated" | "dropped"; summary: string; score: number; callIds: number[]; completeTrace: boolean; steps: IncidentOperationAuditRow[] };
+export type IncidentDecisionEvidenceCall = { callId: number; timestamp: number; talkgroupName: string; talkgroup: number; category: string; transcriptSnippet: string };
+export type IncidentDecisionGroup = { groupKey: string; displayTitle: string; systemShortName: string; category: string; latestTimestampUtc: string; outcome: "created" | "updated" | "dropped"; createdCount: number; updatedCount: number; droppedCount: number; evidenceCalls: IncidentDecisionEvidenceCall[]; chains: IncidentDecisionChain[] };
+export type IncidentDecisionChainPage = { rangeStart: number; rangeEnd: number; bucketSeconds: number; page: number; pageSize: number; totalChains: number; created: number; updated: number; dropped: number; buckets: IncidentDecisionBucket[]; chains: IncidentDecisionChain[]; totalGroups: number; groups: IncidentDecisionGroup[] };
 export type ProfileTalkgroupSetting = { key?: string; systemShortName?: string; id: number; enabled?: boolean | null; label?: string; category?: string; incidentEligible?: boolean | null };
-export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeOther: boolean; allowedTalkgroups: number[]; talkgroups?: ProfileTalkgroupSetting[]; createdAtUtc?: string; updatedAtUtc?: string };
+export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeUtilities: boolean; includeOther: boolean; talkgroups?: ProfileTalkgroupSetting[]; createdAtUtc?: string; updatedAtUtc?: string };
 export type ProfileState = { activeProfileId: string; profiles: ProcessingProfile[]; restartRecommended?: boolean; generatedCsvPath?: string; message?: string };
+export type AlertTalkgroupRef = { systemShortName: string; id: number };
 export type TalkgroupOption = { talkgroup: number; label: string; category: string };
 export type TalkgroupCatalogItem = {
   key: string;
@@ -613,8 +740,11 @@ export type TrConfigEditorSystem = { shortName: string; type: string; modulation
 export type TrConfigEditorSummary = { systems: TrConfigEditorSystem[]; sources: TrConfigEditorSource[]; warnings: string[] };
 export type TrConfigEditor = { livePath: string; draftPath: string; configJson: string; liveConfigJson: string; hasDraft: boolean; parseOk: boolean; parseMessage: string; summary: TrConfigEditorSummary };
 export type TrConfigEditorApplyResult = { ok: boolean; message: string; save: SetupValidationResult; restartJob?: Job | null; editor: TrConfigEditor };
-export type TrConfigBackup = { name: string; path: string; bytes: number; createdAtUtc: string };
-export type TrConfigRestoreResult = { ok: boolean; message: string; backupPath: string; restoreBackupPath: string; serviceOutput: string };
+export type TrConfigArtifactCatalog = { id: string; kind: "active" | "draft" | "backup" | "experiment" | string; state: string; name: string; path: string; createdAtUtc: string; bytes: number; workflow: string; reason: string; relatedActivity: string; hasRecordedOrigin: boolean; isActive: boolean };
+export type TrConfigArtifactDetail = { artifact: TrConfigArtifactCatalog; configJson: string; parseOk: boolean; parseMessage: string; summary: TrConfigEditorSummary };
+export type TrConfigViewer = { activeArtifactId: string; selectedArtifactId: string; artifacts: TrConfigArtifactCatalog[]; selected: TrConfigArtifactDetail | null; activeConfigJson: string };
+export type TrLogEntry = { cursor: string; timestampUtc: string; host: string; identifier: string; processId: string; message: string };
+export type TrLogPage = { start: number; end: number; pageSize: number; entries: TrLogEntry[]; hasOlder: boolean; olderCursor: string; error: string };
 export type SetupCalibrationRange = { lowHz: number; highHz: number; centerHz: number };
 export type SetupCalibrationSystemPlan = { shortName: string; modulation: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; requiredRanges: SetupCalibrationRange[]; requiredSdrCount: number; proposedSourceIndexes: number[]; warnings: string[] };
 export type SetupCalibrationSourcePlan = { index: number; serial: string; device: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string; coveredSystems: string[] };

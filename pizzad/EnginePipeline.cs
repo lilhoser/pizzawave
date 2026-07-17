@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -21,6 +22,7 @@ public sealed class EnginePipeline
     private readonly RemoteBandwidthEstimatorService _bandwidth;
     private readonly LiveTrActivityMonitor _liveTrActivity;
     private readonly ILogger<EnginePipeline> _logger;
+    private readonly RemoteTranscriptionHealthService? _remoteTranscriptionHealth;
     private readonly ConcurrentQueue<TranscriptionQueueItem> _liveQueue = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _priorityLiveQueue = new();
     private readonly ConcurrentQueue<TranscriptionQueueItem> _deferredLiveQueue = new();
@@ -34,6 +36,7 @@ public sealed class EnginePipeline
     private string _provider = "none";
     private int _remoteTranscriptionWorkers;
     private int _remoteBacklogWorkers;
+    private int _activeLiveTranscriptions;
     private DateTimeOffset _nextPressureLogAt = DateTimeOffset.MinValue;
 
     public int QueueDepth => LiveQueueDepth + _backlogQueue.Count;
@@ -45,6 +48,8 @@ public sealed class EnginePipeline
     public int LivePressureQueueDepth => Math.Max(1, _config.Transcription.LivePressureQueueDepth);
     public int LiveTranscriptionWorkerCount => _liveTranscribers.Count > 0 ? _liveTranscribers.Count : _remoteTranscriptionWorkers;
     public int WhisperThreadsPerWorker => Math.Max(1, _config.Transcription.WhisperThreads);
+    public bool HasActiveLiveTranscription => Volatile.Read(ref _activeLiveTranscriptions) > 0;
+    public bool RemoteTranscriptionOutageConfirmed => _remoteTranscriptionHealth?.GetSnapshot().OutageConfirmed == true;
 
     public EnginePipeline(
         EngineConfig config,
@@ -59,7 +64,8 @@ public sealed class EnginePipeline
         TranscriptPostProcessingService postProcessing,
         RemoteBandwidthEstimatorService bandwidth,
         LiveTrActivityMonitor liveTrActivity,
-        ILogger<EnginePipeline> logger)
+        ILogger<EnginePipeline> logger,
+        RemoteTranscriptionHealthService? remoteTranscriptionHealth = null)
     {
         _config = config;
         _database = database;
@@ -74,6 +80,7 @@ public sealed class EnginePipeline
         _bandwidth = bandwidth;
         _liveTrActivity = liveTrActivity;
         _logger = logger;
+        _remoteTranscriptionHealth = remoteTranscriptionHealth;
     }
 
     public async Task StartAsync(CancellationToken ct)
@@ -301,6 +308,7 @@ public sealed class EnginePipeline
             if (!_priorityLiveQueue.TryDequeue(out var item) && !_liveQueue.TryDequeue(out item) && !_deferredLiveQueue.TryDequeue(out item))
                 continue;
 
+            Interlocked.Increment(ref _activeLiveTranscriptions);
             try
             {
                 await ProcessTranscriptionItemAsync(item, backlog: false, liveTranscriber: transcriber, backlogTranscribers: null, genericBacklogTranscriber: null, ct);
@@ -314,6 +322,10 @@ public sealed class EnginePipeline
                 _logger.LogError(ex, "Live transcription worker recovered after an unhandled failure for call {CallId}; requeueing the call", item.CallId);
                 EnqueueTranscription(item);
                 await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeLiveTranscriptions);
             }
         }
     }
@@ -372,6 +384,8 @@ public sealed class EnginePipeline
     {
         try
         {
+            if (_provider == "remote-faster-whisper" && _remoteTranscriptionHealth != null)
+                await _remoteTranscriptionHealth.WaitForAvailabilityAsync(ct);
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
             var result = genericBacklogTranscriber != null
@@ -388,9 +402,10 @@ public sealed class EnginePipeline
             var quality = TranscriptionQualityClassifier.Classify(result.Text, audioSeconds: audioSeconds);
             var profileAllowsDownstream = DownstreamProfilePolicy.Allows(_config, _catalog, call);
             var suppressDownstream = item.Imported || item.SuppressDownstream || !profileAllowsDownstream;
+            var delayedRecovery = !item.Imported && DateTimeOffset.UtcNow.ToUnixTimeSeconds() - call.StartTime > 60 * 60;
             var alert = suppressDownstream
                 ? new EngineAlertMatchResult(false, null, string.Empty, string.Empty, string.Empty, false, string.Empty)
-                : _alerts.Evaluate(call, result.Text, item.Imported);
+                : _alerts.Evaluate(call, result.Text, item.Imported, delayedRecovery);
             var updatedCall = call with
             {
                 Transcription = result.Text,
@@ -416,16 +431,16 @@ public sealed class EnginePipeline
                     Detail = $"{alert.Type}:{alert.Detail}",
                     MatchedAt = call.StartTime,
                     IsImported = item.Imported,
-                    NotificationSuppressed = item.Imported
+                    NotificationSuppressed = item.Imported || delayedRecovery
                 }, ct);
-                await _events.PublishAsync("alert_matched", new { callId = item.CallId, imported = item.Imported }, ct);
+                await _events.PublishAsync("alert_matched", new { callId = item.CallId, imported = item.Imported, notificationSuppressed = item.Imported || delayedRecovery }, ct);
             }
 
-            await _events.PublishAsync("call_transcribed", new { callId = item.CallId, imported = item.Imported, backlog }, ct);
+            await _events.PublishAsync("call_transcribed", new { callId = item.CallId, imported = item.Imported, backlog, notificationSuppressed = delayedRecovery }, ct);
             if (!suppressDownstream && quality.IncludeInSummaries)
             {
                 await _embeddings.EnqueueAsync(updatedCall, ct);
-                _insights.Enqueue(updatedCall);
+                await _insights.EnqueueAsync(updatedCall, ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -434,6 +449,15 @@ public sealed class EnginePipeline
         }
         catch (Exception ex)
         {
+            if (_provider == "remote-faster-whisper" && IsTransientRemoteFailure(ex))
+            {
+                _remoteTranscriptionHealth?.ReportRequestFailure(ex);
+                _logger.LogWarning(ex, "Remote transcription is temporarily unavailable for call {CallId}; leaving it pending and requeueing it", item.CallId);
+                EnqueueTranscription(item);
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                return;
+            }
+
             _logger.LogError(ex, "Transcription failed for call {CallId}", item.CallId);
             var call = await _database.GetCallAsync(item.CallId, ct);
             var metadata = MergeTranscriptionMetadata(call?.RawMetadataJson ?? "{}", CreateTranscriptionFailureMetadata(ex));
@@ -594,7 +618,10 @@ public sealed class EnginePipeline
         if (string.IsNullOrWhiteSpace(baseUrl))
             return TranscriptionResult.Empty(CreateTranscriptionMetadata());
 
-        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        using var client = new HttpClient
+        {
+            Timeout = _provider == "remote-faster-whisper" ? TimeSpan.FromMinutes(2) : TimeSpan.FromMinutes(10)
+        };
         if (!string.IsNullOrWhiteSpace(_config.Transcription.OpenAiApiKey))
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _config.Transcription.OpenAiApiKey);
 
@@ -612,6 +639,33 @@ public sealed class EnginePipeline
         if (doc.RootElement.TryGetProperty("text", out var text))
             return new TranscriptionResult(text.GetString() ?? string.Empty, metadata);
         return new TranscriptionResult(json, metadata);
+    }
+
+    public async Task<bool> EnqueueFailedTranscriptionRetryAsync(long callId, CancellationToken ct)
+    {
+        if (!CanTranscribe())
+            throw new InvalidOperationException("Transcription is not configured and ready.");
+        var call = await _database.GetCallAsync(callId, ct);
+        if (call == null || !string.Equals(call.TranscriptionStatus, "failed", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(call.QualityReason, "transcription_error", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(call.AudioPath))
+            return false;
+        await UpdateCallTranscriptionWithRetryAsync(call.Id, string.Empty, "pending", "retry_backlog", false, call.RawMetadataJson, ct);
+        EnqueueTranscription(new TranscriptionQueueItem(call.Id, null, call.AudioPath, call.IsImported, call.IsImported, TranscriptionWorkKind.Backlog));
+        await _events.PublishAsync("job_updated", new { type = "transcription", queueDepth = QueueDepth }, ct);
+        return true;
+    }
+
+    private static bool IsTransientRemoteFailure(Exception exception)
+    {
+        var root = exception.GetBaseException();
+        if (root is TimeoutException or TaskCanceledException)
+            return true;
+        if (root is not HttpRequestException http)
+            return false;
+        return !http.StatusCode.HasValue
+            || http.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests
+            || (int)http.StatusCode.Value >= 500;
     }
 
     private TranscriptionMetadata CreateTranscriptionMetadata(JsonElement? response = null)

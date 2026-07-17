@@ -68,7 +68,8 @@ public sealed class TranscriptLocationService
             area.Aliases.Any(alias => string.Equals(alias, system, StringComparison.OrdinalIgnoreCase))) ??
             areas.Where(area => area.IsOverride).FirstOrDefault(area => area.Aliases.Any(alias =>
                 !string.IsNullOrWhiteSpace(alias) &&
-                system.Contains(alias, StringComparison.OrdinalIgnoreCase)));
+                system.Contains(alias, StringComparison.OrdinalIgnoreCase))) ??
+            areas.FirstOrDefault(area => HasUsableBounds(area) && AreaMatchesSystem(area, system, system));
     }
 
     private MonitoredAreaConfig? ResolveCallArea(EngineCall call)
@@ -95,6 +96,14 @@ public sealed class TranscriptLocationService
         if (explicitOverride != null)
             return explicitOverride;
 
+        var compatibleConfiguredArea = _config.Locations.MonitoredAreas.FirstOrDefault(area =>
+            !area.IsOverride &&
+            HasUsableBounds(area) &&
+            AreaMatchesSystem(area, call.SystemShortName, catalogSystem) &&
+            AreaLabelMatchesContext(area.AreaLabel, label));
+        if (compatibleConfiguredArea != null)
+            return compatibleConfiguredArea;
+
         var id = DerivedAreaId(contextKey);
         return _derivedAreas.GetOrAdd(id, _ => new MonitoredAreaConfig
         {
@@ -116,6 +125,30 @@ public sealed class TranscriptLocationService
         string.Equals(area.SystemShortName, catalogSystem, StringComparison.OrdinalIgnoreCase) ||
         area.Aliases.Any(alias => string.Equals(alias, siteSystem, StringComparison.OrdinalIgnoreCase) || string.Equals(alias, catalogSystem, StringComparison.OrdinalIgnoreCase));
 
+    private static bool HasUsableBounds(MonitoredAreaConfig area) =>
+        area.North is > -90 and <= 90 &&
+        area.South is >= -90 and < 90 &&
+        area.West is >= -180 and < 180 &&
+        area.East is > -180 and <= 180 &&
+        area.North > area.South &&
+        area.East > area.West;
+
+    private static bool AreaLabelMatchesContext(string areaLabel, string contextLabel)
+    {
+        var ignored = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "county", "city", "site", "simulcast", "mississippi", "ms", "tennessee", "tn"
+        };
+        var areaTokens = LabelTokens(areaLabel).Where(token => !ignored.Contains(token)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var contextTokens = LabelTokens(contextLabel).Where(token => !ignored.Contains(token)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return areaTokens.Overlaps(contextTokens);
+    }
+
+    private static IEnumerable<string> LabelTokens(string value) =>
+        Regex.Matches(value ?? string.Empty, @"[a-z0-9]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            .Select(match => match.Value)
+            .Where(token => token.Length > 1);
+
     private static string DerivedAreaId(string contextKey)
     {
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contextKey.ToLowerInvariant()))).ToLowerInvariant();
@@ -128,7 +161,7 @@ public sealed class TranscriptLocationService
             return null;
 
         return _config.Locations.MonitoredAreas.FirstOrDefault(area =>
-                   area.IsOverride && string.Equals(area.AreaId, areaId, StringComparison.OrdinalIgnoreCase))
+                   string.Equals(area.AreaId, areaId, StringComparison.OrdinalIgnoreCase))
                ?? (_derivedAreas.TryGetValue(areaId, out var derived) ? derived : null);
     }
 

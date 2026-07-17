@@ -67,14 +67,28 @@ public sealed class TalkgroupCatalogService
         string? sort,
         string? direction,
         int page,
-        int pageSize)
+        int pageSize,
+        string? targets = null)
     {
         var document = Load();
         var needle = (query ?? string.Empty).Trim();
         var normalizedState = (state ?? "all").Trim().ToLowerInvariant();
         var normalizedCategory = (category ?? "all").Trim().ToLowerInvariant();
         var descending = string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase);
+        var requestedTargets = (targets ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var exactTargetKeys = requestedTargets
+            .Where(target => document.Items.Any(item => string.Equals(ItemKey(item), target, StringComparison.OrdinalIgnoreCase)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var fallbackTargetIds = requestedTargets
+            .Where(target => !exactTargetKeys.Contains(target))
+            .Select(target => target[(target.LastIndexOf(':') + 1)..])
+            .Select(value => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
         var rows = document.Items
+            .Where(item => requestedTargets.Count == 0 || exactTargetKeys.Contains(ItemKey(item)) || fallbackTargetIds.Contains(item.Id))
             .Where(item => normalizedState switch
             {
                 "included" => item.Enabled,

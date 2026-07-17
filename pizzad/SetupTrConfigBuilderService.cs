@@ -15,12 +15,14 @@ public sealed partial class SetupTrConfigBuilderService
     private readonly HttpClient _http;
     private readonly EngineConfig _config;
     private readonly TalkgroupCatalogService _talkgroups;
+    private readonly TrConfigArtifactProvenanceStore? _provenance;
 
-    public SetupTrConfigBuilderService(HttpClient http, EngineConfig config, TalkgroupCatalogService talkgroups)
+    public SetupTrConfigBuilderService(HttpClient http, EngineConfig config, TalkgroupCatalogService talkgroups, TrConfigArtifactProvenanceStore? provenance = null)
     {
         _http = http;
         _config = config;
         _talkgroups = talkgroups;
+        _provenance = provenance;
     }
 
     public async Task<SetupTrConfigSitesDto> ListSitesAsync(SetupTrConfigSitesRequest request, CancellationToken ct)
@@ -204,6 +206,8 @@ public sealed partial class SetupTrConfigBuilderService
             }
             await File.WriteAllTextAsync(path, NormalizeText(request.ConfigJson), Encoding.UTF8, ct);
         }
+        if (_provenance != null && !string.IsNullOrWhiteSpace(backup))
+            await _provenance.RecordAsync(backup, "Setup", "Safety backup created before Setup applied a Trunk Recorder configuration.", "TR source and site configuration", ct);
         _config.Setup.TrConfigured = true;
         await _talkgroups.GenerateTrCsvAsync(ct);
         await SaveConfigAsync(ct);

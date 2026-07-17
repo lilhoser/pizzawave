@@ -48,6 +48,7 @@ public sealed class RfSurveyService
     private readonly SetupJobService _jobs;
     private readonly TalkgroupCatalogService _talkgroups;
     private readonly ILogger<RfSurveyService> _logger;
+    private readonly TrConfigArtifactProvenanceStore? _configProvenance;
 
     public RfSurveyService(
         EngineConfig config,
@@ -55,7 +56,8 @@ public sealed class RfSurveyService
         SetupCalibrationService calibration,
         SetupJobService jobs,
         TalkgroupCatalogService talkgroups,
-        ILogger<RfSurveyService> logger)
+        ILogger<RfSurveyService> logger,
+        TrConfigArtifactProvenanceStore? configProvenance = null)
     {
         _config = config;
         _database = database;
@@ -63,6 +65,7 @@ public sealed class RfSurveyService
         _jobs = jobs;
         _talkgroups = talkgroups;
         _logger = logger;
+        _configProvenance = configProvenance;
     }
 
     public string ArtifactRoot => Path.Combine(_config.Storage.AppDataRoot, "rf-surveys");
@@ -1074,6 +1077,28 @@ public sealed class RfSurveyService
         return new RfSurveyTrActionResultDto(true, "apply-source-draft", $"{sourcePlanSummary} Setup TR system list applied.", candidatePath, backupPath, backupPath, serviceOutput);
     }
 
+    public static void EnsureCallAndTranscriptionProof(RfSurveyDetailDto detail)
+    {
+        static RfSurveyExperimentDto? Latest(RfSurveyDetailDto value, string type) => value.Experiments
+            .Where(experiment => string.Equals(experiment.Type, type, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(experiment => experiment.CreatedAtUtc)
+            .FirstOrDefault();
+
+        var blockers = new List<string>();
+        if (!string.Equals(Latest(detail, "voice_capture_trial")?.Status, "passed", StringComparison.OrdinalIgnoreCase))
+            blockers.Add("Call capture proof must pass in RF Validation Step 5.");
+        if (!string.Equals(Latest(detail, "transcription_gate")?.Status, "passed", StringComparison.OrdinalIgnoreCase))
+            blockers.Add("Transcription proof must pass in RF Validation Step 5.");
+        if (blockers.Count > 0)
+            throw new InvalidOperationException("Apply & Resume is blocked. " + string.Join(" ", blockers));
+    }
+
+    public static long SelectDraftSourceCenter(long configuredCenterHz, int sampleRate, long plannedLowHz, long plannedHighHz, long fallbackCenterHz) =>
+        SourceWindowCovers(configuredCenterHz, sampleRate, plannedLowHz) &&
+        SourceWindowCovers(configuredCenterHz, sampleRate, plannedHighHz)
+            ? configuredCenterHz
+            : fallbackCenterHz;
+
     public async Task<RfSurveyConfigDraftDto> BuildConfigDraftAsync(string id, CancellationToken ct)
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
@@ -1159,7 +1184,11 @@ public sealed class RfSurveyService
             var runtimeRate = TrRuntimeSampleRate(profile, profileSource, plannedRate);
             PatchSourceField(source, "rate", runtimeRate, changes, sourceIndex);
             if (window != null)
-                PatchSourceField(source, "center", window.Value.CenterHz, changes, sourceIndex);
+            {
+                var configuredCenter = profileSource?.CenterHz ?? 0;
+                var plannedCenter = SelectDraftSourceCenter(configuredCenter, runtimeRate, window.Value.LowHz, window.Value.HighHz, window.Value.CenterHz);
+                PatchSourceField(source, "center", plannedCenter, changes, sourceIndex);
+            }
             var error = rfCandidate?.ErrorHz ?? profileSource?.ErrorHz;
             if (error is int errorHz)
                 PatchSourceField(source, "error", errorHz, changes, sourceIndex);
@@ -8374,23 +8403,31 @@ public sealed class RfSurveyService
 
     private async Task<string> InstallTrFileAsync(string sourcePath, string targetPath, CancellationToken ct)
     {
+        string backup;
         if (NeedsProtectedTrWrite(targetPath))
         {
             var helper = FindAdminHelper() ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected TR config writes are unavailable.");
             var output = await RunAdminHelperAsync(helper, ["install-tr-file", sourcePath, targetPath], ct);
             if (output.ExitCode != 0)
                 throw new InvalidOperationException($"install-tr-file failed: {output.Output.Trim()}");
-            return output.Output.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+            backup = output.Output.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
         }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? ".");
-        var backup = string.Empty;
-        if (File.Exists(targetPath))
+        else
         {
-            backup = $"{targetPath}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
-            File.Copy(targetPath, backup, overwrite: false);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? ".");
+            backup = string.Empty;
+            if (File.Exists(targetPath))
+            {
+                backup = $"{targetPath}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Copy(targetPath, backup, overwrite: false);
+            }
+            File.Copy(sourcePath, targetPath, overwrite: true);
         }
-        File.Copy(sourcePath, targetPath, overwrite: true);
+        if (_configProvenance != null && !string.IsNullOrWhiteSpace(backup))
+        {
+            var activity = Path.GetFileName(Path.GetDirectoryName(sourcePath)) ?? string.Empty;
+            await _configProvenance.RecordAsync(backup, "RF workflow", "Safety backup created before an RF workflow installed a Trunk Recorder configuration.", activity, ct);
+        }
         return backup;
     }
 

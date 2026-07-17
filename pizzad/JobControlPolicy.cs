@@ -15,6 +15,12 @@ public static class JobControlPolicy
         if (job.Type == BackupJobService.JobType && job.Status is "queued" or "running" or "paused")
             return ["cancel"];
 
+        if (job.Type == TranscriptionRecoveryJobService.JobType && job.Status is "queued" or "running" or "canceling")
+            return ["cancel"];
+
+        if (SetupJobService.IsManagedJobType(job.Type) && job.Status is "queued" or "running" or "paused" or "canceling")
+            return ["cancel"];
+
         return [];
     }
 }

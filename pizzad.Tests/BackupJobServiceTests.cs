@@ -7,6 +7,51 @@ namespace pizzad.Tests;
 public sealed class BackupJobServiceTests
 {
     [Fact]
+    public async Task Initialize_UpgradesExistingJobsWithUpdateTimestamp()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var config = await CreateConfigAsync(root);
+            await using (var connection = new SqliteConnection($"Data Source={config.Storage.DatabasePath}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        type TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        total INTEGER NOT NULL DEFAULT 0,
+                        completed INTEGER NOT NULL DEFAULT 0,
+                        failed INTEGER NOT NULL DEFAULT 0,
+                        message TEXT NOT NULL DEFAULT '',
+                        created_at_utc TEXT NOT NULL,
+                        started_at_utc TEXT NULL,
+                        finished_at_utc TEXT NULL,
+                        payload_json TEXT NOT NULL DEFAULT '{}'
+                    );
+                    """;
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var created = DateTime.UtcNow;
+            var jobId = await database.AddJobAsync(new JobDto { Type = "migration_test", Status = "queued", CreatedAtUtc = created }, CancellationToken.None);
+            var job = await database.GetJobAsync(jobId, CancellationToken.None);
+
+            Assert.NotNull(job?.UpdatedAtUtc);
+            Assert.InRange((job.UpdatedAtUtc.Value.ToUniversalTime() - created).TotalSeconds, -1, 1);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task StartAsync_RunsBackupAsAuditedBackgroundJob()
     {
         var root = NewTempRoot();
@@ -26,6 +71,8 @@ public sealed class BackupJobServiceTests
             Assert.Equal("completed", completed.Status);
             Assert.Equal(1, completed.Completed);
             Assert.Contains("Created", completed.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(completed.UpdatedAtUtc);
+            Assert.True(completed.UpdatedAtUtc >= completed.CreatedAtUtc);
             Assert.Single(backups.ListBackups());
             var logs = await database.ListJobLogsAsync(job.Id, 0, CancellationToken.None);
             Assert.Contains(logs, log => log.Text.Contains("Backup archive started", StringComparison.OrdinalIgnoreCase));
@@ -70,6 +117,7 @@ public sealed class BackupJobServiceTests
             Assert.Equal("canceled", job.Status);
             Assert.Contains("interrupted", job.Message, StringComparison.OrdinalIgnoreCase);
             Assert.NotNull(job.FinishedAtUtc);
+            Assert.NotNull(job.UpdatedAtUtc);
         }
         finally
         {

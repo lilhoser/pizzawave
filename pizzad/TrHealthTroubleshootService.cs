@@ -81,26 +81,155 @@ public sealed class TrHealthTroubleshootService
         return result;
     }
 
+    public async Task<IReadOnlyList<TrSystemHealthDto>> BuildSystemAssessmentsAsync(long start, long end, string baseline, CancellationToken ct)
+    {
+        var baselineStart = DateTimeOffset.UtcNow.AddDays(-BaselineDays(baseline)).ToUnixTimeSeconds();
+        var rows = await _database.ListHealthSamplesAsync(Math.Min(start, baselineStart), end, ct);
+        var selectedRows = rows.Where(row =>
+        {
+            var rowStart = new DateTimeOffset(row.WindowStartUtc).ToUnixTimeSeconds();
+            var rowEnd = new DateTimeOffset(row.WindowEndUtc).ToUnixTimeSeconds();
+            return rowStart >= start && rowEnd <= end;
+        }).ToList();
+        return BuildSystemSummaries(selectedRows, rows, start);
+    }
+
+    public async Task<TranscriptionPerformanceDto> BuildTranscriptionPerformanceAsync(long start, long end, int samplePage, int samplePageSize, CancellationToken ct)
+    {
+        static bool Eligible(EngineCall call) => !string.IsNullOrWhiteSpace(call.AudioPath);
+        static bool Completed(EngineCall call) => call.TranscriptionStatus is "complete" or "poor_quality";
+        static bool Usable(EngineCall call) => string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) && string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase);
+        static bool Failed(EngineCall call) => string.Equals(call.TranscriptionStatus, "failed", StringComparison.OrdinalIgnoreCase) || string.Equals(call.QualityReason, "transcription_error", StringComparison.OrdinalIgnoreCase);
+        static bool UnusableAudio(EngineCall call) => call.QualityReason is "inaudible" or "blank_audio" or "marker_only";
+        static bool Pending(EngineCall call) => string.Equals(call.TranscriptionStatus, "pending", StringComparison.OrdinalIgnoreCase);
+        static bool OtherQuality(EngineCall call) => !Usable(call) && !Failed(call) && !UnusableAudio(call) && !Pending(call);
+        static string SystemLabel(EngineCall call) => string.IsNullOrWhiteSpace(call.SystemShortName) ? "Unknown system" : call.SystemShortName.Trim();
+        static string TalkgroupLabel(EngineCall call) => string.IsNullOrWhiteSpace(call.TalkgroupName) ? $"TG {call.Talkgroup}" : call.TalkgroupName.Trim();
+        static string TalkgroupKey(EngineCall call) => TalkgroupCatalogService.CatalogKey(call.SystemShortName, call.Talkgroup);
+        static double Rate(IEnumerable<EngineCall> rows, Func<EngineCall, bool> predicate)
+        {
+            var list = rows as IReadOnlyCollection<EngineCall> ?? rows.ToList();
+            return list.Count == 0 ? 0 : list.Count(predicate) * 100.0 / list.Count;
+        }
+
+        var baselineStart = start - 7 * 86400L;
+        var selected = (await _database.ListCallsAsync(start, end, null, ct)).Where(Eligible).ToList();
+        var baseline = (await _database.ListCallsAsync(baselineStart, start, null, ct)).Where(Eligible).ToList();
+        var completionPoints = await _database.ListTranscriptionCompletionPointsAsync(start, end, ct);
+        var bucketSeconds = end - start <= 86400 ? 900 : 3600;
+        var baselineBySystem = baseline.GroupBy(SystemLabel, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => Rate(group, Usable), StringComparer.OrdinalIgnoreCase);
+        var baselineByTalkgroup = baseline.GroupBy(TalkgroupKey, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => Rate(group, Usable), StringComparer.OrdinalIgnoreCase);
+
+        TranscriptionGroupDto GroupRow(string label, string system, long talkgroup, string category, List<EngineCall> rows, double baselineUsable) => new(
+            label, system, talkgroup, category, rows.Count, rows.Count(Completed), rows.Count(Usable), rows.Count(Failed), rows.Count(UnusableAudio), rows.Count(OtherQuality), rows.Count(Pending),
+            Percent(rows.Count(Completed), rows.Count), Percent(rows.Count(Usable), rows.Count), Percent(rows.Count(Failed), rows.Count), Percent(rows.Count(UnusableAudio), rows.Count), baselineUsable);
+
+        var outcomes = selected
+            .GroupBy(call => call.StartTime - call.StartTime % bucketSeconds)
+            .OrderBy(group => group.Key)
+            .Select(group => new TranscriptionOutcomeBucketDto(group.Key, group.Count(), group.Count(Completed), group.Count(Usable), group.Count(Failed), group.Count(UnusableAudio), group.Count(OtherQuality), group.Count(Pending)))
+            .ToList();
+        var ingestedByBucket = selected.GroupBy(call => call.StartTime - call.StartTime % bucketSeconds)
+            .ToDictionary(group => group.Key, group => group.Sum(call => Math.Max(0, call.StopTime - call.StartTime)));
+        var completedByBucket = completionPoints.GroupBy(point => point.CompletedAt - point.CompletedAt % bucketSeconds)
+            .ToDictionary(group => group.Key, group => group.Sum(point => point.AudioSeconds));
+        var firstBucket = start - start % bucketSeconds;
+        var throughput = Enumerable.Range(0, Math.Max(0, (int)Math.Ceiling((end - firstBucket) / (double)bucketSeconds)))
+            .Select(index => firstBucket + index * (long)bucketSeconds)
+            .Select(bucket => new TranscriptionThroughputBucketDto(bucket, ingestedByBucket.GetValueOrDefault(bucket), completedByBucket.GetValueOrDefault(bucket)))
+            .ToList();
+
+        static double Percentile(IReadOnlyList<double> sorted, double percentile)
+        {
+            if (sorted.Count == 0) return 0;
+            var index = Math.Clamp((int)Math.Ceiling(percentile * sorted.Count) - 1, 0, sorted.Count - 1);
+            return sorted[index];
+        }
+        var latency = completionPoints.Where(point => !point.IsImported)
+            .GroupBy(point => point.CompletedAt - point.CompletedAt % bucketSeconds)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var values = group.Select(point => point.LatencySeconds).Order().ToList();
+                return new TranscriptionLatencyBucketDto(group.Key, values.Count, Percentile(values, .5), Percentile(values, .95));
+            }).ToList();
+
+        var problemRows = selected.Where(call => !Usable(call) && !Pending(call)).OrderByDescending(call => call.StartTime).ToList();
+        samplePageSize = Math.Clamp(samplePageSize, 10, 50);
+        var sampleTotal = problemRows.Count;
+        var pageCount = Math.Max(1, (int)Math.Ceiling(sampleTotal / (double)samplePageSize));
+        samplePage = Math.Clamp(samplePage, 1, pageCount);
+        var talkgroupRows = selected.GroupBy(TalkgroupKey, StringComparer.OrdinalIgnoreCase).Select(group =>
+        {
+            var rows = group.ToList();
+            var first = rows[0];
+            return GroupRow(TalkgroupLabel(first), SystemLabel(first), first.Talkgroup, first.Category, rows, baselineByTalkgroup.GetValueOrDefault(group.Key));
+        }).Where(row => row.TotalCalls >= 10).OrderBy(row => row.UsablePercent).ThenByDescending(row => row.TotalCalls).Take(30).ToList();
+        var visibleTalkgroupKeys = talkgroupRows.Select(row => TalkgroupCatalogService.CatalogKey(row.SystemShortName, row.Talkgroup)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var samples = problemRows.Where(call => visibleTalkgroupKeys.Contains(TalkgroupKey(call)))
+            .GroupBy(TalkgroupKey, StringComparer.OrdinalIgnoreCase).SelectMany(group => group.Take(5))
+            .Select(call =>
+            {
+                var metadataDuration = Math.Max(0, call.StopTime - call.StartTime);
+                var path = Path.IsPathRooted(call.AudioPath) ? call.AudioPath : Path.Combine(_config.Storage.AudioRoot, call.AudioPath);
+                var measuredDuration = CallAudioService.TryReadWavDurationSeconds(path);
+                return new QualityAuditSampleDto(call.Id, call.StartTime, SystemLabel(call), call.Source, call.Talkgroup, TalkgroupLabel(call), call.Category, measuredDuration ?? metadataDuration, call.TranscriptionStatus, call.QualityReason, call.Transcription, $"/api/v1/calls/{call.Id}/audio");
+            }).ToList();
+
+        return new TranscriptionPerformanceDto
+        {
+            RangeStart = start,
+            RangeEnd = end,
+            BucketSeconds = bucketSeconds,
+            TotalCalls = selected.Count,
+            CompletedCalls = selected.Count(Completed),
+            UsableCalls = selected.Count(Usable),
+            EngineFailureCalls = selected.Count(Failed),
+            UnusableAudioCalls = selected.Count(UnusableAudio),
+            OtherQualityCalls = selected.Count(OtherQuality),
+            PendingCalls = selected.Count(Pending),
+            CompletionPercent = Percent(selected.Count(Completed), selected.Count),
+            UsablePercent = Percent(selected.Count(Usable), selected.Count),
+            EngineFailurePercent = Percent(selected.Count(Failed), selected.Count),
+            UnusableAudioPercent = Percent(selected.Count(UnusableAudio), selected.Count),
+            BaselineUsablePercent = Rate(baseline, Usable),
+            Outcomes = outcomes,
+            Throughput = throughput,
+            Latency = latency,
+            Reasons = problemRows.GroupBy(call => string.IsNullOrWhiteSpace(call.QualityReason) ? "unknown" : call.QualityReason, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count()).Select(group => new TranscriptionReasonDto(group.Key, group.Count(), Percent(group.Count(), selected.Count))).ToList(),
+            Systems = selected.GroupBy(SystemLabel, StringComparer.OrdinalIgnoreCase).Select(group =>
+            {
+                var rows = group.ToList();
+                return GroupRow(group.Key, group.Key, 0, string.Empty, rows, baselineBySystem.GetValueOrDefault(group.Key));
+            }).OrderBy(row => row.UsablePercent).ThenByDescending(row => row.TotalCalls).ToList(),
+            Talkgroups = talkgroupRows,
+            Samples = samples,
+            SamplePage = samplePage,
+            SamplePageSize = samplePageSize,
+            SampleTotal = sampleTotal
+        };
+    }
+
     private async Task<TrTroubleshootDto> BuildCoreAsync(long start, long end, bool bySystem, string baseline, CancellationToken ct)
     {
-        var summaryStart = DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeSeconds();
         var baselineStart = DateTimeOffset.UtcNow.AddDays(-BaselineDays(baseline)).ToUnixTimeSeconds();
         var log = await ReadJournalAsync(2000, ct);
         var rows = await _database.ListHealthSamplesAsync(Math.Min(start, baselineStart), end, ct);
         if (!rows.Any(r => IsDisplaySystemScope(r.Scope)))
             rows.AddRange(ParseJournalSamples(log));
-        var summaryRows = rows.Where(r => new DateTimeOffset(r.WindowEndUtc).ToUnixTimeSeconds() >= summaryStart).ToList();
         var selectedRows = rows.Where(r =>
         {
             var rowStart = new DateTimeOffset(r.WindowStartUtc).ToUnixTimeSeconds();
             var rowEnd = new DateTimeOffset(r.WindowEndUtc).ToUnixTimeSeconds();
             return rowStart >= start && rowEnd <= end;
         }).ToList();
+        var summaryRows = selectedRows;
 
         var calls = await _database.ListCallsAsync(start, end, null, ct);
         var observedFrequencies = await _database.ListObservedCallFrequenciesBySystemAsync(ct);
         var logOutput = TailLines(log, 300);
-        var health = BuildSummary(summaryRows, selectedRows, rows, calls, observedFrequencies, bySystem, baseline);
+        var health = BuildSummary(summaryRows, selectedRows, rows, calls, observedFrequencies, bySystem, baseline, start, end);
         var qualityAudit = BuildQualityAudit(calls);
         var diagnostics = BuildDiagnostics(rows, summaryRows, selectedRows, baseline, bySystem, logOutput);
         return new TrTroubleshootDto(
@@ -322,15 +451,17 @@ public sealed class TrHealthTroubleshootService
         List<EngineCall> selectedCalls,
         IReadOnlyDictionary<string, IReadOnlyList<long>> observedFrequencies,
         bool bySystem,
-        string baseline)
+        string baseline,
+        long start,
+        long end)
     {
         if (recentRows.Count == 0)
         {
             return new TrHealthSummaryDto
             {
                 Title = "TR health summary unavailable",
-                Window = "Window: last 24h",
-                Source = "No TR health rows are stored for the last 24 hours.",
+                Window = FormatHealthWindow(start, end),
+                Source = "No Trunk Recorder health rows are stored for this RF-health window.",
                 SummaryText = "No usable TR health rows are available yet.",
                 Samples = selectedRows.OrderByDescending(r => r.WindowStartUtc).Take(200).ToList()
             };
@@ -338,7 +469,8 @@ public sealed class TrHealthTroubleshootService
 
         var global = AggregateForGlobalDisplay(recentRows);
         var metrics = BuildMetricRows(global);
-        var systemRows = BuildSystemRows(recentRows);
+        var systemSummaries = BuildSystemSummaries(recentRows, baselineRows, start);
+        var systemRows = BuildSystemRows(systemSummaries);
         var remedies = BuildRemedies(global);
         var last = recentRows.Max(r => r.WindowEndUtc);
         var hasIssue = metrics.Any(m => m.IsIssue) || systemRows.Any(m => m.IsIssue);
@@ -346,16 +478,17 @@ public sealed class TrHealthTroubleshootService
         return new TrHealthSummaryDto
         {
             Title = hasIssue ? "TR health summary: issues detected" : "TR health summary: no obvious issues",
-            Window = "Window: last 24h (health summary uses last 24h only)",
+            Window = FormatHealthWindow(start, end),
             LastWindow = $"Last parsed bucket: {last.ToLocalTime():yyyy-MM-dd HH:mm:ss}",
             Source = $"Source: pizzad SQLite health samples from journald service '{_config.TrunkRecorder.LogServiceName}'",
             SummaryText = BuildSummaryText(global, systemRows, last),
             Metrics = metrics,
             Systems = systemRows.Count == 0 ? [new TrHealthMetricDto("No system rows", "-", "No system-scoped log lines were parsed for this window.", false)] : systemRows,
+            SystemSummaries = systemSummaries,
             SourceCoverage = BuildSourceCoverage(selectedCalls),
             SourcePlan = BuildSourcePlan(selectedCalls, observedFrequencies),
             Remedies = remedies,
-            Charts = BuildCharts(selectedRows, baselineRows, bySystem, baseline),
+            Charts = BuildCharts(selectedRows, baselineRows, bySystem, baseline, start, end),
             Samples = selectedRows.OrderByDescending(r => r.WindowStartUtc).Take(500).ToList()
         };
     }
@@ -364,7 +497,7 @@ public sealed class TrHealthTroubleshootService
     [
         new("CC summary decode rate", FormatCcSummaryDecodeRateWithConfidence(agg), "Periodic trunk-recorder Control Channel Decode Rates value. This is the normal msg/sec metric discussed by TR users.", HasSufficientCcSummarySamples(agg) && agg.CcSummaryAvgDecodeRate < 10.0),
         new("CC summary zero rate", $"{agg.CcSummaryDecodeZeroPercent:F2}%", "Percent of periodic Control Channel Decode Rates samples that were 0 msg/sec; lower is better.", HasSufficientCcSummarySamples(agg) && agg.CcSummaryDecodeZeroPercent >= 10.0),
-        new("CC message-rate samples", agg.LowDecodeWarningLines.ToString("N0", CultureInfo.InvariantCulture), "Count of per-frequency Control Channel Message Decode Rate samples. These are short-interval source samples, not warning log lines.", agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2)),
+        new("CC message-rate samples", agg.LowDecodeWarningLines.ToString("N0", CultureInfo.InvariantCulture), "Count of per-frequency Control Channel Message Decode Rate samples. These are short-interval source samples, not warning log lines.", false),
         new("Message-rate zero rate", $"{agg.LowDecodeWarningZeroPercent:F2}%", "Percent of per-frequency Control Channel Message Decode Rate samples reporting 0/sec.", agg.LowDecodeWarningLines >= 20 && agg.LowDecodeWarningZeroPercent >= 25.0),
         new("Control-channel retunes", agg.Retunes.ToString("N0", CultureInfo.InvariantCulture), "High counts can indicate weak/unstable control-channel reception or incorrect channel list.", agg.Retunes >= Math.Max(20, agg.Windows * 4)),
         new("Recorded calls concluded", agg.CallsConcluded.ToString("N0", CultureInfo.InvariantCulture), "Count of Concluding Recorded Call lines.", false),
@@ -380,7 +513,14 @@ public sealed class TrHealthTroubleshootService
         new("5-minute windows parsed", agg.Windows.ToString("N0", CultureInfo.InvariantCulture), "Number of summary buckets generated from logs.", false)
     ];
 
-    private static List<TrHealthMetricDto> BuildSystemRows(List<TrHealthSampleDto> rows)
+    private static List<TrHealthMetricDto> BuildSystemRows(IReadOnlyList<TrSystemHealthDto> summaries) =>
+        summaries.Select(summary => new TrHealthMetricDto(
+            summary.SystemShortName,
+            summary.Status,
+            summary.Summary,
+            summary.IsIssue)).ToList();
+
+    private static List<TrSystemHealthDto> BuildSystemSummaries(List<TrHealthSampleDto> rows, List<TrHealthSampleDto> allRows, long selectedStart)
     {
         return rows
             .Where(r => IsDisplaySystemScope(r.Scope))
@@ -388,20 +528,176 @@ public sealed class TrHealthTroubleshootService
             .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
             .Select(g =>
             {
-                var agg = Aggregate(g.ToList());
-                var issue = agg.DecodeZeroPercent >= 25.0
-                    || (HasSufficientCcSummarySamples(agg) && (agg.CcSummaryAvgDecodeRate < 10.0 || agg.CcSummaryDecodeZeroPercent >= 10.0))
-                    || agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2)
-                    || agg.SampleStops > 0
-                    || agg.UnableSource > 0
-                    || agg.NoTxRecorded > 0
-                    || agg.RecorderExhausted > 0
-                    || (agg.CallsConcluded >= 100 && HasSufficientDecodeSamples(agg) && agg.AvgDecodeRate <= 0.10)
-                    || (agg.CallsConcluded >= 100 && agg.DecodeSampleLines < 20);
-                var notes = $"ccSummary={FormatCcSummaryDecodeRateWithConfidence(agg)} ({agg.CcSummaryDecodeSampleLines:N0} samples, zero={agg.CcSummaryDecodeZeroPercent:F2}%), lowWarnings={agg.LowDecodeWarningLines:N0} (zero={agg.LowDecodeWarningZeroPercent:F2}%), retunes={agg.Retunes:N0}, calls={agg.CallsConcluded:N0}, noTx={agg.NoTxRecorded:N0}, recorderExhausted={agg.RecorderExhausted:N0}";
-                return new TrHealthMetricDto(g.Key, issue ? "Issues detected" : "No obvious issues", notes, issue);
+                var currentRows = g.ToList();
+                var agg = Aggregate(currentRows);
+                var historyRows = allRows.Where(row =>
+                    string.Equals(row.Scope, g.Key, StringComparison.OrdinalIgnoreCase)
+                    && new DateTimeOffset(row.WindowEndUtc).ToUnixTimeSeconds() < selectedStart).ToList();
+                var baselineAvailable = HasLocalBaseline(historyRows);
+                var history = baselineAvailable ? Aggregate(historyRows) : null;
+                var sufficient = HasSufficientCcSummarySamples(agg);
+                var noTxPercent = agg.CallsConcluded > 0 ? agg.NoTxRecorded * 100.0 / agg.CallsConcluded : 0;
+                var unavailable = sufficient && (agg.CcSummaryDecodeZeroPercent >= 90.0 || agg.CcSummaryAvgDecodeRate < 1.0);
+                var baselineNoTxPercent = history is { CallsConcluded: > 0 } ? history.NoTxRecorded * 100.0 / history.CallsConcluded : (double?)null;
+                var callsPerHour = EventsPerHour(currentRows, row => row.CallsConcluded);
+                var retunesPerHour = EventsPerHour(currentRows, row => row.Retunes);
+                var baselineCallsPerHour = baselineAvailable ? EventsPerHour(historyRows, row => row.CallsConcluded) : (double?)null;
+                var baselineRetunesPerHour = baselineAvailable ? EventsPerHour(historyRows, row => row.Retunes) : (double?)null;
+                var decodeAssessment = AssessDecode(agg, history?.CcSummaryAvgDecodeRate);
+                var zeroAssessment = AssessZeroDecode(agg, history?.CcSummaryDecodeZeroPercent);
+                var callsAssessment = AssessCalls(callsPerHour, baselineCallsPerHour, unavailable);
+                var noAudioAssessment = AssessNoAudio(agg.CallsConcluded, noTxPercent, baselineNoTxPercent);
+                var retunesAssessment = AssessRetunes(retunesPerHour, baselineRetunesPerHour, unavailable);
+                var tones = new[] { decodeAssessment.Tone, zeroAssessment.Tone, callsAssessment.Tone, noAudioAssessment.Tone, retunesAssessment.Tone };
+                var degraded = tones.Contains("warning", StringComparer.Ordinal);
+                var critical = tones.Contains("error", StringComparer.Ordinal);
+                var status = !sufficient ? "Insufficient data" : unavailable ? "Unavailable" : critical ? "Critical" : degraded ? "Needs review" : "Healthy";
+                var summary = unavailable
+                    ? $"Control-channel decode was zero in {agg.CcSummaryDecodeZeroPercent:F1}% of {agg.CcSummaryDecodeSampleLines:N0} summary samples."
+                    : sufficient
+                        ? $"Control-channel decode averaged {agg.CcSummaryAvgDecodeRate:F1} msg/s with {agg.CcSummaryDecodeZeroPercent:F1}% zero samples; {noTxPercent:F1}% of concluded calls had no audio."
+                        : $"Only {agg.CcSummaryDecodeSampleLines:N0} control-channel summary sample(s) are available.";
+                return new TrSystemHealthDto(
+                    g.Key,
+                    status,
+                    summary,
+                    agg.Windows,
+                    agg.CcSummaryDecodeSampleLines,
+                    agg.CcSummaryAvgDecodeRate,
+                    agg.CcSummaryDecodeZeroPercent,
+                    agg.Retunes,
+                    agg.CallsConcluded,
+                    agg.NoTxRecorded,
+                    agg.RecorderExhausted,
+                    agg.SampleStops,
+                    agg.UnableSource,
+                    callsPerHour,
+                    retunesPerHour,
+                    decodeAssessment,
+                    zeroAssessment,
+                    callsAssessment,
+                    noAudioAssessment,
+                    retunesAssessment,
+                    g.Max(row => row.WindowEndUtc),
+                    unavailable || critical || degraded);
             })
             .ToList();
+    }
+
+    private static bool HasLocalBaseline(List<TrHealthSampleDto> rows)
+    {
+        if (rows.Count < 72)
+            return false;
+        return rows.Max(row => row.WindowEndUtc) - rows.Min(row => row.WindowStartUtc) >= TimeSpan.FromHours(12);
+    }
+
+    private static double EventsPerHour(List<TrHealthSampleDto> rows, Func<TrHealthSampleDto, int> selector)
+    {
+        var observedHours = rows.Sum(row => Math.Max(1.0, (row.WindowEndUtc - row.WindowStartUtc).TotalSeconds)) / 3600.0;
+        return observedHours <= 0 ? 0 : rows.Sum(selector) / observedHours;
+    }
+
+    private static TrMetricAssessmentDto AssessDecode(TrHealthAggregate current, double? baseline)
+    {
+        if (!HasSufficientCcSummarySamples(current))
+            return new("warning", "insufficient", baseline, "Not enough control-channel samples to classify.");
+        if (current.CcSummaryDecodeZeroPercent >= 90.0 || current.CcSummaryAvgDecodeRate < 1.0)
+            return new("error", "critical", baseline, "Control-channel decoding is effectively unavailable.");
+        if (baseline.HasValue)
+        {
+            var floor = Math.Max(10.0, baseline.Value * 0.75);
+            return current.CcSummaryAvgDecodeRate < floor
+                ? new("warning", "local", baseline, $"Below the local {baseline.Value:F1} msg/s baseline; 40 msg/s remains the strong-system reference.")
+                : new("ok", "local", baseline, $"Within the local {baseline.Value:F1} msg/s baseline; 40 msg/s is the strong-system reference.");
+        }
+        return current.CcSummaryAvgDecodeRate >= 35.0
+            ? new("ok", "static", null, "Near the 40 msg/s strong-system reference; no local baseline is mature yet.")
+            : current.CcSummaryAvgDecodeRate >= 10.0
+                ? new("warning", "static", null, "Below the 40 msg/s strong-system reference; local baseline is not mature yet.")
+                : new("error", "critical", null, "Far below the strong-system reference and approaching decode loss.");
+    }
+
+    private static TrMetricAssessmentDto AssessZeroDecode(TrHealthAggregate current, double? baseline)
+    {
+        if (!HasSufficientCcSummarySamples(current))
+            return new("warning", "insufficient", baseline, "Not enough control-channel samples to classify.");
+        if (current.CcSummaryDecodeZeroPercent >= 50.0)
+            return new("error", "critical", baseline, "At least half of control-channel samples decoded nothing.");
+        if (baseline.HasValue)
+        {
+            var ceiling = Math.Max(baseline.Value + 5.0, baseline.Value * 2.0);
+            return current.CcSummaryDecodeZeroPercent > ceiling
+                ? new("warning", "local", baseline, $"Above the local {baseline.Value:F1}% zero-decode baseline.")
+                : new("ok", "local", baseline, $"Within the local {baseline.Value:F1}% zero-decode baseline.");
+        }
+        return current.CcSummaryDecodeZeroPercent < 10.0
+            ? new("ok", "static", null, "Below the static 10% review threshold; no local baseline is mature yet.")
+            : new("warning", "static", null, "Above the static 10% review threshold; local baseline is not mature yet.");
+    }
+
+    private static TrMetricAssessmentDto AssessCalls(double currentPerHour, double? baselinePerHour, bool unavailable)
+    {
+        if (unavailable && currentPerHour <= 0)
+            return new("error", "critical", baselinePerHour, "No calls were observed while control-channel decoding was unavailable.");
+        if (baselinePerHour.HasValue && baselinePerHour.Value >= 1.0)
+        {
+            var ratio = currentPerHour / baselinePerHour.Value;
+            return ratio < 0.1
+                ? new("error", "local", baselinePerHour, $"Call activity is under 10% of the local {baselinePerHour.Value:F1}/hour baseline.")
+                : ratio < 0.5
+                    ? new("warning", "local", baselinePerHour, $"Call activity is below half of the local {baselinePerHour.Value:F1}/hour baseline.")
+                    : new("ok", "local", baselinePerHour, $"Call activity is consistent with the local {baselinePerHour.Value:F1}/hour baseline.");
+        }
+        return currentPerHour > 0
+            ? new("ok", "observed", null, "Calls were observed; no mature local activity baseline is available.")
+            : new("warning", "undetermined", null, "No calls were observed, but no local activity baseline is available for comparison.");
+    }
+
+    private static TrMetricAssessmentDto AssessNoAudio(int calls, double percent, double? baselinePercent)
+    {
+        if (calls == 0)
+            return new("warning", "undetermined", baselinePercent, "No concluded calls are available for audio-outcome classification.");
+        if (percent >= 25.0 || (baselinePercent.HasValue && percent >= Math.Max(25.0, baselinePercent.Value * 3.0)))
+            return new("error", "critical", baselinePercent, "At least one quarter of concluded calls had no recorded audio.");
+        if (baselinePercent.HasValue)
+        {
+            var ceiling = Math.Max(baselinePercent.Value + 2.5, baselinePercent.Value * 1.5);
+            return percent > ceiling
+                ? new("warning", "local", baselinePercent, $"Above the local {baselinePercent.Value:F1}% no-audio baseline.")
+                : new("ok", "local", baselinePercent, $"Within the local {baselinePercent.Value:F1}% no-audio baseline.");
+        }
+        return percent <= 7.5
+            ? new("ok", "static", null, "Within the temporary 7.5% fallback threshold; no local baseline is mature yet.")
+            : new("warning", "static", null, "Above the temporary 7.5% fallback threshold; local baseline is not mature yet.");
+    }
+
+    private static TrMetricAssessmentDto AssessRetunes(double currentPerHour, double? baselinePerHour, bool unavailable)
+    {
+        if (unavailable && currentPerHour <= 0)
+            return new("warning", "undetermined", baselinePerHour, "Retune behavior cannot be evaluated while control-channel decoding is unavailable.");
+        if (baselinePerHour.HasValue)
+        {
+            if (currentPerHour >= Math.Max(96.0, baselinePerHour.Value * 4.0))
+                return new("error", "critical", baselinePerHour, "Retunes are at least four times the local rate and critically elevated.");
+            var ceiling = Math.Max(baselinePerHour.Value + 6.0, baselinePerHour.Value * 1.75);
+            return currentPerHour > ceiling
+                ? new("warning", "local", baselinePerHour, $"Above the local {baselinePerHour.Value:F1}/hour retune baseline.")
+                : new("ok", "local", baselinePerHour, $"Within the local {baselinePerHour.Value:F1}/hour retune baseline.");
+        }
+        return currentPerHour <= 48.0
+            ? new("ok", "static", null, "Below the temporary 48/hour fallback threshold; no local baseline is mature yet.")
+            : currentPerHour < 96.0
+                ? new("warning", "static", null, "Above the temporary 48/hour fallback threshold; local baseline is not mature yet.")
+                : new("error", "critical", null, "Retunes exceed the critical 96/hour fallback threshold.");
+    }
+
+    private static string FormatHealthWindow(long start, long end)
+    {
+        var duration = TimeSpan.FromSeconds(Math.Max(1, end - start));
+        var durationText = duration.TotalHours >= 24 && Math.Abs(duration.TotalHours % 24) < 0.05
+            ? $"{duration.TotalDays:F0} day{(Math.Round(duration.TotalDays) == 1 ? string.Empty : "s")}"
+            : $"{duration.TotalHours:F0} hour{(Math.Round(duration.TotalHours) == 1 ? string.Empty : "s")}";
+        return $"RF-health window: {durationText}, ending {DateTimeOffset.FromUnixTimeSeconds(end).LocalDateTime:g}";
     }
 
     private static List<TrHealthMetricDto> BuildRemedies(TrHealthAggregate agg)
@@ -413,7 +709,7 @@ public sealed class TrHealthTroubleshootService
             rows.Add(new("Low CC summary decode rate", "-", "The periodic Control Channel Decode Rates average is low. Verify antenna/feedline, gain/PPM calibration, local RF noise, and whether this host can reliably hear the active control channel.", true));
         if (HasSufficientCcSummarySamples(agg) && agg.CcSummaryDecodeZeroPercent >= 10.0)
             rows.Add(new("CC summary decode hits zero", "-", "The normal control-channel summary occasionally reaches 0 msg/sec, which indicates real control-channel decode loss.", true));
-        if (agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2))
+        if (agg.LowDecodeWarningLines >= 20 && agg.LowDecodeWarningZeroPercent >= 25.0)
             rows.Add(new("Frequent zero message-rate samples", "-", "TR is repeatedly logging per-frequency Control Channel Message Decode Rate samples near or at zero. Compare these with retune targets to identify weak learned alternates or RF dips.", true));
         if (agg.Retunes >= Math.Max(20, agg.Windows * 4))
             rows.Add(new("High retunes", "-", "Confirm configured control channels and site coverage; frequent retunes often mean weak/unstable control-channel decode.", true));
@@ -432,7 +728,7 @@ public sealed class TrHealthTroubleshootService
     [
         new("CC summary decode rate", FormatCcSummaryDecodeRateWithConfidence(agg), "Periodic Control Channel Decode Rates msg/sec. This is the primary RF-health decode metric.", HasSufficientCcSummarySamples(agg) && agg.CcSummaryAvgDecodeRate < 10.0),
         new("CC summary zero rate", $"{agg.CcSummaryDecodeZeroPercent:F2}%", $"{agg.CcSummaryDecodeZero:N0} zero sample(s) across {agg.CcSummaryDecodeSampleLines:N0} CC summary sample(s).", HasSufficientCcSummarySamples(agg) && agg.CcSummaryDecodeZeroPercent >= 10.0),
-        new("CC message-rate samples", agg.LowDecodeWarningLines.ToString("N0", CultureInfo.InvariantCulture), "Per-frequency Control Channel Message Decode Rate samples. These are retune/instability symptoms when the rate is repeatedly low or zero.", agg.LowDecodeWarningLines >= Math.Max(20, agg.Windows * 2)),
+        new("CC message-rate samples", agg.LowDecodeWarningLines.ToString("N0", CultureInfo.InvariantCulture), "Per-frequency Control Channel Message Decode Rate samples. These are evidence volume, not an issue by themselves; the zero-rate row owns the condition.", false),
         new("Message-rate zero rate", $"{agg.LowDecodeWarningZeroPercent:F2}%", $"{agg.LowDecodeWarningZero:N0} zero sample(s) across {agg.LowDecodeWarningLines:N0} per-frequency message-rate sample(s).", agg.LowDecodeWarningLines >= 20 && agg.LowDecodeWarningZeroPercent >= 25.0),
         new("Retunes", agg.Retunes.ToString("N0", CultureInfo.InvariantCulture), "Control-channel retune events in the selected window.", agg.Retunes >= Math.Max(20, agg.Windows * 4)),
         new("No transmissions", agg.NoTxRecorded.ToString("N0", CultureInfo.InvariantCulture), agg.CallsConcluded > 0 ? $"{agg.NoTxRecorded * 100.0 / agg.CallsConcluded:F2}% of concluded calls." : "No concluded calls in window.", agg.NoTxRecorded > 0),
@@ -762,7 +1058,7 @@ public sealed class TrHealthTroubleshootService
 
     private static double HzToMhz(double hz) => Math.Round(hz / 1_000_000.0, 6);
 
-    private static IReadOnlyList<TrHealthChartDto> BuildCharts(List<TrHealthSampleDto> selectedRows, List<TrHealthSampleDto> baselineRows, bool bySystem, string baseline)
+    private static IReadOnlyList<TrHealthChartDto> BuildCharts(List<TrHealthSampleDto> selectedRows, List<TrHealthSampleDto> baselineRows, bool bySystem, string baseline, long start, long end)
     {
         var rows = selectedRows.Count > 0 ? selectedRows : baselineRows.Where(r => new DateTimeOffset(r.WindowEndUtc).ToUnixTimeSeconds() >= DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeSeconds()).ToList();
         var labels = BuildHourLabels(rows);
@@ -770,7 +1066,7 @@ public sealed class TrHealthTroubleshootService
             return [];
 
         return bySystem
-            ? BuildSystemCharts(rows, baselineRows, labels, baseline)
+            ? BuildSystemCharts(rows, baselineRows, baseline, start, end)
             : BuildGlobalCharts(rows, baselineRows, labels, baseline);
     }
 
@@ -793,30 +1089,127 @@ public sealed class TrHealthTroubleshootService
         ];
     }
 
-    private static IReadOnlyList<TrHealthChartDto> BuildSystemCharts(List<TrHealthSampleDto> rows, List<TrHealthSampleDto> baselineRows, List<DateTime> hours, string baseline)
+    private static IReadOnlyList<TrHealthChartDto> BuildSystemCharts(List<TrHealthSampleDto> rows, List<TrHealthSampleDto> baselineRows, string baseline, long start, long end)
     {
         var scopes = rows.Where(r => IsDisplaySystemScope(r.Scope))
-            .GroupBy(r => r.Scope, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(g => g.Sum(r => r.DecodeZero + r.Retunes + r.NoTxRecorded + r.RecorderExhausted + r.SampleStops))
-            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(3)
-            .Select(g => g.Key)
+            .Select(r => r.Scope)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (scopes.Count == 0)
             return [];
 
-        List<(string Label, IReadOnlyList<double> Values)> Series(Func<TrHealthAggregate, double> selector) =>
-            scopes.Select(scope => (scope, (IReadOnlyList<double>)Hourly(rows.Where(r => string.Equals(r.Scope, scope, StringComparison.OrdinalIgnoreCase)).ToList(), hours, selector))).ToList();
-
+        var latestEvidence = rows.Max(row => new DateTimeOffset(row.WindowEndUtc).ToUnixTimeSeconds());
+        var earliestEvidence = rows.Min(row => new DateTimeOffset(row.WindowStartUtc).ToUnixTimeSeconds());
+        var buckets = BuildChartBuckets(Math.Max(start, earliestEvidence), Math.Min(end, latestEvidence));
+        var baselineInfo = BaselineInfo(
+            baselineRows.Where(r => scopes.Contains(r.Scope, StringComparer.OrdinalIgnoreCase)).ToList(),
+            baseline,
+            DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime);
         return
         [
-            BuildChart("CC Summary Decode Rate by System", "Y axis: periodic Control Channel Decode Rates msg/sec", "F1", hours, Series(a => a.CcSummaryAvgDecodeRate), baselineRows, baseline, a => a.CcSummaryAvgDecodeRate, scopes, BaselineIsRate: true),
-            BuildChart("CC Message-Rate Samples by System", "Y axis: per-frequency Control Channel Message Decode Rate samples per hour", "N0", hours, Series(a => a.LowDecodeWarningLines), baselineRows, baseline, a => a.LowDecodeWarningLines, scopes),
-            BuildChart("Retunes by System", "Y axis: retune events per hour", "N0", hours, Series(a => a.Retunes), baselineRows, baseline, a => a.Retunes, scopes),
-            BuildChart("No Transmissions by System", "Y axis: calls with no recorded transmissions per hour", "N0", hours, Series(a => a.NoTxRecorded), baselineRows, baseline, a => a.NoTxRecorded, scopes),
-            BuildChart("Recorder Capacity Exhausted by System", "Y axis: calls dropped because no recorder was available per hour", "N0", hours, Series(a => a.RecorderExhausted), baselineRows, baseline, a => a.RecorderExhausted, scopes),
-            BuildChart("Sample Source Stops by System", "Y axis: source stopped receiving samples events per hour", "N0", hours, Series(a => a.SampleStops), baselineRows, baseline, a => a.SampleStops, scopes)
+            BuildScopedChart("Decode Rate", "Messages per second", "F1", scopes, rows, baselineRows, buckets, baselineInfo.Note, a => a.CcSummaryAvgDecodeRate),
+            BuildScopedChart("Zero-Decode Samples", "Percent of control-channel samples", "F1", scopes, rows, baselineRows, buckets, baselineInfo.Note, a => a.CcSummaryDecodeZeroPercent),
+            BuildScopedChart("Calls Recorded", "Calls per hour", "N0", scopes, rows, baselineRows, buckets, baselineInfo.Note, a => a.CallsConcluded, ratePerHour: true),
+            BuildScopedChart("Calls Without Audio", "Percent of concluded calls", "F1", scopes, rows, baselineRows, buckets, baselineInfo.Note, a => a.CallsConcluded == 0 ? 0 : a.NoTxRecorded * 100.0 / a.CallsConcluded),
+            BuildScopedChart("Control-Channel Retunes", "Retunes per hour", "F1", scopes, rows, baselineRows, buckets, baselineInfo.Note, a => a.Retunes, ratePerHour: true),
+            BuildScopedEventChart(scopes, rows, buckets)
         ];
+    }
+
+    private static TrHealthChartDto BuildScopedChart(
+        string title,
+        string yAxis,
+        string format,
+        IReadOnlyList<string> scopes,
+        List<TrHealthSampleDto> rows,
+        List<TrHealthSampleDto> baselineRows,
+        IReadOnlyList<TrChartBucket> buckets,
+        string baselineNote,
+        Func<TrHealthAggregate, double> selector,
+        bool ratePerHour = false)
+    {
+        var series = new List<TrHealthSeriesDto>();
+        foreach (var scope in scopes)
+        {
+            var scopedRows = rows.Where(row => string.Equals(row.Scope, scope, StringComparison.OrdinalIgnoreCase)).ToList();
+            var scopedBaseline = baselineRows.Where(row => string.Equals(row.Scope, scope, StringComparison.OrdinalIgnoreCase)).ToList();
+            series.Add(new TrHealthSeriesDto("Current", BucketValues(scopedRows, buckets, selector, ratePerHour), false, scope));
+            var baselineValues = BaselineBucketValues(scopedBaseline, buckets, selector, ratePerHour);
+            if (baselineValues.Any(value => value > 0))
+                series.Add(new TrHealthSeriesDto("Local baseline", baselineValues, true, scope));
+        }
+        return new TrHealthChartDto(title, yAxis, format, buckets.Select(bucket => bucket.StartUtc.ToString("O", CultureInfo.InvariantCulture)).ToList(), series, baselineNote);
+    }
+
+    private static TrHealthChartDto BuildScopedEventChart(IReadOnlyList<string> scopes, List<TrHealthSampleDto> rows, IReadOnlyList<TrChartBucket> buckets)
+    {
+        var series = new List<TrHealthSeriesDto>();
+        foreach (var scope in scopes)
+        {
+            var scopedRows = rows.Where(row => string.Equals(row.Scope, scope, StringComparison.OrdinalIgnoreCase)).ToList();
+            series.Add(new TrHealthSeriesDto("Recorder capacity", BucketValues(scopedRows, buckets, a => a.RecorderExhausted, ratePerHour: true), false, scope));
+            series.Add(new TrHealthSeriesDto("Source stops", BucketValues(scopedRows, buckets, a => a.SampleStops, ratePerHour: true), false, scope));
+        }
+        return new TrHealthChartDto("Capture Interruptions", "Events per hour", "F1", buckets.Select(bucket => bucket.StartUtc.ToString("O", CultureInfo.InvariantCulture)).ToList(), series, string.Empty);
+    }
+
+    private static IReadOnlyList<TrChartBucket> BuildChartBuckets(long start, long end)
+    {
+        var duration = Math.Max(1, end - start);
+        var bucketSeconds = duration <= 2 * 3600 ? 15 * 60
+            : duration <= 6 * 3600 ? 30 * 60
+            : duration <= 24 * 3600 ? 60 * 60
+            : 3 * 60 * 60;
+        var first = start - start % bucketSeconds;
+        var buckets = new List<TrChartBucket>();
+        for (var cursor = first; cursor < end; cursor += bucketSeconds)
+        {
+            var bucketStart = Math.Max(start, cursor);
+            var bucketEnd = Math.Min(end, cursor + bucketSeconds);
+            if (bucketEnd > bucketStart)
+                buckets.Add(new TrChartBucket(DateTimeOffset.FromUnixTimeSeconds(bucketStart).UtcDateTime, DateTimeOffset.FromUnixTimeSeconds(bucketEnd).UtcDateTime, bucketSeconds));
+        }
+        return buckets;
+    }
+
+    private static IReadOnlyList<double> BucketValues(List<TrHealthSampleDto> rows, IReadOnlyList<TrChartBucket> buckets, Func<TrHealthAggregate, double> selector, bool ratePerHour)
+    {
+        return buckets.Select(bucket =>
+        {
+            var matching = rows.Where(row => row.WindowEndUtc.ToUniversalTime() > bucket.StartUtc && row.WindowEndUtc.ToUniversalTime() <= bucket.EndUtc).ToList();
+            if (matching.Count == 0)
+                return 0.0;
+            var value = selector(Aggregate(matching));
+            return ratePerHour ? value / Math.Max(1.0 / 60.0, (bucket.EndUtc - bucket.StartUtc).TotalHours) : value;
+        }).ToList();
+    }
+
+    private static IReadOnlyList<double> BaselineBucketValues(List<TrHealthSampleDto> rows, IReadOnlyList<TrChartBucket> buckets, Func<TrHealthAggregate, double> selector, bool ratePerHour)
+    {
+        if (buckets.Count == 0)
+            return [];
+        var selectedStart = buckets.Min(bucket => bucket.StartUtc);
+        var history = rows.Where(row => row.WindowEndUtc.ToUniversalTime() < selectedStart).ToList();
+        return buckets.Select(bucket =>
+        {
+            var bucketLocal = bucket.StartUtc.ToLocalTime();
+            var slot = (bucketLocal.Hour * 3600 + bucketLocal.Minute * 60) / bucket.NominalSeconds;
+            var matchingDays = history
+                .Where(row =>
+                {
+                    var local = row.WindowStartUtc.ToLocalTime();
+                    return (local.Hour * 3600 + local.Minute * 60) / bucket.NominalSeconds == slot;
+                })
+                .GroupBy(row => row.WindowEndUtc.ToLocalTime().Date)
+                .Select(group =>
+                {
+                    var value = selector(Aggregate(group.ToList()));
+                    return ratePerHour ? value / Math.Max(1.0 / 60.0, bucket.NominalSeconds / 3600.0) : value;
+                })
+                .ToList();
+            return matchingDays.Count == 0 ? 0.0 : matchingDays.Average();
+        }).ToList();
     }
 
     private static TrHealthChartDto BuildChart(
@@ -855,7 +1248,6 @@ public sealed class TrHealthTroubleshootService
             .Select(d => new DateTime(d.Year, d.Month, d.Day, d.Hour, 0, 0))
             .Distinct()
             .OrderBy(d => d)
-            .TakeLast(24)
             .ToList();
 
     private static List<double> Hourly(List<TrHealthSampleDto> rows, List<DateTime> hours, Func<TrHealthAggregate, double> selector)
@@ -916,10 +1308,11 @@ public sealed class TrHealthTroubleshootService
         }).ToList();
     }
 
-    private static (bool ShouldShow, string Note) BaselineInfo(List<TrHealthSampleDto> rows, string baseline)
+    private static (bool ShouldShow, string Note) BaselineInfo(List<TrHealthSampleDto> rows, string baseline, DateTime? beforeUtc = null)
     {
-        var cutoff = DateTime.UtcNow.AddDays(-BaselineDays(baseline));
-        var baselineRows = rows.Where(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < DateTime.UtcNow.AddHours(-24)).ToList();
+        var baselineEnd = beforeUtc ?? DateTime.UtcNow.AddHours(-24);
+        var cutoff = baselineEnd.AddDays(-BaselineDays(baseline));
+        var baselineRows = rows.Where(r => r.WindowEndUtc >= cutoff && r.WindowEndUtc < baselineEnd).ToList();
         var requestedDays = BaselineDays(baseline);
         if (baselineRows.Count == 0)
             return (false, $"Baseline hidden: no stored history older than 24h for the selected {baseline} window.");
@@ -1381,6 +1774,8 @@ public sealed class TrHealthTroubleshootService
         public double LowDecodeWarningZeroPercent => LowDecodeWarningLines == 0 ? 0 : LowDecodeWarningZero * 100.0 / LowDecodeWarningLines;
         public double LowDecodeWarningAvgRate => LowDecodeWarningLines == 0 ? 0 : LowDecodeWarningRateTotal / LowDecodeWarningLines;
     }
+
+    private sealed record TrChartBucket(DateTime StartUtc, DateTime EndUtc, int NominalSeconds);
 
     private sealed record TrSourceWindow(
         int Index,

@@ -11,6 +11,7 @@ public sealed class BackupJobService : IHostedService
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<BackupJobService> _logger;
     private readonly ConcurrentDictionary<long, CancellationTokenSource> _active = new();
+    private readonly SemaphoreSlim _startGate = new(1, 1);
 
     public BackupJobService(
         BackupRestoreService backups,
@@ -44,30 +45,38 @@ public sealed class BackupJobService : IHostedService
 
     public async Task<JobDto> StartAsync(BackupCreateRequestDto? request, CancellationToken ct)
     {
-        await _database.CancelStaleActiveJobsAsync(
-            JobType,
-            StaleBackupJobAge,
-            "Backup job was abandoned by a service restart or shutdown.",
-            ct);
-
-        if (await _database.HasActiveJobAsync(JobType, ct))
-            throw new InvalidOperationException("A backup job is already running. Stop it or wait for it to finish before starting another backup.");
-
-        var jobId = await _database.AddJobAsync(new JobDto
+        await _startGate.WaitAsync(ct);
+        try
         {
-            Type = JobType,
-            Status = "queued",
-            Total = 1,
-            Completed = 0,
-            Failed = 0,
-            Message = "Backup job queued.",
-            CreatedAtUtc = DateTime.UtcNow
-        }, ct);
+            await _database.CancelStaleActiveJobsAsync(
+                JobType,
+                StaleBackupJobAge,
+                "Backup job was abandoned by a service restart or shutdown.",
+                ct);
 
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.ApplicationStopping);
-        _active[jobId] = cts;
-        _ = Task.Run(() => RunAsync(jobId, request, cts.Token), CancellationToken.None);
-        return await _database.GetJobAsync(jobId, ct) ?? new JobDto { Id = jobId, Type = JobType, Status = "queued", Total = 1, Message = "Backup job queued.", CreatedAtUtc = DateTime.UtcNow };
+            if (await _database.HasActiveJobAsync(JobType, ct))
+                throw new InvalidOperationException("A backup job is already running. Stop it or wait for it to finish before starting another backup.");
+
+            var jobId = await _database.AddJobAsync(new JobDto
+            {
+                Type = JobType,
+                Status = "queued",
+                Total = 1,
+                Completed = 0,
+                Failed = 0,
+                Message = "Backup job queued.",
+                CreatedAtUtc = DateTime.UtcNow
+            }, ct);
+
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.ApplicationStopping);
+            _active[jobId] = cts;
+            _ = Task.Run(() => RunAsync(jobId, request, cts.Token), CancellationToken.None);
+            return await _database.GetJobAsync(jobId, ct) ?? new JobDto { Id = jobId, Type = JobType, Status = "queued", Total = 1, Message = "Backup job queued.", CreatedAtUtc = DateTime.UtcNow };
+        }
+        finally
+        {
+            _startGate.Release();
+        }
     }
 
     public async Task<JobDto?> CancelAsync(long jobId, CancellationToken ct)

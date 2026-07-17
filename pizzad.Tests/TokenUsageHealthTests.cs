@@ -68,6 +68,37 @@ public sealed class TokenUsageHealthTests
         Assert.Contains("recovered", health.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task TokenUsage_UsesCompleteWindowWhilePagingLedgerRows()
+    {
+        using var temp = new TempStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var now = DateTime.UtcNow;
+        for (var index = 0; index < 35; index++)
+        {
+            await database.AddLmUsageAsync(
+                Usage(index % 7 != 0, index % 7 == 0 ? "failed" : string.Empty, 100, 25, 125, now.AddMinutes(-index)),
+                CancellationToken.None);
+        }
+
+        var report = await database.GetTokenUsageAsync(
+            new DateTimeOffset(now.AddHours(-2)).ToUnixTimeSeconds(),
+            new DateTimeOffset(now.AddMinutes(1)).ToUnixTimeSeconds(),
+            CancellationToken.None,
+            page: 2,
+            pageSize: 10);
+
+        Assert.Equal(35, report.Summary.Requests);
+        Assert.Equal(35, report.EntryTotal);
+        Assert.Equal(2, report.EntryPage);
+        Assert.Equal(10, report.Entries.Count);
+        Assert.Equal(35, report.ByTime.Sum(row => row.Requests));
+        Assert.Equal(5, report.RecentFailures.Count);
+        Assert.Equal(2.00, report.OpenAiReferenceInputCostPerMillion);
+        Assert.Equal(8.00, report.OpenAiReferenceOutputCostPerMillion);
+    }
+
     private static TokenUsageEntryDto Usage(
         bool success,
         string error,
