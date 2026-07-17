@@ -50,10 +50,10 @@ public sealed class IncidentEventStateShadowContractTests
             [
                 Bundle().Observations[0] with
                 {
-                    Metadata = new Dictionary<string, string>
+                    Metadata = new Dictionary<string, IncidentEventStateMetadataObservation>
                     {
-                        ["source-provided-field"] = "unfamiliar value",
-                        ["another-field"] = "not mapped by application policy"
+                        ["source-provided-field"] = new("unfamiliar value", IncidentEventStateMetadataOrigin.SourceRecord),
+                        ["another-field"] = new("not mapped by application policy", IncidentEventStateMetadataOrigin.SourceRecord)
                     }
                 }
             ]
@@ -122,10 +122,10 @@ public sealed class IncidentEventStateShadowContractTests
                             "source-engine-1",
                             DateTimeOffset.Parse("2026-07-17T11:59:00Z"))
                     ],
-                    new Dictionary<string, string>
+                    new Dictionary<string, IncidentEventStateMetadataObservation>
                     {
-                        ["radio-system"] = "source-system",
-                        ["source-group"] = "source-provided-name"
+                        ["radio-system"] = new("source-system", IncidentEventStateMetadataOrigin.SourceRecord),
+                        ["source-group"] = new("source-provided-name", IncidentEventStateMetadataOrigin.SourceRecord)
                     })
             ],
             []);

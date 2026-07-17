@@ -65,6 +65,27 @@ public sealed class IncidentEventStateShadowPersistenceTests
     }
 
     [Fact]
+    public async Task ProjectionRejectsObservationOrProvenanceOutsideSourceLedger()
+    {
+        await using var temp = await TestDatabase.CreateAsync();
+        await temp.Database.AppendIncidentEventStateShadowLedgerEntryAsync(
+            LedgerEntry("ledger-1"),
+            CancellationToken.None);
+        var projection = Projection("projection-1", "ledger-1");
+        var invalidEvent = projection.Events[0] with
+        {
+            ObservationIds = ["observation-missing"]
+        };
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            temp.Database.AppendIncidentEventStateShadowProjectionAsync(
+                projection with { Events = [invalidEvent] },
+                CancellationToken.None));
+
+        Assert.Contains("unknown observation", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DatabaseTriggersRejectLedgerAndProjectionMutation()
     {
         await using var temp = await TestDatabase.CreateAsync();
@@ -125,6 +146,7 @@ public sealed class IncidentEventStateShadowPersistenceTests
             Bundle(),
             Proposal(supersessionIds),
             Critique(),
+            new IncidentEventStateExecutionContext("test-version", "test-configuration", 100, 200),
             supersessionIds);
     }
 
@@ -146,9 +168,9 @@ public sealed class IncidentEventStateShadowPersistenceTests
                             "source-engine",
                             DateTimeOffset.Parse("2026-07-17T14:59:00Z"))
                     ],
-                    new Dictionary<string, string>
+                    new Dictionary<string, IncidentEventStateMetadataObservation>
                     {
-                        ["source-field"] = "source value"
+                        ["source-field"] = new("source value", IncidentEventStateMetadataOrigin.SourceRecord)
                     })
             ],
             []);

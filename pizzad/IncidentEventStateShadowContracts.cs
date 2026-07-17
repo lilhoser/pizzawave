@@ -13,13 +13,30 @@ public sealed record IncidentEventStateSourceObservation(
     string AudioReference,
     long? AudioDurationMilliseconds,
     IReadOnlyList<IncidentEventStateTranscriptObservation> Transcripts,
-    IReadOnlyDictionary<string, string> Metadata);
+    IReadOnlyDictionary<string, IncidentEventStateMetadataObservation> Metadata);
+
+public enum IncidentEventStateMetadataOrigin
+{
+    SourceRecord,
+    ApplicationDerived,
+    RawPayload
+}
+
+public sealed record IncidentEventStateMetadataObservation(
+    string Value,
+    IncidentEventStateMetadataOrigin Origin);
 
 public sealed record IncidentEventStateTranscriptObservation(
     string TranscriptId,
     string Text,
     string Producer,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset? CreatedAtUtc);
+
+public sealed record IncidentEventStateExecutionContext(
+    string SoftwareVersion,
+    string ConfigurationIdentity,
+    long ProposerDurationMilliseconds,
+    long CriticDurationMilliseconds);
 
 public sealed record IncidentEventStateProvenance(
     string ObservationId,
@@ -88,6 +105,7 @@ public sealed record IncidentEventStateLedgerEntry(
     IncidentEventStateObservationBundle Bundle,
     IncidentEventStateProposal Proposal,
     IncidentEventStateCritique Critique,
+    IncidentEventStateExecutionContext Execution,
     IReadOnlyList<string> SupersedesLedgerEntryIds);
 
 public sealed record IncidentEventStateStoredLedgerEntry(
@@ -122,6 +140,34 @@ public sealed record IncidentEventStateContractValidationResult(
 
 public static class IncidentEventStateContractValidator
 {
+    public static IncidentEventStateContractValidationResult ValidateBundle(
+        IncidentEventStateObservationBundle bundle)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateProposal(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateProposal proposal)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateProposal(bundle, proposal, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateCritique(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateProposal proposal,
+        IncidentEventStateCritique critique)
+    {
+        var errors = new List<string>();
+        ValidateCritique(bundle, proposal, critique, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
     public static IncidentEventStateContractValidationResult Validate(
         IncidentEventStateObservationBundle bundle,
         IncidentEventStateProposal proposal,
@@ -142,6 +188,12 @@ public static class IncidentEventStateContractValidator
         RequireValue(entry.LedgerEntryId, "ledger entry id", errors);
         if (entry.RecordedAtUtc == default)
             errors.Add("ledger entry recorded timestamp is required");
+        RequireValue(entry.Execution.SoftwareVersion, "software version", errors);
+        RequireValue(entry.Execution.ConfigurationIdentity, "configuration identity", errors);
+        if (entry.Execution.ProposerDurationMilliseconds < 0)
+            errors.Add("proposer duration cannot be negative");
+        if (entry.Execution.CriticDurationMilliseconds < 0)
+            errors.Add("critic duration cannot be negative");
         RequireUniqueValues(entry.SupersedesLedgerEntryIds, "superseded ledger entry id", errors);
         if (!entry.SupersedesLedgerEntryIds.SequenceEqual(
                 entry.Proposal.SupersedesLedgerEntryIds,
@@ -215,6 +267,57 @@ public static class IncidentEventStateContractValidator
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
+    public static IncidentEventStateContractValidationResult ValidateProjection(
+        IncidentEventStateProjection projection,
+        IReadOnlyList<IncidentEventStateLedgerEntry> sourceEntries)
+    {
+        var result = ValidateProjection(projection);
+        var errors = result.Errors.ToList();
+        var suppliedLedgerIds = sourceEntries
+            .Select(entry => entry.LedgerEntryId)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var ledgerEntryId in projection.LedgerEntryIds)
+        {
+            if (!suppliedLedgerIds.Contains(ledgerEntryId))
+                errors.Add($"projection source ledger entry '{ledgerEntryId}' was not supplied");
+        }
+
+        var observationGroups = sourceEntries
+            .SelectMany(entry => entry.Bundle.Observations)
+            .GroupBy(observation => observation.ObservationId, StringComparer.Ordinal)
+            .ToList();
+        foreach (var group in observationGroups)
+        {
+            var distinctPayloads = group
+                .Select(observation => System.Text.Json.JsonSerializer.Serialize(observation))
+                .Distinct(StringComparer.Ordinal)
+                .Take(2)
+                .Count();
+            if (distinctPayloads > 1)
+                errors.Add($"source ledgers contain conflicting versions of observation '{group.Key}'");
+        }
+
+        var sourceBundle = new IncidentEventStateObservationBundle(
+            "projection-source",
+            projection.GeneratedAtUtc,
+            observationGroups.Select(group => group.First()).ToList(),
+            []);
+        foreach (var projectedEvent in projection.Events)
+        {
+            ValidateObservationReferences(
+                sourceBundle,
+                projectedEvent.ObservationIds,
+                $"projected event '{projectedEvent.ProjectionEventId}'",
+                errors);
+            foreach (var claim in projectedEvent.Claims)
+                ValidateProvenance(sourceBundle, claim.Provenance, $"projected claim '{claim.ClaimId}'", errors);
+            foreach (var alternative in projectedEvent.Alternatives)
+                ValidateProvenance(sourceBundle, alternative.Provenance, $"projected alternative '{alternative.AlternativeId}'", errors);
+        }
+
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
     private static void ValidateBundle(
         IncidentEventStateObservationBundle bundle,
         List<string> errors)
@@ -243,6 +346,13 @@ public static class IncidentEventStateContractValidator
                 errors.Add($"observation '{observation.ObservationId}' has no source material");
             }
 
+            foreach (var (field, metadata) in observation.Metadata)
+            {
+                RequireValue(field, $"metadata field in observation '{observation.ObservationId}'", errors);
+                if (!Enum.IsDefined(metadata.Origin))
+                    errors.Add($"metadata field '{field}' in observation '{observation.ObservationId}' has an invalid origin");
+            }
+
             RequireUniqueValues(
                 observation.Transcripts.Select(transcript => transcript.TranscriptId),
                 $"transcript id in observation '{observation.ObservationId}'",
@@ -251,8 +361,8 @@ public static class IncidentEventStateContractValidator
             {
                 RequireValue(transcript.TranscriptId, "transcript id", errors);
                 RequireValue(transcript.Producer, $"transcript producer for '{transcript.TranscriptId}'", errors);
-                if (transcript.CreatedAtUtc == default)
-                    errors.Add($"transcript '{transcript.TranscriptId}' created timestamp is required");
+                if (transcript.CreatedAtUtc.HasValue && transcript.CreatedAtUtc.Value == default)
+                    errors.Add($"transcript '{transcript.TranscriptId}' created timestamp cannot be the default value");
             }
         }
     }

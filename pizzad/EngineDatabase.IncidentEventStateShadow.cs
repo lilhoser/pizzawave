@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace pizzad;
 
-public sealed partial class EngineDatabase
+public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
 {
     public async Task<IncidentEventStateStoredLedgerEntry> AppendIncidentEventStateShadowLedgerEntryAsync(
         IncidentEventStateLedgerEntry entry,
@@ -17,7 +17,7 @@ public sealed partial class EngineDatabase
 
         await using var connection = OpenConnection();
         await using var transaction = connection.BeginTransaction();
-        await EnsureIncidentEventStateLedgerReferencesExistAsync(
+        await LoadIncidentEventStateLedgerReferencesAsync(
             connection,
             transaction,
             entry.SupersedesLedgerEntryIds,
@@ -102,11 +102,14 @@ public sealed partial class EngineDatabase
 
         await using var connection = OpenConnection();
         await using var transaction = connection.BeginTransaction();
-        await EnsureIncidentEventStateLedgerReferencesExistAsync(
+        var sourceEntries = await LoadIncidentEventStateLedgerReferencesAsync(
             connection,
             transaction,
             projection.LedgerEntryIds,
             ct);
+        validation = IncidentEventStateContractValidator.ValidateProjection(projection, sourceEntries);
+        if (!validation.IsValid)
+            throw new ArgumentException(string.Join("; ", validation.Errors), nameof(projection));
 
         var payload = JsonSerializer.Serialize(projection, EngineConfig.JsonOptions());
         var contentHash = ContentHash(payload);
@@ -160,28 +163,38 @@ public sealed partial class EngineDatabase
         return new IncidentEventStateStoredProjection(sequence, contentHash, projection);
     }
 
-    private static async Task EnsureIncidentEventStateLedgerReferencesExistAsync(
+    private static async Task<IReadOnlyList<IncidentEventStateLedgerEntry>> LoadIncidentEventStateLedgerReferencesAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         IReadOnlyList<string> ledgerEntryIds,
         CancellationToken ct)
     {
+        var entries = new List<IncidentEventStateLedgerEntry>();
         if (ledgerEntryIds.Count == 0)
-            return;
+            return entries;
 
         foreach (var ledgerEntryId in ledgerEntryIds.Distinct(StringComparer.Ordinal))
         {
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                SELECT COUNT(*)
+                SELECT sequence, content_hash, payload_json
                 FROM incident_event_state_shadow_ledger
                 WHERE ledger_entry_id=$ledger_entry_id;
                 """;
             command.Parameters.AddWithValue("$ledger_entry_id", ledgerEntryId);
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(ct)) != 1)
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct))
                 throw new InvalidOperationException($"Incident event-state ledger entry '{ledgerEntryId}' does not exist.");
+            var sequence = reader.GetInt64(0);
+            var contentHash = reader.GetString(1);
+            var payload = reader.GetString(2);
+            VerifyContentHash("ledger entry", sequence, payload, contentHash);
+            entries.Add(JsonSerializer.Deserialize<IncidentEventStateLedgerEntry>(payload, EngineConfig.JsonOptions())
+                        ?? throw new InvalidDataException($"Incident event-state ledger entry {sequence} has an empty payload."));
         }
+
+        return entries;
     }
 
     private static string ContentHash(string payload) =>
