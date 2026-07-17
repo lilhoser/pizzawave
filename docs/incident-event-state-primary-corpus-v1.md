@@ -57,6 +57,8 @@ The uncommitted audio-bearing artifacts are stored outside the repository at:
 - Audio archive entries: 417
 - Audio archive SHA-256:
   `D157D45EF6E9C10FC74067F77CAF81A8CE3451D7AF10BCCF7DC762528865E0FA`
+- Blind review package SHA-256:
+  `E6854560B1AC445B01F2C48CF81DE3B51A8DC6A5A6079F58D66F685701374DA4`
 
 The timestamp-only selection produced one block with no captured calls and one
 block with two captured calls. They remain in V1. Replacing them after observing
@@ -73,6 +75,8 @@ invent a story when observations are absent or sparse.
 - Audio archive entries: 302
 - Audio archive SHA-256:
   `1F87AF8E6A50939087302AD3925336496F30D02AD286F64E6DE4EFF9A3619505`
+- Sealed blind review package SHA-256:
+  `7F2326F612BC62B4C16D1FE92A8AA08A1047223501A495BA641B4CF90E275322`
 
 Prototype prompts, examples, and architectural adjustments must use only the
 development split. The held-out corpus must not be opened for model evaluation
