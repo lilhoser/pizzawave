@@ -323,6 +323,15 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("finding-drawer", source, StringComparison.Ordinal);
         Assert.Contains(".finding-drawer { width: min(570px, 94vw)", StyleSource(), StringComparison.Ordinal);
         Assert.Contains("background: #20252a", StyleSource(), StringComparison.Ordinal);
+        Assert.Contains("finding-drawer-section next-step", source, StringComparison.Ordinal);
+        Assert.Contains("finding-drawer-section operator-notes", source, StringComparison.Ordinal);
+        Assert.Contains("Operator notes", source, StringComparison.Ordinal);
+        Assert.Contains("finding-activity-pagination", source, StringComparison.Ordinal);
+        Assert.Contains("Page {currentActivityPage} of {activityPageCount}", source, StringComparison.Ordinal);
+        Assert.Contains("recommendation-history-ledger", source, StringComparison.Ordinal);
+        Assert.Contains("recommendationHistoryGroups(items)", source, StringComparison.Ordinal);
+        Assert.Contains("new Set(rows.map(row => row.findingId)).size", source, StringComparison.Ordinal);
+        Assert.Contains(".finding-drawer-section.facts", StyleSource(), StringComparison.Ordinal);
         Assert.DoesNotContain("Finding details and operator actions", source, StringComparison.Ordinal);
         Assert.DoesNotContain("service-issue-card", source, StringComparison.Ordinal);
         Assert.Contains("Recommendation candidates", source, StringComparison.Ordinal);

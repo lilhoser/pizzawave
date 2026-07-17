@@ -10518,6 +10518,7 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
 function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendation) => void; onChanged: () => Promise<unknown> }) {
   const [tab, setTab] = useState<"active" | "known" | "history">("active");
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
+  const [activityPage, setActivityPage] = useState(1);
   const [statusDraft, setStatusDraft] = useState<Record<number, string>>({});
   const [noteDraft, setNoteDraft] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
@@ -10526,6 +10527,10 @@ function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommen
   const items = tab === "active" ? recommendations.items : tab === "known" ? (recommendations.knownIssues ?? []) : recommendations.history;
   const allItems = [...recommendations.items, ...(recommendations.knownIssues ?? []), ...recommendations.history];
   const selectedItem = allItems.find(item => item.findingId === selectedFindingId) ?? null;
+  const activityPageSize = 5;
+  const activityPageCount = Math.max(1, Math.ceil((selectedItem?.audit.length ?? 0) / activityPageSize));
+  const currentActivityPage = Math.min(activityPage, activityPageCount);
+  const visibleActivity = selectedItem?.audit.slice((currentActivityPage - 1) * activityPageSize, currentActivityPage * activityPageSize) ?? [];
   async function changeState(item: SystemRecommendation) {
     setBusy(item.findingId); setMessage("");
     try {
@@ -10554,26 +10559,33 @@ function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommen
     </div>
     <div className="recommendation-tabs" role="tablist"><button className={tab === "active" ? "active" : ""} onClick={() => setTab("active")}>Active ({recommendations.items.length})</button><button className={tab === "known" ? "active" : ""} onClick={() => setTab("known")}>Known Issues ({recommendations.knownIssues?.length ?? 0})</button><button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>History ({recommendations.history.length})</button></div>
     {message && <p className="settings-message error">{message}</p>}
-    {items.length === 0 ? <div className="card"><h3>No {tab === "active" ? "Active Findings" : tab === "known" ? "Known Issues" : "Finding History"}</h3><p className="settings-message ok">Nothing is in this view.</p></div> :
+    {items.length === 0 ? <div className="card"><h3>No {tab === "active" ? "Active Findings" : tab === "known" ? "Known Issues" : "Finding History"}</h3><p className="settings-message ok">Nothing is in this view.</p></div> : tab === "history" ?
+      <div className="recommendation-history-ledger">{recommendationHistoryGroups(items).map(group => <article className="recommendation-history-row" key={group.key}>
+        <div className="recommendation-history-identity"><span className="recommendation-history-icon"><RecommendationTypeIcon item={group.latest} /></span><div><strong>{group.latest.title}</strong><span>{recommendationTypeLabel(group.latest)} · {group.recurrences.toLocaleString()} recurrence{group.recurrences === 1 ? "" : "s"} · {group.records.toLocaleString()} record{group.records === 1 ? "" : "s"}</span></div></div>
+        <div className="recommendation-history-date"><span>First seen</span><strong>{formatShortDate(group.firstSeen)}</strong></div>
+        <div className="recommendation-history-date"><span>Last seen</span><strong>{formatRelativeAge(group.lastSeen)}</strong><small>{formatShortDate(group.lastSeen)}</small></div>
+        <div className="recommendation-history-outcome"><span>{label(group.latest.workflowStatus)}</span><strong>{label(group.latest.severity)}</strong></div>
+        <button type="button" className="secondary-button" onClick={() => { setActivityPage(1); setSelectedFindingId(group.latest.findingId); }}>Review</button>
+      </article>)}</div> :
       <div className="recommendation-list">
         {items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={`${item.findingId}-${item.id}`}>
           <div className="recommendation-head"><div className="recommendation-type"><RecommendationTypeIcon item={item} /><span>{recommendationTypeLabel(item)}</span></div><div className="recommendation-state">{item.activityState === "quiet" && <span>Dormant</span>}{item.workflowStatus !== "new" && <span>{label(item.workflowStatus)}</span>}<strong>{label(item.severity)}</strong></div></div>
           <div className="recommendation-card-body"><h3>{item.title}</h3>
             <div className="recommendation-facts">{recommendationFacts(item).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div>
             {item.reviewDue && <p className="settings-message warning">Known Issue review is due.</p>}
-            <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button><button className="secondary-button" onClick={() => setSelectedFindingId(item.findingId)}>Review finding</button></div>
+            <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button><button className="secondary-button" onClick={() => { setActivityPage(1); setSelectedFindingId(item.findingId); }}>Review finding</button></div>
           </div>
         </article>)}
       </div>}
     {selectedItem && createPortal(<div className="finding-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSelectedFindingId(null); }}><aside className="finding-drawer" role="dialog" aria-modal="true" aria-labelledby="finding-drawer-title">
       <header className={`finding-drawer-head severity-${selectedItem.severity}`}><div><span>{recommendationTypeLabel(selectedItem)} finding #{selectedItem.findingId}</span><h2 id="finding-drawer-title">{selectedItem.title}</h2></div><button type="button" className="icon-button" aria-label="Close finding" onClick={() => setSelectedFindingId(null)}><X size={18} /></button></header>
       <div className="finding-drawer-content">
-        <section><h3>Core facts</h3><div className="recommendation-facts drawer-facts">{recommendationFacts(selectedItem, 6).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div></section>
-        <section><h3>Next step</h3><p>{selectedItem.action}</p><button onClick={() => { onOpen(selectedItem); setSelectedFindingId(null); }}>Open {selectedItem.destinationLabel}</button></section>
-        {selectedItem.hypotheses.length > 0 && <section><h3>Cause hypotheses</h3>{selectedItem.hypotheses.slice(0, 4).map(row => <div className="finding-hypothesis" key={row.kind}><div><strong>{row.label}</strong><span>{label(row.status)} · {label(row.confidence)} confidence</span></div><p>{row.rationale}</p></div>)}</section>}
-        {selectedItem.episodes.length > 0 && <section><h3>Episode patterns</h3><div className="finding-episode-list">{recommendationEpisodeGroups(selectedItem).map(row => <div key={row.signature}><strong>{row.count.toLocaleString()} × {label(row.signature)}</strong><span>Latest {formatShortDate(row.latest)}{row.conditions ? ` · ${row.conditions}` : ""}</span></div>)}</div>{selectedItem.episodeCount > selectedItem.episodes.length && <small className="muted">Pattern summaries use the latest {selectedItem.episodes.length.toLocaleString()} of {selectedItem.episodeCount.toLocaleString()} recorded episodes.</small>}</section>}
-        <section><h3>Workflow</h3><div className="finding-workflow"><select value={statusDraft[selectedItem.findingId] ?? selectedItem.workflowStatus} onChange={event => setStatusDraft(current => ({ ...current, [selectedItem.findingId]: event.target.value }))}><option value="new">New</option><option value="unresolved">Unresolved</option><option value="investigating">Investigating</option><option value="known_issue">Known Issue</option><option value="monitoring">Monitoring</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option></select><button disabled={busy === selectedItem.findingId} onClick={() => void changeState(selectedItem)}>Update status</button></div><div className="finding-note"><textarea value={noteDraft[selectedItem.findingId] ?? ""} onChange={event => setNoteDraft(current => ({ ...current, [selectedItem.findingId]: event.target.value }))} placeholder="Add an append-only operator note" /><button disabled={busy === selectedItem.findingId || !(noteDraft[selectedItem.findingId] ?? "").trim()} onClick={() => void addNote(selectedItem)}>Add note</button></div></section>
-        {selectedItem.audit.length > 0 && <section><h3>Recent activity</h3><div className="finding-audit">{selectedItem.audit.slice(0, 8).map(event => <div key={event.id}><strong>{label(event.eventType)}</strong><span>{event.actor} · {formatShortDate(event.createdAtUtc)}</span><p>{event.detail}</p></div>)}</div></section>}
+        <section className="finding-drawer-section facts"><h3><Info size={17} />Core facts</h3><div className="recommendation-facts drawer-facts">{recommendationFacts(selectedItem, 6).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div></section>
+        <section className="finding-drawer-section next-step"><h3><ChevronRight size={18} />Next step</h3><p>{selectedItem.action}</p><button onClick={() => { onOpen(selectedItem); setSelectedFindingId(null); }}>Open {selectedItem.destinationLabel}</button></section>
+        {selectedItem.hypotheses.length > 0 && <section className="finding-drawer-section hypotheses"><h3><Search size={17} />Cause hypotheses</h3>{selectedItem.hypotheses.slice(0, 4).map(row => <div className="finding-hypothesis" key={row.kind}><div><strong>{row.label}</strong><span>{label(row.status)} · {label(row.confidence)} confidence</span></div><p>{row.rationale}</p></div>)}</section>}
+        {selectedItem.episodes.length > 0 && <section className="finding-drawer-section episodes"><h3><Activity size={17} />Episode patterns</h3><div className="finding-episode-list">{recommendationEpisodeGroups(selectedItem).map(row => <div key={row.signature}><strong>{row.count.toLocaleString()} × {label(row.signature)}</strong><span>Latest {formatShortDate(row.latest)}{row.conditions ? ` · ${row.conditions}` : ""}</span></div>)}</div>{selectedItem.episodeCount > selectedItem.episodes.length && <small className="muted">Pattern summaries use the latest {selectedItem.episodes.length.toLocaleString()} of {selectedItem.episodeCount.toLocaleString()} recorded episodes.</small>}</section>}
+        <section className="finding-drawer-section operator-notes"><h3><Settings size={17} />Operator notes</h3><div className="finding-workflow"><select value={statusDraft[selectedItem.findingId] ?? selectedItem.workflowStatus} onChange={event => setStatusDraft(current => ({ ...current, [selectedItem.findingId]: event.target.value }))}><option value="new">New</option><option value="unresolved">Unresolved</option><option value="investigating">Investigating</option><option value="known_issue">Known Issue</option><option value="monitoring">Monitoring</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option></select><button disabled={busy === selectedItem.findingId} onClick={() => void changeState(selectedItem)}>Update status</button></div><div className="finding-note"><textarea value={noteDraft[selectedItem.findingId] ?? ""} onChange={event => setNoteDraft(current => ({ ...current, [selectedItem.findingId]: event.target.value }))} placeholder="Add an append-only operator note" /><button disabled={busy === selectedItem.findingId || !(noteDraft[selectedItem.findingId] ?? "").trim()} onClick={() => void addNote(selectedItem)}>Add note</button></div></section>
+        {selectedItem.audit.length > 0 && <section className="finding-drawer-section activity"><h3><Database size={17} />Recent activity</h3><div className="finding-audit">{visibleActivity.map(event => <div key={event.id}><strong>{label(event.eventType)}</strong><span>{event.actor} · {formatShortDate(event.createdAtUtc)}</span><p>{event.detail}</p></div>)}</div>{activityPageCount > 1 && <div className="finding-activity-pagination"><button type="button" disabled={currentActivityPage === 1} onClick={() => setActivityPage(page => Math.max(1, page - 1))}>Previous</button><span>Page {currentActivityPage} of {activityPageCount}</span><button type="button" disabled={currentActivityPage === activityPageCount} onClick={() => setActivityPage(page => Math.min(activityPageCount, page + 1))}>Next</button></div>}</section>}
       </div>
     </aside></div>, document.body)}
   </div>;
@@ -10633,6 +10645,20 @@ function recommendationEpisodeGroups(item: SystemRecommendation) {
     groups.set(episode.signature, group);
   }
   return [...groups.values()].sort((a, b) => b.count - a.count).map(group => ({ ...group, conditions: [...group.conditions].slice(0, 3).join(", ") }));
+}
+
+function recommendationHistoryGroups(items: SystemRecommendation[]) {
+  const groups = new Map<string, SystemRecommendation[]>();
+  for (const item of items) {
+    const key = `${item.id}|${item.ownerType}|${item.ownerKey}`;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups.entries()].map(([key, rows]) => {
+    const ordered = [...rows].sort((a, b) => new Date(b.lastSeenUtc || b.resolvedAtUtc).getTime() - new Date(a.lastSeenUtc || a.resolvedAtUtc).getTime());
+    const firstSeen = ordered.reduce((earliest, row) => !earliest || new Date(row.firstSeenUtc).getTime() < new Date(earliest).getTime() ? row.firstSeenUtc : earliest, "");
+    const lastSeen = ordered.reduce((latest, row) => !latest || new Date(row.lastSeenUtc).getTime() > new Date(latest).getTime() ? row.lastSeenUtc : latest, "");
+    return { key, latest: ordered[0], firstSeen, lastSeen, records: rows.length, recurrences: new Set(rows.map(row => row.findingId)).size };
+  }).sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
 }
 
 function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<void>; refreshToken: number }) {
