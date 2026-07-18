@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Database, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench } from "lucide-react";
+import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Database, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench, X } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
-import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -329,7 +329,7 @@ function App() {
       api.request<AlertMatch[]>(`/api/v1/alerts?${rangeQuery(rangeHours)}`),
       api.request<any>("/api/v1/settings/alerts"),
       api.request<SystemCpuSnapshot>("/api/v1/system/cpu").catch(() => null),
-      api.request<SystemRecommendations>("/api/v1/system/recommendations").catch(() => null)
+      api.request<SystemRecommendationSummary>("/api/v1/system/recommendations/summary").catch(() => null)
     ]);
     setCpuSnapshot(cpu);
     setJobs(jobRows);
@@ -4684,6 +4684,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   const [baseline, setBaseline] = useState("7d");
   const pageIdentity = systemPageIdentity(topTab, trTab, metricsTab);
   const [rfChartCategory, setRfChartCategory] = useState<RfChartCategory>("all");
+  const [selectedRfFinding, setSelectedRfFinding] = useState<SystemRecommendation | null>(null);
   const [rfPerformanceHours, setRfPerformanceHours] = useState(() => {
     const saved = Number(localStorage.getItem("pizzawave-system-rf-performance-hours"));
     return [2, 6, 24, 72, 168].includes(saved) ? saved : 2;
@@ -4907,7 +4908,6 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   function openRecommendationTarget(item: SystemRecommendations["items"][number]) {
     const target = item.target;
     const candidates = item.candidates;
-    void api.request(`/api/v1/system/recommendations/${encodeURIComponent(item.id)}/reviewed`, { method: "POST" }).catch(() => undefined);
     if (target.topTab === "recommendations") setTopTab("recommendations");
     if (target.topTab === "runtime") {
       if (target.subTab === "jobs") {
@@ -4930,8 +4930,22 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
       else if (target.subTab === "quality") { setTopTab("metrics"); setMetricsTab("transcription"); }
       else setTopTab("services");
     }
+    if (target.topTab === "metrics") {
+      const metricTabs = ["calls", "transcription", "rf", "incidents", "ai", "bandwidth"] as const;
+      const metricTab = metricTabs.find(value => value === target.subTab);
+      setTopTab("metrics");
+      if (metricTab) setMetricsTab(metricTab);
+      return;
+    }
     if (target.topTab === "tr") {
-      if (target.subTab === "metrics" || target.subTab === "rf") { setRfPerformanceHours(2); localStorage.setItem("pizzawave-system-rf-performance-hours", "2"); setRfChartCategory("all"); setTopTab("metrics"); setMetricsTab("rf"); }
+      if (target.subTab === "metrics" || target.subTab === "rf") {
+        const latestEpisode = [...(item.episodes ?? [])].sort((a, b) => new Date(b.endUtc).getTime() - new Date(a.endUtc).getTime())[0];
+        const ageHours = latestEpisode ? Math.max(0, (Date.now() - new Date(latestEpisode.startUtc).getTime()) / 3_600_000) : 2;
+        const chartHours = [2, 6, 24, 72, 168].find(hours => ageHours <= hours) ?? 168;
+        setSelectedRfFinding(item);
+        if (target.anchor) localStorage.setItem("pizzawave-system-rf-selected-site", target.anchor);
+        setRfPerformanceHours(chartHours); localStorage.setItem("pizzawave-system-rf-performance-hours", String(chartHours)); setRfChartCategory("all"); setTopTab("metrics"); setMetricsTab("rf");
+      }
       else { setTopTab("tr"); setTrTab(target.subTab === "logs" ? "logs" : "summary"); }
     }
     if (target.topTab === "qdrant") setTopTab("services");
@@ -4976,7 +4990,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
         <button className={topTab === "audit" ? "active" : ""} onClick={() => setTopTab("audit")}>Audit History</button>
       </div>}
       {topTab !== "tr" && topTab !== "metrics" && <SystemPageIdentity {...pageIdentity} />}
-      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="recommendations" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} onOpen={openRecommendationTarget} /></div>}
+      {topTab === "recommendations" && <div className="trouble-panel"><PanelLoadState label="recommendations" state={recommendationsResource.state} hasData={Boolean(recommendations)} onRetry={recommendationsResource.refresh} /><RecommendationsPanel recommendations={recommendations} onOpen={openRecommendationTarget} onChanged={recommendationsResource.refresh} /></div>}
       {topTab === "services" && <div className="trouble-panel"><PanelLoadState label="service status" state={servicesRuntimeResource.state} hasData={Boolean(servicesRuntime)} onRetry={servicesRuntimeResource.refresh} /><PanelLoadState label="resource status" state={cpuResource.state} hasData={Boolean(cpuSnapshot)} onRetry={cpuResource.refresh} /><PanelLoadState label="live service resources" state={liveServiceResource.state} hasData={serviceResourceHistory.length > 0} onRetry={liveServiceResource.refresh} />{servicesRuntime && <ServicesManager runtime={servicesRuntime} snapshot={cpuSnapshot} history={serviceResourceHistory} restartBusy={restartBusy} restartMessages={restartMessages} onRestart={restartService} onStopTr={stopTrService} />}</div>}
       {topTab === "queue" && <QueuePanel engineHealth={engineHealth} ingestBusy={ingestBusy} ingestMessage={ingestMessage} onSetIngestPaused={setIngestPaused} refreshToken={panelRefreshToken} />}
       {topTab === "jobs" && <div className="trouble-panel"><PanelLoadState label="jobs" state={jobsResource.state} hasData={Boolean(jobs)} onRetry={jobsResource.refresh} />{jobs && <JobsPanel jobs={jobs} reload={async () => { await jobsResource.refresh(); }} />}</div>}
@@ -5008,7 +5022,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
         <SystemPageIdentity {...pageIdentity} />
         {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={callsDashboardResource.state} hasData={Boolean(callsDashboard)} onRetry={callsDashboardResource.refresh} /><DashboardStatisticsPanel data={callsDashboard} rangeHours={callsPerformanceHours} onRangeHoursChange={hours => { setCallsPerformanceHours(hours); localStorage.setItem("pizzawave-system-calls-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} /></>}
         {metricsTab === "transcription" && <><PanelLoadState label="transcription performance" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} />{performanceSummary && <TranscriptionPerformancePanel data={performanceSummary} rangeHours={transcriptionPerformanceHours} onRangeHoursChange={hours => { setTranscriptionPerformanceHours(hours); localStorage.setItem("pizzawave-system-transcription-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} onExcludeTalkgroup={row => { localStorage.setItem("pizzawave-setup-talkgroup-candidates", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); localStorage.setItem("pizzawave-setup-talkgroup-exclusion-targets", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); onOpenSetup?.("Talkgroups"); }} />}</>}
-        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} onOpenSetup={onOpenSetup} />}</>}
+        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} finding={selectedRfFinding} clearFinding={() => setSelectedRfFinding(null)} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} />}</>}
         {metricsTab === "incidents" && <><PanelLoadState label="incident output" state={incidentDashboardResource.state} hasData={Boolean(incidentDashboard)} onRetry={incidentDashboardResource.refresh} /><IncidentMetricsPanel dashboard={incidentDashboard} rangeHours={incidentPerformanceHours} refreshToken={panelRefreshToken} onRangeHoursChange={hours => { setIncidentPerformanceHours(hours); localStorage.setItem("pizzawave-system-incident-performance-hours", String(hours)); }} /></>}
         {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} rangeHours={aiPerformanceHours} onRangeHoursChange={hours => { setAiUsagePage(1); setAiPerformanceHours(hours); localStorage.setItem("pizzawave-system-ai-performance-hours", String(hours)); }} onPageChange={setAiUsagePage} /></>}
         {metricsTab === "bandwidth" && <><PanelLoadState label="PizzaWave bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} rangeHours={bandwidthPerformanceHours} onRangeHoursChange={hours => { setBandwidthUsagePage(1); setBandwidthPerformanceHours(hours); localStorage.setItem("pizzawave-system-bandwidth-performance-hours", String(hours)); }} onPageChange={setBandwidthUsagePage} /></>}
@@ -10053,7 +10067,7 @@ function formatRfHz(value: number) {
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(6)} MHz` : `${value.toLocaleString()} Hz`;
 }
 
-function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, setBaseline, setCategory, onOpenSetup }: { data: TrTroubleshoot; rangeHours: number; baseline: string; category: RfChartCategory; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void; onOpenSetup?: (section?: string) => void }) {
+function RfMetricsPanel({ data, rangeHours, baseline, category, finding, clearFinding, setRangeHours, setBaseline, setCategory }: { data: TrTroubleshoot; rangeHours: number; baseline: string; category: RfChartCategory; finding?: SystemRecommendation | null; clearFinding?: () => void; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void }) {
   const systems = data.health.systemSummaries ?? [];
   const initialSystem = systems.find(system => system.status !== "Healthy")?.systemShortName ?? systems[0]?.systemShortName ?? "";
   const [selectedSystem, setSelectedSystem] = useState(() => localStorage.getItem("pizzawave-system-rf-selected-site") || initialSystem);
@@ -10061,6 +10075,10 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, s
     if (systems.some(system => system.systemShortName === selectedSystem)) return;
     setSelectedSystem(initialSystem);
   }, [selectedSystem, initialSystem, systems]);
+  useEffect(() => {
+    if (!finding?.ownerKey || !systems.some(system => system.systemShortName.toLowerCase() === finding.ownerKey.toLowerCase())) return;
+    setSelectedSystem(finding.ownerKey);
+  }, [finding?.findingId, finding?.ownerKey, systems]);
   function selectSite(system: string, nextCategory?: RfChartCategory) {
     setSelectedSystem(system);
     localStorage.setItem("pizzawave-system-rf-selected-site", system);
@@ -10078,18 +10096,18 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, setRangeHours, s
     .filter(chart => category === "all" ? primaryTitles.has(chart.title) : rfChartCategoryForTitle(chart.title) === category)
     .filter(chart => chart.title !== "Capture Interruptions" || chart.series.some(series => series.values.some(value => value > 0)));
   const baselineNote = scopedCharts.find(chart => chart.baselineNote)?.baselineNote;
-  const selectedSummary = systems.find(system => system.systemShortName === selectedSystem);
+  const annotations = finding?.ownerKey.toLowerCase() === selectedSystem.toLowerCase() ? finding.episodes : [];
   return <div className="rf-metrics-panel">
-    <RfHealthStatusPanel data={data} onOpenSetup={onOpenSetup} onSelectSite={system => selectSite(system)} onSelectCategory={setCategory} />
+    <RfHealthStatusPanel data={data} onSelectSite={system => selectSite(system)} onSelectCategory={setCategory} />
     <SystemPageHeaderControls><div className="metric-controls rf-chart-controls header-controls">
       <label>Window <select value={rangeHours} onChange={event => setRangeHours(Number(event.target.value))}><option value={2}>Last 2 hours</option><option value={6}>Last 6 hours</option><option value={24}>Last 24 hours</option><option value={72}>Last 3 days</option><option value={168}>Last 7 days</option></select></label>
       <label>Site <select value={selectedSystem} onChange={event => selectSite(event.target.value)}>{systems.map(system => <option value={system.systemShortName} key={system.systemShortName}>{trSystemDisplayName(system.systemShortName)}</option>)}</select></label>
       <label>Charts <select value={category} onChange={e => setCategory(e.target.value as RfChartCategory)}><option value="all">Primary</option><option value="decode">Signal</option><option value="activity">Capture</option><option value="events">Events</option></select></label>
       <label>Compare against baseline <select value={baseline} onChange={e => setBaseline(e.target.value)}><option>7d</option><option>14d</option><option>30d</option></select></label>
     </div></SystemPageHeaderControls>
+    {finding && <div className="card rf-finding-context"><div><strong>Finding evidence overlay</strong><p>{finding.title} · {finding.episodeCount.toLocaleString()} recorded episode(s). Shaded chart regions are immutable episode intervals linked to finding #{finding.findingId}.</p></div>{clearFinding && <button type="button" onClick={clearFinding}>Clear overlay</button>}</div>}
     {baselineNote && <p className="baseline-note rf-baseline-summary">{baselineNote}</p>}
-    {selectedSummary && selectedSummary.status !== "Healthy" && <div className={`card rf-observed-pattern ${trSystemTone(selectedSummary.status)}`}><div><h3>Observed pattern</h3><p><strong>{trSystemDisplayName(selectedSummary.systemShortName)}</strong>: {selectedSummary.summary}</p></div>{onOpenSetup && <button onClick={() => openRfSetup(selectedSummary.systemShortName, onOpenSetup)}>Review this site in Setup</button>}</div>}
-    <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} showBaselineNote={false} key={chart.title} />)}</div>
+    <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} annotations={annotations} showBaselineNote={false} key={chart.title} />)}</div>
   </div>;
 }
 
@@ -10497,30 +10515,144 @@ function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessag
   </div>;
 }
 
-function RecommendationsPanel({ recommendations, onOpen }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendations["items"][number]) => void }) {
+function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendation) => void; onChanged: () => Promise<unknown> }) {
+  const [tab, setTab] = useState<"active" | "known" | "history">("active");
+  const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
+  const [activityPage, setActivityPage] = useState(1);
+  const [statusDraft, setStatusDraft] = useState<Record<number, string>>({});
+  const [noteDraft, setNoteDraft] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+  const [message, setMessage] = useState("");
   if (!recommendations) return <div className="card">Loading recommendations...</div>;
+  const items = tab === "active" ? recommendations.items : tab === "known" ? (recommendations.knownIssues ?? []) : recommendations.history;
+  const allItems = [...recommendations.items, ...(recommendations.knownIssues ?? []), ...recommendations.history];
+  const selectedItem = allItems.find(item => item.findingId === selectedFindingId) ?? null;
+  const activityPageSize = 5;
+  const activityPageCount = Math.max(1, Math.ceil((selectedItem?.audit.length ?? 0) / activityPageSize));
+  const currentActivityPage = Math.min(activityPage, activityPageCount);
+  const visibleActivity = selectedItem?.audit.slice((currentActivityPage - 1) * activityPageSize, currentActivityPage * activityPageSize) ?? [];
+  async function changeState(item: SystemRecommendation) {
+    setBusy(item.findingId); setMessage("");
+    try {
+      await api.request(`/api/v1/system/recommendations/findings/${item.findingId}/state`, { method: "POST", body: JSON.stringify({ status: statusDraft[item.findingId] ?? item.workflowStatus, reviewInDays: (statusDraft[item.findingId] ?? item.workflowStatus) === "known_issue" ? 7 : null }) });
+      await onChanged();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to update the finding."); }
+    finally { setBusy(null); }
+  }
+  async function addNote(item: SystemRecommendation) {
+    const note = noteDraft[item.findingId]?.trim();
+    if (!note) return;
+    setBusy(item.findingId); setMessage("");
+    try {
+      await api.request(`/api/v1/system/recommendations/findings/${item.findingId}/notes`, { method: "POST", body: JSON.stringify({ note }) });
+      setNoteDraft(current => ({ ...current, [item.findingId]: "" }));
+      await onChanged();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to add the note."); }
+    finally { setBusy(null); }
+  }
   return <div className="trouble-panel recommendations-panel">
-    <div className="recommendations-summary card">
-      <div><span>Current findings</span><strong>{recommendations.openCount.toLocaleString()}</strong></div>
-      <div><span>Problems</span><strong>{recommendations.problemCount.toLocaleString()}</strong></div>
-      <div><span>Improvements</span><strong>{recommendations.improvementCount.toLocaleString()}</strong></div>
-      <p>Current evidence from across PizzaWave. Open a finding to continue on the page that owns the evidence or decision.</p>
-    </div>
-    {recommendations.items.length === 0 ? <div className="card"><h3>No Current Findings</h3><p className="settings-message ok">No current problem, risk, or improvement has been identified.</p></div> :
+    <div className="recommendation-tabs" role="tablist"><button className={tab === "active" ? "active" : ""} onClick={() => setTab("active")}>Active ({recommendations.items.length})</button><button className={tab === "known" ? "active" : ""} onClick={() => setTab("known")}>Known Issues ({recommendations.knownIssues?.length ?? 0})</button><button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>History ({recommendations.history.length})</button></div>
+    {message && <p className="settings-message error">{message}</p>}
+    {items.length === 0 ? <div className="card"><h3>No {tab === "active" ? "Active Findings" : tab === "known" ? "Known Issues" : "Finding History"}</h3><p className="settings-message ok">Nothing is in this view.</p></div> : tab === "history" ?
+      <div className="recommendation-history-ledger">{recommendationHistoryGroups(items).map(group => <article className="recommendation-history-row" key={group.key}>
+        <div className="recommendation-history-identity"><span className="recommendation-history-icon"><RecommendationTypeIcon item={group.latest} /></span><div><strong>{group.latest.title}</strong><span>{recommendationTypeLabel(group.latest)} · {group.recurrences.toLocaleString()} recurrence{group.recurrences === 1 ? "" : "s"} · {group.records.toLocaleString()} record{group.records === 1 ? "" : "s"}</span></div></div>
+        <div className="recommendation-history-date"><span>First seen</span><strong>{formatShortDate(group.firstSeen)}</strong></div>
+        <div className="recommendation-history-date"><span>Last seen</span><strong>{formatRelativeAge(group.lastSeen)}</strong><small>{formatShortDate(group.lastSeen)}</small></div>
+        <div className="recommendation-history-outcome"><span>{label(group.latest.workflowStatus)}</span><strong>{label(group.latest.severity)}</strong></div>
+        <button type="button" className="secondary-button" onClick={() => { setActivityPage(1); setSelectedFindingId(group.latest.findingId); }}>Review</button>
+      </article>)}</div> :
       <div className="recommendation-list">
-        {recommendations.items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}`} key={item.id}>
-          <div className="recommendation-head">
-            <div><span className={`recommendation-lifecycle ${item.lifecycle}`}>{label(item.lifecycle)}</span><span className={`recommendation-kind ${item.kind}`}>{item.kind === "improvement" ? "Improvement" : "Problem"}</span><span className={`recommendation-severity ${item.severity}`}>{label(item.severity)} priority</span></div>
-            <span className="recommendation-owner">{item.destinationLabel.split(" / ")[0]}</span>
+        {items.map(item => <article className={`card recommendation-card severity-${item.severity} kind-${item.kind}${item.activityState === "quiet" ? " is-dormant" : ""}`} key={`${item.findingId}-${item.id}`}>
+          <div className="recommendation-head"><div className="recommendation-type"><RecommendationTypeIcon item={item} /><span>{recommendationTypeLabel(item)}</span></div><div className="recommendation-state">{item.activityState === "quiet" && <span>Dormant</span>}{item.workflowStatus !== "new" && <span>{label(item.workflowStatus)}</span>}<strong>{label(item.severity)}</strong></div></div>
+          <div className="recommendation-card-body"><h3>{item.title}</h3>
+            <div className="recommendation-facts">{recommendationFacts(item).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div>
+            {item.reviewDue && <p className="settings-message warning">Known Issue review is due.</p>}
+            <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button><button className="secondary-button" onClick={() => { setActivityPage(1); setSelectedFindingId(item.findingId); }}>Review finding</button></div>
           </div>
-          <h3>{item.title}</h3>
-          <p className="recommendation-window">Evidence window: {item.evidenceWindow}</p>
-          <p>{item.detail}</p>
-          <div className="recommendation-action"><strong>Recommended next step</strong><span>{item.action}</span></div>
-          <div className="recommendation-buttons"><button onClick={() => onOpen(item)}>Open {item.destinationLabel}</button></div>
         </article>)}
       </div>}
+    {selectedItem && createPortal(<div className="finding-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setSelectedFindingId(null); }}><aside className="finding-drawer" role="dialog" aria-modal="true" aria-labelledby="finding-drawer-title">
+      <header className={`finding-drawer-head severity-${selectedItem.severity}`}><div><span>{recommendationTypeLabel(selectedItem)} finding #{selectedItem.findingId}</span><h2 id="finding-drawer-title">{selectedItem.title}</h2></div><button type="button" className="icon-button" aria-label="Close finding" onClick={() => setSelectedFindingId(null)}><X size={18} /></button></header>
+      <div className="finding-drawer-content">
+        <section className="finding-drawer-section facts"><h3><Info size={17} />Core facts</h3><div className="recommendation-facts drawer-facts">{recommendationFacts(selectedItem, 6).map(fact => <div key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong>{fact.detail && <small>{fact.detail}</small>}</div>)}</div></section>
+        <section className="finding-drawer-section next-step"><h3><ChevronRight size={18} />Next step</h3><p>{selectedItem.action}</p><button onClick={() => { onOpen(selectedItem); setSelectedFindingId(null); }}>Open {selectedItem.destinationLabel}</button></section>
+        {selectedItem.hypotheses.length > 0 && <section className="finding-drawer-section hypotheses"><h3><Search size={17} />Cause hypotheses</h3>{selectedItem.hypotheses.slice(0, 4).map(row => <div className="finding-hypothesis" key={row.kind}><div><strong>{row.label}</strong><span>{label(row.status)} · {label(row.confidence)} confidence</span></div><p>{row.rationale}</p></div>)}</section>}
+        {selectedItem.episodes.length > 0 && <section className="finding-drawer-section episodes"><h3><Activity size={17} />Episode patterns</h3><div className="finding-episode-list">{recommendationEpisodeGroups(selectedItem).map(row => <div key={row.signature}><strong>{row.count.toLocaleString()} × {label(row.signature)}</strong><span>Latest {formatShortDate(row.latest)}{row.conditions ? ` · ${row.conditions}` : ""}</span></div>)}</div>{selectedItem.episodeCount > selectedItem.episodes.length && <small className="muted">Pattern summaries use the latest {selectedItem.episodes.length.toLocaleString()} of {selectedItem.episodeCount.toLocaleString()} recorded episodes.</small>}</section>}
+        <section className="finding-drawer-section operator-notes"><h3><Settings size={17} />Operator notes</h3><div className="finding-workflow"><select value={statusDraft[selectedItem.findingId] ?? selectedItem.workflowStatus} onChange={event => setStatusDraft(current => ({ ...current, [selectedItem.findingId]: event.target.value }))}><option value="new">New</option><option value="unresolved">Unresolved</option><option value="investigating">Investigating</option><option value="known_issue">Known Issue</option><option value="monitoring">Monitoring</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option></select><button disabled={busy === selectedItem.findingId} onClick={() => void changeState(selectedItem)}>Update status</button></div><div className="finding-note"><textarea value={noteDraft[selectedItem.findingId] ?? ""} onChange={event => setNoteDraft(current => ({ ...current, [selectedItem.findingId]: event.target.value }))} placeholder="Add an append-only operator note" /><button disabled={busy === selectedItem.findingId || !(noteDraft[selectedItem.findingId] ?? "").trim()} onClick={() => void addNote(selectedItem)}>Add note</button></div></section>
+        {selectedItem.audit.length > 0 && <section className="finding-drawer-section activity"><h3><Database size={17} />Recent activity</h3><div className="finding-audit">{visibleActivity.map(event => <div key={event.id}><strong>{label(event.eventType)}</strong><span>{event.actor} · {formatShortDate(event.createdAtUtc)}</span><p>{event.detail}</p></div>)}</div>{activityPageCount > 1 && <div className="finding-activity-pagination"><button type="button" disabled={currentActivityPage === 1} onClick={() => setActivityPage(page => Math.max(1, page - 1))}>Previous</button><span>Page {currentActivityPage} of {activityPageCount}</span><button type="button" disabled={currentActivityPage === activityPageCount} onClick={() => setActivityPage(page => Math.min(activityPageCount, page + 1))}>Next</button></div>}</section>}
+      </div>
+    </aside></div>, document.body)}
   </div>;
+}
+
+function RecommendationTypeIcon({ item }: { item: SystemRecommendation }) {
+  if (item.target.subTab === "rf" || item.target.subTab === "metrics" || item.section === "trunk-recorder") return <Radio size={18} aria-hidden="true" />;
+  if (item.target.subTab === "bandwidth" || item.section === "network") return <Gauge size={18} aria-hidden="true" />;
+  if (item.target.topTab === "setup" || item.kind === "improvement") return <Wrench size={18} aria-hidden="true" />;
+  if (item.target.subTab === "transcription" || item.target.subTab === "jobs") return <Activity size={18} aria-hidden="true" />;
+  if (item.section === "qdrant") return <Database size={18} aria-hidden="true" />;
+  return <Info size={18} aria-hidden="true" />;
+}
+
+function recommendationTypeLabel(item: SystemRecommendation) {
+  if (item.target.subTab === "rf" || item.target.subTab === "metrics") return "RF";
+  if (item.target.subTab === "bandwidth" || item.section === "network") return "Bandwidth";
+  if (item.target.subTab === "transcription" || item.target.subTab === "jobs") return "Transcription";
+  if (item.section === "trunk-recorder") return "Trunk Recorder";
+  if (item.section === "ai") return "AI";
+  return item.kind === "improvement" ? "Improvement" : label(item.section);
+}
+
+function recommendationFacts(item: SystemRecommendation, limit = 4) {
+  const facts: { label: string; value: string; detail?: string }[] = [];
+  if (item.episodeCount > 0) facts.push({ label: "Episodes", value: item.episodeCount.toLocaleString() });
+  facts.push({ label: "Confidence", value: label(item.confidence) });
+  for (const diagnostic of item.runbook?.diagnostics ?? []) {
+    if (facts.some(fact => fact.label.toLowerCase() === diagnostic.label.toLowerCase())) continue;
+    facts.push({ label: diagnostic.label, value: diagnostic.value });
+    if (facts.length >= limit) break;
+  }
+  if (facts.length < limit && item.evidenceWindow) facts.push({ label: "Evidence", value: item.evidenceWindow });
+  if (facts.length < limit && item.lastSeenUtc) facts.push({ label: "Last seen", value: formatRelativeAge(item.lastSeenUtc), detail: formatShortDate(item.lastSeenUtc) });
+  return facts.slice(0, limit);
+}
+
+function formatRelativeAge(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "Unknown";
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function recommendationEpisodeGroups(item: SystemRecommendation) {
+  const groups = new Map<string, { signature: string; count: number; latest: string; conditions: Set<string> }>();
+  for (const episode of item.episodes) {
+    const group = groups.get(episode.signature) ?? { signature: episode.signature, count: 0, latest: episode.endUtc, conditions: new Set<string>() };
+    group.count += 1;
+    if (new Date(episode.endUtc).getTime() > new Date(group.latest).getTime()) group.latest = episode.endUtc;
+    episode.conditions.forEach(condition => group.conditions.add(label(condition)));
+    groups.set(episode.signature, group);
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count).map(group => ({ ...group, conditions: [...group.conditions].slice(0, 3).join(", ") }));
+}
+
+function recommendationHistoryGroups(items: SystemRecommendation[]) {
+  const groups = new Map<string, SystemRecommendation[]>();
+  for (const item of items) {
+    const key = `${item.id}|${item.ownerType}|${item.ownerKey}`;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups.entries()].map(([key, rows]) => {
+    const ordered = [...rows].sort((a, b) => new Date(b.lastSeenUtc || b.resolvedAtUtc).getTime() - new Date(a.lastSeenUtc || a.resolvedAtUtc).getTime());
+    const firstSeen = ordered.reduce((earliest, row) => !earliest || new Date(row.firstSeenUtc).getTime() < new Date(earliest).getTime() ? row.firstSeenUtc : earliest, "");
+    const lastSeen = ordered.reduce((latest, row) => !latest || new Date(row.lastSeenUtc).getTime() > new Date(latest).getTime() ? row.lastSeenUtc : latest, "");
+    return { key, latest: ordered[0], firstSeen, lastSeen, records: rows.length, recurrences: new Set(rows.map(row => row.findingId)).size };
+  }).sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
 }
 
 function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<void>; refreshToken: number }) {
@@ -11961,25 +12093,18 @@ function TrConfigurationSummaryView({ data, onOpenSetup }: { data: TrTroubleshoo
   </div>;
 }
 
-function openRfSetup(systemShortName: string, onOpenSetup: (section?: string) => void) {
-  localStorage.setItem("pizzawave-site-setup-rf-target-system", systemShortName);
-  localStorage.setItem("pizzawave-site-setup-rf-validation-subpage", "control");
-  onOpenSetup("RF Validation");
-}
-
-function RfHealthStatusPanel({ data, onOpenSetup, onSelectSite, onSelectCategory }: { data: TrTroubleshoot; onOpenSetup?: (section?: string) => void; onSelectSite: (system: string) => void; onSelectCategory: (category: RfChartCategory) => void }) {
+function RfHealthStatusPanel({ data, onSelectSite, onSelectCategory }: { data: TrTroubleshoot; onSelectSite: (system: string) => void; onSelectCategory: (category: RfChartCategory) => void }) {
   const systems = data.health.systemSummaries ?? [];
   return <div className="tr-summary rf-health-status-panel">
     <div className="tr-site-card-grid">{systems.map(system => {
-      return <article className={`card tr-site-card ${trSystemTone(system.status)}`} key={system.systemShortName} onClickCapture={() => onSelectSite(system.systemShortName)}>
-        <div className="tr-site-card-head"><div><h3>{trSystemDisplayName(system.systemShortName)}</h3></div><div className="tr-site-card-actions"><strong className={`section-status ${trSystemTone(system.status)}`}>{system.status}</strong>{system.status !== "Healthy" && onOpenSetup && <button type="button" className="tiny-button" onClick={() => openRfSetup(system.systemShortName, onOpenSetup)}>Review in Setup</button>}</div></div>
-        <p>{system.summary}</p>
+      return <article className="card tr-site-card" key={system.systemShortName} onClickCapture={() => onSelectSite(system.systemShortName)}>
+        <div className="tr-site-card-head"><h3>{trSystemDisplayName(system.systemShortName)}</h3><span>Current window</span></div>
         <div className="tr-site-facts">
-          <TrSiteFact label="Decode" value={system.ccSummarySamples ? `${system.ccSummaryAvgDecodeRate.toFixed(1)} msg/s` : "N/A"} caption={system.decodeAssessment.baselineValue != null ? `Local ${system.decodeAssessment.baselineValue.toFixed(1)} · strong 40 msg/s` : "40 msg/s strong reference"} assessment={system.decodeAssessment} onClick={() => onSelectCategory("decode")} />
-          <TrSiteFact label="Zero decode" value={system.ccSummarySamples ? `${system.ccSummaryDecodeZeroPercent.toFixed(1)}%` : "N/A"} caption={system.zeroDecodeAssessment.baselineValue != null ? `Local ${system.zeroDecodeAssessment.baselineValue.toFixed(1)}% · ${system.ccSummarySamples.toLocaleString()} samples` : `${system.ccSummarySamples.toLocaleString()} summary samples`} assessment={system.zeroDecodeAssessment} onClick={() => onSelectCategory("decode")} />
-          <TrSiteFact label="Calls" value={system.callsConcluded.toLocaleString()} caption={system.callsAssessment.baselineValue != null ? `${system.callsPerHour.toFixed(1)}/hr · local ${system.callsAssessment.baselineValue.toFixed(1)}/hr` : `${system.callsPerHour.toFixed(1)}/hr in window`} assessment={system.callsAssessment} onClick={() => onSelectCategory("activity")} />
-          <TrSiteFact label="No audio" value={system.noTxRecorded.toLocaleString()} caption={system.callsConcluded ? `${(system.noTxRecorded * 100 / system.callsConcluded).toFixed(1)}%${system.noAudioAssessment.baselineValue != null ? ` · local ${system.noAudioAssessment.baselineValue.toFixed(1)}%` : " of calls"}` : "no concluded calls"} assessment={system.noAudioAssessment} onClick={() => onSelectCategory("activity")} />
-          <TrSiteFact label="Retunes" value={system.retunes.toLocaleString()} caption={system.retunesAssessment.baselineValue != null ? `${system.retunesPerHour.toFixed(1)}/hr · local ${system.retunesAssessment.baselineValue.toFixed(1)}/hr` : `${system.retunesPerHour.toFixed(1)}/hr in window`} assessment={system.retunesAssessment} onClick={() => onSelectCategory("events")} />
+          <TrSiteFact label="Decode" value={system.ccSummarySamples ? `${system.ccSummaryAvgDecodeRate.toFixed(1)} msg/s` : "N/A"} caption={system.decodeAssessment.baselineValue != null ? `Local ${system.decodeAssessment.baselineValue.toFixed(1)} · strong 40 msg/s` : "40 msg/s strong reference"} onClick={() => onSelectCategory("decode")} />
+          <TrSiteFact label="Zero decode" value={system.ccSummarySamples ? `${system.ccSummaryDecodeZeroPercent.toFixed(1)}%` : "N/A"} caption={system.zeroDecodeAssessment.baselineValue != null ? `Local ${system.zeroDecodeAssessment.baselineValue.toFixed(1)}% · ${system.ccSummarySamples.toLocaleString()} samples` : `${system.ccSummarySamples.toLocaleString()} summary samples`} onClick={() => onSelectCategory("decode")} />
+          <TrSiteFact label="Calls" value={system.callsConcluded.toLocaleString()} caption={system.callsAssessment.baselineValue != null ? `${system.callsPerHour.toFixed(1)}/hr · local ${system.callsAssessment.baselineValue.toFixed(1)}/hr` : `${system.callsPerHour.toFixed(1)}/hr in window`} onClick={() => onSelectCategory("activity")} />
+          <TrSiteFact label="No audio" value={system.noTxRecorded.toLocaleString()} caption={system.callsConcluded ? `${(system.noTxRecorded * 100 / system.callsConcluded).toFixed(1)}%${system.noAudioAssessment.baselineValue != null ? ` · local ${system.noAudioAssessment.baselineValue.toFixed(1)}%` : " of calls"}` : "no concluded calls"} onClick={() => onSelectCategory("activity")} />
+          <TrSiteFact label="Retunes" value={system.retunes.toLocaleString()} caption={system.retunesAssessment.baselineValue != null ? `${system.retunesPerHour.toFixed(1)}/hr · local ${system.retunesAssessment.baselineValue.toFixed(1)}/hr` : `${system.retunesPerHour.toFixed(1)}/hr in window`} onClick={() => onSelectCategory("events")} />
         </div>
         <small className="tr-site-freshness">Latest evidence: {new Date(system.lastWindowEndUtc).toLocaleString()}</small>
       </article>;
@@ -11987,8 +12112,8 @@ function RfHealthStatusPanel({ data, onOpenSetup, onSelectSite, onSelectCategory
   </div>;
 }
 
-function TrSiteFact({ label: factLabel, value, caption, assessment, onClick }: { label: string; value: string; caption: string; assessment: TrMetricAssessment; onClick: () => void }) {
-  return <button type="button" className={`tr-site-fact ${assessment.tone}`} title={assessment.detail} aria-label={`${factLabel}: ${value}. ${assessment.detail} Open matching Performance charts.`} onClick={onClick}><span>{factLabel}</span><strong>{value}</strong><small>{caption}</small></button>;
+function TrSiteFact({ label: factLabel, value, caption, onClick }: { label: string; value: string; caption: string; onClick: () => void }) {
+  return <button type="button" className="tr-site-fact" aria-label={`${factLabel}: ${value}. Open matching Performance charts.`} onClick={onClick}><span>{factLabel}</span><strong>{value}</strong><small>{caption}</small></button>;
 }
 
 function trSystemTone(status: string) {
@@ -12009,7 +12134,6 @@ function trDeviceLabel(value: string) {
 function TranscriptionPerformancePanel({ data, rangeHours, onRangeHoursChange, onOpenTalkgroup, onExcludeTalkgroup }: { data: TranscriptionPerformance; rangeHours: number; onRangeHoursChange: (hours: number) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void; onExcludeTalkgroup: (row: TranscriptionGroup) => void }) {
   const usableStatus = transcriptionUsableStatus(data.usablePercent, data.baselineUsablePercent, data.totalCalls);
   const endpoint = data.endpointHealth;
-  const outageMinutes = endpoint?.outageStartedAtUtc ? Math.max(1, Math.floor((Date.now() - new Date(endpoint.outageStartedAtUtc).getTime()) / 60000)) : 0;
   const emptyOutageHint = rangeHours < 168 ? ` Older outages may be available; select ${rangeHours < 48 ? "2d or Week" : "Week"}.` : "";
   return <div className="transcription-performance-panel">
     <SystemPageHeaderControls><div className="calls-performance-toolbar header-controls">
@@ -12018,7 +12142,6 @@ function TranscriptionPerformancePanel({ data, rangeHours, onRangeHoursChange, o
         {[{ hours: 24, text: "24h" }, { hours: 48, text: "2d" }, { hours: 168, text: "Week" }].map(option => <button type="button" key={option.hours} className={rangeHours === option.hours ? "active" : ""} onClick={() => onRangeHoursChange(option.hours)}>{option.text}</button>)}
       </div>
     </div></SystemPageHeaderControls>
-    {endpoint?.outageConfirmed && <div className="card service-issue-card"><strong>Remote transcription has been unavailable for about {outageMinutes} minute(s).</strong><p>{endpoint.lastError || "The configured endpoint did not answer its health check."}</p><span className="muted">New calls remain pending and will be retried after recovery.</span></div>}
     <details className="card transcription-outage-history"><summary>Endpoint Outage History ({data.endpointOutages?.length ?? 0} in this window)</summary>{data.endpointOutages?.length ? <div className="transcription-table-scroll"><table className="table compact-table"><thead><tr><th>Started</th><th>Duration</th><th>State</th><th>Model</th><th>Administrative email</th><th>Last evidence</th></tr></thead><tbody>{data.endpointOutages.map(outage => { const started = new Date(outage.startedAtUtc); const recovered = outage.recoveredAtUtc ? new Date(outage.recoveredAtUtc) : null; const durationMinutes = Math.max(0, ((recovered?.getTime() ?? Date.now()) - started.getTime()) / 60000); return <tr key={outage.id}><td>{started.toLocaleString()}</td><td>{formatDurationMinutes(durationMinutes)}</td><td><span className={`section-status ${recovered ? "ok" : "error"}`}>{recovered ? "Recovered" : "Active"}</span></td><td>{outage.reportedModel || outage.expectedModel || "--"}</td><td>{outage.administrativeEmailSent ? "Sent" : "Not sent"}</td><td>{outage.lastError || "--"}</td></tr>; })}</tbody></table></div> : <p className="muted">No remote transcription endpoint outages were recorded in the selected window.{emptyOutageHint}</p>}</details>
     <div className="section kpis transcription-kpis">
       <Kpi label="Transcription Completion" value={`${data.completedCalls.toLocaleString()} / ${data.totalCalls.toLocaleString()}`} status={data.totalCalls < 10 ? "neutral" : data.completionPercent >= 99 ? "ok" : data.completionPercent >= 95 ? "warning" : "error"} subtext={`${data.completionPercent.toFixed(1)}% · PizzaWave reference ≥99%`} />
@@ -12217,7 +12340,7 @@ function MetricTable({ title, rows, issuesFirst = false, technicalNotes = false 
   return <div className="card"><h3>{title}</h3>{issuesFirst && issueRows.length === 0 ? <p className="settings-message ok">No issues detected.</p> : <table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(issuesFirst ? issueRows : rows)}</tbody></table>}{issuesFirst && normalRows.length > 0 && <details><summary>{normalRows.length} normal signal{normalRows.length === 1 ? "" : "s"}</summary><table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(normalRows)}</tbody></table></details>}</div>;
 }
 
-function TrHealthChartView({ chart, showBaselineNote = true, showTitle = true }: { chart: TrHealthChart; showBaselineNote?: boolean; showTitle?: boolean }) {
+function TrHealthChartView({ chart, annotations = [], showBaselineNote = true, showTitle = true }: { chart: TrHealthChart; annotations?: SystemRecommendation["episodes"]; showBaselineNote?: boolean; showTitle?: boolean }) {
   const colors = ["#62c6ff", "#ffcf5a", "#7ee081", "#ff6b5a"];
   const rawMax = Math.max(1, ...chart.series.flatMap(s => s.values));
   const magnitude = Math.pow(10, Math.floor(Math.log10(rawMax / 4 || 1)));
@@ -12230,12 +12353,18 @@ function TrHealthChartView({ chart, showBaselineNote = true, showTitle = true }:
   const y = (v: number) => top + plotH - (v / max) * plotH;
   const yTicks = Array.from({ length: 5 }, (_, index) => index * max / 4);
   const xIndexes = Array.from(new Set([0, .25, .5, .75, 1].map(position => Math.round(position * Math.max(0, chart.labels.length - 1)))));
+  const labelTimes = chart.labels.map(value => new Date(value).getTime());
+  const chartStart = labelTimes[0] ?? 0;
+  const chartEnd = labelTimes[labelTimes.length - 1] ?? chartStart;
+  const annotationBands = annotations.filter(row => new Date(row.endUtc).getTime() >= chartStart && new Date(row.startUtc).getTime() <= chartEnd);
+  const xTime = (value: string) => left + Math.max(0, Math.min(1, (new Date(value).getTime() - chartStart) / Math.max(1, chartEnd - chartStart))) * plotW;
   const seriesColor = (series: TrHealthChart["series"][number], index: number) => series.label === "Strong reference" ? "#9faab5" : series.isBaseline ? "#d7ecff" : colors[index % colors.length];
   return <div className="card tr-chart-card">
     {showTitle && <h3>{chart.title}</h3>}
     <p className="muted">{chart.yAxisLabel} · {chart.labels.length.toLocaleString()} time buckets</p>
     {showBaselineNote && chart.baselineNote && <p className="baseline-note">{chart.baselineNote}</p>}
     <svg className="chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`${chart.title} over time`}>
+      {annotationBands.map(row => { const startX = xTime(row.startUtc); const endX = xTime(row.endUtc); return <rect className={`finding-episode-band severity-${row.severity}`} x={startX} y={top} width={Math.max(3, endX - startX)} height={plotH} key={row.episodeKey}><title>Finding episode: {new Date(row.startUtc).toLocaleString()} to {new Date(row.endUtc).toLocaleString()} · {row.conditions.map(label).join(", ")}</title></rect>; })}
       <line className="axis" x1={left} y1={top} x2={left} y2={top + plotH} />
       <line className="axis" x1={left} y1={top + plotH} x2={left + plotW} y2={top + plotH} />
       {yTicks.map(value => <g key={value}><line className="chart-grid-line" x1={left} y1={y(value)} x2={left + plotW} y2={y(value)} /><text className="chart-label" x={left - 7} y={y(value) + 4} textAnchor="end">{formatChartValue(value, chart.valueFormat)}</text></g>)}

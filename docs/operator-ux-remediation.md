@@ -8,19 +8,19 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 9 - Temporal Pattern Analysis
-- Current milestone: Package 8 System Information Quality is complete,
-  deployed, live-verified, and operator-accepted. Package 7 is deferred as a
-  standalone outstanding feature outside this closeout sequence. Package 5 is
-  complete, deployed, live-verified, and operator-accepted.
-- Continuation branch: `main`
-- Last deployed code state: Package 5 closure remediation on the merged
-  redesign, commit `8d6d5bd`, deployed 2026-07-17
-- Latest tracker commit before closure: `5ac9854`
-- Operator verification: Packages 1, 2, 3, 4, 5, 6, and 8 accepted
-- Next action: complete Package 9 Temporal Pattern Analysis, then Package 10
-  Recovery Workflows and Package 11 Cleanup/final regression. Do not restart
-  Trunk Recorder or otherwise disturb parallel RF experiments.
+- Active package: 10 - Recovery Workflows
+- Current milestone: Package 9 is complete, deployed to the RPI, live-verified,
+  and operator-accepted. Package 7 remains a standalone outstanding feature
+  outside this closeout sequence.
+- Continuation branch: start a new task-specific branch from `main` for Package 10.
+- Last deployed code state: Package 9 RF temporal findings, consolidated
+  Recommendations UX, finding drawer, grouped History, and operator workflow,
+  deployed to the RPI 2026-07-17.
+- Package 9 final implementation commit before documentation closure: `2b6caa4`
+- Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, and 9 accepted
+- Next action: complete Package 10 Recovery Workflows, including encrypted
+  portable backups, then Package 11 Cleanup/final regression. Do not restart
+  Trunk Recorder unless the operator explicitly requests it.
 
 ## Package 5 Final Handoff
 
@@ -630,18 +630,95 @@ Section acceptance checkpoints:
 
 ### 9. Temporal Pattern Analysis
 
-Status: pending; scoped during Package 8 interview
+Status: complete, deployed, live-verified, and operator-accepted
 
-- [ ] Detect sustained outages, recurring time-of-day/day-of-week patterns,
-  trends, spikes, drops, and correlated signals across RF, transcription,
-  talkgroup traffic, incident processing, queues, runtime, and USB evidence.
-- [ ] Use a hybrid contract: retain community targets such as 40 TR messages/s
+Accepted design:
+
+- Store immutable measurements as evidence, typed signal interpretations as
+  conditions, correlated time-bounded behavior as episodes, recurrence or
+  persistence across episodes as patterns, and downstream consequences as
+  impacts. Operator-facing findings wrap episodes, patterns, or standing target
+  gaps. Relationships form an evidence graph rather than a strict tree.
+- Consolidate related conditions into one actionable parent Recommendation.
+  Contributing conditions remain visible in its evidence and on the owning
+  Performance charts, but do not appear as separate Recommendation cards.
+- Scope findings to the narrowest evidence-supported owner (site, SDR/source,
+  RF path, rig, or downstream subsystem) and roll upward only when correlation
+  supports it. Keep observed scope separate from cause hypotheses.
+- Represent repeated symptom signatures, cadence, schedule association,
+  persistence, and trends independently. A reliable twice-weekly signature is
+  meaningful even without a stable day or time. Materially different symptom
+  signatures remain separate patterns.
+- Keep community targets visible even when a mature local baseline is worse.
+  Local normality may prevent false anomaly claims but never turns a target gap
+  into healthy performance.
+- Use deterministic typed detectors as the authority for episodes, patterns,
+  severity, confidence, equivalence, and material change. AI may summarize or
+  phrase hypotheses but cannot invent evidence or own product behavior.
+- Separate operator workflow state from derived activity. Workflow states are
+  New, Unresolved, Investigating, Known Issue, Monitoring, Resolved, and
+  Dismissed. Only operators change workflow state after creation; PizzaWave
+  owns severity, confidence, activity, correlations, and evidence updates.
+- Audit every PizzaWave and operator action. Notes are append-only. Operators
+  can confirm or reject cause hypotheses, merge or split ambiguous patterns,
+  mark historical maintenance intervals, and adjust status without altering
+  measurements.
+- A Known Issue leaves the primary action queue, accumulates matching episodes,
+  and returns through a scheduled review summary or a material change. It is
+  promoted immediately only when severity, scope, cadence, signature, or
+  downstream impact materially changes. Dismissal can apply to one occurrence
+  or the same structured owner/signature; neither uses exact decimal equality.
+- Determine equivalence from typed condition/direction/co-occurrence features,
+  ownership, duration/recurrence shape, impact types, severity bands, and
+  baseline-aware statistical materiality. Raw decimal values remain evidence,
+  not identity keys.
+- Extend Recommendations with Active, Known Issues, and History views. Finding
+  detail owns episodes, pattern/cadence, impacts, hypotheses, notes, audit, and
+  diagnostic actions. Existing Performance charts remain the evidence owner;
+  finding deep links select the entity/time range and render structured episode
+  bands, condition markers, targets, and baselines rather than screenshots.
+- Treat severity, finding confidence, and cause-hypothesis confidence as
+  separate values. Cross-domain relationships distinguish co-occurrence,
+  precedence, correlation, suspected contribution, and operator-confirmed
+  cause; correlation is never stated as proof.
+- Evaluate active episodes every five minutes, patterns hourly, and deeper
+  calendar/baseline relationships daily. Exclude insufficient coverage from
+  denominators and report observable windows explicitly.
+- Preserve intentional maintenance and deployment periods as audited chart
+  evidence while excluding them from baseline learning. The deploy helper owns
+  an explicit start/end maintenance handshake; unexplained service restarts are
+  not excluded automatically.
+- Implement RF first end to end. The operator accepted that vertical slice and
+  the shared Recommendations contracts as the Package 9 closure scope; extending
+  temporal detectors to other domains is future product work.
+
+RF implementation delivered 2026-07-17:
+
+- Deterministic 28-day RF episode and recurrence analysis now groups decimal
+  variations by typed symptom signature and recognizes regular recurrence even
+  without consecutive days or a fixed schedule.
+- One parent RF finding per configured site consolidates decode loss, control
+  instability, general RF degradation, and capture degradation patterns. Typed
+  episodes remain distinct below the parent instead of flooding the action queue.
+- Active, Known Issues, and History views expose operator-owned workflow state,
+  derived activity, append-only notes, cause hypotheses, and a complete audit.
+- Direct links select the owning RF Performance page and render stored episode
+  intervals as chart overlays. Existing RF charts and the 40 msg/s reference remain.
+- The direct-deploy helper records explicit start/end maintenance intervals;
+  these remain audited evidence and are excluded from pattern baselines.
+- RPI live verification showed two parent RF findings for the two configured
+  sites, no legacy RF cards in Active, and 64 visible episode bands for the
+  selected ETV finding. Trunk Recorder remained PID 1595 with its July 11 start.
+
+- [x] Detect sustained outages, recurrence, schedule association, trends,
+  spikes, drops, and correlated typed symptoms for the RF-first vertical.
+- [x] Use a hybrid contract: retain community targets such as 40 TR messages/s
   while learning a rig-local baseline that never hides the stronger target.
-- [ ] Surface concise findings in Recommendations and detailed evidence on the
+- [x] Surface concise findings in Recommendations and detailed evidence on the
   owning Metrics page; preserve reviewed/resolved finding history for 90 days.
-- [ ] Begin provisional recurrence findings after three comparable days and
+- [x] Begin provisional recurrence findings after three comparable days and
   mature local baselines over approximately 28 days.
-- [ ] Test, deploy, verify, and obtain operator acceptance.
+- [x] Test, deploy, verify, and obtain operator acceptance.
 
 ### 10. Recovery Workflows
 
@@ -1937,3 +2014,11 @@ Status: pending
   Its accepted design and persistence/timing foundation remain the handoff, but
   no additional Package 7 implementation will be done in this remediation
   closeout. Active work advances to Packages 9, 10, and 11.
+- 2026-07-17: The operator accepted and closed Package 9 after the RF-first
+  temporal-finding implementation and Recommendations UX closeout. The final
+  UI uses concise severity/type cards, visually receded Dormant findings, a
+  focused opaque drawer with operator notes and paginated activity, and a
+  grouped History ledger that collapsed 262 live history records to 24 rows.
+  All 502 tests passed; the final web-only deployment left Trunk Recorder at
+  PID 1595 with its unchanged July 11 start. Cross-domain temporal-detector
+  expansion remains future product work and is not a Package 9 closure blocker.

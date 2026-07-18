@@ -1131,6 +1131,14 @@ app.MapGet("/api/v1/system/recommendations", async (HttpContext context, AuthSer
 .WithName("SystemRecommendations")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/recommendations/summary", async (HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await recommendations.BuildSummaryAsync(context.RequestAborted));
+})
+.WithName("SystemRecommendationsSummary")
+.WithOpenApi();
+
 app.MapPost("/api/v1/system/recommendations/{id}/reviewed", async (string id, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
@@ -1138,6 +1146,75 @@ app.MapPost("/api/v1/system/recommendations/{id}/reviewed", async (string id, Ht
     return Results.NoContent();
 })
 .WithName("SystemRecommendationReviewed")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/recommendations/findings/{findingId:long}/state", async (long findingId, RecommendationFindingStateRequest request, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return await recommendations.SetWorkflowAsync(findingId, request, context.RequestAborted)
+            ? Results.NoContent()
+            : Results.NotFound();
+    }
+    catch (ArgumentException error)
+    {
+        return Results.BadRequest(new { error = error.Message });
+    }
+})
+.WithName("SystemRecommendationFindingState")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/recommendations/findings/{findingId:long}/notes", async (long findingId, RecommendationFindingNoteRequest request, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return await recommendations.AddNoteAsync(findingId, request, context.RequestAborted)
+            ? Results.NoContent()
+            : Results.NotFound();
+    }
+    catch (ArgumentException error)
+    {
+        return Results.BadRequest(new { error = error.Message });
+    }
+})
+.WithName("SystemRecommendationFindingNote")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/maintenance", async (DateTime? startUtc, DateTime? endUtc, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var end = (endUtc ?? DateTime.UtcNow).ToUniversalTime();
+    var start = (startUtc ?? end.AddDays(-28)).ToUniversalTime();
+    return Results.Ok(await recommendations.ListMaintenanceAsync(start, end, context.RequestAborted));
+})
+.WithName("SystemMaintenanceIntervals")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/maintenance", async (MaintenanceIntervalRequest request, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    try
+    {
+        return Results.Ok(await recommendations.CreateMaintenanceAsync(request, context.RequestAborted));
+    }
+    catch (ArgumentException error)
+    {
+        return Results.BadRequest(new { error = error.Message });
+    }
+})
+.WithName("SystemMaintenanceCreate")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/maintenance/{id:long}/close", async (long id, HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return await recommendations.CloseMaintenanceAsync(id, context.RequestAborted)
+        ? Results.NoContent()
+        : Results.NotFound();
+})
+.WithName("SystemMaintenanceClose")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/cpu", async (HttpContext context, AuthService authService, SystemCpuSnapshotService cpu) =>

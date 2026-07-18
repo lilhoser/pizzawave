@@ -9,7 +9,7 @@ public sealed class SystemRecommendationService
     private static readonly Regex RetuneTargetRegex = new(
         @"\[(?<scope>[^\]]+)\]\s+Retuning to Control Channel:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly TimeSpan RecommendationCacheTtl = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RecommendationCacheTtl = TimeSpan.FromMinutes(5);
     private const long CriticalRemoteBandwidthBytesPerDay = 1_000_000_000;
 
     private readonly EngineConfig _config;
@@ -81,6 +81,13 @@ public sealed class SystemRecommendationService
         }
 
         return result;
+    }
+
+    public async Task<SystemRecommendationSummaryDto> BuildSummaryAsync(CancellationToken ct)
+    {
+        var result = await BuildAsync(ct);
+        return new(result.OpenCount, result.ProblemCount, result.ImprovementCount,
+            result.HighCount, result.MediumCount, result.LowCount, result.KnownIssues.Count);
     }
 
     private async Task<SystemRecommendationsDto> BuildCoreAsync(CancellationToken ct)
@@ -435,51 +442,80 @@ public sealed class SystemRecommendationService
             ? await BuildRetuneTargetDiagnosticsAsync(rfEvidenceStart, rfEvidenceEnd, ct)
             : [];
         var rfAssessments = await _trHealth.BuildSystemAssessmentsAsync(healthStart, new DateTimeOffset(now).ToUnixTimeSeconds(), "7d", ct);
-        foreach (var assessment in rfAssessments
-            .Where(system => system.IsIssue && !string.Equals(system.Status, "Insufficient data", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(system => system.Status is "Unavailable" or "Critical")
-            .ThenBy(system => system.SystemShortName, StringComparer.OrdinalIgnoreCase))
+        var temporalStartUtc = now.AddDays(-28);
+        var temporalSamples = await _database.ListHealthSamplesAsync(new DateTimeOffset(temporalStartUtc).ToUnixTimeSeconds(), new DateTimeOffset(now).ToUnixTimeSeconds(), ct);
+        var maintenanceIntervals = await _database.ListMaintenanceIntervalsAsync(temporalStartUtc, now, ct);
+        var currentRfOwners = rfAssessments.Select(row => row.SystemShortName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var temporalFindings = RfTemporalFindingAnalyzer.Analyze(temporalSamples, maintenanceIntervals, now)
+            .Where(row => currentRfOwners.Contains(row.OwnerKey))
+            .GroupBy(row => row.OwnerKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var patterns = group.OrderBy(row => row.Signature, StringComparer.OrdinalIgnoreCase).ToList();
+                var episodes = patterns.SelectMany(row => row.Episodes).OrderBy(row => row.StartUtc).ToList();
+                var confidence = patterns.Any(row => row.Confidence == "high") ? "high" : patterns.Any(row => row.Confidence == "medium") ? "medium" : "provisional";
+                var severity = patterns.Any(row => row.Severity == "high") ? "high" : "medium";
+                var schedule = string.Join(" ", patterns.Select(row => $"{RfPatternLabel(row.Signature)}: {row.ScheduleSummary}"));
+                return new RfTemporalFindingDto(group.Key, "systemic-rf-degradation", severity, confidence, patterns.Any(row => row.IsActive), patterns.Sum(row => row.OccurrencesPerWeek), schedule,
+                    patterns.SelectMany(row => row.Conditions).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList(), episodes);
+            })
+            .ToList();
+        foreach (var finding in temporalFindings
+            .OrderByDescending(row => row.IsActive)
+            .ThenByDescending(row => SeverityRank(row.Severity))
+            .ThenBy(row => row.OwnerKey, StringComparer.OrdinalIgnoreCase))
         {
             if (liveTrActivity.Stale)
                 continue;
-            var affectedLabel = SystemDisplayName(assessment.SystemShortName);
-            var affectedSystem = currentBySystemAll.FirstOrDefault(system => string.Equals(system.Scope, assessment.SystemShortName, StringComparison.OrdinalIgnoreCase));
+            var affectedLabel = SystemDisplayName(finding.OwnerKey);
+            var assessment = rfAssessments.FirstOrDefault(row => string.Equals(row.SystemShortName, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
+            var affectedSystem = currentBySystemAll.FirstOrDefault(system => string.Equals(system.Scope, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
             var currentRate = affectedSystem == null ? 0 : affectedSystem.DecodeRateTotal / Math.Max(1d, affectedSystem.DecodeLines);
-            var twoHourSystem = bySystemAll.FirstOrDefault(system => string.Equals(system.Scope, assessment.SystemShortName, StringComparison.OrdinalIgnoreCase));
+            var twoHourSystem = bySystemAll.FirstOrDefault(system => string.Equals(system.Scope, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
             var twoHourRate = twoHourSystem == null ? 0 : twoHourSystem.DecodeRateTotal / Math.Max(1d, twoHourSystem.DecodeLines);
             var scopedRetuneTargets = retuneTargets
-                .Where(target => string.Equals(target.Scope, assessment.SystemShortName, StringComparison.OrdinalIgnoreCase))
+                .Where(target => string.Equals(target.Scope, finding.OwnerKey, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             var retuneTargetText = FormatRetuneTargetSummary(scopedRetuneTargets);
             var peerSummary = string.Join(", ", currentBySystemAll
-                .Where(system => !string.Equals(system.Scope, assessment.SystemShortName, StringComparison.OrdinalIgnoreCase) && system.DecodeLines >= 3)
+                .Where(system => !string.Equals(system.Scope, finding.OwnerKey, StringComparison.OrdinalIgnoreCase) && system.DecodeLines >= 3)
                 .OrderByDescending(system => system.DecodeRateTotal / Math.Max(1d, system.DecodeLines))
                 .Take(2)
                 .Select(system => $"{SystemDisplayName(system.Scope)} is {system.DecodeRateTotal / Math.Max(1d, system.DecodeLines):F1} msg/s"));
             var currentDetail = affectedSystem == null
                 ? $"No complete per-site samples were available in the last {rfCurrentWindowMinutes} minutes."
                 : $"Over the last {rfCurrentWindowMinutes} minutes, it averaged {currentRate:F1} msg/s, {affectedSystem.DecodeZeroPct:F1}% of {affectedSystem.DecodeLines:N0} periodic samples were zero, and TR retuned {affectedSystem.Retunes:N0} time(s).";
-            var detail = $"{assessment.Summary} {currentDetail}"
+            var detail = $"PizzaWave grouped {finding.Episodes.Count:N0} matching RF episode(s), about {finding.OccurrencesPerWeek:F1} per week. {finding.ScheduleSummary} {currentDetail}"
                 + (twoHourSystem == null ? string.Empty : $" Its two-hour context is {twoHourRate:F1} msg/s, {twoHourSystem.DecodeZeroPct:F1}% zero samples, and {twoHourSystem.Retunes:N0} retune(s) across {twoHourSystem.DecodeLines:N0} samples.")
-                + " The same localized assessment shown in RF Performance owns this finding; 40 msg/s remains the strong-system reference."
+                + " RF Performance owns the underlying charts; 40 msg/s remains the strong-system reference."
                 + (string.IsNullOrWhiteSpace(retuneTargetText) ? string.Empty : $" Recent retune targets: {retuneTargetText}.")
                 + (string.IsNullOrWhiteSpace(peerSummary) ? string.Empty : $" Other monitored-system context: {peerSummary}.");
-            var highSeverity = assessment.Status is "Unavailable" or "Critical";
-            var siteDiagnostics = BuildRfAssessmentDiagnostics(assessment).Concat(scopedRetuneTargets.Select(target => new RecommendationDiagnosticDto(
+            var siteDiagnostics = (assessment == null ? [] : BuildRfAssessmentDiagnostics(assessment)).Concat(scopedRetuneTargets.Select(target => new RecommendationDiagnosticDto(
                 $"Retune target {affectedLabel}",
                 $"{target.FrequencyMHz} MHz x {target.Count:N0}",
                 "info",
                 $"Observed in the last {rfCurrentWindowMinutes} minutes of trunk-recorder journald."))).ToList();
+            var patternCount = finding.Episodes.Select(row => row.Signature).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            var title = $"{affectedLabel} shows recurring RF degradation";
             rows.Add(new SystemRecommendationDto(
-                $"tr-rf-stability:{assessment.SystemShortName}",
+                $"tr-rf-temporal:{finding.OwnerKey}",
                 "trunk-recorder",
-                highSeverity ? "high" : "medium",
-                highSeverity ? $"{affectedLabel} control channel is unavailable" : $"{affectedLabel} RF performance needs review",
-                detail,
+                finding.Severity,
+                title,
+                $"{patternCount:N0} typed behavioral pattern(s) roll up into this site finding. {detail}",
                 $"Open RF Performance and review the yellow or red site metrics for {affectedLabel}; do not change healthy systems based on this finding.",
-                new RecommendationTargetDto("tr", "metrics", assessment.SystemShortName),
+                new RecommendationTargetDto("tr", "metrics", finding.OwnerKey),
                 [])
-                { Runbook = BuildRunbook("tr-rf-stability") with { Diagnostics = siteDiagnostics } });
+                {
+                    ActivityState = finding.IsActive ? "active" : "quiet",
+                    Confidence = finding.Confidence,
+                    OwnerType = "site",
+                    OwnerKey = finding.OwnerKey,
+                    Signature = finding.Signature,
+                    Episodes = finding.Episodes,
+                    Hypotheses = BuildRfHypotheses(finding),
+                    Runbook = BuildRunbook("tr-rf-stability") with { Diagnostics = siteDiagnostics }
+                });
         }
         var currentResourcePressure = hasFreshResourceSample && (currentTrCpuHostPct >= 75
             || currentTrRssMb >= 1536
@@ -600,6 +636,7 @@ public sealed class SystemRecommendationService
             active.Count(r => r.Severity == "medium"),
             active.Count(r => r.Severity == "low"),
             active,
+            findings.KnownIssues,
             recentlyResolved,
             findings.Resolved);
     }
@@ -644,6 +681,35 @@ public sealed class SystemRecommendationService
         ];
     }
 
+    private static IReadOnlyList<RecommendationHypothesisDto> BuildRfHypotheses(RfTemporalFindingDto finding)
+    {
+        var decodeRelated = finding.Conditions.Any(value => value.StartsWith("decode_", StringComparison.OrdinalIgnoreCase));
+        var retuneRelated = finding.Conditions.Contains("retunes_elevated", StringComparer.OrdinalIgnoreCase);
+        var captureRelated = finding.Conditions.Contains("no_audio_elevated", StringComparer.OrdinalIgnoreCase);
+        return
+        [
+            new("tr_configuration", "Trunk Recorder configuration", "suspected contributor", "low", decodeRelated || retuneRelated
+                ? "Control-channel definitions, center frequency, source coverage, and recorder availability can produce this symptom signature. Configuration has not been proven as the cause."
+                : "Configuration remains a possible contributor but current evidence does not isolate it."),
+            new("sdr", "SDR device or calibration", "suspected contributor", "low", decodeRelated || retuneRelated
+                ? "Device stability and frequency correction can affect decode and retune behavior. No device-specific fault is confirmed."
+                : "The current episode evidence does not isolate an SDR fault."),
+            new("rf_path", "RF path", "suspected contributor", "low", decodeRelated || captureRelated
+                ? "Antenna placement, connectors, feedline, splitters, and terminals can affect this site. The finding does not identify which component, if any, is responsible."
+                : "The RF path remains plausible but is not distinguished by the current evidence."),
+            new("environment", "Environmental interference", "suspected contributor", "low", "Interference or changing propagation can create recurring episodes, particularly when a time association emerges. Correlation is not confirmation."),
+            new("site_behavior", "Transmitter or site behavior", "suspected contributor", "low", "The monitored site itself may change behavior. Peer-site and maintenance context should be reviewed before attributing the pattern locally.")
+        ];
+    }
+
+    private static string RfPatternLabel(string signature) => signature switch
+    {
+        "decode-loss" => "Decode loss",
+        "control-instability" => "Control instability",
+        "capture-degradation" => "Capture degradation",
+        _ => "RF degradation"
+    };
+
     private static SystemRecommendationDto EnrichRecommendation(SystemRecommendationDto recommendation)
     {
         var kind = recommendation.Id is "priority-low-value-audio" ? "improvement" : "problem";
@@ -652,6 +718,7 @@ public sealed class SystemRecommendationService
             "queue-pressure" => "Last 10 minutes",
             "remote-transcription-bandwidth-critical" => "Last 24 hours",
             "recoverable-transcription-failures" => "Last 24 hours",
+            var id when id.StartsWith("tr-rf-temporal:", StringComparison.OrdinalIgnoreCase) => "Matching RF episodes in the last 28 days",
             var id when id.StartsWith("tr-rf-stability:", StringComparison.OrdinalIgnoreCase) => "Current 15 minutes; 2-hour context",
             "tr-resource-pressure" => "Latest sample; 2-hour peaks",
             "priority-low-value-audio" => "Recent captured audio and incident yield",
@@ -692,6 +759,43 @@ public sealed class SystemRecommendationService
 
     public Task MarkReviewedAsync(string recommendationId, CancellationToken ct) =>
         _database.MarkRecommendationReviewedAsync(recommendationId, DateTime.UtcNow, ct);
+
+    public async Task<bool> SetWorkflowAsync(long findingId, RecommendationFindingStateRequest request, CancellationToken ct)
+    {
+        var changed = await _database.SetRecommendationWorkflowAsync(findingId, request, DateTime.UtcNow, ct);
+        if (changed) InvalidateCache();
+        return changed;
+    }
+
+    public async Task<bool> AddNoteAsync(long findingId, RecommendationFindingNoteRequest request, CancellationToken ct)
+    {
+        var changed = await _database.AddRecommendationNoteAsync(findingId, request.Note, DateTime.UtcNow, ct);
+        if (changed) InvalidateCache();
+        return changed;
+    }
+
+    public Task<IReadOnlyList<MaintenanceIntervalDto>> ListMaintenanceAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct) =>
+        _database.ListMaintenanceIntervalsAsync(startUtc, endUtc, ct);
+
+    public async Task<MaintenanceIntervalDto> CreateMaintenanceAsync(MaintenanceIntervalRequest request, CancellationToken ct)
+    {
+        var row = await _database.CreateMaintenanceIntervalAsync(request, DateTime.UtcNow, ct);
+        InvalidateCache();
+        return row;
+    }
+
+    public async Task<bool> CloseMaintenanceAsync(long id, CancellationToken ct)
+    {
+        var changed = await _database.CloseMaintenanceIntervalAsync(id, DateTime.UtcNow, ct);
+        if (changed) InvalidateCache();
+        return changed;
+    }
+
+    private void InvalidateCache()
+    {
+        _cachedRecommendations = null;
+        _cachedRecommendationsAt = DateTimeOffset.MinValue;
+    }
 
     private static bool HasCurrentThrottleFlag(string flags)
     {
@@ -972,6 +1076,7 @@ public sealed record SystemRecommendationDto(
     RecommendationTargetDto Target,
     IReadOnlyList<RecommendationActionDto> Actions)
 {
+    public long FindingId { get; init; }
     public string Kind { get; init; } = "problem";
     public string EvidenceWindow { get; init; } = "Current evidence";
     public string DestinationLabel { get; init; } = "Owning System page";
@@ -981,6 +1086,18 @@ public sealed record SystemRecommendationDto(
     public string LastSeenUtc { get; init; } = "";
     public string ResolvedAtUtc { get; init; } = "";
     public string Resolution { get; init; } = "";
+    public string WorkflowStatus { get; init; } = "new";
+    public string ActivityState { get; init; } = "active";
+    public string Confidence { get; init; } = "medium";
+    public string OwnerType { get; init; } = "system";
+    public string OwnerKey { get; init; } = "";
+    public string Signature { get; init; } = "";
+    public string NextReviewUtc { get; init; } = "";
+    public bool ReviewDue { get; init; }
+    public IReadOnlyList<RfTemporalEpisodeDto> Episodes { get; init; } = [];
+    public int EpisodeCount { get; init; }
+    public IReadOnlyList<RecommendationFindingEventDto> Audit { get; init; } = [];
+    public IReadOnlyList<RecommendationHypothesisDto> Hypotheses { get; init; } = [];
     public RecommendationRunbookDto? Runbook { get; init; }
     public RecommendationBaselineInfoDto? Baseline { get; init; }
 }
@@ -1062,9 +1179,50 @@ public sealed record SystemRecommendationsDto(
     int MediumCount,
     int LowCount,
     IReadOnlyList<SystemRecommendationDto> Items,
+    IReadOnlyList<SystemRecommendationDto> KnownIssues,
     IReadOnlyList<SystemRecommendationDto> RecentlyResolved,
     IReadOnlyList<SystemRecommendationDto> History);
 
+public sealed record SystemRecommendationSummaryDto(
+    int OpenCount,
+    int ProblemCount,
+    int ImprovementCount,
+    int HighCount,
+    int MediumCount,
+    int LowCount,
+    int KnownIssueCount);
+
 public sealed record RecommendationFindingSyncResult(
     IReadOnlyList<SystemRecommendationDto> Active,
+    IReadOnlyList<SystemRecommendationDto> KnownIssues,
     IReadOnlyList<SystemRecommendationDto> Resolved);
+
+public sealed record RecommendationFindingStateRequest(
+    string Status,
+    string Note = "",
+    int? ReviewInDays = null);
+
+public sealed record RecommendationFindingNoteRequest(string Note);
+
+public sealed record RecommendationFindingEventDto(
+    long Id,
+    string EventType,
+    string Actor,
+    string Detail,
+    string DetailsJson,
+    DateTime CreatedAtUtc);
+
+public sealed record RecommendationHypothesisDto(
+    string Kind,
+    string Label,
+    string Status,
+    string Confidence,
+    string Rationale);
+
+public sealed record MaintenanceIntervalRequest(
+    string Source,
+    string Reason,
+    DateTime? StartUtc = null,
+    DateTime? EndUtc = null,
+    bool ExcludeFromBaselines = true,
+    string DetailsJson = "{}");

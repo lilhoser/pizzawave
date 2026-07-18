@@ -5,7 +5,7 @@ namespace pizzad.Tests;
 public sealed class RecommendationFindingLifecycleTests
 {
     [Fact]
-    public async Task FindingsMoveFromNewToReviewedToResolvedAndCanRecur()
+    public async Task OperatorOwnsWorkflowWhileEvidenceActivityChangesIndependently()
     {
         var root = Path.Combine(Path.GetTempPath(), "pizzawave-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -29,15 +29,25 @@ public sealed class RecommendationFindingLifecycleTests
             var first = await database.SyncRecommendationFindingsAsync([finding], now, CancellationToken.None);
             Assert.Equal("new", Assert.Single(first.Active).Lifecycle);
 
-            await database.MarkRecommendationReviewedAsync(finding.Id, now.AddMinutes(1), CancellationToken.None);
-            var reviewed = await database.SyncRecommendationFindingsAsync([finding], now.AddMinutes(2), CancellationToken.None);
-            Assert.Equal("active", Assert.Single(reviewed.Active).Lifecycle);
+            Assert.True(await database.SetRecommendationWorkflowAsync(first.Active[0].FindingId, new("investigating", "Checking the RF path."), now.AddMinutes(1), CancellationToken.None));
+            var investigating = await database.SyncRecommendationFindingsAsync([finding], now.AddMinutes(2), CancellationToken.None);
+            Assert.Equal("investigating", Assert.Single(investigating.Active).WorkflowStatus);
+            Assert.Contains(investigating.Active[0].Audit, row => row.EventType == "workflow_changed" && row.Actor == "operator");
 
-            var resolved = await database.SyncRecommendationFindingsAsync([], now.AddMinutes(3), CancellationToken.None);
-            Assert.Empty(resolved.Active);
-            Assert.Equal("resolved", Assert.Single(resolved.Resolved).Lifecycle);
+            var quiet = await database.SyncRecommendationFindingsAsync([], now.AddMinutes(3), CancellationToken.None);
+            Assert.Equal("investigating", Assert.Single(quiet.Active).WorkflowStatus);
+            Assert.Equal("quiet", quiet.Active[0].ActivityState);
 
-            var recurred = await database.SyncRecommendationFindingsAsync([finding], now.AddMinutes(4), CancellationToken.None);
+            Assert.True(await database.SetRecommendationWorkflowAsync(quiet.Active[0].FindingId, new("known_issue", "External interference; review weekly.", 7), now.AddMinutes(4), CancellationToken.None));
+            var known = await database.SyncRecommendationFindingsAsync([], now.AddMinutes(5), CancellationToken.None);
+            Assert.Empty(known.Active);
+            Assert.Equal("known_issue", Assert.Single(known.KnownIssues).WorkflowStatus);
+
+            Assert.True(await database.SetRecommendationWorkflowAsync(known.KnownIssues[0].FindingId, new("resolved", "RF path repaired."), now.AddMinutes(6), CancellationToken.None));
+            var resolved = await database.SyncRecommendationFindingsAsync([], now.AddMinutes(7), CancellationToken.None);
+            Assert.Equal("resolved", Assert.Single(resolved.Resolved).WorkflowStatus);
+
+            var recurred = await database.SyncRecommendationFindingsAsync([finding], now.AddMinutes(8), CancellationToken.None);
             Assert.Equal("new", Assert.Single(recurred.Active).Lifecycle);
             Assert.Single(recurred.Resolved);
         }

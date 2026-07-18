@@ -373,6 +373,7 @@ export type QueueTalkgroupLoad = {
   incidentCalls: number;
 };
 export type SystemRecommendation = {
+  findingId: number;
   id: string;
   section: string;
   severity: "high" | "medium" | "low" | string;
@@ -382,11 +383,32 @@ export type SystemRecommendation = {
   kind: "problem" | "improvement";
   evidenceWindow: string;
   destinationLabel: string;
-  lifecycle: "new" | "active" | "resolved";
+  lifecycle: string;
+  workflowStatus: "new" | "unresolved" | "investigating" | "known_issue" | "monitoring" | "resolved" | "dismissed" | string;
+  activityState: "active" | "quiet" | string;
+  confidence: "provisional" | "low" | "medium" | "high" | string;
+  ownerType: string;
+  ownerKey: string;
+  signature: string;
+  nextReviewUtc: string;
+  reviewDue: boolean;
   firstSeenUtc: string;
   lastSeenUtc: string;
   resolvedAtUtc: string;
   resolution: string;
+  episodes: {
+    episodeKey: string;
+    ownerKey: string;
+    signature: string;
+    startUtc: string;
+    endUtc: string;
+    severity: string;
+    conditions: string[];
+    evidence: { windows: number; decodeSamples: number; averageDecodeRate: number; zeroDecodePercent: number; retunes: number; callsConcluded: number; noAudioPercent: number };
+  }[];
+  episodeCount: number;
+  audit: { id: number; eventType: string; actor: string; detail: string; detailsJson: string; createdAtUtc: string }[];
+  hypotheses: { kind: string; label: string; status: string; confidence: string; rationale: string }[];
   target: { topTab: string; subTab: string; anchor: string };
   actions: { kind: string; label: string; description: string; talkgroups?: number[] | null }[];
   baseline?: {
@@ -464,9 +486,11 @@ export type SystemRecommendations = {
   mediumCount: number;
   lowCount: number;
   items: SystemRecommendation[];
+  knownIssues: SystemRecommendation[];
   recentlyResolved: SystemRecommendation[];
   history: SystemRecommendation[];
 };
+export type SystemRecommendationSummary = Pick<SystemRecommendations, "openCount" | "problemCount" | "improvementCount" | "highCount" | "mediumCount" | "lowCount"> & { knownIssueCount: number };
 export type TrHealth = {
   id: number;
   windowStartUtc: string;

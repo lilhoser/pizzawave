@@ -171,7 +171,7 @@ public sealed class SystemInformationUiContractTests
         Assert.DoesNotContain(".system-page-identity.tone-", styles, StringComparison.Ordinal);
         Assert.Contains("color-mix(in srgb, var(--accent)", styles, StringComparison.Ordinal);
         Assert.Contains(".category-police { --category-color: #5aa7ff", styles, StringComparison.Ordinal);
-        Assert.Contains(".recommendation-card.severity-high { border-left-color: #ff6b5a", styles, StringComparison.Ordinal);
+        Assert.Contains(".recommendation-card.severity-high { border-color: #c85b50", styles, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -255,8 +255,8 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("Copy Config", source, StringComparison.Ordinal);
         Assert.DoesNotContain("danger-button\" onClick={onOpenSetup}>Open Setup", source, StringComparison.Ordinal);
         Assert.Contains("system-metrics-rf|${rfPerformanceHours}", source, StringComparison.Ordinal);
-        Assert.Contains("setRfPerformanceHours(2)", source, StringComparison.Ordinal);
-        Assert.Contains("pizzawave-system-rf-performance-hours\", \"2", source, StringComparison.Ordinal);
+        Assert.Contains("setRfPerformanceHours(chartHours)", source, StringComparison.Ordinal);
+        Assert.Contains("pizzawave-system-rf-performance-hours\", String(chartHours)", source, StringComparison.Ordinal);
         Assert.Contains("function RfHealthStatusPanel", source, StringComparison.Ordinal);
         Assert.Contains("<label>Window <select value={rangeHours}", source, StringComparison.Ordinal);
         Assert.Contains("tr-site-card-grid", source, StringComparison.Ordinal);
@@ -266,9 +266,9 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("preserveAspectRatio=\"xMidYMid meet\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Raw RF-health samples", source, StringComparison.Ordinal);
         Assert.DoesNotContain("<h3>RF Analysis</h3>", source, StringComparison.Ordinal);
-        Assert.Contains("Observed pattern", source, StringComparison.Ordinal);
-        Assert.Contains("pizzawave-site-setup-rf-target-system", source, StringComparison.Ordinal);
-        Assert.Contains("onOpenSetup(\"RF Validation\")", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Observed pattern", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("rf-observed-pattern", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Review in Setup", source, StringComparison.Ordinal);
         Assert.Contains("TrSiteFact", source, StringComparison.Ordinal);
         Assert.Contains("<label>Charts <select", source, StringComparison.Ordinal);
         Assert.Contains("/decode/i", source, StringComparison.Ordinal);
@@ -307,13 +307,36 @@ public sealed class SystemInformationUiContractTests
     }
 
     [Fact]
-    public void RecommendationsAreReadOnlyEvidenceCardsWithDirectDestinations()
+    public void RecommendationsUseCompactCardsWithFocusedFindingDetails()
     {
         var source = AppSource();
 
-        Assert.Contains("Current evidence from across PizzaWave", source, StringComparison.Ordinal);
-        Assert.Contains("Evidence window: {item.evidenceWindow}", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("recommendations-summary", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Current findings</span>", source, StringComparison.Ordinal);
+        Assert.Contains("recommendationFacts(item)", source, StringComparison.Ordinal);
         Assert.Contains("Open {item.destinationLabel}", source, StringComparison.Ordinal);
+        Assert.Contains("if (target.topTab === \"metrics\")", source, StringComparison.Ordinal);
+        Assert.Contains("\"ai\", \"bandwidth\"] as const", source, StringComparison.Ordinal);
+        Assert.Contains("Review finding", source, StringComparison.Ordinal);
+        Assert.Contains("item.activityState === \"quiet\" && <span>Dormant</span>", source, StringComparison.Ordinal);
+        Assert.Contains("item.activityState === \"quiet\" ? \" is-dormant\"", source, StringComparison.Ordinal);
+        Assert.Contains(".recommendation-card.is-dormant { opacity: .62", StyleSource(), StringComparison.Ordinal);
+        Assert.Contains("formatRelativeAge(item.lastSeenUtc)", source, StringComparison.Ordinal);
+        Assert.Contains("detail: formatShortDate(item.lastSeenUtc)", source, StringComparison.Ordinal);
+        Assert.Contains("finding-drawer", source, StringComparison.Ordinal);
+        Assert.Contains(".finding-drawer { width: min(570px, 94vw)", StyleSource(), StringComparison.Ordinal);
+        Assert.Contains("background: #20252a", StyleSource(), StringComparison.Ordinal);
+        Assert.Contains("finding-drawer-section next-step", source, StringComparison.Ordinal);
+        Assert.Contains("finding-drawer-section operator-notes", source, StringComparison.Ordinal);
+        Assert.Contains("Operator notes", source, StringComparison.Ordinal);
+        Assert.Contains("finding-activity-pagination", source, StringComparison.Ordinal);
+        Assert.Contains("Page {currentActivityPage} of {activityPageCount}", source, StringComparison.Ordinal);
+        Assert.Contains("recommendation-history-ledger", source, StringComparison.Ordinal);
+        Assert.Contains("recommendationHistoryGroups(items)", source, StringComparison.Ordinal);
+        Assert.Contains("new Set(rows.map(row => row.findingId)).size", source, StringComparison.Ordinal);
+        Assert.Contains(".finding-drawer-section.facts", StyleSource(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Finding details and operator actions", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("service-issue-card", source, StringComparison.Ordinal);
         Assert.Contains("Recommendation candidates", source, StringComparison.Ordinal);
         Assert.Contains("Clear candidate filter", source, StringComparison.Ordinal);
         Assert.DoesNotContain("recommendations/${encodeURIComponent(id)}/state", source, StringComparison.Ordinal);
@@ -379,15 +402,16 @@ public sealed class SystemInformationUiContractTests
         var source = RecommendationServiceSource();
 
         Assert.Contains("BuildSystemAssessmentsAsync(healthStart", source, StringComparison.Ordinal);
-        Assert.Contains("system.IsIssue", source, StringComparison.Ordinal);
-        Assert.Contains("tr-rf-stability:{assessment.SystemShortName}", source, StringComparison.Ordinal);
-        Assert.Contains("RF performance needs review", source, StringComparison.Ordinal);
-        Assert.Contains("same localized assessment shown in RF Performance", source, StringComparison.Ordinal);
+        Assert.Contains("RfTemporalFindingAnalyzer.Analyze", source, StringComparison.Ordinal);
+        Assert.Contains("tr-rf-temporal:{finding.OwnerKey}", source, StringComparison.Ordinal);
+        Assert.Contains("recurring RF degradation", source, StringComparison.Ordinal);
+        Assert.Contains("GroupBy(row => row.OwnerKey", source, StringComparison.Ordinal);
+        Assert.Contains("RF Performance owns the underlying charts", source, StringComparison.Ordinal);
         Assert.Contains("40 msg/s remains the strong-system reference", source, StringComparison.Ordinal);
         Assert.Contains("BuildRfAssessmentDiagnostics(assessment)", source, StringComparison.Ordinal);
         Assert.Contains("Other monitored-system context:", source, StringComparison.Ordinal);
         Assert.Contains("BuildRetuneTargetDiagnosticsAsync(rfEvidenceStart, rfEvidenceEnd", source, StringComparison.Ordinal);
-        Assert.Contains("SystemDisplayName(assessment.SystemShortName)", source, StringComparison.Ordinal);
+        Assert.Contains("SystemDisplayName(finding.OwnerKey)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("var retuneProblem", source, StringComparison.Ordinal);
         Assert.DoesNotContain("var lowDecodeProblem", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Global periodic control-channel summary decode-zero rate", source, StringComparison.Ordinal);
