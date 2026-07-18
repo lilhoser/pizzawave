@@ -89,42 +89,42 @@ public sealed class BackupRestoreService
 
         try
         {
-            await using var file = File.Create(plainArchivePath);
-            using var archive = new ZipArchive(file, ZipArchiveMode.Create);
+            await using (var file = File.Create(plainArchivePath))
+            using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+            {
 
-            await AddSnapshotDatabaseAsync(archive, entries, tempRoot, warnings, ct);
-            await AddFileIfExistsAsync(archive, entries, "config", _config.ConfigPath, "config/pizzad.json", warnings, ct);
-            await AddFileIfExistsAsync(archive, entries, "config", _config.Auth.TokenFile, "config/pizzad.token", warnings, ct);
-            await AddFileIfExistsAsync(archive, entries, "tr-config", _config.TrunkRecorder.ConfigPath, "config/trunk-recorder/config.json", warnings, ct);
-            await AddFileIfExistsAsync(archive, entries, "tr-talkgroups", _config.TrunkRecorder.TalkgroupsPath, "config/trunk-recorder/talkgroups.csv", warnings, ct);
+                await AddSnapshotDatabaseAsync(archive, entries, tempRoot, warnings, ct);
+                await AddFileIfExistsAsync(archive, entries, "config", _config.ConfigPath, "config/pizzad.json", warnings, ct);
+                await AddFileIfExistsAsync(archive, entries, "config", _config.Auth.TokenFile, "config/pizzad.token", warnings, ct);
+                await AddFileIfExistsAsync(archive, entries, "tr-config", _config.TrunkRecorder.ConfigPath, "config/trunk-recorder/config.json", warnings, ct);
+                await AddFileIfExistsAsync(archive, entries, "tr-talkgroups", _config.TrunkRecorder.TalkgroupsPath, "config/trunk-recorder/talkgroups.csv", warnings, ct);
 
-            await AddAudioDirectoryAsync(archive, entries, options, warnings, ct);
-            await AddStableDirectoryAsync(archive, entries, "appdata", _config.Storage.AppDataRoot, "appdata", tempRoot, warnings, ct, ExcludeAppDataPath);
-            if (_config.Embeddings.Enabled)
-                await AddQdrantSnapshotAsync(archive, entries, tempRoot, ct);
+                await AddAudioDirectoryAsync(archive, entries, options, warnings, ct);
+                await AddStableDirectoryAsync(archive, entries, "appdata", _config.Storage.AppDataRoot, "appdata", tempRoot, warnings, ct, ExcludeAppDataPath);
+                if (_config.Embeddings.Enabled)
+                    await AddQdrantSnapshotAsync(archive, entries, tempRoot, ct);
 
-            var manifest = new BackupManifestDto(
-                ManifestVersion,
-                "PizzaWave",
-                DateTime.UtcNow,
-                Environment.MachineName,
-                _config.Branding.StackName,
-                _config.ConfigPath,
-                _config.Storage.DatabasePath,
-                _config.Storage.AudioRoot,
-                _config.Storage.AppDataRoot,
-                _config.TrunkRecorder.ConfigPath,
-                _config.TrunkRecorder.TalkgroupsPath,
-                _config.Embeddings.QdrantStoragePath,
-                options.AudioStartUtc,
-                options.AudioEndUtc,
-                entries,
-                warnings);
-            var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
-            await using (var stream = manifestEntry.Open())
-                await JsonSerializer.SerializeAsync(stream, manifest, EngineConfig.JsonOptions(), ct);
-            archive.Dispose();
-            await file.DisposeAsync();
+                var manifest = new BackupManifestDto(
+                    ManifestVersion,
+                    "PizzaWave",
+                    DateTime.UtcNow,
+                    Environment.MachineName,
+                    _config.Branding.StackName,
+                    _config.ConfigPath,
+                    _config.Storage.DatabasePath,
+                    _config.Storage.AudioRoot,
+                    _config.Storage.AppDataRoot,
+                    _config.TrunkRecorder.ConfigPath,
+                    _config.TrunkRecorder.TalkgroupsPath,
+                    _config.Embeddings.QdrantStoragePath,
+                    options.AudioStartUtc,
+                    options.AudioEndUtc,
+                    entries,
+                    warnings);
+                var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
+                await using (var stream = manifestEntry.Open())
+                    await JsonSerializer.SerializeAsync(stream, manifest, EngineConfig.JsonOptions(), ct);
+            }
 
             Directory.CreateDirectory(verifyExtractRoot);
             ZipFile.ExtractToDirectory(plainArchivePath, verifyExtractRoot);
