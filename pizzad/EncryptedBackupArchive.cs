@@ -125,6 +125,63 @@ public static class EncryptedBackupArchive
         return Task.CompletedTask;
     }
 
+    public static Task VerifyFileAsync(string plaintextPath, string encryptedPath, string passphrase, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(passphrase))
+            throw new InvalidOperationException("The backup passphrase is required.");
+
+        using var expected = File.Open(plaintextPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var input = File.Open(encryptedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var header = new byte[HeaderBytes];
+        ReadExactly(input, header);
+        var parsed = ParseHeader(header);
+        if (expected.Length != parsed.PlaintextLength)
+            throw new InvalidOperationException($"Encrypted backup plaintext length is {parsed.PlaintextLength:N0} bytes but the verified ZIP is {expected.Length:N0} bytes.");
+        var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, parsed.Salt, parsed.Iterations, HashAlgorithmName.SHA256, KeyBytes);
+
+        try
+        {
+            using var aes = new AesGcm(key, TagBytes);
+            var ciphertext = new byte[parsed.ChunkSize];
+            var plaintext = new byte[parsed.ChunkSize];
+            var expectedPlaintext = new byte[parsed.ChunkSize];
+            var tag = new byte[TagBytes];
+            long remaining = parsed.PlaintextLength;
+            uint counter = 0;
+
+            while (remaining > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var count = (int)Math.Min(parsed.ChunkSize, remaining);
+                ReadExactly(input, ciphertext.AsSpan(0, count));
+                ReadExactly(input, tag);
+                ReadExactly(expected, expectedPlaintext.AsSpan(0, count));
+                var nonce = BuildNonce(parsed.NoncePrefix, counter);
+                var aad = BuildAssociatedData(header, counter, count);
+                try
+                {
+                    aes.Decrypt(nonce, ciphertext.AsSpan(0, count), tag, plaintext.AsSpan(0, count), aad);
+                }
+                catch (CryptographicException ex)
+                {
+                    throw new InvalidOperationException($"The backup could not be verified at encrypted chunk {counter:N0}. Check the archive integrity.", ex);
+                }
+                if (!plaintext.AsSpan(0, count).SequenceEqual(expectedPlaintext.AsSpan(0, count)))
+                    throw new InvalidOperationException($"Encrypted backup verification differed from the source ZIP at encrypted chunk {counter:N0}.");
+                remaining -= count;
+                counter++;
+            }
+
+            if (input.Position != input.Length)
+                throw new InvalidOperationException("The encrypted backup contains unexpected trailing data.");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+        return Task.CompletedTask;
+    }
+
     public static void ValidatePassphrase(string? passphrase, string? confirmation = null)
     {
         if (string.IsNullOrEmpty(passphrase) || passphrase.Length < 12)

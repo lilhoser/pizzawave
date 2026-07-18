@@ -84,7 +84,6 @@ public sealed class BackupRestoreService
         var tempRoot = Path.Combine(_config.Storage.AppDataRoot, "backup-working", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
         var plainArchivePath = Path.Combine(tempRoot, "backup.zip");
-        var verifyArchivePath = Path.Combine(tempRoot, "verify.zip");
         var verifyExtractRoot = Path.Combine(tempRoot, "verify");
 
         try
@@ -140,19 +139,15 @@ public sealed class BackupRestoreService
                 try
                 {
                     await EncryptedBackupArchive.EncryptFileAsync(plainArchivePath, partialPath, request!.Passphrase!, ct);
-                    await EncryptedBackupArchive.DecryptFileAsync(partialPath, verifyArchivePath, request.Passphrase!, ct);
+                    await EncryptedBackupArchive.VerifyFileAsync(plainArchivePath, partialPath, request.Passphrase!, ct);
                     break;
                 }
                 catch (InvalidOperationException ex) when (encryptionAttempt == 1 && ex.InnerException is CryptographicException)
                 {
                     _logger.LogWarning(ex, "Backup authenticated unlock failed on the first pass; rebuilding the encrypted archive once");
                     try { File.Delete(partialPath); } catch { }
-                    try { File.Delete(verifyArchivePath); } catch { }
                 }
             }
-            var comparison = CompareFiles(plainArchivePath, verifyArchivePath, ct);
-            if (!comparison.Equal)
-                throw new InvalidOperationException($"Encrypted backup unlock did not reproduce the verified ZIP byte-for-byte ({comparison.Message}). No backup was published.");
 
             File.Move(partialPath, path);
             return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings, true);
@@ -833,49 +828,6 @@ public sealed class BackupRestoreService
         await using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var hash = await SHA256.HashDataAsync(stream, ct);
         return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private static (bool Equal, string Message) CompareFiles(string expectedPath, string actualPath, CancellationToken ct)
-    {
-        var expectedLength = new FileInfo(expectedPath).Length;
-        var actualLength = new FileInfo(actualPath).Length;
-        if (expectedLength != actualLength)
-            return (false, $"expected {expectedLength:N0} bytes, unlocked {actualLength:N0} bytes");
-
-        const int bufferSize = 1024 * 1024;
-        using var expected = new FileStream(expectedPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.SequentialScan);
-        using var actual = new FileStream(actualPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.SequentialScan);
-        var expectedBuffer = new byte[bufferSize];
-        var actualBuffer = new byte[bufferSize];
-        long offset = 0;
-        while (offset < expectedLength)
-        {
-            ct.ThrowIfCancellationRequested();
-            var count = (int)Math.Min(bufferSize, expectedLength - offset);
-            ReadExactly(expected, expectedBuffer.AsSpan(0, count));
-            ReadExactly(actual, actualBuffer.AsSpan(0, count));
-            var mismatch = expectedBuffer.AsSpan(0, count).SequenceCompareTo(actualBuffer.AsSpan(0, count));
-            if (mismatch != 0)
-            {
-                var index = 0;
-                while (index < count && expectedBuffer[index] == actualBuffer[index]) index++;
-                return (false, $"first mismatch at byte {offset + index:N0}");
-            }
-            offset += count;
-        }
-        return (true, "identical");
-    }
-
-    private static void ReadExactly(Stream stream, Span<byte> buffer)
-    {
-        var total = 0;
-        while (total < buffer.Length)
-        {
-            var read = stream.Read(buffer[total..]);
-            if (read == 0)
-                throw new EndOfStreamException("A backup verification stream ended unexpectedly.");
-            total += read;
-        }
     }
 
     private static string Sha256(string path)

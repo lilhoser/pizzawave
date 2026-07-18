@@ -386,6 +386,7 @@ public sealed class BackupRestoreServiceTests
                 stream.SetLength(257L * 1024 * 1024 + 17);
 
             await EncryptedBackupArchive.EncryptFileAsync(source, encrypted, Passphrase, CancellationToken.None);
+            await EncryptedBackupArchive.VerifyFileAsync(source, encrypted, Passphrase, CancellationToken.None);
             await EncryptedBackupArchive.DecryptFileAsync(encrypted, restored, Passphrase, CancellationToken.None);
 
             Assert.Equal(new FileInfo(source).Length, new FileInfo(restored).Length);
