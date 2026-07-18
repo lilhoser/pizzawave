@@ -1551,29 +1551,41 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: #17212a;
   background: rgba(255, 255, 255, 0.78);
 }
-.map-heat-marker {
-  fill: color-mix(in srgb, var(--category-color, var(--accent)) 88%, #ffffff 12%);
-  stroke: #111417;
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.95));
-}
-.map-heat-marker.active {
-  fill: #fff7a8;
-  stroke: #111417;
-  filter: drop-shadow(0 0 5px #fff7a8);
-}
-.leaflet-tooltip.map-heat-count {
-  padding: 0;
+.map-heat-node {
   border: 0;
   background: transparent;
-  box-shadow: none;
-  color: #071018;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1;
-  pointer-events: none;
 }
-.leaflet-tooltip.map-heat-count::before {
-  display: none;
+.map-heat-node > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 3px solid #111417;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--category-color, var(--accent)) 88%, #ffffff 12%);
+  color: #071018;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 2px 7px rgba(0, 0, 0, 0.55);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.map-heat-node.clustered > span {
+  border-width: 4px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--category-color, var(--accent)) 45%, #ffffff 55%), 0 3px 9px rgba(0, 0, 0, 0.65);
+}
+.map-heat-node:hover > span {
+  transform: scale(1.08);
+}
+.map-heat-node.active > span {
+  background: #fff7a8;
+  box-shadow: 0 0 0 3px #111417, 0 0 0 7px #fff7a8;
+  transform: scale(1.1);
+}
+.map-heat-node.category-mixed {
+  --category-color: #b58cff;
 }
 .location-heat-list {
   display: grid;

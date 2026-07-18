@@ -67,6 +67,13 @@ Package 5 or Package 8 worktree directories.
   correct attribution, no page overflow, and no browser warnings or errors.
   PizzaWave returned healthy with active ingestion and empty queues. Trunk
   Recorder remained PID 1595 with its unchanged July 11 activation timestamp.
+- Package 11 map follow-up restored the operator-critical aggregation behavior
+  missed by the first Leaflet replacement. Nodes now display their incident/call
+  count directly, cluster by rendered pixel distance at the current zoom, split
+  as the operator zooms in, and show detail text only on hover. Live RPI evidence
+  collapsed nine geolocated addresses to five fitted-view nodes (including
+  aggregate counts 8 and 5), then split to six nodes after zooming in twice;
+  zero detail tooltips were present at rest and browser logs were clean.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.

@@ -40,7 +40,13 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("from \"react-leaflet\"", map, StringComparison.Ordinal);
         Assert.Contains("<MapContainer", map, StringComparison.Ordinal);
         Assert.Contains("<TileLayer", map, StringComparison.Ordinal);
-        Assert.Contains("<CircleMarker", map, StringComparison.Ordinal);
+        Assert.Contains("<Marker", map, StringComparison.Ordinal);
+        Assert.Contains("divIcon", map, StringComparison.Ordinal);
+        Assert.Contains("buildClusters", map, StringComparison.Ordinal);
+        Assert.Contains("zoomend", map, StringComparison.Ordinal);
+        Assert.Contains("<span>${cluster.count.toLocaleString()}</span>", map, StringComparison.Ordinal);
+        Assert.Equal(1, map.Split("<Tooltip", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("permanent", map, StringComparison.Ordinal);
         Assert.DoesNotContain("function mapTiles", app, StringComparison.Ordinal);
         Assert.DoesNotContain("function projectHeatPoint", app, StringComparison.Ordinal);
     }

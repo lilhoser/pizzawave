@@ -805,6 +805,8 @@ Status: implemented, deployed, and live-verified; operator acceptance pending
 - [x] Confirm RSW is already absent; remove the standalone TR-editor routes and
   unreachable UI plus unused RF UI and other proven-unreachable top-level code.
 - [x] Replace the hand-built map interaction engine with React Leaflet.
+- [x] Preserve numbered nodes, zoom-dependent nearby-node aggregation, and
+  hover-only details in the Leaflet replacement.
 - [x] Update operator and architecture documentation.
 - [x] Run the production frontend build, all 516 tests, RPI health checks, and
   live Dashboard map/browser verification.
