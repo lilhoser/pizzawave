@@ -188,6 +188,32 @@ The scoring artifact is
 and is reproducible with
 [`scripts/score_incident_asr_review.py`](../scripts/score_incident_asr_review.py).
 
+### Multi-transcript sparse-case ablation
+
+The original two-observation sparse block was rerun after adding the Whisper and
+Parakeet outputs as alternate transcripts alongside the stored transcript. The
+derived development package has SHA-256
+`A7EF9F66AA93E7EC53FD135E46396F4B7FFD340C7970FF6104CBDB3F0D4157C9` and is
+reproducible with
+[`scripts/build_incident_multitranscript_package.py`](../scripts/build_incident_multitranscript_package.py).
+
+| Model | Duration | Completion | Reasoning | Contract errors | Semantic result |
+|---|---:|---:|---:|---:|---|
+| Gemma 4 26B-A4B | 16.0 s | 1,780 | 1,370 | 1 | Removed the city-destruction interpretation but created a `note creation event`; altered one exact quote |
+| Qwen 3.6 35B-A3B | 34.8 s | 4,859 | 3,585 | 0 | Preserved competing proper-name readings but created a `logistical or administrative` event |
+
+GLM was not rerun. It had already exhausted all 8,192 completion tokens without
+answering the smaller single-transcript sparse case, so this ablation would not
+resolve a remaining operational question for that configuration.
+
+Multiple transcripts materially reduced the dangerous semantic error, but they
+did not stop either answering model from promoting a routine utterance into an
+event account. This rejects a pipeline stage that jointly resolves transcript
+uncertainty and decides event existence. Observation interpretation must retain
+candidate readings without being allowed to create an event. Event hypotheses
+must be proposed later from bounded relational evidence and independently
+critiqued.
+
 ## Architectural consequence
 
 Do not build the replacement pipeline around one model call that converts an
