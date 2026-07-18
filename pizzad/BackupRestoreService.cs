@@ -135,6 +135,8 @@ public sealed class BackupRestoreService
                 var failed = checks.First(check => !check.Ok);
                 throw new InvalidOperationException($"Plain backup archive verification failed for {failed.Name}: {failed.Message}");
             }
+            var verifiedPlainLength = new FileInfo(plainArchivePath).Length;
+            var verifiedPlainHash = await Sha256Async(plainArchivePath, ct);
 
             for (var encryptionAttempt = 1; encryptionAttempt <= 2; encryptionAttempt++)
             {
@@ -151,8 +153,14 @@ public sealed class BackupRestoreService
                     try { File.Delete(verifyArchivePath); } catch { }
                 }
             }
-            if (!string.Equals(await Sha256Async(plainArchivePath, ct), await Sha256Async(verifyArchivePath, ct), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Encrypted backup unlock did not reproduce the verified ZIP byte-for-byte. No backup was published.");
+            var finalPlainLength = new FileInfo(plainArchivePath).Length;
+            var finalPlainHash = await Sha256Async(plainArchivePath, ct);
+            if (finalPlainLength != verifiedPlainLength || !string.Equals(finalPlainHash, verifiedPlainHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The verified ZIP changed while it was being encrypted (before {verifiedPlainLength:N0} bytes / {verifiedPlainHash}; after {finalPlainLength:N0} bytes / {finalPlainHash}). No backup was published.");
+
+            var comparison = await CompareFilesAsync(plainArchivePath, verifyArchivePath, ct);
+            if (!comparison.Equal)
+                throw new InvalidOperationException($"Encrypted backup unlock did not reproduce the verified ZIP byte-for-byte ({comparison.Message}). No backup was published.");
 
             File.Move(partialPath, path);
             return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings, true);
@@ -833,6 +841,48 @@ public sealed class BackupRestoreService
         await using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var hash = await SHA256.HashDataAsync(stream, ct);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static async Task<(bool Equal, string Message)> CompareFilesAsync(string expectedPath, string actualPath, CancellationToken ct)
+    {
+        var expectedLength = new FileInfo(expectedPath).Length;
+        var actualLength = new FileInfo(actualPath).Length;
+        if (expectedLength != actualLength)
+            return (false, $"expected {expectedLength:N0} bytes, unlocked {actualLength:N0} bytes");
+
+        const int bufferSize = 1024 * 1024;
+        await using var expected = new FileStream(expectedPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var actual = new FileStream(actualPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var expectedBuffer = new byte[bufferSize];
+        var actualBuffer = new byte[bufferSize];
+        long offset = 0;
+        while (offset < expectedLength)
+        {
+            var count = (int)Math.Min(bufferSize, expectedLength - offset);
+            await ReadExactlyAsync(expected, expectedBuffer.AsMemory(0, count), ct);
+            await ReadExactlyAsync(actual, actualBuffer.AsMemory(0, count), ct);
+            var mismatch = expectedBuffer.AsSpan(0, count).SequenceCompareTo(actualBuffer.AsSpan(0, count));
+            if (mismatch != 0)
+            {
+                var index = 0;
+                while (index < count && expectedBuffer[index] == actualBuffer[index]) index++;
+                return (false, $"first mismatch at byte {offset + index:N0}");
+            }
+            offset += count;
+        }
+        return (true, "identical");
+    }
+
+    private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
+    {
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer[total..], ct);
+            if (read == 0)
+                throw new EndOfStreamException("A backup verification stream ended unexpectedly.");
+            total += read;
+        }
     }
 
     private static string Sha256(string path)
