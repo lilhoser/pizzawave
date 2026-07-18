@@ -150,7 +150,7 @@ public sealed class BackupRestoreService
                     try { File.Delete(verifyArchivePath); } catch { }
                 }
             }
-            var comparison = await CompareFilesAsync(plainArchivePath, verifyArchivePath, ct);
+            var comparison = CompareFiles(plainArchivePath, verifyArchivePath, ct);
             if (!comparison.Equal)
                 throw new InvalidOperationException($"Encrypted backup unlock did not reproduce the verified ZIP byte-for-byte ({comparison.Message}). No backup was published.");
 
@@ -835,7 +835,7 @@ public sealed class BackupRestoreService
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static async Task<(bool Equal, string Message)> CompareFilesAsync(string expectedPath, string actualPath, CancellationToken ct)
+    private static (bool Equal, string Message) CompareFiles(string expectedPath, string actualPath, CancellationToken ct)
     {
         var expectedLength = new FileInfo(expectedPath).Length;
         var actualLength = new FileInfo(actualPath).Length;
@@ -843,16 +843,17 @@ public sealed class BackupRestoreService
             return (false, $"expected {expectedLength:N0} bytes, unlocked {actualLength:N0} bytes");
 
         const int bufferSize = 1024 * 1024;
-        await using var expected = new FileStream(expectedPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var actual = new FileStream(actualPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var expected = new FileStream(expectedPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.SequentialScan);
+        using var actual = new FileStream(actualPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.SequentialScan);
         var expectedBuffer = new byte[bufferSize];
         var actualBuffer = new byte[bufferSize];
         long offset = 0;
         while (offset < expectedLength)
         {
+            ct.ThrowIfCancellationRequested();
             var count = (int)Math.Min(bufferSize, expectedLength - offset);
-            await ReadExactlyAsync(expected, expectedBuffer.AsMemory(0, count), ct);
-            await ReadExactlyAsync(actual, actualBuffer.AsMemory(0, count), ct);
+            ReadExactly(expected, expectedBuffer.AsSpan(0, count));
+            ReadExactly(actual, actualBuffer.AsSpan(0, count));
             var mismatch = expectedBuffer.AsSpan(0, count).SequenceCompareTo(actualBuffer.AsSpan(0, count));
             if (mismatch != 0)
             {
@@ -865,12 +866,12 @@ public sealed class BackupRestoreService
         return (true, "identical");
     }
 
-    private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
+    private static void ReadExactly(Stream stream, Span<byte> buffer)
     {
         var total = 0;
         while (total < buffer.Length)
         {
-            var read = await stream.ReadAsync(buffer[total..], ct);
+            var read = stream.Read(buffer[total..]);
             if (read == 0)
                 throw new EndOfStreamException("A backup verification stream ended unexpectedly.");
             total += read;

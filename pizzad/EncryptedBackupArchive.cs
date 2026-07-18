@@ -27,7 +27,7 @@ public static class EncryptedBackupArchive
         return stream.Read(actual) == Magic.Length && actual.SequenceEqual(Magic);
     }
 
-    public static async Task EncryptFileAsync(string sourcePath, string destinationPath, string passphrase, CancellationToken ct)
+    public static Task EncryptFileAsync(string sourcePath, string destinationPath, string passphrase, CancellationToken ct)
     {
         ValidatePassphrase(passphrase);
         var salt = RandomNumberGenerator.GetBytes(SaltBytes);
@@ -38,9 +38,9 @@ public static class EncryptedBackupArchive
 
         try
         {
-            await using var input = File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            await using var output = File.Create(destinationPath);
-            await output.WriteAsync(header, ct);
+            using var input = File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var output = File.Create(destinationPath);
+            output.Write(header);
             using var aes = new AesGcm(key, TagBytes);
             var plaintext = new byte[ChunkBytes];
             var ciphertext = new byte[ChunkBytes];
@@ -49,14 +49,15 @@ public static class EncryptedBackupArchive
 
             while (true)
             {
-                var read = await ReadChunkAsync(input, plaintext, ct);
+                ct.ThrowIfCancellationRequested();
+                var read = ReadChunk(input, plaintext);
                 if (read == 0)
                     break;
                 var nonce = BuildNonce(noncePrefix, counter);
                 var aad = BuildAssociatedData(header, counter, read);
                 aes.Encrypt(nonce, plaintext.AsSpan(0, read), ciphertext.AsSpan(0, read), tag, aad);
-                await output.WriteAsync(ciphertext.AsMemory(0, read), ct);
-                await output.WriteAsync(tag, ct);
+                output.Write(ciphertext, 0, read);
+                output.Write(tag);
                 counter++;
             }
         }
@@ -64,22 +65,23 @@ public static class EncryptedBackupArchive
         {
             CryptographicOperations.ZeroMemory(key);
         }
+        return Task.CompletedTask;
     }
 
-    public static async Task DecryptFileAsync(string sourcePath, string destinationPath, string passphrase, CancellationToken ct)
+    public static Task DecryptFileAsync(string sourcePath, string destinationPath, string passphrase, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(passphrase))
             throw new InvalidOperationException("The backup passphrase is required.");
 
-        await using var input = File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var input = File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var header = new byte[HeaderBytes];
-        await ReadExactlyAsync(input, header, ct);
+        ReadExactly(input, header);
         var parsed = ParseHeader(header);
         var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, parsed.Salt, parsed.Iterations, HashAlgorithmName.SHA256, KeyBytes);
 
         try
         {
-            await using var output = File.Create(destinationPath);
+            using var output = File.Create(destinationPath);
             using var aes = new AesGcm(key, TagBytes);
             var ciphertext = new byte[parsed.ChunkSize];
             var plaintext = new byte[parsed.ChunkSize];
@@ -89,9 +91,10 @@ public static class EncryptedBackupArchive
 
             while (remaining > 0)
             {
+                ct.ThrowIfCancellationRequested();
                 var count = (int)Math.Min(parsed.ChunkSize, remaining);
-                await ReadExactlyAsync(input, ciphertext.AsMemory(0, count), ct);
-                await ReadExactlyAsync(input, tag, ct);
+                ReadExactly(input, ciphertext.AsSpan(0, count));
+                ReadExactly(input, tag);
                 var nonce = BuildNonce(parsed.NoncePrefix, counter);
                 var aad = BuildAssociatedData(header, counter, count);
                 try
@@ -102,7 +105,7 @@ public static class EncryptedBackupArchive
                 {
                     throw new InvalidOperationException($"The backup could not be unlocked at encrypted chunk {counter:N0}. Check the passphrase and archive integrity.", ex);
                 }
-                await output.WriteAsync(plaintext.AsMemory(0, count), ct);
+                output.Write(plaintext, 0, count);
                 remaining -= count;
                 counter++;
             }
@@ -119,6 +122,7 @@ public static class EncryptedBackupArchive
         {
             CryptographicOperations.ZeroMemory(key);
         }
+        return Task.CompletedTask;
     }
 
     public static void ValidatePassphrase(string? passphrase, string? confirmation = null)
@@ -174,12 +178,12 @@ public static class EncryptedBackupArchive
         return aad;
     }
 
-    private static async Task<int> ReadChunkAsync(Stream stream, byte[] buffer, CancellationToken ct)
+    private static int ReadChunk(Stream stream, byte[] buffer)
     {
         var total = 0;
         while (total < buffer.Length)
         {
-            var read = await stream.ReadAsync(buffer.AsMemory(total), ct);
+            var read = stream.Read(buffer, total, buffer.Length - total);
             if (read == 0)
                 break;
             total += read;
@@ -187,12 +191,12 @@ public static class EncryptedBackupArchive
         return total;
     }
 
-    private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
+    private static void ReadExactly(Stream stream, Span<byte> buffer)
     {
         var total = 0;
         while (total < buffer.Length)
         {
-            var read = await stream.ReadAsync(buffer[total..], ct);
+            var read = stream.Read(buffer[total..]);
             if (read == 0)
                 throw new InvalidOperationException("Encrypted backup ended unexpectedly.");
             total += read;
