@@ -29,10 +29,9 @@ Package 5 or Package 8 worktree directories.
   and implemented persistence/timing foundation remain documented, but its
   API, UI, isolated store, processing scheduler, and SFTP workflow are not
   implemented or deployed.
-- Package 10 Recovery Workflows is implemented, deployed to the RPI, and
-  nondestructively live-verified. Operator acceptance is still pending; after
-  acceptance, the remaining closeout work is Package 11 Cleanup plus final
-  regression.
+- Package 10 Recovery Workflows is implemented, deployed to the RPI,
+  nondestructively live-verified, and operator-accepted. The remaining closeout
+  work is Package 11 Cleanup plus final regression.
 - Package 9 Temporal Pattern Analysis is complete, deployed to the RPI, live-
   verified, and operator-accepted. Its accepted closure scope is the RF-first
   temporal-finding vertical plus the shared Recommendations lifecycle and UX:

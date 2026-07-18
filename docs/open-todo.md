@@ -7,9 +7,7 @@ The active operator-facing remediation program is tracked in
 
 Current operator-remediation closeout order:
 
-1. Package 10 - obtain operator acceptance for the implemented, RPI-deployed,
-   nondestructively verified same-system recovery and support-package workflows.
-2. Package 11 - cleanup and final regression.
+1. Package 11 - cleanup and final regression.
 
 Standalone outstanding feature, outside this closeout sequence:
 
