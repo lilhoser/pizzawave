@@ -810,6 +810,8 @@ Status: implemented, deployed, and live-verified; operator acceptance pending
 - [x] Preserve operator zoom across dashboard refreshes, open all incidents for
   aggregate nodes, zoom clusters to their first separable level, and retain the
   prior detailed default map scale.
+- [x] Reset the map to its initial center and zoom when the operator closes a
+  location incident or alert detail panel.
 - [x] Update operator and architecture documentation.
 - [x] Run the production frontend build, all 516 tests, RPI health checks, and
   live Dashboard map/browser verification.

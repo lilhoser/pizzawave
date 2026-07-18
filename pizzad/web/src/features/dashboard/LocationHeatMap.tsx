@@ -9,6 +9,7 @@ type Props = {
   rows: LocationHeat[];
   incidents: Incident[];
   focusedKey?: string | null;
+  resetToken?: number;
   onFocusKey?: (key: string | null) => void;
   onSelectLocation?: (row: LocationHeat | null) => void;
   emptyText?: string;
@@ -25,7 +26,7 @@ type HeatCluster = {
 
 const clusterDistancePixels = 54;
 
-export function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLocation, emptyText = "No geolocated incidents detected in the selected range." }: Props) {
+export function LocationHeatMap({ rows, incidents, focusedKey, resetToken = 0, onFocusKey, onSelectLocation, emptyText = "No geolocated incidents detected in the selected range." }: Props) {
   const points = useMemo(() => rows.filter(hasCoordinates), [rows]);
   const positionKey = useMemo(() => points.map(row => `${locationKey(row)}:${row.latitude}:${row.longitude}`).sort().join("|"), [points]);
 
@@ -40,7 +41,7 @@ export function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSel
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapPosition rows={points} positionKey={positionKey} focusedKey={focusedKey} />
+        <MapPosition rows={points} positionKey={positionKey} focusedKey={focusedKey} resetToken={resetToken} />
         <HeatNodes rows={points} incidents={incidents} focusedKey={focusedKey} onFocusKey={onFocusKey} onSelectLocation={onSelectLocation} />
       </MapContainer>
     </div>
@@ -93,9 +94,15 @@ function HeatNodes({ rows, incidents, focusedKey, onFocusKey, onSelectLocation }
   })}</>;
 }
 
-function MapPosition({ rows, positionKey, focusedKey }: { rows: LocationHeat[]; positionKey: string; focusedKey?: string | null }) {
+function MapPosition({ rows, positionKey, focusedKey, resetToken }: { rows: LocationHeat[]; positionKey: string; focusedKey?: string | null; resetToken: number }) {
   const map = useMap();
   const positioned = useRef(false);
+  useEffect(() => {
+    if (resetToken <= 0)
+      return;
+    const center = defaultMapCenter(rows);
+    map.setView([center.latitude, center.longitude], defaultMapZoom(rows), { animate: false });
+  }, [map, resetToken]);
   useEffect(() => {
     const focused = focusedKey ? rows.find(row => locationKey(row) === focusedKey) : null;
     if (focused) {

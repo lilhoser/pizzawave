@@ -48,6 +48,10 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("firstSeparationZoom", map, StringComparison.Ordinal);
         Assert.Contains("onSelectLocation?.(selected)", map, StringComparison.Ordinal);
         Assert.Contains("defaultMapZoom(rows)", map, StringComparison.Ordinal);
+        Assert.Contains("resetToken={mapResetToken}", app, StringComparison.Ordinal);
+        Assert.Contains("setMapResetToken(value => value + 1)", app, StringComparison.Ordinal);
+        Assert.Contains("onClose={closeLocationPanel}", app, StringComparison.Ordinal);
+        Assert.Contains("if (resetToken <= 0)", map, StringComparison.Ordinal);
         Assert.DoesNotContain("[map, positionKey, focusedKey, rows]", map, StringComparison.Ordinal);
         Assert.Contains("<span>${cluster.count.toLocaleString()}</span>", map, StringComparison.Ordinal);
         Assert.Equal(1, map.Split("<Tooltip", StringSplitOptions.None).Length - 1);

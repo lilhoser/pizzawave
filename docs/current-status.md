@@ -82,6 +82,10 @@ Package 5 or Package 8 worktree directories.
   span-based default zoom was restored so OpenStreetMap starts with the same
   street-level detail as the pre-Leaflet map. Live verification held zoom 14
   and the identical tile/cluster state across the 30-second dashboard refresh.
+- Closing a location incident or alert panel now explicitly returns the map to
+  its initial center and span-based zoom. This reset is driven only by the panel
+  close action, so background dashboard refreshes continue preserving the
+  operator's current viewport.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.

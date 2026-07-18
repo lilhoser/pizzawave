@@ -3117,6 +3117,7 @@ function SiteSetupTalkgroupsSection({ setup, reload, onSave }: { setup: SiteSetu
 function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, searchQuery, onSearchChange, hiddenIncidentCount = 0 }: { data: Dashboard | null; rangeHours: number; reload: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; searchQuery: string; onSearchChange: (value: string) => void; hiddenIncidentCount?: number }) {
   const [focusedLocationKey, setFocusedLocationKey] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationHeat | null>(null);
+  const [mapResetToken, setMapResetToken] = useState(0);
   useEffect(() => {
     setSelectedLocation(null);
     setFocusedLocationKey(null);
@@ -3138,20 +3139,25 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
       .filter(alert => matchesAlertSearch(alert, searchQuery))
     : [];
   const mapRows = mode === "alerts" ? alertLocationRows : incidentLocationRows;
+  const closeLocationPanel = () => {
+    setSelectedLocation(null);
+    setFocusedLocationKey(null);
+    setMapResetToken(value => value + 1);
+  };
   return (
     <div className="dashboard-shell">
       <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder="Search incidents and alerts" /></div>
       <div className="dashboard dashboard-around">
         <section className="pane dashboard-map-pane">
           <React.Suspense fallback={<div className="card location-heat-card"><p className="muted">Loading map...</p></div>}>
-            <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : "No geolocated incidents detected in the selected range."} />
+            <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} resetToken={mapResetToken} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : "No geolocated incidents detected in the selected range."} />
           </React.Suspense>
         </section>
         <section className="pane dashboard-incidents-pane">
           {selectedLocation
             ? mode === "alerts"
-              ? <LocationAlertPanel location={selectedLocation} alerts={selectedAlerts} onClose={() => { setSelectedLocation(null); setFocusedLocationKey(null); }} reload={reload} searchQuery={searchQuery} />
-              : <LocationIncidentPanel location={selectedLocation} incidents={selectedIncidents} onClose={() => { setSelectedLocation(null); setFocusedLocationKey(null); }} searchQuery={searchQuery} />
+              ? <LocationAlertPanel location={selectedLocation} alerts={selectedAlerts} onClose={closeLocationPanel} reload={reload} searchQuery={searchQuery} />
+              : <LocationIncidentPanel location={selectedLocation} incidents={selectedIncidents} onClose={closeLocationPanel} searchQuery={searchQuery} />
             : mode === "alerts"
               ? <AlertsPanel alerts={data.alerts} locationMap={alertLocationMap} reload={reload} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />
               : <Incidents rows={data.incidents} alerts={data.alerts} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} reload={reload} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={clearFocusedIncident} clearFocusedHashTarget={clearFocusedHashTarget} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />}
