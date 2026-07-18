@@ -8,21 +8,19 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 9 - Temporal Pattern Analysis
-- Current milestone: Package 9 RF temporal-finding vertical slice is implemented,
-  tested, deployed to the RPI, and live-verified. Package 7 is deferred as a standalone outstanding
-  feature outside this closeout sequence. Packages 5 and 8 are complete,
-  deployed, live-verified, and operator-accepted.
-- Continuation branch: `codex/package9-temporal` in
-  `C:\projects\pizzawave-package9-temporal`
-- Last deployed code state: Package 9 consolidated RF temporal findings and
-  operator workflow, deployed to the RPI 2026-07-17
-- Latest tracker commit before closure: `5ac9854`
-- Operator verification: Packages 1, 2, 3, 4, 5, 6, and 8 accepted
-- Next action: extend the Package 9 contracts from RF to the remaining domains,
-  then complete Package 10
-  Recovery Workflows and Package 11 Cleanup/final regression. Do not restart
-  Trunk Recorder or otherwise disturb parallel RF experiments.
+- Active package: 10 - Recovery Workflows
+- Current milestone: Package 9 is complete, deployed to the RPI, live-verified,
+  and operator-accepted. Package 7 remains a standalone outstanding feature
+  outside this closeout sequence.
+- Continuation branch: start a new task-specific branch from `main` for Package 10.
+- Last deployed code state: Package 9 RF temporal findings, consolidated
+  Recommendations UX, finding drawer, grouped History, and operator workflow,
+  deployed to the RPI 2026-07-17.
+- Package 9 final implementation commit before documentation closure: `2b6caa4`
+- Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, and 9 accepted
+- Next action: complete Package 10 Recovery Workflows, including encrypted
+  portable backups, then Package 11 Cleanup/final regression. Do not restart
+  Trunk Recorder unless the operator explicitly requests it.
 
 ## Package 5 Final Handoff
 
@@ -632,7 +630,7 @@ Section acceptance checkpoints:
 
 ### 9. Temporal Pattern Analysis
 
-Status: RF vertical slice implemented, deployed, and live-verified; remaining domains pending
+Status: complete, deployed, live-verified, and operator-accepted
 
 Accepted design:
 
@@ -690,9 +688,9 @@ Accepted design:
   evidence while excluding them from baseline learning. The deploy helper owns
   an explicit start/end maintenance handshake; unexplained service restarts are
   not excluded automatically.
-- Implement RF first end to end, then extend the same contracts to
-  transcription, queues/runtime, talkgroup traffic, incidents, USB, and
-  cross-domain relationships before Package 9 acceptance.
+- Implement RF first end to end. The operator accepted that vertical slice and
+  the shared Recommendations contracts as the Package 9 closure scope; extending
+  temporal detectors to other domains is future product work.
 
 RF implementation delivered 2026-07-17:
 
@@ -712,16 +710,15 @@ RF implementation delivered 2026-07-17:
   sites, no legacy RF cards in Active, and 64 visible episode bands for the
   selected ETV finding. Trunk Recorder remained PID 1595 with its July 11 start.
 
-- [ ] Detect sustained outages, recurring time-of-day/day-of-week patterns,
-  trends, spikes, drops, and correlated signals across RF, transcription,
-  talkgroup traffic, incident processing, queues, runtime, and USB evidence.
-- [ ] Use a hybrid contract: retain community targets such as 40 TR messages/s
+- [x] Detect sustained outages, recurrence, schedule association, trends,
+  spikes, drops, and correlated typed symptoms for the RF-first vertical.
+- [x] Use a hybrid contract: retain community targets such as 40 TR messages/s
   while learning a rig-local baseline that never hides the stronger target.
-- [ ] Surface concise findings in Recommendations and detailed evidence on the
+- [x] Surface concise findings in Recommendations and detailed evidence on the
   owning Metrics page; preserve reviewed/resolved finding history for 90 days.
-- [ ] Begin provisional recurrence findings after three comparable days and
+- [x] Begin provisional recurrence findings after three comparable days and
   mature local baselines over approximately 28 days.
-- [ ] Test, deploy, verify, and obtain operator acceptance.
+- [x] Test, deploy, verify, and obtain operator acceptance.
 
 ### 10. Recovery Workflows
 
@@ -2017,3 +2014,11 @@ Status: pending
   Its accepted design and persistence/timing foundation remain the handoff, but
   no additional Package 7 implementation will be done in this remediation
   closeout. Active work advances to Packages 9, 10, and 11.
+- 2026-07-17: The operator accepted and closed Package 9 after the RF-first
+  temporal-finding implementation and Recommendations UX closeout. The final
+  UI uses concise severity/type cards, visually receded Dormant findings, a
+  focused opaque drawer with operator notes and paginated activity, and a
+  grouped History ledger that collapsed 262 live history records to 24 rows.
+  All 502 tests passed; the final web-only deployment left Trunk Recorder at
+  PID 1595 with its unchanged July 11 start. Cross-domain temporal-detector
+  expansion remains future product work and is not a Package 9 closure blocker.

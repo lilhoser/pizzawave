@@ -23,21 +23,22 @@ Package 5 or Package 8 worktree directories.
 
 ## 2026-07-17 Operator UX Handoff
 
-- Packages 1, 2, 3, 4, 5, 6, and 8 are complete and operator-accepted.
+- Packages 1, 2, 3, 4, 5, 6, 8, and 9 are complete and operator-accepted.
 - Package 7, Offline And Archive Calls, is a standalone outstanding feature and
   is no longer part of this operator-remediation closeout. Its accepted design
   and implemented persistence/timing foundation remain documented, but its
   API, UI, isolated store, processing scheduler, and SFTP workflow are not
   implemented or deployed.
-- The active closeout sequence is Package 9 Temporal Pattern Analysis, Package
-  10 Recovery Workflows, and Package 11 Cleanup plus final regression.
-- Package 9's RF-first vertical slice is implemented on
-  `codex/package9-temporal` in `C:\projects\pizzawave-package9-temporal` and is
-  deployed to the RPI. It provides consolidated per-site temporal findings,
-  operator workflow/audit, Known Issues handling, maintenance exclusion, and
-  RF chart episode overlays. Continue Package 9 by applying the same contracts
-  to transcription, queues/runtime, talkgroup traffic, incidents, USB, and
-  cross-domain relationships; Package 9 is not yet ready for acceptance.
+- The remaining closeout sequence is Package 10 Recovery Workflows followed by
+  Package 11 Cleanup plus final regression.
+- Package 9 Temporal Pattern Analysis is complete, deployed to the RPI, live-
+  verified, and operator-accepted. Its accepted closure scope is the RF-first
+  temporal-finding vertical plus the shared Recommendations lifecycle and UX:
+  consolidated per-site findings, operator notes/status and audit, Known Issues,
+  maintenance exclusion, RF chart episode overlays, concise severity/type cards,
+  a focused finding drawer, paginated activity, and grouped History. Broader
+  temporal detectors for other domains are future product work rather than a
+  blocker for this closeout.
 - Package 10 must include portable backup encryption. Existing full backups can
   include the PizzaWave authentication token and configured credentials;
   support packages are a separate secret-excluding format.

@@ -7,9 +7,8 @@ The active operator-facing remediation program is tracked in
 
 Current operator-remediation closeout order:
 
-1. Package 9 - temporal pattern analysis.
-2. Package 10 - recovery workflows, including encrypted portable backups.
-3. Package 11 - cleanup and final regression.
+1. Package 10 - recovery workflows, including encrypted portable backups.
+2. Package 11 - cleanup and final regression.
 
 Standalone outstanding feature, outside this closeout sequence:
 
