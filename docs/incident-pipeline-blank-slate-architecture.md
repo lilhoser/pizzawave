@@ -90,6 +90,36 @@ reinterpret evidence or make an incident decision.
 
 ## Architecture
 
+### Production Resource Boundary
+
+Paxan is the production compute target until it is explicitly replaced. As
+observed on 2026-07-18, it has an Intel Core i9-13900K, 64 GB of system RAM, and
+an RTX 4090 with 24 GB of VRAM. Its normal LM Studio workload already consumed
+approximately 22.3 GB of VRAM during inspection. Designs must not treat nominal
+GPU capacity as spare capacity while that workload is present.
+
+Ventax, an RTX 5090 laptop used during development bakeoffs, is experiment
+equipment only. It is not continuously available production infrastructure.
+No production architecture, availability claim, throughput gate, or recovery
+path may depend on Ventax.
+
+Consequently, the production design may not require:
+
+- multiple transcription models to remain resident concurrently;
+- a second large audio model to coexist permanently with the production LLM;
+- synchronous fan-out to multiple ASR models for every call;
+- Ventax or another undeclared accelerator to keep ingestion current;
+- benchmark throughput measured only on Ventax as evidence of Paxan viability.
+
+Alternate transcription and direct-audio models remain valid experimental
+comparators. A selective escalation path is eligible for production only after
+it proves, on Paxan under representative concurrent load, that queue depth,
+latency, VRAM transitions, and failure recovery remain acceptable. The default
+architecture should preserve audio and uncertainty while minimizing always-on
+model residency. A future dedicated production inference host is a separate,
+explicit infrastructure decision rather than an assumption embedded in the
+incident pipeline.
+
 ```mermaid
 flowchart LR
     A["Audio, transcript, and radio metadata"] --> B["Observation bundle"]
