@@ -100,7 +100,7 @@ public static class EncryptedBackupArchive
                 }
                 catch (CryptographicException ex)
                 {
-                    throw new InvalidOperationException("The backup could not be unlocked. Check the passphrase and archive integrity.", ex);
+                    throw new InvalidOperationException($"The backup could not be unlocked at encrypted chunk {counter:N0}. Check the passphrase and archive integrity.", ex);
                 }
                 await output.WriteAsync(plaintext.AsMemory(0, count), ct);
                 remaining -= count;

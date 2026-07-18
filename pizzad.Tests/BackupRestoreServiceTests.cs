@@ -374,6 +374,30 @@ public sealed class BackupRestoreServiceTests
     }
 
     [Fact]
+    public async Task EncryptedArchive_RoundTripsAcrossMoreThan256Chunks()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var source = Path.Combine(root, "large-source.bin");
+            var encrypted = Path.Combine(root, "large.pwbak");
+            var restored = Path.Combine(root, "large-restored.bin");
+            await using (var stream = File.Create(source))
+                stream.SetLength(257L * 1024 * 1024 + 17);
+
+            await EncryptedBackupArchive.EncryptFileAsync(source, encrypted, Passphrase, CancellationToken.None);
+            await EncryptedBackupArchive.DecryptFileAsync(encrypted, restored, Passphrase, CancellationToken.None);
+
+            Assert.Equal(new FileInfo(source).Length, new FileInfo(restored).Length);
+            Assert.Equal(await HashFileAsync(source), await HashFileAsync(restored));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task StageRestore_RejectsWrongPassphraseWithoutLeavingPendingState()
     {
         var root = NewTempRoot();
@@ -522,6 +546,12 @@ public sealed class BackupRestoreServiceTests
         var path = Path.Combine(root, $"decrypted-{Guid.NewGuid():N}.zip");
         await EncryptedBackupArchive.DecryptFileAsync(encryptedPath, path, Passphrase, CancellationToken.None);
         return path;
+    }
+
+    private static async Task<byte[]> HashFileAsync(string path)
+    {
+        await using var stream = File.OpenRead(path);
+        return await SHA256.HashDataAsync(stream);
     }
 
     private static async Task<EngineConfig> CreateConfigAsync(string root)

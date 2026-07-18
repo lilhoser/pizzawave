@@ -126,8 +126,21 @@ public sealed class BackupRestoreService
             archive.Dispose();
             await file.DisposeAsync();
 
-            await EncryptedBackupArchive.EncryptFileAsync(plainArchivePath, partialPath, request!.Passphrase!, ct);
-            await EncryptedBackupArchive.DecryptFileAsync(partialPath, verifyArchivePath, request.Passphrase!, ct);
+            for (var encryptionAttempt = 1; encryptionAttempt <= 2; encryptionAttempt++)
+            {
+                try
+                {
+                    await EncryptedBackupArchive.EncryptFileAsync(plainArchivePath, partialPath, request!.Passphrase!, ct);
+                    await EncryptedBackupArchive.DecryptFileAsync(partialPath, verifyArchivePath, request.Passphrase!, ct);
+                    break;
+                }
+                catch (InvalidOperationException ex) when (encryptionAttempt == 1 && ex.InnerException is CryptographicException)
+                {
+                    _logger.LogWarning(ex, "Backup authenticated unlock failed on the first pass; rebuilding the encrypted archive once");
+                    try { File.Delete(partialPath); } catch { }
+                    try { File.Delete(verifyArchivePath); } catch { }
+                }
+            }
             Directory.CreateDirectory(verifyExtractRoot);
             ZipFile.ExtractToDirectory(verifyArchivePath, verifyExtractRoot);
             var verifiedManifest = await ReadAndValidateManifestAsync(verifyExtractRoot, ct);
