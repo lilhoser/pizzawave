@@ -123,12 +123,14 @@ incident pipeline.
 ```mermaid
 flowchart LR
     A["Audio, transcript, and radio metadata"] --> B["Observation bundle"]
-    B --> C["Learned event-state proposer"]
-    C --> D["Proposed state changes with provenance and uncertainty"]
-    D --> E["Independent learned critic"]
-    E --> F["Append-only shadow event ledger"]
-    F --> G["Current event-state projection"]
-    G --> H["Incident Pipeline Inspector"]
+    B --> C["Learned observation interpretation"]
+    C --> D["Independent interpretation critic"]
+    D --> E["Learned event-state proposer"]
+    E --> F["Proposed state changes with provenance and uncertainty"]
+    F --> G["Independent event-state critic"]
+    G --> H["Append-only shadow event ledger"]
+    H --> I["Current event-state projection"]
+    I --> J["Incident Pipeline Inspector"]
 ```
 
 ### Observation Bundle
@@ -151,6 +153,25 @@ identity or membership.
 The bundle must preserve distinctions between source facts, derived metadata,
 prior model claims, and operator corrections. Prior event state is context, not
 proof.
+
+### Learned Observation Interpretation
+
+Before event reasoning, each observation is interpreted independently. This
+stage may reconcile competing transcript candidates, identify content shared by
+the candidates, preserve alternative readings, and state unresolved questions.
+Every interpretation statement must cite exact source provenance and carry
+uncertainty.
+
+This contract has no event identifier, incident membership, event category, or
+state-change field. It therefore cannot turn a place name, garbled transcript,
+or routine fragment into an event merely because the text appears meaningful.
+An independently invoked critic reviews the interpretation against the same
+single observation before any later event-state proposer may consume it.
+
+The initial coordinator returns an in-memory experimental result only. It does
+not call the event proposer, append the event-state ledger, or write production
+state. Whether interpreted observations should later receive their own
+append-only audit record remains an evaluation decision, not an assumption.
 
 ### Learned Event-State Proposer
 

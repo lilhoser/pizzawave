@@ -87,6 +87,76 @@ public sealed class IncidentEventStateShadowContractTests
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
 
+    [Fact]
+    public void ValidateObservationInterpretation_AcceptsCompetingReadingsWithoutCreatingAnEvent()
+    {
+        var result = IncidentEventStateContractValidator.ValidateObservationInterpretation(
+            Bundle(),
+            ObservationInterpretation());
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+        Assert.Empty(result.Errors);
+        Assert.Equal(2, ObservationInterpretation().PossibleReadings.Count);
+    }
+
+    [Fact]
+    public void ValidateObservationInterpretation_RejectsQuoteMismatchAndCrossObservationEvidence()
+    {
+        var secondObservation = Bundle().Observations[0] with
+        {
+            ObservationId = "observation-2",
+            CallId = 67114,
+            Transcripts =
+            [
+                new IncidentEventStateTranscriptObservation(
+                    "transcript-2",
+                    "A second observation contains different source material.",
+                    "source-engine-2",
+                    DateTimeOffset.Parse("2026-07-17T11:59:30Z"))
+            ]
+        };
+        var bundle = Bundle() with { Observations = [.. Bundle().Observations, secondObservation] };
+        var invalid = ObservationInterpretation() with
+        {
+            PossibleReadings =
+            [
+                ObservationInterpretation().PossibleReadings[0] with
+                {
+                    Provenance =
+                    [
+                        new IncidentEventStateProvenance(
+                            "observation-2",
+                            "transcript-2",
+                            "words absent from the source",
+                            null,
+                            null,
+                            string.Empty)
+                    ]
+                }
+            ]
+        };
+
+        var result = IncidentEventStateContractValidator.ValidateObservationInterpretation(bundle, invalid);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("exact quote does not occur", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("outside interpreted observation", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateObservationInterpretationCritique_RejectsWrongInterpretationReference()
+    {
+        var critique = ObservationInterpretationCritique() with { InterpretationId = "interpretation-missing" };
+
+        var result = IncidentEventStateContractValidator.ValidateObservationInterpretationCritique(
+            Bundle(),
+            ObservationInterpretation(),
+            critique);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("does not match the interpretation", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData(-0.1)]
     [InlineData(1.1)]
@@ -161,6 +231,50 @@ public sealed class IncidentEventStateShadowContractTests
                     ["What produced the reported sounds?"])
             ],
             []);
+
+    private static IncidentEventStateObservationInterpretation ObservationInterpretation() =>
+        new(
+            "interpretation-1",
+            "observation-1",
+            DateTimeOffset.Parse("2026-07-17T12:00:30Z"),
+            "interpretation-model-1",
+            "interpretation-prompt-1",
+            [
+                new IncidentEventStateObservationInterpretationStatement(
+                    "reading-1",
+                    "The speaker may have described hearing approximately ten loud sounds.",
+                    0.2,
+                    [TranscriptProvenance("heard approximately ten loud sounds")]),
+                new IncidentEventStateObservationInterpretationStatement(
+                    "reading-2",
+                    "The exact number of sounds may be uncertain.",
+                    0.6,
+                    [TranscriptProvenance("approximately ten")])
+            ],
+            [
+                new IncidentEventStateObservationInterpretationStatement(
+                    "shared-1",
+                    "The transcript describes loud sounds.",
+                    0.1,
+                    [TranscriptProvenance("loud sounds")])
+            ],
+            ["What produced the sounds?"]);
+
+    private static IncidentEventStateObservationInterpretationCritique ObservationInterpretationCritique() =>
+        new(
+            "interpretation-critique-1",
+            "interpretation-1",
+            DateTimeOffset.Parse("2026-07-17T12:00:45Z"),
+            "interpretation-critic-model-1",
+            "interpretation-critic-prompt-1",
+            "The possible readings preserve uncertainty in the source.",
+            [
+                new IncidentEventStateCritiqueFinding(
+                    "interpretation-finding-1",
+                    "The source does not identify what produced the sounds.",
+                    0.2,
+                    [TranscriptProvenance("loud sounds")])
+            ]);
 
     private static IncidentEventStateCritique Critique() =>
         new(

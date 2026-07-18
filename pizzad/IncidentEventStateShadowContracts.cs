@@ -46,6 +46,31 @@ public sealed record IncidentEventStateProvenance(
     long? AudioEndMilliseconds,
     string MetadataField);
 
+public sealed record IncidentEventStateObservationInterpretationStatement(
+    string StatementId,
+    string Statement,
+    double Uncertainty,
+    IReadOnlyList<IncidentEventStateProvenance> Provenance);
+
+public sealed record IncidentEventStateObservationInterpretation(
+    string InterpretationId,
+    string ObservationId,
+    DateTimeOffset GeneratedAtUtc,
+    string ModelIdentity,
+    string PromptIdentity,
+    IReadOnlyList<IncidentEventStateObservationInterpretationStatement> PossibleReadings,
+    IReadOnlyList<IncidentEventStateObservationInterpretationStatement> SharedContent,
+    IReadOnlyList<string> UnresolvedQuestions);
+
+public sealed record IncidentEventStateObservationInterpretationCritique(
+    string CritiqueId,
+    string InterpretationId,
+    DateTimeOffset GeneratedAtUtc,
+    string ModelIdentity,
+    string PromptIdentity,
+    string Summary,
+    IReadOnlyList<IncidentEventStateCritiqueFinding> Findings);
+
 public sealed record IncidentEventStateClaim(
     string ClaimId,
     string Statement,
@@ -155,6 +180,28 @@ public static class IncidentEventStateContractValidator
         var errors = new List<string>();
         ValidateBundle(bundle, errors);
         ValidateProposal(bundle, proposal, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateObservationInterpretation(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationInterpretation interpretation)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateObservationInterpretation(bundle, interpretation, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateObservationInterpretationCritique(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationInterpretation interpretation,
+        IncidentEventStateObservationInterpretationCritique critique)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateObservationInterpretation(bundle, interpretation, errors);
+        ValidateObservationInterpretationCritique(bundle, interpretation, critique, errors);
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
@@ -447,6 +494,105 @@ public static class IncidentEventStateContractValidator
                 RequireValue(alternative.Statement, $"alternative statement for '{alternative.AlternativeId}'", errors);
                 ValidateUncertainty(alternative.Uncertainty, $"alternative '{alternative.AlternativeId}'", errors);
                 ValidateProvenance(bundle, alternative.Provenance, $"alternative '{alternative.AlternativeId}'", errors);
+            }
+        }
+    }
+
+    private static void ValidateObservationInterpretation(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationInterpretation interpretation,
+        List<string> errors)
+    {
+        RequireValue(interpretation.InterpretationId, "observation interpretation id", errors);
+        RequireValue(interpretation.ObservationId, "interpreted observation id", errors);
+        RequireValue(interpretation.ModelIdentity, "observation interpretation model identity", errors);
+        RequireValue(interpretation.PromptIdentity, "observation interpretation prompt identity", errors);
+        if (interpretation.GeneratedAtUtc == default)
+            errors.Add("observation interpretation generated timestamp is required");
+        ValidateObservationReferences(
+            bundle,
+            [interpretation.ObservationId],
+            $"observation interpretation '{interpretation.InterpretationId}'",
+            errors);
+
+        var statements = interpretation.PossibleReadings
+            .Select(statement => (Statement: statement, Description: "possible reading"))
+            .Concat(interpretation.SharedContent.Select(statement =>
+                (Statement: statement, Description: "shared content")))
+            .ToList();
+        RequireUniqueValues(
+            statements.Select(item => item.Statement.StatementId),
+            $"statement id in observation interpretation '{interpretation.InterpretationId}'",
+            errors);
+        foreach (var (statement, description) in statements)
+        {
+            RequireValue(statement.StatementId, $"{description} id", errors);
+            RequireValue(statement.Statement, $"{description} statement for '{statement.StatementId}'", errors);
+            ValidateUncertainty(statement.Uncertainty, $"{description} '{statement.StatementId}'", errors);
+            ValidateProvenance(bundle, statement.Provenance, $"{description} '{statement.StatementId}'", errors);
+            foreach (var provenance in statement.Provenance)
+            {
+                if (!string.Equals(
+                        provenance.ObservationId,
+                        interpretation.ObservationId,
+                        StringComparison.Ordinal))
+                {
+                    errors.Add($"{description} '{statement.StatementId}' cites observation '{provenance.ObservationId}' outside interpreted observation '{interpretation.ObservationId}'");
+                }
+            }
+        }
+        RequireUniqueValues(
+            interpretation.UnresolvedQuestions,
+            $"unresolved question in observation interpretation '{interpretation.InterpretationId}'",
+            errors);
+        foreach (var question in interpretation.UnresolvedQuestions)
+            RequireValue(question, "observation interpretation unresolved question", errors);
+    }
+
+    private static void ValidateObservationInterpretationCritique(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationInterpretation interpretation,
+        IncidentEventStateObservationInterpretationCritique critique,
+        List<string> errors)
+    {
+        RequireValue(critique.CritiqueId, "observation interpretation critique id", errors);
+        RequireValue(critique.InterpretationId, "observation interpretation critique interpretation id", errors);
+        RequireValue(critique.ModelIdentity, "observation interpretation critique model identity", errors);
+        RequireValue(critique.PromptIdentity, "observation interpretation critique prompt identity", errors);
+        RequireValue(critique.Summary, "observation interpretation critique summary", errors);
+        if (!string.Equals(critique.InterpretationId, interpretation.InterpretationId, StringComparison.Ordinal))
+            errors.Add("observation interpretation critique id reference does not match the interpretation");
+        if (critique.GeneratedAtUtc == default)
+            errors.Add("observation interpretation critique generated timestamp is required");
+        RequireUniqueValues(
+            critique.Findings.Select(finding => finding.FindingId),
+            "observation interpretation critique finding id",
+            errors);
+        foreach (var finding in critique.Findings)
+        {
+            RequireValue(finding.FindingId, "observation interpretation critique finding id", errors);
+            RequireValue(
+                finding.Statement,
+                $"observation interpretation critique finding statement for '{finding.FindingId}'",
+                errors);
+            ValidateUncertainty(
+                finding.Uncertainty,
+                $"observation interpretation critique finding '{finding.FindingId}'",
+                errors);
+            ValidateProvenance(
+                bundle,
+                finding.Provenance,
+                $"observation interpretation critique finding '{finding.FindingId}'",
+                errors);
+            foreach (var provenance in finding.Provenance)
+            {
+                if (!string.Equals(
+                        provenance.ObservationId,
+                        interpretation.ObservationId,
+                        StringComparison.Ordinal))
+                {
+                    errors.Add($"observation interpretation critique finding '{finding.FindingId}' cites observation '{provenance.ObservationId}' outside interpreted observation '{interpretation.ObservationId}'");
+                }
             }
         }
     }
