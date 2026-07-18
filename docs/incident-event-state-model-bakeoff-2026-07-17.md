@@ -214,17 +214,66 @@ candidate readings without being allowed to create an event. Event hypotheses
 must be proposed later from bounded relational evidence and independently
 critiqued.
 
+### Observation-interpretation sparse gate
+
+A narrower contract was then tested on the same two observations. It contained
+no event identifier, incident membership, category, severity, or state-change
+field. Each model interpreted one observation at a time, and a separately
+invoked critic reviewed only that interpretation and its source transcripts.
+
+Qwen failed both observations at a 4,096-token limit. It used 3,505 and 3,262
+reasoning tokens and returned truncated JSON. At 8,192 tokens both Qwen and
+Gemma returned contract-valid interpretations and critiques:
+
+| Interpreter | Observation | Interpret | Critique | Semantic result |
+|---|---|---:|---:|---|
+| Qwen 3.6 35B-A3B | `call:25113` | 33.2 s | 41.6 s | Preserved three readings but added unsupported `route or entity` and `heading to` framing; same-model critic did not reject it |
+| Qwen 3.6 35B-A3B | `call:25115` | 28.7 s | 13.0 s | Invented a shared-content statement about call ID and timestamp; critic endorsed it |
+| Gemma 4 26B-A4B | `call:25113` | 24.3 s | 9.5 s | Stayed close to transcript wording but omitted any unresolved question about the contradictory readings; critic endorsed the omission |
+| Gemma 4 26B-A4B | `call:25115` | 10.1 s | 5.6 s | Conservatively preserved the three incompatible fragments |
+
+Cross-model critique did not repair the failure. Gemma approved both Qwen
+interpretations. It explicitly noticed that Qwen's call-ID/timestamp statement
+was not supported by its cited quotations, then declined to return a finding.
+Qwen approved both Gemma interpretations and did not identify the missing
+dangerous-case uncertainty.
+
+This rejects a learned observation-normalization stage as a required semantic
+authority in the candidate architecture. Exact quotation checks establish that
+text exists; neither same-model nor cross-model critique established that a
+model statement was entailed by that text. The two-call cost also required four
+serial generations and up to 74.8 seconds for one observation, which is not a
+credible Paxan production default.
+
+The raw transcript candidates and audio reference should therefore remain the
+observation evidence. A later learned event reasoner may review those sources
+directly, but an intermediate model paraphrase must not replace or outrank them.
+The interpretation contract and runners remain experiment scaffolding, not an
+accepted production layer. The busy corpus was intentionally not run after the
+sparse gate failed.
+
+Successful sparse artifacts are stored under
+`C:\projects\pizzawave-incident-experiment-20260717\observation-interpretation-v1`.
+Their SHA-256 hashes are:
+
+- Qwen `call:25113`: `0C3389C768BCE38CFF9211BC84C86362EFB6B5C680345C8D75200F4804FAE3A2`
+- Qwen `call:25115`: `819EB9C7B8E33C75658D7BE0FC5A634A3458511E766CCF623DE972EE5A6E8354`
+- Gemma `call:25113`: `9BC385C2E48741BFD95834860D769446126C3815B763DBA9CF05DF1D7ECFF513`
+- Gemma `call:25115`: `C590071F70A4B4E629D2B9CB1AB1DB5C9040D934F9A235C908205B5534C02F11`
+- Gemma-on-Qwen cross critiques: `4CDE9D040FBF0DF55A5935ECBE1260C0C4A1D05F6E2EF72096522425F76C5DAF`, `2F0D8B6114F760423F642DC3F379119CE92725494C142E1077FC6635CB1E06DF`
+- Qwen-on-Gemma cross critiques: `16FF9E7945CA2B8AF0D627A927FB3278AB041E8B67F2F10161D4403892398C36`, `86D77247ECA6C175109BCF1ADAB74E81817250FFD40E80F669D05D222E62E8FE`
+
 ## Architectural consequence
 
 Do not build the replacement pipeline around one model call that converts an
 arbitrary time window into incident records. None of the tested models earned
 that role.
 
-The next development experiment should test a decomposed evidence ledger:
+The next development experiment should test a decomposed evidence ledger
+without a learned paraphrase between source evidence and event reasoning:
 
-1. Produce observation-level interpretations that preserve competing readings
-   and may abstain, including multiple transcript candidates and an explicit
-   assessment of transcript reliability.
+1. Retain audio references and all transcript candidates as first-class source
+   evidence; do not select or paraphrase one into authoritative observation text.
 2. Propose relationships only between bounded observations or existing
    hypotheses, with evidence for the relationship itself.
 3. Maintain hypotheses as revisable state rather than as completed incident
@@ -240,7 +289,7 @@ of incident membership.
 
 ## Next gates
 
-- Define a compact human adjudication worksheet for observation interpretation,
+- Define a compact human adjudication worksheet for source-grounded claims,
   relationship evidence, missed events, false events, over-merges, and splits.
 - Select representative development cases from the already-open development
   corpus without inspecting held-out data.

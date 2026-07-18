@@ -123,14 +123,12 @@ incident pipeline.
 ```mermaid
 flowchart LR
     A["Audio, transcript, and radio metadata"] --> B["Observation bundle"]
-    B --> C["Learned observation interpretation"]
-    C --> D["Independent interpretation critic"]
-    D --> E["Learned event-state proposer"]
-    E --> F["Proposed state changes with provenance and uncertainty"]
-    F --> G["Independent event-state critic"]
-    G --> H["Append-only shadow event ledger"]
-    H --> I["Current event-state projection"]
-    I --> J["Incident Pipeline Inspector"]
+    B --> C["Learned event-state proposer"]
+    C --> D["Proposed state changes with provenance and uncertainty"]
+    D --> E["Independent event-state critic"]
+    E --> F["Append-only shadow event ledger"]
+    F --> G["Current event-state projection"]
+    G --> H["Incident Pipeline Inspector"]
 ```
 
 ### Observation Bundle
@@ -154,24 +152,25 @@ The bundle must preserve distinctions between source facts, derived metadata,
 prior model claims, and operator corrections. Prior event state is context, not
 proof.
 
-### Learned Observation Interpretation
+### Rejected Required Observation-Normalization Stage
 
-Before event reasoning, each observation is interpreted independently. This
-stage may reconcile competing transcript candidates, identify content shared by
-the candidates, preserve alternative readings, and state unresolved questions.
-Every interpretation statement must cite exact source provenance and carry
-uncertainty.
+An experiment tested interpreting each observation independently before event
+reasoning. Its contract had no event identifier, incident membership, event
+category, or state-change field. It preserved possible readings, shared content,
+unresolved questions, exact provenance, and uncertainty, followed by a separate
+learned critique call.
 
-This contract has no event identifier, incident membership, event category, or
-state-change field. It therefore cannot turn a place name, garbled transcript,
-or routine fragment into an event merely because the text appears meaningful.
-An independently invoked critic reviews the interpretation against the same
-single observation before any later event-state proposer may consume it.
+The sparse development gate rejected that stage as a required production
+boundary. Qwen and Gemma produced schema-valid but unsupported or incomplete
+interpretations, and both same-model and cross-model critics approved the known
+defects. One Qwen interpreter/critic pair took 74.8 seconds for a single
+observation on Ventax. More model calls did not establish semantic grounding.
 
-The initial coordinator returns an in-memory experimental result only. It does
-not call the event proposer, append the event-state ledger, or write production
-state. Whether interpreted observations should later receive their own
-append-only audit record remains an evaluation decision, not an assumption.
+Raw transcript candidates and the audio reference therefore remain first-class
+observation evidence. No learned paraphrase may replace or outrank them before
+event reasoning. The interpretation contract and in-memory coordinator remain
+available only as experiment scaffolding; they do not call the event proposer,
+append the event-state ledger, or write production state.
 
 ### Learned Event-State Proposer
 
