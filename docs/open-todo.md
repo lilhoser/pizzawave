@@ -5,9 +5,10 @@ Last consolidated: 2026-07-18
 The active operator-facing remediation program is tracked in
 [operator-ux-remediation.md](operator-ux-remediation.md).
 
-Current operator-remediation closeout order:
+Current operator-remediation closeout:
 
-1. Package 11 - cleanup and final regression.
+1. Package 11 - obtain operator acceptance for the implemented, tested,
+   deployed, and live-verified cleanup. No implementation work remains.
 
 Standalone outstanding feature, outside this closeout sequence:
 

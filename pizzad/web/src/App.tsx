@@ -7,12 +7,14 @@ import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
+import { locationDisplayName, locationKey, locationShortName } from "./features/dashboard/location";
 import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
-import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
+const LocationHeatMap = React.lazy(() => import("./features/dashboard/LocationHeatMap").then(module => ({ default: module.LocationHeatMap })));
 const talkgroupCategoryOptions = [...categories];
 const themeOptions = [
   { value: "blue", label: "Blue" },
@@ -72,37 +74,6 @@ function writeCachedRadioReferenceSites(sid: string, sites: SetupTrConfigSites) 
   } catch {
     // Cache is only a convenience; explicit reload still works if storage is full or blocked.
   }
-}
-
-function downloadFileFromResponse(response: Response, fallbackName: string): Promise<string> {
-  return response.blob().then(blob => {
-    const disposition = response.headers.get("Content-Disposition") || "";
-    const fileName = filenameFromContentDisposition(disposition) || fallbackName;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    return fileName;
-  });
-}
-
-function filenameFromContentDisposition(disposition: string): string {
-  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
-  if (encoded) {
-    try {
-      return decodeURIComponent(encoded).replaceAll(/[\\/]/g, "-");
-    } catch {
-      return encoded.replaceAll(/[\\/]/g, "-");
-    }
-  }
-  const quoted = /filename="([^"]+)"/i.exec(disposition)?.[1];
-  if (quoted) return quoted.replaceAll(/[\\/]/g, "-");
-  const plain = /filename=([^;]+)/i.exec(disposition)?.[1]?.trim();
-  return plain ? plain.replaceAll(/[\\/]/g, "-") : "";
 }
 
 function categoryPageKey(page: Page, rangeHours: number, search: string) {
@@ -2922,28 +2893,6 @@ function defaultSetupSdrDeviceArgs(device: SetupSdrDetection["devices"][number],
       : serialOrIndex;
 }
 
-function siteSetupRfSurveyRequest(setup: SiteSetup, systems: RfSurveySystem[], sources: RfSurveySource[], selectedSourceIndexes: number[]) {
-  const systemNames = systems.map(system => system.shortName).filter(Boolean);
-  return {
-    systemShortName: systemNames[0] || undefined,
-    systemShortNames: systemNames,
-    sourcePlanSystemShortNames: setup.desired.sourcePlanSystemShortNames.length ? setup.desired.sourcePlanSystemShortNames : systemNames,
-    sourcePlanMode: setup.desired.sourcePlanMode || "full",
-    systemDefinitions: systems,
-    siteLabel: setup.desired.siteLabel || "Site Setup",
-    radioReferenceSid: setupRadioReferenceSids(setup).join(",") || undefined,
-    mode: "guided",
-    groundTruthSource: "site-setup",
-    rfPath: normalizeSetupRfPath(setup.desired.rfPath),
-    selectedSourceIndexes,
-    sourceAssignments: setup.desired.sourceAssignments ?? {},
-    sdrSources: sources,
-    currentStep: 2,
-    measurementMode: "guided",
-    probeDurationSeconds: 45
-  };
-}
-
 function normalizeSetupWaterfallGain(source: Pick<RfSurveySource, "gain" | "sdrType" | "device">) {
   const gain = String(source.gain ?? "").trim();
   if (!isAirspyRfSource(source))
@@ -3194,7 +3143,9 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
       <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder="Search incidents and alerts" /></div>
       <div className="dashboard dashboard-around">
         <section className="pane dashboard-map-pane">
-          <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : "No geolocated incidents detected in the selected range."} />
+          <React.Suspense fallback={<div className="card location-heat-card"><p className="muted">Loading map...</p></div>}>
+            <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : "No geolocated incidents detected in the selected range."} />
+          </React.Suspense>
         </section>
         <section className="pane dashboard-incidents-pane">
           {selectedLocation
@@ -3210,23 +3161,6 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
   );
 }
 
-function locationNodeCount(row: LocationHeat, incidents: Incident[] = []) {
-  const incidentCount = row.incidentLinks?.length ?? 0;
-  const standaloneCount = standaloneLocationCallIds(row, incidents).length;
-  return incidentCount + standaloneCount || row.count;
-}
-
-function locationNodeCountLabel(row: LocationHeat, incidents: Incident[] = []) {
-  const incidentCount = row.incidentLinks?.length ?? 0;
-  const standaloneCount = standaloneLocationCallIds(row, incidents).length;
-  const count = incidentCount + standaloneCount || row.count;
-  if (incidentCount && standaloneCount)
-    return `${incidentCount} incident${incidentCount === 1 ? "" : "s"}, ${standaloneCount} call${standaloneCount === 1 ? "" : "s"}`;
-  if (incidentCount)
-    return `${incidentCount} incident${incidentCount === 1 ? "" : "s"}`;
-  return `${count} call${count === 1 ? "" : "s"}`;
-}
-
 function standaloneLocationCallIds(row: LocationHeat, incidents: Incident[]) {
   const linkedIncidentIds = new Set((row.incidentLinks ?? []).map(link => link.incidentId));
   const incidentCallIds = new Set(
@@ -3240,10 +3174,6 @@ function standaloneLocationCallIds(row: LocationHeat, incidents: Incident[]) {
 function standaloneLocationSourceCalls(row: LocationHeat, incidents: Incident[]) {
   const ids = new Set(standaloneLocationCallIds(row, incidents));
   return (row.sourceCalls ?? []).filter(call => ids.has(call.callId));
-}
-
-function locationKey(row: LocationHeat) {
-  return `${row.areaId}|${row.locationText}`.toLowerCase();
 }
 
 function buildIncidentLocationMap(rows: LocationHeat[]) {
@@ -3396,26 +3326,6 @@ function CallVolumeTimelineChart({ rows, rangeStart, rangeEnd, bucketSeconds }: 
   return <div className="card chart-card"><h4>Call Volume by Time and Category</h4>{hasCalls ? <div className="chart-with-legend"><svg className="chart calls-timeline-chart" viewBox="0 0 500 196" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Call volume over time by category"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" />{labelTimes.map(timestamp => <text className="chart-label" textAnchor={timestamp === rangeStart ? "start" : timestamp === rangeEnd ? "end" : "middle"} x={labelX(timestamp)} y="181" key={timestamp}>{formatTime(timestamp)}</text>)}<text className="chart-label" x="4" y="34">{max}</text>{byCategory.map(series => <polyline key={series.category} fill="none" stroke={categoryColors[series.category]} strokeWidth="2.5" points={points(series.values)} />)}</svg><Legend items={byCategory.map(c => [label(c.category), categoryColors[c.category]])} /></div> : <span className="muted">No calls in this window.</span>}</div>;
 }
 
-function QualityByHourChart({ rows }: { rows: QualityHour[] }) {
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const keys: (keyof Omit<QualityHour, "hour">)[] = ["inaudible", "short", "empty", "failure"];
-  const totals = hours.map(hour => {
-    const row = rows.find(r => r.hour === hour);
-    return row ? keys.reduce((sum, key) => sum + row[key], 0) : 0;
-  });
-  const max = Math.max(1, ...totals);
-  return <div className="card chart-card"><h4>Quality Problems by Hour</h4><svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Quality problems by hour"><line className="axis" x1="32" y1="158" x2="482" y2="158" /><line className="axis" x1="32" y1="28" x2="32" y2="158" /><text className="chart-label" x="4" y="34">{max}</text>{[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}{hours.map(hour => {
-    const row = rows.find(r => r.hour === hour);
-    let y = 158;
-    return keys.map(key => {
-      const value = row?.[key] ?? 0;
-      const height = value / max * 118;
-      y -= height;
-      return <rect key={`${hour}-${key}`} x={31 + hour * 19} y={y} width="11" height={height} fill={qualityColors[key]} />;
-    });
-  })}</svg><Legend items={keys.map(k => [label(k), qualityColors[k]])} /></div>;
-}
-
 function Legend({ items }: { items: string[][] }) {
   return <div className="legend">{items.map(([name, color]) => <span key={name}><i style={{ background: color }} />{name}</span>)}</div>;
 }
@@ -3425,299 +3335,6 @@ function PlayableAudio({ src }: { src?: string | null }) {
   useEffect(() => setFailed(false), [src]);
   if (!src || failed) return null;
   return <audio controls preload="metadata" src={src} onError={() => setFailed(true)} />;
-}
-
-function LocationHeatMap({ rows, incidents, focusedKey, onFocusKey, onSelectLocation, emptyText = "No geolocated incidents detected in the selected range." }: { rows: LocationHeat[]; incidents: Incident[]; focusedKey?: string | null; onFocusKey?: (key: string | null) => void; onSelectLocation?: (row: LocationHeat | null) => void; emptyText?: string }) {
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<MapDragState | null>(null);
-  const suppressClickRef = useRef(false);
-  const defaultCenter = useMemo(() => defaultMapCenter(rows), [rows]);
-  const defaultZoom = useMemo(() => defaultMapZoom(rows), [rows]);
-  const areaKey = useMemo(() => Array.from(new Set(rows.map(row => row.areaId))).sort().join("|"), [rows]);
-  const lastAreaKey = useRef(areaKey);
-  const [mapSize, setMapSize] = useState({ width: 760, height: 520 });
-  const [zoom, setZoom] = useState(defaultZoom);
-  const [center, setCenter] = useState(defaultCenter);
-  const [selected, setSelected] = useState<LocationHeat | null>(null);
-  const [dragging, setDragging] = useState(false);
-  useEffect(() => {
-    const element = mapRef.current;
-    if (!element) return;
-    const update = () => setMapSize({ width: Math.max(320, element.clientWidth), height: Math.max(260, element.clientHeight) });
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [rows.length]);
-  useEffect(() => {
-    if (areaKey === lastAreaKey.current) return;
-    lastAreaKey.current = areaKey;
-    setCenter(defaultMapCenter(rows));
-    setZoom(defaultMapZoom(rows));
-    setSelected(null);
-  }, [areaKey, rows]);
-  useEffect(() => {
-    if (!focusedKey) {
-      if (selected) {
-        setSelected(null);
-        setCenter(defaultMapCenter(rows));
-        setZoom(defaultMapZoom(rows));
-      }
-      return;
-    }
-    const row = rows.find(r => locationKey(r) === focusedKey);
-    if (row) focusLocation(row);
-  }, [focusedKey]);
-
-  if (!rows.length) {
-    return <div className="card location-heat-card">
-      <p className="muted">{emptyText}</p>
-    </div>;
-  }
-  const viewport = buildMapViewport(zoom, center, mapSize);
-  const tiles = mapTiles(viewport);
-  const points = rows.map(row => ({ row, point: projectHeatPoint(row, viewport) }));
-
-  function focusLocation(row: LocationHeat) {
-    setSelected(row);
-    setCenter(approximateHeatLatLon(row));
-    setZoom(current => Math.max(current, 12));
-    onFocusKey?.(locationKey(row));
-    onSelectLocation?.(row);
-  }
-
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    setZoom(current => Math.max(8, Math.min(14, current + (event.deltaY < 0 ? 1 : -1))));
-  }
-
-  function resetMapView() {
-    setSelected(null);
-    setCenter(defaultMapCenter(rows));
-    setZoom(defaultMapZoom(rows));
-    onFocusKey?.(null);
-    onSelectLocation?.(null);
-  }
-
-  function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
-    if (isMapControlTarget(event.target)) return;
-    const point = mapEventPoint(event);
-    if (!point) return;
-    setCenter(worldToLatLon(
-      viewport.centerWorldX - viewport.width / 2 + point.x,
-      viewport.centerWorldY - viewport.height / 2 + point.y,
-      zoom));
-    setZoom(current => Math.min(14, current + 1));
-  }
-
-  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || isMapControlTarget(event.target)) return;
-    const point = mapEventPoint(event);
-    if (!point) return;
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: point.x,
-      startY: point.y,
-      centerWorldX: viewport.centerWorldX,
-      centerWorldY: viewport.centerWorldY,
-      moved: false
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const point = mapEventPoint(event);
-    if (!point) return;
-    const dx = point.x - drag.startX;
-    const dy = point.y - drag.startY;
-    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
-    drag.moved = true;
-    suppressClickRef.current = true;
-    setDragging(true);
-    setCenter(worldToLatLon(drag.centerWorldX - dx, drag.centerWorldY - dy, zoom));
-  }
-
-  function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    setDragging(false);
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture can already be gone if the browser canceled the drag.
-    }
-    if (drag.moved)
-      window.setTimeout(() => { suppressClickRef.current = false; }, 0);
-  }
-
-  return <div className="card location-heat-card">
-    <div className="location-map-shell">
-    <div className={`location-map${dragging ? " dragging" : ""}`} ref={mapRef} role="img" aria-label="Geolocated incident map" onWheel={handleWheel} onClick={handleMapClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}>
-      <div className="map-zoom-controls" onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}><button type="button" onClick={() => setZoom(current => Math.min(14, current + 1))} aria-label="Zoom in">+</button><button type="button" onClick={() => setZoom(current => Math.max(8, current - 1))} aria-label="Zoom out">-</button><button type="button" onClick={resetMapView} aria-label="Reset map view">Fit</button><span>{zoom}</span></div>
-      {tiles.map(tile => <img
-        src={`https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`}
-        style={{ left: tile.left, top: tile.top }}
-        alt=""
-        draggable={false}
-        key={`${tile.z}-${tile.x}-${tile.y}`}
-      />)}
-      {points.map(({ row, point }) => {
-        const nodeCount = locationNodeCount(row, incidents);
-        const size = 22 + row.intensity * 36;
-        return <button
-          className={`heat-dot map-heat-dot category-${row.category || "other"} ${selected && locationKey(selected) === locationKey(row) ? "active" : ""}`}
-          style={{ left: `${point.x}%`, top: `${point.y}%`, width: size, height: size }}
-          title={`${locationDisplayName(row)}: ${locationNodeCountLabel(row, incidents)}; ${row.count} matched call${row.count === 1 ? "" : "s"}; latest ${new Date(row.lastHeard * 1000).toLocaleString()}; calls ${row.callIds.join(", ")}`}
-          onClick={event => { event.stopPropagation(); focusLocation(row); }}
-          onPointerDown={event => event.stopPropagation()}
-          key={`${row.areaId}-${row.locationText}`}
-        >
-          <span>{nodeCount}</span>
-        </button>;
-      })}
-      <a className="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
-    </div>
-    </div>
-    <div className="location-heat-list">
-      <span className="location-heat-list-count">{rows.length} geolocated address{rows.length === 1 ? "" : "es"}</span>
-    </div>
-  </div>;
-}
-
-function locationDisplayName(row: LocationHeat) {
-  return row.geocodeDisplayName?.trim() || row.geocodeQuery?.trim() || row.locationText;
-}
-
-function locationShortName(row: LocationHeat) {
-  const display = locationDisplayName(row).trim();
-  const parts = display.split(",").map(part => part.trim()).filter(Boolean);
-  const primary = parts[0];
-  if (primary && /^\d+[a-z]?$/i.test(primary) && parts[1])
-    return `${primary} ${parts[1]}`;
-  return primary || display || row.locationText;
-}
-
-function locationSourceText(row: LocationHeat) {
-  const heard = row.locationText.trim().toLocaleLowerCase();
-  return heard !== locationDisplayName(row).trim().toLocaleLowerCase()
-    && heard !== locationShortName(row).trim().toLocaleLowerCase();
-}
-
-type GeoPoint = { lat: number; lon: number };
-type MapViewport = { zoom: number; width: number; height: number; centerWorldX: number; centerWorldY: number };
-type MapDragState = { pointerId: number; startX: number; startY: number; centerWorldX: number; centerWorldY: number; moved: boolean };
-
-function defaultMapCenter(rows: LocationHeat[]): GeoPoint {
-  const points = rows.filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
-  if (!points.length)
-    return { lat: 0, lon: 0 };
-  return {
-    lat: points.reduce((sum, row) => sum + row.latitude, 0) / points.length,
-    lon: points.reduce((sum, row) => sum + row.longitude, 0) / points.length
-  };
-}
-
-function defaultMapZoom(rows: LocationHeat[]) {
-  const points = rows.filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
-  if (points.length < 2)
-    return 12;
-  const latSpan = Math.max(...points.map(row => row.latitude)) - Math.min(...points.map(row => row.latitude));
-  const lonSpan = Math.max(...points.map(row => row.longitude)) - Math.min(...points.map(row => row.longitude));
-  const span = Math.max(latSpan, lonSpan);
-  if (span <= 0.15) return 13;
-  if (span <= 0.45) return 12;
-  if (span <= 1.1) return 11;
-  if (span <= 3) return 10;
-  if (span <= 8) return 8;
-  return 5;
-}
-
-function buildMapViewport(zoom: number, centerPoint: GeoPoint, size: { width: number; height: number }): MapViewport {
-  const center = latLonToWorld(centerPoint.lat, centerPoint.lon, zoom);
-  return { zoom, width: size.width, height: size.height, centerWorldX: center.x, centerWorldY: center.y };
-}
-
-function mapTiles(viewport: MapViewport) {
-  const tileSize = 256;
-  const startX = Math.floor((viewport.centerWorldX - viewport.width / 2) / tileSize);
-  const endX = Math.floor((viewport.centerWorldX + viewport.width / 2) / tileSize);
-  const startY = Math.floor((viewport.centerWorldY - viewport.height / 2) / tileSize);
-  const endY = Math.floor((viewport.centerWorldY + viewport.height / 2) / tileSize);
-  const tiles: { x: number; y: number; z: number; left: number; top: number }[] = [];
-  const max = 2 ** viewport.zoom;
-  for (let x = startX; x <= endX; x++) {
-    for (let y = startY; y <= endY; y++) {
-      if (y < 0 || y >= max) continue;
-      tiles.push({
-        x: ((x % max) + max) % max,
-        y,
-        z: viewport.zoom,
-        left: Math.round(x * tileSize - viewport.centerWorldX + viewport.width / 2),
-        top: Math.round(y * tileSize - viewport.centerWorldY + viewport.height / 2)
-      });
-    }
-  }
-  return tiles;
-}
-
-function projectHeatPoint(row: LocationHeat, viewport: MapViewport) {
-  const world = latLonToWorldPoint(approximateHeatLatLon(row), viewport.zoom);
-  return {
-    x: (world.x - viewport.centerWorldX + viewport.width / 2) / viewport.width * 100,
-    y: (world.y - viewport.centerWorldY + viewport.height / 2) / viewport.height * 100
-  };
-}
-
-function approximateHeatLatLon(row: LocationHeat): GeoPoint {
-  return { lat: row.latitude, lon: row.longitude };
-}
-
-function latLonToWorldPoint(point: GeoPoint, zoom: number) {
-  return latLonToWorld(point.lat, point.lon, zoom);
-}
-
-function latLonToWorld(lat: number, lon: number, zoom: number) {
-  const sinLat = Math.sin(lat * Math.PI / 180);
-  const scale = 256 * 2 ** zoom;
-  return {
-    x: (lon + 180) / 360 * scale,
-    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale
-  };
-}
-
-function worldToLatLon(x: number, y: number, zoom: number): GeoPoint {
-  const scale = 256 * 2 ** zoom;
-  const wrappedX = ((x % scale) + scale) % scale;
-  const clampedY = Math.max(0, Math.min(scale, y));
-  const lon = wrappedX / scale * 360 - 180;
-  const n = Math.PI - 2 * Math.PI * clampedY / scale;
-  const lat = 180 / Math.PI * Math.atan(Math.sinh(n));
-  return { lat: Math.max(-85.0511, Math.min(85.0511, lat)), lon };
-}
-
-function isMapControlTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest(".map-zoom-controls, .map-heat-dot, .map-attribution"));
-}
-
-function mapEventPoint(event: { currentTarget: HTMLDivElement; clientX: number; clientY: number }) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  if (!rect.width || !rect.height) return null;
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  };
-}
-
-function TopTalkgroups({ rows }: { rows: TopTalkgroup[] }) {
-  return <table className="table top-talkgroups"><thead><tr><th>Talkgroup</th><th>Calls</th><th>Share</th><th>Trend</th></tr></thead><tbody>{rows.map(r => <tr key={r.talkgroup}><td>{r.label}</td><td>{r.count}</td><td>{(r.share * 100).toFixed(1)}%</td><td><div className="trend-bars" aria-label={`${r.label} trend, ${r.trendBucketLabel}`}>{r.trend.map((v, i) => <span className="trend" title={`${r.trendLabels?.[i] ?? "Bucket"}: ${r.trendCounts?.[i] ?? 0} calls`} style={{ height: 4 + v * 30 }} key={i} />)}</div><div className="muted">Hourly volume; hover bars for counts</div></td></tr>)}</tbody></table>;
 }
 
 type DashboardIncidentListItem = { kind: "incident"; incident: Incident } | { kind: "alert"; alert: AlertMatch };
@@ -4555,15 +4172,6 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function incidentTimeRange(incident: Incident) {
-  const first = new Date(incident.firstSeen * 1000);
-  const last = new Date(incident.lastSeen * 1000);
-  if (first.toDateString() === last.toDateString()) {
-    return `${first.toLocaleString()} - ${last.toLocaleTimeString()}`;
-  }
-  return `${first.toLocaleString()} - ${last.toLocaleString()}`;
-}
-
 function relativeIncidentTime(incident: Incident) {
   return relativeTime(incident.lastSeen);
 }
@@ -4581,12 +4189,6 @@ function relativeTime(unixSeconds: number) {
   if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
   const years = Math.floor(days / 365);
   return `${years} year${years === 1 ? "" : "s"} ago`;
-}
-
-function confidenceClass(score: number) {
-  if (score >= 0.75) return "confidence-high";
-  if (score >= 0.45) return "confidence-mid";
-  return "confidence-low";
 }
 
 type SystemTopTab = "recommendations" | "services" | "queue" | "jobs" | "storage" | "backup" | "reset" | "audit" | "tr" | "metrics";
@@ -5223,22 +4825,6 @@ function trLogDisplayLine(entry: TrLogPage["entries"][number]) {
   return [timestamp, entry.host, process, entry.message].filter(Boolean).join(" ");
 }
 
-function MetricsOverviewPanel({ data, dashboard, engineHealth, navigate }: { data: TrTroubleshoot; dashboard: Dashboard | null; engineHealth: EngineHealth | null; navigate: (top: SystemTopTab, sub?: string) => void }) {
-  const audit = data.qualityAudit;
-  const rfIssues = data.health.metrics.filter(row => row.isIssue).length + data.health.systems.filter(row => row.isIssue).length;
-  const queueDepth = engineHealth?.queueDepth ?? 0;
-  const queueState = engineHealth?.ingest?.paused ? "Paused" : queueDepth <= 0 ? "OK" : engineHealth?.queueUnderPressure ? "Pressure" : "Draining";
-  const incidentCount = dashboard?.incidents.length ?? 0;
-  return <div className="metrics-overview">
-    <div className="audit-kpis">
-      <Kpi label="Live Queue" value={queueState} status={queueState === "OK" ? "ok" : queueState === "Pressure" || queueState === "Paused" ? "error" : "warning"} subtext={`${queueDepth.toLocaleString()} queued, ${formatDurationMinutes((engineHealth?.pendingAudioSeconds ?? 0) / 60)} pending audio`} onClick={() => navigate("queue")} />
-      <Kpi label="Transcript Quality" value={`${audit.problemPercent.toFixed(1)}% problem`} status={audit.problemPercent > 25 ? "error" : audit.problemPercent > 10 ? "warning" : "ok"} subtext={`${audit.problemCalls.toLocaleString()} of ${audit.totalCalls.toLocaleString()} calls flagged`} onClick={() => navigate("metrics", "transcription")} />
-      <Kpi label="RF Health" value={rfIssues > 0 ? "Watch" : "OK"} status={rfIssues > 0 ? "warning" : "ok"} subtext={`${rfIssues.toLocaleString()} health issue row(s)`} onClick={() => navigate("metrics", "rf")} />
-      <Kpi label="Incidents" value={incidentCount.toLocaleString()} subtext="incident volume in selected range" onClick={() => navigate("metrics", "incidents")} />
-    </div>
-  </div>;
-}
-
 const emptyRfPath = (): RfSurveyPathProfile => ({
   antenna: "",
   antennaType: "yagi",
@@ -5258,106 +4844,6 @@ const emptyRfPath = (): RfSurveyPathProfile => ({
     { type: "sdr", label: "Configured SDR", connectorIn: "", connectorOut: "", length: "", loss: "", power: "", notes: "", connectorInType: "unknown", connectorInGender: "unknown" }
   ]
 });
-
-function normalizeRfPathProfile(value?: Partial<RfSurveyPathProfile> | null): RfSurveyPathProfile {
-  return {
-    ...emptyRfPath(),
-    ...(value ?? {}),
-    chain: value?.chain?.length ? value.chain : emptyRfPath().chain
-  };
-}
-
-function hasMeaningfulRfPath(value?: RfSurveyPathProfile | null) {
-  if (!value) return false;
-  return value.antennaMount !== "unknown" ||
-    value.antennaPolarization !== "unknown" ||
-    value.aimedAtSite !== "unknown" ||
-    value.positionNotes.trim() ||
-    value.observations.trim() ||
-    value.chain.some(item =>
-      item.type !== "antenna" && item.type !== "sdr" ||
-      !["", "Yagi", "Configured SDR"].includes((item.label ?? "").trim()) ||
-      !["", "unknown"].includes((item.connectorIn ?? "").trim()) ||
-      !["", "unknown"].includes((item.connectorOut ?? "").trim()) ||
-      !["", "unknown"].includes((item.connectorInType ?? "").trim()) ||
-      !["", "unknown"].includes((item.connectorOutType ?? "").trim()) ||
-      (item.length ?? "").trim() ||
-      (item.loss ?? "").trim() ||
-      (item.power ?? "").trim() ||
-      (item.notes ?? "").trim() ||
-      (item.gainDb ?? "").trim() ||
-      (item.passband ?? "").trim());
-}
-
-function buildSurveySystemDefinitions(selectedNames: string[], scopePlan: SetupCalibrationPlan | null, rrSites: SetupTrConfigSites | null, existing: RfSurveySystem[], radioReferenceSid = ""): RfSurveySystem[] {
-  const definitions: RfSurveySystem[] = [];
-  const add = (definition: RfSurveySystem) => {
-    if (!definition.shortName || definitions.some(row => row.shortName.toLowerCase() === definition.shortName.toLowerCase()))
-      return;
-    definitions.push(definition);
-  };
-  const rrCatalogLoaded = Boolean(rrSites);
-  for (const name of selectedNames) {
-    const rr = rrSites?.sites.find(site => stringEqualsIgnoreCase(site.shortName, name) || stringEqualsIgnoreCase(site.name, name));
-    if (rr) {
-      add({
-        shortName: rr.shortName || rr.name,
-        siteLabel: rr.name || rr.shortName,
-        controlChannelsHz: rr.controlChannelsMhz.map(value => Math.round(value * 1_000_000)),
-        voiceFrequenciesHz: [],
-        radioReferenceSid: radioReferenceSid.trim()
-      });
-      continue;
-    }
-    const previous = existing.find(system => stringEqualsIgnoreCase(system.shortName, name));
-    if (previous) {
-      add(previous);
-      continue;
-    }
-    if (rrCatalogLoaded)
-      continue;
-    const live = scopePlan?.systems.find(system => stringEqualsIgnoreCase(system.shortName, name));
-    if (live) {
-      add({ shortName: live.shortName, siteLabel: live.shortName, controlChannelsHz: live.controlChannelsHz, voiceFrequenciesHz: live.voiceFrequenciesHz });
-      continue;
-    }
-  }
-  return definitions;
-}
-
-function radioReferenceCatalogContainsAnySystem(sites: SetupTrConfigSites | null, systemNames: string[]) {
-  if (!sites || systemNames.length === 0)
-    return false;
-  const catalogNames = new Set(sites.sites.flatMap(site => [site.shortName, site.name]).filter(Boolean).map(value => value.toLowerCase()));
-  return systemNames.some(name => catalogNames.has(name.toLowerCase()));
-}
-
-function buildSiteSourceCoverageRows(systems: RfSurveySystem[], sources: RfSurveySource[]) {
-  return systems.map(system => {
-    const controlChannels = uniqueSortedFrequencies(system.controlChannelsHz);
-    const matchingSources = sources.map(source => {
-      const covered = controlChannels.filter(frequency => sourceCoversFrequency(source, frequency));
-      return { source, covered };
-    }).filter(row => row.covered.length > 0);
-    const coveredCount = new Set(matchingSources.flatMap(row => row.covered)).size;
-    const firstSource = matchingSources[0]?.source;
-    const window = firstSource ? formatFrequencyRange(firstSource.centerHz - firstSource.sampleRate / 2, firstSource.centerHz + firstSource.sampleRate / 2) : "--";
-    return {
-      shortName: system.shortName,
-      label: system.siteLabel || system.shortName,
-      controlChannels: controlChannels.map(formatRfHz).join(", ") || "--",
-      sources: matchingSources.map(row => `Source ${row.source.index}`).join(", "),
-      covered: controlChannels.length > 0 && coveredCount === controlChannels.length,
-      partial: coveredCount > 0 && coveredCount < controlChannels.length,
-      window
-    };
-  });
-}
-
-function sourceCoversFrequency(source: Pick<RfSurveySource, "centerHz" | "sampleRate">, frequencyHz: number) {
-  const rate = Math.max(1, source.sampleRate || 1);
-  return frequencyHz >= source.centerHz - rate / 2 && frequencyHz <= source.centerHz + rate / 2;
-}
 
 function RfPathStep({ path, setPath, onTouched, onLoadPrevious, busy, headerMode = "full" }: { path: RfSurveyPathProfile; setPath: React.Dispatch<React.SetStateAction<RfSurveyPathProfile>>; onTouched: () => void; onLoadPrevious: () => Promise<void>; busy: string; headerMode?: "full" | "actions" }) {
   const updateChain = (index: number, patch: Partial<RfSurveyPathProfile["chain"][number]>) => { onTouched(); setPath(current => ({ ...current, chain: current.chain.map((item, i) => i === index ? { ...item, ...patch } : item) })); };
@@ -5501,7 +4987,6 @@ type SweepCandidate = {
 type SweepResult = { jobId?: number; sourceIndex: number; serial: string; gain: string; outputDir: string; summaryPath: string; bestPath: string; best?: SweepCandidate | null; candidates: SweepCandidate[] };
 type SweepInsight = { recommendation: string; confidence: string; rationale: string; nextActions: string[]; rawText: string };
 type SweepHistoryEntry = { jobId?: number; capturedAtUtc: string; sourceIndex: number; bestErrorHz: number; bestScore: number; bestAvgDecodeRate: number; bestTotalDecode: number; bestHasDecodeSamples: boolean };
-type RfRunLogLine = { id: string; level: "info" | "result" | "error"; text: string; createdAtUtc: string };
 
 const AIRSPY_LINEARITY_GAIN_MAX = 21;
 
@@ -7528,18 +7013,6 @@ function peakFromWaterfallCcSignalRow(row: WaterfallCcSignalRow): PositionedSpec
   };
 }
 
-function waterfallCcSignalDisplayLabel(row: WaterfallCcSignalRow, identify?: WaterfallIdentifyResult) {
-  if (identify?.status === "running")
-    return "P25 running";
-  if (identify?.status === "passed")
-    return "P25 confirmed";
-  if (identify?.status === "failed")
-    return row.status === "not-seen" ? "P25 failed" : "RF only";
-  if (identify?.status === "blocked")
-    return "P25 blocked";
-  return row.status === "candidate" ? "RF candidate" : row.label;
-}
-
 function WaterfallIdentifyDetail({ result }: { result: WaterfallIdentifyResult }) {
   const fields = result.fields;
   const chips = fields ? [
@@ -8791,19 +8264,6 @@ function uniqueCaseInsensitive(values: string[]) {
   return result;
 }
 
-function surveySystemDefinitionsSignature(systems: RfSurveySystem[]) {
-  return systems
-    .map(system => ({
-      shortName: (system.shortName ?? "").trim().toLowerCase(),
-      siteLabel: (system.siteLabel ?? "").trim(),
-      controlChannelsHz: uniqueSortedFrequencies(system.controlChannelsHz ?? []),
-      voiceFrequenciesHz: uniqueSortedFrequencies(system.voiceFrequenciesHz ?? [])
-    }))
-    .sort((left, right) => left.shortName.localeCompare(right.shortName))
-    .map(system => `${system.shortName}:${system.siteLabel}:${system.controlChannelsHz.join(",")}:${system.voiceFrequenciesHz.join(",")}`)
-    .join("|");
-}
-
 function stringEqualsIgnoreCase(left: string | undefined | null, right: string | undefined | null) {
   return (left ?? "").trim().toLowerCase() === (right ?? "").trim().toLowerCase();
 }
@@ -9165,13 +8625,6 @@ function summarizeSdrToolOutput(output: string) {
   return trimLogText(text, 160).replace(/\s+/g, " ") || "--";
 }
 
-function InfoTip({ text }: { text: string }) {
-  return <span className="info-tip" tabIndex={0} aria-label={text}>
-    <Info size={13} />
-    <span>{text}</span>
-  </span>;
-}
-
 function trimLogText(value: string, max = 3500) {
   value = (value ?? "").trim();
   return value.length > max ? value.slice(0, max).trimEnd() + "\n...[truncated]" : value;
@@ -9180,18 +8633,6 @@ function trimLogText(value: string, max = 3500) {
 function rfValidationCandidates(experiment: RfSurveyExperiment) {
   const evidence = parseExperimentJson<any>(experiment.evidenceJson);
   return Array.isArray(evidence?.candidates) ? evidence.candidates : [];
-}
-
-function rfValidationPowerExperiment(experiment: RfSurveyExperiment): RfSurveyExperiment | null {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  if (!evidence?.power?.rows) return null;
-  return {
-    ...experiment,
-    type: "rf_power_scan",
-    status: Array.isArray(evidence.power.rows) && evidence.power.rows.some((row: any) => row.status === "measured") ? "passed" : "failed",
-    evidenceJson: JSON.stringify(evidence.power),
-    interpretationJson: JSON.stringify({ best: evidence.candidates?.[0], selectedControlChannelHz: evidence.selectedControlChannelHz })
-  };
 }
 
 function rfSweepProgressRowsFromExperiment(experiment?: RfSurveyExperiment): RfSurveySweepProgressRow[] {
@@ -9399,26 +8840,6 @@ function rfSweepRowClass(status: string, stageLabel = "") {
   return "failed";
 }
 
-function RfValidationSummary({ experiment, onDetails }: { experiment: RfSurveyExperiment; onDetails: () => void }) {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  const best = rfValidationCandidates(experiment)[0];
-  const tone = experiment.status === "passed" ? "passed" : "failed";
-  const applied = !!evidence?.appliedCandidateToLiveTr;
-  const siteReadiness = Array.isArray(evidence?.siteReadiness) ? evidence.siteReadiness : [];
-  const monitorableSites = siteReadiness.filter((site: any) => !!site.monitorable).length;
-  return <div className={`rf-power-summary ${tone}`}>
-    <div>
-      <strong>{siteReadiness.length ? `${monitorableSites}/${siteReadiness.length} selected site(s) monitorable` : best ? `Best source ${best.sourceIndex}: ${formatFixed(best.snrDb, 1)} dB RF / ${label(best.p25Status || "p25 pending")} / TR ${label(best.metricsStatus || "pending")} / voice ${label(best.voiceStatus || "pending")}` : "RF Sweep complete"}</strong>
-      <span>{experiment.blockingIssue || experiment.resultSummary}</span>
-    </div>
-    <div className={`rf-quality ${experiment.status === "passed" ? "ok" : best?.p25Frames ? "warning" : "error"}`}>
-      <strong>{applied ? "Validated and applied" : experiment.status === "passed" ? "Site readiness validated" : best?.p25Frames ? "Partially proven" : "Not validated"}</strong>
-      <span>{evidence?.warning || "Review site readiness before source planning."}</span>
-    </div>
-    <button onClick={onDetails}>Details</button>
-  </div>;
-}
-
 function rfValidationStageClass(status: unknown) {
   const normalized = String(status || "not_run").toLowerCase();
   if (normalized === "passed" || normalized === "measured")
@@ -9512,30 +8933,6 @@ function rfValidationEffectiveStatus(experiment?: RfSurveyExperiment, systems: R
   if (siteReadiness.some((site: any) => site?.monitorable === true))
     return "partial";
   return experiment.status;
-}
-
-function RfValidationStageSummary({ candidate, experiment, systems = [] }: { candidate: any; experiment: RfSurveyExperiment; systems?: RfSurveySystem[] }) {
-  if (!candidate) return null;
-  const system = rfValidationCandidateSystem(candidate, systems);
-  const stages = [
-    { label: "RF screen", value: candidate.rfStatus || "measured", detail: candidate.snrDb == null ? "--" : `${formatFixed(candidate.snrDb, 1)} dB` },
-    { label: "P25 probe", value: candidate.p25Frames ? "passed" : candidate.p25Status || "not_run", detail: candidate.p25Frames ? "Frame evidence" : candidate.p25Summary || "" },
-    { label: "TR metrics", value: candidate.metricsStatus || "not_run", detail: candidate.metricsSummary || "" },
-    { label: "Voice trial", value: rfValidationCandidateVoiceStatus(candidate), detail: candidate.voiceRealCalls ? `${candidate.voiceRealCalls} real call(s)` : candidate.voiceSummary || "" }
-  ];
-  return <div className="rf-validation-stage-card">
-    <div>
-      <strong>{experiment.status === "passed" ? "Validated Candidate" : "Current Best Candidate"}</strong>
-      <span>{system?.siteLabel || system?.shortName || candidate.systemShortName || "Unknown site"} / Source {candidate.sourceIndex}, {candidate.controlChannelHz ? formatRfHz(Number(candidate.controlChannelHz)) : "--"}, gain {candidate.gain ?? "auto"}, frequency correction {formatSignedHz(Number(candidate.errorHz ?? 0))}</span>
-    </div>
-    <div className="rf-validation-stage-strip">
-      {stages.map(stage => <div className="rf-validation-stage" key={stage.label}>
-        <span>{stage.label}</span>
-        <strong className={rfValidationStageClass(stage.value)}>{label(stage.value || "not run")}</strong>
-        <small>{trimLogText(stage.detail || "--", 150)}</small>
-      </div>)}
-    </div>
-  </div>;
 }
 
 function RfValidationRecommendations({
@@ -9681,269 +9078,6 @@ function rfValidationCandidateOutcome(candidate: any) {
   return rfValidationCandidateBlocker(candidate) || "Not proven";
 }
 
-function RfValidationDetails({ experiment }: { experiment: RfSurveyExperiment }) {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  const interpretation = parseExperimentJson<any>(experiment.interpretationJson);
-  return <div className="rf-power-details">
-    <div className={experiment.status === "passed" ? "setup-note" : "setup-warning-list"}>
-      <div>{experiment.blockingIssue || experiment.resultSummary}</div>
-    </div>
-    <div className="setup-review">
-      <div><span>System</span><code>{evidence?.systemShortName || "--"}</code></div>
-      <div><span>RF seconds</span><code>{evidence?.parameters?.rfDuration ?? evidence?.parameters?.rfDurationSeconds ?? "--"}</code></div>
-      <div><span>P25 seconds</span><code>{evidence?.parameters?.p25Duration ?? evidence?.parameters?.p25DurationSeconds ?? "--"}</code></div>
-      <div><span>Metric seconds</span><code>{evidence?.parameters?.metricsDuration ?? evidence?.parameters?.metricsDurationSeconds ?? "--"}</code></div>
-      <div><span>Applied to TR</span><code>{evidence?.appliedCandidateToLiveTr ? evidence?.appliedCandidate?.candidateId || "yes" : "no"}</code></div>
-      <div><span>Recommendation</span><code>{interpretation?.recommendation || "--"}</code></div>
-    </div>
-    <RfValidationRecommendations experiment={experiment} />
-    <pre className="log-box compact">{JSON.stringify({ interpretation, candidates: rfValidationCandidates(experiment) }, null, 2)}</pre>
-  </div>;
-}
-
-function rfPowerHasMeasuredRows(experiment: RfSurveyExperiment) {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  const rows = Array.isArray(evidence?.rows) ? evidence.rows : [];
-  return rows.some((row: any) => row.status === "measured");
-}
-
-function rfPowerBestMeasuredRow(experiment: RfSurveyExperiment) {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  const rows = Array.isArray(evidence?.rows) ? evidence.rows : [];
-  return rows.filter((row: any) => row.status === "measured")
-    .sort((a: any, b: any) => Number(Boolean(a.overload)) - Number(Boolean(b.overload)) || Number(b.snrDb ?? -999) - Number(a.snrDb ?? -999))[0];
-}
-
-function rfPowerQuality(row: any) {
-  const snr = Number(row?.snrDb);
-  const ccPeak = Number(row?.peakDb);
-  const strongestPeak = Number(row?.strongestPeakDb);
-  const strongestOffset = Number(row?.strongestPeakOffsetHz);
-  const adjacentStronger = Number.isFinite(strongestOffset) && Math.abs(strongestOffset) > 25_000 && (!Number.isFinite(ccPeak) || !Number.isFinite(strongestPeak) || strongestPeak > ccPeak + 3);
-  const adjacentNote = adjacentStronger
-    ? ` Stronger adjacent peak at ${formatFixed(strongestOffset, 0)} Hz offset is present.`
-    : "";
-  if (row?.overload)
-    return {
-      label: "Overloaded",
-      tone: "warning",
-      recommendation: `Reduce SDR gain, remove excess amplification, or bypass an LNA/multicoupler path, then rerun.${adjacentNote}`
-    };
-  if (!Number.isFinite(snr))
-    return {
-      label: row?.status === "measured" ? "Unknown" : "No measurement",
-      tone: "neutral",
-      recommendation: row?.issue || "Rerun the scan after checking SDR access and tool output."
-    };
-  if (snr >= 20)
-    return {
-      label: "Excellent",
-      tone: "ok",
-      recommendation: `Strong control-channel RF margin. Continue to P25 probe and call-quality validation.${adjacentNote}`
-    };
-  if (snr >= 14)
-    return {
-      label: "Good",
-      tone: "ok",
-      recommendation: `Good control-channel RF margin. Continue, but still verify P25 and live call quality.${adjacentNote}`
-    };
-  if (snr >= 8)
-    return {
-      label: "Usable",
-      tone: "info",
-      recommendation: `Minimum usable control-channel RF margin. Proceed cautiously and compare against CC metrics/P25 results.${adjacentNote}`
-    };
-  if (adjacentStronger)
-    return {
-      label: "Off Channel",
-      tone: "warning",
-      recommendation: `The tuned control-channel window is weak, while a stronger adjacent peak is ${formatFixed(strongestOffset, 0)} Hz away. Confirm the active CC, try another configured CC, or inspect spectrum before P25.`
-    };
-  if (snr >= 3)
-    return {
-      label: "Marginal",
-      tone: "warning",
-      recommendation: "RF is present but weak. Try antenna aim, RF path simplification, gain changes, or another control channel."
-    };
-  return {
-    label: "Poor",
-    tone: "error",
-    recommendation: "Not enough RF margin. Fix antenna/path/source coverage before treating decoder results as meaningful."
-  };
-}
-
-function RfPowerScanSummary({ experiment, onDetails }: { experiment: RfSurveyExperiment; onDetails: () => void }) {
-  const best = rfPowerBestMeasuredRow(experiment);
-  if (!best) return null;
-  const quality = rfPowerQuality(best);
-  const displayStatus = experiment.status === "blocked" ? "failed" : experiment.status;
-  return <div className={displayStatus === "passed" ? "rf-power-summary passed" : displayStatus === "failed" ? "rf-power-summary failed" : "rf-power-summary"}>
-    <div>
-      <strong>{`Best source ${best.index}: ${formatFixed(best.snrDb, 1)} dB CC SNR`}</strong>
-      <span>{experiment.blockingIssue || experiment.resultSummary}</span>
-    </div>
-    <div className={`rf-quality ${quality.tone}`}>
-      <strong>{quality.label}</strong>
-      <span>{quality.recommendation}</span>
-    </div>
-    <button onClick={onDetails}>Details</button>
-  </div>;
-}
-
-type RfAidBand = { label: string; tone: "error" | "warning" | "info" | "ok" | "neutral"; weight: number };
-
-function RfPowerVisualAid({ experiment }: { experiment: RfSurveyExperiment }) {
-  const best = rfPowerBestMeasuredRow(experiment);
-  if (!best) return null;
-  const snr = Number(best.snrDb);
-  const strongestPeak = Number(best.strongestPeakDb ?? best.peakDb);
-  const clipPct = Number(best.clipPct ?? 0);
-  const ccOffset = Number(best.peakOffsetHz);
-  const strongestOffset = Number(best.strongestPeakOffsetHz);
-  const adjacentText = Number.isFinite(strongestOffset) && Math.abs(strongestOffset) > 25_000
-    ? `Strongest carrier is ${formatFixed(strongestOffset, 0)} Hz from center. Judge decode readiness from CC SNR, then use spectrum context if CC is weak.`
-    : "Strongest carrier is close to the tuned control channel.";
-  return <div className="rf-power-aid">
-    <div className="rf-aid-head">
-      <strong>Interpreting the RF Sweep Results</strong>
-      <span>Good tuning keeps CC SNR high while leaving headroom below overload.</span>
-    </div>
-    <RfAidBar
-      label="CC SNR"
-      value={Number.isFinite(snr) ? `${formatFixed(snr, 1)} dB` : "--"}
-      marker={markerPct(snr, 0, 30)}
-      bands={[
-        { label: "<3 poor", tone: "error", weight: 3 },
-        { label: "3-8 marginal", tone: "warning", weight: 5 },
-        { label: "8-14 usable", tone: "info", weight: 6 },
-        { label: "14-20 good", tone: "ok", weight: 6 },
-        { label: "20+ excellent", tone: "ok", weight: 10 }
-      ]}
-      note="This is the main go/no-go RF margin for the selected control channel."
-    />
-    <RfAidBar
-      label="Strongest peak"
-      value={Number.isFinite(strongestPeak) ? `${formatFixed(strongestPeak, 1)} dBFS` : "--"}
-      marker={markerPct(strongestPeak, -60, 0)}
-      bands={[
-        { label: "quiet", tone: "neutral", weight: 42 },
-        { label: "strong", tone: "ok", weight: 12 },
-        { label: "near limit", tone: "warning", weight: 3 },
-        { label: ">-3 overload", tone: "error", weight: 3 }
-      ]}
-      note="Use this for gain headroom. Near 0 dBFS can overload even when clipping is still 0%."
-    />
-    <RfAidBar
-      label="Clipping"
-      value={`${formatFixed(clipPct, 2)}%`}
-      marker={markerPct(clipPct, 0, 2)}
-      bands={[
-        { label: "0 clean", tone: "ok", weight: 1 },
-        { label: "watch", tone: "warning", weight: 1 },
-        { label: "1%+ overload", tone: "error", weight: 2 }
-      ]}
-      note="Any repeated clipping means gain or external amplification is too high."
-    />
-    <div className="rf-aid-context">
-      <div><span>Measured signal offset</span><code>{Number.isFinite(ccOffset) ? formatSignedHz(ccOffset) : "--"}</code></div>
-      <div><span>Noise floor</span><code>{best.noiseFloorDb == null ? "--" : `${formatFixed(best.noiseFloorDb, 1)} dBFS`}</code></div>
-      <p>{adjacentText}</p>
-    </div>
-  </div>;
-}
-
-function RfAidBar({ label, value, marker, bands, note }: { label: string; value: string; marker: number | null; bands: RfAidBand[]; note: string }) {
-  return <div className="rf-aid-row">
-    <div className="rf-aid-label"><strong>{label}</strong><code>{value}</code></div>
-    <div className="rf-aid-track">
-      {bands.map(band => <span className={`rf-aid-band ${band.tone}`} style={{ flex: band.weight }} key={`${label}-${band.label}`}>{band.label}</span>)}
-      {marker != null && <i className="rf-aid-marker" style={{ left: `${marker}%` }} />}
-    </div>
-    <small>{note}</small>
-  </div>;
-}
-
-function markerPct(value: number, min: number, max: number) {
-  if (!Number.isFinite(value) || max <= min) return null;
-  return Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
-}
-
-function RfPowerSweepMatrix({ experiment }: { experiment: RfSurveyExperiment }) {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  const rows = Array.isArray(evidence?.rows) ? evidence.rows : [];
-  const measured = rows.filter((row: any) => row.status === "measured");
-  if (measured.length <= 1) return null;
-  return <div className="rf-power-matrix">
-    <div className="setup-job-head">
-      <strong>CC x Gain Sweep</strong>
-      <span className="muted">{measured.length} measured condition{measured.length === 1 ? "" : "s"}</span>
-    </div>
-    <div className="rf-power-matrix-grid">
-      {measured.map((row: any, index: number) => {
-        const quality = rfPowerQuality(row);
-        return <div className={`rf-power-matrix-cell ${quality.tone}`} key={`${row.index}-${row.controlChannelHz}-${row.gain}-${index}`}>
-          <strong>{row.controlChannelHz ? formatRfHz(Number(row.controlChannelHz)) : "CC"}</strong>
-          <span>gain {row.gain === "" || row.gain == null ? "auto" : String(row.gain)}</span>
-          <code>{formatFixed(row.snrDb, 1)} dB</code>
-          <small>{row.overload ? "overload" : quality.label}</small>
-        </div>;
-      })}
-    </div>
-  </div>;
-}
-
-function RfPowerScanDetails({ experiment }: { experiment: RfSurveyExperiment }) {
-  const evidence = parseExperimentJson<any>(experiment.evidenceJson);
-  const interpretation = parseExperimentJson<any>(experiment.interpretationJson);
-  const rows = Array.isArray(evidence?.rows) ? evidence.rows : [];
-  return <div className="rf-power-details">
-    <div className="setup-review">
-      <div><span>Control channels</span><code>{Array.isArray(evidence?.controlChannelsHz) ? evidence.controlChannelsHz.map((hz: number) => formatRfHz(Number(hz))).join(", ") : evidence?.controlChannelHz ? formatRfHz(Number(evidence.controlChannelHz)) : "--"}</code></div>
-      <div><span>Duration</span><code>{evidence?.durationSeconds ?? "--"}s</code></div>
-      <div><span>Gains</span><code>{Array.isArray(evidence?.gainSequence) && evidence.gainSequence.length ? evidence.gainSequence.join(", ") : "--"}</code></div>
-      <div><span>Recommendation</span><code>{interpretation?.recommendation || "--"}</code></div>
-    </div>
-    <details className="rf-calculation-note">
-      <summary>How these RF scan results are calculated</summary>
-      <div>
-        <p>PizzaWave runs the displayed SDR command against the selected control channel and writes a short IQ capture into the Setup RF evidence folder. RTL-SDR captures are treated as unsigned 8-bit I/Q samples; Airspy captures are treated as signed 16-bit I/Q samples.</p>
-        <p>The analyzer reads the first analysis window from that file, removes DC bias, applies a Hamming window, then computes a simple FFT. CC peak/SNR use the strongest bin inside the tuned control-channel window. Noise floor is the median of the lower 80% of FFT-bin power values. Strongest offset is the strongest bin anywhere in the capture. Clip percentage counts samples near the ADC rails, and a very high strongest peak flags overload risk.</p>
-        <p>These are quick relative measurements for comparing RF path changes and SDR settings. They are not calibrated dBm/dBFS lab measurements, and decode/call quality still has to be proven by the later P25 and call-quality steps.</p>
-      </div>
-    </details>
-    <div className="rf-power-table">
-      <div className="rf-power-row header"><span>SDR</span><span>Control channel</span><span>Status</span><span>Quality</span><span>Gain</span><span>Control SNR</span><span>Control peak</span><span>Noise</span><span>Measured signal offset</span><span>Strongest</span><span>Clip</span><span>Output</span></div>
-      {rows.map((row: any, index: number) => {
-        const quality = rfPowerQuality(row);
-        return <div className={row.overload ? "rf-power-row warning" : row.status === "measured" ? "rf-power-row" : "rf-power-row failed"} key={`${row.index}-${index}`}>
-          <span>Source {row.index} {row.sdrType ? `(${row.sdrType})` : ""}</span>
-          <span>{row.controlChannelHz ? formatRfHz(Number(row.controlChannelHz)) : "--"}</span>
-          <span className={row.status === "measured" ? "section-status ok" : "section-status error"}>{row.overload ? "overload" : row.status === "blocked" ? "Unavailable" : label(row.status || "unknown")}</span>
-          <span className={`rf-quality-label ${quality.tone}`} title={quality.recommendation}>{quality.label}</span>
-          <span>{row.gain === "" || row.gain == null ? "auto" : String(row.gain)}</span>
-          <span>{row.snrDb == null ? "--" : `${formatFixed(row.snrDb, 1)} dB`}</span>
-          <span>{row.peakDb == null ? "--" : `${formatFixed(row.peakDb, 1)} dB`}</span>
-          <span>{row.noiseFloorDb == null ? "--" : `${formatFixed(row.noiseFloorDb, 1)} dB`}</span>
-          <span>{row.peakOffsetHz == null ? "--" : `${formatFixed(row.peakOffsetHz, 0)} Hz`}</span>
-          <span>{row.strongestPeakOffsetHz == null ? "--" : `${formatFixed(row.strongestPeakOffsetHz, 0)} Hz`}</span>
-          <span>{formatFixed(row.clipPct ?? 0, 2)}%</span>
-          <span>{row.issue || (row.output ? "Captured" : "--")}</span>
-        </div>;
-      })}
-    </div>
-    <div className="rf-command-log-list">
-      {rows.map((row: any, index: number) => <div className="rf-command-log" key={`command-${row.index}-${index}`}>
-        <div className="setup-job-head">
-          <strong>Source {row.index} Command</strong>
-          <span className={row.status === "measured" ? "section-status ok" : "section-status error"}>{row.overload ? "overload" : label(row.status || "unknown")}</span>
-        </div>
-        <pre className="log-box compact">{[`$ ${row.command || "--"}`, row.output ? trimLogText(row.output) : row.issue || "No command output captured."].join("\n\n")}</pre>
-      </div>)}
-    </div>
-    {interpretation?.followUps?.length > 0 && <div className="setup-warning-list">{interpretation.followUps.map((item: string) => <div key={item}>{item}</div>)}</div>}
-  </div>;
-}
-
 function CcMetricRunHistory({ runs, selectedCcHz, onDetails }: { runs: RfSurveyExperiment[]; selectedCcHz?: number; onDetails: (run: RfSurveyExperiment) => void }) {
   if (!runs.length) return <div className="setup-note">No CC metric runs yet.</div>;
   return <div className="cc-run-history">
@@ -10045,12 +9179,6 @@ function experimentControlChannelHz(experiment?: RfSurveyExperiment | null): num
   if (commandMatch) return Number(commandMatch[1]);
   const summaryMatch = /(?:cc|controlChannelHz)["':,\s]+(\d{6,})/i.exec(experiment.resultSummary || "");
   return summaryMatch ? Number(summaryMatch[1]) : null;
-}
-
-function experimentMatchesControlChannel(experiment: RfSurveyExperiment, controlChannelHz: number) {
-  if (!controlChannelHz) return true;
-  const experimentCc = experimentControlChannelHz(experiment);
-  return experimentCc == null || Math.abs(experimentCc - controlChannelHz) <= 1;
 }
 
 function StaleExperimentNotice({ experiment, activeControlChannelHz }: { experiment: RfSurveyExperiment; activeControlChannelHz?: number }) {
@@ -10418,108 +9546,6 @@ function ServicesManager({ runtime, snapshot, history, restartBusy, restartMessa
       </div>
     </section>
     {snapshot && <ResourceEvidence snapshot={snapshot} />}
-  </div>;
-}
-
-function PizzadServiceManager({ runtime, restartBusy, restartMessage, onRestart }: { runtime: any | null; restartBusy: boolean; restartMessage: string; onRestart: () => void }) {
-  if (!runtime) return <div className="card">Loading service status...</div>;
-  const services = [runtime.service?.pizzad].filter(Boolean);
-  const embeddings = runtime.queues?.embeddings;
-  return <div className="system-manager-grid">
-    <div className="system-action-bar">
-      <strong>Pizzad</strong>
-      <button className="danger-button" disabled={restartBusy} onClick={onRestart}>{restartBusy ? "Restarting..." : "Restart Pizzad"}</button>
-      {restartMessage && <span className={restartMessage.includes("failed") || restartMessage.includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessage}</span>}
-    </div>
-    <div className="audit-kpis">
-      <Kpi label="Pizzad" value={runtime.service?.pizzad?.active || "unknown"} status={runtime.service?.pizzad?.ok ? "ok" : "error"} subtext={runtime.service?.pizzad?.enabled || "systemd enabled state"} />
-      <Kpi label="CPU Time" value={`${Number(runtime.process?.totalProcessorTimeSeconds || 0).toFixed(0)}s`} status="ok" subtext={`${runtime.process?.threadCount ?? 0} thread(s)`} />
-      <Kpi label="Memory" value={formatBytes(runtime.process?.workingSetBytes || 0)} status={Number(runtime.process?.workingSetBytes || 0) > 1024 * 1024 * 1024 ? "warning" : "ok"} subtext={`PID ${runtime.process?.pid ?? "--"}`} />
-      <Kpi label="HTTP API" value="Running" status="ok" subtext="System page loaded from pizzad" />
-    </div>
-    {embeddings && <div className="audit-kpis">
-      <Kpi label="Embeddings" value={embeddings.enabled ? label(embeddings.status || "unknown") : "Disabled"} status={!embeddings.enabled ? "neutral" : embeddings.status === "ok" ? "ok" : "warning"} subtext={`${embeddings.queueDepth ?? 0} queued, ${(embeddings.pendingCalls ?? 0).toLocaleString()} pending`} />
-      <Kpi label="Qdrant" value={embeddings.qdrantOk ? "OK" : "Problem"} status={!embeddings.enabled ? "neutral" : embeddings.qdrantOk ? "ok" : "error"} subtext={embeddings.collection || "collection"} />
-      <Kpi label="Embedded Calls" value={(embeddings.embeddedCalls ?? 0).toLocaleString()} status={(embeddings.failedCalls ?? 0) > 0 ? "warning" : "ok"} subtext={`${(embeddings.failedCalls ?? 0).toLocaleString()} failed, model ${embeddings.model || "--"}`} />
-      <Kpi label="Vector Latency" value={`${Number(embeddings.lastSearchMs || 0).toFixed(0)}ms`} status="ok" subtext={`upsert ${Number(embeddings.lastUpsertMs || 0).toFixed(0)}ms, dim ${embeddings.vectorSize || "--"}`} />
-    </div>}
-    {embeddings?.lastError && <div className="card"><h3>Embedding Pipeline</h3><p className="settings-message error">{embeddings.lastError}</p></div>}
-    <div className="card">
-      <h3>Services</h3>
-      <table className="table"><thead><tr><th>Unit</th><th>Active</th><th>Enabled</th><th>Substate</th><th>Main PID</th><th>Started</th></tr></thead><tbody>{services.map((svc: any) => <tr key={svc.unit}>
-        <td>{svc.unit}</td>
-        <td><span className={`job-status ${svc.ok ? "status-completed" : "status-failed"}`}>{svc.active || "unknown"}</span></td>
-        <td>{svc.enabled || "--"}</td>
-        <td>{svc.detail?.SubState || "--"}</td>
-        <td>{svc.detail?.MainPID || "--"}</td>
-        <td>{svc.detail?.ActiveEnterTimestamp || "--"}</td>
-      </tr>)}</tbody></table>
-    </div>
-  </div>;
-}
-
-function QdrantServiceManager({ runtime, restartBusy, restartMessage, onRestart }: { runtime: any | null; restartBusy: boolean; restartMessage: string; onRestart: () => void }) {
-  if (!runtime) return <div className="card">Loading vector database status...</div>;
-  const embeddings = runtime.queues?.embeddings;
-  const services = [runtime.service?.qdrant].filter(Boolean);
-  const storageBytes = Number(runtime.storage?.qdrantBytes || 0);
-  return <div className="system-manager-grid">
-    <div className="system-action-bar">
-      <strong>Qdrant Vector DB</strong>
-      <button className="danger-button" disabled={restartBusy} onClick={onRestart}>{restartBusy ? "Restarting..." : "Restart Qdrant"}</button>
-      {restartMessage && <span className={restartMessage.includes("failed") || restartMessage.includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessage}</span>}
-    </div>
-    <div className="audit-kpis">
-      <Kpi label="Qdrant Service" value={runtime.service?.qdrant?.active || "unknown"} status={runtime.service?.qdrant?.ok ? "ok" : "error"} subtext={runtime.service?.qdrant?.enabled || "systemd enabled state"} />
-      <Kpi label="HTTP API" value={embeddings?.qdrantOk ? "OK" : "Problem"} status={embeddings?.enabled ? embeddings.qdrantOk ? "ok" : "error" : "neutral"} subtext={embeddings?.qdrantOk ? embeddings.collection || "collection reachable" : "collection or service not reachable"} />
-      <Kpi label="Storage" value={formatBytes(storageBytes)} status="ok" subtext={runtime.storage?.qdrantPath || "/var/lib/pizzawave/qdrant"} />
-      <Kpi label="Vector Latency" value={`${Number(embeddings?.lastSearchMs || 0).toFixed(0)}ms`} status="ok" subtext={`upsert ${Number(embeddings?.lastUpsertMs || 0).toFixed(0)}ms`} />
-    </div>
-    <div className="audit-kpis">
-      <Kpi label="Embeddings" value={embeddings?.enabled ? label(embeddings.status || "unknown") : "Disabled"} status={!embeddings?.enabled ? "neutral" : embeddings.status === "ok" ? "ok" : "warning"} subtext={`${embeddings?.queueDepth ?? 0} queued, ${(embeddings?.pendingCalls ?? 0).toLocaleString()} pending`} />
-      <Kpi label="Embedded Calls" value={(embeddings?.embeddedCalls ?? 0).toLocaleString()} status={(embeddings?.failedCalls ?? 0) > 0 ? "warning" : "ok"} subtext={`${(embeddings?.failedCalls ?? 0).toLocaleString()} failed, model ${embeddings?.model || "--"}`} />
-    </div>
-    {embeddings?.lastError && <div className="card"><h3>Embedding Pipeline</h3><p className="settings-message error">{embeddings.lastError}</p></div>}
-    <div className="card">
-      <h3>Services</h3>
-      <table className="table"><thead><tr><th>Unit</th><th>Active</th><th>Enabled</th><th>Substate</th><th>Main PID</th><th>Started</th></tr></thead><tbody>{services.map((svc: any) => <tr key={svc.unit}>
-        <td>{svc.unit}</td>
-        <td><span className={`job-status ${svc.ok ? "status-completed" : "status-failed"}`}>{svc.active || "unknown"}</span></td>
-        <td>{svc.enabled || "--"}</td>
-        <td>{svc.detail?.SubState || "--"}</td>
-        <td>{svc.detail?.MainPID || "--"}</td>
-        <td>{svc.detail?.ActiveEnterTimestamp || "--"}</td>
-      </tr>)}</tbody></table>
-    </div>
-  </div>;
-}
-
-function TrunkRecorderServiceManager({ runtime, data, restartBusy, restartMessage, onRestart }: { runtime: any | null; data: TrTroubleshoot; restartBusy: boolean; restartMessage: string; onRestart: () => void }) {
-  if (!runtime) return <div className="card">Loading service status...</div>;
-  const services = [runtime.service?.trunkRecorder].filter(Boolean);
-  const healthIssues = data.health.metrics.filter(row => row.isIssue).length + data.health.systems.filter(row => row.isIssue).length;
-  return <div className="system-manager-grid">
-    <div className="system-action-bar">
-      <strong>Trunk Recorder</strong>
-      <button className="danger-button" disabled={restartBusy} onClick={onRestart}>{restartBusy ? "Restarting..." : "Restart Trunk Recorder"}</button>
-      {restartMessage && <span className={restartMessage.includes("failed") || restartMessage.includes("Unsupported") ? "settings-message error" : "settings-message ok"}>{restartMessage}</span>}
-    </div>
-    <div className="audit-kpis">
-      <Kpi label="TR Service" value={runtime.service?.trunkRecorder?.active || "unknown"} status={runtime.service?.trunkRecorder?.ok ? "ok" : "error"} subtext={runtime.service?.trunkRecorder?.enabled || "systemd enabled state"} />
-      <Kpi label="Capture Health" value={healthIssues > 0 ? "Watch" : "OK"} status={healthIssues > 0 ? "warning" : "ok"} subtext={`${healthIssues.toLocaleString()} current issue row(s)`} />
-      <Kpi label="Config" value={data.config?.ok ? "OK" : "Problem"} status={data.config?.ok ? "ok" : "error"} subtext={data.config?.path || "TR config path"} />
-    </div>
-    <div className="card">
-      <h3>Services</h3>
-      <table className="table"><thead><tr><th>Unit</th><th>Active</th><th>Enabled</th><th>Substate</th><th>Main PID</th><th>Started</th></tr></thead><tbody>{services.map((svc: any) => <tr key={svc.unit}>
-        <td>{svc.unit}</td>
-        <td><span className={`job-status ${svc.ok ? "status-completed" : "status-failed"}`}>{svc.active || "unknown"}</span></td>
-        <td>{svc.enabled || "--"}</td>
-        <td>{svc.detail?.SubState || "--"}</td>
-        <td>{svc.detail?.MainPID || "--"}</td>
-        <td>{svc.detail?.ActiveEnterTimestamp || "--"}</td>
-      </tr>)}</tbody></table>
-    </div>
   </div>;
 }
 
@@ -11777,249 +10803,6 @@ function formatPendingAge(startTime: number) {
   return formatDurationMinutes(Math.max(0, (Date.now() / 1000 - startTime) / 60));
 }
 
-function TrConfigEditorPanel({
-  reload,
-  onOpenRadioSetup,
-  rawOnly = false,
-  applyLabel = "Save & Restart",
-  onApplied,
-  applyOverride,
-  loadEditor,
-  workspaceDraftLabel
-}: {
-  reload: () => Promise<void>;
-  onOpenRadioSetup?: () => void;
-  rawOnly?: boolean;
-  applyLabel?: string;
-  onApplied?: () => Promise<void>;
-  applyOverride?: (configText: string) => Promise<void>;
-  loadEditor?: () => Promise<TrConfigEditor>;
-  workspaceDraftLabel?: string;
-}) {
-  const [editor, setEditor] = useState<TrConfigEditor | null>(null);
-  const [configText, setConfigText] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"" | "load" | "save" | "draft" | "rr">("load");
-  const [rrSid, setRrSid] = useState("");
-  const [rrSites, setRrSites] = useState("");
-  const [rrCandidate, setRrCandidate] = useState<SetupTrConfigDraft | null>(null);
-  const lastSavedDraftRef = useRef("");
-
-  useEffect(() => {
-    let canceled = false;
-    setBusy("load");
-    (loadEditor ? loadEditor() : api.request<TrConfigEditor>("/api/v1/system/tr-config/editor"))
-      .then(result => {
-        if (canceled) return;
-        setEditor(result);
-        setConfigText(result.configJson);
-        lastSavedDraftRef.current = result.configJson;
-        setMessage(!rawOnly && result.hasDraft ? `${workspaceDraftLabel || "Config draft"} loaded.` : "");
-      })
-      .catch(error => !canceled && setMessage(error instanceof Error ? error.message : "Unable to load TR config."))
-      .finally(() => !canceled && setBusy(""));
-    return () => { canceled = true; };
-  }, []);
-
-  useEffect(() => {
-    const normalizedText = normalizeDraftText(configText);
-    if (loadEditor) return;
-    if (!editor || busy === "load" || normalizedText === lastSavedDraftRef.current) return;
-    const handle = window.setTimeout(() => {
-      api.request<TrConfigEditor>("/api/v1/system/tr-config/editor/draft", {
-        method: "POST",
-        body: JSON.stringify({ configJson: configText })
-      })
-        .then(result => {
-          lastSavedDraftRef.current = normalizedText;
-          setEditor(result);
-          setMessage(result.parseOk ? "Draft autosaved." : `Draft saved, but JSON is invalid: ${result.parseMessage}`);
-        })
-        .catch(error => setMessage(error instanceof Error ? error.message : "Draft autosave failed."));
-    }, 900);
-    return () => window.clearTimeout(handle);
-  }, [configText, editor, busy]);
-
-  const parsed = useMemo(() => parseTrConfig(configText), [configText]);
-  const parseError = parsed.ok ? "" : parsed.error;
-  const root = parsed.ok ? parsed.value : null;
-  const systems = Array.isArray(root?.systems) ? root!.systems : [];
-  const sources = Array.isArray(root?.sources) ? root!.sources : [];
-
-  function updateRoot(mutator: (draft: any) => void) {
-    const base = parsed.ok && root ? cloneJson(root) : {};
-    mutator(base);
-    setConfigText(JSON.stringify(base, null, 2));
-  }
-
-  function updateSystem(index: number, field: string, value: any) {
-    updateRoot(draft => {
-      draft.systems = Array.isArray(draft.systems) ? draft.systems : [];
-      draft.systems[index] = { ...(draft.systems[index] ?? {}), [field]: value };
-    });
-  }
-
-  function updateSource(index: number, field: string, value: any) {
-    updateRoot(draft => {
-      draft.sources = Array.isArray(draft.sources) ? draft.sources : [];
-      draft.sources[index] = { ...(draft.sources[index] ?? {}), [field]: value };
-    });
-  }
-
-  async function draftFromRadioReference() {
-    if (!rrSid.trim()) return;
-    setBusy("rr");
-    setMessage("");
-    try {
-      const draft = await api.request<SetupTrConfigDraft>("/api/v1/setup/tr-config/draft", {
-        method: "POST",
-        body: JSON.stringify({
-          radioReferenceSid: rrSid.trim(),
-          siteNames: rrSites.trim()
-        })
-      });
-      setRrCandidate(draft);
-      setMessage(`RadioReference candidate ready: ${draft.diagnostics}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "RadioReference draft failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveAndRestart() {
-    if (!confirmAction(`${applyLabel} TR config?`, "This writes the active trunk-recorder config, creates the normal backup, and briefly interrupts live capture.")) return;
-    setBusy("save");
-    setMessage("");
-    try {
-      if (applyOverride) {
-        await applyOverride(configText);
-        setMessage("Applied targeted Setup source changes.");
-        return;
-      }
-      const result = await api.request<TrConfigEditorApplyResult>("/api/v1/system/tr-config/editor/apply", {
-        method: "POST",
-        body: JSON.stringify({ configJson: configText })
-      });
-      setEditor(result.editor);
-      setConfigText(result.editor.configJson);
-      lastSavedDraftRef.current = result.editor.configJson;
-      setMessage(result.message + (result.restartJob ? ` Restart job ${result.restartJob.id}.` : ""));
-      await reload();
-      if (result.ok && onApplied) {
-        setBusy("");
-        await onApplied();
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Save and restart failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  if (busy === "load" && !editor) return <div className="card">Loading TR config...</div>;
-
-  if (rawOnly) return <div className="tr-config-editor raw-review">
-    <div className="tr-config-editor-actions raw-review-actions">
-      <button className="danger-button" disabled={busy === "save" || !!parseError} onClick={() => void saveAndRestart()}>{busy === "save" ? "Applying..." : applyLabel}</button>
-    </div>
-    {message && <p className={message.toLowerCase().includes("invalid") || message.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{message}</p>}
-    {parseError && <p className="settings-message error">Raw JSON is invalid: {parseError}</p>}
-    {parsed.ok && <TrConfigReviewCoverage systems={systems} sources={sources} />}
-    <div className="tr-config-raw review-only">
-      <textarea aria-label="Setup TR config JSON" value={configText} spellCheck={false} onChange={e => setConfigText(e.target.value)} />
-    </div>
-  </div>;
-
-  return <div className="tr-config-editor">
-    <div className="tr-config-editor-toolbar">
-      <div>
-        <h3>Active TR Config</h3>
-        <div className="muted">Live: {editor?.livePath || "--"}</div>
-        {editor?.hasDraft && <div className="settings-message">{rawOnly ? "Setup draft" : "Draft"}: {editor.draftPath}</div>}
-      </div>
-      <div className="tr-config-editor-actions">
-        {onOpenRadioSetup && <button type="button" onClick={onOpenRadioSetup}>Open Setup</button>}
-        <button className="danger-button" disabled={busy === "save" || !!parseError} onClick={() => void saveAndRestart()}>{busy === "save" ? "Applying..." : applyLabel}</button>
-      </div>
-    </div>
-    {onOpenRadioSetup && <div className="setup-note">This is the expert config-draft surface. For new SDRs, site changes, RF path changes, or validation work, use Setup.</div>}
-    {message && <p className={message.toLowerCase().includes("invalid") || message.toLowerCase().includes("fail") ? "settings-message error" : "settings-message ok"}>{message}</p>}
-    {parseError && <p className="settings-message error">Raw JSON is invalid: {parseError}</p>}
-    <div className="tr-config-editor-grid">
-      <div className="tr-config-controls">
-        <section className="card">
-          <h3>Systems</h3>
-          <p className="muted">These site blocks drive Setup ground truth, source planning, health checks, and troubleshooting.</p>
-          <div className="tr-config-mini-table">
-            <table className="table compact-table">
-              <thead><tr><th>Short name</th><th>Mod</th><th>Control channels Hz</th><th>Voice channels Hz</th><th>Talkgroups</th><th></th></tr></thead>
-              <tbody>{systems.map((system: any, index: number) => <tr key={index}>
-                <td><input value={system.shortName ?? ""} onChange={e => updateSystem(index, "shortName", e.target.value)} /></td>
-                <td><select value={system.modulation ?? "qpsk"} onChange={e => updateSystem(index, "modulation", e.target.value)}><option value="qpsk">QPSK</option><option value="cqpsk">CQPSK</option><option value="fsk4">FSK4</option></select></td>
-                <td><input value={formatNumberList(system.control_channels)} onChange={e => updateSystem(index, "control_channels", parseNumberList(e.target.value))} /></td>
-                <td><input value={formatNumberList(system.channels)} onChange={e => updateSystem(index, "channels", parseNumberList(e.target.value))} /></td>
-                <td><input value={system.talkgroupsFile ?? ""} onChange={e => updateSystem(index, "talkgroupsFile", e.target.value)} /></td>
-                <td><button onClick={() => updateRoot(draft => draft.systems.splice(index, 1))}>Delete</button></td>
-              </tr>)}</tbody>
-            </table>
-          </div>
-          <button onClick={() => updateRoot(draft => { draft.systems = Array.isArray(draft.systems) ? draft.systems : []; draft.systems.push({ type: "p25", shortName: "site", modulation: "qpsk", control_channels: [], channels: [] }); })}>Add system</button>
-        </section>
-        <section className="card">
-          <h3>SDR Sources</h3>
-          <p className="muted">Source center and rate determine which site frequencies each receiver can cover.</p>
-          <div className="tr-config-mini-table">
-            <table className="table compact-table">
-              <thead><tr><th>#</th><th>Device</th><th>Serial</th><th>Center Hz</th><th>Rate</th><th>Error</th><th>Gain</th><th></th></tr></thead>
-              <tbody>{sources.map((source: any, index: number) => <tr key={index}>
-                <td>{index}</td>
-                <td><input value={source.device ?? ""} onChange={e => updateSource(index, "device", e.target.value)} /></td>
-                <td><input value={source.digitalRecorders ?? ""} onChange={e => updateSource(index, "digitalRecorders", e.target.value)} /></td>
-                <td><input inputMode="numeric" value={source.center ?? ""} onChange={e => updateSource(index, "center", numericOrText(e.target.value))} /></td>
-                <td><input inputMode="numeric" value={source.rate ?? ""} onChange={e => updateSource(index, "rate", numericOrText(e.target.value))} /></td>
-                <td><input inputMode="numeric" value={source.error ?? ""} onChange={e => updateSource(index, "error", numericOrText(e.target.value))} /></td>
-                <td><input value={source.gain ?? ""} onChange={e => updateSource(index, "gain", numericOrText(e.target.value))} /></td>
-                <td><button onClick={() => updateRoot(draft => draft.sources.splice(index, 1))}>Delete</button></td>
-              </tr>)}</tbody>
-            </table>
-          </div>
-          <button onClick={() => updateRoot(draft => { draft.sources = Array.isArray(draft.sources) ? draft.sources : []; draft.sources.push({ device: "rtl", center: 0, rate: 2400000, error: 0, gain: 32 }); })}>Add source</button>
-        </section>
-        <details className="card">
-          <summary>RadioReference refresh</summary>
-          <p className="muted">Draft a replacement from RadioReference, then review the JSON before applying. This reuses the Setup TR config builder.</p>
-          <div className="tr-config-rr-grid">
-            <label>SID <input value={rrSid} onChange={e => setRrSid(e.target.value)} /></label>
-            <label>Site filters <input value={rrSites} onChange={e => setRrSites(e.target.value)} placeholder="Hamilton, Cleveland" /></label>
-            <button disabled={busy === "rr" || !rrSid.trim()} onClick={() => void draftFromRadioReference()}>{busy === "rr" ? "Drafting..." : "Preview RR Candidate"}</button>
-          </div>
-          {rrCandidate && <div className="tr-config-candidate">
-            <div className="setup-job-head">
-              <div>
-                <strong>RadioReference candidate</strong>
-                <p className="muted">{rrCandidate.diagnostics}</p>
-              </div>
-              <div className="setup-button-row">
-                <button onClick={() => { setConfigText(rrCandidate.configJson); setRrCandidate(null); }}>Merge into Draft</button>
-                <button onClick={() => setRrCandidate(null)}>Dismiss</button>
-              </div>
-            </div>
-            {rrCandidate.warnings.length > 0 && <div className="setup-warning-list">{rrCandidate.warnings.map(warning => <div key={warning}>{warning}</div>)}</div>}
-            <pre className="command-box">{summarizeTrConfigDiff(configText, rrCandidate.configJson).join("\n")}</pre>
-          </div>}
-        </details>
-      </div>
-      <div className="tr-config-raw">
-        <div className="card">
-          <h3>Raw JSON</h3>
-          <textarea value={configText} spellCheck={false} onChange={e => setConfigText(e.target.value)} />
-        </div>
-      </div>
-    </div>
-  </div>;
-}
-
 function TrConfigReviewCoverage({ systems, sources }: { systems: any[]; sources: any[] }) {
   const sourceWindows = sources.map((source, index): { index: number; device: string; center: number; rate: number; low: number; high: number } => {
     const center = readTrFrequencyHz(source?.center);
@@ -12095,20 +10878,8 @@ function parseTrConfig(text: string): { ok: true; value: any } | { ok: false; er
   }
 }
 
-function cloneJson(value: any) {
-  return JSON.parse(JSON.stringify(value ?? {}));
-}
-
-function normalizeDraftText(text: string) {
-  return `${text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd()}\n`;
-}
-
 function formatNumberList(value: any) {
   return Array.isArray(value) ? value.join(", ") : "";
-}
-
-function parseNumberList(value: string) {
-  return value.split(/[,\s]+/).map(part => Number(part.trim())).filter(part => Number.isFinite(part) && part > 0);
 }
 
 function summarizeTrConfigDiff(currentText: string, candidateText: string) {
@@ -12163,13 +10934,6 @@ function mapByShortName(value: any) {
 
 function sortedUnion(left: string[], right: string[]) {
   return Array.from(new Set([...left, ...right])).sort((a, b) => a.localeCompare(b));
-}
-
-function numericOrText(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  const numeric = Number(trimmed);
-  return Number.isFinite(numeric) ? numeric : value;
 }
 
 function TrConfigurationSummaryView({ data, onOpenSetup }: { data: TrTroubleshoot; onOpenSetup?: (section?: string) => void }) {
@@ -12232,13 +10996,6 @@ function RfHealthStatusPanel({ data, onSelectSite, onSelectCategory }: { data: T
 
 function TrSiteFact({ label: factLabel, value, caption, onClick }: { label: string; value: string; caption: string; onClick: () => void }) {
   return <button type="button" className="tr-site-fact" aria-label={`${factLabel}: ${value}. Open matching Performance charts.`} onClick={onClick}><span>{factLabel}</span><strong>{value}</strong><small>{caption}</small></button>;
-}
-
-function trSystemTone(status: string) {
-  if (status === "Unavailable" || status === "Critical") return "error";
-  if (status === "Needs review") return "warning";
-  if (status === "Healthy") return "ok";
-  return "neutral";
 }
 
 function trSystemDisplayName(value: string) {
@@ -12361,101 +11118,6 @@ function TranscriptionLatencyChart({ rows, rangeStart, rangeEnd }: { rows: Trans
   const points = (pick: (row: TranscriptionLatencyBucket) => number) => rows.map(row => `${x(row.start)},${y(pick(row))}`).join(" ");
   const scaleLabel = max >= 120 ? `${(max / 60).toFixed(1)}m` : `${max.toFixed(0)}s`;
   return <div className="card tr-chart-card transcription-chart-card"><h3>Transcription Latency Over Time</h3><p className="muted">PizzaWave ingest to completed transcription for live calls; imported/offline calls are excluded.</p><svg className="chart" viewBox="0 0 690 215" preserveAspectRatio="none" role="img" aria-label="Median and 95th percentile transcription latency over time"><line className="axis" x1="44" y1="18" x2="44" y2="170"/><line className="axis" x1="44" y1="170" x2="664" y2="170"/><text className="chart-label" x="5" y="23">{scaleLabel}</text><text className="chart-label" x="24" y="174">0</text><polyline points={points(row => row.p95Seconds)} fill="none" stroke="#f7c948" strokeWidth="2"/><polyline points={points(row => row.medianSeconds)} fill="none" stroke="#54d68a" strokeWidth="2.5"/>{rows.map(row => <circle key={row.start} cx={x(row.start)} cy={y(row.p95Seconds)} r="2.5" fill="#f7c948"><title>{transcriptionChartTime(row.start, rangeStart, rangeEnd)} · p95 {formatDuration(row.p95Seconds)} · median {formatDuration(row.medianSeconds)} · {row.calls} calls</title></circle>)}{transcriptionChartLabels(rangeStart, rangeEnd).map(timestamp => <text className="chart-label" textAnchor={timestamp === rangeStart ? "start" : timestamp === rangeEnd ? "end" : "middle"} x={44 + (timestamp - rangeStart) / Math.max(1, rangeEnd - rangeStart) * 620} y="198" key={timestamp}>{roundedTranscriptionChartTime(timestamp, rangeStart, rangeEnd)}</text>)}</svg><Legend items={[["Median", "#54d68a"], ["95th percentile", "#f7c948"]]} /></div>;
-}
-
-function QualityAuditView({ data, rangeHours }: { data: TrTroubleshoot; rangeHours: number }) {
-  const audit = data.qualityAudit;
-  const [previous, setPrevious] = useState<TrTroubleshoot["qualityAudit"] | null>(null);
-  const [showAllSamples, setShowAllSamples] = useState(false);
-  const visibleSamples = showAllSamples ? audit.samples : audit.samples.slice(0, 10);
-  useEffect(() => {
-    let canceled = false;
-    const end = Math.floor(Date.now() / 1000) - Math.max(1, rangeHours) * 3600;
-    const start = end - Math.max(1, rangeHours) * 3600;
-    api.request<TrTroubleshoot>(`/api/v1/troubleshoot?start=${start}&end=${end}`)
-      .then(result => { if (!canceled) setPrevious(result.qualityAudit); })
-      .catch(() => { if (!canceled) setPrevious(null); });
-    return () => { canceled = true; };
-  }, [rangeHours]);
-  const problemDelta = previous ? audit.problemPercent - previous.problemPercent : 0;
-  const inaudibleDelta = previous ? audit.inaudiblePercent - previous.inaudiblePercent : 0;
-  return <div className="quality-audit">
-    <div className="audit-kpis">
-      <Kpi label="Problem Calls" value={`${audit.problemCalls.toLocaleString()} / ${audit.totalCalls.toLocaleString()}`} status={audit.problemPercent > 25 ? "error" : audit.problemPercent > 10 ? "warning" : "ok"} subtext={`${audit.problemPercent.toFixed(1)}% poor-quality, failed, empty, short, or inaudible`} />
-      <Kpi label="Inaudible Calls" value={audit.inaudibleCalls.toLocaleString()} status={audit.inaudiblePercent > 15 ? "error" : audit.inaudiblePercent > 5 ? "warning" : "ok"} subtext={`${audit.inaudiblePercent.toFixed(1)}% of calls in selected range`} />
-      <Kpi label="Previous Window" value={previous ? `${problemDelta >= 0 ? "+" : ""}${problemDelta.toFixed(1)} pts` : "Loading"} status={!previous ? "neutral" : problemDelta > 5 ? "warning" : problemDelta < -5 ? "ok" : "neutral"} subtext={previous ? `problem rate vs prior ${rangeHours}h window; inaudible ${inaudibleDelta >= 0 ? "+" : ""}${inaudibleDelta.toFixed(1)} pts` : "equal lookback comparison"} />
-      <Kpi label="Review Samples" value={audit.samples.length.toLocaleString()} status={audit.samples.length > 0 ? "warning" : "ok"} subtext="collapsed evidence available for review" />
-    </div>
-    <div className="audit-grid">
-      <AuditTable title="Reasons" rows={audit.byReason} mode="reason" />
-      <AuditTable title="Systems" rows={audit.bySystem} />
-      <AuditTable title="Talkgroups" rows={audit.byTalkgroup} />
-      <QualityAuditHourChart rows={audit.byHour} />
-    </div>
-    <div className="card">
-      <div className="card-heading-row"><h3>Sample Problem Calls</h3>{audit.samples.length > 10 && <button onClick={() => setShowAllSamples(current => !current)}>{showAllSamples ? "Show first 10" : `Show all ${audit.samples.length}`}</button>}</div>
-      <p className="muted">Open only the samples needed to confirm the dominant quality pattern.</p>
-      {audit.samples.length ? visibleSamples.map(sample => <QualityAuditSampleCard sample={sample} key={sample.callId} />) : <p className="muted">No problem calls in the selected range.</p>}
-    </div>
-  </div>;
-}
-
-function AuditTable({ title, rows, mode = "default" }: { title: string; rows: QualityAuditGroup[]; mode?: "default" | "reason" }) {
-  const reasonMode = mode === "reason";
-  return <div className="card audit-table-card">
-    <h3>{title}</h3>
-    {rows.length ? <table className="table"><thead><tr><th>{reasonMode ? "Reason" : "Name"}</th><th>{reasonMode ? "Calls" : "Total"}</th><th>{reasonMode ? "Share" : "Problems"}</th>{!reasonMode && <th>Inaudible</th>}</tr></thead><tbody>{rows.map(row => <tr key={row.label}>
-      <td>{row.label}</td>
-      <td>{row.totalCalls}</td>
-      <td>{reasonMode ? <span>{row.problemPercent.toFixed(1)}%</span> : <span>{row.problemCalls} <span className="muted">({row.problemPercent.toFixed(1)}%)</span></span>}</td>
-      {!reasonMode && <td>{row.inaudibleCalls} <span className="muted">({row.inaudiblePercent.toFixed(1)}%)</span></td>}
-    </tr>)}</tbody></table> : <p className="muted">No problem calls.</p>}
-  </div>;
-}
-
-function QualityAuditHourChart({ rows }: { rows: TrTroubleshoot["qualityAudit"]["byHour"] }) {
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const max = Math.max(1, ...rows.map(r => Math.max(r.problemCalls, r.inaudibleCalls)));
-  return <div className="card chart-card audit-hour-card">
-    <h3>Problems by Hour</h3>
-    <svg className="chart" viewBox="0 0 500 190" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Problem and inaudible calls by hour">
-      <line className="axis" x1="32" y1="158" x2="482" y2="158" />
-      <line className="axis" x1="32" y1="28" x2="32" y2="158" />
-      <text className="chart-label" x="4" y="34">{max}</text>
-      {[0, 6, 12, 18, 23].map(hour => <text className="chart-label" x={36 + hour * 19} y="178" key={hour}>{hour}</text>)}
-      {hours.map(hour => {
-        const row = rows.find(r => r.hour === hour);
-        const problemHeight = ((row?.problemCalls ?? 0) / max) * 118;
-        const inaudibleHeight = ((row?.inaudibleCalls ?? 0) / max) * 118;
-        return <g key={hour}>
-          <rect x={30 + hour * 19} y={158 - problemHeight} width="7" height={problemHeight} fill="#ff6b5a" />
-          <rect x={38 + hour * 19} y={158 - inaudibleHeight} width="7" height={inaudibleHeight} fill="#5aa7ff" />
-        </g>;
-      })}
-    </svg>
-    <Legend items={[["Problems", "#ff6b5a"], ["Inaudible", "#5aa7ff"]]} />
-  </div>;
-}
-
-function QualityAuditSampleCard({ sample }: { sample: QualityAuditSample }) {
-  return <details className={`audit-sample category-${sample.category}`}>
-    <summary>
-      <span>{new Date(sample.startTime * 1000).toLocaleString()}</span>
-      <strong>{sample.qualityReason}</strong>
-      <span>{sample.talkgroupName || `TG ${sample.talkgroup}`}</span>
-      <span>{sample.systemShortName} / source {sample.source}</span>
-      <span>{formatDuration(sample.durationSeconds)}</span>
-    </summary>
-    <p>{sample.transcription || "No transcript available."}</p>
-    <PlayableAudio src={sample.audioUrl} />
-  </details>;
-}
-
-function MetricTable({ title, rows, issuesFirst = false, technicalNotes = false }: { title: string; rows: TrHealthMetric[]; issuesFirst?: boolean; technicalNotes?: boolean }) {
-  const issueRows = rows.filter(row => row.isIssue);
-  const normalRows = rows.filter(row => !row.isIssue);
-  const renderRows = (items: TrHealthMetric[]) => items.map(row => <tr className={row.isIssue ? "issue-row" : ""} key={row.metric}><td>{row.metric}</td><td>{row.value}</td><td>{technicalNotes ? <details><summary>View metrics</summary><p>{row.notes}</p></details> : row.notes}</td></tr>);
-  return <div className="card"><h3>{title}</h3>{issuesFirst && issueRows.length === 0 ? <p className="settings-message ok">No issues detected.</p> : <table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(issuesFirst ? issueRows : rows)}</tbody></table>}{issuesFirst && normalRows.length > 0 && <details><summary>{normalRows.length} normal signal{normalRows.length === 1 ? "" : "s"}</summary><table className="table metric-table"><thead><tr><th>Signal</th><th>Current value</th><th>Meaning</th></tr></thead><tbody>{renderRows(normalRows)}</tbody></table></details>}</div>;
 }
 
 function TrHealthChartView({ chart, annotations = [], showBaselineNote = true, showTitle = true }: { chart: TrHealthChart; annotations?: SystemRecommendation["episodes"]; showBaselineNote?: boolean; showTitle?: boolean }) {
@@ -12986,19 +11648,6 @@ function ArtifactReport({ report }: { report: SetupArtifactReport }) {
   </div>;
 }
 
-function SetupJobPanel({ job, logs }: { job: Job | null; logs: JobLog[] }) {
-  if (!job) return null;
-  return <div className="setup-job-panel">
-    <div className="setup-job-head">
-      <strong>Job {job.id}: {label(job.type)}</strong>
-      <span className={`job-status ${job.status}`}>{job.status}</span>
-      <span>{job.completed}/{job.total}</span>
-    </div>
-    <div className="muted">{job.message}</div>
-    <pre>{logs.length ? logs.map(log => `[${new Date(log.timestampUtc).toLocaleTimeString()}] ${log.stream}: ${log.text}`).join("\n") : "Waiting for job output..."}</pre>
-  </div>;
-}
-
 function SetupJobDrawer({ job, logs, running, onStopCalibration, stopping, open, setOpen }: { job: Job | null; logs: JobLog[]; running: boolean; onStopCalibration: () => Promise<void>; stopping: boolean; open: boolean; setOpen: (open: boolean) => void }) {
   const isCalibration = Boolean(job?.type.includes("calibration"));
   return <div className={`setup-job-drawer ${open ? "open" : ""}`}>
@@ -13143,31 +11792,6 @@ function boundaryOverlayStyle(bounds: { north: number; south: number; east: numb
     width: Math.max(6, right - left),
     height: Math.max(6, bottom - top)
   };
-}
-
-function suggestAreaLabelFromSite(siteName: string) {
-  const value = String(siteName ?? "").trim().replace(/[_-]+/g, " ");
-  const stateMatch = value.match(/^(?<label>.+?),\s*(?<state>[A-Z]{2})$/i) ?? value.match(/^(?<label>.+?)\s+(?<state>[A-Z]{2})$/i);
-  if (!stateMatch?.groups)
-    return value;
-  const stateName = stateNameByAbbreviation[stateMatch.groups.state.toUpperCase()];
-  if (!stateName)
-    return value;
-  let label = stateMatch.groups.label
-    .replace(/\b(simulcast|subsite|tower|site|rfss)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!label)
-    return value;
-  if (/\bcounty\b/i.test(label))
-    return `${titleWords(label)}, ${stateName}`;
-  const words = label.split(/\s+/).filter(Boolean);
-  const place = words[0] ?? label;
-  return `${titleWords(place)}, ${stateName}`;
-}
-
-function titleWords(value: string) {
-  return value.toLowerCase().replace(/\b[a-z]/g, letter => letter.toUpperCase());
 }
 
 const stateNameByAbbreviation: Record<string, string> = {
@@ -14820,17 +13444,6 @@ function inferExecutionMode(value: any, baseUrl: any) {
   }
 }
 
-function normalizeSetupLocationNumbers(values: any) {
-  const areas = values?.locations?.monitoredAreas;
-  if (!Array.isArray(areas)) return;
-  for (const area of areas) {
-    for (const key of ["north", "south", "east", "west"]) {
-      const parsed = Number(area[key]);
-      area[key] = Number.isFinite(parsed) ? parsed : 0;
-    }
-  }
-}
-
 function modelOptions(rows: any[], engine: string) {
   const filtered = rows.filter(row => row.engine === engine);
   return filtered.length ? filtered.map(row => row.id) : ["none"];
@@ -14906,10 +13519,6 @@ function formatFrequencyList(values: number[]) {
   return values.length > 4 ? `${shown}, +${values.length - 4} more` : shown;
 }
 
-function formatFrequencyRange(lowHz: number, highHz: number) {
-  return lowHz === highHz ? formatHz(lowHz) : `${formatHz(lowHz)} - ${formatHz(highHz)}`;
-}
-
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -14920,10 +13529,6 @@ function formatBytes(bytes: number) {
     index++;
   }
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function parseTalkgroups(value: string) {
-  return value.split(/[,\s]+/).map(v => Number(v.trim())).filter(v => Number.isFinite(v) && v > 0);
 }
 
 function formatCompact(value: number) {

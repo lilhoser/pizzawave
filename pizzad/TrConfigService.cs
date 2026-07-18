@@ -20,16 +20,6 @@ public sealed class TrConfigService
         _provenance = provenance;
     }
 
-    public async Task<TrConfigEditorDto> GetEditorAsync(CancellationToken ct)
-    {
-        var livePath = _config.TrunkRecorder.ConfigPath;
-        var liveJson = File.Exists(livePath) ? await File.ReadAllTextAsync(livePath, ct) : string.Empty;
-        var draftPath = EditorDraftPath();
-        var hasDraft = File.Exists(draftPath);
-        var configJson = hasDraft ? await File.ReadAllTextAsync(draftPath, ct) : liveJson;
-        return BuildEditorDto(livePath, draftPath, configJson, liveJson, hasDraft);
-    }
-
     public async Task<TrConfigViewerDto> GetViewerAsync(IReadOnlyList<RfSurveySessionDto> surveySessions, string? selectedId, CancellationToken ct)
     {
         var artifacts = BuildViewerCatalog(surveySessions);
@@ -54,22 +44,6 @@ public sealed class TrConfigService
             activeJson);
     }
 
-    public async Task<TrConfigEditorDto> SaveEditorDraftAsync(TrConfigEditorSaveRequest request, CancellationToken ct)
-    {
-        var draftPath = EditorDraftPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(draftPath) ?? ".");
-        await File.WriteAllTextAsync(draftPath, NormalizeText(request.ConfigJson ?? string.Empty), ct);
-        return await GetEditorAsync(ct);
-    }
-
-    public Task ClearEditorDraftAsync(CancellationToken ct)
-    {
-        var path = EditorDraftPath();
-        if (File.Exists(path))
-            File.Delete(path);
-        return Task.CompletedTask;
-    }
-
     public IReadOnlyList<TrConfigBackupDto> ListConfigBackups()
     {
         var path = _config.TrunkRecorder.ConfigPath;
@@ -84,6 +58,17 @@ public sealed class TrConfigService
             .OrderByDescending(file => file.LastWriteTimeUtc)
             .Select(file => new TrConfigBackupDto(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc))
             .ToList();
+    }
+
+    public Task ClearLegacyEditorDraftAsync(CancellationToken ct)
+    {
+        var path = EditorDraftPath();
+        if (!File.Exists(path))
+            return Task.CompletedTask;
+
+        ct.ThrowIfCancellationRequested();
+        File.Delete(path);
+        return Task.CompletedTask;
     }
 
     public async Task<TrConfigRestoreResultDto> RestoreConfigBackupAsync(TrConfigRestoreRequest request, CancellationToken ct)
@@ -127,17 +112,6 @@ public sealed class TrConfigService
 
         var serviceOutput = request.RestartTr ? await RestartTrAsync(ct) : "Restart TR when you are ready for the restored config to take effect.";
         return new TrConfigRestoreResultDto(true, $"Restored TR config backup {Path.GetFileName(fullBackupPath)}.", fullBackupPath, restoreBackup, serviceOutput);
-    }
-
-    public async Task<string> GetEditorConfigForApplyAsync(string? configJson, CancellationToken ct)
-    {
-        if (!string.IsNullOrWhiteSpace(configJson))
-            return configJson;
-        var draftPath = EditorDraftPath();
-        if (File.Exists(draftPath))
-            return await File.ReadAllTextAsync(draftPath, ct);
-        var livePath = _config.TrunkRecorder.ConfigPath;
-        return File.Exists(livePath) ? await File.ReadAllTextAsync(livePath, ct) : string.Empty;
     }
 
     public object Validate()
@@ -195,27 +169,6 @@ public sealed class TrConfigService
         }
     }
 
-    private TrConfigEditorDto BuildEditorDto(string livePath, string draftPath, string configJson, string liveJson, bool hasDraft)
-    {
-        var summary = EmptySummary();
-        var parseOk = false;
-        var parseMessage = string.Empty;
-        try
-        {
-            var root = JsonNode.Parse(string.IsNullOrWhiteSpace(configJson) ? "{}" : configJson) as JsonObject
-                ?? throw new JsonException("TR config root must be a JSON object.");
-            summary = Summarize(root);
-            parseOk = true;
-            parseMessage = "Valid JSON.";
-        }
-        catch (Exception ex)
-        {
-            parseMessage = ex.Message;
-        }
-
-        return new TrConfigEditorDto(livePath, draftPath, configJson, liveJson, hasDraft, parseOk, parseMessage, summary);
-    }
-
     private IReadOnlyList<TrConfigArtifactCatalogDto> BuildViewerCatalog(IReadOnlyList<RfSurveySessionDto> surveySessions)
     {
         var rows = new List<TrConfigArtifactCatalogDto>();
@@ -224,7 +177,7 @@ public sealed class TrConfigService
         AddViewerArtifact(rows, seen, livePath, "active", "Active", "Current active configuration", "Trunk Recorder", "Installed configuration currently read by Trunk Recorder.", "", true, true);
 
         var draftPath = EditorDraftPath();
-        AddViewerArtifact(rows, seen, draftPath, "draft", "Draft", "Unapplied configuration draft", "Configuration editor", "Saved draft that has not been applied to Trunk Recorder.", "", true, false);
+        AddViewerArtifact(rows, seen, draftPath, "draft", "Legacy draft", "Unapplied legacy configuration draft", "Retired configuration editor", "Read-only draft retained from the retired standalone configuration editor.", "", true, false);
 
         if (!string.IsNullOrWhiteSpace(livePath))
         {
@@ -476,9 +429,6 @@ public sealed class TrConfigService
 
     private static string NormalizeJson(JsonNode node) =>
         node.ToJsonString(EngineConfig.JsonOptions()).Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd() + "\n";
-
-    private static string NormalizeText(string text) =>
-        text.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd() + "\n";
 
     private async Task<string> RestartTrAsync(CancellationToken ct)
     {

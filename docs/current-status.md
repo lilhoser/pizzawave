@@ -30,8 +30,13 @@ Package 5 or Package 8 worktree directories.
   API, UI, isolated store, processing scheduler, and SFTP workflow are not
   implemented or deployed.
 - Package 10 Recovery Workflows is implemented, deployed to the RPI,
-  nondestructively live-verified, and operator-accepted. The remaining closeout
-  work is Package 11 Cleanup plus final regression.
+  nondestructively live-verified, and operator-accepted.
+- Package 11 Cleanup is implemented, deployed to the RPI, and live-verified.
+  The standalone TR editor routes and unreachable UI, obsolete RF UI, and other
+  dead top-level frontend code are removed. The Dashboard map is now an owned,
+  lazy-loaded React Leaflet feature instead of a hand-built tile and interaction
+  engine. All 516 tests and the production frontend build pass; final operator
+  acceptance is the only remaining remediation closeout step.
 - Package 9 Temporal Pattern Analysis is complete, deployed to the RPI, live-
   verified, and operator-accepted. Its accepted closure scope is the RF-first
   temporal-finding vertical plus the shared Recommendations lifecycle and UX:
@@ -56,6 +61,12 @@ Package 5 or Package 8 worktree directories.
   safety-backup, rollback, and service-transition paths remain covered by the
   automated/isolated tests. PizzaWave health and live TR activity remained OK;
   Trunk Recorder stayed PID 1595 with its July 11 activation timestamp.
+- Package 11 deployed first through the backend path, then through a 5.7-second
+  web-only correction. Live Dashboard verification showed loaded map tiles,
+  nine current location markers, working selection with one active marker,
+  correct attribution, no page overflow, and no browser warnings or errors.
+  PizzaWave returned healthy with active ingestion and empty queues. Trunk
+  Recorder remained PID 1595 with its unchanged July 11 activation timestamp.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.

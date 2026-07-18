@@ -9,19 +9,18 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: 11 - Cleanup and final regression.
-- Current milestone: Package 10 is implemented, deployed to the RPI,
-  nondestructively live-verified, and operator-accepted. Package 7 remains a
-  standalone outstanding feature outside this closeout sequence.
-- Continuation: merge the accepted Package 10 branch, then start Package 11 in
-  a new task-specific worktree from updated `main`.
-- Last deployed code state: Package 10 encrypted same-system backup/restore,
-  resumable staging, recovery jobs, reset safeguards, and secret-free support
-  packages, deployed and verified on the RPI 2026-07-18.
+- Current milestone: Package 11 cleanup is implemented, deployed to the RPI,
+  and live-verified. Operator acceptance remains. Package 7 remains a standalone
+  outstanding feature outside this closeout sequence.
+- Continuation: obtain Package 11 operator acceptance, then merge it to `main`
+  and close the operator-remediation sequence.
+- Last deployed code state: Package 11 dead-code and retired-editor removal plus
+  an owned, lazy-loaded React Leaflet Dashboard map, deployed and verified on
+  the RPI 2026-07-18.
 - Package 9 final implementation commit before documentation closure: `2b6caa4`
 - Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, 9, and 10 accepted
-- Next action: merge Package 10 into `main`, then begin Package 11 Cleanup/final
-  regression. Do not restart Trunk Recorder unless the operator explicitly
-  requests it.
+- Next action: obtain Package 11 operator acceptance. Do not restart Trunk
+  Recorder unless the operator explicitly requests it.
 
 ## Package 5 Final Handoff
 
@@ -800,13 +799,16 @@ Accepted design:
 
 ### 11. Cleanup
 
-Status: pending
+Status: implemented, deployed, and live-verified; operator acceptance pending
 
-- [ ] Split the frontend by product ownership.
-- [ ] Remove dead RSW, standalone TR-editor, and unused RF UI code.
-- [ ] Replace the hand-built map interaction engine.
-- [ ] Update operator and architecture documentation.
-- [ ] Run final regression verification and obtain operator acceptance.
+- [x] Split the Dashboard map into an owned, lazy-loaded feature boundary.
+- [x] Confirm RSW is already absent; remove the standalone TR-editor routes and
+  unreachable UI plus unused RF UI and other proven-unreachable top-level code.
+- [x] Replace the hand-built map interaction engine with React Leaflet.
+- [x] Update operator and architecture documentation.
+- [x] Run the production frontend build, all 516 tests, RPI health checks, and
+  live Dashboard map/browser verification.
+- [ ] Obtain operator acceptance.
 
 ## Decision Log
 

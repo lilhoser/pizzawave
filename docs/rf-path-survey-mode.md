@@ -63,8 +63,8 @@ RF validation state:
   Setup source planning and validated RF evidence.
 - `POST /api/v1/setup/site/rf/{id}/tr/apply-source-draft`: rebuild and verify
   the reviewed server-owned draft against its Setup version and content hash,
-  apply it, atomically record the applied Setup snapshot, and clear the expert
-  config editor draft.
+  apply it, atomically record the applied Setup snapshot, and clear any legacy
+  draft left by the retired standalone configuration editor.
 
 Experiment execution:
 

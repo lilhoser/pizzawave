@@ -8,6 +8,9 @@ public sealed class SystemInformationUiContractTests
     private static string StyleSource() =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "style.css"));
 
+    private static string LocationHeatMapSource() =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "LocationHeatMap.tsx"));
+
     private static string RecommendationServiceSource() =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "SystemRecommendationService.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -24,8 +27,22 @@ public sealed class SystemInformationUiContractTests
         Assert.DoesNotContain("<SourceCoverageTable", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Show all {data.health.charts.length} charts", source, StringComparison.Ordinal);
         Assert.DoesNotContain("CC Message-Rate Samples", source, StringComparison.Ordinal);
-        Assert.Contains("audit.samples.slice(0, 10)", source, StringComparison.Ordinal);
-        Assert.Contains("technicalNotes", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("function QualityAuditView", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DashboardMapIsAnOwnedLazyLoadedLeafletFeature()
+    {
+        var app = AppSource();
+        var map = LocationHeatMapSource();
+
+        Assert.Contains("React.lazy(() => import(\"./features/dashboard/LocationHeatMap\")", app, StringComparison.Ordinal);
+        Assert.Contains("from \"react-leaflet\"", map, StringComparison.Ordinal);
+        Assert.Contains("<MapContainer", map, StringComparison.Ordinal);
+        Assert.Contains("<TileLayer", map, StringComparison.Ordinal);
+        Assert.Contains("<CircleMarker", map, StringComparison.Ordinal);
+        Assert.DoesNotContain("function mapTiles", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("function projectHeatPoint", app, StringComparison.Ordinal);
     }
 
     [Fact]

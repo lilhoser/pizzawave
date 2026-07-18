@@ -32,6 +32,21 @@ npm run build
 
 The web build writes static assets consumed by `pizzad`.
 
+### Frontend ownership boundaries
+
+`pizzad/web/src/App.tsx` remains the application shell and the home of shared
+composition code. Product-owned implementations belong under
+`pizzad/web/src/features/<product>/`; they should expose a small typed component
+or helper surface to the shell and may be lazy-loaded when the product carries
+a substantial dependency.
+
+The Dashboard location map is the first enforced boundary. Its display-name
+helpers live in `features/dashboard/location.ts`, and its React Leaflet engine
+lives in `features/dashboard/LocationHeatMap.tsx`. The latter is dynamically
+imported so Leaflet and its CSS are not part of the initial application chunk.
+Do not restore map projection, tile loading, drag, zoom, or marker interaction
+code to `App.tsx`; extend the owned feature instead.
+
 ## Publish `pizzad`
 
 ```bash

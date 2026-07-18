@@ -442,7 +442,6 @@ public sealed record SetupAreaBoundaryResponseDto(
     IReadOnlyList<SetupAreaBoundaryCandidateDto> Candidates,
     string Diagnostics);
 
-public sealed record TrConfigEditorSaveRequest(string ConfigJson);
 public sealed record TrConfigBackupDto(string Name, string Path, long Bytes, DateTime CreatedAtUtc);
 public sealed record TrConfigRestoreRequest(string BackupPath, bool RestartTr = true);
 public sealed record TrConfigRestoreResultDto(bool Ok, string Message, string BackupPath, string RestoreBackupPath, string ServiceOutput);
@@ -468,16 +467,6 @@ public sealed record TrConfigEditorSummaryDto(
     IReadOnlyList<TrConfigEditorSystemDto> Systems,
     IReadOnlyList<TrConfigEditorSourceDto> Sources,
     IReadOnlyList<string> Warnings);
-
-public sealed record TrConfigEditorDto(
-    string LivePath,
-    string DraftPath,
-    string ConfigJson,
-    string LiveConfigJson,
-    bool HasDraft,
-    bool ParseOk,
-    string ParseMessage,
-    TrConfigEditorSummaryDto Summary);
 
 public sealed record TrConfigArtifactCatalogDto(
     string Id,

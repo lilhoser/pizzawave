@@ -508,7 +508,7 @@ app.MapPost("/api/v1/setup/site/rf/{id}/tr/apply-source-draft", async (HttpConte
                 request.DraftHash
             }, EngineConfig.JsonOptions()),
             "ui:apply-source-draft"), context.RequestAborted);
-        await trConfig.ClearEditorDraftAsync(context.RequestAborted);
+        await trConfig.ClearLegacyEditorDraftAsync(context.RequestAborted);
         return Results.Ok(new RfSurveyApplySourceDraftResponseDto(result, applied));
     }
     catch (Exception ex)
@@ -645,14 +645,6 @@ app.MapPost("/api/v1/setup/tr-config/sites", async (SetupTrConfigSitesRequest re
 .WithName("SetupTrConfigSites")
 .WithOpenApi();
 
-app.MapGet("/api/v1/system/tr-config/editor", async (HttpContext context, AuthService authService, TrConfigService trConfig) =>
-{
-    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await trConfig.GetEditorAsync(context.RequestAborted));
-})
-.WithName("SystemTrConfigEditor")
-.WithOpenApi();
-
 app.MapGet("/api/v1/system/tr-config/viewer", async (HttpContext context, string? artifactId, AuthService authService, TrConfigService trConfig, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
@@ -677,48 +669,6 @@ app.MapGet("/api/v1/system/tr-logs", async (HttpContext context, long? start, lo
     }
 })
 .WithName("SystemTrLogs")
-.WithOpenApi();
-
-app.MapPost("/api/v1/system/tr-config/editor/draft", async (TrConfigEditorSaveRequest request, HttpContext context, AuthService authService, TrConfigService trConfig) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        return Results.Ok(await trConfig.SaveEditorDraftAsync(request, context.RequestAborted));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-})
-.WithName("SystemTrConfigEditorDraft")
-.WithOpenApi();
-
-app.MapPost("/api/v1/system/tr-config/editor/apply", async (TrConfigEditorSaveRequest request, HttpContext context, AuthService authService, TrConfigService trConfig, SetupTrConfigBuilderService builder, SetupJobService jobs, RfSurveyService surveys) =>
-{
-    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    try
-    {
-        var configJson = await trConfig.GetEditorConfigForApplyAsync(request.ConfigJson, context.RequestAborted);
-        using var _ = JsonDocument.Parse(configJson);
-        var save = await builder.SaveAsync(new SetupTrConfigSaveRequest(configJson), context.RequestAborted);
-        if (!save.Ok)
-            return Results.Ok(new { ok = false, message = save.Message, save, restartJob = (JobDto?)null, editor = await trConfig.GetEditorAsync(context.RequestAborted) });
-        await trConfig.ClearEditorDraftAsync(context.RequestAborted);
-        await surveys.StopActiveWaterfallsBeforeTrStartAsync(context.RequestAborted);
-        var restartJob = await jobs.StartAsync("restart-tr", confirmed: true, parameters: null, context.RequestAborted);
-        return Results.Ok(new { ok = true, message = "Saved TR config and queued trunk-recorder restart.", save, restartJob, editor = await trConfig.GetEditorAsync(context.RequestAborted) });
-    }
-    catch (JsonException ex)
-    {
-        return Results.BadRequest(new { error = "Invalid TR config JSON: " + ex.Message });
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-})
-.WithName("SystemTrConfigEditorApply")
 .WithOpenApi();
 
 app.MapGet("/api/v1/status", async (HttpContext context, long? start, long? end, AuthService authService, DashboardService dashboard) =>

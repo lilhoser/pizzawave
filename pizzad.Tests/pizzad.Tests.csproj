@@ -23,6 +23,7 @@
   <ItemGroup>
     <None Include="..\pizzad\web\src\App.tsx" Link="UiContract\App.tsx" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\pizzad\web\src\style.css" Link="UiContract\style.css" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\pizzad\web\src\features\dashboard\LocationHeatMap.tsx" Link="UiContract\LocationHeatMap.tsx" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\pizzad\SystemRecommendationService.cs" Link="UiContract\SystemRecommendationService.cs" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
