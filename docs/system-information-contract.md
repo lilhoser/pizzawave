@@ -37,6 +37,13 @@ Performance has no Overview page. Recommendations is the cross-System summary.
 Trunk Recorder configuration snapshots remain an internal rollback mechanism;
 they are not an operator-facing recovery surface.
 
+The persistent footer may show one compact live RF readout for the worst current
+site. Expanding it shows every locally monitored site with rolling two-minute
+decode, five-minute control-channel retunes, freshness, and explicit status.
+This is a current-state instrument, not a behavioral finding or alert. Selecting
+a site opens Performance / Radio Frequency for history and charts; recurring or
+systemic behavior remains owned by Recommendations.
+
 ## Time Contract
 
 - Label the shared top selector `Activity range`.

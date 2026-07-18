@@ -35,7 +35,7 @@ Package 5 or Package 8 worktree directories.
   The standalone TR editor routes and unreachable UI, obsolete RF UI, and other
   dead top-level frontend code are removed. The Dashboard map is now an owned,
   lazy-loaded React Leaflet feature instead of a hand-built tile and interaction
-  engine. All 516 tests and the production frontend build pass; final operator
+  engine. All 522 tests and the production frontend build pass; final operator
   acceptance is the only remaining remediation closeout step.
 - Package 9 Temporal Pattern Analysis is complete, deployed to the RPI, live-
   verified, and operator-accepted. Its accepted closure scope is the RF-first
@@ -89,6 +89,16 @@ Package 5 or Package 8 worktree directories.
 - Incident-map node badges count distinct incidents only. Recorded/source-call
   volume remains supporting detail and is not added to an incident grouping's
   visible badge count; alert-map nodes retain their non-incident fallback.
+- The global footer now includes a compact live RF readout for the currently
+  worst site plus an expandable per-site panel. Decode uses the frequent TR
+  control-channel rate rows over a rolling two-minute window; CC retunes use a
+  rolling five-minute window. Each site shows numeric readings, status,
+  freshness, and local/static assessment basis, and opens Performance / Radio
+  Frequency directly. The bounded `GET /api/v1/system/rf/live` snapshot updates
+  every 10 seconds and does not download historical RF charts. RPI live evidence
+  showed `jackson-ms-hinds-ms` critical at 0 msg/s and
+  `etv-raymond-hinds` degraded while its decode and retune values updated.
+  Trunk Recorder remained PID 1595 with its unchanged July 11 activation time.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.

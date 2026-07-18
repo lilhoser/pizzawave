@@ -97,7 +97,7 @@ public sealed class TrHealthCollector : BackgroundService
         var logLines = log.Split('\n');
         foreach (var scope in ExtractSystemScopes(log))
         {
-            var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractSystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
+            var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractDisplaySystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
             if (scopedLines.Length == 0)
                 continue;
             await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
@@ -436,16 +436,20 @@ public sealed class TrHealthCollector : BackgroundService
 
     private static IReadOnlyList<string> ExtractSystemScopes(string log) =>
         log.Split('\n')
-            .Select(ExtractSystemScope)
+            .Select(ExtractDisplaySystemScope)
             .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Where(s => !s.All(char.IsDigit) && !s.StartsWith("source", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private static string ExtractSystemScope(string line)
+    public static string ExtractDisplaySystemScope(string line)
     {
         var match = SystemScopeRegex.Match(line);
-        return match.Success ? NormalizeScope(match.Groups["scope"].Value) : string.Empty;
+        if (!match.Success)
+            return string.Empty;
+        var scope = NormalizeScope(match.Groups["scope"].Value);
+        return scope.Length == 0 || scope.All(char.IsDigit) || scope.StartsWith("source", StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : scope;
     }
 
     private static string NormalizeScope(string scope) => scope.Trim();
@@ -456,7 +460,7 @@ public sealed class TrHealthCollector : BackgroundService
     private static double ParseDouble(string value) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
 
-    private static bool TryParseCcSummaryDecodeRate(string line, out double rate)
+    public static bool TryParseCcSummaryDecodeRate(string line, out double rate)
     {
         rate = 0;
         if (!line.Contains("msg/sec", StringComparison.OrdinalIgnoreCase))
@@ -468,6 +472,9 @@ public sealed class TrHealthCollector : BackgroundService
 
         return double.TryParse(match.Groups["rate"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate);
     }
+
+    public static bool TryParseLiveControlChannelDecodeRate(string line, out double rate) =>
+        TryParseCcSummaryDecodeRate(line, out rate) || TryParseLowDecodeWarningRate(line, out rate);
 
     private static bool TryParseLowDecodeWarningRate(string line, out double rate)
     {

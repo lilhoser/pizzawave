@@ -10,6 +10,7 @@ import type { RefreshState } from "./refresh";
 import { locationDisplayName, locationKey, locationShortName } from "./features/dashboard/location";
 import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
+import type { LiveRfStatus } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
@@ -158,6 +159,7 @@ function App() {
   const [setupTrOperation, setSetupTrOperation] = useState("");
   const [systemTargetTab, setSystemTargetTab] = useState<SystemTopTab | null>(null);
   const [systemRefreshSignal, setSystemRefreshSignal] = useState(0);
+  const [rfStatusOpen, setRfStatusOpen] = useState(false);
   const [setupTargetSection, setSetupTargetSection] = useState<string | null>(null);
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
   const pageRef = useRef<Page>(page);
@@ -341,6 +343,11 @@ function App() {
       return true;
     }
   });
+  const liveRfResource = usePersistentRefresh({
+    key: "live-rf-status",
+    enabled: setupStatus?.completed === true,
+    load: () => api.request<LiveRfStatus>("/api/v1/system/rf/live")
+  });
   const refreshSharedStatus = useCallback(async () => {
     await Promise.all([statusResource.refresh(), summaryResource.refresh()]);
   }, [statusResource.refresh, summaryResource.refresh]);
@@ -515,13 +522,14 @@ function App() {
     events.addEventListener("summary_updated", refreshDashboardData);
     events.addEventListener("job_updated", () => { scheduleStatus(900); scheduleSummary(900); });
     events.addEventListener("health_updated", () => scheduleStatus(900));
+    events.addEventListener("rf_status_updated", () => void liveRfResource.refresh());
     return () => {
       window.clearTimeout(statusTimer);
       window.clearTimeout(summaryTimer);
       window.clearTimeout(pageTimer);
       events.close();
     };
-  }, [load, statusResource.refresh, summaryResource.refresh]);
+  }, [load, liveRfResource.refresh, statusResource.refresh, summaryResource.refresh]);
   const nav = useMemo(() => ["dashboard", ...categories, "setup", "system", "settings"] as Page[], []);
   const activeProfile = profileState?.profiles.find(p => p.id === profileState.activeProfileId);
   const visibleNav = nav.filter(item => !categories.includes(item as any) || profileIncludes(activeProfile, item));
@@ -587,6 +595,15 @@ function App() {
   const queueHealthTitle = engineHealth
     ? `${engineHealth.recentAudioSecondsTranscribed.toLocaleString()} audio seconds transcribed (${audioTranscribedPerMinute.toFixed(0)}s/min) and ${engineHealth.recentAudioSecondsIngested.toLocaleString()} audio seconds ingested (${audioIngestedPerMinute.toFixed(0)}s/min) in the last ${engineHealth.throughputWindowMinutes} minutes. Calls: ${engineHealth.recentCallsTranscribed.toLocaleString()} done (${engineHealth.recentTranscribedPerMinute.toFixed(1)}/min), ${engineHealth.recentCallsIngested.toLocaleString()} in (${engineHealth.recentIngestPerMinute.toFixed(1)}/min). Local workers: ${engineHealth.liveTranscriptionWorkers} x ${engineHealth.whisperThreadsPerWorker} thread(s). ${queueBlockedNotes.join(" ")}`.trim()
     : "Transcription queue is clear.";
+  const rfToneRank: Record<string, number> = { error: 4, warning: 3, stale: 2, unknown: 1, ok: 0 };
+  const liveRfSites = liveRfResource.data?.sites ?? [];
+  const liveRfWorstSite = [...liveRfSites].sort((left, right) => (rfToneRank[right.tone] ?? 1) - (rfToneRank[left.tone] ?? 1))[0];
+  const liveRfPillText = liveRfWorstSite
+    ? `RF ${liveRfWorstSite.systemShortName} ${liveRfWorstSite.decodeRate.toFixed(1)} msg/s · ${liveRfWorstSite.retunes} retune${liveRfWorstSite.retunes === 1 ? "" : "s"}/5m${liveRfSites.length > 1 ? ` · +${liveRfSites.length - 1}` : ""}`
+    : liveRfResource.state.error ? "RF unavailable" : "RF waiting";
+  const liveRfTitle = liveRfWorstSite
+    ? `${liveRfResource.data?.status}. ${liveRfWorstSite.systemShortName}: ${liveRfWorstSite.status}, ${liveRfWorstSite.decodeRate.toFixed(1)} decoded messages per second and ${liveRfWorstSite.retunes} control-channel retunes in five minutes. Open all sites.`
+    : liveRfResource.state.error || "Waiting for recent control-channel samples.";
   const updateLiveCpuSnapshot = useCallback((sample: SystemRuntimeResourceSample) => {
     setCpuSnapshot(current => current ? {
       ...current,
@@ -899,10 +916,36 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
           {Object.keys(settingsSections).length > 0 && <SettingsView settingsSections={settingsSections} settingsLoadState={settingsLoadState} reload={refreshSharedStatus} pendingProfileHides={pendingProfileHides} setPendingProfileHides={setPendingProfileHides} onDirtyChange={setSettingsDirty} />}
         </div>}
       </main>
+      {!inSetup && rfStatusOpen && <section className="rf-live-panel" aria-label="Live RF status">
+        <div className="rf-live-panel-header">
+          <div>
+            <strong><Radio size={16} aria-hidden="true" /> Live RF</strong>
+            <small>Decode: rolling 2 minutes · CC retunes: rolling 5 minutes</small>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close live RF status" onClick={() => setRfStatusOpen(false)}><X size={16} /></button>
+        </div>
+        {liveRfResource.state.error && <div className="rf-live-message error">Unable to refresh RF status. {liveRfResource.state.error}</div>}
+        {!liveRfResource.state.error && liveRfSites.length === 0 && <div className="rf-live-message">Waiting for recent control-channel samples.</div>}
+        <div className="rf-live-sites">
+          {liveRfSites.map(site => <button type="button" className={`rf-live-site tone-${site.tone}`} key={site.systemShortName} onClick={() => {
+            localStorage.setItem("pizzawave-system-metrics-tab", "rf");
+            setRfStatusOpen(false);
+            goSystem("metrics");
+          }}>
+            <span className="rf-live-site-identity"><span className="rf-live-tone-dot" aria-hidden="true" /><strong>{site.systemShortName}</strong><small>{site.status}</small></span>
+            <span className="rf-live-reading"><strong>{site.decodeRate.toFixed(1)}</strong><small>msg/s decode</small></span>
+            <span className="rf-live-reading"><strong>{site.retunes}</strong><small>CC retunes / 5m</small></span>
+            <span className="rf-live-reading"><strong>{site.lastDecodeUtc ? relativeTime(new Date(site.lastDecodeUtc).getTime() / 1000) : "No sample"}</strong><small>{site.assessmentBasis === "local" ? "Local baseline" : "Current threshold"}</small></span>
+            <ChevronRight size={17} aria-hidden="true" />
+          </button>)}
+        </div>
+        {liveRfSites.length > 0 && <p className="rf-live-panel-note">Select a site to open its full history in Performance → RF.</p>}
+      </section>}
       {!inSetup && <footer className="statusbar">
         <span className="pill" title="Calls in the selected call-data window">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
         <button type="button" className="pill status-pill-button" title="Open incidents" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
         <button type="button" className="pill status-pill-button" title="Open alerts" onClick={() => goDashboard("alerts")}>Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</button>
+        <button type="button" className={`pill status-pill-button rf-live-pill tone-${liveRfWorstSite?.tone ?? "unknown"}`} title={liveRfTitle} aria-expanded={rfStatusOpen} onClick={() => setRfStatusOpen(open => !open)}><Radio size={13} aria-hidden="true" /> {liveRfPillText}</button>
         <button type="button" className={`pill status-pill-button queue-health queue-${queueHealth}`} title={queueHealthTitle} onClick={() => goSystem("queue")}>{queueHealthText}</button>
         <button type="button" className={cpuPillClass} title={cpuPillTitle} onClick={() => goSystem("services")}>{cpuPillText}</button>
         {activeJobCount > 0 && <button type="button" className="pill status-pill-button" title="Open active jobs" onClick={() => goSystem("jobs")}>Jobs {activeJobCount}</button>}

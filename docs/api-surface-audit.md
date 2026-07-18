@@ -66,6 +66,11 @@ Kept because these remain operator-facing and guarded by write auth:
 
 Also kept/added as read-only operational surfaces:
 
+- `GET /api/v1/system/rf/live`
+  - Returns a bounded, cached per-site current-state snapshot for the global RF
+    readout. It does not return RF history, chart samples, or Recommendation
+    episodes.
+
 - `GET /api/v1/system/quality-check`
   - Returns a bounded local telemetry snapshot for cross-rig monitoring without
     requiring direct SQLite access from automations.

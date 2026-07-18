@@ -63,6 +63,21 @@ public sealed class SystemInformationUiContractTests
     }
 
     [Fact]
+    public void StatusBarProvidesCompactPerSiteLiveRfReadout()
+    {
+        var app = AppSource();
+        var styles = StyleSource();
+
+        Assert.Contains("/api/v1/system/rf/live", app, StringComparison.Ordinal);
+        Assert.Contains("rf_status_updated", app, StringComparison.Ordinal);
+        Assert.Contains("Live RF", app, StringComparison.Ordinal);
+        Assert.Contains("CC retunes / 5m", app, StringComparison.Ordinal);
+        Assert.Contains("pizzawave-system-metrics-tab", app, StringComparison.Ordinal);
+        Assert.Contains("rf-live-panel", styles, StringComparison.Ordinal);
+        Assert.Contains("tone-error", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SystemNavigationUsesApprovedOperatorTerminologyAndSurfaces()
     {
         var source = AppSource();

@@ -851,6 +851,28 @@ public sealed record TrSystemHealthDto(
     DateTime LastWindowEndUtc,
     bool IsIssue);
 
+public sealed record LiveRfSiteStatusDto(
+    string SystemShortName,
+    string Tone,
+    string Status,
+    double DecodeRate,
+    double ZeroDecodePercent,
+    int DecodeSamples,
+    int Retunes,
+    double RetunesPerHour,
+    DateTime? LastDecodeUtc,
+    double FreshnessSeconds,
+    string AssessmentBasis,
+    string Detail);
+
+public sealed record LiveRfStatusDto(
+    DateTime GeneratedAtUtc,
+    int DecodeWindowSeconds,
+    int RetuneWindowSeconds,
+    string Tone,
+    string Status,
+    IReadOnlyList<LiveRfSiteStatusDto> Sites);
+
 public sealed record TrHealthSummaryDto
 {
     public string Title { get; init; } = "TR health summary";

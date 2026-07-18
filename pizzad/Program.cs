@@ -56,6 +56,8 @@ builder.Services.AddSingleton<TrConfigArtifactProvenanceStore>();
 builder.Services.AddSingleton<TrConfigService>();
 builder.Services.AddSingleton<TrLogService>();
 builder.Services.AddSingleton<TrHealthTroubleshootService>();
+builder.Services.AddSingleton<LiveRfStatusService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LiveRfStatusService>());
 builder.Services.AddSingleton<SettingsValidationService>();
 builder.Services.AddSingleton<SystemManagerService>();
 builder.Services.AddSingleton<SystemRecommendationService>();
@@ -836,6 +838,14 @@ app.MapGet("/api/v1/troubleshoot", async (HttpContext context, long? start, long
     return Results.Ok(await troubleshoot.BuildAsync(range.Start, range.End, bySystem ?? false, string.IsNullOrWhiteSpace(baseline) ? "7d" : baseline, context.RequestAborted));
 })
 .WithName("Troubleshoot")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/rf/live", (HttpContext context, AuthService authService, LiveRfStatusService liveRf) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(liveRf.GetSnapshot());
+})
+.WithName("SystemLiveRfStatus")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/transcription-performance", async (HttpContext context, long? start, long? end, int? samplePage, int? samplePageSize, AuthService authService, TrHealthTroubleshootService troubleshoot, RemoteTranscriptionHealthService remoteHealth, EngineDatabase database) =>

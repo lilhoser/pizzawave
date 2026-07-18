@@ -774,6 +774,28 @@ export type TrConfigArtifactDetail = { artifact: TrConfigArtifactCatalog; config
 export type TrConfigViewer = { activeArtifactId: string; selectedArtifactId: string; artifacts: TrConfigArtifactCatalog[]; selected: TrConfigArtifactDetail | null; activeConfigJson: string };
 export type TrLogEntry = { cursor: string; timestampUtc: string; host: string; identifier: string; processId: string; message: string };
 export type TrLogPage = { start: number; end: number; pageSize: number; entries: TrLogEntry[]; hasOlder: boolean; olderCursor: string; error: string };
+export type LiveRfSiteStatus = {
+  systemShortName: string;
+  tone: "ok" | "warning" | "error" | "stale" | "unknown" | string;
+  status: string;
+  decodeRate: number;
+  zeroDecodePercent: number;
+  decodeSamples: number;
+  retunes: number;
+  retunesPerHour: number;
+  lastDecodeUtc?: string | null;
+  freshnessSeconds: number;
+  assessmentBasis: string;
+  detail: string;
+};
+export type LiveRfStatus = {
+  generatedAtUtc: string;
+  decodeWindowSeconds: number;
+  retuneWindowSeconds: number;
+  tone: string;
+  status: string;
+  sites: LiveRfSiteStatus[];
+};
 export type SetupCalibrationRange = { lowHz: number; highHz: number; centerHz: number };
 export type SetupCalibrationSystemPlan = { shortName: string; modulation: string; controlChannelsHz: number[]; voiceFrequenciesHz: number[]; requiredRanges: SetupCalibrationRange[]; requiredSdrCount: number; proposedSourceIndexes: number[]; warnings: string[] };
 export type SetupCalibrationSourcePlan = { index: number; serial: string; device: string; centerFrequency: number; sampleRate: number; errorHz: number; gain: string; coveredSystems: string[] };

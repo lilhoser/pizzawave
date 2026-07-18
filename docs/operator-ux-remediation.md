@@ -813,8 +813,12 @@ Status: implemented, deployed, and live-verified; operator acceptance pending
 - [x] Reset the map to its initial center and zoom when the operator closes a
   location incident or alert detail panel.
 - [x] Count distinct incidents, not source calls, in incident-map node badges.
+- [x] Add a persistent, compact live RF footer readout with an expandable
+  per-site decode/CC-retune panel and direct Performance / Radio Frequency
+  navigation; keep historical charts and behavioral findings in their existing
+  owning surfaces.
 - [x] Update operator and architecture documentation.
-- [x] Run the production frontend build, all 516 tests, RPI health checks, and
+- [x] Run the production frontend build, all 522 tests, RPI health checks, and
   live Dashboard map/browser verification.
 - [ ] Obtain operator acceptance.
 

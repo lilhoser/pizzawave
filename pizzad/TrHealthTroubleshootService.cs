@@ -605,39 +605,45 @@ public sealed class TrHealthTroubleshootService
     }
 
     private static TrMetricAssessmentDto AssessDecode(TrHealthAggregate current, double? baseline)
+        => AssessDecodeRate(current.CcSummaryDecodeSampleLines, current.CcSummaryAvgDecodeRate, current.CcSummaryDecodeZeroPercent, baseline, 10);
+
+    public static TrMetricAssessmentDto AssessDecodeRate(int samples, double averageRate, double zeroPercent, double? baseline, int minimumSamples = 10)
     {
-        if (!HasSufficientCcSummarySamples(current))
+        if (samples < minimumSamples)
             return new("warning", "insufficient", baseline, "Not enough control-channel samples to classify.");
-        if (current.CcSummaryDecodeZeroPercent >= 90.0 || current.CcSummaryAvgDecodeRate < 1.0)
+        if (zeroPercent >= 90.0 || averageRate < 1.0)
             return new("error", "critical", baseline, "Control-channel decoding is effectively unavailable.");
         if (baseline.HasValue)
         {
             var floor = Math.Max(10.0, baseline.Value * 0.75);
-            return current.CcSummaryAvgDecodeRate < floor
+            return averageRate < floor
                 ? new("warning", "local", baseline, $"Below the local {baseline.Value:F1} msg/s baseline; 40 msg/s remains the strong-system reference.")
                 : new("ok", "local", baseline, $"Within the local {baseline.Value:F1} msg/s baseline; 40 msg/s is the strong-system reference.");
         }
-        return current.CcSummaryAvgDecodeRate >= 35.0
+        return averageRate >= 35.0
             ? new("ok", "static", null, "Near the 40 msg/s strong-system reference; no local baseline is mature yet.")
-            : current.CcSummaryAvgDecodeRate >= 10.0
+            : averageRate >= 10.0
                 ? new("warning", "static", null, "Below the 40 msg/s strong-system reference; local baseline is not mature yet.")
                 : new("error", "critical", null, "Far below the strong-system reference and approaching decode loss.");
     }
 
     private static TrMetricAssessmentDto AssessZeroDecode(TrHealthAggregate current, double? baseline)
+        => AssessZeroDecodeRate(current.CcSummaryDecodeSampleLines, current.CcSummaryDecodeZeroPercent, baseline, 10);
+
+    public static TrMetricAssessmentDto AssessZeroDecodeRate(int samples, double zeroPercent, double? baseline, int minimumSamples = 10)
     {
-        if (!HasSufficientCcSummarySamples(current))
+        if (samples < minimumSamples)
             return new("warning", "insufficient", baseline, "Not enough control-channel samples to classify.");
-        if (current.CcSummaryDecodeZeroPercent >= 50.0)
+        if (zeroPercent >= 50.0)
             return new("error", "critical", baseline, "At least half of control-channel samples decoded nothing.");
         if (baseline.HasValue)
         {
             var ceiling = Math.Max(baseline.Value + 5.0, baseline.Value * 2.0);
-            return current.CcSummaryDecodeZeroPercent > ceiling
+            return zeroPercent > ceiling
                 ? new("warning", "local", baseline, $"Above the local {baseline.Value:F1}% zero-decode baseline.")
                 : new("ok", "local", baseline, $"Within the local {baseline.Value:F1}% zero-decode baseline.");
         }
-        return current.CcSummaryDecodeZeroPercent < 10.0
+        return zeroPercent < 10.0
             ? new("ok", "static", null, "Below the static 10% review threshold; no local baseline is mature yet.")
             : new("warning", "static", null, "Above the static 10% review threshold; local baseline is not mature yet.");
     }
@@ -678,7 +684,7 @@ public sealed class TrHealthTroubleshootService
             : new("warning", "static", null, "Above the temporary 7.5% fallback threshold; local baseline is not mature yet.");
     }
 
-    private static TrMetricAssessmentDto AssessRetunes(double currentPerHour, double? baselinePerHour, bool unavailable)
+    public static TrMetricAssessmentDto AssessRetunes(double currentPerHour, double? baselinePerHour, bool unavailable)
     {
         if (unavailable && currentPerHour <= 0)
             return new("warning", "undetermined", baselinePerHour, "Retune behavior cannot be evaluated while control-channel decoding is unavailable.");
