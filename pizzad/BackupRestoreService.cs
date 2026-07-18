@@ -78,6 +78,7 @@ public sealed class BackupRestoreService
         var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ");
         var fileName = $"pizzawave-backup-{SafeName(_config.Branding.StackName)}-{stamp}.pwbak";
         var path = Path.Combine(backupRoot, fileName);
+        var partialPath = path + ".partial";
         var entries = new List<BackupManifestEntryDto>();
         var warnings = new List<string>();
         var tempRoot = Path.Combine(_config.Storage.AppDataRoot, "backup-working", Guid.NewGuid().ToString("N"));
@@ -125,8 +126,8 @@ public sealed class BackupRestoreService
             archive.Dispose();
             await file.DisposeAsync();
 
-            await EncryptedBackupArchive.EncryptFileAsync(plainArchivePath, path, request!.Passphrase!, ct);
-            await EncryptedBackupArchive.DecryptFileAsync(path, verifyArchivePath, request.Passphrase!, ct);
+            await EncryptedBackupArchive.EncryptFileAsync(plainArchivePath, partialPath, request!.Passphrase!, ct);
+            await EncryptedBackupArchive.DecryptFileAsync(partialPath, verifyArchivePath, request.Passphrase!, ct);
             Directory.CreateDirectory(verifyExtractRoot);
             ZipFile.ExtractToDirectory(verifyArchivePath, verifyExtractRoot);
             var verifiedManifest = await ReadAndValidateManifestAsync(verifyExtractRoot, ct);
@@ -134,11 +135,13 @@ public sealed class BackupRestoreService
             if (checks.Any(check => !check.Ok))
                 throw new InvalidOperationException("Backup integrity verification failed: " + checks.First(check => !check.Ok).Message);
 
+            File.Move(partialPath, path);
             return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings, true);
         }
         catch
         {
             try { File.Delete(path); } catch { }
+            try { File.Delete(partialPath); } catch { }
             throw;
         }
         finally
@@ -323,6 +326,28 @@ public sealed class BackupRestoreService
         await AddFileAsync(archive, entries, "database", snapshot, "database/pizzad.db", _config.Storage.DatabasePath, ct);
     }
 
+    public void CleanupInterruptedWork()
+    {
+        var workingRoot = Path.Combine(_config.Storage.AppDataRoot, "backup-working");
+        if (Directory.Exists(workingRoot))
+        {
+            foreach (var directory in Directory.EnumerateDirectories(workingRoot, "*", SearchOption.TopDirectoryOnly))
+            {
+                try { Directory.Delete(directory, recursive: true); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Unable to remove interrupted backup working directory {Directory}", directory); }
+            }
+        }
+        var backupRoot = BackupRoot();
+        if (Directory.Exists(backupRoot))
+        {
+            foreach (var partial in Directory.EnumerateFiles(backupRoot, "*.partial", SearchOption.TopDirectoryOnly))
+            {
+                try { File.Delete(partial); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Unable to remove interrupted backup archive {Path}", partial); }
+            }
+        }
+    }
+
     private async Task AddQdrantSnapshotAsync(ZipArchive archive, List<BackupManifestEntryDto> entries, string tempRoot, CancellationToken ct)
     {
         var collection = _config.Embeddings.Collection;
@@ -379,7 +404,7 @@ public sealed class BackupRestoreService
             return;
         }
 
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+        foreach (var file in EnumerateRegularFiles(root)
             .Select(path => new FileInfo(path))
             .Where(info => info.Exists && options.IncludesAudioFile(info)))
         {
@@ -416,7 +441,7 @@ public sealed class BackupRestoreService
             warnings.Add($"{kind} directory was not found: {root}");
             return;
         }
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        foreach (var file in EnumerateRegularFiles(root))
         {
             ct.ThrowIfCancellationRequested();
             if (exclude?.Invoke(file) == true)
@@ -448,7 +473,7 @@ public sealed class BackupRestoreService
             return;
         }
 
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        foreach (var file in EnumerateRegularFiles(root))
         {
             if (exclude?.Invoke(file) == true)
                 continue;
@@ -469,7 +494,7 @@ public sealed class BackupRestoreService
             return;
         }
 
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        foreach (var file in EnumerateRegularFiles(root))
         {
             var info = new FileInfo(file);
             if (info.Exists && options.IncludesAudioFile(info))
@@ -545,6 +570,34 @@ public sealed class BackupRestoreService
             checks.Add(new(entry.ArchivePath, sizeOk && hashOk, sizeOk && hashOk ? "OK" : "Size or checksum mismatch."));
         }
         return checks;
+    }
+
+    private static IReadOnlyList<string> EnumerateRegularFiles(string root)
+    {
+        if (OperatingSystem.IsWindows())
+            return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).ToList();
+
+        var psi = new ProcessStartInfo("find")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        psi.ArgumentList.Add(root);
+        psi.ArgumentList.Add("-xdev");
+        psi.ArgumentList.Add("-type");
+        psi.ArgumentList.Add("f");
+        psi.ArgumentList.Add("-print0");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Unable to inventory regular backup files.");
+        using var output = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(output);
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Regular-file inventory failed for {root}: {TrimMessage(error)}");
+        return System.Text.Encoding.UTF8.GetString(output.ToArray())
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
     }
 
     private static async Task<BackupManifestDto> ReadAndValidateManifestAsync(string extractRoot, CancellationToken ct)

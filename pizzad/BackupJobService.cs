@@ -30,6 +30,7 @@ public sealed class BackupJobService : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        _backups.CleanupInterruptedWork();
         var canceled = await _database.CancelStaleActiveJobsAsync(
             JobType,
             TimeSpan.Zero,

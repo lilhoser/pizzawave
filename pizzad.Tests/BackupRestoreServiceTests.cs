@@ -256,6 +256,33 @@ public sealed class BackupRestoreServiceTests
     }
 
     [Fact]
+    public async Task CleanupInterruptedWork_RemovesWorkingDirectoriesAndUnpublishedArchives()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var config = await CreateConfigAsync(root);
+            var working = Path.Combine(config.Storage.AppDataRoot, "backup-working", "interrupted");
+            var partial = Path.Combine(config.Storage.AppDataRoot, "backups", "interrupted.pwbak.partial");
+            Directory.CreateDirectory(working);
+            Directory.CreateDirectory(Path.GetDirectoryName(partial)!);
+            await File.WriteAllTextAsync(Path.Combine(working, "partial.zip"), "partial");
+            await File.WriteAllTextAsync(partial, "partial");
+            var service = new BackupRestoreService(config, NullLogger<BackupRestoreService>.Instance);
+
+            service.CleanupInterruptedWork();
+
+            Assert.False(Directory.Exists(working));
+            Assert.False(File.Exists(partial));
+            Assert.Empty(service.ListBackups());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CreateBackup_UsesVerifiedOnlineQdrantSnapshotWhenEmbeddingsEnabled()
     {
         var root = NewTempRoot();
