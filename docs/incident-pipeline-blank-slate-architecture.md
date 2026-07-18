@@ -172,6 +172,12 @@ event reasoning. The interpretation contract and in-memory coordinator remain
 available only as experiment scaffolding; they do not call the event proposer,
 append the event-state ledger, or write production state.
 
+A direct-audio sparse test reached the same boundary. Voxtral Mini's dedicated
+transcription corrected a dangerous stored phrase, but its general
+audio-instruction mode hallucinated a long repeated sentence on a nearly empty
+clip. Direct access to audio is useful evidence access; it does not make a
+generative semantic statement authoritative.
+
 ### Learned Event-State Proposer
 
 The proposer consumes observations and the prior projected event state. It

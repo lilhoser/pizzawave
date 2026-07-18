@@ -175,7 +175,7 @@ def main() -> int:
     manifest = {
         "review_package_version": 1,
         "package_sha256": package_hash,
-        "selection_algorithm": "duration-tertiles-with-high-and-low-three-way-normalized-word-edit-disagreement-v1",
+        "selection_algorithm": "duration-tertiles-with-high-and-low-all-source-normalized-word-edit-disagreement-v1",
         "reviewer_instructions": [
             "Complete the review independently without consulting another reviewer or the answer key.",
             "Listen to the audio before reading candidate transcripts.",

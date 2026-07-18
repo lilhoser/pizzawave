@@ -263,6 +263,69 @@ Their SHA-256 hashes are:
 - Gemma-on-Qwen cross critiques: `4CDE9D040FBF0DF55A5935ECBE1260C0C4A1D05F6E2EF72096522425F76C5DAF`, `2F0D8B6114F760423F642DC3F379119CE92725494C142E1077FC6635CB1E06DF`
 - Qwen-on-Gemma cross critiques: `16FF9E7945CA2B8AF0D627A927FB3278AB041E8B67F2F10161D4403892398C36`, `86D77247ECA6C175109BCF1ADAB74E81817250FFD40E80F669D05D222E62E8FE`
 
+### Direct-audio sparse gate
+
+[Voxtral Mini 3B](https://huggingface.co/mistralai/Voxtral-Mini-3B-2507)
+was tested because its dedicated transcription and audio-understanding modes
+fit in substantially less memory than the prior text models. The development
+run used BF16 Transformers inference on Ventax. It peaked at approximately
+9.6 GB decimal GPU memory (8.9 GiB reserved).
+
+On `call:25113`, dedicated transcription returned:
+
+> `You can just make a note it's going to be Pon Express Tupelo, Mississippi. Pon Express Tupelo, Mississippi.`
+
+This independently rejects the stored `blow this city` phrase and agrees with
+the core place-name reading from Whisper and Parakeet. On the nearly empty
+`call:25115`, dedicated transcription returned `So.`
+
+The same model's general audio-instruction mode was not safe. It answered the
+first clip conservatively, but hallucinated `I'm going to be a little bit more
+specific` repeatedly until the 512-token limit on the second clip. Direct audio
+input therefore does not make a generative semantic answer source-grounded.
+Voxtral audio understanding is rejected as incident or observation semantic
+authority under this configuration.
+
+Dedicated transcription was then run over the existing 18-item blind-review
+sample:
+
+| Calls | Model load | Warm inference | Calls/min | Average/call | Audio | RTF | Peak reserved |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 18 | 7.15 s | 14.86 s | 72.7 | 0.826 s | 82.56 s | 0.1800 | 8.92 GiB |
+
+The clear clips remained strong: Voxtral exactly or materially matched Aaron's
+reviewer transcript on the same five clear items where all prior engines were
+accepted. The noisy items did not establish an advantage. Voxtral produced
+obvious wrong phrases on several calls and a runaway repetition of `7.` on
+`item-09`, which consumed 7.08 seconds by itself. Aaron did not review Voxtral
+blindly, so this comparison is diagnostic rather than a new acceptance count.
+
+Voxtral is eligible only as another transcription candidate. It has not earned
+single-transcript authority or a production recommendation. Its Ventax
+throughput does not establish Paxan capacity, and its roughly 9.6 GB footprint
+cannot coexist with Paxan's observed 22.3 GB production LLM residency on a
+24 GB GPU. Any Paxan trial must explicitly measure model switching or a
+different deployment topology rather than assume simultaneous residency.
+
+The sparse artifact SHA-256 is
+`4440E1B51535FE7F578564F22105B5CDA8D2B9D2CAF07788D9BCFC99E7AC4936`.
+The 18-call transcription artifact SHA-256 is
+`EE13F86AB6F4E46FE5F88152687ABCFEE4851EA94CC5E77E3E29BB9FB294FCE0`.
+Both are stored under
+`C:\projects\pizzawave-incident-experiment-20260717` and are reproducible with
+[`scripts/run_incident_direct_audio_bakeoff.py`](../scripts/run_incident_direct_audio_bakeoff.py).
+
+A four-candidate supplemental blind package is ready under
+`C:\projects\pizzawave-incident-experiment-20260717\asr-human-review-voxtral-v1`.
+It contains the same 18 audio clips, with stored, Whisper, Parakeet, and Voxtral
+candidate identities independently hidden for each item. The distributable ZIP
+excludes the answer key and has SHA-256
+`14A3FB70A4521F9D7D2A8EC8EAF797D6866A56731258FB7DB83040C261D11518`.
+Its review package SHA-256 is
+`491D5D8A917DC17B83D488B3889B4C5F0317B4CBD167DDA063E2F83F61DB2F2C`.
+Because the available reviewer has already heard these clips, the result will
+be a supplemental within-reviewer comparison, not an independent second review.
+
 ## Architectural consequence
 
 Do not build the replacement pipeline around one model call that converts an
@@ -293,8 +356,11 @@ of incident membership.
   relationship evidence, missed events, false events, over-merges, and splits.
 - Select representative development cases from the already-open development
   corpus without inspecting held-out data.
-- Compare transcript-only interpretation with audio-grounded interpretation to
-  measure how often ASR corruption causes false incident semantics.
+- Extend the blind listening package with Voxtral as a fourth transcription
+  candidate if another human review pass is available; do not infer acceptance
+  from text similarity alone.
+- If Voxtral remains competitive after blind review, measure transcription-only
+  load, switching, queue recovery, and concurrent production-LLM impact on Paxan.
 - Test proposer/critic separation on those adjudicated cases.
 - Freeze quantitative acceptance gates before any held-out evaluation.
 - Keep all results in shadow artifacts; do not write live incident state.
