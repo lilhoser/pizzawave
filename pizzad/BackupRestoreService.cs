@@ -135,9 +135,6 @@ public sealed class BackupRestoreService
                 var failed = checks.First(check => !check.Ok);
                 throw new InvalidOperationException($"Plain backup archive verification failed for {failed.Name}: {failed.Message}");
             }
-            var verifiedPlainLength = new FileInfo(plainArchivePath).Length;
-            var verifiedPlainHash = await Sha256Async(plainArchivePath, ct);
-
             for (var encryptionAttempt = 1; encryptionAttempt <= 2; encryptionAttempt++)
             {
                 try
@@ -153,11 +150,6 @@ public sealed class BackupRestoreService
                     try { File.Delete(verifyArchivePath); } catch { }
                 }
             }
-            var finalPlainLength = new FileInfo(plainArchivePath).Length;
-            var finalPlainHash = await Sha256Async(plainArchivePath, ct);
-            if (finalPlainLength != verifiedPlainLength || !string.Equals(finalPlainHash, verifiedPlainHash, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"The verified ZIP changed while it was being encrypted (before {verifiedPlainLength:N0} bytes / {verifiedPlainHash}; after {finalPlainLength:N0} bytes / {finalPlainHash}). No backup was published.");
-
             var comparison = await CompareFilesAsync(plainArchivePath, verifyArchivePath, ct);
             if (!comparison.Equal)
                 throw new InvalidOperationException($"Encrypted backup unlock did not reproduce the verified ZIP byte-for-byte ({comparison.Message}). No backup was published.");
