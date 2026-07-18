@@ -44,6 +44,11 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("divIcon", map, StringComparison.Ordinal);
         Assert.Contains("buildClusters", map, StringComparison.Ordinal);
         Assert.Contains("zoomend", map, StringComparison.Ordinal);
+        Assert.Contains("const positioned = useRef(false)", map, StringComparison.Ordinal);
+        Assert.Contains("firstSeparationZoom", map, StringComparison.Ordinal);
+        Assert.Contains("onSelectLocation?.(selected)", map, StringComparison.Ordinal);
+        Assert.Contains("defaultMapZoom(rows)", map, StringComparison.Ordinal);
+        Assert.DoesNotContain("[map, positionKey, focusedKey, rows]", map, StringComparison.Ordinal);
         Assert.Contains("<span>${cluster.count.toLocaleString()}</span>", map, StringComparison.Ordinal);
         Assert.Equal(1, map.Split("<Tooltip", StringSplitOptions.None).Length - 1);
         Assert.DoesNotContain("permanent", map, StringComparison.Ordinal);

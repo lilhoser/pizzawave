@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { divIcon, latLngBounds, type Map as LeafletMap } from "leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { divIcon, type Map as LeafletMap } from "leaflet";
 import { MapContainer, Marker, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Incident, LocationHeat } from "../../types";
@@ -71,14 +71,16 @@ function HeatNodes({ rows, incidents, focusedKey, onFocusKey, onSelectLocation }
       eventHandlers={{
         click: event => {
           event.originalEvent.stopPropagation();
-          if (clustered && map.getZoom() < map.getMaxZoom()) {
-            const bounds = latLngBounds(cluster.rows.map(row => [row.latitude, row.longitude]));
-            map.fitBounds(bounds, { padding: [48, 48], maxZoom: Math.min(map.getMaxZoom(), map.getZoom() + 3), animate: false });
+          const selected = clustered ? mergeClusterRows(cluster.rows) : representative;
+          onSelectLocation?.(selected);
+          if (clustered) {
+            onFocusKey?.(null);
+            const separationZoom = firstSeparationZoom(cluster.rows, map);
+            if (separationZoom !== null)
+              map.setView([cluster.latitude, cluster.longitude], separationZoom, { animate: false });
             return;
           }
-          const selected = clustered ? mergeClusterRows(cluster.rows) : representative;
           onFocusKey?.(locationKey(representative));
-          onSelectLocation?.(selected);
         }
       }}
     >
@@ -93,23 +95,68 @@ function HeatNodes({ rows, incidents, focusedKey, onFocusKey, onSelectLocation }
 
 function MapPosition({ rows, positionKey, focusedKey }: { rows: LocationHeat[]; positionKey: string; focusedKey?: string | null }) {
   const map = useMap();
+  const positioned = useRef(false);
   useEffect(() => {
     const focused = focusedKey ? rows.find(row => locationKey(row) === focusedKey) : null;
     if (focused) {
       map.flyTo([focused.latitude, focused.longitude], Math.max(map.getZoom(), 12), { animate: false });
       return;
     }
-    if (rows.length === 1) {
-      map.setView([rows[0].latitude, rows[0].longitude], 12, { animate: false });
+    if (positioned.current)
       return;
-    }
-    map.fitBounds(rows.map(row => [row.latitude, row.longitude] as [number, number]), { padding: [32, 32], maxZoom: 13, animate: false });
-  }, [map, positionKey, focusedKey, rows]);
+    positioned.current = true;
+    const center = defaultMapCenter(rows);
+    map.setView([center.latitude, center.longitude], defaultMapZoom(rows), { animate: false });
+  }, [map, positionKey, focusedKey]);
+  return null;
+}
+
+function defaultMapCenter(rows: LocationHeat[]) {
+  return {
+    latitude: rows.reduce((sum, row) => sum + row.latitude, 0) / rows.length,
+    longitude: rows.reduce((sum, row) => sum + row.longitude, 0) / rows.length
+  };
+}
+
+function defaultMapZoom(rows: LocationHeat[]) {
+  if (rows.length < 2) return 12;
+  const latitudeSpan = Math.max(...rows.map(row => row.latitude)) - Math.min(...rows.map(row => row.latitude));
+  const longitudeSpan = Math.max(...rows.map(row => row.longitude)) - Math.min(...rows.map(row => row.longitude));
+  const span = Math.max(latitudeSpan, longitudeSpan);
+  if (span <= 0.15) return 13;
+  if (span <= 0.45) return 12;
+  if (span <= 1.1) return 11;
+  if (span <= 3) return 10;
+  if (span <= 8) return 8;
+  return 5;
+}
+
+function firstSeparationZoom(rows: LocationHeat[], map: LeafletMap) {
+  for (let zoom = map.getZoom() + 1; zoom <= map.getMaxZoom(); zoom++) {
+    if (clusterGroups(rows, map, zoom).length > 1)
+      return zoom;
+  }
   return null;
 }
 
 function buildClusters(rows: LocationHeat[], incidents: Incident[], map: LeafletMap): HeatCluster[] {
   const zoom = map.getZoom();
+  return clusterGroups(rows, map, zoom).map(group => {
+    const count = clusterNodeCount(group, incidents);
+    const categories = new Set(group.map(row => row.category || "other"));
+    const weight = group.reduce((sum, row) => sum + Math.max(1, locationNodeCount(row, incidents)), 0);
+    return {
+      key: group.map(locationKey).sort().join("||"),
+      rows: group,
+      latitude: group.reduce((sum, row) => sum + row.latitude * Math.max(1, locationNodeCount(row, incidents)), 0) / weight,
+      longitude: group.reduce((sum, row) => sum + row.longitude * Math.max(1, locationNodeCount(row, incidents)), 0) / weight,
+      count,
+      category: categories.size === 1 ? [...categories][0] : "mixed"
+    };
+  });
+}
+
+function clusterGroups(rows: LocationHeat[], map: LeafletMap, zoom: number) {
   const projected = rows.map(row => map.project([row.latitude, row.longitude], zoom));
   const parents = rows.map((_, index) => index);
   const find = (index: number): number => parents[index] === index ? index : (parents[index] = find(parents[index]));
@@ -128,19 +175,7 @@ function buildClusters(rows: LocationHeat[], incidents: Incident[], map: Leaflet
 
   const groups = new Map<number, LocationHeat[]>();
   rows.forEach((row, index) => groups.set(find(index), [...(groups.get(find(index)) ?? []), row]));
-  return [...groups.values()].map(group => {
-    const count = clusterNodeCount(group, incidents);
-    const categories = new Set(group.map(row => row.category || "other"));
-    const weight = group.reduce((sum, row) => sum + Math.max(1, locationNodeCount(row, incidents)), 0);
-    return {
-      key: group.map(locationKey).sort().join("||"),
-      rows: group,
-      latitude: group.reduce((sum, row) => sum + row.latitude * Math.max(1, locationNodeCount(row, incidents)), 0) / weight,
-      longitude: group.reduce((sum, row) => sum + row.longitude * Math.max(1, locationNodeCount(row, incidents)), 0) / weight,
-      count,
-      category: categories.size === 1 ? [...categories][0] : "mixed"
-    };
-  });
+  return [...groups.values()];
 }
 
 function mergeClusterRows(rows: LocationHeat[]): LocationHeat {

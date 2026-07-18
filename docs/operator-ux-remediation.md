@@ -807,6 +807,9 @@ Status: implemented, deployed, and live-verified; operator acceptance pending
 - [x] Replace the hand-built map interaction engine with React Leaflet.
 - [x] Preserve numbered nodes, zoom-dependent nearby-node aggregation, and
   hover-only details in the Leaflet replacement.
+- [x] Preserve operator zoom across dashboard refreshes, open all incidents for
+  aggregate nodes, zoom clusters to their first separable level, and retain the
+  prior detailed default map scale.
 - [x] Update operator and architecture documentation.
 - [x] Run the production frontend build, all 516 tests, RPI health checks, and
   live Dashboard map/browser verification.

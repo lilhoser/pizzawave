@@ -74,6 +74,14 @@ Package 5 or Package 8 worktree directories.
   collapsed nine geolocated addresses to five fitted-view nodes (including
   aggregate counts 8 and 5), then split to six nodes after zooming in twice;
   zero detail tooltips were present at rest and browser logs were clean.
+- A second map follow-up makes viewport state operator-owned after the initial
+  render: background dashboard refreshes no longer rerun fit/reset behavior.
+  Cluster activation now opens the combined incident set immediately and zooms
+  directly to the first level where its locations can separate; coincident
+  locations remain combined while still exposing every incident. The prior
+  span-based default zoom was restored so OpenStreetMap starts with the same
+  street-level detail as the pre-Leaflet map. Live verification held zoom 14
+  and the identical tile/cluster state across the 30-second dashboard refresh.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.
