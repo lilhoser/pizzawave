@@ -148,6 +148,46 @@ The distributable ZIP includes a local-only
 candidates after playback, stores progress in browser storage, and exports a
 completed structured review without uploading audio or responses.
 
+### Provisional human review: Aaron only
+
+Only one independent review was available. Aaron completed all 18 items on
+2026-07-18. The review is retained with SHA-256
+`07DE7F96BCDA0A91A22DB9914D4AD2821F5A30876E2793245C6A53361145FC29`.
+These results are explicitly provisional; they do not satisfy the planned
+two-reviewer reconciliation protocol and are not a reference transcript set.
+
+| Source | Accepted, all 18 | Accepted, 10 mostly intelligible or clear | Accepted, 5 clear |
+|---|---:|---:|---:|
+| Stored faster-whisper small | 7 | 7 | 5 |
+| Parakeet TDT 0.6B v3 | 7 | 6 | 5 |
+| Whisper large-v3-turbo | 6 | 5 | 5 |
+
+Aaron rejected all three candidates on 8 of 18 items, including two clips rated
+mostly intelligible. On the 12 deliberately high-disagreement items, seven had
+all candidates rejected; the stored and Parakeet transcripts were each accepted
+twice and Whisper once. On the six deliberately low-disagreement items, all
+three sources were accepted on five. The sixth was rated unintelligible and
+contained a loud tone, so rejection of empty transcripts is not evidence of a
+missed spoken phrase.
+
+This review subset deliberately samples disagreement extremes and duration
+tertiles. Its acceptance counts are not population accuracy estimates. It does
+show that:
+
+- no tested ASR source earned authority as the single transcript;
+- clear, agreeing transcripts can be reliable while disagreement strongly
+  identifies cases that need unresolved alternatives or direct audio review;
+- each engine has distinct failure behavior, including filler hallucinations,
+  omitted speech, and runaway numeric repetition;
+- application code must not turn agreement or disagreement into a fixed
+  semantic acceptance rule. Multiple candidates, source audio, and uncertainty
+  belong in the learned observation interpretation.
+
+The scoring artifact is
+`C:\projects\pizzawave-incident-experiment-20260717\asr-human-review-v1\score-provisional-aaron.json`
+and is reproducible with
+[`scripts/score_incident_asr_review.py`](../scripts/score_incident_asr_review.py).
+
 ## Architectural consequence
 
 Do not build the replacement pipeline around one model call that converts an
