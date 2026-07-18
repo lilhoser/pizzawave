@@ -1,6 +1,6 @@
 # PizzaWave Current Status
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.
@@ -21,7 +21,7 @@ The expected base branch is `main`. Create a task-specific `codex/` branch in
 the new worktree before making changes. Do not resume from one of the old
 Package 5 or Package 8 worktree directories.
 
-## 2026-07-17 Operator UX Handoff
+## 2026-07-18 Operator UX Handoff
 
 - Packages 1, 2, 3, 4, 5, 6, 8, and 9 are complete and operator-accepted.
 - Package 7, Offline And Archive Calls, is a standalone outstanding feature and
@@ -29,8 +29,10 @@ Package 5 or Package 8 worktree directories.
   and implemented persistence/timing foundation remain documented, but its
   API, UI, isolated store, processing scheduler, and SFTP workflow are not
   implemented or deployed.
-- The remaining closeout sequence is Package 10 Recovery Workflows followed by
-  Package 11 Cleanup plus final regression.
+- Package 10 Recovery Workflows is implemented, deployed to the RPI, and
+  nondestructively live-verified. Operator acceptance is still pending; after
+  acceptance, the remaining closeout work is Package 11 Cleanup plus final
+  regression.
 - Package 9 Temporal Pattern Analysis is complete, deployed to the RPI, live-
   verified, and operator-accepted. Its accepted closure scope is the RF-first
   temporal-finding vertical plus the shared Recommendations lifecycle and UX:
@@ -42,6 +44,19 @@ Package 5 or Package 8 worktree directories.
 - Package 10 defines exactly two artifact types: encrypted same-system backups
   (which include recovery secrets) and non-restorable, secret-free support
   packages. Backup/restore is not a portable migration or cloning feature.
+- Package 10 RPI validation created and verified a 431.18 MB encrypted backup
+  containing 627 files with recorded audio excluded; downloaded it, returned it
+  through all 108 resumable upload chunks, staged it, verified all 627 manifest
+  checks with no failures or warnings, and canceled staging without applying.
+  A default 24-hour support package contained seven evidence items, performed
+  six redactions, reported no missing evidence, and excluded databases, Qdrant,
+  credentials, tokens, audio, and transcripts. Validation-created artifacts
+  were removed afterward; the pre-existing July 9 legacy ZIP remains supported
+  and untouched.
+- Live restore apply and reset were deliberately not exercised. Their mutation,
+  safety-backup, rollback, and service-transition paths remain covered by the
+  automated/isolated tests. PizzaWave health and live TR activity remained OK;
+  Trunk Recorder stayed PID 1595 with its July 11 activation timestamp.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.

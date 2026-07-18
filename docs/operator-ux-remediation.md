@@ -1,6 +1,6 @@
 # Operator UX Remediation
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 This is the canonical execution tracker for the operator-facing PizzaWave
 architecture review. Read it before beginning work and update it before ending
@@ -8,19 +8,20 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 10 - Recovery Workflows
-- Current milestone: Package 9 is complete, deployed to the RPI, live-verified,
-  and operator-accepted. Package 7 remains a standalone outstanding feature
-  outside this closeout sequence.
-- Continuation branch: start a new task-specific branch from `main` for Package 10.
-- Last deployed code state: Package 9 RF temporal findings, consolidated
-  Recommendations UX, finding drawer, grouped History, and operator workflow,
-  deployed to the RPI 2026-07-17.
+- Active package: 10 - Recovery Workflows, awaiting operator acceptance.
+- Current milestone: Package 10 is implemented, deployed to the RPI, and
+  nondestructively live-verified. Package 7 remains a standalone outstanding
+  feature outside this closeout sequence.
+- Continuation branch: `codex/package10-recovery` in
+  `C:\projects\pizzawave-package10-recovery` until operator acceptance.
+- Last deployed code state: Package 10 encrypted same-system backup/restore,
+  resumable staging, recovery jobs, reset safeguards, and secret-free support
+  packages, deployed and verified on the RPI 2026-07-18.
 - Package 9 final implementation commit before documentation closure: `2b6caa4`
 - Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, and 9 accepted
-- Next action: complete Package 10 Recovery Workflows, including encrypted
-  same-system encrypted backups, then Package 11 Cleanup/final regression. Do not restart
-  Trunk Recorder unless the operator explicitly requests it.
+- Next action: obtain Package 10 operator acceptance, then begin Package 11
+  Cleanup/final regression. Do not restart Trunk Recorder unless the operator
+  explicitly requests it.
 
 ## Package 5 Final Handoff
 
@@ -722,7 +723,7 @@ RF implementation delivered 2026-07-17:
 
 ### 10. Recovery Workflows
 
-Status: accepted design; implementation in progress
+Status: implemented, deployed, and nondestructively RPI-verified; operator acceptance pending
 
 Accepted design:
 
@@ -790,7 +791,12 @@ Accepted design:
   staging, online Qdrant snapshots, pre-restore safety backups, durable recovery
   results, secret-gated support packages, and explicit private-evidence scope.
 - [x] Improve archive scope, verification, manifest, and completion presentation.
-- [ ] Deploy, verify, and obtain operator acceptance.
+- [x] Deploy to RPI and complete nondestructive live verification: encrypted
+  no-audio backup create/download, all 108 resumable upload chunks, unlock,
+  627-entry manifest validation, stage cancellation, default support-package
+  redaction/manifest review, artifact cleanup, health checks, and unchanged
+  Trunk Recorder identity. Restore apply and reset remained isolated-test-only.
+- [ ] Obtain operator acceptance.
 
 ### 11. Cleanup
 
