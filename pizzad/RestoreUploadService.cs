@@ -73,7 +73,7 @@ public sealed class RestoreUploadService
                     await source.CopyToAsync(output, ct);
                 if (new FileInfo(temp).Length != expectedBytes)
                     throw new InvalidOperationException($"Chunk {index} has an unexpected size.");
-                var actual = await Sha256Async(temp, ct);
+                var actual = Sha256(temp, ct);
                 if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"Chunk {index} checksum did not match.");
                 File.Move(temp, final, overwrite: true);
@@ -102,15 +102,17 @@ public sealed class RestoreUploadService
             if (dto.ReceivedChunks.Count != metadata.ChunkCount)
                 throw new InvalidOperationException($"Restore upload is incomplete: {dto.ReceivedChunks.Count} of {metadata.ChunkCount} chunks received.");
             var assembled = Path.Combine(root, metadata.FileName);
-            await using (var output = File.Create(assembled))
+            using (var output = File.Create(assembled))
             {
                 for (var index = 0; index < metadata.ChunkCount; index++)
                 {
-                    await using var input = File.OpenRead(Path.Combine(root, "chunks", $"{index:D8}.chunk"));
-                    await input.CopyToAsync(output, ct);
+                    ct.ThrowIfCancellationRequested();
+                    using var input = File.OpenRead(Path.Combine(root, "chunks", $"{index:D8}.chunk"));
+                    input.CopyTo(output);
                 }
+                output.Flush(flushToDisk: true);
             }
-            if (!string.Equals(await Sha256Async(assembled, ct), metadata.Sha256, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(Sha256(assembled, ct), metadata.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Assembled restore upload checksum did not match the selected file.");
             BackupRestorePreviewDto preview;
             await using (var stream = File.OpenRead(assembled))
@@ -173,10 +175,20 @@ public sealed class RestoreUploadService
     private static Task SaveAsync(string root, RestoreUploadMetadata value, CancellationToken ct) =>
         File.WriteAllTextAsync(Path.Combine(root, "upload.json"), JsonSerializer.Serialize(value, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
     private static bool IsSha256(string? value) => value?.Length == 64 && value.All(Uri.IsHexDigit);
-    private static async Task<string> Sha256Async(string path, CancellationToken ct)
+    private static string Sha256(string path, CancellationToken ct)
     {
-        await using var stream = File.OpenRead(path);
-        return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+        using var stream = File.OpenRead(path);
+        using var sha = SHA256.Create();
+        var buffer = new byte[1024 * 1024];
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var read = stream.Read(buffer, 0, buffer.Length);
+            if (read == 0) break;
+            sha.TransformBlock(buffer, 0, read, null, 0);
+        }
+        sha.TransformFinalBlock([], 0, 0);
+        return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
     }
 
     private sealed record RestoreUploadMetadata(string Id, string FileName, long Bytes, string Sha256, int ChunkSize, int ChunkCount, DateTime CreatedUtc, DateTime ExpiresUtc);
