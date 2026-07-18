@@ -143,6 +143,10 @@ separate. The package is under
 `C:\projects\pizzawave-incident-experiment-20260717\asr-human-review-v1` and is
 reproducible with
 [`scripts/prepare_incident_asr_review.py`](../scripts/prepare_incident_asr_review.py).
+The distributable ZIP includes a local-only
+[`reviewer.html`](../scripts/incident_asr_reviewer.html) interface that reveals
+candidates after playback, stores progress in browser storage, and exports a
+completed structured review without uploading audio or responses.
 
 ## Architectural consequence
 

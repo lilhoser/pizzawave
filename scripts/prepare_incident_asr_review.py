@@ -193,6 +193,10 @@ def main() -> int:
         "asr_artifact_sha256": artifact_hashes,
         "items": answer_key,
     }, indent=2), encoding="utf-8")
+    reviewer_page = Path(__file__).with_name("incident_asr_reviewer.html")
+    if not reviewer_page.is_file():
+        raise FileNotFoundError(reviewer_page)
+    shutil.copy2(reviewer_page, output / "reviewer.html")
     print(json.dumps({
         "output_directory": str(output),
         "eligible_observations": len(eligible),

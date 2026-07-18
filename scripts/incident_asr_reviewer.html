@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PizzaWave Blind Audio Review</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #647080;
+      --paper: #f6f2ea;
+      --surface: #fffdf8;
+      --line: #dcd5c9;
+      --navy: #183a59;
+      --navy-soft: #e8eff4;
+      --coral: #d95f45;
+      --coral-soft: #fae9e3;
+      --green: #27765c;
+      --green-soft: #e5f2ec;
+      --amber: #9a6715;
+      --shadow: 0 16px 50px rgba(31, 42, 52, 0.09);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(217, 95, 69, 0.12), transparent 28rem),
+        radial-gradient(circle at 92% 10%, rgba(24, 58, 89, 0.10), transparent 32rem),
+        var(--paper);
+      color: var(--ink);
+      font: 16px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, input, textarea { font: inherit; }
+    button, label[for="folder-input"] { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, label[for="folder-input"]:focus-visible {
+      outline: 3px solid rgba(217, 95, 69, 0.35);
+      outline-offset: 3px;
+    }
+
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 48px; }
+    .masthead { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .mark {
+      display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px;
+      background: var(--navy); color: white; font-weight: 850; letter-spacing: -0.04em;
+      box-shadow: 0 8px 24px rgba(24, 58, 89, 0.24);
+    }
+    .brand-name { font-weight: 800; letter-spacing: -0.02em; }
+    .brand-subtitle { color: var(--muted); font-size: 13px; }
+    .privacy-chip {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #bad8ca;
+      border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 13px; font-weight: 750;
+    }
+    .privacy-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+
+    .card { border: 1px solid rgba(207, 198, 184, 0.82); border-radius: var(--radius); background: rgba(255, 253, 248, 0.92); box-shadow: var(--shadow); }
+    .setup { display: grid; grid-template-columns: 1.1fr 0.9fr; overflow: hidden; }
+    .setup-main { padding: clamp(30px, 5vw, 62px); }
+    .eyebrow { margin: 0 0 12px; color: var(--coral); font-size: 12px; font-weight: 850; letter-spacing: 0.14em; text-transform: uppercase; }
+    h1 { max-width: 760px; margin: 0; font: 800 clamp(34px, 5vw, 58px)/1.02 Georgia, "Times New Roman", serif; letter-spacing: -0.04em; }
+    .lede { max-width: 660px; margin: 20px 0 30px; color: var(--muted); font-size: 18px; }
+    .setup-fields { display: grid; grid-template-columns: minmax(190px, 0.75fr) minmax(230px, 1fr); gap: 14px; align-items: end; }
+    .field-label { display: block; margin-bottom: 7px; color: #45515f; font-size: 13px; font-weight: 750; }
+    .text-input, textarea {
+      width: 100%; border: 1px solid var(--line); border-radius: 12px; background: white; color: var(--ink);
+      transition: border-color 140ms ease, box-shadow 140ms ease;
+    }
+    .text-input { height: 48px; padding: 0 14px; }
+    textarea { min-height: 118px; padding: 13px 14px; resize: vertical; }
+    .text-input:focus, textarea:focus { border-color: var(--coral); box-shadow: 0 0 0 4px rgba(217, 95, 69, 0.10); outline: none; }
+    #folder-input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; pointer-events: none; }
+    .folder-button, .primary, .secondary, .ghost {
+      min-height: 48px; border-radius: 12px; border: 1px solid transparent; padding: 11px 17px; cursor: pointer;
+      font-weight: 800; transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .folder-button, .primary { display: inline-flex; align-items: center; justify-content: center; background: var(--navy); color: white; }
+    .folder-button:hover, .primary:hover { background: #214b70; transform: translateY(-1px); }
+    .secondary { border-color: var(--line); background: white; color: var(--ink); }
+    .secondary:hover { border-color: #aab3bc; background: #fbfaf7; }
+    .ghost { min-height: 40px; padding: 8px 12px; background: transparent; color: var(--muted); }
+    .ghost:hover { background: rgba(24, 58, 89, 0.06); color: var(--navy); }
+    button:disabled { cursor: not-allowed; opacity: 0.5; transform: none !important; }
+    .error { min-height: 24px; margin-top: 12px; color: #a33d2b; font-size: 14px; font-weight: 700; }
+
+    .setup-aside { padding: clamp(28px, 4vw, 48px); background: var(--navy); color: white; }
+    .setup-aside h2 { margin: 0 0 24px; font-size: 20px; }
+    .steps { display: grid; gap: 20px; margin: 0; padding: 0; list-style: none; counter-reset: steps; }
+    .steps li { position: relative; min-height: 44px; padding-left: 54px; color: #dbe7f0; }
+    .steps li::before {
+      counter-increment: steps; content: counter(steps); position: absolute; left: 0; top: -2px; display: grid; place-items: center;
+      width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.24); border-radius: 12px; color: white; font-weight: 850;
+    }
+    .steps strong { display: block; margin-bottom: 2px; color: white; }
+    .aside-note { margin-top: 30px; padding: 16px; border: 1px solid rgba(255,255,255,0.16); border-radius: 13px; background: rgba(255,255,255,0.07); color: #dbe7f0; font-size: 14px; }
+
+    .review { display: none; }
+    .review.is-active { display: block; }
+    .review-topbar { padding: 18px 20px; margin-bottom: 18px; }
+    .progress-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .progress-copy strong { font-size: 14px; }
+    .progress-copy span { display: block; color: var(--muted); font-size: 12px; }
+    .progress-track { flex: 1; max-width: 560px; height: 9px; overflow: hidden; border-radius: 999px; background: #e7e2da; }
+    .progress-fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--coral), #ee9a64); transition: width 220ms ease; }
+    .reviewer-badge { padding: 7px 10px; border-radius: 9px; background: var(--navy-soft); color: var(--navy); font-size: 13px; font-weight: 800; }
+
+    .review-grid { display: grid; grid-template-columns: minmax(320px, 0.78fr) minmax(430px, 1.22fr); gap: 18px; align-items: start; }
+    .audio-card, .response-card { padding: clamp(20px, 3vw, 30px); }
+    .audio-card { position: sticky; top: 18px; }
+    .item-meta { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .item-number { margin: 0 0 3px; color: var(--coral); font-size: 12px; font-weight: 850; letter-spacing: 0.12em; text-transform: uppercase; }
+    .item-id { margin: 0; font-size: 23px; letter-spacing: -0.02em; }
+    .duration { padding: 6px 9px; border-radius: 8px; background: #f0ece4; color: var(--muted); font-size: 12px; font-weight: 800; }
+    audio { width: 100%; margin: 4px 0 12px; accent-color: var(--coral); }
+    .listen-note { margin: 0 0 22px; color: var(--muted); font-size: 13px; }
+    .candidates { position: relative; border-top: 1px solid var(--line); padding-top: 20px; }
+    .section-title { margin: 0 0 4px; font-size: 16px; }
+    .section-help { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+    .candidate-list { display: grid; gap: 10px; }
+    .candidate {
+      display: grid; grid-template-columns: 22px 32px 1fr; gap: 10px; align-items: start; padding: 13px;
+      border: 1px solid var(--line); border-radius: 12px; background: white; cursor: pointer;
+    }
+    .candidate:hover { border-color: #aeb7bf; }
+    .candidate:has(input:checked) { border-color: var(--navy); background: var(--navy-soft); }
+    .candidate input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--navy); }
+    .candidate-letter { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: #efebe4; font-weight: 900; }
+    .candidate-text { padding-top: 2px; white-space: pre-wrap; }
+    .candidate-lock {
+      position: absolute; inset: 15px -2px -2px; display: grid; place-items: center; padding: 24px; border-radius: 14px;
+      background: rgba(255, 253, 248, 0.94); text-align: center; color: var(--navy); font-weight: 800; backdrop-filter: blur(4px);
+    }
+    .candidates.is-unlocked .candidate-lock { display: none; }
+
+    .response-card h2 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.02em; }
+    .response-intro { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+    .question { padding: 20px 0; border-top: 1px solid var(--line); }
+    .question:first-of-type { padding-top: 0; border-top: 0; }
+    .question-title { display: block; margin-bottom: 10px; font-weight: 800; }
+    .question-hint { display: block; margin: -6px 0 10px; color: var(--muted); font-size: 12px; font-weight: 500; }
+    .ratings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .rating { position: relative; }
+    .rating input { position: absolute; opacity: 0; pointer-events: none; }
+    .rating label { display: block; min-height: 80px; padding: 11px 8px; border: 1px solid var(--line); border-radius: 11px; background: white; text-align: center; cursor: pointer; }
+    .rating strong { display: block; color: var(--navy); font-size: 21px; }
+    .rating span { color: var(--muted); font-size: 11px; }
+    .rating input:checked + label { border-color: var(--navy); background: var(--navy-soft); box-shadow: inset 0 0 0 1px var(--navy); }
+    .rating input:focus-visible + label { outline: 3px solid rgba(217, 95, 69, 0.35); outline-offset: 2px; }
+    .all-wrong { display: flex; gap: 10px; align-items: flex-start; padding: 12px 13px; border-radius: 11px; background: var(--coral-soft); color: #783b2d; cursor: pointer; }
+    .all-wrong input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--coral); }
+    .navigation { display: flex; justify-content: space-between; gap: 12px; padding-top: 22px; border-top: 1px solid var(--line); }
+    .navigation-group { display: flex; gap: 10px; }
+    .item-strip { display: flex; gap: 7px; overflow-x: auto; padding: 15px 2px 2px; scrollbar-width: thin; }
+    .item-dot { flex: 0 0 auto; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 800; }
+    .item-dot.is-current { border-color: var(--navy); background: var(--navy); color: white; }
+    .item-dot.is-complete:not(.is-current) { border-color: #a9d0bd; background: var(--green-soft); color: var(--green); }
+    .status-message { min-height: 22px; margin: 12px 0 0; color: var(--muted); font-size: 13px; text-align: right; }
+
+    .hidden { display: none !important; }
+    @media (max-width: 860px) {
+      .setup, .review-grid { grid-template-columns: 1fr; }
+      .setup-aside { order: -1; }
+      .audio-card { position: static; }
+      .progress-track { max-width: none; }
+      .reviewer-badge { display: none; }
+    }
+    @media (max-width: 580px) {
+      .shell { width: min(100% - 20px, 1180px); padding-top: 14px; }
+      .masthead { align-items: flex-start; }
+      .privacy-chip { font-size: 0; }
+      .privacy-chip::after { content: "Local"; font-size: 12px; }
+      .setup-fields { grid-template-columns: 1fr; }
+      .ratings { grid-template-columns: repeat(2, 1fr); }
+      .navigation { flex-direction: column; }
+      .navigation-group { width: 100%; }
+      .navigation button { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">PW</div>
+        <div>
+          <div class="brand-name">PizzaWave Research</div>
+          <div class="brand-subtitle">Blind audio transcription review</div>
+        </div>
+      </div>
+      <div class="privacy-chip">Local-only review</div>
+    </header>
+
+    <section id="setup" class="setup card">
+      <div class="setup-main">
+        <p class="eyebrow">Independent listening study</p>
+        <h1>Listen first. Judge the words, not the model.</h1>
+        <p class="lede">You will review 18 short radio clips. Model names are hidden. Your answers stay in this browser until you export them.</p>
+        <div class="setup-fields">
+          <div>
+            <label class="field-label" for="reviewer-id">Reviewer ID</label>
+            <input id="reviewer-id" class="text-input" autocomplete="off" placeholder="e.g. reviewer-01">
+          </div>
+          <div>
+            <span class="field-label">Unzipped review folder</span>
+            <input id="folder-input" type="file" webkitdirectory multiple>
+            <label class="folder-button" for="folder-input" tabindex="0">Choose review folder</label>
+          </div>
+        </div>
+        <div id="setup-error" class="error" role="alert"></div>
+      </div>
+      <aside class="setup-aside">
+        <h2>What you’ll do</h2>
+        <ol class="steps">
+          <li><strong>Listen before reading</strong>Candidate transcripts stay covered until the clip starts.</li>
+          <li><strong>Rate what is audible</strong>Mark clarity, acceptable candidates, and what you actually hear.</li>
+          <li><strong>Keep uncertainty visible</strong>Fragments and guesses should remain unresolved.</li>
+          <li><strong>Export once complete</strong>Send the downloaded JSON file back to the study coordinator.</li>
+        </ol>
+        <div class="aside-note">Do not consult another reviewer. There may be more than one acceptable candidate—or none.</div>
+      </aside>
+    </section>
+
+    <section id="review" class="review" aria-live="polite">
+      <div class="review-topbar card">
+        <div class="progress-row">
+          <div class="progress-copy"><strong id="progress-label">0 of 18 complete</strong><span>Saved automatically in this browser</span></div>
+          <div class="progress-track" aria-hidden="true"><div id="progress-fill" class="progress-fill"></div></div>
+          <div id="reviewer-badge" class="reviewer-badge"></div>
+        </div>
+      </div>
+
+      <div class="review-grid">
+        <section class="audio-card card">
+          <div class="item-meta">
+            <div><p id="item-number" class="item-number"></p><h2 id="item-id" class="item-id"></h2></div>
+            <div id="duration" class="duration"></div>
+          </div>
+          <audio id="audio" controls preload="metadata"></audio>
+          <p class="listen-note">Listen as many times as needed. Headphones are recommended.</p>
+          <div id="candidates" class="candidates">
+            <h3 class="section-title">Candidate transcripts</h3>
+            <p class="section-help">Select every candidate that is materially acceptable.</p>
+            <div id="candidate-list" class="candidate-list"></div>
+            <div class="candidate-lock">Start the audio to reveal the candidates.</div>
+          </div>
+        </section>
+
+        <section class="response-card card">
+          <h2>Your assessment</h2>
+          <p class="response-intro">Record only what the audio supports. It is useful to say that nothing is clear.</p>
+
+          <div class="question">
+            <span class="question-title">How intelligible is this clip?</span>
+            <div id="ratings" class="ratings"></div>
+          </div>
+
+          <div class="question">
+            <label class="question-title" for="reviewer-transcript">What do you hear?</label>
+            <span class="question-hint">Write your best transcription. Use brackets or question marks for uncertain words.</span>
+            <textarea id="reviewer-transcript" placeholder="Your transcription…"></textarea>
+          </div>
+
+          <div class="question">
+            <label id="all-wrong-label" class="all-wrong"><input id="all-wrong" type="checkbox"><span><strong>All candidates are materially wrong</strong><br>Select this when none should be accepted.</span></label>
+          </div>
+
+          <div class="question">
+            <label class="question-title" for="uncertain-fragments">Uncertain fragments</label>
+            <span class="question-hint">Optional. Put one unresolved fragment per line.</span>
+            <textarea id="uncertain-fragments" placeholder="[place name?]&#10;unit number unclear"></textarea>
+          </div>
+
+          <div class="question">
+            <label class="question-title" for="notes">Notes</label>
+            <span class="question-hint">Optional. Mention omissions, invented words, names, numbers, or repetition.</span>
+            <textarea id="notes" placeholder="Anything that would help reconcile this review…"></textarea>
+          </div>
+
+          <div class="navigation">
+            <div class="navigation-group">
+              <button id="previous" class="secondary" type="button">Previous</button>
+              <button id="next" class="primary" type="button">Next item</button>
+            </div>
+            <div class="navigation-group">
+              <button id="export" class="primary" type="button">Export review</button>
+              <button id="reset" class="ghost" type="button">Reset progress</button>
+            </div>
+          </div>
+          <div id="status-message" class="status-message" role="status"></div>
+          <div id="item-strip" class="item-strip" aria-label="Review items"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const elements = {
+        setup: document.querySelector('#setup'), review: document.querySelector('#review'),
+        reviewerId: document.querySelector('#reviewer-id'), folderInput: document.querySelector('#folder-input'),
+        setupError: document.querySelector('#setup-error'), reviewerBadge: document.querySelector('#reviewer-badge'),
+        progressLabel: document.querySelector('#progress-label'), progressFill: document.querySelector('#progress-fill'),
+        itemNumber: document.querySelector('#item-number'), itemId: document.querySelector('#item-id'),
+        duration: document.querySelector('#duration'), audio: document.querySelector('#audio'),
+        candidates: document.querySelector('#candidates'), candidateList: document.querySelector('#candidate-list'),
+        ratings: document.querySelector('#ratings'), transcript: document.querySelector('#reviewer-transcript'),
+        allWrong: document.querySelector('#all-wrong'), uncertain: document.querySelector('#uncertain-fragments'),
+        notes: document.querySelector('#notes'), previous: document.querySelector('#previous'),
+        next: document.querySelector('#next'), export: document.querySelector('#export'), reset: document.querySelector('#reset'),
+        status: document.querySelector('#status-message'), itemStrip: document.querySelector('#item-strip')
+      };
+
+      const ratingLabels = ['Unintelligible', 'Fragments', 'Mostly clear', 'Clear'];
+      let manifest = null;
+      let filesByPath = new Map();
+      let responses = {};
+      let currentIndex = 0;
+      let audioUrl = null;
+      let storageKey = null;
+
+      function normalizedPath(file) {
+        const path = file.webkitRelativePath || file.name;
+        const pieces = path.split('/');
+        return pieces.length > 1 ? pieces.slice(1).join('/') : path;
+      }
+
+      function fileFor(relativePath) {
+        const normalized = relativePath.split('\\').join('/');
+        return filesByPath.get(normalized) || [...filesByPath.entries()].find(([path]) => path.endsWith('/' + normalized))?.[1];
+      }
+
+      function emptyResponse(item) {
+        return {
+          item_id: item.item_id,
+          reviewer_id: elements.reviewerId.value.trim(),
+          audio_intelligibility_0_to_3: null,
+          best_candidate_ids: [],
+          all_candidates_materially_wrong: false,
+          reviewer_transcript: '',
+          uncertain_fragments: [],
+          notes: '',
+          audio_played: false
+        };
+      }
+
+      function isComplete(response) {
+        if (!response || response.audio_intelligibility_0_to_3 === null) return false;
+        const candidateDecision = response.best_candidate_ids.length > 0 || response.all_candidates_materially_wrong;
+        const hasTranscript = response.audio_intelligibility_0_to_3 === 0 || response.reviewer_transcript.trim().length > 0;
+        return candidateDecision && hasTranscript;
+      }
+
+      function save() {
+        if (!storageKey) return;
+        localStorage.setItem(storageKey, JSON.stringify({ responses, currentIndex }));
+      }
+
+      function loadSaved() {
+        const saved = localStorage.getItem(storageKey);
+        if (!saved) return;
+        try {
+          const parsed = JSON.parse(saved);
+          responses = parsed.responses || {};
+          currentIndex = Math.min(Math.max(parsed.currentIndex || 0, 0), manifest.items.length - 1);
+        } catch { localStorage.removeItem(storageKey); }
+      }
+
+      function updateProgress() {
+        const complete = manifest.items.filter(item => isComplete(responses[item.item_id])).length;
+        elements.progressLabel.textContent = `${complete} of ${manifest.items.length} complete`;
+        elements.progressFill.style.width = `${100 * complete / manifest.items.length}%`;
+        elements.export.disabled = complete !== manifest.items.length;
+        [...elements.itemStrip.children].forEach((button, index) => {
+          const item = manifest.items[index];
+          button.classList.toggle('is-current', index === currentIndex);
+          button.classList.toggle('is-complete', isComplete(responses[item.item_id]));
+          button.setAttribute('aria-label', `Item ${index + 1}${isComplete(responses[item.item_id]) ? ', complete' : ''}`);
+        });
+      }
+
+      function setStatus(message) {
+        elements.status.textContent = message;
+        if (message) window.setTimeout(() => { if (elements.status.textContent === message) elements.status.textContent = ''; }, 3500);
+      }
+
+      function renderRatings(response) {
+        elements.ratings.innerHTML = '';
+        ratingLabels.forEach((label, value) => {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'rating';
+          wrapper.innerHTML = `<input type="radio" name="rating" id="rating-${value}" value="${value}"><label for="rating-${value}"><strong>${value}</strong><span>${label}</span></label>`;
+          const input = wrapper.querySelector('input');
+          input.checked = response.audio_intelligibility_0_to_3 === value;
+          input.addEventListener('change', () => {
+            response.audio_intelligibility_0_to_3 = value;
+            save(); updateProgress();
+          });
+          elements.ratings.appendChild(wrapper);
+        });
+      }
+
+      function renderCandidates(item, response) {
+        elements.candidateList.innerHTML = '';
+        item.candidates.forEach(candidate => {
+          const label = document.createElement('label');
+          label.className = 'candidate';
+          const checked = response.best_candidate_ids.includes(candidate.candidate_id);
+          label.innerHTML = `<input type="checkbox" ${checked ? 'checked' : ''}><span class="candidate-letter">${candidate.candidate_id}</span><span class="candidate-text"></span>`;
+          label.querySelector('.candidate-text').textContent = candidate.text || '[No transcript]';
+          label.querySelector('input').addEventListener('change', event => {
+            const selected = new Set(response.best_candidate_ids);
+            event.target.checked ? selected.add(candidate.candidate_id) : selected.delete(candidate.candidate_id);
+            response.best_candidate_ids = [...selected].sort();
+            if (response.best_candidate_ids.length) {
+              response.all_candidates_materially_wrong = false;
+              elements.allWrong.checked = false;
+            }
+            save(); updateProgress();
+          });
+          elements.candidateList.appendChild(label);
+        });
+        elements.candidates.classList.toggle('is-unlocked', response.audio_played);
+      }
+
+      function renderStrip() {
+        elements.itemStrip.innerHTML = '';
+        manifest.items.forEach((item, index) => {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = 'item-dot'; button.textContent = index + 1;
+          button.addEventListener('click', () => { currentIndex = index; renderItem(); });
+          elements.itemStrip.appendChild(button);
+        });
+      }
+
+      function renderItem() {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        const item = manifest.items[currentIndex];
+        const response = responses[item.item_id] || (responses[item.item_id] = emptyResponse(item));
+        response.reviewer_id = elements.reviewerId.value.trim();
+        const audioFile = fileFor(item.audio_file);
+        audioUrl = URL.createObjectURL(audioFile);
+        elements.audio.src = audioUrl;
+        elements.itemNumber.textContent = `Item ${currentIndex + 1} of ${manifest.items.length}`;
+        elements.itemId.textContent = item.item_id;
+        elements.duration.textContent = `${(item.audio_duration_milliseconds / 1000).toFixed(1)} sec`;
+        renderCandidates(item, response);
+        renderRatings(response);
+        elements.transcript.value = response.reviewer_transcript;
+        elements.allWrong.checked = response.all_candidates_materially_wrong;
+        elements.uncertain.value = response.uncertain_fragments.join('\n');
+        elements.notes.value = response.notes;
+        elements.previous.disabled = currentIndex === 0;
+        elements.next.textContent = currentIndex === manifest.items.length - 1 ? 'Review first incomplete' : 'Next item';
+        save(); updateProgress();
+      }
+
+      function bindResponseFields() {
+        elements.audio.addEventListener('play', () => {
+          const response = responses[manifest.items[currentIndex].item_id];
+          response.audio_played = true;
+          elements.candidates.classList.add('is-unlocked');
+          save();
+        });
+        elements.transcript.addEventListener('input', () => {
+          responses[manifest.items[currentIndex].item_id].reviewer_transcript = elements.transcript.value;
+          save(); updateProgress();
+        });
+        elements.allWrong.addEventListener('change', () => {
+          const response = responses[manifest.items[currentIndex].item_id];
+          response.all_candidates_materially_wrong = elements.allWrong.checked;
+          if (elements.allWrong.checked) response.best_candidate_ids = [];
+          renderCandidates(manifest.items[currentIndex], response);
+          save(); updateProgress();
+        });
+        elements.uncertain.addEventListener('input', () => {
+          responses[manifest.items[currentIndex].item_id].uncertain_fragments = elements.uncertain.value.split('\n').map(value => value.trim()).filter(Boolean);
+          save();
+        });
+        elements.notes.addEventListener('input', () => {
+          responses[manifest.items[currentIndex].item_id].notes = elements.notes.value;
+          save();
+        });
+        elements.previous.addEventListener('click', () => { if (currentIndex > 0) { currentIndex--; renderItem(); } });
+        elements.next.addEventListener('click', () => {
+          if (currentIndex < manifest.items.length - 1) currentIndex++;
+          else {
+            const incomplete = manifest.items.findIndex(item => !isComplete(responses[item.item_id]));
+            currentIndex = incomplete >= 0 ? incomplete : currentIndex;
+          }
+          renderItem();
+        });
+        elements.reset.addEventListener('click', () => {
+          if (!confirm('Clear all saved answers for this reviewer and package?')) return;
+          localStorage.removeItem(storageKey); responses = {}; currentIndex = 0; renderItem(); setStatus('Progress reset.');
+        });
+        elements.export.addEventListener('click', exportReview);
+      }
+
+      function safeFilePart(value) {
+        const allowed = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';
+        return [...value].map(character => allowed.includes(character) ? character : '-').join('');
+      }
+
+      function exportReview() {
+        const completed = manifest.items.filter(item => isComplete(responses[item.item_id])).length;
+        if (completed !== manifest.items.length) { setStatus(`Complete all ${manifest.items.length} items before exporting.`); return; }
+        const reviewerId = elements.reviewerId.value.trim();
+        const artifact = {
+          review_artifact_version: 1,
+          review_package_sha256: manifest.package_sha256,
+          reviewer_id: reviewerId,
+          completed_at_utc: new Date().toISOString(),
+          items: manifest.items.map(item => {
+            const response = { ...responses[item.item_id] };
+            delete response.audio_played;
+            return response;
+          })
+        };
+        const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url; link.download = `review-${safeFilePart(reviewerId)}.json`; link.click();
+        URL.revokeObjectURL(url); setStatus('Review exported. Send the downloaded JSON to the coordinator.');
+      }
+
+      elements.folderInput.addEventListener('change', async event => {
+        elements.setupError.textContent = '';
+        const reviewerId = elements.reviewerId.value.trim();
+        if (!reviewerId) { elements.setupError.textContent = 'Enter a reviewer ID first.'; event.target.value = ''; return; }
+        filesByPath = new Map([...event.target.files].map(file => [normalizedPath(file), file]));
+        const packageFile = fileFor('review-package.json');
+        if (!packageFile) { elements.setupError.textContent = 'That folder does not contain review-package.json.'; return; }
+        try {
+          manifest = JSON.parse(await packageFile.text());
+          const missing = manifest.items.filter(item => !fileFor(item.audio_file));
+          if (missing.length) throw new Error(`${missing.length} audio files are missing.`);
+          storageKey = `pizzawave-asr-review:${manifest.package_sha256}:${reviewerId}`;
+          responses = {}; currentIndex = 0; loadSaved();
+          elements.reviewerBadge.textContent = reviewerId;
+          elements.setup.classList.add('hidden'); elements.review.classList.add('is-active');
+          bindResponseFields(); renderStrip(); renderItem();
+        } catch (error) { elements.setupError.textContent = `Could not load this package: ${error.message}`; }
+      });
+
+      elements.reviewerId.addEventListener('keydown', event => {
+        if (event.key === 'Enter') document.querySelector('label[for="folder-input"]').click();
+      });
+    })();
+  </script>
+</body>
+</html>
