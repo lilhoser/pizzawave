@@ -61,13 +61,19 @@ builder.Services.AddSingleton<SystemManagerService>();
 builder.Services.AddSingleton<SystemRecommendationService>();
 builder.Services.AddSingleton<SystemCpuSnapshotService>();
 builder.Services.AddSingleton<BackupRestoreService>();
+builder.Services.AddSingleton<RecoveryOperationCoordinator>();
+builder.Services.AddSingleton<RecoveryResultStore>();
 builder.Services.AddSingleton<BackupJobService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupJobService>());
+builder.Services.AddSingleton<SupportPackageService>();
+builder.Services.AddSingleton<RestoreUploadService>();
 builder.Services.AddSingleton<StorageMaintenanceService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<StorageMaintenanceService>());
 builder.Services.AddSingleton<TranscriptionRecoveryJobService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TranscriptionRecoveryJobService>());
 builder.Services.AddSingleton<SystemResetService>();
+builder.Services.AddSingleton<RecoveryJobService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RecoveryJobService>());
 builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<SiteSetupService>();
 builder.Services.AddSingleton<SetupJobService>();
@@ -1042,7 +1048,7 @@ app.MapGet("/api/v1/system/backups/{name}", (HttpContext context, string name, A
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var row = backups.ListBackups().FirstOrDefault(b => string.Equals(b.Name, name, StringComparison.OrdinalIgnoreCase));
-    return row == null ? Results.NotFound() : Results.File(row.Path, "application/zip", row.Name);
+    return row == null ? Results.NotFound() : Results.File(row.Path, row.Encrypted ? "application/octet-stream" : "application/zip", row.Name);
 })
 .WithName("SystemBackupsDownload")
 .WithOpenApi();
@@ -1055,10 +1061,10 @@ app.MapDelete("/api/v1/system/backups/{name}", (HttpContext context, string name
 .WithName("SystemBackupsDelete")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/backups/{name}/restore", async (HttpContext context, string name, AuthService authService, BackupRestoreService backups) =>
+app.MapPost("/api/v1/system/backups/{name}/restore", async (HttpContext context, string name, BackupRestoreUnlockRequestDto request, AuthService authService, BackupRestoreService backups) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    var preview = await backups.StageLocalRestoreAsync(name, context.RequestAborted);
+    var preview = await backups.StageLocalRestoreAsync(name, request.Passphrase, context.RequestAborted);
     return preview == null ? Results.NotFound() : Results.Ok(preview);
 })
 .WithName("SystemBackupsStageLocalRestore")
@@ -1074,19 +1080,19 @@ app.MapPost("/api/v1/system/backups/restore", async (HttpContext context, AuthSe
     if (file == null || file.Length == 0)
         return Results.BadRequest(new { error = "Backup file is required." });
     await using var stream = file.OpenReadStream();
-    return Results.Ok(await backups.StageRestoreAsync(stream, file.FileName, context.RequestAborted));
+    return Results.Ok(await backups.StageRestoreAsync(stream, file.FileName, form["passphrase"].FirstOrDefault(), context.RequestAborted));
 })
 .WithName("SystemBackupsStageRestore")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/reset", async (HttpContext context, AuthService authService, SystemResetService reset) =>
+app.MapPost("/api/v1/system/reset", async (HttpContext context, AuthService authService, RecoveryJobService recoveryJobs) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     try
     {
         var request = await JsonSerializer.DeserializeAsync<SystemResetRequestDto>(context.Request.Body, EngineConfig.JsonOptions(), context.RequestAborted)
             ?? new SystemResetRequestDto();
-        return Results.Ok(await reset.ResetAsync(request, context.RequestAborted));
+        return Results.Ok(await recoveryJobs.StartResetAsync(request, context.RequestAborted));
     }
     catch (InvalidOperationException ex)
     {
@@ -1107,10 +1113,10 @@ app.MapGet("/api/v1/system/backups/restore/pending", (HttpContext context, AuthS
 .WithName("SystemBackupsRestorePending")
 .WithOpenApi();
 
-app.MapPost("/api/v1/system/backups/restore/apply", async (HttpContext context, AuthService authService, BackupRestoreService backups) =>
+app.MapPost("/api/v1/system/backups/restore/apply", async (HttpContext context, BackupRestoreUnlockRequestDto request, AuthService authService, RecoveryJobService recoveryJobs) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
-    return Results.Ok(await backups.ApplyPendingRestoreAsync(context.RequestAborted));
+    return Results.Ok(await recoveryJobs.StartRestoreApplyAsync(request.Passphrase, context.RequestAborted));
 })
 .WithName("SystemBackupsRestoreApply")
 .WithOpenApi();
@@ -1121,6 +1127,96 @@ app.MapPost("/api/v1/system/backups/restore/cancel", async (HttpContext context,
     return Results.Ok(await backups.CancelPendingRestoreAsync(context.RequestAborted));
 })
 .WithName("SystemBackupsRestoreCancel")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/backups/restore/uploads", async (HttpContext context, RestoreUploadCreateRequestDto request, AuthService authService, RestoreUploadService uploads) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await uploads.CreateAsync(request, context.RequestAborted));
+})
+.WithName("SystemBackupsRestoreUploadCreate")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/backups/restore/uploads/{id}", (HttpContext context, string id, AuthService authService, RestoreUploadService uploads) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var upload = uploads.Get(id);
+    return upload == null ? Results.NotFound() : Results.Ok(upload);
+})
+.WithName("SystemBackupsRestoreUploadStatus")
+.WithOpenApi();
+
+app.MapPut("/api/v1/system/backups/restore/uploads/{id}/chunks/{index:int}", async (HttpContext context, string id, int index, AuthService authService, RestoreUploadService uploads) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await uploads.PutChunkAsync(id, index, context.Request.Body, context.Request.Headers["X-Chunk-SHA256"].FirstOrDefault(), context.RequestAborted));
+})
+.WithName("SystemBackupsRestoreUploadChunk")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/backups/restore/uploads/{id}/complete", async (HttpContext context, string id, RestoreUploadCompleteRequestDto request, AuthService authService, RestoreUploadService uploads) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await uploads.CompleteAsync(id, request.Passphrase, context.RequestAborted));
+})
+.WithName("SystemBackupsRestoreUploadComplete")
+.WithOpenApi();
+
+app.MapDelete("/api/v1/system/backups/restore/uploads/{id}", (HttpContext context, string id, AuthService authService, RestoreUploadService uploads) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return uploads.Cancel(id) ? Results.Ok(new { canceled = id }) : Results.NotFound();
+})
+.WithName("SystemBackupsRestoreUploadCancel")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/support-packages", (HttpContext context, AuthService authService, SupportPackageService packages) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(packages.List());
+})
+.WithName("SystemSupportPackagesList")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/support-packages", async (HttpContext context, SupportPackageCreateRequestDto request, AuthService authService, RecoveryJobService recoveryJobs) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await recoveryJobs.StartSupportPackageAsync(request, context.RequestAborted));
+})
+.WithName("SystemSupportPackagesCreate")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/support-packages/{name}", (HttpContext context, string name, AuthService authService, SupportPackageService packages) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var row = packages.List().FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+    return row == null ? Results.NotFound() : Results.File(row.Path, "application/zip", row.Name);
+})
+.WithName("SystemSupportPackagesDownload")
+.WithOpenApi();
+
+app.MapDelete("/api/v1/system/support-packages/{name}", (HttpContext context, string name, AuthService authService, SupportPackageService packages) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return packages.Delete(name) ? Results.Ok(new { deleted = name }) : Results.NotFound();
+})
+.WithName("SystemSupportPackagesDelete")
+.WithOpenApi();
+
+app.MapGet("/api/v1/system/recovery/results", (HttpContext context, AuthService authService, RecoveryResultStore results) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(results.List());
+})
+.WithName("SystemRecoveryResults")
+.WithOpenApi();
+
+app.MapPost("/api/v1/system/recovery/results/{operation}/acknowledge", async (HttpContext context, string operation, AuthService authService, RecoveryResultStore results) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    return await results.AcknowledgeAsync(operation, context.RequestAborted) ? Results.Ok(new { acknowledged = operation }) : Results.NotFound();
+})
+.WithName("SystemRecoveryResultAcknowledge")
 .WithOpenApi();
 
 app.MapGet("/api/v1/system/recommendations", async (HttpContext context, AuthService authService, SystemRecommendationService recommendations) =>
@@ -1604,7 +1700,7 @@ app.MapPost("/api/v1/talkgroups/catalog/policy", async (HttpContext context, Tal
 .WithName("TalkgroupCatalogPolicyUpdate")
 .WithOpenApi();
 
-app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, BackupJobService backups, SetupJobService setupJobs, TranscriptionRecoveryJobService transcriptionRecovery) =>
+app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long id, JobControlRequest request, AuthService authService, EngineDatabase database, BackupJobService backups, RecoveryJobService recoveryJobs, SetupJobService setupJobs, TranscriptionRecoveryJobService transcriptionRecovery) =>
 {
     if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
     var job = await database.GetJobAsync(id, context.RequestAborted);
@@ -1617,6 +1713,7 @@ app.MapPost("/api/v1/jobs/{id:long}/control", async (HttpContext context, long i
         JobDto? updated = job.Type switch
         {
             BackupJobService.JobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await backups.CancelAsync(id, context.RequestAborted),
+            RecoveryJobService.SupportPackageJobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await recoveryJobs.CancelSupportPackageAsync(id, context.RequestAborted),
             TranscriptionRecoveryJobService.JobType when string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await transcriptionRecovery.CancelAsync(id, context.RequestAborted),
             _ when SetupJobService.IsManagedJobType(job.Type) && string.Equals(request.Action, "cancel", StringComparison.OrdinalIgnoreCase) => await setupJobs.CancelAsync(id, context.RequestAborted),
             "sftp_import" or "local_import" => throw new InvalidOperationException("Historical import jobs are no longer supported from the web application."),

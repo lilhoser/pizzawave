@@ -21,6 +21,7 @@ public sealed class EngineConfig
     public ProfileConfig Profiles { get; set; } = new();
     public LocationConfig Locations { get; set; } = new();
     public SetupConfig Setup { get; set; } = new();
+    public RecoveryConfig Recovery { get; set; } = new();
 
     [JsonIgnore]
     public string ConfigPath { get; set; } = string.Empty;
@@ -113,6 +114,8 @@ public sealed class EngineConfig
         Storage.DatabasePath = ExpandPath(Storage.DatabasePath);
         Storage.AudioRoot = ExpandPath(Storage.AudioRoot);
         Storage.AppDataRoot = ExpandPath(Storage.AppDataRoot);
+        if (Recovery.SupportPackageRetentionDays <= 0) Recovery.SupportPackageRetentionDays = 7;
+        Recovery.SupportPackageRetentionDays = Math.Clamp(Recovery.SupportPackageRetentionDays, 1, 365);
         Auth.TokenFile = ExpandPath(Auth.TokenFile);
         Ingest.CallstreamBind = string.IsNullOrWhiteSpace(Ingest.CallstreamBind) ? "127.0.0.1" : Ingest.CallstreamBind.Trim();
         if (Ingest.CallstreamPort <= 0) Ingest.CallstreamPort = 9123;
@@ -333,6 +336,12 @@ public sealed class StorageConfig
     public string DatabasePath { get; set; } = "/var/lib/pizzawave/pizzad.db";
     public string AudioRoot { get; set; } = "/var/lib/pizzawave/audio";
     public string AppDataRoot { get; set; } = "/var/lib/pizzawave/appdata";
+}
+
+public sealed class RecoveryConfig
+{
+    public bool SupportPackageCleanupEnabled { get; set; } = true;
+    public int SupportPackageRetentionDays { get; set; } = 7;
 }
 
 public sealed class IngestConfig

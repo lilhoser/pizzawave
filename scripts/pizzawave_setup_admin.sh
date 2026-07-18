@@ -559,56 +559,77 @@ for row in entries:
     if expected and sha256(source) != expected:
         raise SystemExit(f"Checksum mismatch before restore: {source}")
 
-for row in entries:
-    source = Path(real(row.get("sourcePath", "")))
-    target = Path(os.path.realpath(row.get("targetPath", "")))
-    if target.exists():
-        backup = backup_root / target.relative_to("/")
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(target, backup)
-    if target.name.endswith(".db"):
-        for sidecar_suffix in ("-wal", "-shm"):
-            sidecar = Path(str(target) + sidecar_suffix)
-            if sidecar.exists():
-                backup = backup_root / sidecar.relative_to("/")
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(sidecar, backup)
-                sidecar.unlink()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.parent / (target.name + f".restore-tmp-{os.getpid()}")
-    shutil.copy2(source, tmp)
-    os.replace(tmp, target)
-    if target.name.endswith(".db"):
-        for sidecar_suffix in ("-wal", "-shm"):
-            sidecar = Path(str(target) + sidecar_suffix)
-            if sidecar.exists():
-                sidecar.unlink()
+mutated = []
+try:
+    for row in entries:
+        source = Path(real(row.get("sourcePath", "")))
+        target = Path(os.path.realpath(row.get("targetPath", "")))
+        existed = target.exists()
+        if existed:
+            backup = backup_root / target.relative_to("/")
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, backup)
+        if target.name.endswith(".db"):
+            for sidecar_suffix in ("-wal", "-shm"):
+                sidecar = Path(str(target) + sidecar_suffix)
+                if sidecar.exists():
+                    backup = backup_root / sidecar.relative_to("/")
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(sidecar, backup)
+                    sidecar.unlink()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.parent / (target.name + f".restore-tmp-{os.getpid()}")
+        shutil.copy2(source, tmp)
+        os.replace(tmp, target)
+        mutated.append((target, existed))
+        if target.name.endswith(".db"):
+            for sidecar_suffix in ("-wal", "-shm"):
+                sidecar = Path(str(target) + sidecar_suffix)
+                if sidecar.exists():
+                    sidecar.unlink()
 
-config_path = Path("/etc/pizzawave/pizzad.json")
-if config_path.exists():
-    with config_path.open("r", encoding="utf-8-sig") as handle:
-        config = json.load(handle)
-    setup = config.setdefault("setup", {})
-    setup["completed"] = False
-    setup["completedAtUtc"] = None
-    setup["currentStep"] = "tr"
-    setup["installMode"] = "reuseExistingTr"
-    setup["restoreAppliedAtUtc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    for key in (
-        "trDetected",
-        "trConfigured",
-        "talkgroupsValidated",
-        "callstreamValidated",
-        "transcriptionValidated",
-        "monitoredAreasValidated",
-        "healthValidated",
-    ):
-        setup[key] = False
-    setup["pendingRestorePath"] = ""
-    setup["pendingRestoreManifestJson"] = ""
-    tmp_config = config_path.with_name(config_path.name + f".restore-setup-tmp-{os.getpid()}")
-    tmp_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp_config, config_path)
+    config_path = Path("/etc/pizzawave/pizzad.json")
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8-sig") as handle:
+            config = json.load(handle)
+        setup = config.setdefault("setup", {})
+        setup["completed"] = False
+        setup["completedAtUtc"] = None
+        setup["currentStep"] = "tr"
+        setup["installMode"] = "reuseExistingTr"
+        setup["restoreAppliedAtUtc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for key in (
+            "trDetected",
+            "trConfigured",
+            "talkgroupsValidated",
+            "callstreamValidated",
+            "transcriptionValidated",
+            "monitoredAreasValidated",
+            "healthValidated",
+        ):
+            setup[key] = False
+        setup["pendingRestorePath"] = ""
+        setup["pendingRestoreManifestJson"] = ""
+        tmp_config = config_path.with_name(config_path.name + f".restore-setup-tmp-{os.getpid()}")
+        tmp_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp_config, config_path)
+except Exception:
+    for target, existed in reversed(mutated):
+        backup = backup_root / target.relative_to("/")
+        if existed and backup.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backup, target)
+        elif not existed and target.exists():
+            target.unlink()
+        if target.name.endswith(".db"):
+            for sidecar_suffix in ("-wal", "-shm"):
+                sidecar = Path(str(target) + sidecar_suffix)
+                sidecar_backup = backup_root / sidecar.relative_to("/")
+                if sidecar_backup.exists():
+                    shutil.copy2(sidecar_backup, sidecar)
+                elif sidecar.exists():
+                    sidecar.unlink()
+    raise
 
 print(f"Restore copied {len(entries)} file(s). Previous files were backed up under {backup_root}.")
 PY
@@ -620,6 +641,70 @@ PY
   chmod 0640 /etc/pizzawave/pizzad.token 2>/dev/null || true
   chown root:root /etc/trunk-recorder/config.json /etc/trunk-recorder/talkgroups.csv 2>/dev/null || true
   systemctl restart qdrant.service 2>/dev/null || true
+  python3 - "$real_plan" <<'PY'
+import http.client
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+from urllib.parse import quote, urlsplit
+
+with open(sys.argv[1], "r", encoding="utf-8-sig") as handle:
+    plan = json.load(handle)
+snapshots = [row for row in (plan.get("entries") or []) if row.get("kind") == "qdrant-snapshot"]
+if snapshots:
+    with open("/etc/pizzawave/pizzad.json", "r", encoding="utf-8-sig") as handle:
+        config = json.load(handle)
+    embeddings = config.get("embeddings") or {}
+    base_url = embeddings.get("qdrantBaseUrl") or "http://localhost:6333"
+    api_key = embeddings.get("qdrantApiKey") or ""
+    collection = embeddings.get("collection") or "pizzawave_calls"
+    parsed = urlsplit(base_url)
+    connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+
+    for row in snapshots:
+        snapshot = Path(row["targetPath"])
+        if not snapshot.is_file():
+            raise SystemExit(f"Staged Qdrant snapshot is missing: {snapshot}")
+        boundary = "----pizzawave-" + uuid.uuid4().hex
+        prefix = (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"snapshot\"; filename=\"{snapshot.name}\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+        suffix = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        endpoint = (parsed.path.rstrip("/") + f"/collections/{quote(collection, safe='')}/snapshots/upload?wait=true&priority=snapshot")
+        last_error = None
+        for attempt in range(30):
+            try:
+                connection = connection_type(parsed.hostname, parsed.port, timeout=600)
+                connection.putrequest("POST", endpoint)
+                connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+                connection.putheader("Content-Length", str(len(prefix) + snapshot.stat().st_size + len(suffix)))
+                if api_key:
+                    connection.putheader("api-key", api_key)
+                connection.endheaders()
+                connection.send(prefix)
+                with snapshot.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        connection.send(chunk)
+                connection.send(suffix)
+                response = connection.getresponse()
+                body = response.read().decode("utf-8", errors="replace")
+                connection.close()
+                if 200 <= response.status < 300:
+                    snapshot.unlink()
+                    last_error = None
+                    break
+                last_error = f"HTTP {response.status}: {body[:500]}"
+            except Exception as error:
+                last_error = str(error)
+            time.sleep(1)
+        if last_error:
+            raise SystemExit(f"Qdrant snapshot recovery failed: {last_error}")
+PY
   systemctl restart trunk-recorder.service 2>/dev/null || true
   nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-restore-restart-pizzad.log 2>&1 &
   echo "Restore applied. qdrant/trunk-recorder were restarted when present; pizzad restart scheduled."

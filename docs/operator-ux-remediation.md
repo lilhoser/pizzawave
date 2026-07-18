@@ -19,7 +19,7 @@ work so that progress does not depend on conversation history.
 - Package 9 final implementation commit before documentation closure: `2b6caa4`
 - Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, and 9 accepted
 - Next action: complete Package 10 Recovery Workflows, including encrypted
-  portable backups, then Package 11 Cleanup/final regression. Do not restart
+  same-system encrypted backups, then Package 11 Cleanup/final regression. Do not restart
   Trunk Recorder unless the operator explicitly requests it.
 
 ## Package 5 Final Handoff
@@ -722,10 +722,74 @@ RF implementation delivered 2026-07-17:
 
 ### 10. Recovery Workflows
 
-Status: pending
+Status: accepted design; implementation in progress
 
-- [ ] Run restore/reset work through auditable background jobs where required.
-- [ ] Improve archive scope, verification, and completion presentation.
+Accepted design:
+
+- There are exactly two recovery-related artifact types: a same-system Backup
+  and a secret-free Support Package. A backup may be downloaded for safekeeping,
+  but cross-system cloning or migration is unsupported. Support packages are
+  shareable diagnostics and are never restorable.
+- New backups are encrypted with an operator passphrase that PizzaWave never
+  persists. Require at least 12 characters and exact confirmation. Keep the key
+  only in process memory; browser disconnect or operator absence does not stop
+  the job. If PizzaWave restarts, delete the incomplete archive and require a
+  new job rather than persisting key material.
+- Every backup includes configuration, credentials, the authentication token,
+  database, app data, Trunk Recorder configuration/talkgroups, and Qdrant when
+  enabled. The only selectable data scope is recorded audio: none, 24 hours,
+  7 days, 30 days, 60 days, or all. Restore applies exactly the scope recorded
+  at creation; it does not offer a second component mixer.
+- Existing plaintext ZIP backups remain fully supported without warnings,
+  conversion requirements, or download restrictions.
+- Reset with backup requires the passphrase before work starts and cannot begin
+  destructive stages until the encrypted backup is complete and verified.
+  Reset without backup remains possible only through stronger confirmation and
+  an explicit audit record.
+- Restore upload, decryption, manifest review, and verification are non-
+  disruptive. Large uploads are resumable in verified chunks, survive browser
+  reloads/disconnects, and expire after 24 hours when incomplete. Destructive
+  apply requires a second confirmation listing every service that will stop or
+  restart, including Trunk Recorder.
+- Before apply, create and verify a backup of current state using the restore
+  passphrase. Automatically roll back failures before the restart boundary.
+  Post-restart failures do not enter a restart loop; they expose a guided
+  rollback using the pre-restore backup.
+- Restore outcome is Completed, Completed with warnings, or Failed based on
+  manifest restoration, SQLite integrity, configuration load, PizzaWave health,
+  and included dependent-service checks. The result and stage log survive
+  database replacement and remain visible until acknowledged.
+- Data Only reset pauses PizzaWave ingest only during destructive work and does
+  not restart Trunk Recorder. Site and Full reset stop capture and leave Trunk
+  Recorder stopped until Setup is explicitly applied. Every transition is
+  recorded by the reset job.
+- Support Packages default to 24 hours of logs, redacted PizzaWave/TR config,
+  service/resource state, jobs/operator actions, diagnostic metrics, recent
+  errors, and build information. They always exclude the database, Qdrant,
+  secrets, tokens, and credentials. Audio/transcript content requires a bounded
+  explicit opt-in and privacy warning. A manifest reports scope, sizes,
+  redactions, missing evidence, and privacy inclusions; unresolved secret-scan
+  results prevent readiness.
+- Support Packages retain locally for seven days by default, with configurable
+  retention or cleanup disabled. Backups are never automatically deleted.
+- Only one backup, restore, reset, or support-package job owns recovery resources
+  at a time. Backup/support work is subordinate to live capture and safely
+  cancellable before finalization; restore/reset has exclusive ownership before
+  mutation and reports any blocker truthfully.
+- Backup creation never pauses ingest or Trunk Recorder. Use online snapshots,
+  immutable copies, and change detection; fail rather than publish a backup whose
+  internal consistency cannot be proven.
+- Live acceptance is non-destructive on both RPI and OT. Verify create/download,
+  unlock, inventory, redaction, cleanup, resumable upload, decryption, validation,
+  and staging. Prove restore apply/reset in automated tests and an isolated
+  temporary installation unless the operator separately authorizes a live drill.
+
+- [x] Run backup, support-package, restore-apply, and reset work through
+  auditable background jobs that do not depend on the browser remaining open.
+- [x] Implement encrypted same-system backups, verified resumable restore
+  staging, online Qdrant snapshots, pre-restore safety backups, durable recovery
+  results, secret-gated support packages, and explicit private-evidence scope.
+- [x] Improve archive scope, verification, manifest, and completion presentation.
 - [ ] Deploy, verify, and obtain operator acceptance.
 
 ### 11. Cleanup

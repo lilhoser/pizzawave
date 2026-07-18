@@ -63,7 +63,7 @@ public sealed class BackupJobServiceTests
             var backups = new BackupRestoreService(config, NullLogger<BackupRestoreService>.Instance);
             var service = new BackupJobService(backups, database, new TestApplicationLifetime(), NullLogger<BackupJobService>.Instance);
 
-            var job = await service.StartAsync(new BackupCreateRequestDto("24h"), CancellationToken.None);
+            var job = await service.StartAsync(new BackupCreateRequestDto("24h", "correct horse battery staple", "correct horse battery staple"), CancellationToken.None);
 
             Assert.Equal(BackupJobService.JobType, job.Type);
             Assert.True(job.Id > 0);

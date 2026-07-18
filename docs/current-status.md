@@ -39,9 +39,9 @@ Package 5 or Package 8 worktree directories.
   a focused finding drawer, paginated activity, and grouped History. Broader
   temporal detectors for other domains are future product work rather than a
   blocker for this closeout.
-- Package 10 must include portable backup encryption. Existing full backups can
-  include the PizzaWave authentication token and configured credentials;
-  support packages are a separate secret-excluding format.
+- Package 10 defines exactly two artifact types: encrypted same-system backups
+  (which include recovery secrets) and non-restorable, secret-free support
+  packages. Backup/restore is not a portable migration or cloning feature.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.
@@ -215,8 +215,9 @@ Current master TODO list:
       or comparable counterpoise will be part of the test. Without that, it may
       not beat the Remtronix/direct-counterpoise path.
 - 2026-05-24 Raymond/MS live RF checkpoint:
-  - The RPI is now at `10.0.0.115` (`sdr1861`) and has been testing MSWIN ETV
-    Raymond.
+  - At that checkpoint the RPI used the Raymond LAN address `10.0.0.115`.
+    That address is historical; the current workstation route is
+    `http://100.105.110.92:8080/` (`sdr1861`).
   - The current useful one-SDR experiment is intentionally partial coverage:
     `rtl=00000002`, center `772.718750 MHz`, rate `2.4M`, error `1200`, gain
     `49` (driver uses `49.6`), control channel `773.781250`, modulation `qpsk`.

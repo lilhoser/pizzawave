@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace pizzad.Tests;
 
@@ -26,7 +27,9 @@ public sealed class SystemResetServiceTests
         var result = await service.ResetAsync(new SystemResetRequestDto
         {
             Presets = ["site-reset"],
-            CreateBackup = true
+            CreateBackup = true,
+            BackupPassphrase = "correct horse battery staple",
+            BackupPassphraseConfirmation = "correct horse battery staple"
         }, CancellationToken.None);
 
         Assert.True(result.Ok);
@@ -65,6 +68,7 @@ public sealed class SystemResetServiceTests
         {
             Presets = ["site-reset"],
             CreateBackup = false,
+            ConfirmNoBackup = true,
             PreserveBranding = false,
             PreserveTranscription = true,
             PreserveAiInsights = true,
@@ -101,7 +105,9 @@ public sealed class SystemResetServiceTests
         await Assert.ThrowsAnyAsync<IOException>(() => service.ResetAsync(new SystemResetRequestDto
         {
             Presets = ["data-only"],
-            CreateBackup = true
+            CreateBackup = true,
+            BackupPassphrase = "correct horse battery staple",
+            BackupPassphraseConfirmation = "correct horse battery staple"
         }, CancellationToken.None));
 
         Assert.False(ingest.Paused);
@@ -121,7 +127,8 @@ public sealed class SystemResetServiceTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
         {
             Presets = [scope],
-            CreateBackup = false
+            CreateBackup = false,
+            ConfirmNoBackup = true
         }, CancellationToken.None));
 
         Assert.Contains("Unsupported reset scope", error.Message);
@@ -140,7 +147,8 @@ public sealed class SystemResetServiceTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
         {
             Presets = ["data-only", "full-reset"],
-            CreateBackup = false
+            CreateBackup = false,
+            ConfirmNoBackup = true
         }, CancellationToken.None));
 
         Assert.Contains("exactly one reset scope", error.Message);
@@ -247,6 +255,7 @@ public sealed class SystemResetServiceTests
 
     private sealed class FakeQdrantServer : IDisposable
     {
+        private static readonly byte[] Snapshot = Encoding.UTF8.GetBytes("qdrant snapshot data");
         private readonly HttpListener _listener = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _loop;
@@ -294,7 +303,20 @@ public sealed class SystemResetServiceTests
                 lock (Requests)
                     Requests.Add(context.Request.RawUrl ?? string.Empty);
                 context.Response.StatusCode = 200;
-                var body = Encoding.UTF8.GetBytes("{\"result\":true}");
+                byte[] body;
+                if (context.Request.HttpMethod == "POST" && (context.Request.RawUrl ?? string.Empty).Contains("/snapshots", StringComparison.Ordinal))
+                {
+                    var checksum = Convert.ToHexString(SHA256.HashData(Snapshot)).ToLowerInvariant();
+                    body = Encoding.UTF8.GetBytes($"{{\"result\":{{\"name\":\"reset-test.snapshot\",\"checksum\":\"{checksum}\"}},\"status\":\"ok\"}}");
+                }
+                else if (context.Request.HttpMethod == "GET" && (context.Request.RawUrl ?? string.Empty).EndsWith(".snapshot", StringComparison.Ordinal))
+                {
+                    body = Snapshot;
+                }
+                else
+                {
+                    body = Encoding.UTF8.GetBytes("{\"result\":true}");
+                }
                 await context.Response.OutputStream.WriteAsync(body);
                 context.Response.Close();
             }

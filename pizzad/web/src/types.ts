@@ -722,7 +722,7 @@ export type SetupStatus = {
   detection: any;
   values: any;
 };
-export type BackupArchive = { name: string; path: string; bytes: number; createdUtc: string; modifiedUtc: string };
+export type BackupArchive = { name: string; path: string; bytes: number; createdUtc: string; modifiedUtc: string; encrypted: boolean };
 export type BackupManifestEntry = { kind: string; path: string; archivePath: string; bytes: number; sha256: string };
 export type BackupManifest = {
   manifestVersion: number;
@@ -746,7 +746,14 @@ export type BackupEstimateKind = { kind: string; bytes: number; fileCount: numbe
 export type BackupEstimate = { bytes: number; fileCount: number; kinds: BackupEstimateKind[]; warnings: string[] };
 export type BackupCreateResult = { name: string; path: string; bytes: number; fileCount: number; warnings: string[] };
 export type BackupRestoreCheck = { name: string; ok: boolean; message: string };
-export type BackupRestorePreview = { stagePath: string; manifest: BackupManifest; checks: BackupRestoreCheck[] };
+export type BackupRestorePreview = { stagePath: string; manifest: BackupManifest; checks: BackupRestoreCheck[]; encrypted: boolean };
+export type SupportPackage = { name: string; path: string; bytes: number; createdUtc: string; expiresUtc?: string | null; manifest?: SupportPackageManifest | null };
+export type SupportEvidence = { category: string; name: string; bytes: number };
+export type SupportPackageManifest = { version: number; product: string; createdUtc: string; windowStartUtc: string; windowEndUtc: string; stackName: string; evidence: SupportEvidence[]; exclusions: string[]; privacyInclusions: string[]; redactionCount: number; collectionFailures: string[] };
+export type SupportPackageCreateResult = { name: string; path: string; bytes: number; manifest: SupportPackageManifest };
+export type RestoreUpload = { id: string; fileName: string; bytes: number; sha256: string; chunkSize: number; chunkCount: number; receivedChunks: number[]; createdUtc: string; expiresUtc: string };
+export type RecoveryOperationStage = { atUtc: string; stage: string; status: string; message: string };
+export type RecoveryOperationResult = { operation: string; jobId?: number | null; status: string; createdUtc: string; updatedUtc: string; finishedUtc?: string | null; acknowledged: boolean; stages: RecoveryOperationStage[] };
 export type BackupRestoreApplyResult = { scheduled: boolean; message: string };
 export type BackupRestoreCancelResult = { canceled: boolean; message: string };
 export type SystemResetResult = { ok: boolean; message: string; warnings: string[]; backup?: BackupCreateResult | null; nextPage: string };

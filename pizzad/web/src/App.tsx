@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { sha256 } from "@noble/hashes/sha256";
 import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Database, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench, X } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
-import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { RecoveryOperationResult, RestoreUpload } from "./types";
+import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigEditor, TrConfigEditorApplyResult, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -10657,6 +10659,12 @@ function recommendationHistoryGroups(items: SystemRecommendation[]) {
 
 function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<void>; refreshToken: number }) {
   const [audioWindow, setAudioWindow] = useState("7d");
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupPassphraseConfirmation, setBackupPassphraseConfirmation] = useState("");
+  const [restorePassphrase, setRestorePassphrase] = useState("");
+  const [supportAudio, setSupportAudio] = useState(false);
+  const [supportTranscripts, setSupportTranscripts] = useState(false);
+  const [supportPrivacyAcknowledged, setSupportPrivacyAcknowledged] = useState(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [backupJob, setBackupJob] = useState<Job | null>(null);
@@ -10667,16 +10675,20 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
     key: `system-backups|${audioWindow}|${refreshToken}`,
     enabled: true,
     load: async () => {
-      const [rows, estimate, pending] = await Promise.all([
+      const [rows, estimate, pending, supportPackages, recoveryResults] = await Promise.all([
         api.request<BackupArchive[]>("/api/v1/system/backups"),
         loadBackupEstimateValue(),
-        api.request<BackupRestorePreview | null>("/api/v1/system/backups/restore/pending")
+        api.request<BackupRestorePreview | null>("/api/v1/system/backups/restore/pending"),
+        api.request<SupportPackage[]>("/api/v1/system/support-packages"),
+        api.request<RecoveryOperationResult[]>("/api/v1/system/recovery/results")
       ]);
-      return { rows, estimate, pending };
+      return { rows, estimate, pending, supportPackages, recoveryResults };
     }
   });
   const rows = inventoryResource.data?.rows ?? [];
   const estimate = inventoryResource.data?.estimate ?? null;
+  const supportPackages = inventoryResource.data?.supportPackages ?? [];
+  const recoveryResults = (inventoryResource.data?.recoveryResults ?? []).filter(result => !result.acknowledged);
   useEffect(() => {
     if (!preview && inventoryResource.data?.pending)
       setPreview(inventoryResource.data.pending);
@@ -10715,6 +10727,7 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
   }, [backupJob?.id, backupJob?.status]);
 
   const audioWindowOptions = [
+    { value: "none", label: "No recorded audio" },
     { value: "24h", label: "Last 24h" },
     { value: "7d", label: "Last 7d" },
     { value: "30d", label: "Last 30d" },
@@ -10749,12 +10762,22 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
   }
 
   async function createBackup() {
+    if (backupPassphrase.length < 12) {
+      setMessage("Enter a backup passphrase of at least 12 characters.");
+      return;
+    }
+    if (backupPassphrase !== backupPassphraseConfirmation) {
+      setMessage("Backup passphrase confirmation does not match.");
+      return;
+    }
     const sizeText = estimate ? ` Estimated source size is ${formatBytes(estimate.bytes)} across ${estimate.fileCount.toLocaleString()} file(s); compressed archive size may differ.` : "";
     if (!confirmAction("Create backup?", `This archives PizzaWave SQLite data, ${audioWindowLabel.toLowerCase()} of recorded call audio, app data, Qdrant storage, TR config, talkgroups, and PizzaWave config.${sizeText} It can take a while on rigs with lots of audio.`)) return;
     setBusy("create");
     setMessage("Starting backup job...");
     try {
-      const job = await api.request<Job>("/api/v1/system/backups", { method: "POST", body: JSON.stringify({ audioWindow }) });
+      const job = await api.request<Job>("/api/v1/system/backups", { method: "POST", body: JSON.stringify({ audioWindow, passphrase: backupPassphrase, passphraseConfirmation: backupPassphraseConfirmation }) });
+      setBackupPassphrase("");
+      setBackupPassphraseConfirmation("");
       handledBackupJobId.current = null;
       setBackupJob(job);
       setMessage(`Backup job #${job.id} started. You can monitor or stop it from this page or System > Jobs.`);
@@ -10788,12 +10811,41 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
       return;
     }
     if (!confirmAction("Stage restore archive?", "This does not overwrite live data yet. It validates and stages the archive so you can review it here before applying.")) return;
-    const form = new FormData();
-    form.append("file", file);
     setBusy("restore");
-    setMessage("Uploading and validating restore archive...");
+    setMessage("Hashing the selected backup...");
     try {
-      const result = await api.request<BackupRestorePreview>("/api/v1/system/backups/restore", { method: "POST", body: form });
+      const hasher = sha256.create();
+      const hashReadSize = 4 * 1024 * 1024;
+      for (let offset = 0; offset < file.size; offset += hashReadSize)
+        hasher.update(new Uint8Array(await file.slice(offset, Math.min(file.size, offset + hashReadSize)).arrayBuffer()));
+      const wholeHash = [...hasher.digest()].map(value => value.toString(16).padStart(2, "0")).join("");
+      const resumeKey = `pizzawave-restore-upload:${file.name}:${file.size}:${file.lastModified}`;
+      let upload: RestoreUpload | null = null;
+      const priorId = localStorage.getItem(resumeKey);
+      if (priorId) {
+        try {
+          const prior = await api.request<RestoreUpload>(`/api/v1/system/backups/restore/uploads/${encodeURIComponent(priorId)}`);
+          if (prior.sha256 === wholeHash && prior.bytes === file.size) upload = prior;
+        } catch {
+          localStorage.removeItem(resumeKey);
+        }
+      }
+      if (!upload) {
+        upload = await api.request<RestoreUpload>("/api/v1/system/backups/restore/uploads", { method: "POST", body: JSON.stringify({ fileName: file.name, bytes: file.size, sha256: wholeHash }) });
+        localStorage.setItem(resumeKey, upload.id);
+      }
+      const received = new Set(upload.receivedChunks);
+      for (let index = 0; index < upload.chunkCount; index++) {
+        if (received.has(index)) continue;
+        const start = index * upload.chunkSize;
+        const chunk = file.slice(start, Math.min(file.size, start + upload.chunkSize));
+        const chunkHash = [...sha256(new Uint8Array(await chunk.arrayBuffer()))].map(value => value.toString(16).padStart(2, "0")).join("");
+        setMessage(`Uploading backup chunk ${index + 1} of ${upload.chunkCount}...`);
+        upload = await api.request<RestoreUpload>(`/api/v1/system/backups/restore/uploads/${encodeURIComponent(upload.id)}/chunks/${index}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream", "X-Chunk-SHA256": chunkHash }, body: chunk });
+      }
+      setMessage("Upload complete. Unlocking and validating the backup...");
+      const result = await api.request<BackupRestorePreview>(`/api/v1/system/backups/restore/uploads/${encodeURIComponent(upload.id)}/complete`, { method: "POST", body: JSON.stringify({ passphrase: restorePassphrase }) });
+      localStorage.removeItem(resumeKey);
       setPreview(result);
       setMessage(`Restore staged from ${result.manifest.stackName}. Review the preview below before applying.`);
       await reload();
@@ -10809,7 +10861,7 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
     setBusy(`restore-${row.name}`);
     setMessage(`Staging ${row.name} for restore...`);
     try {
-      const result = await api.request<BackupRestorePreview>(`/api/v1/system/backups/${encodeURIComponent(row.name)}/restore`, { method: "POST" });
+      const result = await api.request<BackupRestorePreview>(`/api/v1/system/backups/${encodeURIComponent(row.name)}/restore`, { method: "POST", body: JSON.stringify({ passphrase: restorePassphrase }) });
       setPreview(result);
       setMessage(`Restore staged from ${result.manifest.stackName}. Review the preview below before applying.`);
       await reload();
@@ -10827,14 +10879,16 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
       setMessage("Restore archive verification failed. Do not apply this backup.");
       return;
     }
-    if (!confirmAction("Apply staged restore?", "This overwrites backed-up PizzaWave/TR files and may restart services. Continue only if this archive is the intended restore source.")) return;
+    if (restorePassphrase.length < 12) {
+      setMessage("Enter the backup passphrase before apply. PizzaWave uses it to create and verify the pre-restore safety backup.");
+      return;
+    }
+    if (!confirmAction("Apply staged restore?", "PizzaWave first creates and verifies a current-state safety backup. Apply then overwrites the staged PizzaWave and Trunk Recorder files, restarts Qdrant and Trunk Recorder when present, and restarts pizzad. Live capture will be interrupted.")) return;
     setBusy("apply-restore");
     setMessage("Applying staged restore...");
     try {
-      const result = await api.request<BackupRestoreApplyResult>("/api/v1/system/backups/restore/apply", { method: "POST" });
-      setMessage(result.message || "Restore applied. Review service status before resuming monitoring.");
-      setPreview(null);
-      await reload();
+      const job = await api.request<Job>("/api/v1/system/backups/restore/apply", { method: "POST", body: JSON.stringify({ passphrase: restorePassphrase }) });
+      setMessage(`Restore job #${job.id} started. It continues without this browser and records each stage in System > Jobs.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Restore apply failed.");
     } finally {
@@ -10859,6 +10913,42 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
     }
   }
 
+  async function createSupportPackage() {
+    if ((supportAudio || supportTranscripts) && !supportPrivacyAcknowledged) {
+      setMessage("Acknowledge the privacy warning before including call audio or transcript text.");
+      return;
+    }
+    setBusy("support");
+    setMessage("Collecting and redacting the last 24 hours of diagnostic evidence...");
+    try {
+      const job = await api.request<Job>("/api/v1/system/support-packages", { method: "POST", body: JSON.stringify({ hours: 24, includeAudio: supportAudio, includeTranscripts: supportTranscripts, privacyAcknowledged: supportPrivacyAcknowledged }) });
+      setMessage(`Support-package job #${job.id} started. It continues without this browser; the completed package will appear here on refresh.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Support package creation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteSupportPackage(name: string) {
+    if (!confirmAction("Delete support package?", `This permanently deletes ${name}.`)) return;
+    setBusy(`delete-support-${name}`);
+    try {
+      await api.request(`/api/v1/system/support-packages/${encodeURIComponent(name)}`, { method: "DELETE" });
+      setMessage(`Deleted ${name}.`);
+      await loadBackups();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Support package deletion failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function acknowledgeRecoveryResult(operation: string) {
+    await api.request(`/api/v1/system/recovery/results/${encodeURIComponent(operation)}/acknowledge`, { method: "POST" });
+    await loadBackups();
+  }
+
   return <>
   <PanelLoadState label="backup inventory" state={inventoryResource.state} hasData={Boolean(inventoryResource.data)} onRetry={inventoryResource.refresh} />
   {(message || backupJob) && <div className={`backup-job-banner section-status ${jobTone(backupJob)}`}>
@@ -10879,17 +10969,23 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
         <button disabled={locked} onClick={() => void cancelRestore()}>{busy === "cancel-restore" ? "Canceling..." : "Cancel Staged Restore"}</button>
       </div>
     </div>
+    <label className="setting-field"><span>Restore passphrase<small>Required again at apply time to create and verify the pre-restore safety backup. PizzaWave does not store it.</small></span><input disabled={locked} type="password" autoComplete="current-password" value={restorePassphrase} onChange={event => setRestorePassphrase(event.target.value)} /></label>
     <BackupRestorePreviewCard preview={preview} />
   </section> : <div className="system-manager-grid backup-restore-layout">
+    {recoveryResults.map(result => <section className={`card recovery-result-card section-status ${result.status === "failed" ? "error" : result.status === "completed" ? "ok" : "info"}`} key={result.operation}><div className="jobs-card-head"><div><h3>{label(result.operation)}: {label(result.status)}</h3><p>{result.stages.at(-1)?.message ?? "Recovery operation status recorded."}</p><small>Updated {new Date(result.updatedUtc).toLocaleString()}{result.jobId ? ` · Job #${result.jobId}` : ""}</small></div>{result.finishedUtc && <button onClick={() => void acknowledgeRecoveryResult(result.operation)}>Acknowledge</button>}</div><details><summary>Stage log ({result.stages.length.toLocaleString()})</summary><table className="table compact-table"><thead><tr><th>Time</th><th>Stage</th><th>Status</th><th>Detail</th></tr></thead><tbody>{result.stages.map((stage, index) => <tr key={`${stage.atUtc}-${index}`}><td>{new Date(stage.atUtc).toLocaleString()}</td><td>{label(stage.stage)}</td><td>{label(stage.status)}</td><td>{stage.message}</td></tr>)}</tbody></table></details></section>)}
     <section className="card backup-create-card">
       <div className="jobs-card-head">
-        <div><h3>Create Backup</h3><p>Creates a portable full-state archive; only recorded-audio history is windowed.</p></div>
+        <div><h3>Create Backup</h3><p>Creates an encrypted same-system recovery archive. PizzaWave never stores the passphrase.</p></div>
         <button disabled={locked} onClick={() => void createBackup()}>{busy === "create" ? "Starting..." : "Create Backup"}</button>
       </div>
       <label className="setting-field compact-setting">
         <span>Recorded audio scope<small>Database, configuration, app data, Qdrant, Trunk Recorder config, and talkgroups are always included in full.</small></span>
         <select disabled={locked} value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioWindowOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
       </label>
+      <div className="settings-grid backup-passphrase-grid">
+        <label className="setting-field"><span>Backup passphrase<small>At least 12 characters. You will need it to restore this backup.</small></span><input disabled={locked} type="password" autoComplete="new-password" value={backupPassphrase} onChange={event => setBackupPassphrase(event.target.value)} /></label>
+        <label className="setting-field"><span>Confirm passphrase<small>The backup is unlocked and integrity-checked before it is marked complete.</small></span><input disabled={locked} type="password" autoComplete="new-password" value={backupPassphraseConfirmation} onChange={event => setBackupPassphraseConfirmation(event.target.value)} /></label>
+      </div>
       {estimate && <div className="backup-preview">
         <div className="audit-kpis backup-estimate-kpis">
           <Kpi label="Estimated Source Size" value={formatBytes(estimate.bytes)} status="ok" subtext={`${estimate.fileCount.toLocaleString()} source file(s); compressed size may differ`} />
@@ -10904,15 +11000,21 @@ function BackupRestorePanel({ reload, refreshToken }: { reload: () => Promise<vo
     <section className="card available-backups-card">
       <div className="jobs-card-head"><div><h3>Available Backups</h3><p>Download an archive for safekeeping or stage one for deliberate review.</p></div><span className="job-status status-completed">{rows.length.toLocaleString()} local</span></div>
       {rows.length === 0 ? <p className="muted">No local backups found.</p> : <div className="table-scroll"><table className="table backups-table"><thead><tr><th>Backup</th><th>Created</th><th>Size</th><th>Actions</th></tr></thead><tbody>{rows.map(row => <tr key={row.name}>
-        <td><strong>{row.name}</strong><small>{row.path}</small></td>
+        <td><strong>{row.name}</strong><small>{row.encrypted ? "Encrypted backup" : "Legacy ZIP backup"} · {row.path}</small></td>
         <td>{new Date(row.createdUtc).toLocaleString()}</td>
         <td>{formatBytes(row.bytes)}</td>
         <td><div className="table-action-row"><a className="button-link" href={`/api/v1/system/backups/${encodeURIComponent(row.name)}`}>Download</a><button disabled={locked} onClick={() => void stageLocalRestore(row)}>{busy === `restore-${row.name}` ? "Staging..." : "Stage Restore"}</button><button className="danger-button" disabled={locked} onClick={() => void deleteBackup(row.name)}>Delete</button></div></td>
       </tr>)}</tbody></table></div>}
     </section>
     <section className="card upload-backup-card">
-      <div><h3>Upload Backup Archive</h3><p>Upload a PizzaWave archive from another location. Staging validates it without changing live files.</p></div>
-      <div className="backup-upload-controls"><input ref={fileRef} disabled={locked} type="file" accept=".zip,application/zip" /><button disabled={locked} onClick={() => void stageRestore()}>{busy === "restore" ? "Staging..." : "Stage Uploaded Archive"}</button></div>
+      <div><h3>Stage a Backup</h3><p>Unlock and validate an encrypted backup, or continue using an existing legacy ZIP. Staging does not change live files.</p></div>
+      <label className="setting-field"><span>Backup passphrase<small>Required for encrypted .pwbak files; ignored for legacy .zip backups.</small></span><input disabled={locked} type="password" autoComplete="current-password" value={restorePassphrase} onChange={event => setRestorePassphrase(event.target.value)} /></label>
+      <div className="backup-upload-controls"><input ref={fileRef} disabled={locked} type="file" accept=".pwbak,.zip,application/zip,application/octet-stream" /><button disabled={locked} onClick={() => void stageRestore()}>{busy === "restore" ? "Staging..." : "Stage Uploaded Backup"}</button></div>
+    </section>
+    <section className="card support-package-card">
+      <div className="jobs-card-head"><div><h3>Support Package</h3><p>Creates a shareable, non-restorable diagnostic ZIP. By default it excludes databases, vectors, credentials, call audio, and transcript text and must pass a secret scan.</p></div><button disabled={locked} onClick={() => void createSupportPackage()}>{busy === "support" ? "Collecting..." : "Create Support Package"}</button></div>
+      <details><summary>Optional private call evidence</summary><p className="section-status warning">Call audio and transcript text can contain names, addresses, medical details, and other private radio traffic. Include them only when support specifically needs them and you are authorized to share them. The opt-in window is limited to 24 hours.</p><SettingCheckbox label="Include call audio" description="Adds recorded call audio from the last 24 hours." checked={supportAudio} onChange={setSupportAudio} disabled={locked} /><SettingCheckbox label="Include transcript text" description="Adds up to 5,000 transcripts from the last 24 hours." checked={supportTranscripts} onChange={setSupportTranscripts} disabled={locked} />{(supportAudio || supportTranscripts) && <SettingCheckbox label="I understand and authorize this private evidence" description="Required before PizzaWave will collect the selected call content." checked={supportPrivacyAcknowledged} onChange={setSupportPrivacyAcknowledged} disabled={locked} />}</details>
+      {supportPackages.length === 0 ? <p className="muted">No support packages are retained. Packages expire according to the configured cleanup policy.</p> : <div className="table-scroll"><table className="table compact-table"><thead><tr><th>Package</th><th>Created</th><th>Size</th><th>Actions</th></tr></thead><tbody>{supportPackages.map(row => <tr key={row.name}><td><strong>{row.name}</strong><small>{row.expiresUtc ? `Expires ${new Date(row.expiresUtc).toLocaleString()}` : "Automatic cleanup disabled"}</small>{row.manifest && <details><summary>Review manifest before download</summary><p>{new Date(row.manifest.windowStartUtc).toLocaleString()} to {new Date(row.manifest.windowEndUtc).toLocaleString()} · {row.manifest.evidence.length.toLocaleString()} evidence file(s) · {row.manifest.redactionCount.toLocaleString()} redaction(s)</p><p><strong>Excluded:</strong> {row.manifest.exclusions.join(", ")}</p>{row.manifest.collectionFailures.length > 0 && <p><strong>Missing evidence:</strong> {row.manifest.collectionFailures.join(" ")}</p>}</details>}</td><td>{new Date(row.createdUtc).toLocaleString()}</td><td>{formatBytes(row.bytes)}</td><td><div className="table-action-row"><a className="button-link" href={`/api/v1/system/support-packages/${encodeURIComponent(row.name)}`}>Download</a><button className="danger-button" disabled={locked} onClick={() => void deleteSupportPackage(row.name)}>Delete</button></div></td></tr>)}</tbody></table></div>}
     </section>
   </div>}
   </>;
@@ -10938,9 +11040,12 @@ function SystemResetPanel({ reload }: { reload: () => Promise<void> }) {
   const [createBackup, setCreateBackup] = useState(true);
   const [preserveAudit, setPreserveAudit] = useState(true);
   const [audioWindow, setAudioWindow] = useState("7d");
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupPassphraseConfirmation, setBackupPassphraseConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const audioOptions = [
+    { value: "none", label: "No recorded audio" },
     { value: "24h", label: "Last 24h" },
     { value: "7d", label: "Last 7d" },
     { value: "30d", label: "Last 30d" },
@@ -10955,23 +11060,30 @@ function SystemResetPanel({ reload }: { reload: () => Promise<void> }) {
   const selected = presets.find(row => row.id === preset) ?? presets[0];
 
   async function runReset() {
+    if (createBackup && (backupPassphrase.length < 12 || backupPassphrase !== backupPassphraseConfirmation)) {
+      setMessage(backupPassphrase.length < 12 ? "Enter a backup passphrase of at least 12 characters." : "Backup passphrase confirmation does not match.");
+      return;
+    }
     const backupText = createBackup ? ` A backup with ${audioOptions.find(row => row.value === audioWindow)?.label.toLowerCase() ?? "selected"} recorded audio will be created first.` : " No backup will be created first.";
-    if (!confirmAction(`Run ${selected.title}?`, `${selected.detail}${backupText} PizzaWave ingest will pause immediately before data removal; Trunk Recorder will continue. Recovery requires restoring an archive from Backup and Restore.`)) return;
+    const impactText = preset === "data-only" ? " PizzaWave ingest pauses during removal and resumes afterward; Trunk Recorder is not restarted." : " PizzaWave ingest and Trunk Recorder capture stop; capture remains stopped until Setup is applied.";
+    if (!confirmAction(`Run ${selected.title}?`, `${selected.detail}${backupText}${impactText} Recovery requires restoring an archive from Backup and Restore.`)) return;
+    if (!createBackup && !confirmAction("Continue without a recovery backup?", "This reset will permanently remove the selected state without first creating a recovery archive. This choice will be recorded.")) return;
     setBusy(true);
     setMessage(`Running ${selected.title}...`);
     try {
-      const result = await api.request<SystemResetResult>("/api/v1/system/reset", {
+      const job = await api.request<Job>("/api/v1/system/reset", {
         method: "POST",
         body: JSON.stringify({
           presets: [preset],
           createBackup,
+          confirmNoBackup: !createBackup,
           backupAudioWindow: audioWindow,
+          backupPassphrase,
+          backupPassphraseConfirmation,
           preserveAuditHistory: preset === "data-only" && preserveAudit
         })
       });
-      const backupResult = result.backup ? ` Backup: ${result.backup.name}.` : "";
-      setMessage(`${result.message}${backupResult}${result.warnings.length ? " Warnings: " + result.warnings.join(" ") : ""}`);
-      await reload();
+      setMessage(`Reset job #${job.id} started. It continues without this browser and is recorded in System > Jobs.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Reset failed.");
     } finally {
@@ -10987,12 +11099,12 @@ function SystemResetPanel({ reload }: { reload: () => Promise<void> }) {
         <input type="radio" name="reset-scope" value={row.id} checked={preset === row.id} disabled={busy} onChange={() => setPreset(row.id)} />
         <span><strong>{row.title}</strong><small>{row.detail}</small></span>
       </label>)}</div>
-      <p className="reset-live-impact"><strong>Live-operation impact:</strong> PizzaWave ingest pauses immediately before data removal and remains paused afterward. Trunk Recorder is not stopped. Resume ingest from Runtime / Queue after reset and any required setup are complete.</p>
+      <p className="reset-live-impact"><strong>Live-operation impact:</strong> Data Only briefly pauses PizzaWave ingest and resumes it when complete without restarting Trunk Recorder. Site Reset and Full Reset stop Trunk Recorder and leave capture stopped until Setup is deliberately applied.</p>
       <div className="reset-safety-panel">
         <div className="jobs-card-head"><div><h3>Recovery Safeguard</h3><p>Confirm the recovery boundary before running the selected reset.</p></div><button className="danger-button" disabled={busy} onClick={() => void runReset()}>{busy ? "Resetting..." : `Run ${selected.title}`}</button></div>
         <div className="reset-safety-controls">
           <SettingCheckbox label="Create backup before reset" description="Recommended. Backup creation finishes before PizzaWave pauses ingest or removes data." checked={createBackup} onChange={setCreateBackup} disabled={busy} />
-          {createBackup && <label className="setting-field compact-setting reset-audio-window"><span>Recorded audio in backup<small>All non-audio state is backed up in full.</small></span><select disabled={busy} value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
+          {createBackup && <><label className="setting-field compact-setting reset-audio-window"><span>Recorded audio in backup<small>All non-audio state is backed up in full.</small></span><select disabled={busy} value={audioWindow} onChange={event => setAudioWindow(event.target.value)}>{audioOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="setting-field"><span>Backup passphrase<small>At least 12 characters. PizzaWave does not store it.</small></span><input disabled={busy} type="password" autoComplete="new-password" value={backupPassphrase} onChange={event => setBackupPassphrase(event.target.value)} /></label><label className="setting-field"><span>Confirm passphrase</span><input disabled={busy} type="password" autoComplete="new-password" value={backupPassphraseConfirmation} onChange={event => setBackupPassphraseConfirmation(event.target.value)} /></label></>}
           {preset === "data-only" && <SettingCheckbox label="Preserve audit and setup history" description="Keeps configuration/setup activity history while operational history is cleared." checked={preserveAudit} onChange={setPreserveAudit} disabled={busy} />}
         </div>
         {!createBackup && <p className="section-status warning">No recovery archive will be created before this reset.</p>}

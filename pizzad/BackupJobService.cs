@@ -10,6 +10,7 @@ public sealed class BackupJobService : IHostedService
     private readonly EngineDatabase _database;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<BackupJobService> _logger;
+    private readonly RecoveryOperationCoordinator _recovery;
     private readonly ConcurrentDictionary<long, CancellationTokenSource> _active = new();
     private readonly SemaphoreSlim _startGate = new(1, 1);
 
@@ -17,12 +18,14 @@ public sealed class BackupJobService : IHostedService
         BackupRestoreService backups,
         EngineDatabase database,
         IHostApplicationLifetime lifetime,
-        ILogger<BackupJobService> logger)
+        ILogger<BackupJobService> logger,
+        RecoveryOperationCoordinator? recovery = null)
     {
         _backups = backups;
         _database = database;
         _lifetime = lifetime;
         _logger = logger;
+        _recovery = recovery ?? new RecoveryOperationCoordinator();
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -54,8 +57,9 @@ public sealed class BackupJobService : IHostedService
                 "Backup job was abandoned by a service restart or shutdown.",
                 ct);
 
-            if (await _database.HasActiveJobAsync(JobType, ct))
-                throw new InvalidOperationException("A backup job is already running. Stop it or wait for it to finish before starting another backup.");
+            foreach (var type in new[] { JobType, RecoveryJobService.SupportPackageJobType, RecoveryJobService.RestoreApplyJobType, RecoveryJobService.ResetJobType })
+                if (await _database.HasActiveJobAsync(type, ct))
+                    throw new InvalidOperationException("Another backup, restore, reset, or support-package job is already active.");
 
             var jobId = await _database.AddJobAsync(new JobDto
             {
@@ -108,6 +112,7 @@ public sealed class BackupJobService : IHostedService
     {
         try
         {
+            using var recoveryLease = _recovery.Acquire("backup creation");
             await _database.UpdateJobAsync(jobId, "running", 1, 0, 0, "Creating backup archive...", true, false, CancellationToken.None);
             await _database.AddJobLogAsync(jobId, "info", $"Backup archive started. Audio window: {BackupCreateOptions.From(request).AudioWindow}.", CancellationToken.None);
             var result = await _backups.CreateBackupAsync(request, ct);

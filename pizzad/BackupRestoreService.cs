@@ -11,11 +11,15 @@ public sealed class BackupRestoreService
     private const int ManifestVersion = 1;
     private readonly EngineConfig _config;
     private readonly ILogger<BackupRestoreService> _logger;
+    private readonly RecoveryOperationCoordinator _recovery;
+    private readonly RecoveryResultStore _recoveryResults;
 
-    public BackupRestoreService(EngineConfig config, ILogger<BackupRestoreService> logger)
+    public BackupRestoreService(EngineConfig config, ILogger<BackupRestoreService> logger, RecoveryOperationCoordinator? recovery = null, RecoveryResultStore? recoveryResults = null)
     {
         _config = config;
         _logger = logger;
+        _recovery = recovery ?? new RecoveryOperationCoordinator();
+        _recoveryResults = recoveryResults ?? new RecoveryResultStore(config);
     }
 
     public IReadOnlyList<BackupArchiveDto> ListBackups()
@@ -24,7 +28,9 @@ public sealed class BackupRestoreService
         if (!Directory.Exists(root))
             return [];
 
-        return Directory.EnumerateFiles(root, "*.zip")
+        return Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase) ||
+                           Path.GetExtension(path).Equals(".pwbak", StringComparison.OrdinalIgnoreCase))
             .Select(path =>
             {
                 var info = new FileInfo(path);
@@ -33,7 +39,8 @@ public sealed class BackupRestoreService
                     path,
                     info.Length,
                     info.CreationTimeUtc,
-                    info.LastWriteTimeUtc);
+                    info.LastWriteTimeUtc,
+                    EncryptedBackupArchive.HasEncryptedExtension(path));
             })
             .OrderByDescending(row => row.CreatedUtc)
             .ToList();
@@ -52,7 +59,8 @@ public sealed class BackupRestoreService
         AddEstimateFile(totals, warnings, "tr-talkgroups", _config.TrunkRecorder.TalkgroupsPath);
         AddEstimateAudioDirectory(totals, warnings, options);
         AddEstimateDirectory(totals, warnings, "appdata", _config.Storage.AppDataRoot, ExcludeAppDataPath);
-        AddEstimateDirectory(totals, warnings, "qdrant", _config.Embeddings.QdrantStoragePath);
+        if (_config.Embeddings.Enabled)
+            AddEstimateDirectory(totals, warnings, "qdrant", _config.Embeddings.QdrantStoragePath);
 
         var kinds = totals
             .OrderBy(row => row.Key, StringComparer.OrdinalIgnoreCase)
@@ -63,20 +71,24 @@ public sealed class BackupRestoreService
 
     public async Task<BackupCreateResultDto> CreateBackupAsync(BackupCreateRequestDto? request, CancellationToken ct)
     {
+        EncryptedBackupArchive.ValidatePassphrase(request?.Passphrase, request?.PassphraseConfirmation);
         var options = BackupCreateOptions.From(request);
         var backupRoot = BackupRoot();
         Directory.CreateDirectory(backupRoot);
-        var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ");
-        var fileName = $"pizzawave-backup-{SafeName(_config.Branding.StackName)}-{stamp}.zip";
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ");
+        var fileName = $"pizzawave-backup-{SafeName(_config.Branding.StackName)}-{stamp}.pwbak";
         var path = Path.Combine(backupRoot, fileName);
         var entries = new List<BackupManifestEntryDto>();
         var warnings = new List<string>();
         var tempRoot = Path.Combine(_config.Storage.AppDataRoot, "backup-working", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
+        var plainArchivePath = Path.Combine(tempRoot, "backup.zip");
+        var verifyArchivePath = Path.Combine(tempRoot, "verify.zip");
+        var verifyExtractRoot = Path.Combine(tempRoot, "verify");
 
         try
         {
-            await using var file = File.Create(path);
+            await using var file = File.Create(plainArchivePath);
             using var archive = new ZipArchive(file, ZipArchiveMode.Create);
 
             await AddSnapshotDatabaseAsync(archive, entries, tempRoot, warnings, ct);
@@ -87,7 +99,8 @@ public sealed class BackupRestoreService
 
             await AddAudioDirectoryAsync(archive, entries, options, warnings, ct);
             await AddDirectoryAsync(archive, entries, "appdata", _config.Storage.AppDataRoot, "appdata", warnings, ct, ExcludeAppDataPath);
-            await AddDirectoryAsync(archive, entries, "qdrant", _config.Embeddings.QdrantStoragePath, "qdrant", warnings, ct);
+            if (_config.Embeddings.Enabled)
+                await AddQdrantSnapshotAsync(archive, entries, tempRoot, ct);
 
             var manifest = new BackupManifestDto(
                 ManifestVersion,
@@ -109,8 +122,19 @@ public sealed class BackupRestoreService
             var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
             await using (var stream = manifestEntry.Open())
                 await JsonSerializer.SerializeAsync(stream, manifest, EngineConfig.JsonOptions(), ct);
+            archive.Dispose();
+            await file.DisposeAsync();
 
-            return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings);
+            await EncryptedBackupArchive.EncryptFileAsync(plainArchivePath, path, request!.Passphrase!, ct);
+            await EncryptedBackupArchive.DecryptFileAsync(path, verifyArchivePath, request.Passphrase!, ct);
+            Directory.CreateDirectory(verifyExtractRoot);
+            ZipFile.ExtractToDirectory(verifyArchivePath, verifyExtractRoot);
+            var verifiedManifest = await ReadAndValidateManifestAsync(verifyExtractRoot, ct);
+            var checks = VerifyManifest(verifyExtractRoot, verifiedManifest);
+            if (checks.Any(check => !check.Ok))
+                throw new InvalidOperationException("Backup integrity verification failed: " + checks.First(check => !check.Ok).Message);
+
+            return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings, true);
         }
         catch
         {
@@ -123,47 +147,60 @@ public sealed class BackupRestoreService
         }
     }
 
-    public async Task<BackupRestorePreviewDto> StageRestoreAsync(Stream source, string fileName, CancellationToken ct)
+    public async Task<BackupRestorePreviewDto> StageRestoreAsync(Stream source, string fileName, string? passphrase, CancellationToken ct)
     {
         var stageRoot = Path.Combine(_config.Storage.AppDataRoot, "restore-staging", DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ") + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(stageRoot);
-        var archivePath = Path.Combine(stageRoot, string.IsNullOrWhiteSpace(fileName) ? "restore.zip" : Path.GetFileName(fileName));
-        await using (var output = File.Create(archivePath))
-            await source.CopyToAsync(output, ct);
+        try
+        {
+            var uploadedPath = Path.Combine(stageRoot, string.IsNullOrWhiteSpace(fileName) ? "restore-upload" : Path.GetFileName(fileName));
+            await using (var output = File.Create(uploadedPath))
+                await source.CopyToAsync(output, ct);
 
-        var extractRoot = Path.Combine(stageRoot, "extract");
-        Directory.CreateDirectory(extractRoot);
-        ZipFile.ExtractToDirectory(archivePath, extractRoot);
-        var manifestPath = Path.Combine(extractRoot, "manifest.json");
-        if (!File.Exists(manifestPath))
-            throw new InvalidOperationException("Backup archive does not contain manifest.json.");
+            var encrypted = EncryptedBackupArchive.HasEncryptedHeader(uploadedPath);
+            var archivePath = encrypted ? Path.Combine(stageRoot, "restore.zip") : uploadedPath;
+            if (encrypted)
+                await EncryptedBackupArchive.DecryptFileAsync(uploadedPath, archivePath, passphrase ?? string.Empty, ct);
 
-        var manifest = JsonSerializer.Deserialize<BackupManifestDto>(await File.ReadAllTextAsync(manifestPath, ct), EngineConfig.JsonOptions())
-            ?? throw new InvalidOperationException("Backup manifest could not be read.");
-        if (manifest.ManifestVersion != ManifestVersion || !string.Equals(manifest.Product, "PizzaWave", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Backup archive is not a supported PizzaWave backup.");
+            var extractRoot = Path.Combine(stageRoot, "extract");
+            Directory.CreateDirectory(extractRoot);
+            ZipFile.ExtractToDirectory(archivePath, extractRoot);
+            var manifest = await ReadAndValidateManifestAsync(extractRoot, ct);
+            var checks = VerifyManifest(extractRoot, manifest);
+            if (checks.Any(check => !check.Ok))
+                throw new InvalidOperationException("Backup integrity verification failed. Restore was not staged.");
+            var plan = BuildRestorePlan(extractRoot, manifest);
+            var planPath = Path.Combine(stageRoot, "restore-plan.json");
+            await File.WriteAllTextAsync(planPath, JsonSerializer.Serialize(plan, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
 
-        var checks = VerifyManifest(extractRoot, manifest);
-        var plan = BuildRestorePlan(extractRoot, manifest);
-        var planPath = Path.Combine(stageRoot, "restore-plan.json");
-        await File.WriteAllTextAsync(planPath, JsonSerializer.Serialize(plan, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
+            _config.Setup.PendingRestorePath = stageRoot;
+            _config.Setup.PendingRestoreManifestJson = JsonSerializer.Serialize(manifest, EngineConfig.JsonOptions());
+            await SaveConfigAsync(ct);
 
-        _config.Setup.PendingRestorePath = stageRoot;
-        _config.Setup.PendingRestoreManifestJson = JsonSerializer.Serialize(manifest, EngineConfig.JsonOptions());
-        await SaveConfigAsync(ct);
-
-        return new BackupRestorePreviewDto(stageRoot, manifest, checks);
+            return new BackupRestorePreviewDto(stageRoot, manifest, checks, encrypted);
+        }
+        catch
+        {
+            try { Directory.Delete(stageRoot, recursive: true); } catch { }
+            throw;
+        }
     }
 
-    public async Task<BackupRestorePreviewDto?> StageLocalRestoreAsync(string name, CancellationToken ct)
+    public Task<BackupRestorePreviewDto> StageRestoreAsync(Stream source, string fileName, CancellationToken ct) =>
+        StageRestoreAsync(source, fileName, null, ct);
+
+    public async Task<BackupRestorePreviewDto?> StageLocalRestoreAsync(string name, string? passphrase, CancellationToken ct)
     {
         var row = ListBackups().FirstOrDefault(backup => string.Equals(backup.Name, name, StringComparison.OrdinalIgnoreCase));
         if (row == null)
             return null;
 
         await using var stream = File.Open(row.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        return await StageRestoreAsync(stream, row.Name, ct);
+        return await StageRestoreAsync(stream, row.Name, passphrase, ct);
     }
+
+    public Task<BackupRestorePreviewDto?> StageLocalRestoreAsync(string name, CancellationToken ct) =>
+        StageLocalRestoreAsync(name, null, ct);
 
     public BackupRestorePreviewDto? PendingRestore()
     {
@@ -173,7 +210,8 @@ public sealed class BackupRestoreService
         if (manifest == null)
             return null;
         var extractRoot = Path.Combine(_config.Setup.PendingRestorePath, "extract");
-        return new BackupRestorePreviewDto(_config.Setup.PendingRestorePath, manifest, Directory.Exists(extractRoot) ? VerifyManifest(extractRoot, manifest) : [new("archive", false, "Restore staging directory is missing.")]);
+        var encrypted = Directory.Exists(_config.Setup.PendingRestorePath) && Directory.EnumerateFiles(_config.Setup.PendingRestorePath, "*", SearchOption.TopDirectoryOnly).Any(EncryptedBackupArchive.HasEncryptedHeader);
+        return new BackupRestorePreviewDto(_config.Setup.PendingRestorePath, manifest, Directory.Exists(extractRoot) ? VerifyManifest(extractRoot, manifest) : [new("archive", false, "Restore staging directory is missing.")], encrypted);
     }
 
     public async Task<BackupRestoreCancelResultDto> CancelPendingRestoreAsync(CancellationToken ct)
@@ -196,14 +234,21 @@ public sealed class BackupRestoreService
         return new BackupRestoreCancelResultDto(true, "Restore was canceled. No live files were changed.");
     }
 
-    public async Task<BackupRestoreApplyResultDto> ApplyPendingRestoreAsync(CancellationToken ct)
+    public async Task<BackupRestoreApplyResultDto> ApplyPendingRestoreAsync(string? passphrase, CancellationToken ct)
     {
+        using var recoveryLease = _recovery.Acquire("restore apply");
+        await _recoveryResults.StartAsync("restore", null, "Restore apply started.", ct);
+        EncryptedBackupArchive.ValidatePassphrase(passphrase, passphrase);
         var stageRoot = _config.Setup.PendingRestorePath;
         if (string.IsNullOrWhiteSpace(stageRoot))
             throw new InvalidOperationException("No backup restore is staged.");
         var planPath = Path.Combine(stageRoot, "restore-plan.json");
         if (!File.Exists(planPath))
             throw new InvalidOperationException("Staged restore plan is missing.");
+
+        await _recoveryResults.AppendAsync("restore", "safety-backup", "running", "Creating and verifying the pre-restore safety backup.", false, ct);
+        var safetyBackup = await CreateBackupAsync(new BackupCreateRequestDto("all", passphrase, passphrase), ct);
+        await _recoveryResults.AppendAsync("restore", "safety-backup", "completed", $"Verified {safetyBackup.Name}.", false, ct);
 
         if (!OperatingSystem.IsWindows())
         {
@@ -226,7 +271,9 @@ public sealed class BackupRestoreService
             var stderr = await stderrTask;
             if (process.ExitCode != 0)
                 throw new InvalidOperationException($"Restore helper failed with exit code {process.ExitCode}: {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim()}");
-            return new BackupRestoreApplyResultDto(true, stdout.Trim());
+            var message = $"Pre-restore backup {safetyBackup.Name} was verified. {stdout.Trim()}";
+            await _recoveryResults.AppendAsync("restore", "apply", "completed", message, true, CancellationToken.None);
+            return new BackupRestoreApplyResultDto(true, message);
         }
 
         var plan = JsonSerializer.Deserialize<BackupRestorePlanDto>(await File.ReadAllTextAsync(planPath, ct), EngineConfig.JsonOptions())
@@ -234,8 +281,13 @@ public sealed class BackupRestoreService
         foreach (var entry in plan.Entries)
             CopyPlanEntry(entry);
         MarkRestoredConfigApplied(_config.ConfigPath);
-        return new BackupRestoreApplyResultDto(true, "Restore files were copied. Restart pizzad before using the restored data.");
+        var windowsMessage = $"Pre-restore backup {safetyBackup.Name} was verified. Restore files were copied. Restart pizzad before using the restored data.";
+        await _recoveryResults.AppendAsync("restore", "apply", "completed", windowsMessage, true, CancellationToken.None);
+        return new BackupRestoreApplyResultDto(true, windowsMessage);
     }
+
+    public Task<BackupRestoreApplyResultDto> ApplyPendingRestoreAsync(CancellationToken ct) =>
+        ApplyPendingRestoreAsync(null, ct);
 
     public bool DeleteBackup(string name)
     {
@@ -265,11 +317,57 @@ public sealed class BackupRestoreService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Unable to create SQLite snapshot; falling back to direct database copy.");
-            warnings.Add("SQLite snapshot failed; backup used a direct database file copy.");
-            File.Copy(_config.Storage.DatabasePath, snapshot, overwrite: true);
+            _logger.LogError(ex, "Unable to create a consistent SQLite snapshot.");
+            throw new InvalidOperationException("PizzaWave could not create a consistent SQLite snapshot. No backup was published.", ex);
         }
         await AddFileAsync(archive, entries, "database", snapshot, "database/pizzad.db", _config.Storage.DatabasePath, ct);
+    }
+
+    private async Task AddQdrantSnapshotAsync(ZipArchive archive, List<BackupManifestEntryDto> entries, string tempRoot, CancellationToken ct)
+    {
+        var collection = _config.Embeddings.Collection;
+        if (string.IsNullOrWhiteSpace(collection))
+            throw new InvalidOperationException("Embeddings are enabled but the Qdrant collection is not configured.");
+        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        if (!string.IsNullOrWhiteSpace(_config.Embeddings.QdrantApiKey))
+            client.DefaultRequestHeaders.Add("api-key", _config.Embeddings.QdrantApiKey);
+        var collectionPath = $"{_config.Embeddings.QdrantBaseUrl}/collections/{Uri.EscapeDataString(collection)}";
+        string? snapshotName = null;
+        try
+        {
+            using var create = await client.PostAsync(collectionPath + "/snapshots?wait=true", null, ct);
+            var createText = await create.Content.ReadAsStringAsync(ct);
+            if (!create.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Qdrant snapshot creation failed with HTTP {(int)create.StatusCode}: {TrimMessage(createText)}");
+            using var document = JsonDocument.Parse(createText);
+            snapshotName = document.RootElement.GetProperty("result").GetProperty("name").GetString();
+            if (string.IsNullOrWhiteSpace(snapshotName))
+                throw new InvalidOperationException("Qdrant snapshot creation did not return a snapshot name.");
+            var expectedChecksum = document.RootElement.GetProperty("result").TryGetProperty("checksum", out var checksumElement) ? checksumElement.GetString() : null;
+            var localPath = Path.Combine(tempRoot, Path.GetFileName(snapshotName));
+            using var download = await client.GetAsync(collectionPath + "/snapshots/" + Uri.EscapeDataString(snapshotName), HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!download.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Qdrant snapshot download failed with HTTP {(int)download.StatusCode}.");
+            await using (var input = await download.Content.ReadAsStreamAsync(ct))
+            await using (var output = File.Create(localPath))
+                await input.CopyToAsync(output, ct);
+            var actualChecksum = await Sha256Async(localPath, ct);
+            if (!string.IsNullOrWhiteSpace(expectedChecksum) && !string.Equals(actualChecksum, expectedChecksum, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Downloaded Qdrant snapshot checksum did not match Qdrant snapshot metadata.");
+            await AddFileAsync(archive, entries, "qdrant-snapshot", localPath, "qdrant/" + Path.GetFileName(snapshotName), collection, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException("PizzaWave could not create and verify a consistent online Qdrant snapshot. No backup was published.", ex);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(snapshotName))
+            {
+                try { using var response = await client.DeleteAsync(collectionPath + "/snapshots/" + Uri.EscapeDataString(snapshotName), CancellationToken.None); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Unable to remove temporary Qdrant snapshot {Snapshot}", snapshotName); }
+            }
+        }
     }
 
     private async Task AddAudioDirectoryAsync(ZipArchive archive, List<BackupManifestEntryDto> entries, BackupCreateOptions options, List<string> warnings, CancellationToken ct)
@@ -402,6 +500,8 @@ public sealed class BackupRestoreService
                first.Equals(".cache", StringComparison.OrdinalIgnoreCase) ||
                first.Equals("restore-staging", StringComparison.OrdinalIgnoreCase) ||
                first.Equals("protected-config", StringComparison.OrdinalIgnoreCase) ||
+               first.Equals("recovery-results", StringComparison.OrdinalIgnoreCase) ||
+               first.Equals("qdrant-restore", StringComparison.OrdinalIgnoreCase) ||
                (first.Equals("rf-surveys", StringComparison.OrdinalIgnoreCase) &&
                 (extension.Equals(".cs16", StringComparison.OrdinalIgnoreCase) ||
                  extension.Equals(".u8", StringComparison.OrdinalIgnoreCase) ||
@@ -447,17 +547,54 @@ public sealed class BackupRestoreService
         return checks;
     }
 
-    private static BackupRestorePlanDto BuildRestorePlan(string extractRoot, BackupManifestDto manifest)
+    private static async Task<BackupManifestDto> ReadAndValidateManifestAsync(string extractRoot, CancellationToken ct)
+    {
+        var manifestPath = Path.Combine(extractRoot, "manifest.json");
+        if (!File.Exists(manifestPath))
+            throw new InvalidOperationException("Backup archive does not contain manifest.json.");
+        var manifest = JsonSerializer.Deserialize<BackupManifestDto>(await File.ReadAllTextAsync(manifestPath, ct), EngineConfig.JsonOptions())
+            ?? throw new InvalidOperationException("Backup manifest could not be read.");
+        if (manifest.ManifestVersion != ManifestVersion || !string.Equals(manifest.Product, "PizzaWave", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Backup archive is not a supported PizzaWave backup.");
+        return manifest;
+    }
+
+    private BackupRestorePlanDto BuildRestorePlan(string extractRoot, BackupManifestDto manifest)
     {
         var entries = manifest.Entries
             .Select(entry => new BackupRestorePlanEntryDto(
                 SafeExtractPath(extractRoot, entry.ArchivePath),
-                entry.Path,
+                RestoreTargetPath(entry),
                 entry.Kind,
                 entry.Bytes,
                 entry.Sha256))
             .ToList();
         return new BackupRestorePlanDto(DateTime.UtcNow, entries);
+    }
+
+    private string RestoreTargetPath(BackupManifestEntryDto entry)
+    {
+        var archivePath = entry.ArchivePath.Replace('\\', '/').TrimStart('/');
+        return entry.Kind.ToLowerInvariant() switch
+        {
+            "database" when archivePath == "database/pizzad.db" => _config.Storage.DatabasePath,
+            "config" when archivePath == "config/pizzad.json" => _config.ConfigPath,
+            "config" when archivePath == "config/pizzad.token" => _config.Auth.TokenFile,
+            "tr-config" when archivePath == "config/trunk-recorder/config.json" => _config.TrunkRecorder.ConfigPath,
+            "tr-talkgroups" when archivePath == "config/trunk-recorder/talkgroups.csv" => _config.TrunkRecorder.TalkgroupsPath,
+            "audio" => SafeRestoreTarget(_config.Storage.AudioRoot, archivePath, "audio/"),
+            "appdata" => SafeRestoreTarget(_config.Storage.AppDataRoot, archivePath, "appdata/"),
+            "qdrant" => SafeRestoreTarget(_config.Embeddings.QdrantStoragePath, archivePath, "qdrant/"),
+            "qdrant-snapshot" => SafeRestoreTarget(Path.Combine(_config.Storage.AppDataRoot, "qdrant-restore"), archivePath, "qdrant/"),
+            _ => throw new InvalidOperationException($"Backup contains an unsupported restore entry: {entry.Kind} / {entry.ArchivePath}.")
+        };
+    }
+
+    private static string SafeRestoreTarget(string root, string archivePath, string requiredPrefix)
+    {
+        if (!archivePath.StartsWith(requiredPrefix, StringComparison.Ordinal) || archivePath.Length <= requiredPrefix.Length)
+            throw new InvalidOperationException($"Backup contains an invalid {requiredPrefix.TrimEnd('/')} path.");
+        return SafeChildPath(root, archivePath[requiredPrefix.Length..]);
     }
 
     private static void CopyPlanEntry(BackupRestorePlanEntryDto entry)
@@ -560,9 +697,15 @@ public sealed class BackupRestoreService
 
     private static string SafeExtractPath(string root, string archivePath)
     {
-        var full = Path.GetFullPath(Path.Combine(root, archivePath.Replace('/', Path.DirectorySeparatorChar)));
-        var rootFull = Path.GetFullPath(root);
-        if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+        return SafeChildPath(root, archivePath.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private static string SafeChildPath(string root, string relativePath)
+    {
+        var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var full = Path.GetFullPath(Path.Combine(rootFull, relativePath));
+        var prefix = rootFull + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Backup archive contains an unsafe path.");
         return full;
     }
@@ -579,6 +722,8 @@ public sealed class BackupRestoreService
         using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
+
+    private static string TrimMessage(string value) => value.Length <= 500 ? value : value[..500];
 
     private static string FindAdminHelper()
     {
@@ -627,6 +772,8 @@ public sealed class BackupCreateOptions
 
     public bool IncludesAudioFile(FileInfo file)
     {
+        if (AudioWindow == "none")
+            return false;
         if (AudioStartUtc.HasValue && file.LastWriteTimeUtc < AudioStartUtc.Value)
             return false;
         if (AudioEndUtc.HasValue && file.LastWriteTimeUtc > AudioEndUtc.Value)
@@ -637,15 +784,15 @@ public sealed class BackupCreateOptions
     private static string NormalizeAudioWindow(string? value)
     {
         var normalized = value?.Trim().ToLowerInvariant();
-        return normalized is "24h" or "7d" or "30d" or "60d" or "all" ? normalized : "all";
+        return normalized is "none" or "24h" or "7d" or "30d" or "60d" or "all" ? normalized : "all";
     }
 }
 
-public sealed record BackupArchiveDto(string Name, string Path, long Bytes, DateTime CreatedUtc, DateTime ModifiedUtc);
-public sealed record BackupCreateRequestDto(string? AudioWindow);
+public sealed record BackupArchiveDto(string Name, string Path, long Bytes, DateTime CreatedUtc, DateTime ModifiedUtc, bool Encrypted);
+public sealed record BackupCreateRequestDto(string? AudioWindow, string? Passphrase = null, string? PassphraseConfirmation = null);
 public sealed record BackupEstimateDto(long Bytes, int FileCount, IReadOnlyList<BackupEstimateKindDto> Kinds, IReadOnlyList<string> Warnings);
 public sealed record BackupEstimateKindDto(string Kind, long Bytes, int FileCount);
-public sealed record BackupCreateResultDto(string Name, string Path, long Bytes, int FileCount, IReadOnlyList<string> Warnings);
+public sealed record BackupCreateResultDto(string Name, string Path, long Bytes, int FileCount, IReadOnlyList<string> Warnings, bool Encrypted);
 public sealed record BackupManifestDto(
     int ManifestVersion,
     string Product,
@@ -664,9 +811,10 @@ public sealed record BackupManifestDto(
     IReadOnlyList<BackupManifestEntryDto> Entries,
     IReadOnlyList<string> Warnings);
 public sealed record BackupManifestEntryDto(string Kind, string Path, string ArchivePath, long Bytes, string Sha256);
-public sealed record BackupRestorePreviewDto(string StagePath, BackupManifestDto Manifest, IReadOnlyList<BackupRestoreCheckDto> Checks);
+public sealed record BackupRestorePreviewDto(string StagePath, BackupManifestDto Manifest, IReadOnlyList<BackupRestoreCheckDto> Checks, bool Encrypted = false);
 public sealed record BackupRestoreCheckDto(string Name, bool Ok, string Message);
 public sealed record BackupRestorePlanDto(DateTime CreatedUtc, IReadOnlyList<BackupRestorePlanEntryDto> Entries);
 public sealed record BackupRestorePlanEntryDto(string SourcePath, string TargetPath, string Kind, long Bytes, string Sha256);
 public sealed record BackupRestoreApplyResultDto(bool Scheduled, string Message);
 public sealed record BackupRestoreCancelResultDto(bool Canceled, string Message);
+public sealed record BackupRestoreUnlockRequestDto(string? Passphrase);

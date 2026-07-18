@@ -384,7 +384,8 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains(">Reset</button>", source, StringComparison.Ordinal);
         Assert.Contains("Create Backup", backupSource, StringComparison.Ordinal);
         Assert.Contains("Available Backups", backupSource, StringComparison.Ordinal);
-        Assert.Contains("Upload Backup Archive", backupSource, StringComparison.Ordinal);
+        Assert.Contains("Stage a Backup", backupSource, StringComparison.Ordinal);
+        Assert.Contains("Support Package", backupSource, StringComparison.Ordinal);
         Assert.Contains("Staged Restore Review", backupSource, StringComparison.Ordinal);
         Assert.Contains("Backup contents by area", backupSource, StringComparison.Ordinal);
         Assert.Contains("backup-estimate-kpis", backupSource, StringComparison.Ordinal);

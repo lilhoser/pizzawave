@@ -13,8 +13,10 @@ public sealed class SystemResetService
     private readonly AuthService _auth;
     private readonly BackupRestoreService _backups;
     private readonly ILogger<SystemResetService> _logger;
+    private readonly RecoveryOperationCoordinator _recovery;
+    private readonly RecoveryResultStore _recoveryResults;
 
-    public SystemResetService(EngineConfig config, EngineDatabase database, EmbeddingService embeddings, IngestControlService ingest, AuthService auth, BackupRestoreService backups, ILogger<SystemResetService> logger)
+    public SystemResetService(EngineConfig config, EngineDatabase database, EmbeddingService embeddings, IngestControlService ingest, AuthService auth, BackupRestoreService backups, ILogger<SystemResetService> logger, RecoveryOperationCoordinator? recovery = null, RecoveryResultStore? recoveryResults = null)
     {
         _config = config;
         _database = database;
@@ -23,6 +25,8 @@ public sealed class SystemResetService
         _auth = auth;
         _backups = backups;
         _logger = logger;
+        _recovery = recovery ?? new RecoveryOperationCoordinator();
+        _recoveryResults = recoveryResults ?? new RecoveryResultStore(config);
     }
 
     public async Task<SystemResetResultDto> ResetAsync(SystemResetRequestDto? request, CancellationToken ct)
@@ -39,6 +43,8 @@ public sealed class SystemResetService
             throw new InvalidOperationException("Choose exactly one reset scope.");
         if (presets[0] is not ("data-only" or "site-reset" or "full-reset"))
             throw new InvalidOperationException($"Unsupported reset scope: {presets[0]}.");
+        if (!request.CreateBackup && !request.ConfirmNoBackup)
+            throw new InvalidOperationException("Reset without a recovery backup requires explicit no-backup confirmation.");
         if (!string.IsNullOrWhiteSpace(_config.Setup.PendingRestorePath))
             throw new InvalidOperationException("Cancel or apply the pending restore before starting reset.");
         if (!await _resetGate.WaitAsync(0, ct))
@@ -46,6 +52,7 @@ public sealed class SystemResetService
 
         try
         {
+            using var recoveryLease = _recovery.Acquire("system reset");
             var dataOnly = presets.Contains("data-only");
             var siteReset = presets.Contains("site-reset");
             var fullReset = presets.Contains("full-reset");
@@ -62,9 +69,20 @@ public sealed class SystemResetService
             // A safety backup can be large. Keep accepting live calls until the
             // archive is complete, then pause immediately before destructive work.
             if (request.CreateBackup)
-                backup = await _backups.CreateBackupAsync(new BackupCreateRequestDto(request.BackupAudioWindow), ct);
+            {
+                await _recoveryResults.AppendAsync("reset", "safety-backup", "running", "Creating and verifying the reset safety backup.", false, ct);
+                backup = await _backups.CreateBackupAsync(new BackupCreateRequestDto(request.BackupAudioWindow, request.BackupPassphrase, request.BackupPassphraseConfirmation), ct);
+                await _recoveryResults.AppendAsync("reset", "safety-backup", "completed", $"Verified {backup.Name}.", false, ct);
+            }
 
             _ingest.Pause(false, $"System reset started: {string.Join(", ", presets)}.", 0);
+            await _recoveryResults.AppendAsync("reset", "ingest", "paused", "PizzaWave ingest paused before destructive work.", false, ct);
+
+            if (clearSiteState)
+            {
+                await StopTrunkRecorderAsync(ct);
+                await _recoveryResults.AppendAsync("reset", "trunk-recorder", "stopped", "Trunk Recorder stopped and will remain stopped until Setup apply.", false, ct);
+            }
 
             if (clearOperationalData)
             {
@@ -94,6 +112,12 @@ public sealed class SystemResetService
 
             _config.ApplyDefaults();
             await SaveConfigAsync(ct);
+
+            if (dataOnly)
+            {
+                _ingest.Resume("Data-only reset completed.", 0);
+                await _recoveryResults.AppendAsync("reset", "ingest", "resumed", "PizzaWave ingest resumed after Data Only reset.", false, ct);
+            }
 
             var message = fullReset
                 ? "Full reset complete. First-run prerequisites must be completed before returning to normal operation."
@@ -178,6 +202,28 @@ public sealed class SystemResetService
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"Site reset helper failed with exit code {process.ExitCode}: {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim()}");
         _logger.LogInformation("Site file reset completed: {Output}", stdout.Trim());
+    }
+
+    private async Task StopTrunkRecorderAsync(CancellationToken ct)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+        var psi = new ProcessStartInfo("sudo")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        psi.ArgumentList.Add(FindAdminHelper());
+        psi.ArgumentList.Add("stop-tr");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Unable to stop Trunk Recorder for site reset.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Trunk Recorder could not be stopped for site reset: {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim()}");
     }
 
     private void PreflightProtectedSiteFilesForReset()
@@ -297,7 +343,10 @@ public sealed class SystemResetRequestDto
 {
     public List<string> Presets { get; set; } = new();
     public bool CreateBackup { get; set; } = true;
+    public bool ConfirmNoBackup { get; set; }
     public string BackupAudioWindow { get; set; } = "all";
+    public string? BackupPassphrase { get; set; }
+    public string? BackupPassphraseConfirmation { get; set; }
     public bool PreserveAuditHistory { get; set; } = true;
     public bool PreserveBranding { get; set; } = true;
     public bool PreserveTranscription { get; set; } = true;
