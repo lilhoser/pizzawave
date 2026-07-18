@@ -99,7 +99,7 @@ public sealed class BackupRestoreService
             await AddFileIfExistsAsync(archive, entries, "tr-talkgroups", _config.TrunkRecorder.TalkgroupsPath, "config/trunk-recorder/talkgroups.csv", warnings, ct);
 
             await AddAudioDirectoryAsync(archive, entries, options, warnings, ct);
-            await AddDirectoryAsync(archive, entries, "appdata", _config.Storage.AppDataRoot, "appdata", warnings, ct, ExcludeAppDataPath);
+            await AddStableDirectoryAsync(archive, entries, "appdata", _config.Storage.AppDataRoot, "appdata", tempRoot, warnings, ct, ExcludeAppDataPath);
             if (_config.Embeddings.Enabled)
                 await AddQdrantSnapshotAsync(archive, entries, tempRoot, ct);
 
@@ -133,7 +133,10 @@ public sealed class BackupRestoreService
             var verifiedManifest = await ReadAndValidateManifestAsync(verifyExtractRoot, ct);
             var checks = VerifyManifest(verifyExtractRoot, verifiedManifest);
             if (checks.Any(check => !check.Ok))
-                throw new InvalidOperationException("Backup integrity verification failed: " + checks.First(check => !check.Ok).Message);
+            {
+                var failed = checks.First(check => !check.Ok);
+                throw new InvalidOperationException($"Backup integrity verification failed for {failed.Name}: {failed.Message}");
+            }
 
             File.Move(partialPath, path);
             return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings, true);
@@ -570,6 +573,50 @@ public sealed class BackupRestoreService
             checks.Add(new(entry.ArchivePath, sizeOk && hashOk, sizeOk && hashOk ? "OK" : "Size or checksum mismatch."));
         }
         return checks;
+    }
+
+    private async Task AddStableDirectoryAsync(ZipArchive archive, List<BackupManifestEntryDto> entries, string kind, string root, string archiveRoot, string tempRoot, List<string> warnings, CancellationToken ct, Func<string, bool>? exclude = null)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            warnings.Add($"{kind} directory was not found: {root}");
+            return;
+        }
+        var snapshotRoot = Path.Combine(tempRoot, kind + "-snapshot");
+        foreach (var file in EnumerateRegularFiles(root))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (exclude?.Invoke(file) == true || IsSymlink(file))
+                continue;
+            var relative = Path.GetRelativePath(root, file);
+            var snapshotPath = Path.Combine(snapshotRoot, relative);
+            await CopyStableFileAsync(file, snapshotPath, ct);
+            var archivePath = Path.Combine(archiveRoot, relative).Replace('\\', '/');
+            await AddFileAsync(archive, entries, kind, snapshotPath, archivePath, Path.Combine(root, relative), ct);
+        }
+    }
+
+    private static async Task CopyStableFileAsync(string source, string destination, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await using (var input = File.Open(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                await using (var output = File.Create(destination))
+                    await input.CopyToAsync(output, ct);
+                var snapshotHash = await Sha256Async(destination, ct);
+                var sourceHash = await Sha256Async(source, ct);
+                if (string.Equals(snapshotHash, sourceHash, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+            catch (FileNotFoundException) when (attempt < 3) { }
+            catch (IOException) when (attempt < 3) { }
+            try { File.Delete(destination); } catch { }
+        }
+        throw new InvalidOperationException($"App-data file remained in motion during three snapshot attempts: {source}. No backup was published.");
     }
 
     private static IReadOnlyList<string> EnumerateRegularFiles(string root)
