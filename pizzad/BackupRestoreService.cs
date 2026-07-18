@@ -126,6 +126,16 @@ public sealed class BackupRestoreService
             archive.Dispose();
             await file.DisposeAsync();
 
+            Directory.CreateDirectory(verifyExtractRoot);
+            ZipFile.ExtractToDirectory(plainArchivePath, verifyExtractRoot);
+            var verifiedManifest = await ReadAndValidateManifestAsync(verifyExtractRoot, ct);
+            var checks = VerifyManifest(verifyExtractRoot, verifiedManifest);
+            if (checks.Any(check => !check.Ok))
+            {
+                var failed = checks.First(check => !check.Ok);
+                throw new InvalidOperationException($"Plain backup archive verification failed for {failed.Name}: {failed.Message}");
+            }
+
             for (var encryptionAttempt = 1; encryptionAttempt <= 2; encryptionAttempt++)
             {
                 try
@@ -141,15 +151,8 @@ public sealed class BackupRestoreService
                     try { File.Delete(verifyArchivePath); } catch { }
                 }
             }
-            Directory.CreateDirectory(verifyExtractRoot);
-            ZipFile.ExtractToDirectory(verifyArchivePath, verifyExtractRoot);
-            var verifiedManifest = await ReadAndValidateManifestAsync(verifyExtractRoot, ct);
-            var checks = VerifyManifest(verifyExtractRoot, verifiedManifest);
-            if (checks.Any(check => !check.Ok))
-            {
-                var failed = checks.First(check => !check.Ok);
-                throw new InvalidOperationException($"Backup integrity verification failed for {failed.Name}: {failed.Message}");
-            }
+            if (!string.Equals(await Sha256Async(plainArchivePath, ct), await Sha256Async(verifyArchivePath, ct), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Encrypted backup unlock did not reproduce the verified ZIP byte-for-byte. No backup was published.");
 
             File.Move(partialPath, path);
             return new BackupCreateResultDto(fileName, path, new FileInfo(path).Length, entries.Count, warnings, true);
@@ -581,9 +584,11 @@ public sealed class BackupRestoreService
                 checks.Add(new(entry.ArchivePath, false, "File missing from archive extraction."));
                 continue;
             }
-            var sizeOk = new FileInfo(path).Length == entry.Bytes;
-            var hashOk = string.Equals(Sha256(path), entry.Sha256, StringComparison.OrdinalIgnoreCase);
-            checks.Add(new(entry.ArchivePath, sizeOk && hashOk, sizeOk && hashOk ? "OK" : "Size or checksum mismatch."));
+            var actualBytes = new FileInfo(path).Length;
+            var actualHash = Sha256(path);
+            var sizeOk = actualBytes == entry.Bytes;
+            var hashOk = string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase);
+            checks.Add(new(entry.ArchivePath, sizeOk && hashOk, sizeOk && hashOk ? "OK" : $"Expected {entry.Bytes:N0} bytes / {entry.Sha256}; extracted {actualBytes:N0} bytes / {actualHash}."));
         }
         return checks;
     }
