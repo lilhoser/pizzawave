@@ -6,7 +6,8 @@ namespace pizzad;
 
 public static class EncryptedBackupArchive
 {
-    private static readonly byte[] Magic = Encoding.ASCII.GetBytes("PWBAK001");
+    private static readonly byte[] MagicV1 = Encoding.ASCII.GetBytes("PWBAK001");
+    private static readonly byte[] MagicV2 = Encoding.ASCII.GetBytes("PWBAK002");
     private const int SaltBytes = 16;
     private const int NoncePrefixBytes = 8;
     private const int TagBytes = 16;
@@ -22,9 +23,9 @@ public static class EncryptedBackupArchive
     {
         if (!File.Exists(path) || new FileInfo(path).Length < HeaderBytes)
             return false;
-        Span<byte> actual = stackalloc byte[Magic.Length];
+        Span<byte> actual = stackalloc byte[MagicV2.Length];
         using var stream = File.OpenRead(path);
-        return stream.Read(actual) == Magic.Length && actual.SequenceEqual(Magic);
+        return stream.Read(actual) == MagicV2.Length && (actual.SequenceEqual(MagicV1) || actual.SequenceEqual(MagicV2));
     }
 
     public static async Task EncryptFileAsync(string sourcePath, string destinationPath, string passphrase, CancellationToken ct)
@@ -33,7 +34,7 @@ public static class EncryptedBackupArchive
         var salt = RandomNumberGenerator.GetBytes(SaltBytes);
         var noncePrefix = RandomNumberGenerator.GetBytes(NoncePrefixBytes);
         var plaintextLength = new FileInfo(sourcePath).Length;
-        var header = BuildHeader(salt, noncePrefix, KdfIterations, ChunkBytes, plaintextLength);
+        var header = BuildHeader(MagicV2, salt, noncePrefix, KdfIterations, ChunkBytes, plaintextLength);
         var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, KdfIterations, HashAlgorithmName.SHA256, KeyBytes);
 
         try
@@ -41,7 +42,7 @@ public static class EncryptedBackupArchive
             await using var input = File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             await using var output = File.Create(destinationPath);
             await output.WriteAsync(header, ct);
-            using var aes = new AesGcm(key, TagBytes);
+            using var cipher = new ChaCha20Poly1305(key);
             var plaintext = new byte[ChunkBytes];
             var ciphertext = new byte[ChunkBytes];
             var tag = new byte[TagBytes];
@@ -54,7 +55,7 @@ public static class EncryptedBackupArchive
                     break;
                 var nonce = BuildNonce(noncePrefix, counter);
                 var aad = BuildAssociatedData(header, counter, read);
-                aes.Encrypt(nonce, plaintext.AsSpan(0, read), ciphertext.AsSpan(0, read), tag, aad);
+                cipher.Encrypt(nonce, plaintext.AsSpan(0, read), ciphertext.AsSpan(0, read), tag, aad);
                 await output.WriteAsync(ciphertext.AsMemory(0, read), ct);
                 await output.WriteAsync(tag, ct);
                 counter++;
@@ -80,7 +81,8 @@ public static class EncryptedBackupArchive
         try
         {
             await using var output = File.Create(destinationPath);
-            using var aes = new AesGcm(key, TagBytes);
+            using var aes = parsed.Version == 1 ? new AesGcm(key, TagBytes) : null;
+            using var chacha = parsed.Version == 2 ? new ChaCha20Poly1305(key) : null;
             var ciphertext = new byte[parsed.ChunkSize];
             var plaintext = new byte[parsed.ChunkSize];
             var tag = new byte[TagBytes];
@@ -96,7 +98,10 @@ public static class EncryptedBackupArchive
                 var aad = BuildAssociatedData(header, counter, count);
                 try
                 {
-                    aes.Decrypt(nonce, ciphertext.AsSpan(0, count), tag, plaintext.AsSpan(0, count), aad);
+                    if (chacha != null)
+                        chacha.Decrypt(nonce, ciphertext.AsSpan(0, count), tag, plaintext.AsSpan(0, count), aad);
+                    else
+                        aes!.Decrypt(nonce, ciphertext.AsSpan(0, count), tag, plaintext.AsSpan(0, count), aad);
                 }
                 catch (CryptographicException ex)
                 {
@@ -129,13 +134,13 @@ public static class EncryptedBackupArchive
             throw new InvalidOperationException("Backup passphrase confirmation does not match.");
     }
 
-    private static byte[] BuildHeader(byte[] salt, byte[] noncePrefix, int iterations, int chunkSize, long plaintextLength)
+    private static byte[] BuildHeader(byte[] magic, byte[] salt, byte[] noncePrefix, int iterations, int chunkSize, long plaintextLength)
     {
         var header = new byte[HeaderBytes];
-        Magic.CopyTo(header, 0);
-        salt.CopyTo(header, Magic.Length);
-        noncePrefix.CopyTo(header, Magic.Length + SaltBytes);
-        var offset = Magic.Length + SaltBytes + NoncePrefixBytes;
+        magic.CopyTo(header, 0);
+        salt.CopyTo(header, magic.Length);
+        noncePrefix.CopyTo(header, magic.Length + SaltBytes);
+        var offset = magic.Length + SaltBytes + NoncePrefixBytes;
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(offset, sizeof(int)), iterations);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(offset + sizeof(int), sizeof(int)), chunkSize);
         BinaryPrimitives.WriteInt64LittleEndian(header.AsSpan(offset + sizeof(int) * 2, sizeof(long)), plaintextLength);
@@ -144,17 +149,20 @@ public static class EncryptedBackupArchive
 
     private static ParsedHeader ParseHeader(byte[] header)
     {
-        if (!header.AsSpan(0, Magic.Length).SequenceEqual(Magic))
+        var version = header.AsSpan(0, MagicV2.Length).SequenceEqual(MagicV2)
+            ? 2
+            : header.AsSpan(0, MagicV1.Length).SequenceEqual(MagicV1) ? 1 : 0;
+        if (version == 0)
             throw new InvalidOperationException("Backup is not a supported encrypted PizzaWave archive.");
-        var salt = header.AsSpan(Magic.Length, SaltBytes).ToArray();
-        var noncePrefix = header.AsSpan(Magic.Length + SaltBytes, NoncePrefixBytes).ToArray();
-        var offset = Magic.Length + SaltBytes + NoncePrefixBytes;
+        var salt = header.AsSpan(MagicV2.Length, SaltBytes).ToArray();
+        var noncePrefix = header.AsSpan(MagicV2.Length + SaltBytes, NoncePrefixBytes).ToArray();
+        var offset = MagicV2.Length + SaltBytes + NoncePrefixBytes;
         var iterations = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(offset, sizeof(int)));
         var chunkSize = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(offset + sizeof(int), sizeof(int)));
         var plaintextLength = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(offset + sizeof(int) * 2, sizeof(long)));
         if (iterations < 100_000 || iterations > 10_000_000 || chunkSize < 64 * 1024 || chunkSize > 16 * 1024 * 1024 || plaintextLength < 0)
             throw new InvalidOperationException("Encrypted backup header is invalid.");
-        return new ParsedHeader(salt, noncePrefix, iterations, chunkSize, plaintextLength);
+        return new ParsedHeader(version, salt, noncePrefix, iterations, chunkSize, plaintextLength);
     }
 
     private static byte[] BuildNonce(byte[] prefix, uint counter)
@@ -199,5 +207,5 @@ public static class EncryptedBackupArchive
         }
     }
 
-    private sealed record ParsedHeader(byte[] Salt, byte[] NoncePrefix, int Iterations, int ChunkSize, long PlaintextLength);
+    private sealed record ParsedHeader(int Version, byte[] Salt, byte[] NoncePrefix, int Iterations, int ChunkSize, long PlaintextLength);
 }
