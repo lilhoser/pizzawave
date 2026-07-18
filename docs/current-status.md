@@ -86,6 +86,9 @@ Package 5 or Package 8 worktree directories.
   its initial center and span-based zoom. This reset is driven only by the panel
   close action, so background dashboard refreshes continue preserving the
   operator's current viewport.
+- Incident-map node badges count distinct incidents only. Recorded/source-call
+  volume remains supporting detail and is not added to an incident grouping's
+  visible badge count; alert-map nodes retain their non-incident fallback.
 - Any future Package 7 task must begin from its documented handoff, deliver a
   complete operator-visible slice before deployment, preserve live capture
   priority, and avoid restarting Trunk Recorder as a side effect.

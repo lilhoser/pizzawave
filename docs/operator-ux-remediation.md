@@ -812,6 +812,7 @@ Status: implemented, deployed, and live-verified; operator acceptance pending
   prior detailed default map scale.
 - [x] Reset the map to its initial center and zoom when the operator closes a
   location incident or alert detail panel.
+- [x] Count distinct incidents, not source calls, in incident-map node badges.
 - [x] Update operator and architecture documentation.
 - [x] Run the production frontend build, all 516 tests, RPI health checks, and
   live Dashboard map/browser verification.

@@ -214,25 +214,28 @@ function hasCoordinates(row: LocationHeat) {
 
 function clusterNodeCount(rows: LocationHeat[], incidents: Incident[]) {
   const incidentIds = new Set(rows.flatMap(row => (row.incidentLinks ?? []).map(link => link.incidentId)));
+  if (incidentIds.size)
+    return incidentIds.size;
   const linkedCallIds = new Set(incidents.filter(incident => incidentIds.has(incident.id)).flatMap(incident => incident.calls.map(call => call.callId)));
   const standaloneCallIds = new Set(rows.flatMap(row => row.callIds ?? []).filter(callId => !linkedCallIds.has(callId)));
-  return incidentIds.size + standaloneCallIds.size || rows.reduce((sum, row) => sum + row.count, 0);
+  return standaloneCallIds.size || rows.reduce((sum, row) => sum + row.count, 0);
 }
 
 function clusterNodeCountLabel(rows: LocationHeat[], incidents: Incident[]) {
   const incidentIds = new Set(rows.flatMap(row => (row.incidentLinks ?? []).map(link => link.incidentId)));
+  if (incidentIds.size) return `${incidentIds.size} incident${incidentIds.size === 1 ? "" : "s"}`;
   const linkedCallIds = new Set(incidents.filter(incident => incidentIds.has(incident.id)).flatMap(incident => incident.calls.map(call => call.callId)));
   const standaloneCallIds = new Set(rows.flatMap(row => row.callIds ?? []).filter(callId => !linkedCallIds.has(callId)));
-  if (incidentIds.size && standaloneCallIds.size) return `${incidentIds.size} incident${incidentIds.size === 1 ? "" : "s"}, ${standaloneCallIds.size} call${standaloneCallIds.size === 1 ? "" : "s"}`;
-  if (incidentIds.size) return `${incidentIds.size} incident${incidentIds.size === 1 ? "" : "s"}`;
   const count = standaloneCallIds.size || rows.reduce((sum, row) => sum + row.count, 0);
   return `${count} call${count === 1 ? "" : "s"}`;
 }
 
 function locationNodeCount(row: LocationHeat, incidents: Incident[]) {
   const incidentCount = row.incidentLinks?.length ?? 0;
+  if (incidentCount)
+    return incidentCount;
   const standaloneCount = standaloneLocationCallIds(row, incidents).length;
-  return incidentCount + standaloneCount || row.count;
+  return standaloneCount || row.count;
 }
 
 function standaloneLocationCallIds(row: LocationHeat, incidents: Incident[]) {
