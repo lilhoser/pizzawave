@@ -1,6 +1,6 @@
 # PizzaWave Current Status
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.
@@ -31,12 +31,14 @@ Package 5 or Package 8 worktree directories.
   implemented or deployed.
 - Package 10 Recovery Workflows is implemented, deployed to the RPI,
   nondestructively live-verified, and operator-accepted.
-- Package 11 Cleanup is implemented, deployed to the RPI, and live-verified.
+- Package 11 Cleanup is implemented, deployed to the RPI, live-verified, and
+  operator-accepted.
   The standalone TR editor routes and unreachable UI, obsolete RF UI, and other
   dead top-level frontend code are removed. The Dashboard map is now an owned,
   lazy-loaded React Leaflet feature instead of a hand-built tile and interaction
-  engine. All 522 tests and the production frontend build pass; final operator
-  acceptance is the only remaining remediation closeout step.
+  engine. All 522 tests and the production frontend build pass. The subsequent
+  map aggregation, persistent RF status, and RF KPI color regressions were also
+  corrected, deployed, and live-verified before operator acceptance.
 - Package 9 Temporal Pattern Analysis is complete, deployed to the RPI, live-
   verified, and operator-accepted. Its accepted closure scope is the RF-first
   temporal-finding vertical plus the shared Recommendations lifecycle and UX:

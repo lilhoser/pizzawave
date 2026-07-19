@@ -1,6 +1,6 @@
 # Operator UX Remediation
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 This is the canonical execution tracker for the operator-facing PizzaWave
 architecture review. Read it before beginning work and update it before ending
@@ -8,19 +8,19 @@ work so that progress does not depend on conversation history.
 
 ## Current Position
 
-- Active package: 11 - Cleanup and final regression.
+- Active package: none; the operator-remediation sequence is closed.
 - Current milestone: Package 11 cleanup is implemented, deployed to the RPI,
-  and live-verified. Operator acceptance remains. Package 7 remains a standalone
-  outstanding feature outside this closeout sequence.
-- Continuation: obtain Package 11 operator acceptance, then merge it to `main`
-  and close the operator-remediation sequence.
-- Last deployed code state: Package 11 dead-code and retired-editor removal plus
-  an owned, lazy-loaded React Leaflet Dashboard map, deployed and verified on
-  the RPI 2026-07-18.
+  live-verified, and operator-accepted. Package 7 remains a standalone
+  outstanding feature outside this closed sequence.
+- Continuation: none for this remediation sequence.
+- Last deployed code state: Package 11 dead-code and retired-editor removal,
+  the owned React Leaflet Dashboard map and its aggregation corrections, the
+  persistent live RF footer, and restored semantic RF KPI colors, deployed and
+  verified on the RPI through 2026-07-19.
 - Package 9 final implementation commit before documentation closure: `2b6caa4`
-- Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, 9, and 10 accepted
-- Next action: obtain Package 11 operator acceptance. Do not restart Trunk
-  Recorder unless the operator explicitly requests it.
+- Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, 9, 10, and 11 accepted
+- Next action: none. Do not restart Trunk Recorder unless the operator
+  explicitly requests it.
 
 ## Package 5 Final Handoff
 
@@ -799,7 +799,7 @@ Accepted design:
 
 ### 11. Cleanup
 
-Status: implemented, deployed, and live-verified; operator acceptance pending
+Status: complete, deployed, live-verified, and operator-accepted
 
 - [x] Split the Dashboard map into an owned, lazy-loaded feature boundary.
 - [x] Confirm RSW is already absent; remove the standalone TR-editor routes and
@@ -820,7 +820,7 @@ Status: implemented, deployed, and live-verified; operator acceptance pending
 - [x] Update operator and architecture documentation.
 - [x] Run the production frontend build, all 522 tests, RPI health checks, and
   live Dashboard map/browser verification.
-- [ ] Obtain operator acceptance.
+- [x] Obtain operator acceptance.
 
 ## Decision Log
 
