@@ -1,9 +1,110 @@
 namespace pizzad.Tests;
 
 using System.Reflection;
+using System.Text.Json;
 
 public sealed class SiteSetupRfSelectionTests
 {
+    [Fact]
+    public void BuildSiteSetupRequest_PutsSelectedChannelFirstWithoutDiscardingAlternates()
+    {
+        var desired = new SiteSetupConfig
+        {
+            Systems =
+            [
+                new RfSurveySystemDto(
+                    "etv-raymond-hinds",
+                    "ETV Raymond Hinds",
+                    [773_031_250, 773_281_250, 773_531_250, 773_781_250],
+                    [])
+            ],
+            RfSelections = [new SiteSetupRfSelection { FrequencyHz = 773_781_250, SourceIndex = 0 }]
+        };
+
+        var method = typeof(RfSurveyService).GetMethod("BuildSiteSetupRequest", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "BuildSiteSetupRequest");
+        var request = (RfSurveyCreateRequest)(method.Invoke(null, [desired])
+            ?? throw new InvalidOperationException("BuildSiteSetupRequest returned null."));
+
+        var system = Assert.Single(request.SystemDefinitions!);
+        Assert.Equal([773_781_250, 773_031_250, 773_281_250, 773_531_250], system.ControlChannelsHz);
+    }
+
+    [Fact]
+    public void BuildSourcePlanSystems_PrefersProvenChannelsAndRetainsAuthoritativeAlternates()
+    {
+        var profile = new RfSurveyProfileDto
+        {
+            Systems =
+            [
+                new RfSurveySystemDto(
+                    "etv-raymond-hinds",
+                    "ETV Raymond Hinds",
+                    [773_031_250, 773_281_250, 773_531_250, 773_781_250],
+                    [])
+            ]
+        };
+        var experiment = new RfSurveyExperimentDto
+        {
+            Type = "rf_validation_sweep",
+            CreatedAtUtc = DateTime.UtcNow,
+            EvidenceJson = JsonSerializer.Serialize(new
+            {
+                candidates = new object[]
+                {
+                    new { systemShortName = "etv-raymond-hinds", controlChannelHz = 773_781_250L, rfStatus = "measured", metricsStatus = "passed", snrDb = 18.0 },
+                    new { systemShortName = "etv-raymond-hinds", controlChannelHz = 773_281_250L, rfStatus = "measured", metricsStatus = "passed", snrDb = 12.0 },
+                    new { systemShortName = "etv-raymond-hinds", controlChannelHz = 773_031_250L, rfStatus = "measured", metricsStatus = "failed", snrDb = 20.0 }
+                }
+            }, EngineConfig.JsonOptions())
+        };
+        var warnings = new List<string>();
+        var method = typeof(RfSurveyService).GetMethod("BuildSourcePlanSystems", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "BuildSourcePlanSystems");
+
+        var result = (IReadOnlyList<RfSurveySystemDto>)(method.Invoke(null, [profile, new[] { "etv-raymond-hinds" }, new[] { experiment }, warnings])
+            ?? throw new InvalidOperationException("BuildSourcePlanSystems returned null."));
+
+        var system = Assert.Single(result);
+        Assert.Equal([773_781_250, 773_281_250, 773_031_250, 773_531_250], system.ControlChannelsHz);
+        Assert.Contains(warnings, warning => warning.Contains("retained 2 authoritative alternate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildPendingChanges_DetectsPerSiteChannelDriftEvenWhenAggregateMatches()
+    {
+        var desired = new SiteSetupConfig
+        {
+            Systems =
+            [
+                new RfSurveySystemDto("site-a", "Site A", [100, 200], []),
+                new RfSurveySystemDto("site-b", "Site B", [300], [])
+            ],
+            SourcePlanSystemShortNames = ["site-a", "site-b"]
+        };
+        var applied = new SiteSetupAppliedConfigDto(
+            "config.json",
+            true,
+            "hash",
+            DateTime.UtcNow,
+            ["site-a", "site-b"],
+            [100, 200, 300],
+            [],
+            [
+                new SiteSetupAppliedSystemDto("site-a", [100]),
+                new SiteSetupAppliedSystemDto("site-b", [200, 300])
+            ]);
+        var method = typeof(SiteSetupService).GetMethod("BuildControlChannelPendingChanges", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(SiteSetupService).FullName, "BuildControlChannelPendingChanges");
+
+        var changes = (IReadOnlyList<SiteSetupPendingChangeDto>)(method.Invoke(null, [desired, applied, new[] { "site-a", "site-b" }])
+            ?? throw new InvalidOperationException("BuildControlChannelPendingChanges returned null."));
+
+        Assert.Equal(2, changes.Count(change => change.Category == "Control Channels"));
+        Assert.Contains(changes, change => change.Summary.StartsWith("Site A:", StringComparison.Ordinal));
+        Assert.Contains(changes, change => change.Summary.StartsWith("Site B:", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void NormalizeRfSelections_KeepsMeasurementsBoundToDifferentSources()
     {

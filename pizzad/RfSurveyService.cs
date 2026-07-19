@@ -518,7 +518,7 @@ public sealed class RfSurveyService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var systems = ApplyExplicitRfSelections(desired.Systems, desired.RfSelections);
+        var systems = OrderControlChannelsByRfSelections(desired.Systems, desired.RfSelections);
         return new RfSurveyCreateRequest(
             SystemShortName: systemNames.FirstOrDefault(),
             SiteLabel: string.IsNullOrWhiteSpace(desired.SiteLabel) ? "Site Setup" : desired.SiteLabel,
@@ -538,7 +538,7 @@ public sealed class RfSurveyService
             SourceAssignments: desired.SourceAssignments);
     }
 
-    private static IReadOnlyList<RfSurveySystemDto> ApplyExplicitRfSelections(
+    private static IReadOnlyList<RfSurveySystemDto> OrderControlChannelsByRfSelections(
         IReadOnlyList<RfSurveySystemDto> systems,
         IReadOnlyList<SiteSetupRfSelection> selections)
     {
@@ -551,14 +551,13 @@ public sealed class RfSurveyService
 
         return systems.Select(system =>
         {
-            var chosenControlChannels = system.ControlChannelsHz
-                .Where(selected.Contains)
+            var orderedControlChannels = system.ControlChannelsHz
+                .Where(frequency => frequency > 0)
                 .Distinct()
-                .Order()
+                .OrderBy(frequency => selected.Contains(frequency) ? 0 : 1)
+                .ThenBy(frequency => frequency)
                 .ToList();
-            return chosenControlChannels.Count > 0
-                ? system with { ControlChannelsHz = chosenControlChannels }
-                : system;
+            return system with { ControlChannelsHz = orderedControlChannels };
         }).ToList();
     }
 
@@ -6992,14 +6991,30 @@ public sealed class RfSurveyService
             var passing = siteCandidates
                 .Where(IsMonitorableRfCandidate)
                 .OrderByDescending(ScoreRfValidationCandidate)
-                .FirstOrDefault();
-            if (passing == null)
+                .ToList();
+            if (passing.Count == 0)
             {
                 warnings.Add($"RF Sweep did not prove a usable control channel for {system.SiteLabel}; Config Draft will not allocate source bandwidth to that site.");
                 continue;
             }
 
-            planned.Add(system with { ControlChannelsHz = [passing.ControlChannelHz] });
+            var provenControlChannels = passing
+                .GroupBy(candidate => candidate.ControlChannelHz)
+                .Select(group => group.OrderByDescending(ScoreRfValidationCandidate).First())
+                .OrderByDescending(ScoreRfValidationCandidate)
+                .Select(candidate => candidate.ControlChannelHz)
+                .Where(frequency => frequency > 0)
+                .Distinct()
+                .ToList();
+            var recoveryControlChannels = provenControlChannels
+                .Concat(system.ControlChannelsHz.Where(frequency => !provenControlChannels.Contains(frequency)))
+                .Where(frequency => frequency > 0)
+                .Distinct()
+                .ToList();
+            var unprovenCount = recoveryControlChannels.Count - provenControlChannels.Count;
+            if (unprovenCount > 0)
+                warnings.Add($"{system.SiteLabel}: retained {unprovenCount} authoritative alternate control channel(s) for cold-start recovery; {provenControlChannels.Count} channel(s) currently passed live decode validation.");
+            planned.Add(system with { ControlChannelsHz = recoveryControlChannels });
         }
         return planned;
     }
@@ -7282,7 +7297,7 @@ public sealed class RfSurveyService
         {
             ShortName = definition.ShortName.Trim(),
             SiteLabel = string.IsNullOrWhiteSpace(definition.SiteLabel) ? definition.ShortName.Trim() : definition.SiteLabel.Trim(),
-            ControlChannelsHz = definition.ControlChannelsHz.Where(value => value > 0).Distinct().Order().ToList(),
+            ControlChannelsHz = definition.ControlChannelsHz.Where(value => value > 0).Distinct().ToList(),
             VoiceFrequenciesHz = definition.VoiceFrequenciesHz.Where(value => value > 0).Distinct().Order().ToList()
         })
         .GroupBy(definition => definition.ShortName, StringComparer.OrdinalIgnoreCase)

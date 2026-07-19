@@ -416,12 +416,17 @@ public sealed class SiteSetupService
             return configured;
         }
 
-        var seededSystems = applied.SystemShortNames
-            .Select(name => new RfSurveySystemDto(
-                name,
-                name,
-                applied.ControlChannelsHz,
-                []))
+        var seededSystems = (applied.Systems is { Count: > 0 }
+                ? applied.Systems.Select(system => new RfSurveySystemDto(
+                    system.ShortName,
+                    system.ShortName,
+                    system.ControlChannelsHz,
+                    []))
+                : applied.SystemShortNames.Select(name => new RfSurveySystemDto(
+                    name,
+                    name,
+                    applied.SystemShortNames.Count == 1 ? applied.ControlChannelsHz : [],
+                    [])))
             .ToList();
         configured.SystemShortNames = applied.SystemShortNames.ToList();
         configured.SourcePlanSystemShortNames = applied.SystemShortNames.ToList();
@@ -446,6 +451,7 @@ public sealed class SiteSetupService
         var root = doc.RootElement;
         var systems = new List<string>();
         var controlChannels = new List<long>();
+        var appliedSystems = new List<SiteSetupAppliedSystemDto>();
         if (root.TryGetProperty("systems", out var systemsElement) && systemsElement.ValueKind == JsonValueKind.Array)
         {
             foreach (var system in systemsElement.EnumerateArray())
@@ -454,8 +460,12 @@ public sealed class SiteSetupService
                     ? shortNameElement.GetString() ?? string.Empty
                     : string.Empty;
                 if (!string.IsNullOrWhiteSpace(shortName))
+                {
                     systems.Add(shortName.Trim());
-                controlChannels.AddRange(ReadFrequencyArray(system, "control_channels"));
+                    var systemControlChannels = ReadFrequencyArray(system, "control_channels");
+                    controlChannels.AddRange(systemControlChannels);
+                    appliedSystems.Add(new SiteSetupAppliedSystemDto(shortName.Trim(), systemControlChannels));
+                }
             }
         }
 
@@ -486,7 +496,8 @@ public sealed class SiteSetupService
             info.LastWriteTimeUtc,
             systems.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList(),
             controlChannels.Distinct().Order().ToList(),
-            sources);
+            sources,
+            appliedSystems);
     }
 
     private async Task<List<RfSurveySystemDto>> BuildAppliedSystemDefinitionsAsync(SiteSetupAppliedConfigDto applied, SiteSetupConfig previous, CancellationToken ct)
@@ -542,16 +553,7 @@ public sealed class SiteSetupService
         if (!SetEquals(desiredSystems, applied.SystemShortNames))
             rows.Add(new SiteSetupPendingChangeDto("Systems/Sites", $"Desired systems ({desiredSystems.Count}) differ from applied systems ({applied.SystemShortNames.Count})."));
 
-        var desiredControls = desired.RfSelections.Count > 0
-            ? desired.RfSelections.Select(selection => selection.FrequencyHz).Where(value => value > 0).Distinct().Order().ToList()
-            : desired.Systems
-                .Where(system => desiredSystems.Any(name => string.Equals(name, system.ShortName, StringComparison.OrdinalIgnoreCase)))
-                .SelectMany(system => system.ControlChannelsHz)
-                .Distinct()
-                .Order()
-                .ToList();
-        if (desiredControls.Count > 0 && !desiredControls.SequenceEqual(applied.ControlChannelsHz))
-            rows.Add(new SiteSetupPendingChangeDto("Control Channels", $"Desired CCs ({desiredControls.Count}) differ from applied CCs ({applied.ControlChannelsHz.Count})."));
+        rows.AddRange(BuildControlChannelPendingChanges(desired, applied, desiredSystems));
 
         if (desired.Sources.Count > 0 && !string.Equals(SourceConfigSummary(desired.Sources), AppliedSourceConfigSummary(applied.Sources), StringComparison.Ordinal))
             rows.Add(new SiteSetupPendingChangeDto("TR Sources", $"Desired sources ({desired.Sources.Count}) differ from applied sources ({applied.Sources.Count})."));
@@ -577,6 +579,32 @@ public sealed class SiteSetupService
             !string.Equals(desired.LastAppliedConfigHash, applied.ConfigHash, StringComparison.OrdinalIgnoreCase))
             rows.Add(new SiteSetupPendingChangeDto("Applied Config", "Live TR config has changed since Site Setup last applied it."));
 
+        return rows;
+    }
+
+    private static IReadOnlyList<SiteSetupPendingChangeDto> BuildControlChannelPendingChanges(
+        SiteSetupConfig desired,
+        SiteSetupAppliedConfigDto applied,
+        IReadOnlyList<string> desiredSystems)
+    {
+        var rows = new List<SiteSetupPendingChangeDto>();
+        var appliedSystems = applied.Systems ?? [];
+        foreach (var desiredSystem in desired.Systems
+            .Where(system => desiredSystems.Any(name => string.Equals(name, system.ShortName, StringComparison.OrdinalIgnoreCase))))
+        {
+            var desiredControls = desiredSystem.ControlChannelsHz.Where(value => value > 0).Distinct().Order().ToList();
+            if (desiredControls.Count == 0)
+                continue;
+            var appliedSystem = appliedSystems.FirstOrDefault(system =>
+                string.Equals(system.ShortName, desiredSystem.ShortName, StringComparison.OrdinalIgnoreCase));
+            var actualControls = (appliedSystem?.ControlChannelsHz ??
+                    (appliedSystems.Count == 0 && desiredSystems.Count == 1 ? applied.ControlChannelsHz : []))
+                .Where(value => value > 0).Distinct().Order().ToList();
+            if (!desiredControls.SequenceEqual(actualControls))
+                rows.Add(new SiteSetupPendingChangeDto(
+                    "Control Channels",
+                    $"{desiredSystem.SiteLabel}: {desiredControls.Count} known control channel(s), {actualControls.Count} present in the active config."));
+        }
         return rows;
     }
 

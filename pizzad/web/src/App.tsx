@@ -8989,10 +8989,16 @@ function systemsWithValidatedControlChannels(systems: RfSurveySystem[], experime
   const bestBySystem = new Map(groups.map(group => [group.key, group.best]));
   const hadCandidates = new Set(groups.filter(group => group.candidates.length > 0).map(group => group.key));
   return systems.map(system => {
+    const group = groups.find(row => row.key === system.shortName);
     const best = bestBySystem.get(system.shortName);
     if (best && rfValidationCandidatePassed(best)) {
-      const cc = Math.round(Number(best.controlChannelHz));
-      return { ...system, controlChannelsHz: cc > 0 ? [cc] : [] };
+      const approved = (group?.candidates ?? [])
+        .filter(rfValidationCandidatePassed)
+        .sort((a, b) => rfValidationCandidateReadinessScore(b) - rfValidationCandidateReadinessScore(a))
+        .map(candidate => Math.round(Number(candidate.controlChannelHz)))
+        .filter((frequency, index, values) => frequency > 0 && values.indexOf(frequency) === index);
+      const recovery = [...approved, ...system.controlChannelsHz.filter(frequency => !approved.includes(Math.round(frequency)))];
+      return { ...system, controlChannelsHz: recovery };
     }
     return hadCandidates.has(system.shortName)
       ? { ...system, controlChannelsHz: [] }

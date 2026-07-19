@@ -1404,7 +1404,12 @@ public sealed record SiteSetupAppliedConfigDto(
     DateTime? ConfigUpdatedAtUtc,
     IReadOnlyList<string> SystemShortNames,
     IReadOnlyList<long> ControlChannelsHz,
-    IReadOnlyList<SiteSetupAppliedSourceDto> Sources);
+    IReadOnlyList<SiteSetupAppliedSourceDto> Sources,
+    IReadOnlyList<SiteSetupAppliedSystemDto>? Systems = null);
+
+public sealed record SiteSetupAppliedSystemDto(
+    string ShortName,
+    IReadOnlyList<long> ControlChannelsHz);
 
 public sealed record SiteSetupAppliedSourceDto(
     int Index,
