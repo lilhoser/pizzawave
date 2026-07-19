@@ -1,6 +1,6 @@
 # Passive RF Telemetry Contract
 
-Status: implemented; pending OT-only runtime validation
+Status: implemented and deployed to OT; passive event validation in progress
 
 Implementation checkpoints:
 
@@ -8,7 +8,23 @@ Implementation checkpoints:
 - callstream `codex/rf-telemetry` at `1cdd5c4`.
 - PizzaWave configuration and tests are on `codex/rf-telemetry`.
 - Both changed C++ translation units compile on OT in an isolated temporary
-  tree. All 529 PizzaWave tests pass. No live host has been changed.
+  tree. All 529 PizzaWave tests pass.
+
+## OT Deployment Checkpoint
+
+Deployed 2026-07-19 at 19:13 EDT with a backup at
+`/var/backups/pizzawave/rf-telemetry-20260719T231317Z`.
+
+- PizzaWave `main`: `de90c93`; backend hash `5ed6df2b...`.
+- Trunk Recorder SHA-256: `877232c7a44e62abadec1f357beed13cc44ecc81b2d483aac89326444a3a1982`.
+- callstream SHA-256: `72ea0030c23456b511e0678215176fc668e22ed722e5593fe97f0056f57681cb`.
+- Eighteen initial samples parsed successfully: six for each of the three OT
+  systems, with an exact 15-second cadence.
+- Live call delivery, ingest, and transcription remained healthy with no
+  queue backlog or dropped calls.
+- No retune or reacquisition occurred naturally during the initial window.
+  Leave telemetry enabled and validate those event types from the first
+  natural occurrence; do not induce an RF interruption solely for validation.
 
 Trunk Recorder writes control-channel retunes as single-line JSON records with
 the `TR_RF` prefix. PizzaWave's callstream plugin uses TR's existing plugin API
@@ -35,7 +51,6 @@ provide trustworthy values for them.
 
 ## Initial Validation
 
-Build the matching Trunk Recorder and callstream branches, enable
-`rf_telemetry`, and run them on OT first. Verify normal samples, one supervised
-retune, and one reacquisition event against the existing human-readable TR log.
-Do not promote to RPI or add PizzaWave persistence until the OT evidence agrees.
+Continue observing OT. Compare the first natural retune and reacquisition event
+with the existing human-readable TR log. Do not promote to RPI or add PizzaWave
+persistence until that evidence agrees.

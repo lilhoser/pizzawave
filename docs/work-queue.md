@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 19:00 EDT
+Last reconciled: 2026-07-19 19:16 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -11,20 +11,24 @@ read-only, but must not deploy.
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
 | RPI (`sdr1861`) | `main` at `99adf8a` | `96594b14...` | `23672a49...` | Healthy |
-| OT (`omicrontheta`) | `09bffda` | `097c740a...` | `62e684c5...` | Healthy, eight commits behind `main` |
+| OT (`omicrontheta`) | `main` at `de90c93` | `5ed6df2b...` | `23672a49...` | Healthy; passive RF telemetry enabled |
 
-The hosts do **not** currently run the same PizzaWave build. Neither host runs
-the experimental Trunk Recorder retune-grace binary.
+The hosts now share the same web build, but RPI's PizzaWave backend remains at
+the earlier `99adf8a` state. Neither host runs the experimental Trunk Recorder
+retune-grace binary. Only OT runs the passive RF telemetry build.
 
 ## Active
 
-- OT-only validation of passive RF telemetry before deployment elsewhere:
+- Complete OT validation of passive RF telemetry before deployment elsewhere:
   - Trunk Recorder `codex/rf-telemetry` at `8318dfb` emits retune events;
   - callstream `codex/rf-telemetry` at `1cdd5c4` emits periodic samples and
     reacquisition events;
   - PizzaWave config generation enables the 15-second sample stream.
-  Both C++ objects compile on OT in an isolated temporary tree and all 529
-  PizzaWave tests pass. Nothing from this item has been deployed.
+  The matching artifacts were deployed to OT at 2026-07-19 19:13 EDT. All
+  three configured systems emit valid samples at exact 15-second intervals;
+  TR, callstream, PizzaWave ingest, and transcription remained healthy. No
+  natural retune or reacquisition occurred in the initial observation window,
+  so those two event types remain pending passive validation.
 
 ## Pending
 
