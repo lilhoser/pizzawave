@@ -166,6 +166,26 @@ def completion_request(
         },
     }
     request_bytes = json.dumps(request_document, separators=(",", ":")).encode("utf-8")
+    try:
+        with urllib.request.urlopen(f"{base_url.rstrip('/')}/models", timeout=10) as response:
+            advertised_models = json.loads(response.read()).get("data", [])
+        advertised_model_ids = {item.get("id") for item in advertised_models}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return {
+            "duration_milliseconds": 0,
+            "request_sha256": sha256_bytes(request_bytes),
+            "request_error": f"model preflight failed: {exc}",
+            "response": None,
+            "response_content": "",
+        }
+    if model not in advertised_model_ids:
+        return {
+            "duration_milliseconds": 0,
+            "request_sha256": sha256_bytes(request_bytes),
+            "request_error": f"requested model is not advertised by the endpoint: {model}",
+            "response": None,
+            "response_content": "",
+        }
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
         data=request_bytes,
@@ -177,7 +197,10 @@ def completion_request(
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             response_bytes = response.read()
         response_document = json.loads(response_bytes)
-        error = ""
+        response_model = response_document.get("model")
+        error = "" if response_model == model else (
+            f"response model '{response_model}' does not match requested model '{model}'"
+        )
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         response_document = None
         error = str(exc)
@@ -224,6 +247,9 @@ def validate_provenance(
 
 
 def parse_content(call: dict[str, Any], owner: str, errors: list[str]) -> Any:
+    if call["request_error"]:
+        errors.append(f"{owner} request failed: {call['request_error']}")
+        return None
     content = call["response_content"]
     if not content:
         errors.append(f"{owner} response content is empty")

@@ -300,12 +300,12 @@ obvious wrong phrases on several calls and a runaway repetition of `7.` on
 `item-09`, which consumed 7.08 seconds by itself. Aaron did not review Voxtral
 blindly, so this comparison is diagnostic rather than a new acceptance count.
 
-Voxtral is eligible only as another transcription candidate. It has not earned
-single-transcript authority or a production recommendation. Its Ventax
-throughput does not establish Paxan capacity, and its roughly 9.6 GB footprint
-cannot coexist with Paxan's observed 22.3 GB production LLM residency on a
-24 GB GPU. Any Paxan trial must explicitly measure model switching or a
-different deployment topology rather than assume simultaneous residency.
+Voxtral is rejected as a production candidate for this pipeline. It did not
+show an advantage on the difficult clips, produced obvious errors and runaway
+repetition, and its roughly 9.6 GB footprint cannot coexist with Paxan's
+observed 22.3 GB production LLM residency on a 24 GB GPU. Its correct sparse
+transcription remains evidence that the stored `blow this city` phrase was bad,
+not evidence for adopting Voxtral.
 
 The sparse artifact SHA-256 is
 `4440E1B51535FE7F578564F22105B5CDA8D2B9D2CAF07788D9BCFC99E7AC4936`.
@@ -315,11 +315,12 @@ Both are stored under
 `C:\projects\pizzawave-incident-experiment-20260717` and are reproducible with
 [`scripts/run_incident_direct_audio_bakeoff.py`](../scripts/run_incident_direct_audio_bakeoff.py).
 
-A four-candidate supplemental blind package is ready under
+A four-candidate supplemental package was generated under
 `C:\projects\pizzawave-incident-experiment-20260717\asr-human-review-voxtral-v1`.
-It contains the same 18 audio clips, with stored, Whisper, Parakeet, and Voxtral
-candidate identities independently hidden for each item. The distributable ZIP
-excludes the answer key and has SHA-256
+It reused the same 18 clips already reviewed by Aaron. Repeating that listening
+exercise would not create an independent review and is not required. The
+artifact is retained only for reproducibility. Its distributable ZIP excludes
+the answer key and has SHA-256
 `14A3FB70A4521F9D7D2A8EC8EAF797D6866A56731258FB7DB83040C261D11518`.
 Its review package SHA-256 is
 `491D5D8A917DC17B83D488B3889B4C5F0317B4CBD167DDA063E2F83F61DB2F2C`.
@@ -350,17 +351,61 @@ Candidate retrieval may reduce the comparisons required, but retrieval scores,
 time proximity, metadata, and embeddings remain routing aids rather than proof
 of incident membership.
 
+### Pairwise observation-relationship gate
+
+The next contract compares exactly two explicitly supplied observations. It can
+return possible relationships, counterevidence, and unresolved questions, but
+has no event identifier, incident membership, event category, or persistence
+operation. Every relationship statement must cite exact text from both
+observations.
+
+Two development pairs were selected without using legacy incident decisions as
+truth:
+
+- `call:25113` / `call:25115` is the sparse disagreement followed by a nearly
+  empty observation. It is a negative falsification case.
+- `call:22385` / `call:22395` was selected by high transcript similarity within
+  five minutes. Both contain independently transcribed instructions about
+  removing a girl or other occupant from the back of a car while vehicles are
+  searched. It is a plausible positive case, not adjudicated ground truth.
+
+Ventax Qwen correctly returned no possible relationship for the negative pair,
+but invented `route or delivery` while explaining counterevidence. Its critic
+incorrectly declared the output fully grounded. The proposer/critic sequence
+took 40.4 seconds.
+
+The first positive-pair request to the Ventax alias failed with HTTP 500 and the
+local model disappeared. A retry silently fell through LM Link to Paxan's Q8
+production model. That response is excluded from model comparison. It did find
+the shared vehicle/occupant instruction, but altered an exact quote and invented
+confident counterevidence about differing ownership, so it failed the contract
+anyway.
+
+All experiment runners now require the requested model alias to be advertised
+immediately before every call and reject any response whose model identity does
+not exactly match. This prevents a disappeared experiment model from silently
+routing to Paxan. No further relationship-model calls should use the shared LM
+Link endpoint; the next model run requires an isolated Ventax endpoint or a
+standalone inference runtime.
+
+Pairwise comparison remains useful scope control, but it has not earned
+semantic authority. The valid negative artifact SHA-256 is
+`D7C84F3658227A829FC7BBEA7B22B8085D550531BCEA9A5C521F668EE93BC7EF`.
+The positive local-runtime failure and excluded fallback artifacts have hashes
+`DE4C27EFAECAA8B4772F4DA1D6D950FB164BDB3FC9BEC613A568930364159AB4`
+and
+`3E46A37B599041111E37819C317DEF7259A82717D8D14B16482488EEA8DC1723`.
+
 ## Next gates
 
 - Define a compact human adjudication worksheet for source-grounded claims,
   relationship evidence, missed events, false events, over-merges, and splits.
 - Select representative development cases from the already-open development
   corpus without inspecting held-out data.
-- Extend the blind listening package with Voxtral as a fourth transcription
-  candidate if another human review pass is available; do not infer acceptance
-  from text similarity alone.
-- If Voxtral remains competitive after blind review, measure transcription-only
-  load, switching, queue recovery, and concurrent production-LLM impact on Paxan.
+- Do not spend additional review or Paxan capacity on Voxtral for this design.
 - Test proposer/critic separation on those adjudicated cases.
+- Rerun the negative and plausible-positive relationship pairs through an
+  isolated non-production model runtime; require both abstention on the
+  negative case and grounded relationship evidence on the positive case.
 - Freeze quantitative acceptance gates before any held-out evaluation.
 - Keep all results in shadow artifacts; do not write live incident state.

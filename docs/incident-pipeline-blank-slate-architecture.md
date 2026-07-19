@@ -176,7 +176,10 @@ A direct-audio sparse test reached the same boundary. Voxtral Mini's dedicated
 transcription corrected a dangerous stored phrase, but its general
 audio-instruction mode hallucinated a long repeated sentence on a nearly empty
 clip. Direct access to audio is useful evidence access; it does not make a
-generative semantic statement authoritative.
+generative semantic statement authoritative. Voxtral is not a production
+candidate: it showed no established quality advantage on the reviewed difficult
+clips, exhibited runaway repetition, and cannot coexist with Paxan's resident
+production LLM within the observed 24 GB GPU boundary.
 
 ### Learned Event-State Proposer
 
@@ -197,6 +200,15 @@ Each proposal must express:
 
 The proposer must be allowed to conclude that the evidence is unresolved. It
 must not be forced into a binary incident/non-incident answer.
+
+Before this full proposer is eligible, a narrower pairwise relationship
+experiment must prove that a learned model can both abstain on unrelated or
+insufficient observations and identify grounded connections on plausible
+positive pairs. The pairwise contract has no event or membership output and
+requires every relationship statement to cite both observations. Initial Qwen
+testing preserved the negative sparse pair but still added unsupported semantic
+framing, so this remains an unproven evaluation boundary rather than accepted
+production architecture.
 
 ### Provenance
 

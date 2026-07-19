@@ -71,6 +71,32 @@ public sealed record IncidentEventStateObservationInterpretationCritique(
     string Summary,
     IReadOnlyList<IncidentEventStateCritiqueFinding> Findings);
 
+public sealed record IncidentEventStateObservationRelationshipStatement(
+    string StatementId,
+    string Statement,
+    double Uncertainty,
+    IReadOnlyList<IncidentEventStateProvenance> Provenance);
+
+public sealed record IncidentEventStateObservationRelationshipProposal(
+    string ProposalId,
+    string BundleId,
+    IReadOnlyList<string> ObservationIds,
+    DateTimeOffset GeneratedAtUtc,
+    string ModelIdentity,
+    string PromptIdentity,
+    IReadOnlyList<IncidentEventStateObservationRelationshipStatement> PossibleRelationships,
+    IReadOnlyList<IncidentEventStateObservationRelationshipStatement> EvidenceAgainstRelationship,
+    IReadOnlyList<string> UnresolvedQuestions);
+
+public sealed record IncidentEventStateObservationRelationshipCritique(
+    string CritiqueId,
+    string ProposalId,
+    DateTimeOffset GeneratedAtUtc,
+    string ModelIdentity,
+    string PromptIdentity,
+    string Summary,
+    IReadOnlyList<IncidentEventStateCritiqueFinding> Findings);
+
 public sealed record IncidentEventStateClaim(
     string ClaimId,
     string Statement,
@@ -202,6 +228,28 @@ public static class IncidentEventStateContractValidator
         ValidateBundle(bundle, errors);
         ValidateObservationInterpretation(bundle, interpretation, errors);
         ValidateObservationInterpretationCritique(bundle, interpretation, critique, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateObservationRelationshipProposal(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationRelationshipProposal proposal)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateObservationRelationshipProposal(bundle, proposal, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateObservationRelationshipCritique(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationRelationshipProposal proposal,
+        IncidentEventStateObservationRelationshipCritique critique)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateObservationRelationshipProposal(bundle, proposal, errors);
+        ValidateObservationRelationshipCritique(bundle, proposal, critique, errors);
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
@@ -495,6 +543,102 @@ public static class IncidentEventStateContractValidator
                 ValidateUncertainty(alternative.Uncertainty, $"alternative '{alternative.AlternativeId}'", errors);
                 ValidateProvenance(bundle, alternative.Provenance, $"alternative '{alternative.AlternativeId}'", errors);
             }
+        }
+    }
+
+    private static void ValidateObservationRelationshipProposal(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationRelationshipProposal proposal,
+        List<string> errors)
+    {
+        RequireValue(proposal.ProposalId, "observation relationship proposal id", errors);
+        RequireValue(proposal.BundleId, "observation relationship bundle id", errors);
+        RequireValue(proposal.ModelIdentity, "observation relationship model identity", errors);
+        RequireValue(proposal.PromptIdentity, "observation relationship prompt identity", errors);
+        if (!string.Equals(proposal.BundleId, bundle.BundleId, StringComparison.Ordinal))
+            errors.Add("observation relationship proposal bundle id does not match the source bundle");
+        if (proposal.GeneratedAtUtc == default)
+            errors.Add("observation relationship generated timestamp is required");
+        if (proposal.ObservationIds.Count != 2)
+            errors.Add("observation relationship proposal must compare exactly two observations");
+        ValidateObservationReferences(
+            bundle,
+            proposal.ObservationIds,
+            $"observation relationship proposal '{proposal.ProposalId}'",
+            errors);
+
+        var statements = proposal.PossibleRelationships
+            .Select(statement => (Statement: statement, Description: "possible relationship"))
+            .Concat(proposal.EvidenceAgainstRelationship.Select(statement =>
+                (Statement: statement, Description: "relationship counterevidence")))
+            .ToList();
+        RequireUniqueValues(
+            statements.Select(item => item.Statement.StatementId),
+            $"statement id in observation relationship proposal '{proposal.ProposalId}'",
+            errors);
+        var comparedObservations = proposal.ObservationIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var (statement, description) in statements)
+        {
+            RequireValue(statement.StatementId, $"{description} id", errors);
+            RequireValue(statement.Statement, $"{description} statement for '{statement.StatementId}'", errors);
+            ValidateUncertainty(statement.Uncertainty, $"{description} '{statement.StatementId}'", errors);
+            ValidateProvenance(bundle, statement.Provenance, $"{description} '{statement.StatementId}'", errors);
+            var citedObservations = statement.Provenance
+                .Select(provenance => provenance.ObservationId)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var observationId in citedObservations)
+            {
+                if (!comparedObservations.Contains(observationId))
+                    errors.Add($"{description} '{statement.StatementId}' cites observation '{observationId}' outside the compared pair");
+            }
+            if (comparedObservations.Count == 2 && !comparedObservations.SetEquals(citedObservations))
+                errors.Add($"{description} '{statement.StatementId}' must cite both compared observations");
+        }
+
+        RequireUniqueValues(
+            proposal.UnresolvedQuestions,
+            $"unresolved question in observation relationship proposal '{proposal.ProposalId}'",
+            errors);
+        foreach (var question in proposal.UnresolvedQuestions)
+            RequireValue(question, "observation relationship unresolved question", errors);
+    }
+
+    private static void ValidateObservationRelationshipCritique(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationRelationshipProposal proposal,
+        IncidentEventStateObservationRelationshipCritique critique,
+        List<string> errors)
+    {
+        RequireValue(critique.CritiqueId, "observation relationship critique id", errors);
+        RequireValue(critique.ProposalId, "observation relationship critique proposal id", errors);
+        RequireValue(critique.ModelIdentity, "observation relationship critique model identity", errors);
+        RequireValue(critique.PromptIdentity, "observation relationship critique prompt identity", errors);
+        RequireValue(critique.Summary, "observation relationship critique summary", errors);
+        if (!string.Equals(critique.ProposalId, proposal.ProposalId, StringComparison.Ordinal))
+            errors.Add("observation relationship critique proposal id does not match the proposal");
+        if (critique.GeneratedAtUtc == default)
+            errors.Add("observation relationship critique generated timestamp is required");
+        RequireUniqueValues(
+            critique.Findings.Select(finding => finding.FindingId),
+            "observation relationship critique finding id",
+            errors);
+        var comparedObservations = proposal.ObservationIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var finding in critique.Findings)
+        {
+            RequireValue(finding.FindingId, "observation relationship critique finding id", errors);
+            RequireValue(finding.Statement, $"observation relationship critique finding statement for '{finding.FindingId}'", errors);
+            ValidateUncertainty(finding.Uncertainty, $"observation relationship critique finding '{finding.FindingId}'", errors);
+            ValidateProvenance(bundle, finding.Provenance, $"observation relationship critique finding '{finding.FindingId}'", errors);
+            var citedObservations = finding.Provenance
+                .Select(provenance => provenance.ObservationId)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var observationId in citedObservations)
+            {
+                if (!comparedObservations.Contains(observationId))
+                    errors.Add($"observation relationship critique finding '{finding.FindingId}' cites observation '{observationId}' outside the compared pair");
+            }
+            if (comparedObservations.Count == 2 && !comparedObservations.SetEquals(citedObservations))
+                errors.Add($"observation relationship critique finding '{finding.FindingId}' must cite both compared observations");
         }
     }
 

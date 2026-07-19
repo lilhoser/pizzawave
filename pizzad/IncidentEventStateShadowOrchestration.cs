@@ -25,6 +25,24 @@ public sealed record IncidentEventStateObservationInterpretationRunResult(
     IncidentEventStateObservationInterpretationCritique Critique,
     IncidentEventStateObservationInterpretationExecution Execution);
 
+public sealed record IncidentEventStateObservationRelationshipRunRequest(
+    IReadOnlyList<string> ObservationIds,
+    string SoftwareVersion,
+    string ConfigurationIdentity);
+
+public sealed record IncidentEventStateObservationRelationshipExecution(
+    string SoftwareVersion,
+    string ConfigurationIdentity,
+    long ProposerElapsedMilliseconds,
+    long CriticElapsedMilliseconds);
+
+public sealed record IncidentEventStateObservationRelationshipRunResult(
+    string BundleId,
+    IReadOnlyList<string> ObservationIds,
+    IncidentEventStateObservationRelationshipProposal Proposal,
+    IncidentEventStateObservationRelationshipCritique Critique,
+    IncidentEventStateObservationRelationshipExecution Execution);
+
 public interface IIncidentEventStateObservationInterpreter
 {
     Task<IncidentEventStateObservationInterpretation> InterpretAsync(
@@ -38,6 +56,22 @@ public interface IIncidentEventStateObservationInterpretationCritic
     Task<IncidentEventStateObservationInterpretationCritique> CritiqueAsync(
         IncidentEventStateObservationBundle bundle,
         IncidentEventStateObservationInterpretation interpretation,
+        CancellationToken ct);
+}
+
+public interface IIncidentEventStateObservationRelationshipProposer
+{
+    Task<IncidentEventStateObservationRelationshipProposal> ProposeAsync(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<string> observationIds,
+        CancellationToken ct);
+}
+
+public interface IIncidentEventStateObservationRelationshipCritic
+{
+    Task<IncidentEventStateObservationRelationshipCritique> CritiqueAsync(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateObservationRelationshipProposal proposal,
         CancellationToken ct);
 }
 
@@ -129,6 +163,85 @@ public sealed class IncidentEventStateObservationInterpretationCoordinator
                 request.SoftwareVersion,
                 request.ConfigurationIdentity,
                 interpreterTimer.ElapsedMilliseconds,
+                criticTimer.ElapsedMilliseconds));
+    }
+}
+
+public sealed class IncidentEventStateObservationRelationshipCoordinator
+{
+    private readonly IIncidentEventStateObservationRelationshipProposer _proposer;
+    private readonly IIncidentEventStateObservationRelationshipCritic _critic;
+
+    public IncidentEventStateObservationRelationshipCoordinator(
+        IIncidentEventStateObservationRelationshipProposer proposer,
+        IIncidentEventStateObservationRelationshipCritic critic)
+    {
+        _proposer = proposer;
+        _critic = critic;
+    }
+
+    public async Task<IncidentEventStateObservationRelationshipRunResult> RunAsync(
+        IncidentEventStateObservationRelationshipRunRequest request,
+        IncidentEventStateObservationBundle bundle,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.SoftwareVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ConfigurationIdentity);
+        if (request.ObservationIds.Count != 2 ||
+            request.ObservationIds.Distinct(StringComparer.Ordinal).Count() != 2)
+        {
+            throw new ArgumentException("Exactly two distinct observation ids are required.", nameof(request));
+        }
+
+        var bundleValidation = IncidentEventStateContractValidator.ValidateBundle(bundle);
+        if (!bundleValidation.IsValid)
+            throw new ArgumentException(string.Join("; ", bundleValidation.Errors), nameof(bundle));
+        var knownObservationIds = bundle.Observations
+            .Select(observation => observation.ObservationId)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var observationId in request.ObservationIds)
+        {
+            if (!knownObservationIds.Contains(observationId))
+            {
+                throw new ArgumentException(
+                    $"Observation id '{observationId}' does not exist in bundle '{bundle.BundleId}'.",
+                    nameof(request));
+            }
+        }
+
+        var proposerTimer = Stopwatch.StartNew();
+        var proposal = await _proposer.ProposeAsync(bundle, request.ObservationIds, ct);
+        proposerTimer.Stop();
+        var proposalValidation =
+            IncidentEventStateContractValidator.ValidateObservationRelationshipProposal(bundle, proposal);
+        if (!proposalValidation.IsValid)
+            throw new InvalidDataException(string.Join("; ", proposalValidation.Errors));
+        if (!request.ObservationIds.ToHashSet(StringComparer.Ordinal)
+                .SetEquals(proposal.ObservationIds))
+        {
+            throw new InvalidDataException("Proposal observation ids do not match the requested pair.");
+        }
+
+        var criticTimer = Stopwatch.StartNew();
+        var critique = await _critic.CritiqueAsync(bundle, proposal, ct);
+        criticTimer.Stop();
+        var critiqueValidation =
+            IncidentEventStateContractValidator.ValidateObservationRelationshipCritique(
+                bundle,
+                proposal,
+                critique);
+        if (!critiqueValidation.IsValid)
+            throw new InvalidDataException(string.Join("; ", critiqueValidation.Errors));
+
+        return new IncidentEventStateObservationRelationshipRunResult(
+            bundle.BundleId,
+            request.ObservationIds,
+            proposal,
+            critique,
+            new IncidentEventStateObservationRelationshipExecution(
+                request.SoftwareVersion,
+                request.ConfigurationIdentity,
+                proposerTimer.ElapsedMilliseconds,
                 criticTimer.ElapsedMilliseconds));
     }
 }
