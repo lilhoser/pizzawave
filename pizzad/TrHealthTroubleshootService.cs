@@ -23,17 +23,24 @@ public sealed class TrHealthTroubleshootService
     private readonly EngineDatabase _database;
     private readonly TrConfigService _trConfig;
     private readonly ILogger<TrHealthTroubleshootService> _logger;
+    private readonly Func<DateTime, DateTime, CancellationToken, Task<string>>? _journalRangeReader;
     private readonly SemaphoreSlim _cacheGate = new(1, 1);
     private TrTroubleshootCacheEntry? _cachedTroubleshoot;
     private Task<TrTroubleshootDto>? _troubleshootBuildTask;
     private string _troubleshootBuildKey = string.Empty;
 
-    public TrHealthTroubleshootService(EngineConfig config, EngineDatabase database, TrConfigService trConfig, ILogger<TrHealthTroubleshootService> logger)
+    public TrHealthTroubleshootService(
+        EngineConfig config,
+        EngineDatabase database,
+        TrConfigService trConfig,
+        ILogger<TrHealthTroubleshootService> logger,
+        Func<DateTime, DateTime, CancellationToken, Task<string>>? journalRangeReader = null)
     {
         _config = config;
         _database = database;
         _trConfig = trConfig;
         _logger = logger;
+        _journalRangeReader = journalRangeReader;
     }
 
     public async Task<TrTroubleshootDto> BuildAsync(long start, long end, bool bySystem, string baseline, CancellationToken ct)
@@ -254,7 +261,7 @@ public sealed class TrHealthTroubleshootService
 
     public async Task<TrRfAnalysisDto> BuildRfAnalysisAsync(string? system, long start, long end, CancellationToken ct)
     {
-        var allRows = await _database.ListHealthSamplesAsync(start, end, ct);
+        var allRows = await ListHealthSamplesWithExactBoundariesAsync(start, end, ct);
         var systems = allRows
             .Where(r => IsDisplaySystemScope(r.Scope))
             .Select(r => r.Scope)
@@ -272,7 +279,7 @@ public sealed class TrHealthTroubleshootService
         var metrics = BuildRfMetricRows(aggregate);
         var durationSeconds = Math.Max(1, end - start);
         var priorStart = start - durationSeconds;
-        var priorRows = (await _database.ListHealthSamplesAsync(priorStart, start, ct))
+        var priorRows = (await ListHealthSamplesWithExactBoundariesAsync(priorStart, start, ct))
             .Where(r => string.Equals(r.Scope, selectedSystem, StringComparison.OrdinalIgnoreCase))
             .ToList();
         var prior = Aggregate(priorRows);
@@ -1413,6 +1420,9 @@ public sealed class TrHealthTroubleshootService
 
     private async Task<string> ReadJournalRangeAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)
     {
+        if (_journalRangeReader != null)
+            return await _journalRangeReader(startUtc, endUtc, ct);
+
         var psi = new ProcessStartInfo("journalctl")
         {
             RedirectStandardOutput = true,
@@ -1557,13 +1567,55 @@ public sealed class TrHealthTroubleshootService
         }
     }
 
-    private static List<TrHealthSampleDto> ParseJournalSamples(string log)
+    private async Task<List<TrHealthSampleDto>> ListHealthSamplesWithExactBoundariesAsync(long start, long end, CancellationToken ct)
+    {
+        var rows = await _database.ListHealthSamplesAsync(start, end, ct);
+        if (end <= start || (OperatingSystem.IsWindows() && _journalRangeReader == null))
+            return rows;
+
+        var startUtc = DateTimeOffset.FromUnixTimeSeconds(start).UtcDateTime;
+        var endUtc = DateTimeOffset.FromUnixTimeSeconds(end).UtcDateTime;
+        foreach (var (boundaryStart, boundaryEnd) in BuildPartialBoundaryRanges(startUtc, endUtc))
+        {
+            var log = await ReadJournalRangeAsync(boundaryStart, boundaryEnd, ct);
+            rows.AddRange(ParseJournalSamples(log, boundaryStart, boundaryEnd));
+        }
+
+        return rows
+            .OrderBy(r => r.WindowStartUtc)
+            .ThenBy(r => r.Scope, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<(DateTime StartUtc, DateTime EndUtc)> BuildPartialBoundaryRanges(DateTime startUtc, DateTime endUtc)
+    {
+        if (endUtc <= startUtc)
+            return [];
+
+        var firstCompleteBucket = CeilingToFiveMinutes(startUtc);
+        var lastCompleteBucketEnd = FloorToFiveMinutes(endUtc);
+        if (firstCompleteBucket >= lastCompleteBucketEnd)
+            return [(startUtc, endUtc)];
+
+        var ranges = new List<(DateTime StartUtc, DateTime EndUtc)>(2);
+        if (startUtc < firstCompleteBucket)
+            ranges.Add((startUtc, firstCompleteBucket));
+        if (lastCompleteBucketEnd < endUtc)
+            ranges.Add((lastCompleteBucketEnd, endUtc));
+        return ranges;
+    }
+
+    private static List<TrHealthSampleDto> ParseJournalSamples(string log, DateTime? rangeStartUtc = null, DateTime? rangeEndUtc = null)
     {
         var buckets = new Dictionary<(DateTime StartUtc, string Scope), List<string>>();
         foreach (var line in log.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var ts = ParseTrTimestamp(line);
             if (ts == null)
+                continue;
+            if (rangeStartUtc.HasValue && ts.Value < rangeStartUtc.Value)
+                continue;
+            if (rangeEndUtc.HasValue && ts.Value >= rangeEndUtc.Value)
                 continue;
 
             var start = FloorToFiveMinutes(ts.Value);
@@ -1620,6 +1672,12 @@ public sealed class TrHealthTroubleshootService
     {
         var utc = timestampUtc.Kind == DateTimeKind.Utc ? timestampUtc : timestampUtc.ToUniversalTime();
         return new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, utc.Minute / 5 * 5, 0, DateTimeKind.Utc);
+    }
+
+    private static DateTime CeilingToFiveMinutes(DateTime timestampUtc)
+    {
+        var floor = FloorToFiveMinutes(timestampUtc);
+        return floor == timestampUtc ? floor : floor.AddMinutes(5);
     }
 
     private static TrHealthAggregate Aggregate(List<TrHealthSampleDto> rows)

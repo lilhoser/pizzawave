@@ -124,6 +124,65 @@ public sealed class TrHealthTroubleshootServiceTests
     }
 
     [Fact]
+    public async Task BuildRfAnalysisAsync_IncludesSamplesFromPartialBoundaryBuckets()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rf-boundaries-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = Path.Combine(root, "audio") },
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = Path.Combine(root, "missing-config.json"), LogServiceName = "trunk-recorder" }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+
+            var startTime = new DateTimeOffset(2026, 7, 19, 13, 23, 19, TimeSpan.Zero);
+            var start = startTime.ToUnixTimeSeconds();
+            var end = start + 1800;
+            var firstCompleteBucket = new DateTimeOffset(2026, 7, 19, 13, 25, 0, TimeSpan.Zero);
+            for (var i = 0; i < 5; i++)
+            {
+                await database.InsertHealthSampleAsync(new TrHealthSampleDto
+                {
+                    WindowStartUtc = firstCompleteBucket.AddMinutes(i * 5).UtcDateTime,
+                    WindowEndUtc = firstCompleteBucket.AddMinutes((i + 1) * 5).UtcDateTime,
+                    Scope = "site-a",
+                    LowDecodeWarningLines = 100,
+                    LowDecodeWarningRateTotal = 4000
+                }, CancellationToken.None);
+            }
+
+            var journal = string.Join('\n', Enumerable.Range(0, 600).Select(index =>
+            {
+                var timestamp = DateTimeOffset.FromUnixTimeSeconds(start + index * 3).LocalDateTime;
+                return $"[{timestamp:yyyy-MM-dd HH:mm:ss.ffffff}] (info) [site-a] freq: 769.606250 MHz Control Channel Message Decode Rate: 0/sec, count: 1";
+            }));
+            Task<string> ReadJournal(DateTime rangeStart, DateTime rangeEnd, CancellationToken cancellationToken) => Task.FromResult(journal);
+
+            var service = new TrHealthTroubleshootService(
+                config,
+                database,
+                new TrConfigService(config, NullLogger<TrConfigService>.Instance),
+                NullLogger<TrHealthTroubleshootService>.Instance,
+                ReadJournal);
+
+            var result = await service.BuildRfAnalysisAsync("site-a", start, end, CancellationToken.None);
+
+            Assert.Contains("600 CC message-rate samples", result.Summary, StringComparison.Ordinal);
+            Assert.Equal("600", Assert.Single(result.Metrics, row => row.Metric == "CC message-rate samples").Value);
+            Assert.Equal("16.67%", Assert.Single(result.Metrics, row => row.Metric == "Message-rate zero rate").Value);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BuildAsync_PerSiteAssessmentUsesMatureLocalBaselineInsteadOfBrittleAbsoluteCutoff()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-tr-baseline-{Guid.NewGuid():N}");

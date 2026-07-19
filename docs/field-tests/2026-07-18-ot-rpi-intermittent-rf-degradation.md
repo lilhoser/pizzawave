@@ -121,7 +121,7 @@ The first live start used an incomplete runtime library path and could not load 
 
 The live result is strong evidence that longer dwell materially improves recovery and eliminates wasteful churn. It does not prove that 12 seconds is the best value, does not prevent the initial RF/decode collapse, and does not solve the RPI cold-start problem when only one control channel is configured. The experimental binary and config were rolled back after the fixed window; OT finished on its original `/usr/local/bin/trunk-recorder`, and RPI was never changed. Final verification showed both hosts' `trunk-recorder` and `pizzad` services active, PizzaWave health `ok`, and live TR activity current.
 
-PizzaWave's RF-analysis API returned only 500 message-rate samples for the 30-minute window, while the journal contained 597 after startup. Its percentage therefore differs from the complete raw-window calculation above. Fixed-window analysis should not silently truncate this evidence.
+PizzaWave's RF-analysis API returned only 500 message-rate samples for the 30-minute window, while the journal contained 597 after startup. The API had no hard 500-row cap; it included only complete five-minute health buckets and silently omitted the partial bucket at each boundary. Its percentage therefore differed from the complete raw-window calculation above.
 
 ## Artifacts
 
@@ -148,7 +148,7 @@ RPI:
 2. Turn the compatibility trial into a properly packaged, immediately reversible OT build and run a longer supervised window. Keep `controlRetuneLimit` at `0`.
 3. Test explicit configuration of all known-good control-channel alternates, especially on RPI, so cold-start recovery does not depend on first decoding the primary.
 4. Refine the upstream design around last-known-good preference and reacquisition dwell. The evidence now justifies preparing the current-upstream branch for review; create a fork or upstream pull request only after the longer OT trial and focused tests.
-5. Remove the RF-analysis API's 500-sample truncation for fixed windows, or explicitly paginate and aggregate the complete selected window.
+5. Include exact partial-boundary journal samples when combining stored five-minute buckets for fixed-window RF analysis.
 6. Add durable per-source RF telemetry independent of decoded message rate: absolute channel power, local noise floor, channel SNR, frequency residual, selected control channel, and retune state. Decode rate alone cannot distinguish RF loss from failure to reacquire.
 7. Repeat the IQ comparison after the source-plan and retune changes. The success criterion is not only a higher average decode rate, but removal of long zero windows during modest input-level fades.
 
