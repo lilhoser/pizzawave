@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Incident Relationship Review</title>
+  <style>
+    :root { color-scheme: dark; --ink:#edf3f7; --muted:#9db0bc; --line:#2a3b46; --panel:#13212a; --panel2:#172a35; --accent:#66d2b1; --warn:#ffc96b; --bg:#091218; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at 15% 0,#17303a 0,transparent 36rem),var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+    button,input,textarea { font:inherit; }
+    button { border:1px solid var(--line); border-radius:10px; padding:.7rem 1rem; color:var(--ink); background:#1b303b; cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    .primary { background:var(--accent); color:#071510; border-color:transparent; font-weight:750; }
+    header { position:sticky; top:0; z-index:4; display:flex; gap:1rem; justify-content:space-between; align-items:center; padding:1rem 1.4rem; background:rgba(9,18,24,.93); backdrop-filter:blur(12px); border-bottom:1px solid var(--line); }
+    h1 { margin:0; font-size:1.2rem; letter-spacing:.01em; }
+    .local { color:var(--accent); font-size:.84rem; }
+    .reviewer { display:flex; align-items:center; gap:.5rem; color:var(--muted); }
+    .reviewer input { width:12rem; padding:.45rem .6rem; }
+    .progress { min-width:12rem; color:var(--muted); text-align:right; }
+    main { display:grid; grid-template-columns:15rem minmax(0,1fr); min-height:calc(100vh - 70px); }
+    nav { padding:1rem; border-right:1px solid var(--line); background:rgba(10,22,29,.8); }
+    .case-button { width:100%; display:flex; justify-content:space-between; margin:.35rem 0; text-align:left; }
+    .case-button.active { border-color:var(--accent); background:#204036; }
+    .case-button.done::after { content:'✓'; color:var(--accent); }
+    .content { max-width:1050px; width:100%; margin:0 auto; padding:1.5rem; }
+    .notice { padding:.9rem 1rem; border:1px solid #365061; border-radius:12px; color:var(--muted); background:#10202a; }
+    .observations { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1rem 0; }
+    article { min-width:0; border:1px solid var(--line); border-radius:15px; background:linear-gradient(160deg,var(--panel2),var(--panel)); padding:1rem; }
+    article h2 { margin:0 0 .25rem; font-size:1rem; }
+    .meta { display:flex; flex-wrap:wrap; gap:.35rem .8rem; color:var(--muted); font-size:.82rem; }
+    audio { width:100%; margin:.8rem 0; }
+    details { border-top:1px solid var(--line); padding:.7rem 0 0; margin-top:.7rem; }
+    summary { cursor:pointer; color:var(--accent); }
+    .transcript { margin:.7rem 0; padding:.7rem; border-left:3px solid #3b5969; background:#0c1920; white-space:pre-wrap; }
+    .producer { color:var(--muted); font-size:.76rem; }
+    .form { border:1px solid var(--line); border-radius:15px; padding:1rem; background:rgba(19,33,42,.9); }
+    label { display:block; margin:.9rem 0 .35rem; font-weight:650; }
+    textarea,input[type=text] { width:100%; color:var(--ink); background:#09161d; border:1px solid var(--line); border-radius:9px; padding:.7rem; }
+    textarea { min-height:5rem; resize:vertical; }
+    fieldset { border:0; padding:0; margin:.8rem 0; }
+    .choices { display:grid; grid-template-columns:repeat(3,1fr); gap:.6rem; }
+    .choice { display:flex; gap:.5rem; align-items:flex-start; padding:.75rem; border:1px solid var(--line); border-radius:10px; font-weight:500; }
+    .range { display:flex; gap:1rem; align-items:center; }
+    .range input { flex:1; }
+    .actions { display:flex; justify-content:space-between; gap:.7rem; margin-top:1rem; }
+    .hidden { display:none !important; }
+    @media (max-width:800px) { main{grid-template-columns:1fr} nav{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line)} .case-button{min-width:8rem} .observations{grid-template-columns:1fr} .choices{grid-template-columns:1fr} header{align-items:flex-start}.progress{min-width:0} }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Incident relationship review</h1><div class="local">Local only · nothing is uploaded</div></div>
+    <label class="reviewer" for="reviewer-name">Reviewer <input id="reviewer-name" type="text" autocomplete="name" placeholder="Name"></label>
+    <div class="progress" id="progress"></div>
+  </header>
+  <main>
+    <nav id="case-nav" aria-label="Review cases"></nav>
+    <section class="content">
+      <div class="notice">Listen to both calls and compare all transcript candidates. Radio metadata is context, not proof. Record only what the supplied evidence supports; “unresolved” is a valid result.</div>
+      <div id="case-view"></div>
+      <div class="actions">
+        <button id="previous">Previous</button>
+        <button id="next">Save &amp; next</button>
+        <button class="primary" id="download">Download review JSON</button>
+      </div>
+    </section>
+  </main>
+  <script src="review-package.js"></script>
+  <script>
+    (() => {
+      const pkg = window.INCIDENT_RELATIONSHIP_REVIEW_PACKAGE;
+      if (!pkg) { document.getElementById('case-view').textContent = 'Review package is missing.'; return; }
+      const key = `incident-relationship-review:${pkg.content_sha256}`;
+      const emptyAnswer = c => ({case_id:c.case_id, relationship_assessment:'', connection_description:'', evidence_observation_a:'', evidence_observation_b:'', counterevidence_alternatives:'', unresolved_questions:'', confidence:50});
+      let state;
+      try { state = JSON.parse(localStorage.getItem(key)); } catch { state = null; }
+      if (!state || state.package_sha256 !== pkg.content_sha256) state = {review_version:'incident-relationship-review-v1',package_sha256:pkg.content_sha256,reviewer:'',started_at_utc:new Date().toISOString(),completed_at_utc:'',cases:pkg.cases.map(emptyAnswer)};
+      let index = 0;
+      const esc = value => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+      const answer = () => state.cases[index];
+      const complete = a => Boolean(a.relationship_assessment && a.connection_description.trim());
+      function persist() { try { localStorage.setItem(key, JSON.stringify(state)); } catch {} renderNav(); renderProgress(); }
+      function capture() {
+        const a=answer();
+        state.reviewer=document.getElementById('reviewer-name').value.trim();
+        a.relationship_assessment=document.querySelector('input[name=assessment]:checked')?.value||'';
+        for(const id of ['connection_description','evidence_observation_a','evidence_observation_b','counterevidence_alternatives','unresolved_questions']) a[id]=document.getElementById(id).value;
+        a.confidence=Number(document.getElementById('confidence').value);
+        persist();
+      }
+      function renderNav() {
+        document.getElementById('case-nav').innerHTML=pkg.cases.map((c,i)=>`<button class="case-button ${i===index?'active':''} ${complete(state.cases[i])?'done':''}" data-index="${i}"><span>Case ${i+1}</span></button>`).join('');
+        document.querySelectorAll('.case-button').forEach(b=>b.onclick=()=>{capture();index=Number(b.dataset.index);render();});
+      }
+      function renderProgress() { const done=state.cases.filter(complete).length; document.getElementById('progress').textContent=`${done} of ${pkg.cases.length} complete`; }
+      function observationCard(o,label) {
+        const when=new Date(o.observed_at_unix_seconds*1000).toLocaleString();
+        const transcripts=o.transcripts.length?o.transcripts.map(t=>`<div class="transcript"><div class="producer">${esc(t.producer)} · ${esc(t.transcript_id)}</div>${esc(t.text)||'<em>Empty transcript</em>'}</div>`).join(''):'<div class="transcript"><em>No transcript candidate</em></div>';
+        return `<article><h2>Observation ${label} · ${esc(o.observation_id)}</h2><div class="meta"><span>${esc(when)}</span><span>System ${esc(o.metadata.systemShortName)}</span><span>Talkgroup ${esc(o.metadata.talkgroup)}</span><span>Frequency ${esc(o.metadata.frequency)}</span></div><audio controls preload="metadata" src="${esc(o.audio_file)}"></audio><details open><summary>Transcript candidates (${o.transcripts.length})</summary>${transcripts}</details></article>`;
+      }
+      function render() {
+        const c=pkg.cases[index],a=answer();
+        document.getElementById('case-view').innerHTML=`<div class="observations">${observationCard(c.observations[0],'A')}${observationCard(c.observations[1],'B')}</div><div class="form"><fieldset><legend><strong>What does the evidence support?</strong></legend><div class="choices">${[['same_event','Same unfolding event'],['not_same_event','Not the same event'],['unresolved','Unresolved']].map(([v,l])=>`<label class="choice"><input type="radio" name="assessment" value="${v}" ${a.relationship_assessment===v?'checked':''}>${l}</label>`).join('')}</div></fieldset><label for="connection_description">Describe what connects—or separates—the calls</label><textarea id="connection_description">${esc(a.connection_description)}</textarea><label for="evidence_observation_a">Evidence from observation A</label><textarea id="evidence_observation_a">${esc(a.evidence_observation_a)}</textarea><label for="evidence_observation_b">Evidence from observation B</label><textarea id="evidence_observation_b">${esc(a.evidence_observation_b)}</textarea><label for="counterevidence_alternatives">Counterevidence or plausible alternatives</label><textarea id="counterevidence_alternatives">${esc(a.counterevidence_alternatives)}</textarea><label for="unresolved_questions">Unresolved questions</label><textarea id="unresolved_questions">${esc(a.unresolved_questions)}</textarea><label for="confidence">Confidence</label><div class="range"><span>Low</span><input id="confidence" type="range" min="0" max="100" value="${a.confidence}"><output id="confidence-output">${a.confidence}</output><span>High</span></div></div>`;
+        document.getElementById('confidence').oninput=e=>document.getElementById('confidence-output').textContent=e.target.value;
+        document.getElementById('previous').disabled=index===0;
+        document.getElementById('next').textContent=index===pkg.cases.length-1?'Save case':'Save & next';
+        renderNav();renderProgress();
+      }
+      document.getElementById('previous').onclick=()=>{capture();if(index>0){index--;render();}};
+      document.getElementById('next').onclick=()=>{capture();if(index<pkg.cases.length-1){index++;render();}};
+      document.getElementById('download').onclick=()=>{capture();state.completed_at_utc=state.cases.every(complete)?new Date().toISOString():'';const blob=new Blob([JSON.stringify(state,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='incident-relationship-review.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+      document.getElementById('reviewer-name').value=state.reviewer||'';
+      document.getElementById('reviewer-name').addEventListener('change',capture);
+      window.addEventListener('beforeunload',capture);render();
+    })();
+  </script>
+</body>
+</html>

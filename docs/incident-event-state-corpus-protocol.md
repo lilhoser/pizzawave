@@ -2,7 +2,7 @@
 
 Date: 2026-07-17
 
-Status: protocol draft to freeze before corpus extraction or model review
+Status: corpus extracted; review protocol frozen for held-out acceptance
 
 ## Purpose
 
@@ -96,6 +96,13 @@ not evidence that the old diagnosis was correct.
 At least two reviewers independently inspect each selected time block. A third
 reviewer reconciles disagreements without erasing the original reviews.
 
+One reviewer may complete compact development-only relationship cases to expose
+bad assumptions and improve the review tool. Those results are provisional,
+must be marked single-reviewer, and cannot score held-out acceptance or replace
+the independent time-block review above. A reviewer must never be asked to
+repeat the same clips under a newly shuffled model-candidate package and count
+that as an independent review.
+
 Reviewers receive:
 
 - call audio and transcript candidates;
@@ -151,4 +158,3 @@ Corpus extraction should not begin until the owner supplies or approves:
 4. the reviewer workflow and who can perform independent adjudication;
 5. the storage location and handling requirements for audio-bearing corpus
    artifacts.
-

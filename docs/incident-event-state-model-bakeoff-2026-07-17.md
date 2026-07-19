@@ -453,15 +453,16 @@ Final artifact hashes:
 
 ## Next gates
 
-- Freeze a compact human adjudication worksheet for source-grounded claims,
-  relationship evidence, missed events, false events, over-merges, and splits.
-- Convert the already-open development examples into explicit adjudication
-  cases; do not infer reference truth from the model outcomes above.
+- Complete the six-case local relationship worksheet generated from new
+  development observations. It contains no model output and repeats none of the
+  18 clips from Aaron's ASR review.
 - Do not spend additional review or Paxan capacity on Voxtral for this design.
 - Preserve proposer/critic disagreement and validator rejection as first-class
   shadow-ledger records; do not collapse them into consensus.
 - Exercise the new non-persisting event-hypothesis transition contract on
   adjudicated development cases. Critic-only findings may trigger another
   relationship review but cannot authorize hypothesis growth.
-- Freeze quantitative acceptance gates before any held-out evaluation.
+- Apply the frozen quantitative gates in
+  [`incident-event-state-evaluation-gates.md`](incident-event-state-evaluation-gates.md)
+  before any held-out evaluation.
 - Keep all results in shadow artifacts; do not write live incident state.
