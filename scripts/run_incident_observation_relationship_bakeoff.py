@@ -11,12 +11,33 @@ from pathlib import Path
 from typing import Any
 
 from run_incident_observation_interpretation_bakeoff import (
-    PROVENANCE_SCHEMA,
     completion_request,
     parse_content,
     read_package,
     valid_uncertainty,
 )
+
+
+PROVENANCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "observation_id": {"type": "string"},
+        "transcript_id": {
+            "type": "string",
+            "description": "Exact supplied transcript id, or empty for metadata evidence.",
+        },
+        "exact_quote": {
+            "type": "string",
+            "description": "Exact text copied from that transcript, or empty for metadata evidence.",
+        },
+        "metadata_field": {
+            "type": "string",
+            "description": "Exact supplied metadata key only, or empty for transcript evidence.",
+        },
+    },
+    "required": ["observation_id", "transcript_id", "exact_quote", "metadata_field"],
+    "additionalProperties": False,
+}
 
 
 STATEMENT_SCHEMA = {
@@ -92,14 +113,14 @@ CRITIQUE_SCHEMA = {
 PROPOSER_PROMPT = """Compare exactly two radio-call observations using their competing transcript candidates.
 Your task is limited to possible relationships between these two observations. Do not create an event or incident, assign membership, name or categorize an event, assign a call role, or infer operational significance.
 
-A possible relationship statement must be supported by specific quoted content from both observations. Sequence or proximity alone is not relationship evidence. Quote existence alone does not establish that your statement is entailed. Do not add entities, actions, causes, responses, destinations, or continuity that the cited words do not establish.
+A possible relationship statement must be supported by specific quoted content from both observations. Source metadata may contextualize that text evidence but is never itself a relationship: do not report shared system, talkgroup, frequency, source, or temporal proximity as a possible relationship. Quote existence alone does not establish that your statement is entailed. Do not add entities, actions, causes, responses, destinations, or continuity that the combined evidence does not support.
 
-Return no possible relationship when the evidence is insufficient. Preserve counterevidence and unresolved questions. Every relationship or counterevidence statement must cite exact, case-sensitive text copied from both observations. Uncertainty is from 0 to 1, where 1 is highly uncertain."""
+Return no possible relationship when the evidence is insufficient. Preserve counterevidence and unresolved questions. Every relationship or counterevidence statement must cite evidence from both observations. Statement IDs must be nonempty and unique across both possible_relationships and evidence_against_relationship. Each provenance item identifies exactly one evidence kind: transcript evidence uses an exact transcript_id and exact, case-sensitive copied text while metadata_field is empty; metadata evidence uses the exact supplied metadata key while transcript_id and exact_quote are empty. Uncertainty is from 0 to 1, where 1 is highly uncertain; do not use zero when competing transcripts materially disagree or when continuity remains unproven."""
 
 CRITIC_PROMPT = """Independently critique a proposed relationship analysis for exactly two radio-call observations.
-Check whether every proposed relationship is actually entailed by its cited words from both observations. Identify added entities, actions, causes, responses, destinations, continuity, false certainty, omitted counterevidence, or omitted plausible alternatives. Sequence or proximity alone is not relationship evidence.
+Check whether every proposed relationship is supported by its cited transcript evidence from both observations. Identify added entities, actions, causes, responses, destinations, continuity, false certainty, omitted counterevidence, omitted plausible alternatives, or metadata-only relationships. Source metadata may contextualize text evidence but shared system, talkgroup, frequency, source, or temporal proximity never proves a relationship.
 
-Do not create an event or incident, assign membership, name or categorize an event, or assign a call role. Every finding must cite exact, case-sensitive text from both observations. Return no findings only when the proposal is fully grounded and preserves uncertainty."""
+Do not create an event or incident, assign membership, name or categorize an event, or assign a call role. Every finding must cite evidence from both observations. Each provenance item identifies exactly one evidence kind: transcript evidence uses an exact transcript_id and exact copied text while metadata_field is empty; metadata evidence uses the exact supplied metadata key while transcript_id and exact_quote are empty. Return no findings only when the proposal is fully grounded and preserves uncertainty."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -134,6 +155,17 @@ def pair_source(bundle_id: str, observations: list[dict[str, Any]]) -> dict[str,
                     }
                     for transcript in observation.get("transcripts", [])
                 ],
+                "metadata": {
+                    field: value
+                    for field, value in observation.get("metadata", {}).items()
+                    if field in {
+                        "source",
+                        "systemShortName",
+                        "talkgroup",
+                        "frequency",
+                        "stopTimeUnixSeconds",
+                    }
+                },
             }
             for observation in observations
         ],
@@ -162,10 +194,25 @@ def validate_provenance(
         }
         transcript_id = item.get("transcript_id")
         quote = item.get("exact_quote")
-        if transcript_id not in transcripts:
-            errors.append(f"{owner} cites unknown transcript '{transcript_id}'")
-        elif not isinstance(quote, str) or not quote or quote not in transcripts[transcript_id]:
-            errors.append(f"{owner} quote does not occur exactly in transcript '{transcript_id}'")
+        metadata_field = item.get("metadata_field")
+        has_transcript = bool(transcript_id)
+        has_metadata = bool(metadata_field)
+        if not has_transcript and not has_metadata:
+            errors.append(f"{owner} provenance identifies no source material")
+        if has_transcript and has_metadata:
+            errors.append(f"{owner} provenance mixes transcript and metadata evidence")
+        if has_transcript:
+            if transcript_id not in transcripts:
+                errors.append(f"{owner} cites unknown transcript '{transcript_id}'")
+            elif not isinstance(quote, str) or not quote or quote not in transcripts[transcript_id]:
+                errors.append(f"{owner} quote does not occur exactly in transcript '{transcript_id}'")
+        elif quote:
+            errors.append(f"{owner} metadata provenance must not contain an exact quote")
+        if has_metadata:
+            if metadata_field not in observations[observation_id].get("metadata", {}):
+                errors.append(f"{owner} cites unknown metadata field '{metadata_field}'")
+            if transcript_id or quote:
+                errors.append(f"{owner} metadata provenance must leave transcript fields empty")
     if cited_observations != set(observations):
         errors.append(f"{owner} must cite both compared observations")
 
@@ -266,8 +313,8 @@ def main() -> int:
             "bundle_id": bundle_id,
             "observation_ids": observation_ids,
             "model_requested": args.model,
-            "proposer_prompt_identity": "incident-observation-relationship-proposer-v1",
-            "critic_prompt_identity": "incident-observation-relationship-critic-v1",
+            "proposer_prompt_identity": "incident-observation-relationship-proposer-v4",
+            "critic_prompt_identity": "incident-observation-relationship-critic-v4",
             "source": source,
             "proposer_call": None,
             "proposal": None,

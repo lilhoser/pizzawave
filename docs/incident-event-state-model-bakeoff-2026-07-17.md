@@ -396,16 +396,72 @@ The positive local-runtime failure and excluded fallback artifacts have hashes
 and
 `3E46A37B599041111E37819C317DEF7259A82717D8D14B16482488EEA8DC1723`.
 
+#### Isolated Gemma relationship result
+
+Gemma 4 26B-A4B Q4 was then loaded behind a Ventax-local API and reached only
+through a dedicated SSH tunnel. Each request verified that the local alias was
+advertised and that the response reported that exact alias. No shared LM Link
+endpoint or production model participated.
+
+The first metadata-aware prompt exposed a design error rather than passing the
+gate: Gemma reported shared system and talkgroup values as the relationship.
+The final contract explicitly makes those values context only and requires a
+relationship to be supported by transcript evidence from both observations.
+It also requires globally unique statement identifiers, exclusive transcript
+or metadata provenance, and visible uncertainty when candidates disagree.
+
+The final development runs covered nine comparisons: three negatives and six
+plausible continuations. They were selected from the already-open development
+corpus; no held-out file was opened.
+
+Observed behavior:
+
+- Gemma abstained on the sparse negative and on two harder unrelated pairs,
+  including a same-talkgroup pair with similar dispatch phrasing.
+- It grounded the girl/car overlap, an identity/name continuation, and a
+  repeated clothing/location description in exact transcript text.
+- The proposer missed the explicit `469` continuation; the independently
+  invoked critic found and grounded that omission.
+- It produced an inexact quote on the recovered-vehicle pair, which the
+  deterministic validator rejected before critique.
+- It missed a plausible worker/supervisor follow-up whose relation depended on
+  discourse context rather than repeated wording.
+- Valid proposer-plus-critic comparisons took approximately 10.4 to 77.9
+  seconds per pair on the Ventax lab runtime. This is evaluation evidence, not
+  a Paxan production throughput measurement.
+
+This is a **limited pass for bounded evidence generation** and a rejection of
+pairwise model output as incident membership authority. The useful unit is the
+append-only set of proposal, critique, validation failure, counterevidence, and
+unresolved questions. Proposer and critic disagreement must remain visible; a
+missing proposal cannot be silently repaired into incident state. The next
+architecture experiment must determine whether an evolving, revisable event
+hypothesis can use these evidence records without turning retrieval metadata or
+model agreement into proof.
+
+Final artifact hashes:
+
+- sparse negative: `34BBA8141908DDBC0F406E0A209198DEFC74DA76616DE6A46DC87B582D6E3EFB`
+- girl/car plausible positive: `A1F51285E358D2685664EE38709D3E86BBB66C9CC9363AE40EB96E764D22B73A`
+- template-similar negative: `4138B2D52BABC751A1807B39383E9AF6837878001260BD891AD640E6CD8655FE`
+- `469` proposer miss / critic finding: `0F414B8D01FAAB9377B9261C857110E4231E24ADA97C6564C103B1749108C0BE`
+- recovered-vehicle provenance failure: `2042456A4D036E7F91B87F232293B4A5C45473B4DBB70150741987D68EBCFB1C`
+- identity/name plausible positive: `F3CEED9366A923F853DB9AF5F239312E8AA41F78DE2179E0EF0B93E15902E509`
+- clothing/location plausible positive: `2D65EEDAEC8BF0EAE9B5FF0BC0329C7F1FF4C8213EC4CE57315D45A0EEE178F1`
+- missed worker/supervisor follow-up: `D94E1B527016FA6764FC44A90119FA560CB0FA8B44A1C1C72736EA3667E6FCE7`
+- unrelated cross-context negative: `741E9C3E3A7B447E149888101DEC39E157D4CA1E57F700E938AB9EC5A65F56E7`
+
 ## Next gates
 
-- Define a compact human adjudication worksheet for source-grounded claims,
+- Freeze a compact human adjudication worksheet for source-grounded claims,
   relationship evidence, missed events, false events, over-merges, and splits.
-- Select representative development cases from the already-open development
-  corpus without inspecting held-out data.
+- Convert the already-open development examples into explicit adjudication
+  cases; do not infer reference truth from the model outcomes above.
 - Do not spend additional review or Paxan capacity on Voxtral for this design.
-- Test proposer/critic separation on those adjudicated cases.
-- Rerun the negative and plausible-positive relationship pairs through an
-  isolated non-production model runtime; require both abstention on the
-  negative case and grounded relationship evidence on the positive case.
+- Preserve proposer/critic disagreement and validator rejection as first-class
+  shadow-ledger records; do not collapse them into consensus.
+- Exercise the new non-persisting event-hypothesis transition contract on
+  adjudicated development cases. Critic-only findings may trigger another
+  relationship review but cannot authorize hypothesis growth.
 - Freeze quantitative acceptance gates before any held-out evaluation.
 - Keep all results in shadow artifacts; do not write live incident state.

@@ -201,14 +201,23 @@ Each proposal must express:
 The proposer must be allowed to conclude that the evidence is unresolved. It
 must not be forced into a binary incident/non-incident answer.
 
-Before this full proposer is eligible, a narrower pairwise relationship
-experiment must prove that a learned model can both abstain on unrelated or
-insufficient observations and identify grounded connections on plausible
-positive pairs. The pairwise contract has no event or membership output and
-requires every relationship statement to cite both observations. Initial Qwen
-testing preserved the negative sparse pair but still added unsupported semantic
-framing, so this remains an unproven evaluation boundary rather than accepted
-production architecture.
+The narrower pairwise relationship experiment produced a limited pass. An
+isolated Gemma run could abstain on several unrelated pairs and ground several
+textually explicit connections, but it also missed continuations, produced an
+inexact quote, and sometimes required its critic to surface an omitted
+relationship. The pairwise contract therefore remains an evidence-generation
+boundary, not accepted membership authority.
+
+A separate hypothesis-transition contract now prevents the former arbitrary
+bundle-to-event proposer from being the experiment path. A transition receives
+the source bundle, prior hypotheses, and explicit validated pairwise evidence.
+It may produce a revisable shadow hypothesis, but deterministic validation
+rejects any added observation outside the cited pairwise evidence. Critic
+findings remain visible but cannot authorize hypothesis growth because a critic
+finding may challenge rather than support a relationship. A missed relationship
+must first become a validated relationship proposal or be human-adjudicated.
+The transition coordinator has no store, scheduler, endpoint, or production
+writer.
 
 ### Provenance
 
@@ -457,7 +466,20 @@ boundary:
 - separately invoked proposer and critic interfaces with validation before
   append.
 
-Nothing schedules the new coordinator, calls a model, exposes an endpoint, or
-writes production incident state. The next step is to approve and freeze the
-selection and adjudication parameters in
-`docs/incident-event-state-corpus-protocol.md`, then extract an immutable corpus.
+Nothing schedules the new coordinator, exposes an endpoint, or writes
+production incident state. Standalone development harnesses have now tested
+observation interpretation, direct audio understanding, transcription, and
+bounded pairwise relationship proposals. The first two semantic approaches
+were rejected. Pairwise comparison earned only a limited role as an evidence
+generator: deterministic failures and proposer/critic disagreement remain
+records, never membership decisions.
+
+The development and sealed held-out corpus split is already extracted. The
+held-out directory remains unopened. A shadow-only, revisable event-hypothesis
+transition contract now consumes validated relationship evidence while
+preserving dissent and uncertainty. It contains no static event taxonomy,
+talkgroup mapping, automatic semantic membership rule, production writer, or
+scheduler. Its structural validator requires cited relationship evidence before
+a multi-observation hypothesis can grow. Human adjudication criteria and
+quantitative gates must be frozen before a transition-model experiment can open
+the sealed held-out corpus.

@@ -43,6 +43,22 @@ public sealed record IncidentEventStateObservationRelationshipRunResult(
     IncidentEventStateObservationRelationshipCritique Critique,
     IncidentEventStateObservationRelationshipExecution Execution);
 
+public sealed record IncidentEventStateHypothesisTransitionRunRequest(
+    string SoftwareVersion,
+    string ConfigurationIdentity);
+
+public sealed record IncidentEventStateHypothesisTransitionExecution(
+    string SoftwareVersion,
+    string ConfigurationIdentity,
+    long ProposerElapsedMilliseconds,
+    long CriticElapsedMilliseconds);
+
+public sealed record IncidentEventStateHypothesisTransitionRunResult(
+    string BundleId,
+    IncidentEventStateHypothesisTransitionProposal Proposal,
+    IncidentEventStateHypothesisTransitionCritique Critique,
+    IncidentEventStateHypothesisTransitionExecution Execution);
+
 public interface IIncidentEventStateObservationInterpreter
 {
     Task<IncidentEventStateObservationInterpretation> InterpretAsync(
@@ -72,6 +88,23 @@ public interface IIncidentEventStateObservationRelationshipCritic
     Task<IncidentEventStateObservationRelationshipCritique> CritiqueAsync(
         IncidentEventStateObservationBundle bundle,
         IncidentEventStateObservationRelationshipProposal proposal,
+        CancellationToken ct);
+}
+
+public interface IIncidentEventStateHypothesisTransitionProposer
+{
+    Task<IncidentEventStateHypothesisTransitionProposal> ProposeAsync(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateObservationRelationshipEvidence> evidence,
+        CancellationToken ct);
+}
+
+public interface IIncidentEventStateHypothesisTransitionCritic
+{
+    Task<IncidentEventStateHypothesisTransitionCritique> CritiqueAsync(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateObservationRelationshipEvidence> evidence,
+        IncidentEventStateHypothesisTransitionProposal proposal,
         CancellationToken ct);
 }
 
@@ -239,6 +272,64 @@ public sealed class IncidentEventStateObservationRelationshipCoordinator
             proposal,
             critique,
             new IncidentEventStateObservationRelationshipExecution(
+                request.SoftwareVersion,
+                request.ConfigurationIdentity,
+                proposerTimer.ElapsedMilliseconds,
+                criticTimer.ElapsedMilliseconds));
+    }
+}
+
+public sealed class IncidentEventStateHypothesisTransitionCoordinator
+{
+    private readonly IIncidentEventStateHypothesisTransitionProposer _proposer;
+    private readonly IIncidentEventStateHypothesisTransitionCritic _critic;
+
+    public IncidentEventStateHypothesisTransitionCoordinator(
+        IIncidentEventStateHypothesisTransitionProposer proposer,
+        IIncidentEventStateHypothesisTransitionCritic critic)
+    {
+        _proposer = proposer;
+        _critic = critic;
+    }
+
+    public async Task<IncidentEventStateHypothesisTransitionRunResult> RunAsync(
+        IncidentEventStateHypothesisTransitionRunRequest request,
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateObservationRelationshipEvidence> evidence,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.SoftwareVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ConfigurationIdentity);
+        var bundleValidation = IncidentEventStateContractValidator.ValidateBundle(bundle);
+        if (!bundleValidation.IsValid)
+            throw new ArgumentException(string.Join("; ", bundleValidation.Errors), nameof(bundle));
+
+        var proposerTimer = Stopwatch.StartNew();
+        var proposal = await _proposer.ProposeAsync(bundle, evidence, ct);
+        proposerTimer.Stop();
+        var proposalValidation = IncidentEventStateContractValidator.ValidateHypothesisTransitionProposal(
+            bundle,
+            evidence,
+            proposal);
+        if (!proposalValidation.IsValid)
+            throw new InvalidDataException(string.Join("; ", proposalValidation.Errors));
+
+        var criticTimer = Stopwatch.StartNew();
+        var critique = await _critic.CritiqueAsync(bundle, evidence, proposal, ct);
+        criticTimer.Stop();
+        var critiqueValidation = IncidentEventStateContractValidator.ValidateHypothesisTransitionCritique(
+            bundle,
+            evidence,
+            proposal,
+            critique);
+        if (!critiqueValidation.IsValid)
+            throw new InvalidDataException(string.Join("; ", critiqueValidation.Errors));
+
+        return new IncidentEventStateHypothesisTransitionRunResult(
+            bundle.BundleId,
+            proposal,
+            critique,
+            new IncidentEventStateHypothesisTransitionExecution(
                 request.SoftwareVersion,
                 request.ConfigurationIdentity,
                 proposerTimer.ElapsedMilliseconds,

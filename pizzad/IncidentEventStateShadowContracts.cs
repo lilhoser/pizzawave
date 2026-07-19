@@ -97,6 +97,35 @@ public sealed record IncidentEventStateObservationRelationshipCritique(
     string Summary,
     IReadOnlyList<IncidentEventStateCritiqueFinding> Findings);
 
+public sealed record IncidentEventStateObservationRelationshipEvidence(
+    string EvidenceId,
+    IncidentEventStateObservationRelationshipProposal Proposal,
+    IncidentEventStateObservationRelationshipCritique Critique);
+
+public sealed record IncidentEventStateHypothesisRevision(
+    string RevisionId,
+    IReadOnlyList<string> SupersedesHypothesisIds,
+    IncidentEventStateHypothesis Hypothesis,
+    IReadOnlyList<string> SupportingRelationshipEvidenceIds,
+    IReadOnlyList<string> UnresolvedQuestions);
+
+public sealed record IncidentEventStateHypothesisTransitionProposal(
+    string ProposalId,
+    string BundleId,
+    DateTimeOffset GeneratedAtUtc,
+    string ModelIdentity,
+    string PromptIdentity,
+    IReadOnlyList<IncidentEventStateHypothesisRevision> Revisions);
+
+public sealed record IncidentEventStateHypothesisTransitionCritique(
+    string CritiqueId,
+    string ProposalId,
+    DateTimeOffset GeneratedAtUtc,
+    string ModelIdentity,
+    string PromptIdentity,
+    string Summary,
+    IReadOnlyList<IncidentEventStateCritiqueFinding> Findings);
+
 public sealed record IncidentEventStateClaim(
     string ClaimId,
     string Statement,
@@ -250,6 +279,30 @@ public static class IncidentEventStateContractValidator
         ValidateBundle(bundle, errors);
         ValidateObservationRelationshipProposal(bundle, proposal, errors);
         ValidateObservationRelationshipCritique(bundle, proposal, critique, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateHypothesisTransitionProposal(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateObservationRelationshipEvidence> evidence,
+        IncidentEventStateHypothesisTransitionProposal proposal)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateHypothesisTransitionProposal(bundle, evidence, proposal, errors);
+        return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IncidentEventStateContractValidationResult ValidateHypothesisTransitionCritique(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateObservationRelationshipEvidence> evidence,
+        IncidentEventStateHypothesisTransitionProposal proposal,
+        IncidentEventStateHypothesisTransitionCritique critique)
+    {
+        var errors = new List<string>();
+        ValidateBundle(bundle, errors);
+        ValidateHypothesisTransitionProposal(bundle, evidence, proposal, errors);
+        ValidateHypothesisTransitionCritique(bundle, proposal, critique, errors);
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
@@ -639,6 +692,146 @@ public static class IncidentEventStateContractValidator
             }
             if (comparedObservations.Count == 2 && !comparedObservations.SetEquals(citedObservations))
                 errors.Add($"observation relationship critique finding '{finding.FindingId}' must cite both compared observations");
+        }
+    }
+
+    private static void ValidateHypothesisTransitionProposal(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentEventStateObservationRelationshipEvidence> evidence,
+        IncidentEventStateHypothesisTransitionProposal proposal,
+        List<string> errors)
+    {
+        RequireValue(proposal.ProposalId, "hypothesis transition proposal id", errors);
+        RequireValue(proposal.ModelIdentity, "hypothesis transition model identity", errors);
+        RequireValue(proposal.PromptIdentity, "hypothesis transition prompt identity", errors);
+        if (!string.Equals(proposal.BundleId, bundle.BundleId, StringComparison.Ordinal))
+            errors.Add("hypothesis transition proposal bundle id does not match the observation bundle");
+        if (proposal.GeneratedAtUtc == default)
+            errors.Add("hypothesis transition proposal generated timestamp is required");
+
+        RequireUniqueValues(evidence.Select(item => item.EvidenceId), "relationship evidence id", errors);
+        var evidenceById = new Dictionary<string, IncidentEventStateObservationRelationshipEvidence>(StringComparer.Ordinal);
+        foreach (var item in evidence)
+        {
+            RequireValue(item.EvidenceId, "relationship evidence id", errors);
+            var evidenceValidation = ValidateObservationRelationshipCritique(bundle, item.Proposal, item.Critique);
+            errors.AddRange(evidenceValidation.Errors.Select(error => $"relationship evidence '{item.EvidenceId}': {error}"));
+            if (!string.IsNullOrWhiteSpace(item.EvidenceId))
+                evidenceById.TryAdd(item.EvidenceId, item);
+        }
+
+        RequireUniqueValues(proposal.Revisions.Select(revision => revision.RevisionId), "hypothesis revision id", errors);
+        RequireUniqueValues(
+            proposal.Revisions.Select(revision => revision.Hypothesis.HypothesisId),
+            "revised hypothesis id",
+            errors);
+        RequireUniqueValues(
+            bundle.PriorState.Select(hypothesis => hypothesis.ProjectionEventId),
+            "prior hypothesis id",
+            errors);
+        foreach (var prior in bundle.PriorState)
+            RequireValue(prior.ProjectionEventId, "prior hypothesis id", errors);
+        var priorById = bundle.PriorState
+            .GroupBy(hypothesis => hypothesis.ProjectionEventId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        foreach (var revision in proposal.Revisions)
+        {
+            RequireValue(revision.RevisionId, "hypothesis revision id", errors);
+            RequireUniqueValues(
+                revision.SupersedesHypothesisIds,
+                $"superseded hypothesis id in revision '{revision.RevisionId}'",
+                errors);
+            RequireUniqueValues(
+                revision.SupportingRelationshipEvidenceIds,
+                $"relationship evidence id in revision '{revision.RevisionId}'",
+                errors);
+            RequireUniqueValues(
+                revision.UnresolvedQuestions,
+                $"unresolved question in revision '{revision.RevisionId}'",
+                errors);
+            foreach (var question in revision.UnresolvedQuestions)
+                RequireValue(question, "hypothesis revision unresolved question", errors);
+
+            var syntheticProposal = new IncidentEventStateProposal(
+                proposal.ProposalId,
+                proposal.BundleId,
+                proposal.GeneratedAtUtc,
+                proposal.ModelIdentity,
+                proposal.PromptIdentity,
+                [revision.Hypothesis],
+                []);
+            ValidateProposal(bundle, syntheticProposal, errors);
+
+            var priorObservationIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var priorId in revision.SupersedesHypothesisIds)
+            {
+                if (!priorById.TryGetValue(priorId, out var prior))
+                {
+                    errors.Add($"revision '{revision.RevisionId}' supersedes unknown hypothesis '{priorId}'");
+                    continue;
+                }
+                priorObservationIds.UnionWith(prior.ObservationIds);
+            }
+
+            var supportedObservationIds = new HashSet<string>(priorObservationIds, StringComparer.Ordinal);
+            foreach (var evidenceId in revision.SupportingRelationshipEvidenceIds)
+            {
+                if (!evidenceById.TryGetValue(evidenceId, out var item))
+                {
+                    errors.Add($"revision '{revision.RevisionId}' references unknown relationship evidence '{evidenceId}'");
+                    continue;
+                }
+                if (item.Proposal.PossibleRelationships.Count > 0)
+                    supportedObservationIds.UnionWith(item.Proposal.ObservationIds);
+            }
+
+            foreach (var observationId in revision.Hypothesis.ObservationIds)
+            {
+                if (!supportedObservationIds.Contains(observationId) &&
+                    !(revision.SupersedesHypothesisIds.Count == 0 &&
+                      revision.Hypothesis.ObservationIds.Count == 1))
+                {
+                    errors.Add($"revision '{revision.RevisionId}' adds observation '{observationId}' without cited relationship evidence");
+                }
+            }
+
+            var addsObservation = revision.Hypothesis.ObservationIds.Any(
+                observationId => !priorObservationIds.Contains(observationId));
+            if (addsObservation &&
+                revision.Hypothesis.ObservationIds.Count > 1 &&
+                revision.SupportingRelationshipEvidenceIds.All(evidenceId =>
+                    !evidenceById.TryGetValue(evidenceId, out var item) ||
+                    item.Proposal.PossibleRelationships.Count == 0))
+            {
+                errors.Add($"revision '{revision.RevisionId}' adds observations without a validated relationship proposal");
+            }
+        }
+    }
+
+    private static void ValidateHypothesisTransitionCritique(
+        IncidentEventStateObservationBundle bundle,
+        IncidentEventStateHypothesisTransitionProposal proposal,
+        IncidentEventStateHypothesisTransitionCritique critique,
+        List<string> errors)
+    {
+        RequireValue(critique.CritiqueId, "hypothesis transition critique id", errors);
+        RequireValue(critique.ModelIdentity, "hypothesis transition critique model identity", errors);
+        RequireValue(critique.PromptIdentity, "hypothesis transition critique prompt identity", errors);
+        RequireValue(critique.Summary, "hypothesis transition critique summary", errors);
+        if (!string.Equals(critique.ProposalId, proposal.ProposalId, StringComparison.Ordinal))
+            errors.Add("hypothesis transition critique proposal id does not match the proposal");
+        if (critique.GeneratedAtUtc == default)
+            errors.Add("hypothesis transition critique generated timestamp is required");
+        RequireUniqueValues(
+            critique.Findings.Select(finding => finding.FindingId),
+            "hypothesis transition critique finding id",
+            errors);
+        foreach (var finding in critique.Findings)
+        {
+            RequireValue(finding.FindingId, "hypothesis transition critique finding id", errors);
+            RequireValue(finding.Statement, $"hypothesis transition critique finding statement for '{finding.FindingId}'", errors);
+            ValidateUncertainty(finding.Uncertainty, $"hypothesis transition critique finding '{finding.FindingId}'", errors);
+            ValidateProvenance(bundle, finding.Provenance, $"hypothesis transition critique finding '{finding.FindingId}'", errors);
         }
     }
 
