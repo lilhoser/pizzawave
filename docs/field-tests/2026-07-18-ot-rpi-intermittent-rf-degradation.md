@@ -99,7 +99,7 @@ Both original configurations were restored after evidence capture. During restor
 
 Current upstream behavior checks decode approximately every three seconds and immediately round-robins to the next learned control channel below 2 msg/s. `controlRetuneLimit` is not a dwell or recovery control: values above zero terminate Trunk Recorder after the configured number of failed retune attempts. It must remain `0` for these systems.
 
-A local Trunk Recorder branch, `codex/retune-hysteresis`, adds `controlRetuneGracePeriod` while preserving the upstream default of immediate retuning when the setting is `0`. Commit `f893508` built successfully on OT but was not installed on either live host.
+A local Trunk Recorder branch, `codex/retune-hysteresis`, adds `controlRetuneGracePeriod` while preserving the upstream default of immediate retuning when the setting is `0`. Commit `f893508` is based on current upstream. Because OT's installed binary dates to 2026-04-29, a compatibility branch, `codex/retune-hysteresis-ot` at `58b5b3c`, applies the same change to upstream commit `766a553` from 2026-04-27 so the live trial does not include months of unrelated upstream changes.
 
 Offline replay with `controlRetuneGracePeriod: 12` showed:
 
@@ -107,7 +107,21 @@ Offline replay with `controlRetuneGracePeriod: 12` showed:
 - a decodable direct-centered sample acquired the correct site without a retune despite several initial low-rate checks;
 - the same decodable sample with legacy behavior cycled three times before acquisition.
 
-This is sufficient evidence for a controlled OT-only live trial, but not yet for an upstream pull request. The branch still needs live behavior across real fades, and it does not solve the RPI cold-start problem when only one control channel is configured.
+The OT compatibility build then ran for a fixed 30-minute live window from Unix `1784467399` through `1784469199`, with original source centers, `controlRetuneGracePeriod: 12`, and `controlRetuneLimit: 0`.
+
+| System | Samples | Avg decode | Zero samples | Samples below 2 | Retunes | Calls concluded |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| OT North Bradley | 597 | 12.82 msg/s | 9.21% | 11.89% | 15 | 12 |
+| OT Cleveland | 597 | 39.87 msg/s | 0.00% | 0.00% | 0 | 27 |
+| OT Hamilton | 597 | 15.31 msg/s | 5.86% | 6.03% | 12 | 306 |
+
+North Bradley experienced several real low-decode intervals. Retunes within a recovery cycle were 12 seconds apart, never three seconds apart. It returned to the primary and recovered multiple times. Compared with the original-center baseline, North Bradley average decode increased from 6.67 to 12.82 msg/s, zero samples fell from 38.00% to 9.21%, and retunes fell from 252 to 15. Hamilton showed the same direction of change, while Cleveland remained stable. No service exit, no-source event, or callstream failure occurred during the successful window.
+
+The first live start used an incomplete runtime library path and could not load the installed `libcallstream.so`; it was rolled back immediately. The corrected isolated override included the installed plugin directory and completed normally. This was a trial-packaging error, not a crash in the retune change.
+
+The live result is strong evidence that longer dwell materially improves recovery and eliminates wasteful churn. It does not prove that 12 seconds is the best value, does not prevent the initial RF/decode collapse, and does not solve the RPI cold-start problem when only one control channel is configured. The experimental binary and config were rolled back after the fixed window; OT finished on its original `/usr/local/bin/trunk-recorder`, and RPI was never changed. Final verification showed both hosts' `trunk-recorder` and `pizzad` services active, PizzaWave health `ok`, and live TR activity current.
+
+PizzaWave's RF-analysis API returned only 500 message-rate samples for the 30-minute window, while the journal contained 597 after startup. Its percentage therefore differs from the complete raw-window calculation above. Fixed-window analysis should not silently truncate this evidence.
 
 ## Artifacts
 
@@ -119,6 +133,7 @@ OT:
 - `20260718T214309Z-ot-north-bradley-live-plan-outage-iq`
 - `20260718T220046Z-ot-source1-live-reference-decoder`
 - `20260719-source-center-ab`
+- `20260719-retune-grace-live`
 
 RPI:
 
@@ -130,11 +145,12 @@ RPI:
 ## Recommended next steps
 
 1. Run repeated or longer OT North Bradley baseline/candidate pairs before adopting the candidate source centers permanently. Use Cleveland and Hamilton as contemporaneous controls.
-2. Run an OT-only live trial of the retune branch with `controlRetuneGracePeriod` set to 12 seconds and `controlRetuneLimit` left at `0`. Preserve an immediate rollback binary and config.
+2. Turn the compatibility trial into a properly packaged, immediately reversible OT build and run a longer supervised window. Keep `controlRetuneLimit` at `0`.
 3. Test explicit configuration of all known-good control-channel alternates, especially on RPI, so cold-start recovery does not depend on first decoding the primary.
-4. If the grace trial succeeds, refine the upstream design around last-known-good preference and reacquisition dwell, then decide whether to fork or propose it upstream.
-5. Add durable per-source RF telemetry independent of decoded message rate: absolute channel power, local noise floor, channel SNR, frequency residual, selected control channel, and retune state. Decode rate alone cannot distinguish RF loss from failure to reacquire.
-6. Repeat the IQ comparison after the source-plan and retune changes. The success criterion is not only a higher average decode rate, but removal of long zero windows during modest input-level fades.
+4. Refine the upstream design around last-known-good preference and reacquisition dwell. The evidence now justifies preparing the current-upstream branch for review; create a fork or upstream pull request only after the longer OT trial and focused tests.
+5. Remove the RF-analysis API's 500-sample truncation for fixed windows, or explicitly paginate and aggregate the complete selected window.
+6. Add durable per-source RF telemetry independent of decoded message rate: absolute channel power, local noise floor, channel SNR, frequency residual, selected control channel, and retune state. Decode rate alone cannot distinguish RF loss from failure to reacquire.
+7. Repeat the IQ comparison after the source-plan and retune changes. The success criterion is not only a higher average decode rate, but removal of long zero windows during modest input-level fades.
 
 ## Limits
 
