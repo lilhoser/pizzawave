@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 16:20 EDT
+Last reconciled: 2026-07-19 16:35 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -19,7 +19,9 @@ the experimental Trunk Recorder retune-grace binary.
 ## Active
 
 - Reconcile source control and deployment ownership.
-  - Publish the 50 local `main` commits missing from `origin/main` after review.
+  - Local `main` through `9299a28` is published to `origin/main`.
+  - Merged and superseded package worktrees have been removed. The canonical
+    `main` and isolated incident-v3 worktrees remain.
   - Add deployment locking and record the source commit in deployment manifests.
   - Bring OT and RPI to the same reviewed `main` build only after deployment
     ownership is established.
@@ -44,8 +46,8 @@ the experimental Trunk Recorder retune-grace binary.
 
 - Preserve, merge, or retire the incident-v3, transcription bakeoff, embedding,
   and old platform-refactor branches after their owners review them.
-- Remove obsolete clean worktrees only after the branch reconciliation appendix
-  is approved.
+- Review and retire obsolete local branch names after confirming no session
+  still refers to them. Their worktrees have already been removed.
 
 ## Completion Rule
 
@@ -57,4 +59,3 @@ Each implementation item ends with one sequence:
 4. Deployment runs from `main` under the deployment lock.
 5. Host, commit, hashes, time, and verification result are recorded here.
 6. The task worktree is removed after its branch is safely retained.
-
