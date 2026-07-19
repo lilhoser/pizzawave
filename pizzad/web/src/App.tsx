@@ -11031,11 +11031,11 @@ function RfHealthStatusPanel({ data, onSelectSite, onSelectCategory }: { data: T
       return <article className="card tr-site-card" key={system.systemShortName} onClickCapture={() => onSelectSite(system.systemShortName)}>
         <div className="tr-site-card-head"><h3>{trSystemDisplayName(system.systemShortName)}</h3><span>Current window</span></div>
         <div className="tr-site-facts">
-          <TrSiteFact label="Decode" value={system.ccSummarySamples ? `${system.ccSummaryAvgDecodeRate.toFixed(1)} msg/s` : "N/A"} caption={system.decodeAssessment.baselineValue != null ? `Local ${system.decodeAssessment.baselineValue.toFixed(1)} · strong 40 msg/s` : "40 msg/s strong reference"} onClick={() => onSelectCategory("decode")} />
-          <TrSiteFact label="Zero decode" value={system.ccSummarySamples ? `${system.ccSummaryDecodeZeroPercent.toFixed(1)}%` : "N/A"} caption={system.zeroDecodeAssessment.baselineValue != null ? `Local ${system.zeroDecodeAssessment.baselineValue.toFixed(1)}% · ${system.ccSummarySamples.toLocaleString()} samples` : `${system.ccSummarySamples.toLocaleString()} summary samples`} onClick={() => onSelectCategory("decode")} />
-          <TrSiteFact label="Calls" value={system.callsConcluded.toLocaleString()} caption={system.callsAssessment.baselineValue != null ? `${system.callsPerHour.toFixed(1)}/hr · local ${system.callsAssessment.baselineValue.toFixed(1)}/hr` : `${system.callsPerHour.toFixed(1)}/hr in window`} onClick={() => onSelectCategory("activity")} />
-          <TrSiteFact label="No audio" value={system.noTxRecorded.toLocaleString()} caption={system.callsConcluded ? `${(system.noTxRecorded * 100 / system.callsConcluded).toFixed(1)}%${system.noAudioAssessment.baselineValue != null ? ` · local ${system.noAudioAssessment.baselineValue.toFixed(1)}%` : " of calls"}` : "no concluded calls"} onClick={() => onSelectCategory("activity")} />
-          <TrSiteFact label="Retunes" value={system.retunes.toLocaleString()} caption={system.retunesAssessment.baselineValue != null ? `${system.retunesPerHour.toFixed(1)}/hr · local ${system.retunesAssessment.baselineValue.toFixed(1)}/hr` : `${system.retunesPerHour.toFixed(1)}/hr in window`} onClick={() => onSelectCategory("events")} />
+          <TrSiteFact label="Decode" value={system.ccSummarySamples ? `${system.ccSummaryAvgDecodeRate.toFixed(1)} msg/s` : "N/A"} caption={system.decodeAssessment.baselineValue != null ? `Local ${system.decodeAssessment.baselineValue.toFixed(1)} · strong 40 msg/s` : "40 msg/s strong reference"} assessment={system.decodeAssessment} onClick={() => onSelectCategory("decode")} />
+          <TrSiteFact label="Zero decode" value={system.ccSummarySamples ? `${system.ccSummaryDecodeZeroPercent.toFixed(1)}%` : "N/A"} caption={system.zeroDecodeAssessment.baselineValue != null ? `Local ${system.zeroDecodeAssessment.baselineValue.toFixed(1)}% · ${system.ccSummarySamples.toLocaleString()} samples` : `${system.ccSummarySamples.toLocaleString()} summary samples`} assessment={system.zeroDecodeAssessment} onClick={() => onSelectCategory("decode")} />
+          <TrSiteFact label="Calls" value={system.callsConcluded.toLocaleString()} caption={system.callsAssessment.baselineValue != null ? `${system.callsPerHour.toFixed(1)}/hr · local ${system.callsAssessment.baselineValue.toFixed(1)}/hr` : `${system.callsPerHour.toFixed(1)}/hr in window`} assessment={system.callsAssessment} onClick={() => onSelectCategory("activity")} />
+          <TrSiteFact label="No audio" value={system.noTxRecorded.toLocaleString()} caption={system.callsConcluded ? `${(system.noTxRecorded * 100 / system.callsConcluded).toFixed(1)}%${system.noAudioAssessment.baselineValue != null ? ` · local ${system.noAudioAssessment.baselineValue.toFixed(1)}%` : " of calls"}` : "no concluded calls"} assessment={system.noAudioAssessment} onClick={() => onSelectCategory("activity")} />
+          <TrSiteFact label="Retunes" value={system.retunes.toLocaleString()} caption={system.retunesAssessment.baselineValue != null ? `${system.retunesPerHour.toFixed(1)}/hr · local ${system.retunesAssessment.baselineValue.toFixed(1)}/hr` : `${system.retunesPerHour.toFixed(1)}/hr in window`} assessment={system.retunesAssessment} onClick={() => onSelectCategory("events")} />
         </div>
         <small className="tr-site-freshness">Latest evidence: {new Date(system.lastWindowEndUtc).toLocaleString()}</small>
       </article>;
@@ -11043,8 +11043,8 @@ function RfHealthStatusPanel({ data, onSelectSite, onSelectCategory }: { data: T
   </div>;
 }
 
-function TrSiteFact({ label: factLabel, value, caption, onClick }: { label: string; value: string; caption: string; onClick: () => void }) {
-  return <button type="button" className="tr-site-fact" aria-label={`${factLabel}: ${value}. Open matching Performance charts.`} onClick={onClick}><span>{factLabel}</span><strong>{value}</strong><small>{caption}</small></button>;
+function TrSiteFact({ label: factLabel, value, caption, assessment, onClick }: { label: string; value: string; caption: string; assessment: TrMetricAssessment; onClick: () => void }) {
+  return <button type="button" className={`tr-site-fact ${assessment.tone}`} title={assessment.detail} aria-label={`${factLabel}: ${value}. ${assessment.detail} Open matching Performance charts.`} onClick={onClick}><span>{factLabel}</span><strong>{value}</strong><small>{caption}</small></button>;
 }
 
 function trSystemDisplayName(value: string) {

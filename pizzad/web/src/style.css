@@ -2528,6 +2528,9 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   color: inherit;
   cursor: pointer;
 }
+.tr-site-fact.ok { border-color: #2f6f47; background: #18251d; }
+.tr-site-fact.warning { border-color: #8b7321; background: #2a2515; }
+.tr-site-fact.error { border-color: #9e3f3f; background: #2d1b1b; }
 .tr-site-fact:hover,
 .tr-site-fact:focus-visible { filter: brightness(1.18); outline: 1px solid #72b7ff; }
 .tr-site-facts span { color: #9faab5; font-size: 10px; font-weight: 700; text-transform: uppercase; }

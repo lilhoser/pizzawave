@@ -78,6 +78,21 @@ public sealed class SystemInformationUiContractTests
     }
 
     [Fact]
+    public void RadioFrequencyKpisRetainSemanticAssessmentColors()
+    {
+        var app = AppSource();
+        var styles = StyleSource();
+
+        Assert.Contains("assessment={system.decodeAssessment}", app, StringComparison.Ordinal);
+        Assert.Contains("assessment={system.zeroDecodeAssessment}", app, StringComparison.Ordinal);
+        Assert.Contains("assessment={system.retunesAssessment}", app, StringComparison.Ordinal);
+        Assert.Contains("className={`tr-site-fact ${assessment.tone}`}", app, StringComparison.Ordinal);
+        Assert.Contains(".tr-site-fact.ok", styles, StringComparison.Ordinal);
+        Assert.Contains(".tr-site-fact.warning", styles, StringComparison.Ordinal);
+        Assert.Contains(".tr-site-fact.error", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SystemNavigationUsesApprovedOperatorTerminologyAndSurfaces()
     {
         var source = AppSource();
