@@ -408,6 +408,9 @@ public sealed class SetupTrConfigBuilderServiceTests
         Assert.Equal(9123, client.GetProperty("port").GetInt32());
         Assert.False(plugin.TryGetProperty("sftpHost", out _));
         Assert.Equal("etv-raymond", plugin.GetProperty("streams")[0].GetProperty("shortName").GetString());
+        var rfTelemetry = plugin.GetProperty("rf_telemetry");
+        Assert.True(rfTelemetry.GetProperty("enabled").GetBoolean());
+        Assert.Equal(15, rfTelemetry.GetProperty("sample_interval_seconds").GetInt32());
 
         Directory.Delete(root, recursive: true);
     }

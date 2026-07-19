@@ -875,6 +875,7 @@ public sealed class RfSurveyMultiSystemTests
             var rootElement = document.RootElement;
             var system = rootElement.GetProperty("systems")[0];
             var stream = rootElement.GetProperty("plugins")[0].GetProperty("streams")[0];
+            var rfTelemetry = rootElement.GetProperty("plugins")[0].GetProperty("rf_telemetry");
             var source = rootElement.GetProperty("sources")[0];
 
             Assert.True(rootElement.GetProperty("audioStreaming").GetBoolean());
@@ -886,6 +887,8 @@ public sealed class RfSurveyMultiSystemTests
             Assert.Equal(0, system.GetProperty("minTransmissionDuration").GetInt32());
             Assert.True(system.GetProperty("callLog").GetBoolean());
             Assert.Equal("north-bradley", stream.GetProperty("shortName").GetString());
+            Assert.True(rfTelemetry.GetProperty("enabled").GetBoolean());
+            Assert.Equal(15, rfTelemetry.GetProperty("sample_interval_seconds").GetInt32());
             Assert.Equal("airspy=26A464DC28793293,sensitivity=0,linearity=0,bias=0", source.GetProperty("device").GetString());
             Assert.False(source.TryGetProperty("gain", out _));
             Assert.Equal(15, source.GetProperty("lnaGain").GetInt32());

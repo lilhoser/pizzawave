@@ -3,9 +3,8 @@
 Last updated: 2026-07-19
 
 Before starting or deploying new work, read [work-queue.md](work-queue.md).
-The 2026-07-19 reconciliation found local `main` ahead of `origin/main` and OT
-and RPI on different deploy manifests; those source-control and deployment
-ownership items take priority over new implementation.
+Local and remote `main` were reconciled on 2026-07-19. OT and RPI still have
+different deploy manifests, so check both versions before the next deployment.
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.

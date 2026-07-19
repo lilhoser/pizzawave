@@ -86,6 +86,4 @@ Do not remove any worktree or branch until:
 1. local `main` is reviewed and safely published;
 2. the unique incident/transcription/embedding/platform branches receive an
    explicit disposition;
-3. deployment locking is active; and
-4. OT and RPI deployment provenance is recorded and reconciled.
-
+3. OT and RPI deployed versions are checked before the next deployment.

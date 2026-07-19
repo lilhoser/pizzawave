@@ -7717,6 +7717,10 @@ public sealed class RfSurveyService
         callstream["library"] = callstream["library"]?.GetValue<string>() ?? "libcallstream.so";
         callstream["host"] = _config.Ingest.CallstreamBind;
         callstream["port"] = _config.Ingest.CallstreamPort;
+        JsonObject rfTelemetry = [];
+        rfTelemetry["enabled"] = true;
+        rfTelemetry["sample_interval_seconds"] = 15;
+        callstream["rf_telemetry"] = rfTelemetry;
         var clients = new JsonArray();
         JsonObject client = [];
         client["address"] = _config.Ingest.CallstreamBind;

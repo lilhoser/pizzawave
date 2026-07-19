@@ -240,6 +240,7 @@ callstream["name"] = "callstream"
 callstream["library"] = callstream.get("library") or "libcallstream.so"
 callstream["host"] = host
 callstream["port"] = port
+callstream["rf_telemetry"] = {"enabled": True, "sample_interval_seconds": 15}
 if disable_capture_dir:
     data.pop("captureDir", None)
 
