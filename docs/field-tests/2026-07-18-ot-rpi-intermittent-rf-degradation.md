@@ -123,6 +123,20 @@ The live result is strong evidence that longer dwell materially improves recover
 
 PizzaWave's RF-analysis API returned only 500 message-rate samples for the 30-minute window, while the journal contained 597 after startup. The API had no hard 500-row cap; it included only complete five-minute health buckets and silently omitted the partial bucket at each boundary. Its percentage therefore differed from the complete raw-window calculation above.
 
+## Setup recovery-channel repair
+
+On 2026-07-19, Setup was found to retain all four RadioReference control-channel candidates for each RPI site in desired state while writing only the single RF-selected channel to the active Trunk Recorder config. The RF selection was incorrectly used as an allowlist rather than as the preferred-channel ordering signal. Config Draft also collapsed each system to its single best live RF candidate, and Setup reconciliation compared only a stack-wide aggregate channel list.
+
+The repair now:
+
+- keeps the proven/preferred channel first while retaining authoritative alternates;
+- reports active-versus-desired control-channel drift per system;
+- allows Call Quality proof before an additive recovery-channel-only apply while continuing to block source, system-removal, or channel-replacement drift;
+- compares stored system definitions by frequency values instead of collection object identity, preventing successful proof records from being deleted on each Setup refresh; and
+- includes exact partial boundary samples in fixed-window RF analysis.
+
+After call-capture proof passed with 10 real audio calls and transcription proof passed with 11 usable transcripts, Setup applied and restarted the RPI config with Raymond `[773.781250, 773.031250, 773.281250, 773.531250]` MHz and Jackson `[855.287500, 855.537500, 855.987500, 856.812500]` MHz. `controlRetuneLimit` remained `0`; no retune-grace binary was installed. Raymond cold-started on 773.781250 MHz, produced 28 msg/s in its first three-second report, and reached 37-41 msg/s within 38 seconds. Jackson continued cycling because its assigned receiver remains disconnected.
+
 ## Artifacts
 
 Artifacts remain on the measured hosts under `/var/lib/pizzawave/rf-surveys/manual`.
