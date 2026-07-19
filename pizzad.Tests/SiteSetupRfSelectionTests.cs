@@ -106,6 +106,28 @@ public sealed class SiteSetupRfSelectionTests
     }
 
     [Fact]
+    public void SameSystemDefinitions_ComparesFrequencyValuesInsteadOfListReferences()
+    {
+        IReadOnlyList<RfSurveySystemDto> first =
+        [
+            new("raymond", "Raymond", [773_781_250, 773_031_250], [770_081_250], "4879", "mswin")
+        ];
+        IReadOnlyList<RfSurveySystemDto> equivalent =
+        [
+            new("raymond", "Raymond", new List<long> { 773_781_250, 773_031_250 }, new List<long> { 770_081_250 }, "4879", "mswin")
+        ];
+        IReadOnlyList<RfSurveySystemDto> reorderedPrimary =
+        [
+            new("raymond", "Raymond", [773_031_250, 773_781_250], [770_081_250], "4879", "mswin")
+        ];
+        var method = typeof(RfSurveyService).GetMethod("SameSystemDefinitions", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "SameSystemDefinitions");
+
+        Assert.True((bool)method.Invoke(null, [first, equivalent])!);
+        Assert.False((bool)method.Invoke(null, [first, reorderedPrimary])!);
+    }
+
+    [Fact]
     public void NormalizeRfSelections_KeepsMeasurementsBoundToDifferentSources()
     {
         var values = new[]

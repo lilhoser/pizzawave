@@ -766,7 +766,7 @@ public sealed class RfSurveyService
         var incomingDefinitions = request.SystemDefinitions ?? current.Systems;
         var incomingSources = request.SdrSources ?? current.Sources;
         var incomingSourceAssignments = request.SourceAssignments ?? current.SourceAssignments;
-        var definitionsChanged = request.SystemDefinitions != null && !NormalizeSystemDefinitions(request.SystemDefinitions).SequenceEqual(current.Systems);
+        var definitionsChanged = request.SystemDefinitions != null && !SameSystemDefinitions(request.SystemDefinitions, current.Systems);
         var sourcesChanged = request.SdrSources != null && !NormalizeRfSurveySources(request.SdrSources).SequenceEqual(current.Sources);
         var sourceAssignmentsChanged = request.SourceAssignments != null && !SameSourceAssignments(NormalizeSourceAssignments(request.SourceAssignments, incomingDefinitions, incomingSources), current.SourceAssignments);
         var sourcePlanAppliedBeforeDraft = HasAppliedSourcePlan(row.Session);
@@ -7447,6 +7447,29 @@ public sealed class RfSurveyService
 
     private static bool SameStringSet(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
         left.Count == right.Count && left.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(right.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+
+    private static bool SameSystemDefinitions(
+        IReadOnlyList<RfSurveySystemDto> left,
+        IReadOnlyList<RfSurveySystemDto> right)
+    {
+        var normalizedLeft = NormalizeSystemDefinitions(left);
+        var normalizedRight = NormalizeSystemDefinitions(right);
+        if (normalizedLeft.Count != normalizedRight.Count)
+            return false;
+        foreach (var system in normalizedLeft)
+        {
+            var other = normalizedRight.FirstOrDefault(candidate =>
+                string.Equals(candidate.ShortName, system.ShortName, StringComparison.OrdinalIgnoreCase));
+            if (other == null ||
+                !string.Equals(other.SiteLabel, system.SiteLabel, StringComparison.Ordinal) ||
+                !string.Equals(other.RadioReferenceSid, system.RadioReferenceSid, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(other.TalkgroupSystemShortName, system.TalkgroupSystemShortName, StringComparison.OrdinalIgnoreCase) ||
+                !other.ControlChannelsHz.SequenceEqual(system.ControlChannelsHz) ||
+                !other.VoiceFrequenciesHz.Order().SequenceEqual(system.VoiceFrequenciesHz.Order()))
+                return false;
+        }
+        return true;
+    }
 
     private static bool SameSourceAssignments(IReadOnlyDictionary<string, int> left, IReadOnlyDictionary<string, int> right)
     {
