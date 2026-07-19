@@ -2,6 +2,11 @@
 
 Last consolidated: 2026-07-19
 
+The active cross-package queue and deployment baseline are maintained in
+[work-queue.md](work-queue.md). Repository and worktree detail from the latest
+reconciliation is in
+[reconciliation-audit-2026-07-19.md](reconciliation-audit-2026-07-19.md).
+
 The active operator-facing remediation program is tracked in
 [operator-ux-remediation.md](operator-ux-remediation.md).
 
