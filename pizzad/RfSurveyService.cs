@@ -6241,9 +6241,29 @@ public sealed class RfSurveyService
             .Select(system => $"{system.ShortName}|{string.Join(",", system.ControlChannelsHz.Order())}")
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (!liveSystems.SequenceEqual(draftSystems, StringComparer.OrdinalIgnoreCase))
+        if (!liveSystems.SequenceEqual(draftSystems, StringComparer.OrdinalIgnoreCase) &&
+            !DraftOnlyAddsRecoveryControlChannels(live.Systems, draft.Systems))
             drift.Add("Live TR system/control-channel list differs from draft.");
         return drift;
+    }
+
+    private static bool DraftOnlyAddsRecoveryControlChannels(
+        IReadOnlyList<TrConfigSourceCoverageSystem> liveSystems,
+        IReadOnlyList<TrConfigSourceCoverageSystem> draftSystems)
+    {
+        if (liveSystems.Count != draftSystems.Count)
+            return false;
+        foreach (var liveSystem in liveSystems)
+        {
+            var draftSystem = draftSystems.FirstOrDefault(system =>
+                string.Equals(system.ShortName, liveSystem.ShortName, StringComparison.OrdinalIgnoreCase));
+            if (draftSystem == null)
+                return false;
+            var draftChannels = draftSystem.ControlChannelsHz.Where(value => value > 0).ToHashSet();
+            if (!liveSystem.ControlChannelsHz.Where(value => value > 0).All(draftChannels.Contains))
+                return false;
+        }
+        return true;
     }
 
     private static object? BuildVoiceCoverageEvidence(RfSurveyProfileDto profile, IReadOnlyList<TrConfigSourceCoverageSource>? liveSources = null)

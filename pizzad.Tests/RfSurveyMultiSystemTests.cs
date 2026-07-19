@@ -1113,6 +1113,35 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public void AppliedDraftDrift_AllowsOnlyAdditiveRecoveryControlChannels()
+    {
+        var source = new TrConfigSourceCoverageSource(0, "airspy=abc", "osmosdr", 772_000_000, 6_000_000, 769_187_500, 774_812_500);
+        var live = new TrConfigSourceCoverageValidation(
+            true,
+            [],
+            [source],
+            [new TrConfigSourceCoverageSystem("raymond", [773_781_250])]);
+        var additiveDraft = new TrConfigSourceCoverageValidation(
+            true,
+            [],
+            [source],
+            [new TrConfigSourceCoverageSystem("raymond", [773_781_250, 773_031_250, 773_281_250, 773_531_250])]);
+        var replacementDraft = new TrConfigSourceCoverageValidation(
+            true,
+            [],
+            [source],
+            [new TrConfigSourceCoverageSystem("raymond", [773_031_250])]);
+        var method = typeof(RfSurveyService).GetMethod("AppliedDraftDrift", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "AppliedDraftDrift");
+
+        var additiveDrift = (IReadOnlyList<string>)method.Invoke(null, [live, additiveDraft])!;
+        var replacementDrift = (IReadOnlyList<string>)method.Invoke(null, [live, replacementDraft])!;
+
+        Assert.Empty(additiveDrift);
+        Assert.Contains(replacementDrift, item => item.Contains("system/control-channel", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ObservedCallSpanSeconds_UsesLastStopTime()
     {
         var method = typeof(RfSurveyService).GetMethod("ObservedCallSpanSeconds", BindingFlags.Static | BindingFlags.NonPublic)
