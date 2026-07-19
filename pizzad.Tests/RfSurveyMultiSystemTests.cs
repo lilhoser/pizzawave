@@ -206,6 +206,34 @@ public sealed class RfSurveyMultiSystemTests
             Assert.Equal(summary, updated.Session.SourcePlanSummary);
             Assert.Equal([0], updated.Profile.SelectedSourceIndexes);
             Assert.Equal(4, updated.Profile.CurrentStep);
+
+            var siteSetupArtifactPath = Path.Combine(root, "site-setup");
+            Directory.CreateDirectory(siteSetupArtifactPath);
+            var siteSetupSession = session with { Id = "site-setup", ArtifactPath = siteSetupArtifactPath };
+            await database.AddRfSurveySessionAsync(
+                siteSetupSession,
+                JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, true, true, true, true, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+            var authoritativeDefinitions = new RfSurveySystemDto[]
+            {
+                new("chattanooga", "Chattanooga", [855212500, 856237500], []),
+                new("cleveland", "Cleveland", [851050000], [])
+            };
+
+            var refreshedSiteSetup = await service.UpdateDraftAsync("site-setup", new RfSurveyDraftUpdateRequest(
+                SystemShortName: profile.SystemShortName,
+                SiteLabel: profile.SiteLabel,
+                SelectedSourceIndexes: [0],
+                CurrentStep: 4,
+                SystemShortNames: profile.SystemShortNames,
+                SourcePlanSystemShortNames: profile.SourcePlanSystemShortNames,
+                SourcePlanMode: profile.SourcePlanMode,
+                SystemDefinitions: authoritativeDefinitions,
+                SdrSources: profile.Sources), CancellationToken.None);
+
+            Assert.Equal([855212500, 856237500], refreshedSiteSetup.Profile.Systems.Single(system => system.ShortName == "chattanooga").ControlChannelsHz);
+            Assert.Equal("draft", refreshedSiteSetup.Session.Status);
         }
         finally
         {

@@ -802,7 +802,10 @@ public sealed class RfSurveyService
             !sourcePlanModeChanged &&
             SameStringSet(effectiveSystems, currentSystems) &&
             SameIntSet(effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, current.SelectedSourceIndexes);
-        var effectiveDefinitionsChanged = staleStepFourSupersetAutosave || staleAppliedEmptySelectionAutosave || staleAppliedSamePlanAutosave ? false : definitionsChanged;
+        var authoritativeSiteSetupDefinitionsChanged =
+            string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase) && definitionsChanged;
+        var effectiveDefinitionsChanged = authoritativeSiteSetupDefinitionsChanged ||
+            (!(staleStepFourSupersetAutosave || staleAppliedEmptySelectionAutosave || staleAppliedSamePlanAutosave) && definitionsChanged);
         var systemChanged = !SameStringSet(effectiveSystems, currentSystems) || sourcePlanChanged || sourcePlanModeChanged || effectiveDefinitionsChanged || sourcesChanged || sourceAssignmentsChanged;
         var radioFactsChanged = false;
         var effectiveRadioReferenceSid = string.IsNullOrWhiteSpace(request.RadioReferenceSid) ? current.RadioReferenceSid : request.RadioReferenceSid.Trim();
