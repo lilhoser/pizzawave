@@ -6,6 +6,8 @@ namespace pizzad;
 
 public sealed class TrHealthCollector : BackgroundService
 {
+    private static readonly TimeSpan RfSampleRetention = TimeSpan.FromDays(8);
+    private static readonly TimeSpan RfEventRetention = TimeSpan.FromDays(90);
     private static readonly Regex CcSummaryDecodeRateRegex = new(
         @"\[(?<scope>[^\]]+)\]\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<rate>-?\d+(?:\.\d+)?)\s+msg/sec",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -73,6 +75,17 @@ public sealed class TrHealthCollector : BackgroundService
             log = string.Empty;
         }
 
+        var telemetryEvents = RfTelemetryParser.ParseJournal(log, out var rejectedTelemetryRows);
+        var telemetryWritten = await _database.UpsertRfTelemetryEventsAsync(telemetryEvents, ct);
+        var telemetryPruned = await _database.PruneRfTelemetryEventsAsync(
+            DateTime.UtcNow.Subtract(RfSampleRetention),
+            DateTime.UtcNow.Subtract(RfEventRetention),
+            ct);
+        if (rejectedTelemetryRows > 0)
+            _logger.LogWarning("TR RF telemetry rejected {RejectedRows} malformed or unsupported row(s)", rejectedTelemetryRows);
+        if (telemetryPruned > 0)
+            _logger.LogInformation("TR RF telemetry pruned {PrunedRows} expired row(s)", telemetryPruned);
+
         var global = BuildSample("global", start, end, log) with
         {
             TrCpuPercent = runtime.TrCpuPercent,
@@ -85,31 +98,38 @@ public sealed class TrHealthCollector : BackgroundService
             HostLoad5 = runtime.HostLoad5,
             HostLoad15 = runtime.HostLoad15
         };
-        if (!HasAnyHealthSignal(global) && !HasAnyResourceSignal(global))
+        var hasHealthSample = HasAnyHealthSignal(global) || HasAnyResourceSignal(global);
+        if (!hasHealthSample && telemetryEvents.Count == 0)
         {
             _logger.LogDebug("TR health collection skipped empty window {Start:u} - {End:u}", start, end);
             return;
         }
 
-        var samplesWritten = 1;
-        await _database.InsertHealthSampleAsync(global, ct);
-
-        var logLines = log.Split('\n');
-        foreach (var scope in ExtractSystemScopes(log))
+        var samplesWritten = 0;
+        if (hasHealthSample)
         {
-            var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractDisplaySystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
-            if (scopedLines.Length == 0)
-                continue;
-            await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
-            samplesWritten++;
+            await _database.InsertHealthSampleAsync(global, ct);
+            samplesWritten = 1;
+            var logLines = log.Split('\n');
+            foreach (var scope in ExtractSystemScopes(log))
+            {
+                var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractDisplaySystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
+                if (scopedLines.Length == 0)
+                    continue;
+                await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
+                samplesWritten++;
+            }
+            await _events.PublishAsync("health_updated", new { windowStartUtc = start, windowEndUtc = end }, ct);
         }
 
-        await _events.PublishAsync("health_updated", new { windowStartUtc = start, windowEndUtc = end }, ct);
-        if (HasLiveTrCaptureSignal(global))
+        if (telemetryWritten > 0)
+            await _events.PublishAsync("rf_telemetry_updated", new { windowStartUtc = start, windowEndUtc = end, events = telemetryWritten }, ct);
+        if (HasLiveTrCaptureSignal(global) || telemetryEvents.Count > 0)
             _liveTrActivity.MarkTrHealth(DateTime.UtcNow);
         _logger.LogInformation(
-            "TR health collected {SamplesWritten} sample(s) for {Start:u} - {End:u}: decodeLines={DecodeLines}, callsStarted={CallsStarted}, callsConcluded={CallsConcluded}",
+            "TR health collected {SamplesWritten} sample(s) and {TelemetryWritten} new RF event(s) for {Start:u} - {End:u}: decodeLines={DecodeLines}, callsStarted={CallsStarted}, callsConcluded={CallsConcluded}",
             samplesWritten,
+            telemetryWritten,
             start,
             end,
             global.DecodeLines,

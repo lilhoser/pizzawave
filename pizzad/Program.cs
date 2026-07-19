@@ -848,6 +848,21 @@ app.MapGet("/api/v1/system/rf/live", (HttpContext context, AuthService authServi
 .WithName("SystemLiveRfStatus")
 .WithOpenApi();
 
+app.MapGet("/api/v1/system/rf/telemetry", async (HttpContext context, long? start, long? end, string? system, string? eventType, int? limit, AuthService authService, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = new TimeRangeQuery(start, end).Resolve();
+    return Results.Ok(await database.ListRfTelemetryEventsAsync(
+        range.Start,
+        range.End,
+        system,
+        eventType,
+        limit ?? 1000,
+        context.RequestAborted));
+})
+.WithName("SystemRfTelemetry")
+.WithOpenApi();
+
 app.MapGet("/api/v1/system/transcription-performance", async (HttpContext context, long? start, long? end, int? samplePage, int? samplePageSize, AuthService authService, TrHealthTroubleshootService troubleshoot, RemoteTranscriptionHealthService remoteHealth, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

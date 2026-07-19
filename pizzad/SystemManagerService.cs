@@ -171,7 +171,7 @@ public sealed class SystemManagerService
 
     private async Task<Dictionary<string, long>> TableCountsAsync(CancellationToken ct)
     {
-        var tables = new[] { "calls", "incidents", "incident_calls", "incident_operation_audit", "call_embedding_jobs", "incident_analysis_jobs", "alert_matches", "jobs", "remote_service_outages", "tr_health_samples", "insight_windows", "insight_events", "lm_usage", "geocode_cache" };
+        var tables = new[] { "calls", "incidents", "incident_calls", "incident_operation_audit", "call_embedding_jobs", "incident_analysis_jobs", "alert_matches", "jobs", "remote_service_outages", "tr_health_samples", "rf_telemetry_events", "insight_windows", "insight_events", "lm_usage", "geocode_cache" };
         var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         await using var connection = _database.OpenConnection();
         foreach (var table in tables)

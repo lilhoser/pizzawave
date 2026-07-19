@@ -782,6 +782,42 @@ public sealed record TrHealthSampleDto
     public double HostLoad15 { get; init; }
 }
 
+public sealed record RfTelemetryEventDto
+{
+    public long Id { get; init; }
+    public string EventKey { get; init; } = string.Empty;
+    public int SchemaVersion { get; init; }
+    public string EventType { get; init; } = string.Empty;
+    public DateTime TimestampUtc { get; init; }
+    public string SystemShortName { get; init; } = string.Empty;
+    public string SystemType { get; init; } = string.Empty;
+    public double? ControlChannelHz { get; init; }
+    public double? DecodeRate { get; init; }
+    public double? FrequencyErrorHz { get; init; }
+    public double? LowDecodeSeconds { get; init; }
+    public double? SampleWindowSeconds { get; init; }
+    public int? SourceIndex { get; init; }
+    public double? SourceCenterHz { get; init; }
+    public double? SourceSampleRate { get; init; }
+    public double? SourceErrorHz { get; init; }
+    public string SourceDriver { get; init; } = string.Empty;
+    public string SourceDevice { get; init; } = string.Empty;
+    public string Reason { get; init; } = string.Empty;
+    public double? PreviousControlChannelHz { get; init; }
+    public double? RequestedControlChannelHz { get; init; }
+    public double? FrequencyErrorBeforeRetuneHz { get; init; }
+    public int? PreviousSourceIndex { get; init; }
+    public double? PreviousSourceCenterHz { get; init; }
+    public int? SelectedSourceIndex { get; init; }
+    public double? SelectedSourceCenterHz { get; init; }
+    public double? SelectedSourceSampleRate { get; init; }
+    public double? SelectedSourceErrorHz { get; init; }
+    public string SelectedSourceDriver { get; init; } = string.Empty;
+    public string SelectedSourceDevice { get; init; } = string.Empty;
+    public bool? Success { get; init; }
+    public string RawJson { get; init; } = string.Empty;
+}
+
 public sealed record TrHealthMetricDto(string Metric, string Value, string Notes, bool IsIssue);
 
 public sealed record TrSourceCoverageDto(

@@ -1,6 +1,6 @@
 # Passive RF Telemetry Contract
 
-Status: implemented and deployed to OT; passive event validation in progress
+Status: emission and PizzaWave persistence validated on OT
 
 Implementation checkpoints:
 
@@ -42,15 +42,40 @@ All events use `schemaVersion: 1` and include Unix time, system identity,
 control channel, decode rate, frequency residual, source index, source center,
 sample rate, configured source correction, source driver, and device arguments.
 Retune events add the prior/requested channels and sources, reason, and result.
-Reacquisition events add low-decode duration and retune count.
+Reacquisition events add the continuous low-decode duration.
 
 This path is passive. It does not open an SDR, change tuning, capture IQ, or
 alter Trunk Recorder's retune behavior. Control-channel signal power and noise
 are intentionally absent because current Trunk Recorder interfaces do not
 provide trustworthy values for them.
 
+## PizzaWave Persistence
+
+The existing TR health collector owns ingestion so the system has only one
+bounded journal reader. It accepts schema version 1 events with the correct
+producer prefix, required typed fields, recognized event names, and plausible
+timestamps. Identical JSON records are deduplicated by SHA-256.
+
+Dense `rf_sample` rows are retained for eight days, covering the seven-day UI
+lookback with collection margin. Rare retune and reacquisition events are
+retained for 90 days. The authenticated
+`/api/v1/system/rf/telemetry` endpoint supports time, system, event-type, and
+bounded row-limit filters.
+
 ## Initial Validation
 
-Continue observing OT. Compare the first natural retune and reacquisition event
-with the existing human-readable TR log. Do not promote to RPI or add PizzaWave
-persistence until that evidence agrees.
+Initial validation required comparing the first natural retune and
+reacquisition event with the existing human-readable TR log before RPI
+promotion.
+
+Validation completed at 2026-07-19 19:29 EDT. Hamilton generated a TDULC
+retune from 855.2125 to 856.7625 MHz, three low-decode retunes through the
+remaining configured channels, and reacquired 855.2125 MHz after nine seconds
+of continuous low decode. All four structured retunes and the reacquisition
+matched the adjacent human-readable log lines and were stored successfully.
+
+PizzaWave ingestion candidate `26625f8` was deployed to OT with backend hash
+`ecdf7a0b...`. It created 60 periodic rows plus the five transition events in
+the first completed collection window. The authenticated API returned the full
+typed channel/source chain. The schema migration also backfilled the pre-retune
+frequency residual for events captured before that typed column was added.

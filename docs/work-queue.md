@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 19:16 EDT
+Last reconciled: 2026-07-19 19:39 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -11,7 +11,7 @@ read-only, but must not deploy.
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
 | RPI (`sdr1861`) | `main` at `99adf8a` | `96594b14...` | `23672a49...` | Healthy |
-| OT (`omicrontheta`) | `main` at `de90c93` | `5ed6df2b...` | `23672a49...` | Healthy; passive RF telemetry enabled |
+| OT (`omicrontheta`) | RF ingestion candidate `26625f8` | `ecdf7a0b...` | `23672a49...` | Healthy; RF emission and persistence validated |
 
 The hosts now share the same web build, but RPI's PizzaWave backend remains at
 the earlier `99adf8a` state. Neither host runs the experimental Trunk Recorder
@@ -19,7 +19,7 @@ retune-grace binary. Only OT runs the passive RF telemetry build.
 
 ## Active
 
-- Complete OT validation of passive RF telemetry before deployment elsewhere:
+- RF telemetry analysis and operator presentation:
   - Trunk Recorder `codex/rf-telemetry` at `8318dfb` emits retune events;
   - callstream `codex/rf-telemetry` at `1cdd5c4` emits periodic samples and
     reacquisition events;
@@ -27,14 +27,16 @@ retune-grace binary. Only OT runs the passive RF telemetry build.
   The matching artifacts were deployed to OT at 2026-07-19 19:13 EDT. All
   three configured systems emit valid samples at exact 15-second intervals;
   TR, callstream, PizzaWave ingest, and transcription remained healthy. No
-  natural retune or reacquisition occurred in the initial observation window,
-  so those two event types remain pending passive validation.
+  Hamilton naturally produced four retunes followed by reacquisition at
+  2026-07-19 19:29 EDT. Structured events matched the human-readable log and
+  retained the complete channel/source sequence. PizzaWave schema-v1 parsing,
+  deduplicated storage, bounded retention, migration, and authenticated query
+  endpoint are validated on OT; all 531 tests pass. Add analysis and operator
+  presentation before considering RPI promotion.
 
 ## Pending
 
-1. RF telemetry after OT validation:
-   - implement PizzaWave ingestion/storage;
-   - add analysis and operator presentation;
+1. RF telemetry after analysis/operator presentation:
    - promote the tested build to RPI.
 2. Harden and test Trunk Recorder retune grace, then propose it upstream.
 3. Add supervised Setup validation of every alternate control channel.

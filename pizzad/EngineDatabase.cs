@@ -3383,6 +3383,174 @@ public sealed partial class EngineDatabase
         return await command.ExecuteNonQueryAsync(ct) > 0;
     }
 
+    public async Task<int> UpsertRfTelemetryEventsAsync(IEnumerable<RfTelemetryEventDto> events, CancellationToken ct)
+    {
+        var rows = events.ToList();
+        if (rows.Count == 0)
+            return 0;
+
+        var inserted = 0;
+        await using var connection = OpenConnection();
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        foreach (var row in rows)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)tx;
+            command.CommandText = """
+                INSERT OR IGNORE INTO rf_telemetry_events (
+                    event_key, schema_version, event_type, timestamp_utc, system_short_name, system_type,
+                    control_channel_hz, decode_rate, frequency_error_hz, low_decode_seconds, sample_window_seconds,
+                    source_index, source_center_hz, source_sample_rate, source_error_hz, source_driver, source_device,
+                    reason, previous_control_channel_hz, requested_control_channel_hz, frequency_error_before_retune_hz, previous_source_index,
+                    previous_source_center_hz, selected_source_index, selected_source_center_hz,
+                    selected_source_sample_rate, selected_source_error_hz, selected_source_driver,
+                    selected_source_device, success, raw_json, ingested_at_utc)
+                VALUES (
+                    $event_key, $schema_version, $event_type, $timestamp_utc, $system_short_name, $system_type,
+                    $control_channel_hz, $decode_rate, $frequency_error_hz, $low_decode_seconds, $sample_window_seconds,
+                    $source_index, $source_center_hz, $source_sample_rate, $source_error_hz, $source_driver, $source_device,
+                    $reason, $previous_control_channel_hz, $requested_control_channel_hz, $frequency_error_before_retune_hz, $previous_source_index,
+                    $previous_source_center_hz, $selected_source_index, $selected_source_center_hz,
+                    $selected_source_sample_rate, $selected_source_error_hz, $selected_source_driver,
+                    $selected_source_device, $success, $raw_json, $ingested_at_utc);
+                """;
+            Add(command, "$event_key", row.EventKey);
+            Add(command, "$schema_version", row.SchemaVersion);
+            Add(command, "$event_type", row.EventType);
+            Add(command, "$timestamp_utc", row.TimestampUtc.ToString("O"));
+            Add(command, "$system_short_name", row.SystemShortName);
+            Add(command, "$system_type", row.SystemType);
+            Add(command, "$control_channel_hz", row.ControlChannelHz);
+            Add(command, "$decode_rate", row.DecodeRate);
+            Add(command, "$frequency_error_hz", row.FrequencyErrorHz);
+            Add(command, "$low_decode_seconds", row.LowDecodeSeconds);
+            Add(command, "$sample_window_seconds", row.SampleWindowSeconds);
+            Add(command, "$source_index", row.SourceIndex);
+            Add(command, "$source_center_hz", row.SourceCenterHz);
+            Add(command, "$source_sample_rate", row.SourceSampleRate);
+            Add(command, "$source_error_hz", row.SourceErrorHz);
+            Add(command, "$source_driver", row.SourceDriver);
+            Add(command, "$source_device", row.SourceDevice);
+            Add(command, "$reason", row.Reason);
+            Add(command, "$previous_control_channel_hz", row.PreviousControlChannelHz);
+            Add(command, "$requested_control_channel_hz", row.RequestedControlChannelHz);
+            Add(command, "$frequency_error_before_retune_hz", row.FrequencyErrorBeforeRetuneHz);
+            Add(command, "$previous_source_index", row.PreviousSourceIndex);
+            Add(command, "$previous_source_center_hz", row.PreviousSourceCenterHz);
+            Add(command, "$selected_source_index", row.SelectedSourceIndex);
+            Add(command, "$selected_source_center_hz", row.SelectedSourceCenterHz);
+            Add(command, "$selected_source_sample_rate", row.SelectedSourceSampleRate);
+            Add(command, "$selected_source_error_hz", row.SelectedSourceErrorHz);
+            Add(command, "$selected_source_driver", row.SelectedSourceDriver);
+            Add(command, "$selected_source_device", row.SelectedSourceDevice);
+            Add(command, "$success", row.Success.HasValue ? row.Success.Value ? 1 : 0 : null);
+            Add(command, "$raw_json", row.RawJson);
+            Add(command, "$ingested_at_utc", DateTime.UtcNow.ToString("O"));
+            inserted += await command.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+        return inserted;
+    }
+
+    public async Task<int> PruneRfTelemetryEventsAsync(DateTime sampleCutoffUtc, DateTime eventCutoffUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM rf_telemetry_events
+            WHERE (event_type='rf_sample' AND timestamp_utc < $sample_cutoff)
+               OR (event_type<>'rf_sample' AND timestamp_utc < $event_cutoff);
+            """;
+        Add(command, "$sample_cutoff", sampleCutoffUtc.ToUniversalTime().ToString("O"));
+        Add(command, "$event_cutoff", eventCutoffUtc.ToUniversalTime().ToString("O"));
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<RfTelemetryEventDto>> ListRfTelemetryEventsAsync(
+        long start,
+        long end,
+        string? system,
+        string? eventType,
+        int limit,
+        CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM rf_telemetry_events
+            WHERE unixepoch(timestamp_utc) >= $start
+              AND unixepoch(timestamp_utc) <= $end
+              AND ($system='' OR system_short_name=$system COLLATE NOCASE)
+              AND ($event_type='' OR event_type=$event_type)
+            ORDER BY timestamp_utc DESC, id DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        Add(command, "$system", system?.Trim() ?? string.Empty);
+        Add(command, "$event_type", eventType?.Trim() ?? string.Empty);
+        Add(command, "$limit", Math.Clamp(limit, 1, 5000));
+        var rows = new List<RfTelemetryEventDto>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            rows.Add(ReadRfTelemetryEvent(reader));
+        return rows;
+    }
+
+    private static RfTelemetryEventDto ReadRfTelemetryEvent(SqliteDataReader reader) => new()
+    {
+        Id = reader.GetInt64(reader.GetOrdinal("id")),
+        EventKey = reader.GetString(reader.GetOrdinal("event_key")),
+        SchemaVersion = reader.GetInt32(reader.GetOrdinal("schema_version")),
+        EventType = reader.GetString(reader.GetOrdinal("event_type")),
+        TimestampUtc = DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc")), null, DateTimeStyles.RoundtripKind),
+        SystemShortName = reader.GetString(reader.GetOrdinal("system_short_name")),
+        SystemType = reader.GetString(reader.GetOrdinal("system_type")),
+        ControlChannelHz = NullableDouble(reader, "control_channel_hz"),
+        DecodeRate = NullableDouble(reader, "decode_rate"),
+        FrequencyErrorHz = NullableDouble(reader, "frequency_error_hz"),
+        LowDecodeSeconds = NullableDouble(reader, "low_decode_seconds"),
+        SampleWindowSeconds = NullableDouble(reader, "sample_window_seconds"),
+        SourceIndex = NullableInt(reader, "source_index"),
+        SourceCenterHz = NullableDouble(reader, "source_center_hz"),
+        SourceSampleRate = NullableDouble(reader, "source_sample_rate"),
+        SourceErrorHz = NullableDouble(reader, "source_error_hz"),
+        SourceDriver = reader.GetString(reader.GetOrdinal("source_driver")),
+        SourceDevice = reader.GetString(reader.GetOrdinal("source_device")),
+        Reason = reader.GetString(reader.GetOrdinal("reason")),
+        PreviousControlChannelHz = NullableDouble(reader, "previous_control_channel_hz"),
+        RequestedControlChannelHz = NullableDouble(reader, "requested_control_channel_hz"),
+        FrequencyErrorBeforeRetuneHz = NullableDouble(reader, "frequency_error_before_retune_hz"),
+        PreviousSourceIndex = NullableInt(reader, "previous_source_index"),
+        PreviousSourceCenterHz = NullableDouble(reader, "previous_source_center_hz"),
+        SelectedSourceIndex = NullableInt(reader, "selected_source_index"),
+        SelectedSourceCenterHz = NullableDouble(reader, "selected_source_center_hz"),
+        SelectedSourceSampleRate = NullableDouble(reader, "selected_source_sample_rate"),
+        SelectedSourceErrorHz = NullableDouble(reader, "selected_source_error_hz"),
+        SelectedSourceDriver = reader.GetString(reader.GetOrdinal("selected_source_driver")),
+        SelectedSourceDevice = reader.GetString(reader.GetOrdinal("selected_source_device")),
+        Success = NullableBool(reader, "success"),
+        RawJson = reader.GetString(reader.GetOrdinal("raw_json"))
+    };
+
+    private static double? NullableDouble(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
+    }
+
+    private static int? NullableInt(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+    }
+
+    private static bool? NullableBool(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal) != 0;
+    }
+
     public async Task InsertHealthSampleAsync(TrHealthSampleDto sample, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -4707,6 +4875,15 @@ public sealed partial class EngineDatabase
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "host_load_1", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "host_load_5", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "host_load_15", "REAL NOT NULL DEFAULT 0", ct);
+        await AddColumnIfMissingAsync(connection, "rf_telemetry_events", "frequency_error_before_retune_hz", "REAL", ct);
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE rf_telemetry_events
+            SET frequency_error_before_retune_hz=json_extract(raw_json, '$.frequencyErrorBeforeRetuneHz')
+            WHERE event_type='control_channel_retune'
+              AND frequency_error_before_retune_hz IS NULL
+              AND json_valid(raw_json)
+              AND json_type(raw_json, '$.frequencyErrorBeforeRetuneHz') IN ('integer', 'real');
+            """, ct);
         await ExecuteNonQueryAsync(connection, """
             CREATE TABLE IF NOT EXISTS recommendation_states (
                 recommendation_id TEXT PRIMARY KEY,
@@ -5188,6 +5365,45 @@ public sealed partial class EngineDatabase
         );
 
         CREATE INDEX IF NOT EXISTS idx_tr_health_window ON tr_health_samples(window_start_utc DESC, scope);
+
+        CREATE TABLE IF NOT EXISTS rf_telemetry_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_key TEXT NOT NULL UNIQUE,
+            schema_version INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            timestamp_utc TEXT NOT NULL,
+            system_short_name TEXT NOT NULL,
+            system_type TEXT NOT NULL,
+            control_channel_hz REAL,
+            decode_rate REAL,
+            frequency_error_hz REAL,
+            low_decode_seconds REAL,
+            sample_window_seconds REAL,
+            source_index INTEGER,
+            source_center_hz REAL,
+            source_sample_rate REAL,
+            source_error_hz REAL,
+            source_driver TEXT NOT NULL DEFAULT '',
+            source_device TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            previous_control_channel_hz REAL,
+            requested_control_channel_hz REAL,
+            frequency_error_before_retune_hz REAL,
+            previous_source_index INTEGER,
+            previous_source_center_hz REAL,
+            selected_source_index INTEGER,
+            selected_source_center_hz REAL,
+            selected_source_sample_rate REAL,
+            selected_source_error_hz REAL,
+            selected_source_driver TEXT NOT NULL DEFAULT '',
+            selected_source_device TEXT NOT NULL DEFAULT '',
+            success INTEGER,
+            raw_json TEXT NOT NULL,
+            ingested_at_utc TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_rf_telemetry_window
+            ON rf_telemetry_events(timestamp_utc DESC, system_short_name, event_type);
 
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
