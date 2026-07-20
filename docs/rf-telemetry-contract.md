@@ -1,14 +1,15 @@
 # Passive RF Telemetry Contract
 
-Status: emission and PizzaWave persistence validated on OT
+Status: emission, persistence, analysis, and operator presentation validated on OT
 
 Implementation checkpoints:
 
 - Trunk Recorder `codex/rf-telemetry` at `8318dfb`.
 - callstream `codex/rf-telemetry` at `1cdd5c4`.
-- PizzaWave configuration and tests are on `codex/rf-telemetry`.
+- PizzaWave ingestion is on `main` at `eafa333`; analysis and presentation are
+  on `codex/rf-telemetry-ui` pending merge.
 - Both changed C++ translation units compile on OT in an isolated temporary
-  tree. All 529 PizzaWave tests pass.
+  tree. All 534 PizzaWave tests pass.
 
 ## OT Deployment Checkpoint
 
@@ -61,6 +62,22 @@ lookback with collection margin. Rare retune and reacquisition events are
 retained for 90 days. The authenticated
 `/api/v1/system/rf/telemetry` endpoint supports time, system, event-type, and
 bounded row-limit filters.
+
+The authenticated `/api/v1/system/rf/telemetry-summary` endpoint returns
+bounded per-site time series and transition narratives. Buckets adapt from one
+minute for short windows to 30 minutes for the seven-day lookback. The Radio
+Frequency page shows average/minimum decode rate, the 40 msg/sec strong-system
+reference, average absolute frequency residual, and the natural channel-change
+and recovery sequence. It uses its own System time window, not the global call
+data selector.
+
+Recommendations use the same local-baseline assessment shown on the RF page.
+Related decode, zero-decode, retune, and capture symptoms remain a single
+per-site finding. A finding is presented while degradation is active, for 24
+hours after a severe episode, or when a reliable recurring schedule has
+formed. Once none of those conditions remains, it moves to Finding History.
+Passive samples and typed transitions are supporting evidence inside that
+finding and do not create duplicate cards.
 
 ## Initial Validation
 

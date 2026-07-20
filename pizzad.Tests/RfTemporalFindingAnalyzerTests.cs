@@ -53,6 +53,44 @@ public sealed class RfTemporalFindingAnalyzerTests
         Assert.Equal("provisional", finding.Confidence);
     }
 
+    [Fact]
+    public void WideningCollectorViewsDoNotDuplicateEpisodes()
+    {
+        var now = DateTime.UtcNow;
+        var start = now.AddMinutes(-10);
+        var samples = new[]
+        {
+            Sample(start, 20, 5),
+            Sample(start, 20, 5) with { WindowEndUtc = start.AddMinutes(10) },
+            Sample(start, 20, 5) with { WindowEndUtc = start.AddMinutes(15) },
+            Sample(start.AddMinutes(5), 20, 5)
+        };
+
+        var finding = Assert.Single(RfTemporalFindingAnalyzer.Analyze(samples, [], now));
+
+        Assert.Single(finding.Episodes);
+        Assert.Equal(2, finding.Episodes[0].Evidence.Windows);
+        Assert.Equal(start.AddMinutes(10), finding.Episodes[0].EndUtc);
+    }
+
+    [Fact]
+    public void RelatedSymptomsSeparatedByOneHealthyBucketRemainOneEpisode()
+    {
+        var now = DateTime.UtcNow;
+        var start = now.AddMinutes(-15);
+        var decodeLoss = Sample(start, 0.2, 0);
+        var healthy = Sample(start.AddMinutes(5), 40, 0);
+        var retuneInstability = Sample(start.AddMinutes(10), 20, 5);
+
+        var finding = Assert.Single(RfTemporalFindingAnalyzer.Analyze([decodeLoss, healthy, retuneInstability], [], now));
+
+        var episode = Assert.Single(finding.Episodes);
+        Assert.Equal("decode-loss", episode.Signature);
+        Assert.Contains("decode_unavailable", episode.Conditions);
+        Assert.Contains("retunes_elevated", episode.Conditions);
+        Assert.Equal(2, episode.Evidence.Windows);
+    }
+
     private static TrHealthSampleDto Sample(DateTime startUtc, double decodeRate, int retunes) => new()
     {
         WindowStartUtc = startUtc,

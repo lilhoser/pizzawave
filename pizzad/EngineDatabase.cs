@@ -707,28 +707,46 @@ public sealed partial class EngineDatabase
             }
         }
 
-        var quietIds = new List<long>();
+        var quietIds = new List<(long Id, string RecommendationId, string ActivityState)>();
         await using (var inactive = connection.CreateCommand())
         {
             inactive.Transaction = transaction;
             var inactiveFilter = activeIds.Count == 0
                 ? string.Empty
                 : $" AND recommendation_id NOT IN ({string.Join(',', activeIds.Select((_, index) => $"$active{index}"))})";
-            inactive.CommandText = $"SELECT id FROM recommendation_findings WHERE resolved_at_utc='' AND activity_state<>'quiet'{inactiveFilter};";
+            inactive.CommandText = $"SELECT id, recommendation_id, activity_state FROM recommendation_findings WHERE resolved_at_utc=''{inactiveFilter};";
             var index = 0;
             foreach (var id in activeIds)
                 Add(inactive, $"$active{index++}", id);
             await using var reader = await inactive.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) quietIds.Add(reader.GetInt64(0));
+            while (await reader.ReadAsync(ct)) quietIds.Add((reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
         }
-        foreach (var findingId in quietIds)
+        foreach (var inactiveFinding in quietIds)
         {
+            if (inactiveFinding.RecommendationId.StartsWith("tr-rf-temporal-v2:", StringComparison.OrdinalIgnoreCase))
+            {
+                await using var resolve = connection.CreateCommand();
+                resolve.Transaction = transaction;
+                resolve.CommandText = """
+                    UPDATE recommendation_findings
+                    SET resolved_at_utc=$now, workflow_status='resolved', activity_state='quiet',
+                        resolution='No active degradation, recent severe episode, or reliable recurring schedule remains.'
+                    WHERE id=$id;
+                    """;
+                Add(resolve, "$now", nowUtc.ToString("O"));
+                Add(resolve, "$id", inactiveFinding.Id);
+                await resolve.ExecuteNonQueryAsync(ct);
+                await InsertRecommendationEventAsync(connection, transaction, inactiveFinding.Id, "resolved", "pizzawave", "RF finding moved to history because current evidence no longer meets the presentation threshold.", "{}", nowUtc, ct);
+                continue;
+            }
+            if (string.Equals(inactiveFinding.ActivityState, "quiet", StringComparison.OrdinalIgnoreCase))
+                continue;
             await using var quiet = connection.CreateCommand();
             quiet.Transaction = transaction;
             quiet.CommandText = "UPDATE recommendation_findings SET activity_state='quiet' WHERE id=$id;";
-            Add(quiet, "$id", findingId);
+            Add(quiet, "$id", inactiveFinding.Id);
             await quiet.ExecuteNonQueryAsync(ct);
-            await InsertRecommendationEventAsync(connection, transaction, findingId, "activity_changed", "pizzawave", "Current evidence is quiet; operator workflow status was not changed.", "{\"to\":\"quiet\"}", nowUtc, ct);
+            await InsertRecommendationEventAsync(connection, transaction, inactiveFinding.Id, "activity_changed", "pizzawave", "Current evidence is quiet; operator workflow status was not changed.", "{\"to\":\"quiet\"}", nowUtc, ct);
         }
 
         await using (var prune = connection.CreateCommand())
@@ -3497,6 +3515,90 @@ public sealed partial class EngineDatabase
         return rows;
     }
 
+    public async Task<RfTelemetrySummaryDto> BuildRfTelemetrySummaryAsync(long start, long end, CancellationToken ct)
+    {
+        var duration = Math.Max(1, end - start);
+        var bucketSeconds = duration <= 6 * 3600 ? 60
+            : duration <= 24 * 3600 ? 300
+            : duration <= 72 * 3600 ? 900
+            : 1800;
+        var pointsBySystem = new Dictionary<string, List<RfTelemetryPointDto>>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = OpenConnection();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT system_short_name,
+                       CAST(unixepoch(timestamp_utc) / $bucket AS INTEGER) * $bucket AS bucket_start,
+                       COUNT(*) AS samples,
+                       SUM(CASE WHEN decode_rate <= 0 THEN 1 ELSE 0 END) AS zero_samples,
+                       AVG(decode_rate) AS avg_decode,
+                       MIN(decode_rate) AS min_decode,
+                       MAX(decode_rate) AS max_decode,
+                       AVG(ABS(frequency_error_hz)) AS avg_error,
+                       MAX(low_decode_seconds) AS max_low_decode
+                FROM rf_telemetry_events
+                WHERE event_type='rf_sample'
+                  AND unixepoch(timestamp_utc) >= $start
+                  AND unixepoch(timestamp_utc) <= $end
+                GROUP BY system_short_name, bucket_start
+                ORDER BY system_short_name, bucket_start;
+                """;
+            Add(command, "$bucket", bucketSeconds);
+            Add(command, "$start", start);
+            Add(command, "$end", end);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var system = reader.GetString(0);
+                if (!pointsBySystem.TryGetValue(system, out var points))
+                    pointsBySystem[system] = points = [];
+                points.Add(new RfTelemetryPointDto(
+                    reader.GetInt64(1),
+                    reader.GetInt32(2),
+                    reader.GetInt32(3),
+                    reader.GetDouble(4),
+                    reader.GetDouble(5),
+                    reader.GetDouble(6),
+                    reader.IsDBNull(7) ? 0 : reader.GetDouble(7),
+                    reader.IsDBNull(8) ? 0 : reader.GetDouble(8)));
+            }
+        }
+
+        var sites = pointsBySystem.Select(entry =>
+        {
+            var samples = entry.Value.Sum(point => point.Samples);
+            var latest = entry.Value.Count == 0 ? (DateTime?)null : DateTimeOffset.FromUnixTimeSeconds(entry.Value[^1].Start).UtcDateTime;
+            return new RfTelemetrySiteSeriesDto(
+                entry.Key,
+                samples,
+                latest,
+                samples == 0 ? 0 : entry.Value.Sum(point => point.AverageDecodeRate * point.Samples) / samples,
+                samples == 0 ? 0 : entry.Value.Sum(point => point.ZeroDecodeSamples) * 100d / samples,
+                entry.Value);
+        }).OrderBy(site => site.SystemShortName, StringComparer.OrdinalIgnoreCase).ToList();
+
+        var transitionRows = (await ListRfTelemetryEventsAsync(start, end, null, "control_channel_retune", 500, ct))
+            .Concat(await ListRfTelemetryEventsAsync(start, end, null, "control_channel_reacquired", 500, ct));
+        var transitions = transitionRows
+            .OrderBy(row => row.TimestampUtc)
+            .Select(row => new RfTelemetryTransitionDto(
+                row.TimestampUtc,
+                row.SystemShortName,
+                row.EventType,
+                row.Reason,
+                row.DecodeRate,
+                row.PreviousControlChannelHz,
+                row.RequestedControlChannelHz,
+                row.ControlChannelHz,
+                row.PreviousSourceIndex,
+                row.SelectedSourceIndex,
+                row.SourceIndex,
+                row.LowDecodeSeconds,
+                row.Success))
+            .ToList();
+        return new RfTelemetrySummaryDto(start, end, bucketSeconds, sites, transitions);
+    }
+
     private static RfTelemetryEventDto ReadRfTelemetryEvent(SqliteDataReader reader) => new()
     {
         Id = reader.GetInt64(reader.GetOrdinal("id")),
@@ -5006,6 +5108,13 @@ public sealed partial class EngineDatabase
                 resolution='Superseded by the consolidated temporal RF site finding.'
             WHERE resolved_at_utc=''
               AND (recommendation_id LIKE 'tr-rf-stability:%' OR recommendation_id LIKE 'tr-rf-temporal:%:%');
+            """, ct);
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE recommendation_findings
+            SET resolved_at_utc=CASE WHEN resolved_at_utc='' THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE resolved_at_utc END,
+                workflow_status='resolved', activity_state='quiet',
+                resolution='Superseded by corrected RF episode grouping.'
+            WHERE resolved_at_utc='' AND recommendation_id LIKE 'tr-rf-temporal:%';
             """, ct);
         await ExecuteNonQueryAsync(connection, """
             UPDATE recommendation_findings AS old

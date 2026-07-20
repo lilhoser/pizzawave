@@ -600,6 +600,10 @@ export type TrRfAnalysis = {
   retuneTargets: TrHealthMetric[];
   recommendations: TrHealthMetric[];
 };
+export type RfTelemetryPoint = { start: number; samples: number; zeroDecodeSamples: number; averageDecodeRate: number; minimumDecodeRate: number; maximumDecodeRate: number; averageAbsoluteFrequencyErrorHz: number; maximumLowDecodeSeconds: number };
+export type RfTelemetrySiteSeries = { systemShortName: string; samples: number; latestSampleUtc?: string | null; averageDecodeRate: number; zeroDecodePercent: number; points: RfTelemetryPoint[] };
+export type RfTelemetryTransition = { timestampUtc: string; systemShortName: string; eventType: string; reason: string; decodeRate?: number | null; previousControlChannelHz?: number | null; requestedControlChannelHz?: number | null; controlChannelHz?: number | null; previousSourceIndex?: number | null; selectedSourceIndex?: number | null; sourceIndex?: number | null; lowDecodeSeconds?: number | null; success?: boolean | null };
+export type RfTelemetrySummary = { start: number; end: number; bucketSeconds: number; sites: RfTelemetrySiteSeries[]; transitions: RfTelemetryTransition[] };
 export type QualityAuditGroup = {
   label: string;
   totalCalls: number;

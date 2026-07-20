@@ -442,6 +442,10 @@ public sealed class SystemRecommendationService
             ? await BuildRetuneTargetDiagnosticsAsync(rfEvidenceStart, rfEvidenceEnd, ct)
             : [];
         var rfAssessments = await _trHealth.BuildSystemAssessmentsAsync(healthStart, new DateTimeOffset(now).ToUnixTimeSeconds(), "7d", ct);
+        var passiveRf = await _database.BuildRfTelemetrySummaryAsync(
+            new DateTimeOffset(now.AddHours(-2)).ToUnixTimeSeconds(),
+            new DateTimeOffset(now).ToUnixTimeSeconds(),
+            ct);
         var temporalStartUtc = now.AddDays(-28);
         var temporalSamples = await _database.ListHealthSamplesAsync(new DateTimeOffset(temporalStartUtc).ToUnixTimeSeconds(), new DateTimeOffset(now).ToUnixTimeSeconds(), ct);
         var maintenanceIntervals = await _database.ListMaintenanceIntervalsAsync(temporalStartUtc, now, ct);
@@ -459,6 +463,9 @@ public sealed class SystemRecommendationService
                 return new RfTemporalFindingDto(group.Key, "systemic-rf-degradation", severity, confidence, patterns.Any(row => row.IsActive), patterns.Sum(row => row.OccurrencesPerWeek), schedule,
                     patterns.SelectMany(row => row.Conditions).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList(), episodes);
             })
+            .Where(row => row.IsActive
+                || row.Episodes.Any(episode => episode.Severity == "high" && episode.EndUtc >= now.AddHours(-24))
+                || row.ScheduleSummary.Contains("Most episodes started", StringComparison.OrdinalIgnoreCase))
             .ToList();
         foreach (var finding in temporalFindings
             .OrderByDescending(row => row.IsActive)
@@ -469,6 +476,15 @@ public sealed class SystemRecommendationService
                 continue;
             var affectedLabel = SystemDisplayName(finding.OwnerKey);
             var assessment = rfAssessments.FirstOrDefault(row => string.Equals(row.SystemShortName, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
+            var assessmentShowsCurrentIssue = assessment != null && new[]
+            {
+                assessment.DecodeAssessment,
+                assessment.ZeroDecodeAssessment,
+                assessment.CallsAssessment,
+                assessment.NoAudioAssessment,
+                assessment.RetunesAssessment
+            }.Any(metric => metric.Tone != "ok" && metric.Basis != "insufficient");
+            var isActive = finding.IsActive && assessmentShowsCurrentIssue;
             var affectedSystem = currentBySystemAll.FirstOrDefault(system => string.Equals(system.Scope, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
             var currentRate = affectedSystem == null ? 0 : affectedSystem.DecodeRateTotal / Math.Max(1d, affectedSystem.DecodeLines);
             var twoHourSystem = bySystemAll.FirstOrDefault(system => string.Equals(system.Scope, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
@@ -485,8 +501,23 @@ public sealed class SystemRecommendationService
             var currentDetail = affectedSystem == null
                 ? $"No complete per-site samples were available in the last {rfCurrentWindowMinutes} minutes."
                 : $"Over the last {rfCurrentWindowMinutes} minutes, it averaged {currentRate:F1} msg/s, {affectedSystem.DecodeZeroPct:F1}% of {affectedSystem.DecodeLines:N0} periodic samples were zero, and TR retuned {affectedSystem.Retunes:N0} time(s).";
+            var passiveSeries = passiveRf.Sites.FirstOrDefault(site => string.Equals(site.SystemShortName, finding.OwnerKey, StringComparison.OrdinalIgnoreCase));
+            var passiveTransitions = passiveRf.Transitions
+                .Where(row => string.Equals(row.SystemShortName, finding.OwnerKey, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(row => row.TimestampUtc)
+                .ToList();
+            var networkMoves = passiveTransitions.Count(row => row.EventType == "control_channel_retune" && row.Reason == "tdulc");
+            var lowDecodeSearches = passiveTransitions.Count(row => row.EventType == "control_channel_retune" && row.Reason == "low_decode");
+            var recoveries = passiveTransitions.Count(row => row.EventType == "control_channel_reacquired");
+            var passiveDetail = passiveSeries == null || passiveSeries.Samples < 4
+                ? string.Empty
+                : $" Passive 15-second evidence contains {passiveSeries.Samples:N0} samples averaging {passiveSeries.AverageDecodeRate:F1} msg/s with {passiveSeries.ZeroDecodePercent:F1}% zero decode"
+                    + (passiveTransitions.Count == 0
+                        ? " and no recorded control-channel transitions."
+                        : $", plus {networkMoves:N0} network-directed move(s), {lowDecodeSearches:N0} low-decode search(es), and {recoveries:N0} recorded recovery event(s).");
             var detail = $"PizzaWave grouped {finding.Episodes.Count:N0} matching RF episode(s), about {finding.OccurrencesPerWeek:F1} per week. {finding.ScheduleSummary} {currentDetail}"
                 + (twoHourSystem == null ? string.Empty : $" Its two-hour context is {twoHourRate:F1} msg/s, {twoHourSystem.DecodeZeroPct:F1}% zero samples, and {twoHourSystem.Retunes:N0} retune(s) across {twoHourSystem.DecodeLines:N0} samples.")
+                + passiveDetail
                 + " RF Performance owns the underlying charts; 40 msg/s remains the strong-system reference."
                 + (string.IsNullOrWhiteSpace(retuneTargetText) ? string.Empty : $" Recent retune targets: {retuneTargetText}.")
                 + (string.IsNullOrWhiteSpace(peerSummary) ? string.Empty : $" Other monitored-system context: {peerSummary}.");
@@ -495,19 +526,25 @@ public sealed class SystemRecommendationService
                 $"{target.FrequencyMHz} MHz x {target.Count:N0}",
                 "info",
                 $"Observed in the last {rfCurrentWindowMinutes} minutes of trunk-recorder journald."))).ToList();
+            if (passiveSeries != null)
+                siteDiagnostics.Add(new RecommendationDiagnosticDto(
+                    "Passive RF telemetry",
+                    $"{passiveSeries.AverageDecodeRate:F1} msg/s · {passiveSeries.ZeroDecodePercent:F1}% zero · {passiveTransitions.Count:N0} transition(s)",
+                    assessmentShowsCurrentIssue ? "issue" : "ok",
+                    $"{passiveSeries.Samples:N0} typed 15-second samples in the two-hour evidence window."));
             var patternCount = finding.Episodes.Select(row => row.Signature).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             var title = $"{affectedLabel} shows recurring RF degradation";
             rows.Add(new SystemRecommendationDto(
-                $"tr-rf-temporal:{finding.OwnerKey}",
+                $"tr-rf-temporal-v2:{finding.OwnerKey}",
                 "trunk-recorder",
-                finding.Severity,
+                isActive ? finding.Severity : "medium",
                 title,
                 $"{patternCount:N0} typed behavioral pattern(s) roll up into this site finding. {detail}",
                 $"Open RF Performance and review the yellow or red site metrics for {affectedLabel}; do not change healthy systems based on this finding.",
                 new RecommendationTargetDto("tr", "metrics", finding.OwnerKey),
                 [])
                 {
-                    ActivityState = finding.IsActive ? "active" : "quiet",
+                    ActivityState = isActive ? "active" : "quiet",
                     Confidence = finding.Confidence,
                     OwnerType = "site",
                     OwnerKey = finding.OwnerKey,
@@ -718,7 +755,7 @@ public sealed class SystemRecommendationService
             "queue-pressure" => "Last 10 minutes",
             "remote-transcription-bandwidth-critical" => "Last 24 hours",
             "recoverable-transcription-failures" => "Last 24 hours",
-            var id when id.StartsWith("tr-rf-temporal:", StringComparison.OrdinalIgnoreCase) => "Matching RF episodes in the last 28 days",
+            var id when id.StartsWith("tr-rf-temporal", StringComparison.OrdinalIgnoreCase) => "Matching RF episodes in the last 28 days",
             var id when id.StartsWith("tr-rf-stability:", StringComparison.OrdinalIgnoreCase) => "Current 15 minutes; 2-hour context",
             "tr-resource-pressure" => "Latest sample; 2-hour peaks",
             "priority-low-value-audio" => "Recent captured audio and incident yield",

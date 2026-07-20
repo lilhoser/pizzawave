@@ -11,7 +11,7 @@ import { locationDisplayName, locationKey, locationShortName } from "./features/
 import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
 import type { LiveRfStatus } from "./types";
-import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
+import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -4437,7 +4437,14 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   const metricsDataResource = usePersistentRefresh({
     key: `system-metrics-rf|${rfPerformanceHours}|${baseline}`,
     enabled: topTab === "metrics" && metricsTab === "rf",
-    load: () => api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${rangeQuery(rfPerformanceHours)}&bySystem=true&baseline=${baseline}`)
+    load: async () => {
+      const range = rangeQuery(rfPerformanceHours);
+      const [health, telemetry] = await Promise.all([
+        api.request<TrTroubleshoot>(`/api/v1/troubleshoot?${range}&bySystem=true&baseline=${baseline}`),
+        api.request<RfTelemetrySummary>(`/api/v1/system/rf/telemetry-summary?${range}`)
+      ]);
+      return { health, telemetry };
+    }
   });
   const callsDashboardResource = usePersistentRefresh({
     key: `system-metrics-calls|${callsPerformanceHours}`,
@@ -4675,7 +4682,7 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
         <SystemPageIdentity {...pageIdentity} />
         {metricsTab === "calls" && <><PanelLoadState label="call metrics" state={callsDashboardResource.state} hasData={Boolean(callsDashboard)} onRetry={callsDashboardResource.refresh} /><DashboardStatisticsPanel data={callsDashboard} rangeHours={callsPerformanceHours} onRangeHoursChange={hours => { setCallsPerformanceHours(hours); localStorage.setItem("pizzawave-system-calls-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} /></>}
         {metricsTab === "transcription" && <><PanelLoadState label="transcription performance" state={performanceSummaryResource.state} hasData={Boolean(performanceSummary)} onRetry={performanceSummaryResource.refresh} />{performanceSummary && <TranscriptionPerformancePanel data={performanceSummary} rangeHours={transcriptionPerformanceHours} onRangeHoursChange={hours => { setTranscriptionPerformanceHours(hours); localStorage.setItem("pizzawave-system-transcription-performance-hours", String(hours)); }} onOpenTalkgroup={onOpenTalkgroup} onExcludeTalkgroup={row => { localStorage.setItem("pizzawave-setup-talkgroup-candidates", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); localStorage.setItem("pizzawave-setup-talkgroup-exclusion-targets", JSON.stringify([{ systemShortName: row.systemShortName, id: row.talkgroup }])); onOpenSetup?.("Talkgroups"); }} />}</>}
-        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} finding={selectedRfFinding} clearFinding={() => setSelectedRfFinding(null)} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} />}</>}
+        {metricsTab === "rf" && <><PanelLoadState label="radio frequency metrics" state={metricsDataResource.state} hasData={Boolean(metricsData)} onRetry={metricsDataResource.refresh} />{metricsData && <RfMetricsPanel data={metricsData.health} telemetry={metricsData.telemetry} rangeHours={rfPerformanceHours} baseline={baseline} category={rfChartCategory} finding={selectedRfFinding} clearFinding={() => setSelectedRfFinding(null)} setRangeHours={value => { setRfPerformanceHours(value); localStorage.setItem("pizzawave-system-rf-performance-hours", String(value)); }} setBaseline={setBaseline} setCategory={setRfChartCategory} />}</>}
         {metricsTab === "incidents" && <><PanelLoadState label="incident output" state={incidentDashboardResource.state} hasData={Boolean(incidentDashboard)} onRetry={incidentDashboardResource.refresh} /><IncidentMetricsPanel dashboard={incidentDashboard} rangeHours={incidentPerformanceHours} refreshToken={panelRefreshToken} onRangeHoursChange={hours => { setIncidentPerformanceHours(hours); localStorage.setItem("pizzawave-system-incident-performance-hours", String(hours)); }} /></>}
         {metricsTab === "ai" && <><PanelLoadState label="AI usage" state={tokenUsageResource.state} hasData={Boolean(tokenUsage)} onRetry={tokenUsageResource.refresh} /><TokenUsagePanel report={tokenUsage} rangeHours={aiPerformanceHours} onRangeHoursChange={hours => { setAiUsagePage(1); setAiPerformanceHours(hours); localStorage.setItem("pizzawave-system-ai-performance-hours", String(hours)); }} onPageChange={setAiUsagePage} /></>}
         {metricsTab === "bandwidth" && <><PanelLoadState label="PizzaWave bandwidth" state={bandwidthUsageResource.state} hasData={Boolean(bandwidthUsage)} onRetry={bandwidthUsageResource.refresh} /><RemoteBandwidthPanel report={bandwidthUsage} rangeHours={bandwidthPerformanceHours} onRangeHoursChange={hours => { setBandwidthUsagePage(1); setBandwidthPerformanceHours(hours); localStorage.setItem("pizzawave-system-bandwidth-performance-hours", String(hours)); }} onPageChange={setBandwidthUsagePage} /></>}
@@ -9252,7 +9259,7 @@ function formatRfHz(value: number) {
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(6)} MHz` : `${value.toLocaleString()} Hz`;
 }
 
-function RfMetricsPanel({ data, rangeHours, baseline, category, finding, clearFinding, setRangeHours, setBaseline, setCategory }: { data: TrTroubleshoot; rangeHours: number; baseline: string; category: RfChartCategory; finding?: SystemRecommendation | null; clearFinding?: () => void; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void }) {
+function RfMetricsPanel({ data, telemetry, rangeHours, baseline, category, finding, clearFinding, setRangeHours, setBaseline, setCategory }: { data: TrTroubleshoot; telemetry: RfTelemetrySummary; rangeHours: number; baseline: string; category: RfChartCategory; finding?: SystemRecommendation | null; clearFinding?: () => void; setRangeHours: (value: number) => void; setBaseline: (value: string) => void; setCategory: (value: RfChartCategory) => void }) {
   const systems = data.health.systemSummaries ?? [];
   const initialSystem = systems.find(system => system.status !== "Healthy")?.systemShortName ?? systems[0]?.systemShortName ?? "";
   const [selectedSystem, setSelectedSystem] = useState(() => localStorage.getItem("pizzawave-system-rf-selected-site") || initialSystem);
@@ -9269,19 +9276,35 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, finding, clearFi
     localStorage.setItem("pizzawave-system-rf-selected-site", system);
     if (nextCategory) setCategory(nextCategory);
   }
+  const telemetrySite = telemetry.sites.find(site => site.systemShortName.toLowerCase() === selectedSystem.toLowerCase());
+  const preciseCharts: TrHealthChart[] = telemetrySite?.points.length ? [{
+    title: "Decode Rate", yAxisLabel: "Messages per second", valueFormat: "F1",
+    labels: telemetrySite.points.map(point => new Date(point.start * 1000).toISOString()),
+    series: [
+      { label: "Average", values: telemetrySite.points.map(point => point.averageDecodeRate), isBaseline: false, scope: selectedSystem },
+      { label: "Minimum", values: telemetrySite.points.map(point => point.minimumDecodeRate), isBaseline: false, scope: selectedSystem },
+      { label: "Strong reference", values: telemetrySite.points.map(() => 40), isBaseline: true, scope: selectedSystem }
+    ], baselineNote: `${telemetrySite.samples.toLocaleString()} passive samples; green/healthy still requires comparison with the site's local baseline and the 40 msg/sec strong-system reference.`
+  }, {
+    title: "Control-Channel Frequency Error", yAxisLabel: "Average absolute error (Hz)", valueFormat: "F0",
+    labels: telemetrySite.points.map(point => new Date(point.start * 1000).toISOString()),
+    series: [{ label: "Frequency error", values: telemetrySite.points.map(point => point.averageAbsoluteFrequencyErrorHz), isBaseline: false, scope: selectedSystem }],
+    baselineNote: "Residual reported by Trunk Recorder for the active control channel; compare sustained changes within the same source/site."
+  }] : [];
   const scopedCharts = data.health.charts.map(chart => {
     const series = chart.series.filter(row => !row.scope || row.scope.toLowerCase() === selectedSystem.toLowerCase());
-    if (chart.title === "Decode Rate" && chart.labels.length) {
+    if (chart.title === "Decode Rate" && chart.labels.length && !preciseCharts.length) {
       series.push({ label: "Strong reference", values: chart.labels.map(() => 40), isBaseline: true, scope: selectedSystem });
     }
     return { ...chart, series };
   });
-  const primaryTitles = new Set(["Decode Rate", "Zero-Decode Samples", "Calls Without Audio", "Control-Channel Retunes"]);
-  const visibleCharts = scopedCharts
+  const primaryTitles = new Set(["Decode Rate", "Control-Channel Frequency Error", "Zero-Decode Samples", "Calls Without Audio", "Control-Channel Retunes"]);
+  const visibleCharts = [...preciseCharts, ...scopedCharts.filter(chart => !preciseCharts.length || chart.title !== "Decode Rate")]
     .filter(chart => category === "all" ? primaryTitles.has(chart.title) : rfChartCategoryForTitle(chart.title) === category)
     .filter(chart => chart.title !== "Capture Interruptions" || chart.series.some(series => series.values.some(value => value > 0)));
   const baselineNote = scopedCharts.find(chart => chart.baselineNote)?.baselineNote;
   const annotations = finding?.ownerKey.toLowerCase() === selectedSystem.toLowerCase() ? finding.episodes : [];
+  const transitions = telemetry.transitions.filter(row => row.systemShortName.toLowerCase() === selectedSystem.toLowerCase()).slice(-20).reverse();
   return <div className="rf-metrics-panel">
     <RfHealthStatusPanel data={data} onSelectSite={system => selectSite(system)} onSelectCategory={setCategory} />
     <SystemPageHeaderControls><div className="metric-controls rf-chart-controls header-controls">
@@ -9292,12 +9315,14 @@ function RfMetricsPanel({ data, rangeHours, baseline, category, finding, clearFi
     </div></SystemPageHeaderControls>
     {finding && <div className="card rf-finding-context"><div><strong>Finding evidence overlay</strong><p>{finding.title} · {finding.episodeCount.toLocaleString()} recorded episode(s). Shaded chart regions are immutable episode intervals linked to finding #{finding.findingId}.</p></div>{clearFinding && <button type="button" onClick={clearFinding}>Clear overlay</button>}</div>}
     {baselineNote && <p className="baseline-note rf-baseline-summary">{baselineNote}</p>}
+    {telemetrySite && <p className="baseline-note rf-baseline-summary">{telemetrySite.samples.toLocaleString()} passive RF samples in this window. Expected status uses the site baseline, while 40 msg/sec remains the strong-system reference.</p>}
     <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} annotations={annotations} showBaselineNote={false} key={chart.title} />)}</div>
+    {transitions.length > 0 && (category === "all" || category === "events") && <section className="system-content-section rf-transition-section"><SystemSectionHeader title="Control-Channel Transitions" description="Natural channel changes and recovery, in causal order; routine stable periods are omitted." /><div className="table-wrap"><table><thead><tr><th>Time</th><th>Site</th><th>What happened</th><th>Evidence</th></tr></thead><tbody>{transitions.map((row, index) => <tr key={`${row.timestampUtc}-${row.eventType}-${index}`}><td>{new Date(row.timestampUtc).toLocaleString()}</td><td>{trSystemDisplayName(row.systemShortName)}</td><td>{row.eventType === "control_channel_reacquired" ? "Control channel reacquired" : row.reason === "tdulc" ? "Network-directed channel change" : "Low-decode channel search"}</td><td>{row.eventType === "control_channel_reacquired" ? `${formatFixed(row.decodeRate, 0)} msg/sec after ${formatFixed(row.lowDecodeSeconds, 0)}s low decode on ${formatRfHz(Number(row.controlChannelHz || 0))}` : `${formatRfHz(Number(row.previousControlChannelHz || 0))} → ${formatRfHz(Number(row.requestedControlChannelHz || 0))}${row.success === false ? " (not covered)" : ""}`}</td></tr>)}</tbody></table></div></section>}
   </div>;
 }
 
 function rfChartCategoryForTitle(title: string): Exclude<RfChartCategory, "all"> {
-  if (/decode/i.test(title)) return "decode";
+  if (/decode/i.test(title) || /frequency error/i.test(title)) return "decode";
   if (/calls/i.test(title)) return "activity";
   return "events";
 }
@@ -11208,11 +11233,7 @@ function formatRfChartTime(value: string, labels: string[]) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return value;
   const parsed = labels.map(label => new Date(label).getTime()).filter(Number.isFinite);
-  const step = parsed.length > 1 ? Math.max(15 * 60_000, parsed[1] - parsed[0]) : 60 * 60_000;
-  let roundedTimestamp = Math.ceil(timestamp / step) * step;
-  if (parsed.length > 1 && timestamp === parsed[0] && roundedTimestamp === Math.ceil(parsed[1] / step) * step)
-    roundedTimestamp = Math.floor(timestamp / step) * step;
-  const rounded = new Date(roundedTimestamp);
+  const rounded = new Date(timestamp);
   const spansDays = parsed.length > 1 && new Date(parsed[0]).toLocaleDateString() !== new Date(parsed[parsed.length - 1]).toLocaleDateString();
   return rounded.toLocaleString([], spansDays ? { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" } : { hour: "numeric", minute: "2-digit" });
 }

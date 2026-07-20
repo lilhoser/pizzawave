@@ -46,7 +46,12 @@ public sealed class RfTelemetryPersistenceTests
             await database.InitializeAsync(CancellationToken.None);
 
             var now = DateTime.UtcNow;
-            var recentSample = Event("sample-recent", "rf_sample", now, "raymond");
+            var recentSample = Event("sample-recent", "rf_sample", now, "raymond") with
+            {
+                DecodeRate = 40,
+                FrequencyErrorHz = 595,
+                LowDecodeSeconds = 0
+            };
             var oldSample = Event("sample-old", "rf_sample", now.AddDays(-9), "raymond");
             var oldRetune = Event("retune-old", "control_channel_retune", now.AddDays(-20), "raymond") with
             {
@@ -70,6 +75,15 @@ public sealed class RfTelemetryPersistenceTests
             var retune = Assert.Single(retunes);
             Assert.True(retune.Success);
             Assert.Equal(595, retune.FrequencyErrorBeforeRetuneHz);
+
+            var summary = await database.BuildRfTelemetrySummaryAsync(start, end, CancellationToken.None);
+            var site = Assert.Single(summary.Sites);
+            Assert.Equal("raymond", site.SystemShortName);
+            Assert.Equal(40, site.AverageDecodeRate);
+            Assert.Equal(0, site.ZeroDecodePercent);
+            var point = Assert.Single(site.Points);
+            Assert.Equal(595, point.AverageAbsoluteFrequencyErrorHz);
+            Assert.Single(summary.Transitions);
         }
         finally
         {

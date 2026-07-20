@@ -468,7 +468,7 @@ public sealed class SystemInformationUiContractTests
 
         Assert.Contains("BuildSystemAssessmentsAsync(healthStart", source, StringComparison.Ordinal);
         Assert.Contains("RfTemporalFindingAnalyzer.Analyze", source, StringComparison.Ordinal);
-        Assert.Contains("tr-rf-temporal:{finding.OwnerKey}", source, StringComparison.Ordinal);
+        Assert.Contains("tr-rf-temporal-v2:{finding.OwnerKey}", source, StringComparison.Ordinal);
         Assert.Contains("recurring RF degradation", source, StringComparison.Ordinal);
         Assert.Contains("GroupBy(row => row.OwnerKey", source, StringComparison.Ordinal);
         Assert.Contains("RF Performance owns the underlying charts", source, StringComparison.Ordinal);

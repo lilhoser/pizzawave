@@ -818,6 +818,46 @@ public sealed record RfTelemetryEventDto
     public string RawJson { get; init; } = string.Empty;
 }
 
+public sealed record RfTelemetryPointDto(
+    long Start,
+    int Samples,
+    int ZeroDecodeSamples,
+    double AverageDecodeRate,
+    double MinimumDecodeRate,
+    double MaximumDecodeRate,
+    double AverageAbsoluteFrequencyErrorHz,
+    double MaximumLowDecodeSeconds);
+
+public sealed record RfTelemetrySiteSeriesDto(
+    string SystemShortName,
+    int Samples,
+    DateTime? LatestSampleUtc,
+    double AverageDecodeRate,
+    double ZeroDecodePercent,
+    IReadOnlyList<RfTelemetryPointDto> Points);
+
+public sealed record RfTelemetryTransitionDto(
+    DateTime TimestampUtc,
+    string SystemShortName,
+    string EventType,
+    string Reason,
+    double? DecodeRate,
+    double? PreviousControlChannelHz,
+    double? RequestedControlChannelHz,
+    double? ControlChannelHz,
+    int? PreviousSourceIndex,
+    int? SelectedSourceIndex,
+    int? SourceIndex,
+    double? LowDecodeSeconds,
+    bool? Success);
+
+public sealed record RfTelemetrySummaryDto(
+    long Start,
+    long End,
+    int BucketSeconds,
+    IReadOnlyList<RfTelemetrySiteSeriesDto> Sites,
+    IReadOnlyList<RfTelemetryTransitionDto> Transitions);
+
 public sealed record TrHealthMetricDto(string Metric, string Value, string Notes, bool IsIssue);
 
 public sealed record TrSourceCoverageDto(

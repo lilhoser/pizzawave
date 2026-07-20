@@ -56,4 +56,42 @@ public sealed class RecommendationFindingLifecycleTests
             try { Directory.Delete(root, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task RfFindingMovesToHistoryWhenPresentationEvidenceAgesOut()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pizzawave-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                Storage = new StorageConfig
+                {
+                    DatabasePath = Path.Combine(root, "pizzad.db"),
+                    AudioRoot = Path.Combine(root, "audio")
+                }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var now = DateTime.UtcNow;
+            var finding = new SystemRecommendationDto(
+                "tr-rf-temporal-v2:site-a", "trunk-recorder", "medium", "RF finding", "Evidence", "Review it",
+                new RecommendationTargetDto("tr", "metrics", "site-a"), []);
+
+            var active = await database.SyncRecommendationFindingsAsync([finding], now, CancellationToken.None);
+            Assert.Single(active.Active);
+
+            var agedOut = await database.SyncRecommendationFindingsAsync([], now.AddMinutes(5), CancellationToken.None);
+
+            Assert.Empty(agedOut.Active);
+            var historical = Assert.Single(agedOut.Resolved);
+            Assert.Equal("resolved", historical.WorkflowStatus);
+            Assert.Contains("No active degradation", historical.Resolution);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
 }

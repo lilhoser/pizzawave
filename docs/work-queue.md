@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 19:39 EDT
+Last reconciled: 2026-07-19 20:10 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -11,7 +11,7 @@ read-only, but must not deploy.
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
 | RPI (`sdr1861`) | `main` at `99adf8a` | `96594b14...` | `23672a49...` | Healthy |
-| OT (`omicrontheta`) | RF ingestion candidate `26625f8` | `ecdf7a0b...` | `23672a49...` | Healthy; RF emission and persistence validated |
+| OT (`omicrontheta`) | `codex/rf-telemetry-ui` candidate | `699f3780...` | `40692c2b...` | Healthy; RF presentation and Recommendations validated |
 
 The hosts now share the same web build, but RPI's PizzaWave backend remains at
 the earlier `99adf8a` state. Neither host runs the experimental Trunk Recorder
@@ -31,8 +31,13 @@ retune-grace binary. Only OT runs the passive RF telemetry build.
   2026-07-19 19:29 EDT. Structured events matched the human-readable log and
   retained the complete channel/source sequence. PizzaWave schema-v1 parsing,
   deduplicated storage, bounded retention, migration, and authenticated query
-  endpoint are validated on OT; all 531 tests pass. Add analysis and operator
-  presentation before considering RPI promotion.
+  endpoint are validated on OT. The RF page now presents adaptive decode and
+  frequency-error charts plus a causal control-channel transition table for
+  2-hour through 7-day windows. Recommendation cards reuse the same current
+  site assessment, combine related RF symptoms, retain typed transition
+  evidence, and move aged-out patterns into Finding History. OT is healthy,
+  the 10-inch layout retains all controls and content, and all 534 tests pass.
+  Merge the reviewed candidate to `main` before RPI promotion.
 
 ## Pending
 

@@ -13,14 +13,23 @@ public static class RfTemporalFindingAnalyzer
             .Where(row => row.ExcludeFromBaselines)
             .Select(row => (Start: row.StartUtc.ToUniversalTime(), End: (row.EndUtc ?? nowUtc).ToUniversalTime()))
             .ToList();
-        var episodes = samples
+        // The collector can persist successively wider views of the same journal
+        // interval. Keep the first (narrowest) observation for each interval start
+        // so one real degradation window cannot become many overlapping episodes.
+        var normalizedSamples = samples
+            .GroupBy(row => (row.Scope.ToUpperInvariant(), row.WindowStartUtc.ToUniversalTime()))
+            .Select(group => group
+                .OrderBy(row => row.WindowEndUtc.ToUniversalTime() - row.WindowStartUtc.ToUniversalTime())
+                .First())
+            .ToList();
+        var episodes = normalizedSamples
             .Where(row => !string.Equals(row.Scope, "global", StringComparison.OrdinalIgnoreCase))
             .Where(row => !excluded.Any(window => row.WindowStartUtc.ToUniversalTime() < window.End && row.WindowEndUtc.ToUniversalTime() > window.Start))
             .GroupBy(row => row.Scope, StringComparer.OrdinalIgnoreCase)
             .SelectMany(group => BuildEpisodes(group.Key, group.OrderBy(row => row.WindowStartUtc).ToList()))
             .ToList();
 
-        var observableStart = samples.Count == 0 ? nowUtc : samples.Min(row => row.WindowStartUtc.ToUniversalTime());
+        var observableStart = normalizedSamples.Count == 0 ? nowUtc : normalizedSamples.Min(row => row.WindowStartUtc.ToUniversalTime());
         var observableDays = Math.Max(1.0, (nowUtc - observableStart).TotalDays);
         return episodes
             .GroupBy(row => (row.OwnerKey, row.Signature))
@@ -40,22 +49,20 @@ public static class RfTemporalFindingAnalyzer
             var classified = Classify(row);
             if (classified is null)
             {
-                if (current != null)
-                {
-                    result.Add(current.Build());
-                    current = null;
-                }
+                // Do not split a degradation merely because one five-minute
+                // bucket briefly returns to normal. A later abnormal bucket
+                // beyond EpisodeGap closes the prior episode.
                 continue;
             }
 
-            if (current == null || current.Signature != classified.Value.Signature || row.WindowStartUtc.ToUniversalTime() - current.EndUtc > EpisodeGap)
+            if (current == null || row.WindowStartUtc.ToUniversalTime() - current.EndUtc > EpisodeGap)
             {
                 if (current != null) result.Add(current.Build());
                 current = new EpisodeBuilder(owner, classified.Value.Signature, row, classified.Value.Conditions, classified.Value.Severity);
             }
             else
             {
-                current.Add(row, classified.Value.Conditions, classified.Value.Severity);
+                current.Add(row, classified.Value.Signature, classified.Value.Conditions, classified.Value.Severity);
             }
         }
         if (current != null) result.Add(current.Build());
@@ -134,16 +141,17 @@ public static class RfTemporalFindingAnalyzer
             AddMetrics(row);
         }
 
-        public string Signature { get; }
+        public string Signature { get; private set; }
         public DateTime StartUtc { get; }
         public DateTime EndUtc { get; private set; }
         public string Severity { get; private set; }
 
-        public void Add(TrHealthSampleDto row, IEnumerable<string> conditions, string severity)
+        public void Add(TrHealthSampleDto row, string signature, IEnumerable<string> conditions, string severity)
         {
             EndUtc = row.WindowEndUtc.ToUniversalTime();
             if (severity == "high") Severity = "high";
             foreach (var condition in conditions) _conditions.Add(condition);
+            if (SignatureRank(signature) > SignatureRank(Signature)) Signature = signature;
             AddMetrics(row);
         }
 
@@ -171,6 +179,14 @@ public static class RfTemporalFindingAnalyzer
             var key = $"{_owner}:{Signature}:{StartUtc:O}:{EndUtc:O}";
             return new RfTemporalEpisodeDto(key, _owner, Signature, StartUtc, EndUtc, Severity, _conditions.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList(), evidence);
         }
+
+        private static int SignatureRank(string value) => value switch
+        {
+            "decode-loss" => 4,
+            "control-instability" => 3,
+            "capture-degradation" => 2,
+            _ => 1
+        };
     }
 }
 
