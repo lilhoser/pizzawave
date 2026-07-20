@@ -9,6 +9,7 @@ public static class RfTelemetryParser
     private const string CallstreamMarker = "PIZZAWAVE_RF ";
     private const string TrMarker = "TR_RF ";
     private static readonly DateTime MinimumTimestampUtc = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly TimeSpan RetuneNarrativeBucket = TimeSpan.FromMinutes(5);
 
     public static IReadOnlyList<RfTelemetryEventDto> ParseJournal(string journal, out int rejected)
     {
@@ -27,6 +28,22 @@ public static class RfTelemetryParser
                 rejected++;
         }
         return events;
+    }
+
+    public static IReadOnlyList<RfTelemetryEventDto> CollapseForPersistence(IReadOnlyList<RfTelemetryEventDto> events)
+    {
+        var ordinary = events.Where(row => row.EventType != "control_channel_retune");
+        var representativeRetunes = events
+            .Where(row => row.EventType == "control_channel_retune")
+            .GroupBy(row => (
+                System: row.SystemShortName.ToUpperInvariant(),
+                Reason: row.Reason.ToUpperInvariant(),
+                row.PreviousControlChannelHz,
+                row.RequestedControlChannelHz,
+                row.Success,
+                Bucket: row.TimestampUtc.Ticks / RetuneNarrativeBucket.Ticks))
+            .Select(group => group.OrderBy(row => row.TimestampUtc).First());
+        return ordinary.Concat(representativeRetunes).OrderBy(row => row.TimestampUtc).ToList();
     }
 
     public static bool TryParseLine(string line, out RfTelemetryEventDto? parsed)

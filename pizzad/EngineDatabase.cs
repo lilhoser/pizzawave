@@ -3577,8 +3577,12 @@ public sealed partial class EngineDatabase
                 entry.Value);
         }).OrderBy(site => site.SystemShortName, StringComparer.OrdinalIgnoreCase).ToList();
 
-        var transitionRows = (await ListRfTelemetryEventsAsync(start, end, null, "control_channel_retune", 500, ct))
-            .Concat(await ListRfTelemetryEventsAsync(start, end, null, "control_channel_reacquired", 500, ct));
+        var transitionRows = new List<RfTelemetryEventDto>();
+        foreach (var system in sites.Select(row => row.SystemShortName))
+        {
+            transitionRows.AddRange(await ListRfTelemetryEventsAsync(start, end, system, "control_channel_retune", 200, ct));
+            transitionRows.AddRange(await ListRfTelemetryEventsAsync(start, end, system, "control_channel_reacquired", 200, ct));
+        }
         var transitions = transitionRows
             .OrderBy(row => row.TimestampUtc)
             .Select(row => new RfTelemetryTransitionDto(

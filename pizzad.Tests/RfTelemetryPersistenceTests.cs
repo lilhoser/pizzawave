@@ -29,6 +29,30 @@ public sealed class RfTelemetryPersistenceTests
     }
 
     [Fact]
+    public void RepetitiveRetuneLoopsKeepOneNarrativeCyclePerFiveMinutes()
+    {
+        var start = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var rows = new[]
+        {
+            Event("sample", "rf_sample", start, "site-a"),
+            Retune("a", start.AddSeconds(1), 100, 200),
+            Retune("duplicate", start.AddMinutes(1), 100, 200),
+            Retune("next-pair", start.AddMinutes(1), 200, 300),
+            Retune("next-bucket", start.AddMinutes(5), 100, 200),
+            Retune("other-site", start.AddMinutes(1), 100, 200) with { SystemShortName = "site-b" }
+        };
+
+        var collapsed = RfTelemetryParser.CollapseForPersistence(rows);
+
+        Assert.Equal(5, collapsed.Count);
+        Assert.DoesNotContain(collapsed, row => row.EventKey == "duplicate");
+        Assert.Contains(collapsed, row => row.EventKey == "a");
+        Assert.Contains(collapsed, row => row.EventKey == "next-pair");
+        Assert.Contains(collapsed, row => row.EventKey == "next-bucket");
+        Assert.Contains(collapsed, row => row.EventKey == "other-site");
+    }
+
+    [Fact]
     public async Task Database_DeduplicatesFiltersAndPrunesTelemetryByEventClass()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rf-telemetry-{Guid.NewGuid():N}");
@@ -103,4 +127,13 @@ public sealed class RfTelemetryPersistenceTests
         SystemType = "p25",
         RawJson = "{}"
     };
+
+    private static RfTelemetryEventDto Retune(string key, DateTime timestampUtc, double previous, double requested) =>
+        Event(key, "control_channel_retune", timestampUtc, "site-a") with
+        {
+            Reason = "low_decode",
+            PreviousControlChannelHz = previous,
+            RequestedControlChannelHz = requested,
+            Success = true
+        };
 }

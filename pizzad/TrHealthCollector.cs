@@ -75,7 +75,8 @@ public sealed class TrHealthCollector : BackgroundService
             log = string.Empty;
         }
 
-        var telemetryEvents = RfTelemetryParser.ParseJournal(log, out var rejectedTelemetryRows);
+        var parsedTelemetryEvents = RfTelemetryParser.ParseJournal(log, out var rejectedTelemetryRows);
+        var telemetryEvents = RfTelemetryParser.CollapseForPersistence(parsedTelemetryEvents);
         var telemetryWritten = await _database.UpsertRfTelemetryEventsAsync(telemetryEvents, ct);
         var telemetryPruned = await _database.PruneRfTelemetryEventsAsync(
             DateTime.UtcNow.Subtract(RfSampleRetention),
@@ -83,6 +84,8 @@ public sealed class TrHealthCollector : BackgroundService
             ct);
         if (rejectedTelemetryRows > 0)
             _logger.LogWarning("TR RF telemetry rejected {RejectedRows} malformed or unsupported row(s)", rejectedTelemetryRows);
+        if (parsedTelemetryEvents.Count > telemetryEvents.Count)
+            _logger.LogDebug("TR RF telemetry collapsed {CollapsedRows} repetitive retune row(s) into five-minute narrative representatives", parsedTelemetryEvents.Count - telemetryEvents.Count);
         if (telemetryPruned > 0)
             _logger.LogInformation("TR RF telemetry pruned {PrunedRows} expired row(s)", telemetryPruned);
 
