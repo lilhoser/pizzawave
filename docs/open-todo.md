@@ -13,7 +13,14 @@ The active operator-facing remediation program is tracked in
 The operator-remediation sequence is closed. Package 11 was implemented,
 tested, deployed, live-verified, and operator-accepted on 2026-07-19.
 
-Standalone outstanding feature, outside this closeout sequence:
+Current priority order:
+
+1. RF stabilization: supervised alternate-control-channel validation, hardened
+   Trunk Recorder retune grace, and the controlled OT source-centering test.
+2. Incident pipeline redesign in its independently owned session and worktree.
+3. Package 7 isolated Offline and Archive Calls workspaces.
+
+Standalone outstanding feature after those higher priorities:
 
 - Package 7 - implement isolated Offline and Archive Calls workspaces from the
   accepted design. The persistence/timing foundation is complete but not

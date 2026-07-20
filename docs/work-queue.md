@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 21:00 EDT
+Last reconciled: 2026-07-19 22:20 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,8 +10,8 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `8c5e8ba` | `7c1a956d...` | `a7b32390...` | Healthy; passive RF emitters active |
-| OT (`omicrontheta`) | `main` at `8c5e8ba` | `7c1a956d...` | `a7b32390...` | Healthy; RF presentation and Recommendations validated |
+| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; passive RF emitters active; live RF controls verified |
+| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Cleveland retune-only state verified as degraded, not critical |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
@@ -20,9 +20,27 @@ revision rather than the newer upstream base used by OT.
 
 ## Active
 
-- None. Select one pending item before the next implementation or deployment.
+- None. RF stabilization is the next implementation priority. The incident
+  pipeline redesign remains independently owned by its existing session and
+  must not be merged or deployed as part of RF work.
 
 ## Recently Completed
+
+- Thread source-control reconciliation confirmed that all Package 5-11,
+  System, recovery, temporal-analysis, and RF work from this thread is present
+  on `main`. Merged, patch-equivalent, or explicitly superseded local package
+  branches and fully merged remote branches were retired. The
+  `codex/incident-v3-analysis` worktree and the unique incident, transcription,
+  embedding, and platform branches remain isolated for their respective owners.
+- Live RF status follow-up at `ec5572f`:
+  - removed the two explanatory prose notes above the RF charts;
+  - added a persistent per-browser site pin to the footer RF pill;
+  - repaired popup site navigation so Performance / Radio Frequency opens on
+    the selected site;
+  - prevented elevated retunes alone from making a currently decoding site
+    critical; they remain visible as degraded evidence;
+  - rebuilt the production web assets, passed all 536 tests, pushed `main`, and
+    deployed the identical backend/web hashes to OT and RPI.
 
 - RF telemetry analysis and operator presentation:
   - Trunk Recorder `codex/rf-telemetry` at `8318dfb` emits retune events;
@@ -53,19 +71,20 @@ revision rather than the newer upstream base used by OT.
 
 ## Pending
 
-1. Harden and test Trunk Recorder retune grace, then propose it upstream.
-2. Add supervised Setup validation of every alternate control channel.
-3. Repeat the controlled OT source-centering experiment.
-4. Package 7: isolated Offline and Archive Calls workspaces.
-5. Incident pipeline redesign, using its dedicated handoff and experimental
-   branches. It must not be mixed into RF or operational packages.
+1. RF stabilization:
+   - add supervised Setup validation of every alternate control channel;
+   - harden and test Trunk Recorder retune grace, then propose it upstream;
+   - repeat the controlled OT source-centering experiment.
+2. Incident pipeline redesign, using its dedicated handoff, worktree, and
+   experimental branches. Another session owns this work; it must not be mixed
+   into RF stabilization.
+3. Package 7: isolated Offline and Archive Calls workspaces.
 
 ## Awaiting Disposition
 
-- Preserve, merge, or retire the incident-v3, transcription bakeoff, embedding,
-  and old platform-refactor branches after their owners review them.
-- Review and retire obsolete local branch names after confirming no session
-  still refers to them. Their worktrees have already been removed.
+- Preserve or retire the incident-v3, transcription bakeoff, embedding, and old
+  platform-refactor branches after their owners review them. They are not work
+  from the RF/System/package thread and were deliberately not merged here.
 
 ## Completion Rule
 

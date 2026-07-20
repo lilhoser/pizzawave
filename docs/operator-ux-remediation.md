@@ -1,6 +1,6 @@
 # Operator UX Remediation
 
-Last updated: 2026-07-19
+Last updated: 2026-07-19 22:20 EDT
 
 This is the canonical execution tracker for the operator-facing PizzaWave
 architecture review. Read it before beginning work and update it before ending
@@ -9,17 +9,21 @@ work so that progress does not depend on conversation history.
 ## Current Position
 
 - Active package: none; the operator-remediation sequence is closed.
-- Current milestone: Package 11 cleanup is implemented, deployed to the RPI,
-  live-verified, and operator-accepted. Package 7 remains a standalone
-  outstanding feature outside this closed sequence.
-- Continuation: none for this remediation sequence.
-- Last deployed code state: Package 11 dead-code and retired-editor removal,
-  the owned React Leaflet Dashboard map and its aggregation corrections, the
-  persistent live RF footer, and restored semantic RF KPI colors, deployed and
-  verified on the RPI through 2026-07-19.
+- Current milestone: Package 11 cleanup and subsequent System/RF follow-ups are
+  implemented, deployed to both hosts, live-verified, and operator-accepted.
+  Package 7 remains a standalone outstanding feature outside this closed
+  sequence.
+- Continuation: the remediation sequence remains closed. Cross-package work now
+  proceeds in this order: RF stabilization, the independently owned incident
+  pipeline redesign, then standalone Package 7.
+- Last deployed code state: `main` at `ec5572f` on both OT and RPI, including
+  the persistent/pinnable live RF footer, repaired per-site RF navigation, and
+  retune-only severity correction. Both hosts use deployable backend hash
+  `4a6b67d8...` and web hash `e05e0275...`.
 - Package 9 final implementation commit before documentation closure: `2b6caa4`
 - Operator verification: Packages 1, 2, 3, 4, 5, 6, 8, 9, 10, and 11 accepted
-- Next action: none. Do not restart Trunk Recorder unless the operator
+- Next action: begin the bounded RF stabilization work from its entries in
+  `docs/work-queue.md`. Do not restart Trunk Recorder unless the operator
   explicitly requests it.
 
 ## Package 5 Final Handoff

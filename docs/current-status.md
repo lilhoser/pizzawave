@@ -1,10 +1,12 @@
 # PizzaWave Current Status
 
-Last updated: 2026-07-19
+Last updated: 2026-07-19 22:20 EDT
 
 Before starting or deploying new work, read [work-queue.md](work-queue.md).
-Local and remote `main` were reconciled on 2026-07-19. OT and RPI still have
-different deploy manifests, so check both versions before the next deployment.
+Local and remote `main` were reconciled on 2026-07-19. OT and RPI run the same
+PizzaWave source (`ec5572f`) and deployable hashes: backend `4a6b67d8...` and
+web `e05e0275...`. Their manifest RIDs differ as expected (`linux-x64` and
+`linux-arm64`). Check both live manifests again before the next deployment.
 
 This is the handoff note for starting a new Codex session rooted at
 `C:\projects\pizzawave`.
@@ -26,6 +28,23 @@ the new worktree before making changes. Do not resume from one of the old
 Package 5 or Package 8 worktree directories.
 
 ## 2026-07-18 Operator UX Handoff
+
+- Priority order after this handoff is RF stabilization, the independently
+  owned incident-pipeline redesign, then Package 7 Offline and Archive Calls.
+  RF stabilization consists of supervised validation of every configured
+  alternate control channel, hardening/testing the Trunk Recorder retune-grace
+  behavior for a possible upstream proposal, and repeating the controlled OT
+  source-centering experiment.
+- The latest live RF follow-up is merged and deployed at `ec5572f`. The footer
+  RF pill supports persistent site pinning, popup rows open the selected site
+  in Performance / Radio Frequency, and retunes without current decode loss
+  produce a degraded rather than critical site state. The two prose notes above
+  the RF charts were removed. All 536 tests pass.
+- Source-control reconciliation found no unmerged Package 5-11, System, or RF
+  implementation from this thread. Obsolete merged, patch-equivalent, and
+  superseded thread branches were retired. The incident-v3 worktree and unique
+  incident, transcription, embedding, and platform branches remain deliberately
+  separate for their owners.
 
 - Packages 1, 2, 3, 4, 5, 6, 8, and 9 are complete and operator-accepted.
 - Package 7, Offline And Archive Calls, is a standalone outstanding feature and
@@ -105,9 +124,10 @@ Package 5 or Package 8 worktree directories.
   showed `jackson-ms-hinds-ms` critical at 0 msg/s and
   `etv-raymond-hinds` degraded while its decode and retune values updated.
   Trunk Recorder remained PID 1595 with its unchanged July 11 activation time.
-- Any future Package 7 task must begin from its documented handoff, deliver a
-  complete operator-visible slice before deployment, preserve live capture
-  priority, and avoid restarting Trunk Recorder as a side effect.
+- Any future Package 7 task must begin after the RF stabilization priority and
+  use its documented handoff. It must deliver a complete operator-visible slice
+  before deployment, preserve live capture priority, and avoid restarting
+  Trunk Recorder as a side effect.
 
 ## Active Architecture
 
