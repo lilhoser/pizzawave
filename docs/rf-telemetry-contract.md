@@ -6,8 +6,7 @@ Implementation checkpoints:
 
 - Trunk Recorder `codex/rf-telemetry` at `8318dfb`.
 - callstream `codex/rf-telemetry` at `1cdd5c4`.
-- PizzaWave ingestion is on `main` at `eafa333`; analysis and presentation are
-  on `codex/rf-telemetry-ui` pending merge.
+- PizzaWave ingestion, analysis, and presentation are on `main` at `71663cc`.
 - Both changed C++ translation units compile on OT in an isolated temporary
   tree. All 534 PizzaWave tests pass.
 
@@ -96,3 +95,21 @@ PizzaWave ingestion candidate `26625f8` was deployed to OT with backend hash
 the first completed collection window. The authenticated API returned the full
 typed channel/source chain. The schema migration also backfilled the pre-retune
 frequency residual for events captured before that typed column was added.
+
+## RPI Deployment Checkpoint
+
+PizzaWave `main` at `71663cc` was deployed to RPI on 2026-07-19. RPI and OT
+have matching deployable hashes: backend `0f2d33d0...` and web
+`a7b32390...`.
+
+RPI's Trunk Recorder emitter was deliberately rebased onto the exact installed
+`766a553` source revision to avoid importing unrelated upstream changes. The
+result is `ca787409`; the callstream emitter remains `1cdd5c4`. Installed
+SHA-256 values are `4856146b...` for Trunk Recorder and `31ac526d...` for
+callstream. The pre-install binaries and configuration are retained at
+`/var/backups/pizzawave/rf-telemetry-rpi-20260720T004203Z`.
+
+After the single required TR restart, RPI emitted 15-second typed samples for
+ETV Raymond and Jackson plus typed low-decode retunes for the known disconnected
+Jackson dongle. PizzaWave health, live ingest, transcription, and queues remained
+normal. No retune behavior or limits were changed.

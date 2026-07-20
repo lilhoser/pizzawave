@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 20:10 EDT
+Last reconciled: 2026-07-19 20:43 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,12 +10,13 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `99adf8a` | `96594b14...` | `23672a49...` | Healthy |
-| OT (`omicrontheta`) | `codex/rf-telemetry-ui` candidate | `699f3780...` | `40692c2b...` | Healthy; RF presentation and Recommendations validated |
+| RPI (`sdr1861`) | `main` at `71663cc` | `0f2d33d0...` | `a7b32390...` | Healthy; passive RF emitters active |
+| OT (`omicrontheta`) | `main` at `71663cc` | `0f2d33d0...` | `a7b32390...` | Healthy; RF presentation and Recommendations validated |
 
-The hosts now share the same web build, but RPI's PizzaWave backend remains at
-the earlier `99adf8a` state. Neither host runs the experimental Trunk Recorder
-retune-grace binary. Only OT runs the passive RF telemetry build.
+The hosts share the same PizzaWave deployable build. Neither host runs the
+experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
+telemetry emitters; RPI's TR emitter is based on its exact prior `766a553`
+revision rather than the newer upstream base used by OT.
 
 ## Active
 
@@ -37,17 +38,18 @@ retune-grace binary. Only OT runs the passive RF telemetry build.
   site assessment, combine related RF symptoms, retain typed transition
   evidence, and move aged-out patterns into Finding History. OT is healthy,
   the 10-inch layout retains all controls and content, and all 534 tests pass.
-  Merge the reviewed candidate to `main` before RPI promotion.
+  The reviewed candidate was squash-merged to `main` as `71663cc`, pushed, and
+  deployed to both hosts. RPI's passive emitters were installed at 20:42 EDT
+  from TR `ca787409` and callstream `1cdd5c4`, with rollback artifacts under
+  `/var/backups/pizzawave/rf-telemetry-rpi-20260720T004203Z`.
 
 ## Pending
 
-1. RF telemetry after analysis/operator presentation:
-   - promote the tested build to RPI.
-2. Harden and test Trunk Recorder retune grace, then propose it upstream.
-3. Add supervised Setup validation of every alternate control channel.
-4. Repeat the controlled OT source-centering experiment.
-5. Package 7: isolated Offline and Archive Calls workspaces.
-6. Incident pipeline redesign, using its dedicated handoff and experimental
+1. Harden and test Trunk Recorder retune grace, then propose it upstream.
+2. Add supervised Setup validation of every alternate control channel.
+3. Repeat the controlled OT source-centering experiment.
+4. Package 7: isolated Offline and Archive Calls workspaces.
+5. Incident pipeline redesign, using its dedicated handoff and experimental
    branches. It must not be mixed into RF or operational packages.
 
 ## Awaiting Disposition
