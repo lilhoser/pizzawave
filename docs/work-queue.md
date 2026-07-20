@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 17:33 EDT
+Last reconciled: 2026-07-20 19:10 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -39,7 +39,10 @@ Cross-repository source state:
   RPI Raymond and OT North Bradley/Hamilton. RPI captured a shadow-instrumented
   event immediately after activation: both decoders collapsed together at
   onset, but the fixed-primary shadow recovered to 22-36 frames/s while the
-  live decoder cycled alternates. OT is awaiting its first qualifying event. See
+  live decoder cycled alternates. OT subsequently captured North Bradley: both
+  decoders again collapsed together at onset, but recovery diverged in the
+  opposite direction, with live recovering to 36 while shadow remained at 1.
+  Hamilton stayed healthy throughout. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
@@ -123,9 +126,10 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
-   - keep the already-armed OT North Bradley/Hamilton shadow recorder running
-     until it retains one natural onset; this is now the key cross-geography
-     discriminator;
+   - retain OT North Bradley capture `1784584105012` as the completed cross-
+     geography discriminator: its IQ power/CNR changed only about 0.4/0.5 dB,
+     sample continuity was clean, and a fresh replay reproduced the low decode;
+     Hamilton remained healthy on the same host;
    - retain Raymond capture `1784582765019` and its 78-sample live/shadow
      timeline as the first result; isolated replay independently reproduced
      repeated decode losses in the captured IQ, while live alternate-channel
@@ -133,8 +137,10 @@ Cross-repository source state:
    - keep current-lineage candidate `51920b1` and exact RPI compatibility
      candidate `c923e02c` isolated for maintainer review even though their
      coherent artifacts are now deployed experimentally;
-   - add wider pre-channelizer IQ or source-continuity counters only if both
-     live and shadow decoders collapse and RF/front-end localization remains;
+   - use one bounded wider pre-channelizer capture, plus offline modulation-
+     quality analysis, to distinguish North Bradley in-channel distortion from
+     front-end behavior; do not add broad host metrics or another recovery
+     policy experiment;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and

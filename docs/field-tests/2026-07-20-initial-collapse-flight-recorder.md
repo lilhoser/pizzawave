@@ -261,6 +261,74 @@ replay independently confirms that the retained primary-channel IQ contains
 the repeated decode losses, while the production wideband shadow timeline is
 the valid evidence for the recovery cost of real live retuning.
 
+## OT cross-geography shadow event
+
+North Bradley produced the required OT event at 2026-07-20 17:48:25.012 EDT:
+
+`1784584105012-whiteoakmt-nbradley-automatic.fc32`
+
+The completed file contains the full 30-second prehistory and 60-second
+post-trigger window: 8,640,000 complex samples at 96,000 samples/sec,
+69,120,000 bytes. SHA-256 values are
+`845ab28446f73e0726514165ca0f38bbec3cfb5061819b0900ab577bd76c7100`
+for IQ and
+`842fe59d87151559a1c2c0459cd215668f6d70d7f0b96d97c42da0bbeecaa9c6`
+for JSON. The file size remained unchanged across a second check and the JSON
+contains 91 one-second live/shadow samples.
+
+The onset signature corroborates Raymond at the decoder boundary but not at
+the amplitude boundary. During the six seconds leading into the trigger, both
+independent decoders repeatedly fell to 1-4 frames/s on the unchanged
+769.606250 MHz primary. The trigger metadata records live 1 msg/s and shadow
+4 frames/s; the trigger-aligned one-second sample is 4/4. This again rejects a
+live-only counter or accumulated-live-decoder explanation for the onset.
+
+Recovery then diverged in both directions:
+
+- during 12 post-trigger samples on alternate live control channels, live was
+  0-1 frames/s while the fixed-primary shadow reached 18 frames/s and exceeded
+  live in 11 samples;
+- after live returned to 769.606250 MHz, 48 samples had live rates of 1-36 and
+  shadow rates of 0-4; live exceeded shadow in 42 samples and ended at 36/1.
+
+This is stronger than a claim that retuning is simply good or bad. The same
+transient can drive two decoder graphs fed by the same source into different
+long-lived recovery states. Retuning helped the live graph escape the state in
+this OT event, whereas Raymond's fixed-primary shadow recovered first. The
+initial impairment and the recovery amplification are separate phenomena.
+
+### OT IQ and replay analysis
+
+One-second spectral analysis of the complete IQ file found only a modest
+approximately 0.41 dB raw-power decline and 0.48 dB in-band/outer-band decline
+from the preceding baseline into the trigger. The outer-band noise floor stayed
+near -126.3 dB on the same analysis scale, and the signal centroid varied by
+less than about 80 Hz around the edge. All 8,640,000 samples were finite, with
+no zero samples, repeated adjacent complex samples, or contemporaneous TR or
+kernel USB/overflow messages.
+
+A fresh isolated replay reproduced the waveform's low and erratic decode. In
+the trigger-aligned file seconds 25-30, both fresh graphs reported the identical
+sequence 4, 1, 3, 1, 1, 1 frames/s. Across all 91 signal-bearing replay
+intervals, live and shadow counts matched exactly. The replay's attempted
+alternate tune was rejected because the narrowband file covers only the
+primary, so both graphs continued decoding the same retained primary waveform.
+
+Hamilton provides a same-host control. Across 95 simultaneous live samples
+spanning the North Bradley event, Hamilton remained at 23-42 frames/s with no
+zero or <=1 frame/s interval. The OT event is therefore not a host-wide CPU,
+service, or sample-flow outage.
+
+The cross-geography conclusion is narrower and more useful than "both sites
+fade." Raymond had a coincident 3-4 dB received-power/CNR drop. North Bradley
+had nearly stable power and noise but a stored waveform that remained difficult
+for a fresh decoder. Both initial collapses are real signal-path impairments,
+but they do not share one simple amplitude-fade signature. North Bradley is
+more consistent with in-channel modulation distortion such as changing
+multipath/simulcast geometry or narrow co-channel interference. A good omni
+antenna does not rule out that class of impairment; an omni can preserve
+multiple competing paths.
+
 A mistaken local-only merge commit, `19ae14f`, was created while interpreting
 "main" as Trunk Recorder's default branch. It was never pushed or deployed and
 was removed immediately; local and remote `master` both remain at `382f5f2`.
