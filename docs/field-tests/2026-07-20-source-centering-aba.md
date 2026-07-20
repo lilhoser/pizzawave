@@ -134,6 +134,16 @@ the failure mode.
 
 ## Recommended next experiment
 
+Follow-up: the decoder-state replay in
+[2026-07-20-p25-retune-state-replay.md](2026-07-20-p25-retune-state-replay.md)
+supersedes the receiver-role crossover below as the highest-priority next
+step. Persistent and fully reconstructed P25 graphs both reacquired the same
+degraded Raymond samples in 5/5 fixed-offset runs, with effectively identical
+latency and throughput. The next experiment is live sample-continuity
+localization across the SDR source, GNU Radio graph, and OP25 frame boundary.
+The crossover remains a possible later RF-path test if continuity telemetry
+shows an intact live pipeline.
+
 Run a simultaneous OT North Bradley receiver-role crossover during an active
 fade. This avoids another time-confounded sequential center comparison and
 requires no historical control-channel scoring machinery.

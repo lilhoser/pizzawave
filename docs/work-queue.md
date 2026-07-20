@@ -37,6 +37,16 @@ Cross-repository source state:
 
 ## Recently Completed
 
+- Deterministic P25 retune-state replay is complete and recorded in
+  [field-tests/2026-07-20-p25-retune-state-replay.md](field-tests/2026-07-20-p25-retune-state-replay.md).
+  Five fixed-sample runs per decoder variant forced three noise-only Raymond
+  channel visits before returning to the captured primary. Both persistent
+  and fully reconstructed P25 graphs decoded the correct site and system in
+  5/5 runs. Mean primary rates were 20.00 and 19.65 msg/s, respectively, with
+  effectively identical acquisition latency. Full graph reset is not a
+  supported stabilization fix and was not deployed. Durable configs, logs,
+  binaries, hashes, source, and machine-readable analysis remain on RPI under
+  `/var/lib/pizzawave/rf-surveys/manual/20260720T-rpi-raymond-demod-state-replay`.
 - The supervised source-centering A-B-A on OT and RPI is complete and recorded
   in
   [field-tests/2026-07-20-source-centering-aba.md](field-tests/2026-07-20-source-centering-aba.md).
@@ -96,10 +106,15 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
-   - run the simultaneous OT North Bradley receiver-role crossover documented
-     in the July 20 field test;
-   - use its role-versus-device result to choose either a short
-     gain/attenuation challenge or live DSP/reacquisition investigation;
+   - add low-volume live sample-continuity counters at the SDR source, P25
+     graph input, channelizer output, timing output, and OP25 frame boundary;
+   - retain a bounded event window with host CPU, run queue, I/O wait, memory,
+     thermal, undervoltage, and USB/SDR errors when decode falls below 2 msg/s;
+   - capture one short same-branch IQ segment per host during an event and use
+     the counters to localize source delivery, scheduler/backpressure,
+     decoder/queue, or genuine RF loss;
+   - keep the receiver-role crossover as a later RF-path discriminator only if
+     the live pipeline remains continuous through a fade;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
