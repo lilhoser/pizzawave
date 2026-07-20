@@ -8,12 +8,33 @@ public sealed class SystemInformationUiContractTests
     private static string StyleSource() =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "style.css"));
 
+    private static string RefreshSource() =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "refresh.ts"));
+
     private static string LocationHeatMapSource() =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "LocationHeatMap.tsx"));
 
     private static string RecommendationServiceSource() =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UiContract", "SystemRecommendationService.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    [Fact]
+    public void NavigationBadgesFollowFreshActiveState()
+    {
+        var app = AppSource();
+        var refresh = RefreshSource();
+        var recommendations = RecommendationServiceSource();
+
+        Assert.Contains("dashboardResource.refreshFresh()", app, StringComparison.Ordinal);
+        Assert.Contains("summaryResource.refreshFresh()", app, StringComparison.Ordinal);
+        Assert.Contains("setActiveAlertCount(countActiveAlerts(nextDashboard.alerts))", app, StringComparison.Ordinal);
+        Assert.Contains("item.kind === \"problem\" && item.activityState !== \"quiet\"", app, StringComparison.Ordinal);
+        Assert.Contains("onSystemProblemCount={setSystemProblemCount}", app, StringComparison.Ordinal);
+        Assert.Contains("if (inFlight?.key === keyRef.current)", refresh, StringComparison.Ordinal);
+        Assert.Contains("await inFlight.promise", refresh, StringComparison.Ordinal);
+        Assert.Contains("var activeNow = active\n            .Where(r => !string.Equals(r.ActivityState, \"quiet\"", recommendations, StringComparison.Ordinal);
+        Assert.Contains("activeNow.Count(r => r.Kind == \"problem\")", recommendations, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void PrimarySystemViewsDoNotRestoreKnownMisleadingOrDuplicatedContent()
