@@ -1,6 +1,6 @@
 # PizzaWave Current Status
 
-Last updated: 2026-07-19 22:20 EDT
+Last updated: 2026-07-20 10:05 EDT
 
 Before starting or deploying new work, read [work-queue.md](work-queue.md).
 Local and remote `main` were reconciled on 2026-07-19. OT and RPI run the same
@@ -31,10 +31,12 @@ Package 5 or Package 8 worktree directories.
 
 - Priority order after this handoff is RF stabilization, the independently
   owned incident-pipeline redesign, then Package 7 Offline and Archive Calls.
-  RF stabilization consists of supervised validation of every configured
-  alternate control channel, hardening/testing the Trunk Recorder retune-grace
-  behavior for a possible upstream proposal, and repeating the controlled OT
-  source-centering experiment.
+  The controlled source-centering A-B-A is complete and does not support the
+  candidate centers as a permanent fix. The next experiment is the simultaneous
+  OT North Bradley receiver-role crossover documented in
+  [field-tests/2026-07-20-source-centering-aba.md](field-tests/2026-07-20-source-centering-aba.md).
+  Alternate-channel validation and retune grace remain secondary recovery
+  work rather than the presumed root-cause investigation.
 - The latest live RF follow-up is merged and deployed at `ec5572f`. The footer
   RF pill supports persistent site pinning, popup rows open the selected site
   in Performance / Radio Frequency, and retunes without current decode loss

@@ -1,6 +1,6 @@
 # PizzaWave Open TODO
 
-Last consolidated: 2026-07-19
+Last consolidated: 2026-07-20
 
 The active cross-package queue and deployment baseline are maintained in
 [work-queue.md](work-queue.md). Repository and worktree detail from the latest
@@ -15,8 +15,13 @@ tested, deployed, live-verified, and operator-accepted on 2026-07-19.
 
 Current priority order:
 
-1. RF stabilization: supervised alternate-control-channel validation, hardened
-   Trunk Recorder retune grace, and the controlled OT source-centering test.
+1. RF stabilization: the source-centering A-B-A is complete and did not support
+   permanent candidate centers. Next run the simultaneous OT North Bradley
+   receiver-role crossover from
+   [field-tests/2026-07-20-source-centering-aba.md](field-tests/2026-07-20-source-centering-aba.md),
+   then choose a receiver/front-end or live DSP follow-up from that result.
+   Alternate-channel validation and retune grace remain secondary recovery
+   work.
 2. Incident pipeline redesign in its independently owned session and worktree.
 3. Package 7 isolated Offline and Archive Calls workspaces.
 

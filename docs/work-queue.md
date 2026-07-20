@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 22:20 EDT
+Last reconciled: 2026-07-20 10:05 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -37,6 +37,15 @@ Cross-repository source state:
 
 ## Recently Completed
 
+- The supervised source-centering A-B-A on OT and RPI is complete and recorded
+  in
+  [field-tests/2026-07-20-source-centering-aba.md](field-tests/2026-07-20-source-centering-aba.md).
+  Candidate centers were installed for one exact 30-minute phase, followed by
+  an exact 30-minute restored-center confirmation. Raymond worsened under the
+  candidate and was strongest after restoration. North Bradley's higher
+  candidate average coincided with improvement on unchanged Hamilton and the
+  candidate did not prevent short fades. Original configs were restored and
+  hash-verified; both TR services and PizzaWave health checks finished clean.
 - Thread source-control reconciliation confirmed that all Package 5-11,
   System, recovery, temporal-analysis, and RF work from this thread is present
   on `main`. Merged, patch-equivalent, or explicitly superseded local package
@@ -87,9 +96,12 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
-   - add supervised Setup validation of every alternate control channel;
-   - harden and test Trunk Recorder retune grace, then propose it upstream;
-   - repeat the controlled OT source-centering experiment.
+   - run the simultaneous OT North Bradley receiver-role crossover documented
+     in the July 20 field test;
+   - use its role-versus-device result to choose either a short
+     gain/attenuation challenge or live DSP/reacquisition investigation;
+   - keep alternate-channel validation and Trunk Recorder retune grace as
+     secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
    experimental branches. Another session owns this work; it must not be mixed
    into RF stabilization.

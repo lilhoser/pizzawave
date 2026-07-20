@@ -158,13 +158,28 @@ RPI:
 
 ## Recommended next steps
 
-1. Run repeated or longer OT North Bradley baseline/candidate pairs before adopting the candidate source centers permanently. Use Cleveland and Hamilton as contemporaneous controls.
-2. Turn the compatibility trial into a properly packaged, immediately reversible OT build and run a longer supervised window. Keep `controlRetuneLimit` at `0`.
-3. Test explicit configuration of all known-good control-channel alternates, especially on RPI, so cold-start recovery does not depend on first decoding the primary.
-4. Refine the upstream design around last-known-good preference and reacquisition dwell. The evidence now justifies preparing the current-upstream branch for review; create a fork or upstream pull request only after the longer OT trial and focused tests.
-5. Include exact partial-boundary journal samples when combining stored five-minute buckets for fixed-window RF analysis.
-6. Add durable per-source RF telemetry independent of decoded message rate: absolute channel power, local noise floor, channel SNR, frequency residual, selected control channel, and retune state. Decode rate alone cannot distinguish RF loss from failure to reacquire.
-7. Repeat the IQ comparison after the source-plan and retune changes. The success criterion is not only a higher average decode rate, but removal of long zero windows during modest input-level fades.
+The repeated source-center test is complete. See
+[2026-07-20-source-centering-aba.md](2026-07-20-source-centering-aba.md).
+Its A-B-A result does not support adopting the candidate centers as a
+stabilization fix: Raymond worsened during the centered phase, North Bradley's
+apparent gain was confounded by simultaneous improvement on unchanged
+Hamilton, and both targets decoded cleanly after their original centers were
+restored.
+
+1. Run the simultaneous OT North Bradley receiver-role crossover specified in
+   the July 20 record. It is now the highest-value experiment because it
+   separates source geometry from a physical SDR/feed leg without another
+   sequential time confound.
+2. If the crossover identifies a receiver/front-end effect, follow with a
+   short randomized gain or stepped-attenuation challenge during degradation.
+3. If captured IQ remains decodable while only the live chain fails, focus the
+   next implementation work on live DSP/reacquisition state rather than RF
+   center placement.
+4. Keep alternate-channel validation and retune grace as secondary recovery
+   work. Neither should be presented as the root-cause investigation.
+5. Add per-source channel power, noise floor, SNR, frequency residual, and
+   device identity only where needed to discriminate the crossover result;
+   decode rate alone cannot separate RF loss from failure to reacquire.
 
 ## Limits
 
