@@ -250,6 +250,21 @@ the completed six-case review. Until then, automatic membership mutation is
 blocked by insufficient and failed development evidence, not by implementation
 work.
 
+That 12-case blind expansion is now complete. GPT-OSS achieved 6 of 12 valid
+correct decisions and preserved none of three unresolved cases. Qwen achieved
+7 of 12 and preserved one of three. Each had one contract failure. Across all
+18 reviewed development pairs, both recalled only 8 of 11 confirmed shared
+relationships; GPT-OSS preserved 0 of 5 unresolved cases and Qwen preserved 2
+of 5. The typed three-way decision therefore also fails as automatic mutation
+authority, and the sealed held-out set must remain unopened.
+
+If experimentation continues, the state model should remove
+`supports_distinct_event` from learned authority. New observations remain
+unresolved singletons unless a one-sided, source-grounded shared-event link is
+admitted. A missing or rejected link does not prove a separate event. Even that
+link-only form remains a non-mutating shadow proposal until it independently
+meets precision, recall, stability, and Paxan gates.
+
 ### Provenance
 
 Provenance points to source observations rather than application-owned semantic

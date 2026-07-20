@@ -71,9 +71,9 @@
       </div>
       <section class="export-panel hidden" id="export-panel" aria-live="polite">
         <strong>Your completed review is preserved below.</strong>
-        <p class="export-status" id="export-status">Choose a save method. If the browser blocks downloads, copy the selected JSON.</p>
+        <p class="export-status" id="export-status">Use ordinary download or copy the JSON. This page does not open a native file picker.</p>
         <div class="export-buttons">
-          <button class="primary" id="save-file">Save JSON file</button>
+          <button class="primary" id="save-file">Download JSON</button>
           <button id="copy-json">Copy JSON</button>
           <button id="select-json">Select all JSON</button>
         </div>
@@ -122,15 +122,8 @@
         if(!copied){const output=document.getElementById('export-json');output.focus();output.select();try{copied=document.execCommand('copy');}catch{}}
         document.getElementById('export-status').textContent=copied?'Review JSON copied to the clipboard.':'Automatic copy was blocked. The JSON is selected; press Ctrl+C.';
       }
-      async function saveExport() {
+      function saveExport() {
         const json=prepareExport();
-        if(typeof window.showSaveFilePicker==='function'){
-          try{
-            const handle=await window.showSaveFilePicker({suggestedName:'incident-relationship-review.json',types:[{description:'JSON review',accept:{'application/json':['.json']}}]});
-            const writable=await handle.createWritable();await writable.write(json);await writable.close();
-            document.getElementById('export-status').textContent='Review JSON saved.';return;
-          }catch(error){if(error?.name==='AbortError'){document.getElementById('export-status').textContent='Save was cancelled. Your JSON remains available below.';return;}}
-        }
         const blob=new Blob([json],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='incident-relationship-review.json';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
         document.getElementById('export-status').textContent='Download requested. If no file appeared, use Copy JSON or select the text below.';
       }

@@ -597,12 +597,43 @@ SHA-256 is
 No model result is bundled into the reviewer view.
 
 Before human answers were available, frozen v2 outputs were captured for all
-12 cases from both GPT-OSS 20B and Qwen 3.6. Their case-level decisions remain
-unreported until review completion. For each directory, the manifest is the
+12 cases from both GPT-OSS 20B and Qwen 3.6. Their case-level decisions were
+not inspected against labels until review completion. For each directory, the manifest is the
 SHA-256 of sorted UTF-8 lines containing `<filename> <artifact-sha256>`:
 
 - GPT-OSS 20B, 12 artifacts: `9282134F9A36D415DD13CC0AB342610D3DD5F18376BCBC24121E39CF56B6BDC4`
 - Qwen 3.6, 12 artifacts: `2F2805952B8DDF5BED1B6AF646263AEA3433FBDA28D5B3EC87ABCE5B7CE67D64`
+
+The in-app browser crashed when the reviewer invoked its native file picker,
+but all 12 answers were recovered from the page's completed local-storage
+record. The recovered review contains eight `same_event`, one
+`not_same_event`, and three `unresolved` assessments. Its SHA-256 is
+`08C4D6622DFC7775B7FFD88E0AB7A35D8B4659F642ABDFBF7E0093F4738A0C87`.
+The reviewer now avoids the native picker and retains ordinary download,
+clipboard, selection, and visible-JSON fallbacks.
+
+Against the recovered review, GPT-OSS produced 11 of 12 contract-valid records
+but only 6 of 12 valid correct decisions. It recalled 5 of 8 confirmed shared
+events and preserved 0 of 3 unresolved cases. It treated sequential mileage
+values (`15068` then `15069`) as different events, split a continuing
+vehicle/license discussion, and again declared all low-information pairs
+distinct from absence of overlap. Latency remained 1.6 to 2.7 seconds.
+
+Qwen also produced 11 of 12 contract-valid records and reached only 7 of 12
+valid correct decisions. It recalled 5 of 8 confirmed shared events and
+preserved 1 of 3 unresolved cases. One false-distinct explanation explicitly
+used different talkgroups and frequencies as proof despite the prompt's
+prohibition. Latency was 24.0 to 47.1 seconds.
+
+Across both reviewed development packages (18 pairs), each model recalled only
+8 of 11 confirmed shared relationships (0.727). GPT-OSS preserved 0 of 5
+reviewer-unresolved cases; Qwen preserved 2 of 5. Contract-valid rates were
+16 of 18 for GPT-OSS and 17 of 18 for Qwen, both far below the required 0.99.
+Qwen admitted 8 correct relationships among 9 relationship verdicts (0.889
+precision), below the required 0.95. GPT-OSS's admitted relationship precision
+was 8 of 8, but its 0.727 recall and systematic false-distinct behavior reject
+automatic mutation. No repeated trials or held-out evaluation are warranted:
+the first frozen trial already fails mandatory development gates.
 
 ## Next gates
 
@@ -613,10 +644,13 @@ SHA-256 of sorted UTF-8 lines containing `<filename> <artifact-sha256>`:
   these development experiments.
 - Retain the typed-evidence contract and application-owned transition only as
   non-mutating shadow scaffolding. Do not enable its append/create operations.
-- Add new, non-repeated development cases enriched for ambiguous follow-ups,
-  generic acknowledgments, and plausible-but-unproven continuity. Blind human
-  adjudication is required before another model can earn automatic mutation;
-  legacy V2/V3 membership and model agreement are not labels.
+- Do not run these candidates on the sealed held-out corpus. Both failed the
+  expanded blind development gate.
+- If model research continues, restrict the next contract to one-sided link
+  proposals: a model may propose a source-grounded shared-event link or
+  abstain, but it may not assert a distinct event or mutate membership. Treat
+  unlinked observations as unresolved singletons rather than model-proven
+  separate events.
 - Do not build a mandatory multi-model consensus stage. Treat invalid output
   as abstention and do not tune another prompt against these six answers.
 - Use deterministic provenance and reference checks on every output. Sample
