@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 15:54 EDT
+Last reconciled: 2026-07-20 16:40 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -23,12 +23,13 @@ Cross-repository source state:
 
 - callstream RF sampling/reacquisition telemetry is merged and pushed on
   callstream `main` at `1cdd5c4`; its temporary feature branch is retired;
-- upstream Trunk Recorder `master` remains untouched at `382f5f2`;
-- the Trunk Recorder telemetry and retune-grace candidates are consolidated in
-  one clean local branch/worktree, `codex/rf-stabilization` at `602a637` under
-  `C:\projects\trunk-recorder-rf-stabilization`. It is intentionally not merged
-  into upstream `master` or deployed; hardening and upstream/fork disposition
-  belong to the next RF task.
+- local Trunk Recorder `master` contains the current-lineage telemetry, flight
+  recorder, and passive-shadow work at merge commit `19ae14f`; remote
+  `origin/master` remains untouched at `382f5f2`;
+- the exact older RPI compatibility candidate remains on
+  `codex/initial-collapse-capture-rpi` at `c923e02c`;
+- the retune-grace experiment remains isolated on `codex/rf-stabilization` at
+  `602a637` and was not included in `19ae14f`.
 
 ## Active
 
@@ -120,9 +121,10 @@ Cross-repository source state:
 1. RF stabilization:
    - wait for the already-armed OT North Bradley/Hamilton recorder to retain
      one natural onset and replay it before changing OT RF or recovery policy;
-   - coordinate ownership before integrating or deploying the completed
-     passive-shadow candidates: OT/current lineage `51920b1`, exact RPI
-     lineage `c923e02c`; neither candidate is merged, pushed, or deployed;
+   - coordinate ownership before pushing or deploying the passive-shadow
+     work: current-lineage candidate `51920b1` is merged into local Trunk
+     Recorder `master` at `19ae14f`; exact RPI lineage `c923e02c` remains a
+     compatibility branch; neither is pushed or deployed;
    - compare live, shadow, and retained-IQ replay at the next event to decide
      whether the modest fade itself, live decoder/control interaction, or
      queue/accounting produces the 0 msg/s collapse;

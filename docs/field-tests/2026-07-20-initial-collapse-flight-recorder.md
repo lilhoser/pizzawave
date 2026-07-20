@@ -156,8 +156,10 @@ remaining question is propagation versus interference/front-end behavior.
 
 ## Shadow-decoder implementation candidate
 
-Implemented and committed on 2026-07-20, but deliberately not merged, pushed,
-configured, or deployed while another Codex task owns production deployment:
+Implemented and committed on 2026-07-20. The current-lineage candidate was
+subsequently merged into local Trunk Recorder `master` as `19ae14f`, but was
+not pushed, configured, or deployed while another Codex task owns production
+deployment:
 
 - OT/current telemetry lineage: `codex/initial-collapse-capture-live` at
   `51920b1`;
@@ -174,8 +176,8 @@ three-second collapse trigger are unchanged.
 
 Each enabled system emits a one-second `TR_SHADOW` sample containing live and
 shadow frequencies, non-timeout queue-message rates, raw counts, and window
-duration. A
-bounded in-memory timeline retains the configured pre-trigger duration. When
+duration. A bounded in-memory timeline retains the configured pre-trigger
+duration. When
 the existing flight recorder triggers, its JSON receives that prehistory and
 continues appending samples until IQ capture finishes, thereby producing one
 event-local live-versus-shadow sequence with no database or UI dependency.
@@ -201,10 +203,10 @@ and RPI
 Both services were active. No service was restarted for this implementation or
 validation.
 
-The next action requires explicit coordination: decide the integration branch
-and deployment owner, review the coherent executable/plugin artifact set, and
-only then merge and enable `collapseShadow` on Raymond, North Bradley, and
-Hamilton.
+The next action requires explicit coordination: decide whether and where to
+push local `master`, assign one deployment owner, review the coherent
+executable/plugin artifact set, and only then enable `collapseShadow` on
+Raymond, North Bradley, and Hamilton.
 
 ## Artifacts and rollback
 
