@@ -45,6 +45,11 @@ Package 5 or Package 8 worktree directories.
   superseded thread branches were retired. The incident-v3 worktree and unique
   incident, transcription, embedding, and platform branches remain deliberately
   separate for their owners.
+- callstream telemetry is now available from its pushed `main` at `1cdd5c4`.
+  Trunk Recorder upstream `master` remains unchanged; the unreviewed telemetry
+  and retune-grace candidates are preserved together on the single local
+  `codex/rf-stabilization` branch at `602a637`. That branch is the starting point
+  for RF hardening, not a production or upstream-approved build.
 
 - Packages 1, 2, 3, 4, 5, 6, 8, and 9 are complete and operator-accepted.
 - Package 7, Offline And Archive Calls, is a standalone outstanding feature and

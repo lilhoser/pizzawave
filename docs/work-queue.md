@@ -18,6 +18,17 @@ experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
 telemetry emitters; RPI's TR emitter is based on its exact prior `766a553`
 revision rather than the newer upstream base used by OT.
 
+Cross-repository source state:
+
+- callstream RF sampling/reacquisition telemetry is merged and pushed on
+  callstream `main` at `1cdd5c4`; its temporary feature branch is retired;
+- upstream Trunk Recorder `master` remains untouched at `382f5f2`;
+- the Trunk Recorder telemetry and retune-grace candidates are consolidated in
+  one clean local branch/worktree, `codex/rf-stabilization` at `602a637` under
+  `C:\projects\trunk-recorder-rf-stabilization`. It is intentionally not merged
+  into upstream `master` or deployed; hardening and upstream/fork disposition
+  belong to the next RF task.
+
 ## Active
 
 - None. RF stabilization is the next implementation priority. The incident
@@ -32,6 +43,10 @@ revision rather than the newer upstream base used by OT.
   branches and fully merged remote branches were retired. The
   `codex/incident-v3-analysis` worktree and the unique incident, transcription,
   embedding, and platform branches remain isolated for their respective owners.
+- Cross-repository cleanup merged and pushed the deployed callstream telemetry
+  to callstream `main`, then consolidated three experimental Trunk Recorder
+  branches/two redundant worktrees into the single `codex/rf-stabilization`
+  branch described above.
 - Live RF status follow-up at `ec5572f`:
   - removed the two explanatory prose notes above the RF charts;
   - added a persistent per-browser site pin to the footer RF pill;
