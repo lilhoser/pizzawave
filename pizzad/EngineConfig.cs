@@ -165,6 +165,12 @@ public sealed class EngineConfig
         AiInsights.IncidentV2ShadowCandidateLimit = Math.Clamp(AiInsights.IncidentV2ShadowCandidateLimit, 6, 40);
         if (AiInsights.IncidentV3FrameCandidateLimit <= 0) AiInsights.IncidentV3FrameCandidateLimit = 18;
         AiInsights.IncidentV3FrameCandidateLimit = Math.Clamp(AiInsights.IncidentV3FrameCandidateLimit, 6, 40);
+        if (AiInsights.IncidentEventLinkShadowIntervalSeconds <= 0) AiInsights.IncidentEventLinkShadowIntervalSeconds = 300;
+        AiInsights.IncidentEventLinkShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentEventLinkShadowIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentEventLinkShadowLookbackMinutes <= 0) AiInsights.IncidentEventLinkShadowLookbackMinutes = 120;
+        AiInsights.IncidentEventLinkShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentEventLinkShadowLookbackMinutes, 30, 720);
+        if (AiInsights.IncidentEventLinkShadowCandidateLimit <= 0) AiInsights.IncidentEventLinkShadowCandidateLimit = 4;
+        AiInsights.IncidentEventLinkShadowCandidateLimit = Math.Clamp(AiInsights.IncidentEventLinkShadowCandidateLimit, 1, IncidentEventStateLinkContractValidator.MaximumCandidateCount);
         // Incident V3 is retained only as a read-only comparison baseline. Its
         // semantic executor is retired and must not be enabled by deployed
         // configuration left over from an earlier experiment.
@@ -396,6 +402,10 @@ public sealed class AiInsightsConfig
     public int IncidentV3FrameCandidateLimit { get; set; } = 18;
     public bool IncidentV3PlanExecutorEnabled { get; set; }
     public bool IncidentV3PlanExecutorDryRun { get; set; } = true;
+    public bool IncidentEventLinkShadowEnabled { get; set; }
+    public int IncidentEventLinkShadowIntervalSeconds { get; set; } = 300;
+    public int IncidentEventLinkShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentEventLinkShadowCandidateLimit { get; set; } = 4;
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

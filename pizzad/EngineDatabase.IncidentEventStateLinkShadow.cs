@@ -149,6 +149,30 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
         return new IncidentEventStateStoredLinkProjection(sequence, contentHash, projection);
     }
 
+    public async Task<IncidentEventStateStoredLinkLedgerEntry?> GetLatestIncidentEventStateLinkShadowLedgerEntryAsync(
+        CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT sequence, content_hash, payload_json
+            FROM incident_event_state_link_shadow_ledger
+            ORDER BY sequence DESC
+            LIMIT 1;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var sequence = reader.GetInt64(0);
+        var contentHash = reader.GetString(1);
+        var payload = reader.GetString(2);
+        VerifyContentHash("link ledger entry", sequence, payload, contentHash);
+        var entry = JsonSerializer.Deserialize<IncidentEventStateLinkLedgerEntry>(payload, EngineConfig.JsonOptions())
+                    ?? throw new InvalidDataException($"Incident event-state link ledger entry {sequence} has an empty payload.");
+        return new IncidentEventStateStoredLinkLedgerEntry(sequence, contentHash, entry);
+    }
+
     private static async Task ValidateLinkProjectionLedgerReferencesAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

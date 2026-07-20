@@ -48,9 +48,9 @@ link interfaces cannot write `incidents` or `incident_calls`.
 - A first observation with no candidates becomes a singleton without invoking a
   model.
 
-There is deliberately no scheduler, HTTP endpoint, dependency-injection
-registration, production-incident adapter, deployment configuration, or live
-writer.
+There is deliberately no HTTP endpoint, production-incident adapter, or writer
+to production incident tables. A disabled-by-default hosted runner is available
+for an explicitly configured live shadow experiment.
 
 ## First Local Gate
 
@@ -95,8 +95,38 @@ the SSH tunnel was closed afterward.
 The one-sided boundary materially limits harm: misses become extra singletons
 instead of false model-declared splits. Qwen has better recall but much higher
 latency; GPT-OSS is faster but substantially less complete. Both have too little
-recall and too little development evidence to justify live shadow scheduling or
-production authority.
+recall and too little development evidence to justify production authority. A
+bounded live shadow may gather passive operational evidence without making
+either model authoritative.
+
+## Bounded Live Shadow
+
+When explicitly enabled, the runner samples at most one newly transcribed call
+per configured interval. It advances to the newest call instead of accumulating
+a model backlog, retrieves a bounded set of prior shadow events by embedding
+similarity plus recent same-system shadow state, and permits only one positive
+link or abstention. The first activation
+sets a current-call fence and does not backfill history.
+
+The model receives transcripts and timestamps only. Talkgroup names, categories,
+radio labels, audio paths, and other call metadata are removed from the prompt.
+Retrieval generates opaque candidates but is not proof of membership. Model
+failures, malformed replies, and invalid citations are recorded as unresolved
+singletons. The runner begins half an interval after process startup to reduce
+overlap with the existing incident schedule.
+
+The default configuration remains off. A bounded experiment can enable:
+
+```json
+{
+  "aiInsights": {
+    "incidentEventLinkShadowEnabled": true,
+    "incidentEventLinkShadowIntervalSeconds": 300,
+    "incidentEventLinkShadowLookbackMinutes": 120,
+    "incidentEventLinkShadowCandidateLimit": 4
+  }
+}
+```
 
 Do not request new manual labels. Existing reviews remain smoke evidence only;
 ordinary operator corrections may later be recorded as passive evaluation

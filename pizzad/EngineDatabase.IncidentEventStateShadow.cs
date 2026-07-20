@@ -259,6 +259,8 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
             ON incident_event_state_link_shadow_ledger(recorded_at_utc, sequence);
         CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_observation
             ON incident_event_state_link_shadow_ledger(new_observation_id, sequence);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_observation_unique
+            ON incident_event_state_link_shadow_ledger(new_observation_id);
 
         CREATE TABLE IF NOT EXISTS incident_event_state_link_shadow_projections (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,

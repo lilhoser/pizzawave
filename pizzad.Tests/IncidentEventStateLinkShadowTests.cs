@@ -152,8 +152,144 @@ public sealed class IncidentEventStateLinkShadowTests
         Assert.False(proposer.WasCalled);
         Assert.Equal("application", result.LedgerEntry.Entry.Proposal.ModelIdentity);
         Assert.Equal(0, result.LedgerEntry.Entry.Execution.ProposerDurationMilliseconds);
+        Assert.Equal(string.Empty, result.LedgerEntry.Entry.Execution.ProposerError);
         Assert.Equal(IncidentEventStateLinkTransitionOutcome.UnresolvedSingleton, result.LedgerEntry.Entry.Transition.Outcome);
         Assert.Equal(["observation-new"], Assert.Single(result.Projection.Projection.Events).ObservationIds);
+    }
+
+    [Fact]
+    public async Task ProposerFailureIsRecordedAndFailsClosedToSingleton()
+    {
+        var coordinator = new IncidentEventStateLinkShadowCoordinator(
+            new ThrowingProposer(),
+            new RecordingStore(),
+            new FixedTimeProvider(FixedNow));
+
+        var result = await coordinator.RunAsync(
+            Request(),
+            Bundle(),
+            PriorProjection(),
+            "observation-new",
+            Candidates(),
+            CancellationToken.None);
+
+        Assert.Equal(IncidentEventStateLinkTransitionOutcome.UnresolvedSingleton, result.LedgerEntry.Entry.Transition.Outcome);
+        Assert.Equal("application", result.LedgerEntry.Entry.Proposal.ModelIdentity);
+        Assert.Contains("simulated failure", result.LedgerEntry.Entry.Execution.ProposerError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LiveSelectionUsesVectorRetrievalButExcludesLabelsAndRadioMetadataFromPrompt()
+    {
+        var priorCall = new EngineCall
+        {
+            Id = 1001,
+            StartTime = 1001,
+            StopTime = 1004,
+            SystemShortName = "system-a",
+            Talkgroup = 42,
+            TalkgroupName = "STATIC LABEL",
+            Category = "STATIC CATEGORY",
+            TranscriptionStatus = "completed",
+            Transcription = "Unit 469, did you receive the message?"
+        };
+        var newCall = priorCall with
+        {
+            Id = 1002,
+            StartTime = 1005,
+            StopTime = 1008,
+            Talkgroup = 99,
+            TalkgroupName = "OTHER LABEL",
+            Category = "OTHER CATEGORY",
+            Transcription = "469, your radio is breaking up."
+        };
+        var selection = IncidentEventStateLinkLiveSelection.Build(
+            newCall,
+            [priorCall, newCall],
+            [new VectorSearchMatchDto(priorCall.Id, 0.91, "vector")],
+            new IncidentEventStateLinkProjection(
+                "prior",
+                FixedNow,
+                [],
+                [new IncidentEventStateLinkProjectionEvent("opaque-event", ["call:1001"], [])]),
+            4,
+            FixedNow);
+
+        Assert.Equal("call:1002", selection.NewObservationId);
+        Assert.Equal("opaque-event", Assert.Single(selection.Candidates).ProjectionEventId);
+        Assert.All(selection.Bundle.Observations, observation =>
+        {
+            Assert.Empty(observation.Metadata);
+            Assert.Equal(string.Empty, observation.AudioReference);
+        });
+        var prompt = IncidentEventStateLinkPrompt.Build(selection.Bundle, selection.NewObservationId, selection.Candidates);
+        Assert.DoesNotContain("STATIC LABEL", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("STATIC CATEGORY", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("opaque-event", prompt.UserPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LiveSelectionEligibilityUsesSourceQualityNotAFragileTranscriptionStatusLiteral()
+    {
+        var call = new EngineCall
+        {
+            SystemShortName = "system-a",
+            Transcription = "A usable transcript",
+            TranscriptionStatus = "complete",
+            QualityReason = "ok"
+        };
+
+        Assert.True(IncidentEventStateLinkLiveSelection.IsEligibleSourceObservation(call));
+        Assert.False(IncidentEventStateLinkLiveSelection.IsEligibleSourceObservation(call with { QualityReason = "repetitive" }));
+        Assert.False(IncidentEventStateLinkLiveSelection.IsEligibleSourceObservation(call with { Transcription = string.Empty }));
+    }
+
+    [Fact]
+    public void LiveSelectionAddsRecentSameSystemProjectionAsCandidateWithoutTreatingRetrievalAsProof()
+    {
+        var priorSameSystem = new EngineCall
+        {
+            Id = 2001,
+            StartTime = 2001,
+            StopTime = 2003,
+            SystemShortName = "system-a",
+            TranscriptionStatus = "complete",
+            QualityReason = "ok",
+            Transcription = "Prior same-system observation"
+        };
+        var priorOtherSystem = priorSameSystem with
+        {
+            Id = 2002,
+            SystemShortName = "system-b",
+            Transcription = "Prior other-system observation"
+        };
+        var newCall = priorSameSystem with
+        {
+            Id = 2003,
+            StartTime = 2010,
+            StopTime = 2012,
+            Transcription = "New observation"
+        };
+        var projection = new IncidentEventStateLinkProjection(
+            "prior",
+            FixedNow,
+            [],
+            [
+                new IncidentEventStateLinkProjectionEvent("same-system-event", ["call:2001"], []),
+                new IncidentEventStateLinkProjectionEvent("other-system-event", ["call:2002"], [])
+            ]);
+
+        var selection = IncidentEventStateLinkLiveSelection.Build(
+            newCall,
+            [priorSameSystem, priorOtherSystem, newCall],
+            [],
+            projection,
+            4,
+            FixedNow);
+
+        var candidate = Assert.Single(selection.Candidates);
+        Assert.Equal("same-system-event", candidate.ProjectionEventId);
+        Assert.Equal(["call:2001"], candidate.ObservationIds);
     }
 
     [Fact]
@@ -183,6 +319,9 @@ public sealed class IncidentEventStateLinkShadowTests
         var latest = await temp.Database.GetLatestIncidentEventStateLinkShadowProjectionAsync(CancellationToken.None);
         Assert.NotNull(latest);
         Assert.Equal(result.Projection.ContentHash, latest.ContentHash);
+        var latestEntry = await temp.Database.GetLatestIncidentEventStateLinkShadowLedgerEntryAsync(CancellationToken.None);
+        Assert.NotNull(latestEntry);
+        Assert.Equal(result.LedgerEntry.ContentHash, latestEntry.ContentHash);
 
         await using var connection = temp.Database.OpenConnection();
         Assert.Equal(0, await CountAsync(connection, "incidents"));
@@ -283,6 +422,15 @@ public sealed class IncidentEventStateLinkShadowTests
             WasCalled = true;
             return Task.FromResult(proposal);
         }
+    }
+
+    private sealed class ThrowingProposer : IIncidentEventStateLinkProposer
+    {
+        public Task<IncidentEventStateLinkProposal> ProposeAsync(
+            IncidentEventStateObservationBundle bundle,
+            string newObservationId,
+            IReadOnlyList<IncidentEventStateLinkCandidate> candidates,
+            CancellationToken ct) => throw new InvalidOperationException("simulated failure");
     }
 
     private sealed class RecordingStore : IIncidentEventStateLinkShadowStore

@@ -56,7 +56,8 @@ public sealed record IncidentEventStateLinkTransition(
 public sealed record IncidentEventStateLinkExecutionContext(
     string SoftwareVersion,
     string ConfigurationIdentity,
-    long ProposerDurationMilliseconds);
+    long ProposerDurationMilliseconds,
+    string ProposerError);
 
 public sealed record IncidentEventStateLinkLedgerEntry(
     string LedgerEntryId,
@@ -487,6 +488,7 @@ public sealed class IncidentEventStateLinkShadowCoordinator
         var now = _timeProvider.GetUtcNow();
         IncidentEventStateLinkProposal proposal;
         long proposerDurationMilliseconds;
+        var proposerError = string.Empty;
         if (candidates.Count == 0)
         {
             proposal = new IncidentEventStateLinkProposal(
@@ -506,8 +508,30 @@ public sealed class IncidentEventStateLinkShadowCoordinator
         else
         {
             var timer = Stopwatch.StartNew();
-            proposal = await _proposer.ProposeAsync(bundle, newObservationId, candidates, ct);
-            timer.Stop();
+            try
+            {
+                proposal = await _proposer.ProposeAsync(bundle, newObservationId, candidates, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                proposal = new IncidentEventStateLinkProposal(
+                    $"application:proposer-error:{request.LedgerEntryId}",
+                    now,
+                    "application",
+                    IncidentEventStateLinkPrompt.PromptIdentity,
+                    IncidentEventStateLinkDecision.Abstain,
+                    string.Empty,
+                    "The link proposer failed; the observation remains unresolved.",
+                    1,
+                    [],
+                    [],
+                    ["Would a successful source-grounded comparison connect this observation to a candidate event?"]);
+                proposerError = ex.GetBaseException().Message;
+            }
+            finally
+            {
+                timer.Stop();
+            }
             proposerDurationMilliseconds = timer.ElapsedMilliseconds;
         }
         var proposalValidation = IncidentEventStateLinkContractValidator.ValidateProposal(
@@ -551,7 +575,8 @@ public sealed class IncidentEventStateLinkShadowCoordinator
             new IncidentEventStateLinkExecutionContext(
                 request.SoftwareVersion,
                 request.ConfigurationIdentity,
-                proposerDurationMilliseconds));
+                proposerDurationMilliseconds,
+                proposerError));
         var entryValidation = IncidentEventStateLinkContractValidator.ValidateLedgerEntry(entry);
         if (!entryValidation.IsValid)
             throw new InvalidDataException(string.Join("; ", entryValidation.Errors));
