@@ -430,14 +430,41 @@ Observed behavior:
   seconds per pair on the Ventax lab runtime. This is evaluation evidence, not
   a Paxan production throughput measurement.
 
-This is a **limited pass for bounded evidence generation** and a rejection of
-pairwise model output as incident membership authority. The useful unit is the
-append-only set of proposal, critique, validation failure, counterevidence, and
-unresolved questions. Proposer and critic disagreement must remain visible; a
-missing proposal cannot be silently repaired into incident state. The next
-architecture experiment must determine whether an evolving, revisable event
-hypothesis can use these evidence records without turning retrieval metadata or
-model agreement into proof.
+Before human review this was only a limited pass for bounded evidence
+generation, never incident membership authority. The subsequent review below
+rejects the Gemma proposer/critic sequence as a required pipeline stage. The
+contracts and artifacts remain useful falsification scaffolding; proposer and
+critic disagreement must remain visible and a missing proposal cannot be
+silently repaired into incident state.
+
+#### Provisional human relationship review
+
+Aaron reviewed all six blind development cases on 2026-07-20. These were new
+clips and did not repeat the prior 18-call ASR review. The result contains three
+`same_event`, one `not_same_event`, and two `unresolved` assessments. It is a
+single-reviewer development result, not held-out acceptance data. The archived
+review SHA-256 is
+`402978F9C0D2C38616633B00EBB73AAAA896F34606DE18131699006A5C852FC1`.
+
+Against that review:
+
+- the valid proposer output found one of the three reviewer-confirmed
+  relationships;
+- it missed the explicit `469` continuation, although the critic surfaced the
+  omission;
+- it identified the recovered-vehicle continuation but an inexact quote caused
+  deterministic rejection, so no valid relationship remained;
+- it correctly abstained on the reviewer-confirmed unrelated dispatch pair;
+- it returned empty relationship and unresolved-question sets for both cases
+  the reviewer marked unresolved, and both critics endorsed that false
+  certainty.
+
+The admitted proposer therefore recalled only 1 of 3 reviewer-confirmed
+relationships, far below the frozen 0.85 development gate, and preserved 0 of
+2 reviewer-unresolved cases. Critic-only recovery cannot authorize membership.
+The Gemma pairwise proposer/critic sequence is **rejected as a mandatory
+incident-pipeline stage**. Its 10.4-to-77.9-second pair latency independently
+makes exhaustive real-time comparison infeasible on Paxan.
 
 Final artifact hashes:
 
@@ -453,15 +480,16 @@ Final artifact hashes:
 
 ## Next gates
 
-- Complete the six-case local relationship worksheet generated from new
-  development observations. It contains no model output and repeats none of the
-  18 clips from Aaron's ASR review.
 - Do not spend additional review or Paxan capacity on Voxtral for this design.
-- Preserve proposer/critic disagreement and validator rejection as first-class
-  shadow-ledger records; do not collapse them into consensus.
-- Exercise the new non-persisting event-hypothesis transition contract on
-  adjudicated development cases. Critic-only findings may trigger another
-  relationship review but cannot authorize hypothesis growth.
+- Do not make pairwise proposer-plus-critic calls a mandatory live stage or
+  proceed to the pairwise-evidence-dependent transition experiment.
+- Test a production-shaped, single-generation incremental update that receives
+  one new observation, competing transcripts, and a small retrieved set of
+  revisable prior hypotheses. It must emit its own grounded relationship
+  evidence and proposed state change in one contract.
+- Use deterministic provenance and reference checks on every output. Sample
+  learned critique offline for evaluation; do not require a second live model
+  generation unless Paxan throughput later proves it affordable.
 - Apply the frozen quantitative gates in
   [`incident-event-state-evaluation-gates.md`](incident-event-state-evaluation-gates.md)
   before any held-out evaluation.

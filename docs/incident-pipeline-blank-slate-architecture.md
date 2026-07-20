@@ -201,23 +201,27 @@ Each proposal must express:
 The proposer must be allowed to conclude that the evidence is unresolved. It
 must not be forced into a binary incident/non-incident answer.
 
-The narrower pairwise relationship experiment produced a limited pass. An
-isolated Gemma run could abstain on several unrelated pairs and ground several
-textually explicit connections, but it also missed continuations, produced an
-inexact quote, and sometimes required its critic to surface an omitted
-relationship. The pairwise contract therefore remains an evidence-generation
-boundary, not accepted membership authority.
+The narrower pairwise relationship experiment failed after blind development
+review. The admitted Gemma proposer output found only one of three
+reviewer-confirmed relationships and preserved neither of two unresolved cases.
+One omission appeared only in critic dissent and another relationship was
+discarded for an inexact quote. The 10.4-to-77.9-second proposer-plus-critic
+latency per pair is also incompatible with exhaustive real-time comparison on
+Paxan. Pairwise calls are retained only as offline falsification scaffolding,
+not a mandatory production boundary.
 
-A separate hypothesis-transition contract now prevents the former arbitrary
-bundle-to-event proposer from being the experiment path. A transition receives
-the source bundle, prior hypotheses, and explicit validated pairwise evidence.
-It may produce a revisable shadow hypothesis, but deterministic validation
-rejects any added observation outside the cited pairwise evidence. Critic
-findings remain visible but cannot authorize hypothesis growth because a critic
-finding may challenge rather than support a relationship. A missed relationship
-must first become a validated relationship proposal or be human-adjudicated.
-The transition coordinator has no store, scheduler, endpoint, or production
-writer.
+A separate hypothesis-transition contract proved that structural validation
+can prevent uncited observation growth and that critic dissent cannot authorize
+membership. Because its required pairwise evidence stage failed, that
+coordinator will not become the next model experiment. It remains non-persisting
+contract scaffolding with no store, scheduler, endpoint, or production writer.
+
+The next production-shaped experiment is a single incremental generation. It
+receives one new observation, competing transcripts, and a small retrieved set
+of revisable prior hypotheses. The same response must provide grounded
+relationship evidence and a proposed shadow-state change. Retrieval limits the
+context but never proves membership. Deterministic validation remains required;
+learned critique is sampled offline rather than imposed on every live update.
 
 ### Provenance
 
@@ -469,17 +473,15 @@ boundary:
 Nothing schedules the new coordinator, exposes an endpoint, or writes
 production incident state. Standalone development harnesses have now tested
 observation interpretation, direct audio understanding, transcription, and
-bounded pairwise relationship proposals. The first two semantic approaches
-were rejected. Pairwise comparison earned only a limited role as an evidence
-generator: deterministic failures and proposer/critic disagreement remain
-records, never membership decisions.
+bounded pairwise relationship proposals. All three learned semantic approaches
+were rejected as mandatory pipeline stages. Their deterministic failures and
+proposer/critic disagreements remain experiment records, never membership
+decisions.
 
 The development and sealed held-out corpus split is already extracted. The
-held-out directory remains unopened. A shadow-only, revisable event-hypothesis
-transition contract now consumes validated relationship evidence while
-preserving dissent and uncertainty. It contains no static event taxonomy,
-talkgroup mapping, automatic semantic membership rule, production writer, or
-scheduler. Its structural validator requires cited relationship evidence before
-a multi-observation hypothesis can grow. Human adjudication criteria and
-quantitative gates must be frozen before a transition-model experiment can open
-the sealed held-out corpus.
+held-out directory remains unopened. The next experiment must replace the
+failed multi-call chain with one bounded incremental proposal and deterministic
+source validation. It must contain no static event taxonomy, talkgroup mapping,
+automatic semantic membership rule, production writer, or scheduler. The
+already-frozen human adjudication criteria and quantitative gates apply before
+any sealed held-out evaluation.

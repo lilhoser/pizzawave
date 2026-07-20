@@ -44,6 +44,10 @@
     .range { display:flex; gap:1rem; align-items:center; }
     .range input { flex:1; }
     .actions { display:flex; justify-content:space-between; gap:.7rem; margin-top:1rem; }
+    .export-panel { margin-top:1rem; padding:1rem; border:1px solid var(--accent); border-radius:15px; background:#0d201d; }
+    .export-panel textarea { min-height:14rem; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .export-buttons { display:flex; flex-wrap:wrap; gap:.7rem; margin:.7rem 0; }
+    .export-status { color:var(--warn); }
     .hidden { display:none !important; }
     @media (max-width:800px) { main{grid-template-columns:1fr} nav{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line)} .case-button{min-width:8rem} .observations{grid-template-columns:1fr} .choices{grid-template-columns:1fr} header{align-items:flex-start}.progress{min-width:0} }
   </style>
@@ -62,8 +66,19 @@
       <div class="actions">
         <button id="previous">Previous</button>
         <button id="next">Save &amp; next</button>
-        <button class="primary" id="download">Download review JSON</button>
+        <span class="local" id="save-status" aria-live="polite"></span>
+        <button class="primary" id="download">Export review JSON</button>
       </div>
+      <section class="export-panel hidden" id="export-panel" aria-live="polite">
+        <strong>Your completed review is preserved below.</strong>
+        <p class="export-status" id="export-status">Choose a save method. If the browser blocks downloads, copy the selected JSON.</p>
+        <div class="export-buttons">
+          <button class="primary" id="save-file">Save JSON file</button>
+          <button id="copy-json">Copy JSON</button>
+          <button id="select-json">Select all JSON</button>
+        </div>
+        <textarea id="export-json" readonly aria-label="Completed review JSON"></textarea>
+      </section>
     </section>
   </main>
   <script src="review-package.js"></script>
@@ -89,6 +104,36 @@
         a.confidence=Number(document.getElementById('confidence').value);
         persist();
       }
+      function prepareExport() {
+        capture();
+        state.completed_at_utc=state.cases.every(complete)?new Date().toISOString():'';
+        persist();
+        const json=JSON.stringify(state,null,2)+'\n';
+        document.getElementById('export-json').value=json;
+        document.getElementById('export-panel').classList.remove('hidden');
+        document.getElementById('export-status').textContent=state.completed_at_utc?'All cases are complete. Save or copy the JSON below.':'The review is incomplete, but the current answers can still be saved.';
+        document.getElementById('export-json').scrollIntoView({behavior:'smooth',block:'start'});
+        return json;
+      }
+      async function copyExport() {
+        const json=prepareExport();
+        let copied=false;
+        try { await navigator.clipboard.writeText(json); copied=true; } catch {}
+        if(!copied){const output=document.getElementById('export-json');output.focus();output.select();try{copied=document.execCommand('copy');}catch{}}
+        document.getElementById('export-status').textContent=copied?'Review JSON copied to the clipboard.':'Automatic copy was blocked. The JSON is selected; press Ctrl+C.';
+      }
+      async function saveExport() {
+        const json=prepareExport();
+        if(typeof window.showSaveFilePicker==='function'){
+          try{
+            const handle=await window.showSaveFilePicker({suggestedName:'incident-relationship-review.json',types:[{description:'JSON review',accept:{'application/json':['.json']}}]});
+            const writable=await handle.createWritable();await writable.write(json);await writable.close();
+            document.getElementById('export-status').textContent='Review JSON saved.';return;
+          }catch(error){if(error?.name==='AbortError'){document.getElementById('export-status').textContent='Save was cancelled. Your JSON remains available below.';return;}}
+        }
+        const blob=new Blob([json],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='incident-relationship-review.json';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+        document.getElementById('export-status').textContent='Download requested. If no file appeared, use Copy JSON or select the text below.';
+      }
       function renderNav() {
         document.getElementById('case-nav').innerHTML=pkg.cases.map((c,i)=>`<button class="case-button ${i===index?'active':''} ${complete(state.cases[i])?'done':''}" data-index="${i}"><span>Case ${i+1}</span></button>`).join('');
         document.querySelectorAll('.case-button').forEach(b=>b.onclick=()=>{capture();index=Number(b.dataset.index);render();});
@@ -108,8 +153,11 @@
         renderNav();renderProgress();
       }
       document.getElementById('previous').onclick=()=>{capture();if(index>0){index--;render();}};
-      document.getElementById('next').onclick=()=>{capture();if(index<pkg.cases.length-1){index++;render();}};
-      document.getElementById('download').onclick=()=>{capture();state.completed_at_utc=state.cases.every(complete)?new Date().toISOString():'';const blob=new Blob([JSON.stringify(state,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='incident-relationship-review.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+      document.getElementById('next').onclick=()=>{capture();document.getElementById('save-status').textContent=`Case ${index+1} saved locally.`;if(index<pkg.cases.length-1){index++;render();}};
+      document.getElementById('download').onclick=prepareExport;
+      document.getElementById('save-file').onclick=saveExport;
+      document.getElementById('copy-json').onclick=copyExport;
+      document.getElementById('select-json').onclick=()=>{prepareExport();const output=document.getElementById('export-json');output.focus();output.select();document.getElementById('export-status').textContent='JSON selected. Press Ctrl+C to copy it.';};
       document.getElementById('reviewer-name').value=state.reviewer||'';
       document.getElementById('reviewer-name').addEventListener('change',capture);
       window.addEventListener('beforeunload',capture);render();
