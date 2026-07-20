@@ -60,6 +60,24 @@ public sealed class IncidentEvidenceV2Tests
         Assert.True(result.Accepted);
     }
 
+    [Theory]
+    [InlineData("chest ... pain")]
+    [InlineData("chest … pain")]
+    public void VerifySpans_RejectsEllipsesThatCouldCombineTranscriptFragments(string quotedText)
+    {
+        const string transcript = "Medic responding chest pain at 523 Callaway Court.";
+        var hypothesis = HypothesisWithSpan(new EvidenceSpanV2(802453, 999, 1009, quotedText));
+        var transcripts = new Dictionary<long, string> { [802453] = transcript };
+
+        var result = IncidentEvidenceClaimVerifier.VerifySpans(hypothesis, transcripts);
+
+        Assert.False(result.Accepted);
+        Assert.Contains(result.Errors, error => error.Contains("ellipsis", StringComparison.OrdinalIgnoreCase));
+        Assert.False(IncidentEvidenceClaimVerifier.IsSpanGrounded(
+            new EvidenceSpanV2(802453, 999, 1009, quotedText),
+            transcripts));
+    }
+
     [Fact]
     public void SnakeCaseModelHypothesis_DeserializesAndCanBeServerDecided()
     {

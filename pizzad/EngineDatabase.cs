@@ -1147,7 +1147,7 @@ public sealed partial class EngineDatabase
                 $finish_reason, $input_chars, $payload_chars, $prompt_tokens, $completion_tokens, $total_tokens)
             RETURNING id;
             """;
-        Add(command, "$timestamp_utc", entry.TimestampUtc.ToString("O"));
+        Add(command, "$timestamp_utc", entry.TimestampUtc.ToUniversalTime().ToString("O"));
         Add(command, "$trigger_activity", entry.TriggerActivity);
         Add(command, "$request_kind", entry.RequestKind);
         Add(command, "$success", entry.Success ? 1 : 0);
@@ -3022,7 +3022,7 @@ public sealed partial class EngineDatabase
         var bucketSeconds = rangeSeconds <= 24 * 3600 ? 3600 : rangeSeconds <= 48 * 3600 ? 2 * 3600 : 6 * 3600;
         var byTime = rangeRows
             .GroupBy(row => DateTimeOffset.FromUnixTimeSeconds(
-                new DateTimeOffset(DateTime.SpecifyKind(row.TimestampUtc, DateTimeKind.Utc)).ToUnixTimeSeconds() / bucketSeconds * bucketSeconds))
+                new DateTimeOffset(row.TimestampUtc.ToUniversalTime()).ToUnixTimeSeconds() / bucketSeconds * bucketSeconds))
             .OrderBy(group => group.Key)
             .Select(group => new TokenUsageTimeBucketDto(
                 group.Key.ToUnixTimeSeconds(),
@@ -4659,7 +4659,10 @@ public sealed partial class EngineDatabase
 
     private static TokenUsageEntryDto ReadLmUsage(SqliteDataReader reader) => new(
         reader.GetInt64(reader.GetOrdinal("id")),
-        DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc"))),
+        DateTime.Parse(
+            reader.GetString(reader.GetOrdinal("timestamp_utc")),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind).ToUniversalTime(),
         reader.GetString(reader.GetOrdinal("trigger_activity")),
         reader.GetString(reader.GetOrdinal("request_kind")),
         reader.GetInt64(reader.GetOrdinal("success")) != 0,
