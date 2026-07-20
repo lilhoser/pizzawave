@@ -478,15 +478,71 @@ Final artifact hashes:
 - missed worker/supervisor follow-up: `D94E1B527016FA6764FC44A90119FA560CB0FA8B44A1C1C72736EA3667E6FCE7`
 - unrelated cross-context negative: `741E9C3E3A7B447E149888101DEC39E157D4CA1E57F700E938AB9EC5A65F56E7`
 
+### Single-generation incremental-update gate
+
+The production-shaped incremental contract was then frozen and run against the
+same six adjudicated development pairs. Each request received one prior
+single-observation hypothesis, one new observation, competing transcripts, and
+neutral metadata. A response had to choose exactly one of: revise the prior
+hypothesis, create a distinct single-observation hypothesis, or defer. Revision
+required relationship evidence from both observations. Deterministic validation
+also required exact source provenance and prevented observations from entering
+a hypothesis through claims about another hypothesis.
+
+The runs used a Ventax-local API reached only through a dedicated SSH tunnel.
+The requested alias was checked before each request and against each response;
+Paxan and the shared LM Link endpoint were not involved. The prompt and
+validator were not tuned after viewing Aaron's decisions.
+
+GLM 4.7 Flash failed before semantic scoring. Its first three fair attempts
+took 93.1, 99.2, and 96.7 seconds and returned, respectively, empty content,
+malformed non-JSON content with invented schema values, and empty content. The
+run exceeded its five-minute process budget. The later request errors occurred
+while the lab model was being unloaded and are excluded from model scoring.
+The three scored artifact hashes are:
+
+- `748B3BADB126B044E84A7D13C8BFA73BEB7C0979B2C267D4C25D1653BF6FD8AD`
+- `EFF6E52BDED8B1C7D8E85C0EA6AEA237FA09D570355E0745C3B64DFE9C6C56FE`
+- `993D88640A46E652CF53F5812A87F41E61F55672DFFBA7CC06A473BBFCA0F93D`
+
+Qwen 3.6 35B-A3B completed all six requests. Its raw outcome matched four of
+the six reviews: all three `same_event` cases and the one `not_same_event`
+case. It forced both reviewer-`unresolved` cases into `not_same_event`. Every
+response failed deterministic validation, principally by mixing transcript and
+metadata fields in a single provenance citation, citing observations outside a
+new single-observation hypothesis, or duplicating statement identifiers.
+Therefore the admitted score is 0 of 6, not 4 of 6. Per-request latency was
+54.7 to 70.6 seconds (mean 62.0 seconds), and the loaded model occupied about
+20.55 GiB on the Ventax runtime. Artifact hashes in review order are:
+
+- `2D0B3BD5419DF24F92AC54B7A452516C71F5A705E02A121CE6F8A6109A5CBD66`
+- `0182D5D684E891EB8A1C8094C82130DBD0E0B4F0C404F3C0DACCC47F63EED29F`
+- `FFEA502842653B0C13B0DFCCC61B69614C8870FB7D0B9A8B6E25E42BA1EC63F1`
+- `2AD84565D423E8410A0216FFD2574767D2AEC31DF8BF5005192F20D8B9F596D1`
+- `3BA2E7FFC55BC47A06588C7D5F9824E22C347CCE69D6AD6A552AFEE621C5CA20`
+- `660957933F628BD127C1CDA0DF7482D8335AB9EACC3D1E9764D4676D6175FE0E`
+
+The result rejects both tested models as live incremental-state writers. It
+also rejects direct free-form generation as the next architectural commitment:
+Qwen sometimes recognized relationships, but did not reliably preserve
+abstention or the evidence boundary required to mutate state. This is a model
+and contract result, not evidence that a larger model or prompt revision would
+make the architecture safe.
+
 ## Next gates
 
 - Do not spend additional review or Paxan capacity on Voxtral for this design.
 - Do not make pairwise proposer-plus-critic calls a mandatory live stage or
   proceed to the pairwise-evidence-dependent transition experiment.
-- Test a production-shaped, single-generation incremental update that receives
-  one new observation, competing transcripts, and a small retrieved set of
-  revisable prior hypotheses. It must emit its own grounded relationship
-  evidence and proposed state change in one contract.
+- Do not promote GLM, Qwen, or Gemma to a live incident-state writer based on
+  these development experiments.
+- Separate semantic evidence generation from state mutation. The next
+  experiment should compare bounded, typed evidence records produced from each
+  observation with a prior hypothesis, while an application-owned transition
+  function alone applies append, supersede, defer, or reject operations.
+- Measure whether a smaller candidate generator can supply useful evidence
+  within Paxan's latency and memory budget. Treat invalid output as abstention;
+  do not repair it into membership or tune against these six reviewed answers.
 - Use deterministic provenance and reference checks on every output. Sample
   learned critique offline for evaluation; do not require a second live model
   generation unless Paxan throughput later proves it affordable.

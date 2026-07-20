@@ -216,12 +216,22 @@ membership. Because its required pairwise evidence stage failed, that
 coordinator will not become the next model experiment. It remains non-persisting
 contract scaffolding with no store, scheduler, endpoint, or production writer.
 
-The next production-shaped experiment is a single incremental generation. It
-receives one new observation, competing transcripts, and a small retrieved set
-of revisable prior hypotheses. The same response must provide grounded
-relationship evidence and a proposed shadow-state change. Retrieval limits the
-context but never proves membership. Deterministic validation remains required;
-learned critique is sampled offline rather than imposed on every live update.
+The production-shaped single-generation experiment has now failed its
+development gate. GLM 4.7 Flash produced no valid response in three fair
+attempts at roughly 93 to 99 seconds each. Qwen 3.6 35B-A3B made the raw
+relationship choice on four of six reviewed pairs, but forced both unresolved
+pairs into distinct events and produced zero contract-valid state proposals.
+Its requests took 54.7 to 70.6 seconds and the loaded model occupied about
+20.55 GiB on the Ventax lab runtime. Neither model is a candidate live writer,
+and these results do not justify moving inference to the 5090-class laptop.
+
+The next boundary should make semantic model output evidence rather than a
+state mutation. A bounded generator may propose typed, source-grounded evidence
+about the new observation and a retrieved prior hypothesis. Application-owned
+code validates exact sources and applies the ledger transition, or abstains.
+Retrieval still limits context but never proves membership. Invalid output is
+rejection, not input to a repair model. Learned critique remains an offline or
+sampled evaluation instrument.
 
 ### Provenance
 
@@ -479,9 +489,11 @@ proposer/critic disagreements remain experiment records, never membership
 decisions.
 
 The development and sealed held-out corpus split is already extracted. The
-held-out directory remains unopened. The next experiment must replace the
-failed multi-call chain with one bounded incremental proposal and deterministic
-source validation. It must contain no static event taxonomy, talkgroup mapping,
+held-out directory remains unopened. A single bounded incremental proposal was
+tested and rejected: GLM did not return usable content and all six Qwen state
+proposals failed deterministic validation. The next experiment must narrow the
+model boundary to typed source-grounded evidence and keep the state transition
+application-owned. It must contain no static event taxonomy, talkgroup mapping,
 automatic semantic membership rule, production writer, or scheduler. The
 already-frozen human adjudication criteria and quantitative gates apply before
 any sealed held-out evaluation.
