@@ -352,6 +352,104 @@ Shadow-deployment rollback sets are under
 `/var/backups/pizzawave/collapse-shadow-20260720T220000Z-rpi` and
 `/var/backups/pizzawave/collapse-shadow-20260720T220000Z-ot`.
 
+## Paired wide/narrow follow-up
+
+The next discriminator is now implemented on the experimental Trunk Recorder
+branches. Each qualifying collapse writes the existing 96,000 sample/sec
+primary-channel capture and a synchronized, independently channelized wider
+capture from the same SDR source. The wider branch retains approximately
+600 kHz of spectrum at 800,000 samples/sec on OT. On RPI its rate is selected
+from an integer decimation of the 6 MHz source and is expected to be
+approximately 857,143 samples/sec. The paired JSON records share a
+`captureGroupUnixMs` value and identify their `narrow` or `wide` variant.
+
+The wide window is deliberately shorter (10 seconds before and 20 seconds
+after the trigger) than the narrow 30/60-second window. It is long enough to
+cover onset while bounding RAM and disk use. This experiment tests the missing
+ownership boundary in the existing evidence:
+
+- a broadband power/noise or spectral change across the wide capture would
+  implicate propagation, interference, SDR front-end behavior, or source
+  delivery before the narrow channelizer;
+- stable neighboring spectrum with degradation confined to the P25 channel
+  would favor in-channel multipath/simulcast or co-channel interference;
+- clean wide samples but a corrupted narrow product would implicate the
+  channelizer or downstream graph.
+
+OT was deployed and armed at 2026-07-20 19:23:31 EDT from experimental commit
+`313d247`. The installed binary SHA-256 is
+`db7d1920e9fcecd42087d0db0fd133d4167d16ee88c03ff8cc3a3d637c9cc603`.
+Both North Bradley and Hamilton logged a 96 kHz narrow rate and 800 kHz paired
+wide rate, with zero service restarts and healthy PizzaWave live activity.
+Rollback is under
+`/var/backups/pizzawave/collapse-wide-20260720T231500Z-ot`.
+
+RPI was deployed and armed at 2026-07-20 19:35:40 EDT from experimental
+commit `393a0732`. The installed ARM64 binary SHA-256 is
+`be56f18daad7930a552deb0cb432556caa447de13b9457a5ffcf98ef64a2de17`.
+The 6 MHz Airspy source selects a 6/7 decimation and logged a paired wide rate
+of 857,142.857 samples/sec beside the 96,774.2 sample/sec narrow capture. The
+service had zero restarts, PizzaWave live activity was healthy, and
+`libcallstream.so` retained SHA-256
+`31ac526d66664e4fed8d0a43acf0549dac12ad6a35ec38b25704b53e1fc31450`.
+Rollback is under
+`/var/backups/pizzawave/collapse-wide-20260720T233600Z-rpi`.
+
+An isolated ARM replay before deployment also produced a complete paired
+manual capture with a common group ID. Its file source was only 96,774.2
+samples/sec, so both outputs correctly used that available rate; the OT native
+validation above is the high-rate branch test. Both validations are plumbing
+checks, not RF evidence.
+
+Before deployment, an isolated OT replay verified that a manual trigger wrote
+a coherent pair with the same capture group: 3,840,000 bytes at 96 kHz and
+32,000,000 bytes at 800 kHz for a two-second prehistory plus three-second
+post-trigger window. The validation files are temporary and are not field
+evidence.
+
+### OT paired-capture result
+
+The first production pair triggered five seconds after the new process started
+and therefore captured recovery but not onset. It was still a useful integrity
+check: low-decode and >=30 frame/s seconds had outer-band power within 0.02 dB,
+while the control-channel/outer-band ratio was 3.36 dB higher during good
+decode. All samples were finite and there were no zero, repeated-adjacent, or
+clipped samples.
+
+TR was re-armed from a healthy 36-42 frame/s state. North Bradley then produced
+a second pair at 2026-07-20 19:29:17 EDT. The wide file contains the full ten
+seconds before and twenty seconds after trigger: 24,000,000 complex samples,
+192,000,000 bytes. The narrow file contains approximately 26.34 seconds before
+and the full 60 seconds after trigger: 8,288,490 complex samples, 66,307,920
+bytes. Stable-file SHA-256 values are:
+
+- narrow IQ: `8140f02771ae6766c0f630707a48f59c0c000ac61ceccb3ff5d47aa82d58451a`;
+- narrow JSON: `a1ce45b1f0a2d4394b544d70d35c5b046f6657da16173835cd9b9e2045e063b4`;
+- wide IQ: `b8c4622a28d8ed81ac4ceb7c8959db8d1d48f417817063b1080945f9cdb5a208`;
+- wide JSON: `805b8fa4f95e013c853978ecf7570144463d8d8fd83ca11377383cd24e437c3b`.
+
+The paired onset is frequency selective. Comparing the 19 one-second intervals
+at <=3 live frames/s with the four intervals at >=30 frames/s, outer-band
+(150-300 kHz offset) power differed by only 0.14 dB. The control-channel to
+outer-band ratio was 1.72 dB higher in the recovered intervals. Raw wide-band
+power changed by 0.78 dB, largely because a distinct neighboring transmission
+approximately 54 kHz below the control channel appeared during recovery; that
+12.5 kHz band rose 10.5 dB and was not present at onset. No clipping, zero,
+repeated-adjacent, or non-finite samples occurred.
+
+This rejects a broadband antenna fade, tuner-gain collapse, USB/sample outage,
+and the neighboring transmission as explanations for this North Bradley
+event. It favors a channel-selective cancellation/fade at the antenna caused
+by multipath or simulcast geometry. A channel-local interferer remains
+possible, but is less favored because failed decode coincided with lower, not
+higher, control-channel energy and no new nearby spectral component appeared.
+
+Decoder state remains a separate recovery amplifier. After the shared onset,
+the fixed-primary shadow temporarily recovered to 15 frames/s while live was
+retuned, then remained at 1 frame/s while live recovered through 19, 30, 39,
+and 36 frames/s on the primary. Neither fixed tuning nor retuning is a universal
+fix, and this divergence cannot explain the initial simultaneous collapse.
+
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is
 not the primary result above. Automatic quota is process-local, which explains
@@ -359,8 +457,10 @@ why both files exist despite `collapseCaptureMaxEvents: 1`.
 
 ## Limits
 
-This is one natural event on one site. The narrowband branch changes bandwidth
-and replay applies another channelizer, so replay superiority is not by itself
-proof of decoder state. OT has not yet produced a qualifying event. The result
-does, however, directly establish that Raymond's onset combined a real modest
-signal fade with a materially worse live-decoder outcome.
+The evidence contains natural events in both geographies, not enough to assign
+one universal physical cause or estimate prevalence. The paired capture closes
+the wide-versus-channel-local evidence gap for North Bradley, but Raymond's
+existing events remain narrowband. Replay applies another channelizer, so
+replay behavior is not by itself proof of decoder state. A natural RPI paired
+capture remains necessary before deciding whether Raymond shares North
+Bradley's frequency-selective signature.

@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 19:10 EDT
+Last reconciled: 2026-07-20 19:36 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,8 +10,8 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond flight recorder and fixed-primary shadow active |
-| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; North Bradley/Hamilton flight recorders and shadows active |
+| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond paired wide/narrow recorder and fixed-primary shadow active |
+| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; North Bradley/Hamilton paired wide/narrow recorders and shadows active |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
@@ -26,10 +26,10 @@ Cross-repository source state:
   callstream `main` at `1cdd5c4`; its temporary feature branch is retired;
 - local and remote Trunk Recorder `master` remain aligned and untouched at
   `382f5f2`; current-lineage telemetry, flight-recorder, and passive-shadow
-  work remains isolated on `codex/initial-collapse-capture-live` at `51920b1`
+  work remains isolated on `codex/initial-collapse-capture-live` at `313d247`
   for maintainer review and possible upstream submission;
 - the exact older RPI compatibility candidate remains on
-  `codex/initial-collapse-capture-rpi` at `c923e02c`;
+  `codex/initial-collapse-capture-rpi` at `393a0732`;
 - the retune-grace experiment remains separately isolated on
   `codex/rf-stabilization` at `602a637`.
 
@@ -42,7 +42,11 @@ Cross-repository source state:
   live decoder cycled alternates. OT subsequently captured North Bradley: both
   decoders again collapsed together at onset, but recovery diverged in the
   opposite direction, with live recovering to 36 while shadow remained at 1.
-  Hamilton stayed healthy throughout. See
+  Hamilton stayed healthy throughout. A paired 800 kHz OT capture now shows
+  North Bradley's collapse was channel selective: outer-band power was stable
+  within 0.14 dB while control-channel energy tracked recovery. RPI is armed
+  with an approximately 857 kHz paired wide branch to determine whether
+  Raymond's next onset has the same selective signature. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
