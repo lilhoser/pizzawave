@@ -6,9 +6,9 @@ Implementation checkpoints:
 
 - Trunk Recorder `codex/rf-telemetry` at `8318dfb`.
 - callstream `codex/rf-telemetry` at `1cdd5c4`.
-- PizzaWave ingestion, analysis, and presentation are on `main` at `71663cc`.
+- PizzaWave ingestion, analysis, and presentation are on `main` at `8c5e8ba`.
 - Both changed C++ translation units compile on OT in an isolated temporary
-  tree. All 534 PizzaWave tests pass.
+  tree. All 535 PizzaWave tests pass.
 
 ## OT Deployment Checkpoint
 
@@ -78,6 +78,13 @@ formed. Once none of those conditions remains, it moves to Finding History.
 Passive samples and typed transitions are supporting evidence inside that
 finding and do not create duplicate cards.
 
+The journal remains exact, but persistence treats retunes as a causal
+narrative rather than a counter: within each five-minute bucket it keeps the
+first occurrence of each distinct site, reason, prior channel, requested
+channel, and result. Existing TR health buckets retain exact retune totals.
+Summary queries cap transitions per site so a disconnected source cannot crowd
+other monitored sites out of the response.
+
 ## Initial Validation
 
 Initial validation required comparing the first natural retune and
@@ -98,8 +105,8 @@ frequency residual for events captured before that typed column was added.
 
 ## RPI Deployment Checkpoint
 
-PizzaWave `main` at `71663cc` was deployed to RPI on 2026-07-19. RPI and OT
-have matching deployable hashes: backend `0f2d33d0...` and web
+PizzaWave `main` at `8c5e8ba` was deployed to RPI on 2026-07-19. RPI and OT
+have matching deployable hashes: backend `7c1a956d...` and web
 `a7b32390...`.
 
 RPI's Trunk Recorder emitter was deliberately rebased onto the exact installed
@@ -112,4 +119,7 @@ callstream. The pre-install binaries and configuration are retained at
 After the single required TR restart, RPI emitted 15-second typed samples for
 ETV Raymond and Jackson plus typed low-decode retunes for the known disconnected
 Jackson dongle. PizzaWave health, live ingest, transcription, and queues remained
-normal. No retune behavior or limits were changed.
+normal. The first bounded collector window persisted four representative
+Jackson transitions from the 100 exact journal events in that five-minute loop,
+while Raymond's dense samples averaged 39.9 msg/sec. No retune behavior or
+limits were changed.

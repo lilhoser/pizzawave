@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 20:43 EDT
+Last reconciled: 2026-07-19 21:00 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,8 +10,8 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `71663cc` | `0f2d33d0...` | `a7b32390...` | Healthy; passive RF emitters active |
-| OT (`omicrontheta`) | `main` at `71663cc` | `0f2d33d0...` | `a7b32390...` | Healthy; RF presentation and Recommendations validated |
+| RPI (`sdr1861`) | `main` at `8c5e8ba` | `7c1a956d...` | `a7b32390...` | Healthy; passive RF emitters active |
+| OT (`omicrontheta`) | `main` at `8c5e8ba` | `7c1a956d...` | `a7b32390...` | Healthy; RF presentation and Recommendations validated |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
@@ -19,6 +19,10 @@ telemetry emitters; RPI's TR emitter is based on its exact prior `766a553`
 revision rather than the newer upstream base used by OT.
 
 ## Active
+
+- None. Select one pending item before the next implementation or deployment.
+
+## Recently Completed
 
 - RF telemetry analysis and operator presentation:
   - Trunk Recorder `codex/rf-telemetry` at `8318dfb` emits retune events;
@@ -37,11 +41,15 @@ revision rather than the newer upstream base used by OT.
   2-hour through 7-day windows. Recommendation cards reuse the same current
   site assessment, combine related RF symptoms, retain typed transition
   evidence, and move aged-out patterns into Finding History. OT is healthy,
-  the 10-inch layout retains all controls and content, and all 534 tests pass.
+  the 10-inch layout retains all controls and content, and all 535 tests pass.
   The reviewed candidate was squash-merged to `main` as `71663cc`, pushed, and
   deployed to both hosts. RPI's passive emitters were installed at 20:42 EDT
   from TR `ca787409` and callstream `1cdd5c4`, with rollback artifacts under
   `/var/backups/pizzawave/rf-telemetry-rpi-20260720T004203Z`.
+  Repetitive low-decode loops retain one representative of each distinct
+  channel transition per five-minute bucket, preventing a disconnected source
+  from crowding another site's narrative or growing storage without bound.
+  Existing TR health counters continue to retain the exact retune totals.
 
 ## Pending
 
