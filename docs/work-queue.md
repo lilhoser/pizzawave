@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 10:05 EDT
+Last reconciled: 2026-07-20 15:54 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -15,8 +15,9 @@ read-only, but must not deploy.
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
-telemetry emitters; RPI's TR emitter is based on its exact prior `766a553`
-revision rather than the newer upstream base used by OT.
+telemetry emitters and the bounded initial-collapse flight recorder described
+below; RPI's TR build remains based on its exact prior `766a553` lineage rather
+than the newer upstream base used by OT.
 
 Cross-repository source state:
 
@@ -31,12 +32,23 @@ Cross-repository source state:
 
 ## Active
 
-- None. RF stabilization is the next implementation priority. The incident
-  pipeline redesign remains independently owned by its existing session and
-  must not be merged or deployed as part of RF work.
+- Initial-collapse flight recording is active on RPI Raymond and OT North
+  Bradley/Hamilton. RPI has captured and replayed one natural event; OT is
+  awaiting its first qualifying event. See
+  [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
+  The incident pipeline redesign remains independently owned by its existing
+  session and must not be merged or deployed as part of RF work.
 
 ## Recently Completed
 
+- The first natural initial-collapse IQ capture is complete on RPI Raymond.
+  Live decode reached 0 msg/s on the unchanged 773.781250 MHz primary while a
+  fresh replay of the exact trigger-aligned samples fell only to 8 msg/s and
+  immediately recovered. IQ power fell approximately 3.45 dB at the same edge
+  while spectral centroid remained stable. This establishes a real modest RF
+  dip amplified into a full live-decoder collapse; it rejects both total RF
+  loss and a pure counter artifact. The recorder remains active to obtain OT
+  evidence.
 - Deterministic P25 retune-state replay is complete and recorded in
   [field-tests/2026-07-20-p25-retune-state-replay.md](field-tests/2026-07-20-p25-retune-state-replay.md).
   Five fixed-sample runs per decoder variant forced three noise-only Raymond
@@ -106,15 +118,16 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
-   - add low-volume live sample-continuity counters at the SDR source, P25
-     graph input, channelizer output, timing output, and OP25 frame boundary;
-   - retain a bounded event window with host CPU, run queue, I/O wait, memory,
-     thermal, undervoltage, and USB/SDR errors when decode falls below 2 msg/s;
-   - capture one short same-branch IQ segment per host during an event and use
-     the counters to localize source delivery, scheduler/backpressure,
-     decoder/queue, or genuine RF loss;
-   - keep the receiver-role crossover as a later RF-path discriminator only if
-     the live pipeline remains continuous through a fade;
+   - wait for the already-armed OT North Bradley/Hamilton recorder to retain
+     one natural onset and replay it before changing OT RF or recovery policy;
+   - add a passive always-primary shadow P25 decoder on the exact same
+     channelized samples, with an isolated frame counter and no calls, plugins,
+     retunes, or system-state effects;
+   - compare live, shadow, and retained-IQ replay at the next event to decide
+     whether the modest fade itself, live decoder/control interaction, or
+     queue/accounting produces the 0 msg/s collapse;
+   - add wider pre-channelizer IQ or source-continuity counters only if both
+     live and shadow decoders collapse and RF/front-end localization remains;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
