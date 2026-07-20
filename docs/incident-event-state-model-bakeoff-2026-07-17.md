@@ -596,6 +596,14 @@ SHA-256 is
 `B9E20BB19282EFF1B3CCA2039B00F6ECAAB681E9DDCF90A821ED160BA205FBDF`.
 No model result is bundled into the reviewer view.
 
+Before human answers were available, frozen v2 outputs were captured for all
+12 cases from both GPT-OSS 20B and Qwen 3.6. Their case-level decisions remain
+unreported until review completion. For each directory, the manifest is the
+SHA-256 of sorted UTF-8 lines containing `<filename> <artifact-sha256>`:
+
+- GPT-OSS 20B, 12 artifacts: `9282134F9A36D415DD13CC0AB342610D3DD5F18376BCBC24121E39CF56B6BDC4`
+- Qwen 3.6, 12 artifacts: `2F2805952B8DDF5BED1B6AF646263AEA3433FBDA28D5B3EC87ABCE5B7CE67D64`
+
 ## Next gates
 
 - Do not spend additional review or Paxan capacity on Voxtral for this design.
