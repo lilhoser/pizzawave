@@ -23,13 +23,14 @@ Cross-repository source state:
 
 - callstream RF sampling/reacquisition telemetry is merged and pushed on
   callstream `main` at `1cdd5c4`; its temporary feature branch is retired;
-- local Trunk Recorder `master` contains the current-lineage telemetry, flight
-  recorder, and passive-shadow work at merge commit `19ae14f`; remote
-  `origin/master` remains untouched at `382f5f2`;
+- local and remote Trunk Recorder `master` remain aligned and untouched at
+  `382f5f2`; current-lineage telemetry, flight-recorder, and passive-shadow
+  work remains isolated on `codex/initial-collapse-capture-live` at `51920b1`
+  for maintainer review and possible upstream submission;
 - the exact older RPI compatibility candidate remains on
   `codex/initial-collapse-capture-rpi` at `c923e02c`;
-- the retune-grace experiment remains isolated on `codex/rf-stabilization` at
-  `602a637` and was not included in `19ae14f`.
+- the retune-grace experiment remains separately isolated on
+  `codex/rf-stabilization` at `602a637`.
 
 ## Active
 
@@ -122,9 +123,9 @@ Cross-repository source state:
    - wait for the already-armed OT North Bradley/Hamilton recorder to retain
      one natural onset and replay it before changing OT RF or recovery policy;
    - coordinate ownership before pushing or deploying the passive-shadow
-     work: current-lineage candidate `51920b1` is merged into local Trunk
-     Recorder `master` at `19ae14f`; exact RPI lineage `c923e02c` remains a
-     compatibility branch; neither is pushed or deployed;
+     work: current-lineage candidate `51920b1` remains on its integration
+     branch for maintainer review; exact RPI lineage `c923e02c` remains a
+     compatibility branch; neither is merged, pushed, or deployed;
    - compare live, shadow, and retained-IQ replay at the next event to decide
      whether the modest fade itself, live decoder/control interaction, or
      queue/accounting produces the 0 msg/s collapse;

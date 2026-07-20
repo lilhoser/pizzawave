@@ -156,10 +156,9 @@ remaining question is propagation versus interference/front-end behavior.
 
 ## Shadow-decoder implementation candidate
 
-Implemented and committed on 2026-07-20. The current-lineage candidate was
-subsequently merged into local Trunk Recorder `master` as `19ae14f`, but was
-not pushed, configured, or deployed while another Codex task owns production
-deployment:
+Implemented and committed on 2026-07-20, but deliberately kept on isolated
+integration branches for maintainer review and possible upstream submission.
+It was not merged, pushed, configured, or deployed:
 
 - OT/current telemetry lineage: `codex/initial-collapse-capture-live` at
   `51920b1`;
@@ -203,10 +202,14 @@ and RPI
 Both services were active. No service was restarted for this implementation or
 validation.
 
-The next action requires explicit coordination: decide whether and where to
-push local `master`, assign one deployment owner, review the coherent
+The next action requires explicit coordination: choose the maintainer-review
+and upstream-submission path, assign one deployment owner, review the coherent
 executable/plugin artifact set, and only then enable `collapseShadow` on
 Raymond, North Bradley, and Hamilton.
+
+A mistaken local-only merge commit, `19ae14f`, was created while interpreting
+"main" as Trunk Recorder's default branch. It was never pushed or deployed and
+was removed immediately; local and remote `master` both remain at `382f5f2`.
 
 ## Artifacts and rollback
 
