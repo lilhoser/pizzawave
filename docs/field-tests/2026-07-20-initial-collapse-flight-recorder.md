@@ -156,9 +156,8 @@ remaining question is propagation versus interference/front-end behavior.
 
 ## Shadow-decoder implementation candidate
 
-Implemented and committed on 2026-07-20, but deliberately kept on isolated
-integration branches for maintainer review and possible upstream submission.
-It was not merged, pushed, configured, or deployed:
+Implemented and committed on 2026-07-20 and deliberately kept on isolated
+integration branches for maintainer review and possible upstream submission:
 
 - OT/current telemetry lineage: `codex/initial-collapse-capture-live` at
   `51920b1`;
@@ -194,18 +193,73 @@ Offline validation used isolated build and replay directories only:
   matched exactly in every reported interval, including startup at 9 msg/s
   and steady rates from 26-42 msg/s.
 
-Production verification after testing showed the pre-existing deployed hashes
-unchanged: OT
-`bdc8dd87146badecef534d02c1f54a1d147f96d35ec6a0f435bf80f156ca40a0`
-and RPI
-`42d31cc1fad56512b06c5603362a8ad2a4c99e9413db3484cf0f28a81591b979`.
-Both services were active. No service was restarted for this implementation or
-validation.
+The candidates were initially validated without changing production. After
+deployment ownership was explicitly assigned, coherent experimental artifact
+sets were installed at 17:25 EDT on 2026-07-20 and `collapseShadow` was enabled
+for Raymond, North Bradley, and Hamilton. Trunk Recorder was restarted once on
+each host. PizzaWave was not redeployed.
 
-The next action requires explicit coordination: choose the maintainer-review
-and upstream-submission path, assign one deployment owner, review the coherent
-executable/plugin artifact set, and only then enable `collapseShadow` on
-Raymond, North Bradley, and Hamilton.
+- OT PID `2181680`, zero restarts after activation, binary SHA-256
+  `368a068a973ae5fe9fd3f6b3b3734e8bcf0eb765ce0bdde645fde45aa5b326f1`;
+- RPI PID `158920`, zero restarts after activation, binary SHA-256
+  `15824b7f8083d4b824d10d6e06a22b81a75eca93b4a7b8aa8499e76d299e0449`;
+- each host received the standard plugins from the same build as its
+  executable; the separately built PizzaWave `libcallstream.so` was preserved;
+- both PizzaWave health endpoints returned `status: ok` and live TR activity
+  recovered after the normal post-restart interval;
+- OT immediately produced matched live/shadow baselines of approximately
+  27-42 valid frames/s on both monitored systems.
+
+## First live shadow event
+
+Raymond produced a qualifying natural event only 19 seconds after the RPI
+restart. The recorder triggered at 2026-07-20 17:26:05.019 EDT and completed at
+17:27:05.022 EDT:
+
+`1784582765019-etv-raymond-hinds-automatic.fc32`
+
+The file contains 1,713,426 available pre-trigger samples and the requested
+5,806,451 post-trigger samples at 96,774.1935 samples/sec. The shorter-than-
+configured prehistory is expected because the process had not yet been alive
+for 30 seconds. The file is 60,159,016 bytes and has SHA-256
+`952196947658ba2c2ab2438ee4c44fc6f66311ee14f8f89f3dd8ee1ad7ce271e`.
+Its JSON contains 78 one-second live/shadow samples.
+
+At the trigger, the unchanged primary was 773.781250 MHz, the live three-second
+rate was 0 msg/s, and the concurrent fixed-primary shadow rate was 1 frame/s.
+The one-second timeline shows both decoders descending together from a healthy
+42 frames/s to 1 frame/s before the trigger. This is direct evidence that this
+onset was present in the sample stream delivered to both independent decoders;
+it was not created solely by accumulated state in the live decoder.
+
+The behavior immediately after onset is different. One second after the
+trigger, the live decoder began cycling alternate control channels and stayed
+at 1 frame/s. The shadow remained on 773.781250 MHz and recovered to 22, 28,
+and 36 frames/s over the next three seconds. Similar fixed-primary recoveries
+to 18-24 frames/s occurred during the later live alternate-channel cycle.
+When the live decoder returned to the primary, the two rates converged again.
+
+The current interpretation therefore has two parts:
+
+1. the initial Raymond collapse is a real shared RF/sample-delivery impairment,
+   not merely queue accounting or a poisoned long-running decoder;
+2. brute-force alternate-channel hopping can materially extend the live outage
+   after the primary becomes decodable again.
+
+This does not yet identify propagation, interference, or front-end behavior as
+the cause of the shared onset, and one Raymond event does not establish that OT
+has the same cause. The shadow experiment remains active on OT specifically to
+obtain that geographic discriminator. No recovery-policy change should be made
+until an OT event is captured and compared with the Raymond result.
+
+An isolated fresh-process replay of the captured IQ produced 84 one-second
+samples, spanning 0-42 frames/s in both decoders. Both reached zero in the same
+six intervals; only four samples differed at all. Replay also logged seven
+failed requests for alternate frequencies outside the narrowband file source,
+so its changing live-frequency labels do not represent actual retunes. The
+replay independently confirms that the retained primary-channel IQ contains
+the repeated decode losses, while the production wideband shadow timeline is
+the valid evidence for the recovery cost of real live retuning.
 
 A mistaken local-only merge commit, `19ae14f`, was created while interpreting
 "main" as Trunk Recorder's default branch. It was never pushed or deployed and
@@ -226,6 +280,9 @@ RPI backups are under
 `collapse-capture-20260720T193900Z-rpi-ownership-fix`. OT's coherent-build
 rollback is under
 `/var/backups/pizzawave/collapse-capture-20260720T195100Z-ot-coherent-build`.
+Shadow-deployment rollback sets are under
+`/var/backups/pizzawave/collapse-shadow-20260720T220000Z-rpi` and
+`/var/backups/pizzawave/collapse-shadow-20260720T220000Z-ot`.
 
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is

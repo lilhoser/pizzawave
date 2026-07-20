@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 16:40 EDT
+Last reconciled: 2026-07-20 17:33 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,14 +10,15 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; passive RF emitters active; live RF controls verified |
-| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Cleveland retune-only state verified as degraded, not critical |
+| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond flight recorder and fixed-primary shadow active |
+| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; North Bradley/Hamilton flight recorders and shadows active |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
-telemetry emitters and the bounded initial-collapse flight recorder described
-below; RPI's TR build remains based on its exact prior `766a553` lineage rather
-than the newer upstream base used by OT.
+telemetry emitters, bounded initial-collapse flight recorder, and passive
+fixed-primary shadow decoder described below; RPI's TR build remains based on
+its exact prior `766a553` lineage rather than the newer upstream base used by
+OT.
 
 Cross-repository source state:
 
@@ -34,9 +35,11 @@ Cross-repository source state:
 
 ## Active
 
-- Initial-collapse flight recording is active on RPI Raymond and OT North
-  Bradley/Hamilton. RPI has captured and replayed one natural event; OT is
-  awaiting its first qualifying event. See
+- Initial-collapse flight recording and passive shadow decoding are active on
+  RPI Raymond and OT North Bradley/Hamilton. RPI captured a shadow-instrumented
+  event immediately after activation: both decoders collapsed together at
+  onset, but the fixed-primary shadow recovered to 22-36 frames/s while the
+  live decoder cycled alternates. OT is awaiting its first qualifying event. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
@@ -120,15 +123,16 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
-   - wait for the already-armed OT North Bradley/Hamilton recorder to retain
-     one natural onset and replay it before changing OT RF or recovery policy;
-   - coordinate ownership before pushing or deploying the passive-shadow
-     work: current-lineage candidate `51920b1` remains on its integration
-     branch for maintainer review; exact RPI lineage `c923e02c` remains a
-     compatibility branch; neither is merged, pushed, or deployed;
-   - compare live, shadow, and retained-IQ replay at the next event to decide
-     whether the modest fade itself, live decoder/control interaction, or
-     queue/accounting produces the 0 msg/s collapse;
+   - keep the already-armed OT North Bradley/Hamilton shadow recorder running
+     until it retains one natural onset; this is now the key cross-geography
+     discriminator;
+   - retain Raymond capture `1784582765019` and its 78-sample live/shadow
+     timeline as the first result; isolated replay independently reproduced
+     repeated decode losses in the captured IQ, while live alternate-channel
+     hopping amplified the production outage after the primary recovered;
+   - keep current-lineage candidate `51920b1` and exact RPI compatibility
+     candidate `c923e02c` isolated for maintainer review even though their
+     coherent artifacts are now deployed experimentally;
    - add wider pre-channelizer IQ or source-continuity counters only if both
      live and shadow decoders collapse and RF/front-end localization remains;
    - keep alternate-channel validation and Trunk Recorder retune grace as
