@@ -120,9 +120,9 @@ Cross-repository source state:
 1. RF stabilization:
    - wait for the already-armed OT North Bradley/Hamilton recorder to retain
      one natural onset and replay it before changing OT RF or recovery policy;
-   - add a passive always-primary shadow P25 decoder on the exact same
-     channelized samples, with an isolated frame counter and no calls, plugins,
-     retunes, or system-state effects;
+   - coordinate ownership before integrating or deploying the completed
+     passive-shadow candidates: OT/current lineage `51920b1`, exact RPI
+     lineage `c923e02c`; neither candidate is merged, pushed, or deployed;
    - compare live, shadow, and retained-IQ replay at the next event to decide
      whether the modest fade itself, live decoder/control interaction, or
      queue/accounting produces the 0 msg/s collapse;

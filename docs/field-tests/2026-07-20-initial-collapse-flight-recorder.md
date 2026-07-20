@@ -136,7 +136,7 @@ next North Bradley or Hamilton event has the same signature.
 ## Recommended next experiment
 
 Add one passive, always-primary shadow P25 decoder beside the live decoder on
-the same already-channelized sample stream. The shadow must have its own
+the same SDR sample stream. The shadow must have its own
 message queue and count valid P25 frames only; it must not create calls, invoke
 plugins, retune, or affect system state.
 
@@ -153,6 +153,58 @@ This directly tests the newly observed amplification without collecting
 historical control-channel evidence or broad host-metric scaffolding. A wider
 pre-channelizer IQ branch should follow only if both decoders collapse and the
 remaining question is propagation versus interference/front-end behavior.
+
+## Shadow-decoder implementation candidate
+
+Implemented and committed on 2026-07-20, but deliberately not merged, pushed,
+configured, or deployed while another Codex task owns production deployment:
+
+- OT/current telemetry lineage: `codex/initial-collapse-capture-live` at
+  `51920b1`;
+- exact RPI telemetry lineage: `codex/initial-collapse-capture-rpi` at
+  `c923e02c`.
+
+The per-system `collapseShadow` setting constructs a second existing
+`p25_trunking` graph from the same SDR source and fixes it on the first
+configured control channel. Its independent queue is drained only for counts;
+messages are not parsed and cannot create calls, invoke plugins, retune, or
+change system state. OP25 timeout markers are excluded from both one-second
+comparison counters. The production graph, production message accounting, and
+three-second collapse trigger are unchanged.
+
+Each enabled system emits a one-second `TR_SHADOW` sample containing live and
+shadow frequencies, non-timeout queue-message rates, raw counts, and window
+duration. A
+bounded in-memory timeline retains the configured pre-trigger duration. When
+the existing flight recorder triggers, its JSON receives that prehistory and
+continues appending samples until IQ capture finishes, thereby producing one
+event-local live-versus-shadow sequence with no database or UI dependency.
+
+Offline validation used isolated build and replay directories only:
+
+- OT compiled the complete current-lineage candidate. A manual five-second
+  pre/ten-second post capture produced exactly five trigger-and-prehistory
+  timeline entries and ten post-trigger entries. A forced live alternate-CC
+  sequence changed `liveControlChannelHz` while
+  `shadowControlChannelHz` remained fixed on 769.606250 MHz.
+- RPI compiled a clean archive of its exact older lineage. A 25-second replay
+  of the live Raymond calibration capture identified RFSS 002, site 008,
+  system 2AD, WACN BEE00, and NAC 2A4. Live and shadow one-second counts
+  matched exactly in every reported interval, including startup at 9 msg/s
+  and steady rates from 26-42 msg/s.
+
+Production verification after testing showed the pre-existing deployed hashes
+unchanged: OT
+`bdc8dd87146badecef534d02c1f54a1d147f96d35ec6a0f435bf80f156ca40a0`
+and RPI
+`42d31cc1fad56512b06c5603362a8ad2a4c99e9413db3484cf0f28a81591b979`.
+Both services were active. No service was restarted for this implementation or
+validation.
+
+The next action requires explicit coordination: decide the integration branch
+and deployment owner, review the coherent executable/plugin artifact set, and
+only then merge and enable `collapseShadow` on Raymond, North Bradley, and
+Hamilton.
 
 ## Artifacts and rollback
 
