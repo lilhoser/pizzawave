@@ -128,6 +128,31 @@ The default configuration remains off. A bounded experiment can enable:
 }
 ```
 
+## Initial OT Live Evidence
+
+The bounded runner was enabled on Omicrontheta on 2026-07-20. The legacy v2 and
+v3 shadow comparisons were disabled in the same configuration change to offset
+model load; production incident construction was not changed. RPI was not
+deployed. The initial backend manifest hash was
+`eef3d7e4c88538b8cb90e394b2295c2f06b959821958bb8321e246af67104e19`.
+The pre-experiment config is preserved on OT as
+`/etc/pizzawave/pizzad.json.codex-link-shadow-20260720T2024Z.bak` with SHA-256
+`1ade5bf6aac8a4a6ecca833b0242fc0d8b941574e147734d7d26627e60b692f4`.
+
+The startup fence skipped historical calls. Three scheduled observations had no
+candidate and became application-created unresolved singletons without model
+calls. Live evidence then showed that embedding-only retrieval had omitted a
+prior same-system shadow event, so candidate generation was broadened to fill
+unused vector slots with recent same-system shadow state. This changes only what
+the model may compare; it does not establish a relationship.
+
+The next observation received two opaque candidates. The verified
+`qwen/qwen3.6-35b-a3b@q8_0` proposer abstained, and the observation remained an
+unresolved singleton. The call took 33,031 ms and used 729 prompt tokens plus 279
+completion tokens (1,008 total). There was no proposer error, AI completion
+health remained green, and transcription queue depth returned to zero. This is
+operational smoke evidence only; it does not establish relationship accuracy.
+
 Do not request new manual labels. Existing reviews remain smoke evidence only;
 ordinary operator corrections may later be recorded as passive evaluation
 evidence. A further model comparison may reuse these same reviewed inputs, but
