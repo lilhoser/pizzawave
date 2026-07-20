@@ -48,6 +48,22 @@ public sealed class LiveRfStatusServiceTests
     }
 
     [Fact]
+    public void BuildSnapshotDoesNotClassifyRetunesAloneAsCriticalWhileDecodeRemainsAvailable()
+    {
+        var now = new DateTime(2026, 7, 18, 16, 0, 0, DateTimeKind.Utc);
+        var lines = Enumerable.Range(0, 6)
+            .Select(index => DecodeLine(now.AddSeconds(-10 - index * 10), "CLEVELAND", 30))
+            .Concat(Enumerable.Range(0, 9).Select(index => RetuneLine(now.AddSeconds(-20 - index * 20), "CLEVELAND")));
+
+        var site = Assert.Single(LiveRfStatusService.BuildSnapshot(now, string.Join('\n', lines)).Sites);
+
+        Assert.Equal("warning", site.Tone);
+        Assert.Equal("Degraded", site.Status);
+        Assert.Equal(30, site.DecodeRate);
+        Assert.Equal(9, site.Retunes);
+    }
+
+    [Fact]
     public void BuildSnapshotMarksSiteStaleWhenOnlyOlderDecodeSamplesRemain()
     {
         var now = new DateTime(2026, 7, 18, 16, 0, 0, DateTimeKind.Utc);

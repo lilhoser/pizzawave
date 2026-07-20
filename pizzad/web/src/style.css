@@ -524,6 +524,12 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .rf-live-site small,
 .rf-live-panel-note { color: #9eabb6; }
 .rf-live-sites { display: grid; gap: 7px; }
+.rf-live-site-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: stretch;
+  gap: 6px;
+}
 .rf-live-site {
   display: grid;
   grid-template-columns: minmax(130px, 1fr) repeat(3, minmax(96px, auto)) auto;
@@ -540,6 +546,20 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 }
 .rf-live-site:hover,
 .rf-live-site:focus { background: #283139; border-color: var(--accent); }
+.rf-live-pin {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #3c4650;
+  border-radius: 9px;
+  color: #9eabb6;
+  background: #20272d;
+}
+.rf-live-pin:hover,
+.rf-live-pin:focus,
+.rf-live-pin.active { color: var(--accent); border-color: var(--accent); background: #283139; }
 .rf-live-site.tone-ok { border-left-color: #54d68a; }
 .rf-live-site.tone-warning { border-left-color: #f7c948; }
 .rf-live-site.tone-error { border-left-color: #ff6b5a; }
@@ -1800,9 +1820,6 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .receiver-setup-handoff button {
   grid-column: 2;
   grid-row: 1 / span 2;
-}
-.rf-baseline-summary {
-  margin: 0 0 10px;
 }
 .trouble-panel {
   min-height: 0;

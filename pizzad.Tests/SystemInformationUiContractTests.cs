@@ -73,7 +73,11 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("Live RF", app, StringComparison.Ordinal);
         Assert.Contains("CC retunes / 5m", app, StringComparison.Ordinal);
         Assert.Contains("pizzawave-system-metrics-tab", app, StringComparison.Ordinal);
+        Assert.Contains("pizzawave-live-rf-pinned-site", app, StringComparison.Ordinal);
+        Assert.Contains("pizzawave-system-rf-selected-site", app, StringComparison.Ordinal);
+        Assert.Contains("pizzawave-rf-site-selected", app, StringComparison.Ordinal);
         Assert.Contains("rf-live-panel", styles, StringComparison.Ordinal);
+        Assert.Contains("rf-live-pin", styles, StringComparison.Ordinal);
         Assert.Contains("tone-error", styles, StringComparison.Ordinal);
     }
 

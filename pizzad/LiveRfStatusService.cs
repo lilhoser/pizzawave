@@ -176,6 +176,9 @@ public sealed class LiveRfStatusService : BackgroundService
         var decodeAssessment = TrHealthTroubleshootService.AssessDecodeRate(samples, averageRate, zeroPercent, baseline?.DecodeAssessment.BaselineValue, MinimumDecodeSamples);
         var zeroAssessment = TrHealthTroubleshootService.AssessZeroDecodeRate(samples, zeroPercent, baseline?.ZeroDecodeAssessment.BaselineValue, MinimumDecodeSamples);
         var retuneAssessment = TrHealthTroubleshootService.AssessRetunes(retunesPerHour, baseline?.RetunesAssessment.BaselineValue, averageRate < 1.0 && samples >= MinimumDecodeSamples);
+        var effectiveRetuneAssessment = retuneAssessment.Tone == "error" && decodeAssessment.Tone != "error" && zeroAssessment.Tone != "error"
+            ? retuneAssessment with { Tone = "warning", Detail = "Retunes are elevated, but current control-channel decoding remains available." }
+            : retuneAssessment;
 
         string tone;
         string status;
@@ -191,12 +194,12 @@ public sealed class LiveRfStatusService : BackgroundService
         }
         else
         {
-            tone = WorstTone(decodeAssessment.Tone, zeroAssessment.Tone, retuneAssessment.Tone);
+            tone = WorstTone(decodeAssessment.Tone, zeroAssessment.Tone, effectiveRetuneAssessment.Tone);
             status = tone == "error" ? "Critical" : tone == "warning" ? "Degraded" : "Healthy";
         }
 
         var basis = new[] { decodeAssessment.Basis, zeroAssessment.Basis, retuneAssessment.Basis }.Contains("local", StringComparer.OrdinalIgnoreCase) ? "local" : "static";
-        var detail = $"Decode: {decodeAssessment.Detail} Zero decode: {zeroAssessment.Detail} Retunes: {retuneAssessment.Detail}";
+        var detail = $"Decode: {decodeAssessment.Detail} Zero decode: {zeroAssessment.Detail} Retunes: {effectiveRetuneAssessment.Detail}";
         return new LiveRfSiteStatusDto(scope, tone, status, averageRate, zeroPercent, samples, retunes, retunesPerHour, lastDecodeUtc, freshnessSeconds, basis, detail);
     }
 

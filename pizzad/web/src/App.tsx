@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { sha256 } from "@noble/hashes/sha256";
-import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Database, Gauge, Info, Link2, Play, Radio, RefreshCw, Search, Settings, Square, Wrench, X } from "lucide-react";
+import { Activity, Bell, BellOff, Camera, CheckCircle2, ChevronDown, ChevronRight, Database, Gauge, Info, Link2, Pin, Play, Radio, RefreshCw, Search, Settings, Square, Wrench, X } from "lucide-react";
 import { api, rangeBody, rangeQuery } from "./api";
 import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
@@ -160,6 +160,7 @@ function App() {
   const [systemTargetTab, setSystemTargetTab] = useState<SystemTopTab | null>(null);
   const [systemRefreshSignal, setSystemRefreshSignal] = useState(0);
   const [rfStatusOpen, setRfStatusOpen] = useState(false);
+  const [pinnedRfSite, setPinnedRfSite] = useState(() => localStorage.getItem("pizzawave-live-rf-pinned-site") || "");
   const [setupTargetSection, setSetupTargetSection] = useState<string | null>(null);
   const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
   const pageRef = useRef<Page>(page);
@@ -598,12 +599,27 @@ function App() {
   const rfToneRank: Record<string, number> = { error: 4, warning: 3, stale: 2, unknown: 1, ok: 0 };
   const liveRfSites = liveRfResource.data?.sites ?? [];
   const liveRfWorstSite = [...liveRfSites].sort((left, right) => (rfToneRank[right.tone] ?? 1) - (rfToneRank[left.tone] ?? 1))[0];
-  const liveRfPillText = liveRfWorstSite
-    ? `RF ${liveRfWorstSite.systemShortName} ${liveRfWorstSite.decodeRate.toFixed(1)} msg/s · ${liveRfWorstSite.retunes} retune${liveRfWorstSite.retunes === 1 ? "" : "s"}/5m${liveRfSites.length > 1 ? ` · +${liveRfSites.length - 1}` : ""}`
+  const liveRfPinnedSite = liveRfSites.find(site => site.systemShortName.toLowerCase() === pinnedRfSite.toLowerCase());
+  const liveRfDisplayedSite = liveRfPinnedSite ?? liveRfWorstSite;
+  const liveRfPillText = liveRfDisplayedSite
+    ? `RF ${liveRfDisplayedSite.systemShortName} ${liveRfDisplayedSite.decodeRate.toFixed(1)} msg/s · ${liveRfDisplayedSite.retunes} retune${liveRfDisplayedSite.retunes === 1 ? "" : "s"}/5m${liveRfSites.length > 1 ? ` · +${liveRfSites.length - 1}` : ""}`
     : liveRfResource.state.error ? "RF unavailable" : "RF waiting";
-  const liveRfTitle = liveRfWorstSite
-    ? `${liveRfResource.data?.status}. ${liveRfWorstSite.systemShortName}: ${liveRfWorstSite.status}, ${liveRfWorstSite.decodeRate.toFixed(1)} decoded messages per second and ${liveRfWorstSite.retunes} control-channel retunes in five minutes. Open all sites.`
+  const liveRfTitle = liveRfDisplayedSite
+    ? `${liveRfPinnedSite ? "Pinned site. " : "Worst-performing site. "}${liveRfResource.data?.status}. ${liveRfDisplayedSite.systemShortName}: ${liveRfDisplayedSite.status}, ${liveRfDisplayedSite.decodeRate.toFixed(1)} decoded messages per second and ${liveRfDisplayedSite.retunes} control-channel retunes in five minutes. Open all sites.`
     : liveRfResource.state.error || "Waiting for recent control-channel samples.";
+  function togglePinnedRfSite(systemShortName: string) {
+    const next = pinnedRfSite.toLowerCase() === systemShortName.toLowerCase() ? "" : systemShortName;
+    setPinnedRfSite(next);
+    if (next) localStorage.setItem("pizzawave-live-rf-pinned-site", next);
+    else localStorage.removeItem("pizzawave-live-rf-pinned-site");
+  }
+  function openRfSite(systemShortName: string) {
+    localStorage.setItem("pizzawave-system-metrics-tab", "rf");
+    localStorage.setItem("pizzawave-system-rf-selected-site", systemShortName);
+    window.dispatchEvent(new CustomEvent("pizzawave-rf-site-selected", { detail: systemShortName }));
+    setRfStatusOpen(false);
+    goSystem("metrics");
+  }
   const updateLiveCpuSnapshot = useCallback((sample: SystemRuntimeResourceSample) => {
     setCpuSnapshot(current => current ? {
       ...current,
@@ -927,17 +943,16 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {liveRfResource.state.error && <div className="rf-live-message error">Unable to refresh RF status. {liveRfResource.state.error}</div>}
         {!liveRfResource.state.error && liveRfSites.length === 0 && <div className="rf-live-message">Waiting for recent control-channel samples.</div>}
         <div className="rf-live-sites">
-          {liveRfSites.map(site => <button type="button" className={`rf-live-site tone-${site.tone}`} key={site.systemShortName} onClick={() => {
-            localStorage.setItem("pizzawave-system-metrics-tab", "rf");
-            setRfStatusOpen(false);
-            goSystem("metrics");
-          }}>
-            <span className="rf-live-site-identity"><span className="rf-live-tone-dot" aria-hidden="true" /><strong>{site.systemShortName}</strong><small>{site.status}</small></span>
-            <span className="rf-live-reading"><strong>{site.decodeRate.toFixed(1)}</strong><small>msg/s decode</small></span>
-            <span className="rf-live-reading"><strong>{site.retunes}</strong><small>CC retunes / 5m</small></span>
-            <span className="rf-live-reading"><strong>{site.lastDecodeUtc ? relativeTime(new Date(site.lastDecodeUtc).getTime() / 1000) : "No sample"}</strong><small>{site.assessmentBasis === "local" ? "Local baseline" : "Current threshold"}</small></span>
-            <ChevronRight size={17} aria-hidden="true" />
-          </button>)}
+          {liveRfSites.map(site => <div className="rf-live-site-row" key={site.systemShortName}>
+            <button type="button" className={`rf-live-site tone-${site.tone}`} onClick={() => openRfSite(site.systemShortName)}>
+              <span className="rf-live-site-identity"><span className="rf-live-tone-dot" aria-hidden="true" /><strong>{site.systemShortName}</strong><small>{site.status}</small></span>
+              <span className="rf-live-reading"><strong>{site.decodeRate.toFixed(1)}</strong><small>msg/s decode</small></span>
+              <span className="rf-live-reading"><strong>{site.retunes}</strong><small>CC retunes / 5m</small></span>
+              <span className="rf-live-reading"><strong>{site.lastDecodeUtc ? relativeTime(new Date(site.lastDecodeUtc).getTime() / 1000) : "No sample"}</strong><small>{site.assessmentBasis === "local" ? "Local baseline" : "Current threshold"}</small></span>
+              <ChevronRight size={17} aria-hidden="true" />
+            </button>
+            <button type="button" className={`rf-live-pin${liveRfPinnedSite?.systemShortName.toLowerCase() === site.systemShortName.toLowerCase() ? " active" : ""}`} title={liveRfPinnedSite?.systemShortName.toLowerCase() === site.systemShortName.toLowerCase() ? `Unpin ${site.systemShortName}` : `Pin ${site.systemShortName} in the status bar`} aria-label={liveRfPinnedSite?.systemShortName.toLowerCase() === site.systemShortName.toLowerCase() ? `Unpin ${site.systemShortName}` : `Pin ${site.systemShortName} in the status bar`} onClick={() => togglePinnedRfSite(site.systemShortName)}><Pin size={15} aria-hidden="true" /></button>
+          </div>)}
         </div>
         {liveRfSites.length > 0 && <p className="rf-live-panel-note">Select a site to open its full history in Performance → RF.</p>}
       </section>}
@@ -945,7 +960,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         <span className="pill" title="Calls in the selected call-data window">Calls {statusSummary?.calls?.toLocaleString() ?? "--"}</span>
         <button type="button" className="pill status-pill-button" title="Open incidents" onClick={() => goDashboard("incidents")}>Incidents {statusSummary?.incidents?.toLocaleString() ?? "--"}</button>
         <button type="button" className="pill status-pill-button" title="Open alerts" onClick={() => goDashboard("alerts")}>Alerts {statusSummary?.alerts?.toLocaleString() ?? "--"}</button>
-        <button type="button" className={`pill status-pill-button rf-live-pill tone-${liveRfWorstSite?.tone ?? "unknown"}`} title={liveRfTitle} aria-expanded={rfStatusOpen} onClick={() => setRfStatusOpen(open => !open)}><Radio size={13} aria-hidden="true" /> {liveRfPillText}</button>
+        <button type="button" className={`pill status-pill-button rf-live-pill tone-${liveRfDisplayedSite?.tone ?? "unknown"}`} title={liveRfTitle} aria-expanded={rfStatusOpen} onClick={() => setRfStatusOpen(open => !open)}><Radio size={13} aria-hidden="true" /> {liveRfPillText}{liveRfPinnedSite && <Pin size={12} aria-label="Pinned site" />}</button>
         <button type="button" className={`pill status-pill-button queue-health queue-${queueHealth}`} title={queueHealthTitle} onClick={() => goSystem("queue")}>{queueHealthText}</button>
         <button type="button" className={cpuPillClass} title={cpuPillTitle} onClick={() => goSystem("services")}>{cpuPillText}</button>
         {activeJobCount > 0 && <button type="button" className="pill status-pill-button" title="Open active jobs" onClick={() => goSystem("jobs")}>Jobs {activeJobCount}</button>}
@@ -9271,6 +9286,15 @@ function RfMetricsPanel({ data, telemetry, rangeHours, baseline, category, findi
     if (!finding?.ownerKey || !systems.some(system => system.systemShortName.toLowerCase() === finding.ownerKey.toLowerCase())) return;
     setSelectedSystem(finding.ownerKey);
   }, [finding?.findingId, finding?.ownerKey, systems]);
+  useEffect(() => {
+    const selectRequestedSite = (event: Event) => {
+      const systemShortName = String((event as CustomEvent<string>).detail || "");
+      if (systems.some(system => system.systemShortName.toLowerCase() === systemShortName.toLowerCase()))
+        setSelectedSystem(systemShortName);
+    };
+    window.addEventListener("pizzawave-rf-site-selected", selectRequestedSite);
+    return () => window.removeEventListener("pizzawave-rf-site-selected", selectRequestedSite);
+  }, [systems]);
   function selectSite(system: string, nextCategory?: RfChartCategory) {
     setSelectedSystem(system);
     localStorage.setItem("pizzawave-system-rf-selected-site", system);
@@ -9284,12 +9308,12 @@ function RfMetricsPanel({ data, telemetry, rangeHours, baseline, category, findi
       { label: "Average", values: telemetrySite.points.map(point => point.averageDecodeRate), isBaseline: false, scope: selectedSystem },
       { label: "Minimum", values: telemetrySite.points.map(point => point.minimumDecodeRate), isBaseline: false, scope: selectedSystem },
       { label: "Strong reference", values: telemetrySite.points.map(() => 40), isBaseline: true, scope: selectedSystem }
-    ], baselineNote: `${telemetrySite.samples.toLocaleString()} passive samples; green/healthy still requires comparison with the site's local baseline and the 40 msg/sec strong-system reference.`
+    ], baselineNote: ""
   }, {
     title: "Control-Channel Frequency Error", yAxisLabel: "Average absolute error (Hz)", valueFormat: "F0",
     labels: telemetrySite.points.map(point => new Date(point.start * 1000).toISOString()),
     series: [{ label: "Frequency error", values: telemetrySite.points.map(point => point.averageAbsoluteFrequencyErrorHz), isBaseline: false, scope: selectedSystem }],
-    baselineNote: "Residual reported by Trunk Recorder for the active control channel; compare sustained changes within the same source/site."
+    baselineNote: ""
   }] : [];
   const scopedCharts = data.health.charts.map(chart => {
     const series = chart.series.filter(row => !row.scope || row.scope.toLowerCase() === selectedSystem.toLowerCase());
@@ -9302,7 +9326,6 @@ function RfMetricsPanel({ data, telemetry, rangeHours, baseline, category, findi
   const visibleCharts = [...preciseCharts, ...scopedCharts.filter(chart => !preciseCharts.length || chart.title !== "Decode Rate")]
     .filter(chart => category === "all" ? primaryTitles.has(chart.title) : rfChartCategoryForTitle(chart.title) === category)
     .filter(chart => chart.title !== "Capture Interruptions" || chart.series.some(series => series.values.some(value => value > 0)));
-  const baselineNote = scopedCharts.find(chart => chart.baselineNote)?.baselineNote;
   const annotations = finding?.ownerKey.toLowerCase() === selectedSystem.toLowerCase() ? finding.episodes : [];
   const transitions = telemetry.transitions.filter(row => row.systemShortName.toLowerCase() === selectedSystem.toLowerCase()).slice(-20).reverse();
   return <div className="rf-metrics-panel">
@@ -9314,8 +9337,6 @@ function RfMetricsPanel({ data, telemetry, rangeHours, baseline, category, findi
       <label>Compare against baseline <select value={baseline} onChange={e => setBaseline(e.target.value)}><option>7d</option><option>14d</option><option>30d</option></select></label>
     </div></SystemPageHeaderControls>
     {finding && <div className="card rf-finding-context"><div><strong>Finding evidence overlay</strong><p>{finding.title} · {finding.episodeCount.toLocaleString()} recorded episode(s). Shaded chart regions are immutable episode intervals linked to finding #{finding.findingId}.</p></div>{clearFinding && <button type="button" onClick={clearFinding}>Clear overlay</button>}</div>}
-    {baselineNote && <p className="baseline-note rf-baseline-summary">{baselineNote}</p>}
-    {telemetrySite && <p className="baseline-note rf-baseline-summary">{telemetrySite.samples.toLocaleString()} passive RF samples in this window. Expected status uses the site baseline, while 40 msg/sec remains the strong-system reference.</p>}
     <div className="tr-chart-grid">{visibleCharts.map(chart => <TrHealthChartView chart={chart} annotations={annotations} showBaselineNote={false} key={chart.title} />)}</div>
     {transitions.length > 0 && (category === "all" || category === "events") && <section className="system-content-section rf-transition-section"><SystemSectionHeader title="Control-Channel Transitions" description="Natural channel changes and recovery, in causal order; routine stable periods are omitted." /><div className="table-wrap"><table><thead><tr><th>Time</th><th>Site</th><th>What happened</th><th>Evidence</th></tr></thead><tbody>{transitions.map((row, index) => <tr key={`${row.timestampUtc}-${row.eventType}-${index}`}><td>{new Date(row.timestampUtc).toLocaleString()}</td><td>{trSystemDisplayName(row.systemShortName)}</td><td>{row.eventType === "control_channel_reacquired" ? "Control channel reacquired" : row.reason === "tdulc" ? "Network-directed channel change" : "Low-decode channel search"}</td><td>{row.eventType === "control_channel_reacquired" ? `${formatFixed(row.decodeRate, 0)} msg/sec after ${formatFixed(row.lowDecodeSeconds, 0)}s low decode on ${formatRfHz(Number(row.controlChannelHz || 0))}` : `${formatRfHz(Number(row.previousControlChannelHz || 0))} → ${formatRfHz(Number(row.requestedControlChannelHz || 0))}${row.success === false ? " (not covered)" : ""}`}</td></tr>)}</tbody></table></div></section>}
   </div>;
