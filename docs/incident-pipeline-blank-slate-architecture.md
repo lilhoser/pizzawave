@@ -233,6 +233,23 @@ Retrieval still limits context but never proves membership. Invalid output is
 rejection, not input to a repair model. Learned critique remains an offline or
 sampled evaluation instrument.
 
+That narrower typed-evidence boundary has now been implemented and tested in a
+standalone development harness. It removed state objects and observation
+identifiers from model output and allowed invalid output only to defer. GPT-OSS
+20B was fast and smaller (1.5 to 2.2 seconds, 11.28 GiB) but forced both
+reviewer-unresolved cases into distinct events. Qwen 3.6 produced valid records
+but falsely merged one unresolved pair, preserved only one of two uncertainties,
+and took 23.6 to 46.4 seconds at 20.55 GiB. Neither earns automatic append or
+create authority. The contract remains useful for non-mutating shadow evidence.
+
+Using both models as a consensus stage is explicitly rejected. Their combined
+Ventax residency was about 31.8 GiB, beyond Paxan's 24 GiB, and agreement is not
+proof. The next evidence need is a larger blind development set enriched for
+ambiguous continuity and generic acknowledgments, using clips not present in
+the completed six-case review. Until then, automatic membership mutation is
+blocked by insufficient and failed development evidence, not by implementation
+work.
+
 ### Provenance
 
 Provenance points to source observations rather than application-owned semantic
@@ -491,9 +508,10 @@ decisions.
 The development and sealed held-out corpus split is already extracted. The
 held-out directory remains unopened. A single bounded incremental proposal was
 tested and rejected: GLM did not return usable content and all six Qwen state
-proposals failed deterministic validation. The next experiment must narrow the
-model boundary to typed source-grounded evidence and keep the state transition
-application-owned. It must contain no static event taxonomy, talkgroup mapping,
-automatic semantic membership rule, production writer, or scheduler. The
-already-frozen human adjudication criteria and quantitative gates apply before
-any sealed held-out evaluation.
+proposals failed deterministic validation. A subsequent typed-evidence contract
+improved structure and latency but failed to preserve reviewer uncertainty with
+either GPT-OSS 20B or Qwen 3.6. It remains non-mutating shadow scaffolding. The
+next development corpus expansion must contain no static event taxonomy,
+talkgroup mapping, automatic semantic membership rule, production writer, or
+scheduler. The already-frozen human adjudication criteria and quantitative
+gates apply before any sealed held-out evaluation.

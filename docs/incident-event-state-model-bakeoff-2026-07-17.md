@@ -529,6 +529,73 @@ abstention or the evidence boundary required to mutate state. This is a model
 and contract result, not evidence that a larger model or prompt revision would
 make the architecture safe.
 
+### Typed-evidence transition gate
+
+A narrower experiment removed hypothesis and state construction from the model
+response. The model returned only a typed verdict, one natural-language
+relationship statement, uncertainty, exact transcript citations separated into
+prior and new observation evidence, and unresolved questions. Application code
+owned the observation identities, validated the citations, and deterministically
+mapped an admitted verdict to append, create, or defer. Invalid records could
+only defer. No metadata was available as output evidence.
+
+The initial schema pilot reused a general provenance shape that required a
+metadata field and was discarded as a contract-design error. Version 2 removed
+that field and observation identifiers from model output. This was a structural
+correction, not semantic tuning against the six review answers. The v2 prompt
+and validator were then frozen for the following comparison.
+
+GPT-OSS 20B loaded at 11.28 GiB and completed the six calls in 1.5 to 2.2
+seconds each (mean 2.0 seconds). Five of six records passed deterministic
+validation. It correctly identified the three confirmed shared-event pairs and
+the confirmed distinct-event pair, but forced both reviewer-unresolved pairs
+to `supports_distinct_event`. One of those records was rejected for an inexact
+quote and therefore safely deferred by application code; the other caused a
+false split. The model preserved 0 of 2 unresolved verdicts. It also justified
+the admitted false split from absence of overlapping content despite an
+explicit instruction that absence does not prove distinct events. Artifact
+hashes in review order are:
+
+- `8FD387F759358C5BFB048B45BDE5E3E3B7CE4454C933B07A3DA3EB7EA38F27DB`
+- `BF48DBBBE6C4C5AD6236100D76234107D6E00FAFF5A9E72139B334332E651C0A`
+- `8C4F0B2FF522BF20C7846B88072C5F7B5C6B0D7A37B813DB837BA76AD7854619`
+- `C1BE4FAE4DF533D115C22CC05DFD364D9123191E3BF28A5BE5AE49F823104312`
+- `7128423E14FD9737DD86EAC06622693DB11345D22005279DB8195517A077468F`
+- `C024AD22142C98AB5CDE9CD4AFBE2D8E7774342E8377A1E6D41A64F1E94666A5`
+
+Qwen 3.6 35B-A3B loaded at 20.55 GiB and completed the same contract in
+23.6 to 46.4 seconds per call (mean 36.6 seconds). All six records passed
+deterministic validation. It found all three confirmed shared relationships,
+the confirmed distinct pair, and one reviewer-unresolved pair. It falsely
+merged the other reviewer-unresolved pair with 0.1 uncertainty, claiming that
+a generic acknowledgment and conversational adjacency established continuity.
+That is one false relationship among four admitted relationships (3/4
+precision) and preserves only 1 of 2 reviewer-marked uncertainties. Artifact
+hashes in review order are:
+
+- `97FBA23379321548CEC2309722010C7974D1F69F94DB863FB13ED23DC995384B`
+- `7E3E98DE0B6F2384F67F9F3D00465978B0FE96746A0AA8C2CB2C2173A7DE80DD`
+- `FC1B49BD06347165DE64E583652E652B1E3CE1C8DDB733DDA76FB64B413D20C6`
+- `7B0D6B742E714B50899747C4E4AA1B23AA2A5BBA92D7957FFB1AFC8A368CBAD7`
+- `60B485806994C9FDB2E1E4058D14A0CB20F70C65EAC71605A3A468EC74CC75FD`
+- `02E5D4B98A6E2B8FBEEBF483E2BD504229DF544758E7494BB81CA6B7F79B0425`
+
+The models' disagreement on the two unresolved cases would make a consensus
+rule look successful on this tiny set, but it is not a viable production
+design. The models occupied about 31.8 GiB combined on Ventax, Paxan has only
+24 GiB, and mandatory dual generation violates the one-generation operational
+gate. Model agreement is also not relationship proof. The typed contract is
+useful safety scaffolding, but neither tested model earned automatic state
+mutation and the held-out corpus remains sealed.
+
+A second blind development package is prepared for the next evidence step. It
+contains 12 cases and 24 unique clips, with no observation repeated from the
+completed six-case package. Timing and transcript similarity were used only to
+diversify candidate retrieval; they did not assign review answers. The package
+SHA-256 is
+`B9E20BB19282EFF1B3CCA2039B00F6ECAAB681E9DDCF90A821ED160BA205FBDF`.
+No model result is bundled into the reviewer view.
+
 ## Next gates
 
 - Do not spend additional review or Paxan capacity on Voxtral for this design.
@@ -536,13 +603,14 @@ make the architecture safe.
   proceed to the pairwise-evidence-dependent transition experiment.
 - Do not promote GLM, Qwen, or Gemma to a live incident-state writer based on
   these development experiments.
-- Separate semantic evidence generation from state mutation. The next
-  experiment should compare bounded, typed evidence records produced from each
-  observation with a prior hypothesis, while an application-owned transition
-  function alone applies append, supersede, defer, or reject operations.
-- Measure whether a smaller candidate generator can supply useful evidence
-  within Paxan's latency and memory budget. Treat invalid output as abstention;
-  do not repair it into membership or tune against these six reviewed answers.
+- Retain the typed-evidence contract and application-owned transition only as
+  non-mutating shadow scaffolding. Do not enable its append/create operations.
+- Add new, non-repeated development cases enriched for ambiguous follow-ups,
+  generic acknowledgments, and plausible-but-unproven continuity. Blind human
+  adjudication is required before another model can earn automatic mutation;
+  legacy V2/V3 membership and model agreement are not labels.
+- Do not build a mandatory multi-model consensus stage. Treat invalid output
+  as abstention and do not tune another prompt against these six answers.
 - Use deterministic provenance and reference checks on every output. Sample
   learned critique offline for evaluation; do not require a second live model
   generation unless Paxan throughput later proves it affordable.

@@ -33,7 +33,13 @@ def canonical_bytes(value: Any) -> bytes:
 
 
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    prefix = "window.INCIDENT_RELATIONSHIP_REVIEW_PACKAGE="
+    if text.startswith(prefix):
+        text = text[len(prefix) :].strip()
+        if text.endswith(";"):
+            text = text[:-1]
+    return json.loads(text)
 
 
 def parse_pair(value: str) -> tuple[str, str]:
@@ -47,11 +53,18 @@ def excluded_observation_ids(path: Path | None) -> set[str]:
     if path is None:
         return set()
     package = read_json(path)
-    return {
+    excluded = {
         item.get("observation_id", "")
         for item in package.get("items", [])
         if item.get("observation_id")
     }
+    excluded.update(
+        observation.get("observation_id", "")
+        for case in package.get("cases", [])
+        for observation in case.get("observations", [])
+        if observation.get("observation_id")
+    )
+    return excluded
 
 
 def metadata_value(observation: dict[str, Any], field: str) -> str:
@@ -181,6 +194,10 @@ def main() -> int:
     package_json = json.dumps(package, ensure_ascii=False, separators=(",", ":"))
     (args.output_directory / "review-package.js").write_text(
         f"window.INCIDENT_RELATIONSHIP_REVIEW_PACKAGE={package_json};\n",
+        encoding="utf-8",
+    )
+    (args.output_directory / "review-package.json").write_text(
+        json.dumps(package, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     review_template = {
