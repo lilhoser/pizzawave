@@ -530,3 +530,12 @@ next development corpus expansion must contain no static event taxonomy,
 talkgroup mapping, automatic semantic membership rule, production writer, or
 scheduler. The already-frozen human adjudication criteria and quantitative
 gates apply before any sealed held-out evaluation.
+
+On 2026-07-20, the surviving link-only boundary was implemented locally as an
+isolated shadow contract. A model may propose one exact-source-cited link from a
+new observation to one bounded retrieved event, or abstain. It cannot assert a
+distinct event or construct state. Application code validates the citations and
+candidate token, appends the attempt to a dedicated hash-verified ledger, and
+projects either the admitted link or an unresolved singleton. The implementation
+has no scheduler, endpoint, production writer, or deployment configuration. See
+`docs/incident-event-link-shadow.md`.

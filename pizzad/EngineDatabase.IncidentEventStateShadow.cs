@@ -242,6 +242,35 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         CREATE INDEX IF NOT EXISTS idx_incident_event_state_shadow_projections_generated
             ON incident_event_state_shadow_projections(generated_at_utc, sequence);
 
+        CREATE TABLE IF NOT EXISTS incident_event_state_link_shadow_ledger (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            ledger_entry_id TEXT NOT NULL UNIQUE,
+            recorded_at_utc TEXT NOT NULL,
+            bundle_id TEXT NOT NULL,
+            proposal_id TEXT NOT NULL,
+            new_observation_id TEXT NOT NULL,
+            transition_outcome TEXT NOT NULL,
+            projection_event_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_recorded
+            ON incident_event_state_link_shadow_ledger(recorded_at_utc, sequence);
+        CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_observation
+            ON incident_event_state_link_shadow_ledger(new_observation_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS incident_event_state_link_shadow_projections (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            projection_id TEXT NOT NULL UNIQUE,
+            generated_at_utc TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_projections_generated
+            ON incident_event_state_link_shadow_projections(generated_at_utc, sequence);
+
         CREATE TRIGGER IF NOT EXISTS incident_event_state_shadow_ledger_no_update
         BEFORE UPDATE ON incident_event_state_shadow_ledger
         BEGIN
@@ -264,6 +293,30 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         BEFORE DELETE ON incident_event_state_shadow_projections
         BEGIN
             SELECT RAISE(ABORT, 'incident event-state shadow projections are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_event_state_link_shadow_ledger_no_update
+        BEFORE UPDATE ON incident_event_state_link_shadow_ledger
+        BEGIN
+            SELECT RAISE(ABORT, 'incident event-state link shadow ledger is append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_event_state_link_shadow_ledger_no_delete
+        BEFORE DELETE ON incident_event_state_link_shadow_ledger
+        BEGIN
+            SELECT RAISE(ABORT, 'incident event-state link shadow ledger is append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_event_state_link_shadow_projections_no_update
+        BEFORE UPDATE ON incident_event_state_link_shadow_projections
+        BEGIN
+            SELECT RAISE(ABORT, 'incident event-state link shadow projections are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_event_state_link_shadow_projections_no_delete
+        BEFORE DELETE ON incident_event_state_link_shadow_projections
+        BEGIN
+            SELECT RAISE(ABORT, 'incident event-state link shadow projections are append-only');
         END;
         """;
 }
