@@ -80,12 +80,23 @@ under the one-sided policy admitted 8/8 correct GPT-OSS links with `8/11`
 relationship recall. The old Qwen outputs admitted 8 correct and 1 false link.
 Those are transformations of old responses, not runs of the new prompt.
 
+The same frozen link-only prompt was then run directly with GPT-OSS 20B on the
+Ventax experiment host. It produced 17 contract-valid responses and admitted 4
+positive links. All 4 matched the existing review, for observed positive-link
+precision `1.000`, but relationship recall was only `4/11` (`0.364`). Mean
+generation time was 3.7 seconds, range 3.3 to 4.4 seconds. The score artifact
+SHA-256 is
+`5B93CB232C8640F115329F1E59FF0C3EB3841A6AB63FF01926519D00DABC53ED`.
+Ventax was used only for this offline comparison; its model was unloaded and
+the SSH tunnel was closed afterward.
+
 ## Consequence
 
 The one-sided boundary materially limits harm: misses become extra singletons
-instead of false model-declared splits. The first Qwen run nevertheless has too
-little recall, too little development evidence, and too much latency to justify
-live shadow scheduling or production authority.
+instead of false model-declared splits. Qwen has better recall but much higher
+latency; GPT-OSS is faster but substantially less complete. Both have too little
+recall and too little development evidence to justify live shadow scheduling or
+production authority.
 
 Do not request new manual labels. Existing reviews remain smoke evidence only;
 ordinary operator corrections may later be recorded as passive evaluation
