@@ -2807,6 +2807,28 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
 .incident-review-row small { color: #9faab5; }
 .incident-review-row > span:last-child { color: #f7c948; font-size: 12px; }
 .incident-chain-card { overflow: hidden; }
+.incident-shadow-card { overflow: hidden; }
+.incident-shadow-run-picker { display: flex; align-items: center; gap: 6px; color: #aeb8c2; font-size: 12px; }
+.incident-shadow-run-picker select { max-width: 280px; }
+.incident-shadow-summary { margin-bottom: 8px; }
+.incident-shadow-list { display: grid; gap: 5px; }
+.incident-shadow-row {
+  display: grid;
+  grid-template-columns: 76px minmax(260px, 1fr) minmax(140px, auto);
+  align-items: center;
+  gap: 9px;
+  min-height: 54px;
+  padding: 7px 9px;
+  border: 1px solid #30363d;
+  background: #191e23;
+}
+.incident-shadow-identity,
+.incident-shadow-activity { display: grid; gap: 2px; min-width: 0; }
+.incident-shadow-identity em { color: #c6d0d8; font-size: 11px; font-style: normal; }
+.incident-shadow-identity small,
+.incident-shadow-activity small { color: #9faab5; }
+.incident-shadow-identity .warning-text { color: #f7c948; }
+.incident-shadow-activity { text-align: right; }
 .incident-chain-list { display: grid; gap: 5px; }
 .incident-chain-row {
   display: grid;
@@ -2933,6 +2955,8 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   .incident-review-row { grid-template-columns: minmax(0, 1fr) !important; }
   .incident-chain-row { grid-template-columns: 72px minmax(0, 1fr); }
   .incident-chain-activity { grid-column: 2; text-align: left; }
+  .incident-shadow-row { grid-template-columns: 72px minmax(0, 1fr); }
+  .incident-shadow-activity { grid-column: 2; text-align: left; }
 }
 .log-box {
   width: 100%;

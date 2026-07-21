@@ -18,6 +18,8 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
             throw new ArgumentException(string.Join("; ", projectionValidation.Errors), nameof(projection));
         if (!projection.LedgerEntryIds.Contains(entry.LedgerEntryId, StringComparer.Ordinal))
             throw new ArgumentException("link projection does not reference the appended ledger entry", nameof(projection));
+        if (!string.Equals(entry.RunId, projection.RunId, StringComparison.Ordinal))
+            throw new ArgumentException("link ledger entry and projection belong to different runs", nameof(projection));
 
         await using var connection = OpenConnection();
         await using var transaction = connection.BeginTransaction();
@@ -28,6 +30,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
         entryCommand.Transaction = transaction;
         entryCommand.CommandText = """
             INSERT INTO incident_event_state_link_shadow_ledger (
+                run_id,
                 ledger_entry_id,
                 recorded_at_utc,
                 bundle_id,
@@ -38,6 +41,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
                 content_hash,
                 payload_json
             ) VALUES (
+                $run_id,
                 $ledger_entry_id,
                 $recorded_at_utc,
                 $bundle_id,
@@ -50,6 +54,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
             );
             SELECT last_insert_rowid();
             """;
+        entryCommand.Parameters.AddWithValue("$run_id", entry.RunId);
         entryCommand.Parameters.AddWithValue("$ledger_entry_id", entry.LedgerEntryId);
         entryCommand.Parameters.AddWithValue("$recorded_at_utc", entry.RecordedAtUtc.UtcDateTime.ToString("O"));
         entryCommand.Parameters.AddWithValue("$bundle_id", entry.Bundle.BundleId);
@@ -69,11 +74,13 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
         projectionCommand.Transaction = transaction;
         projectionCommand.CommandText = """
             INSERT INTO incident_event_state_link_shadow_projections (
+                run_id,
                 projection_id,
                 generated_at_utc,
                 content_hash,
                 payload_json
             ) VALUES (
+                $run_id,
                 $projection_id,
                 $generated_at_utc,
                 $content_hash,
@@ -81,6 +88,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
             );
             SELECT last_insert_rowid();
             """;
+        projectionCommand.Parameters.AddWithValue("$run_id", projection.RunId);
         projectionCommand.Parameters.AddWithValue("$projection_id", projection.ProjectionId);
         projectionCommand.Parameters.AddWithValue("$generated_at_utc", projection.GeneratedAtUtc.UtcDateTime.ToString("O"));
         projectionCommand.Parameters.AddWithValue("$content_hash", projectionHash);
@@ -94,6 +102,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
     }
 
     public async Task<IReadOnlyList<IncidentEventStateStoredLinkLedgerEntry>> ListIncidentEventStateLinkShadowLedgerEntriesAsync(
+        string runId,
         long afterSequence,
         int limit,
         CancellationToken ct)
@@ -104,11 +113,12 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
         command.CommandText = """
             SELECT sequence, content_hash, payload_json
             FROM incident_event_state_link_shadow_ledger
-            WHERE sequence > $after_sequence
+            WHERE run_id=$run_id AND sequence > $after_sequence
             ORDER BY sequence
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$after_sequence", Math.Max(0, afterSequence));
+        command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 1000));
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -126,6 +136,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
     }
 
     public async Task<IncidentEventStateStoredLinkProjection?> GetLatestIncidentEventStateLinkShadowProjectionAsync(
+        string runId,
         CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -133,9 +144,11 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
         command.CommandText = """
             SELECT sequence, content_hash, payload_json
             FROM incident_event_state_link_shadow_projections
+            WHERE run_id=$run_id
             ORDER BY sequence DESC
             LIMIT 1;
             """;
+        command.Parameters.AddWithValue("$run_id", runId);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
             return null;
@@ -150,6 +163,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
     }
 
     public async Task<IncidentEventStateStoredLinkLedgerEntry?> GetLatestIncidentEventStateLinkShadowLedgerEntryAsync(
+        string runId,
         CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -157,9 +171,11 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
         command.CommandText = """
             SELECT sequence, content_hash, payload_json
             FROM incident_event_state_link_shadow_ledger
+            WHERE run_id=$run_id
             ORDER BY sequence DESC
             LIMIT 1;
             """;
+        command.Parameters.AddWithValue("$run_id", runId);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
             return null;
@@ -186,8 +202,9 @@ public sealed partial class EngineDatabase : IIncidentEventStateLinkShadowStore
             command.CommandText = """
                 SELECT sequence, content_hash, payload_json
                 FROM incident_event_state_link_shadow_ledger
-                WHERE ledger_entry_id=$ledger_entry_id;
+                WHERE run_id=$run_id AND ledger_entry_id=$ledger_entry_id;
                 """;
+            command.Parameters.AddWithValue("$run_id", projection.RunId);
             command.Parameters.AddWithValue("$ledger_entry_id", ledgerEntryId);
             await using var reader = await command.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct))

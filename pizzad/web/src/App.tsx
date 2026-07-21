@@ -8,7 +8,7 @@ import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import { locationDisplayName, locationKey, locationShortName } from "./features/dashboard/location";
-import type { IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
+import type { IncidentDecisionChainPage, IncidentDecisionGroup, IncidentLinkShadowReport } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
 import type { LiveRfStatus } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
@@ -9369,6 +9369,7 @@ function rfChartCategoryForTitle(title: string): Exclude<RfChartCategory, "all">
 function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHoursChange }: { dashboard: Dashboard | null; rangeHours: number; refreshToken: number; onRangeHoursChange: (hours: number) => void }) {
   const [page, setPage] = useState(1);
   const [openChain, setOpenChain] = useState<string | null>(null);
+  const [selectedShadowRun, setSelectedShadowRun] = useState("");
   useEffect(() => { setPage(1); setOpenChain(null); }, [rangeHours]);
   const chainResource = usePersistentRefresh({
     key: `incident-chains|${rangeHours}|${page}|${refreshToken}`,
@@ -9376,6 +9377,12 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
     load: () => api.request<IncidentDecisionChainPage>(`/api/v1/incidents/chains?hours=${rangeHours}&page=${page}&pageSize=20`)
   });
   const chains = chainResource.data;
+  const shadowResource = usePersistentRefresh({
+    key: `incident-link-shadow|${selectedShadowRun}|${refreshToken}`,
+    enabled: true,
+    load: () => api.request<IncidentLinkShadowReport>(`/api/v1/incidents/link-shadow?limit=100${selectedShadowRun ? `&runId=${encodeURIComponent(selectedShadowRun)}` : ""}`)
+  });
+  const shadow = shadowResource.data;
   if (!dashboard || !chains) return <div className="card">Loading incident performance...</div>;
 
   const categoryCounts = Array.from(new Set(dashboard.incidents.map(incident => incident.category))).map(category => ({ label: label(category), value: dashboard.incidents.filter(incident => incident.category === category).length })).sort((a, b) => b.value - a.value);
@@ -9404,6 +9411,33 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
       <section className="system-content-section"><SystemSectionHeader title="Incident Categories" /><Bars title="Incident Categories" rows={categoryBars} showTitle={false} /></section>
       <section className="system-content-section"><SystemSectionHeader title="Retained Calls per Incident" /><Bars title="Retained Calls per Incident" rows={callBars} showTitle={false} /></section>
     </div>
+    <section className="card incident-shadow-card system-content-section">
+      <SystemSectionHeader title="Link Shadow Experiment" description="Read-only experiment evidence. These model decisions and projected events do not create, update, or delete production incidents." actions={shadow?.runs.length ? <label className="incident-shadow-run-picker">Run <select value={shadow.selectedRunId} onChange={event => setSelectedShadowRun(event.target.value)}>{shadow.runs.map(run => <option value={run.runId} key={run.runId}>{run.runId}{run.isConfiguredRun ? " (configured)" : ""}</option>)}</select></label> : null} />
+      <PanelLoadState label="link shadow experiment" state={shadowResource.state} hasData={Boolean(shadow)} onRetry={shadowResource.refresh} />
+      {shadow && <>
+        <div className="incident-outcome-summary incident-shadow-summary" aria-label="Link shadow outcomes">
+          <span><strong>{shadow.totals.attempts.toLocaleString()}</strong> attempts</span>
+          <span><strong>{shadow.totals.candidateBackedAttempts.toLocaleString()}</strong> with candidates</span>
+          <span><strong>{shadow.totals.proposedLinks.toLocaleString()}</strong> links proposed</span>
+          <span><strong>{shadow.totals.admittedLinks.toLocaleString()}</strong> links admitted</span>
+          <span><strong>{shadow.totals.abstentions.toLocaleString()}</strong> abstentions</span>
+          <span><strong>{shadow.totals.invalidProposals.toLocaleString()}</strong> invalid</span>
+          <span><strong>{Math.round(shadow.totals.averageProposerMilliseconds / 100) / 10}s</strong> average model time</span>
+          <span><strong>{shadow.totals.totalTokens.toLocaleString()}</strong> tokens</span>
+          <span><strong>{shadow.totals.projectedEvents.toLocaleString()}</strong> projected events</span>
+        </div>
+        <div className="incident-shadow-list">{shadow.attempts.map(attempt => {
+          const admitted = attempt.outcome === "LinkedToExistingEvent";
+          const failed = Boolean(attempt.validationErrors.length || attempt.proposerError);
+          return <div className="incident-shadow-row" key={attempt.sequence}>
+            <span className={`section-status ${failed ? "warning" : admitted ? "ok" : "neutral"}`}>{failed ? "Invalid" : admitted ? "Linked" : "Unresolved"}</span>
+            <span className="incident-shadow-identity"><strong>Call {attempt.callId || "unknown"}</strong><small>{new Date(attempt.recordedAtUtc).toLocaleString()} · {attempt.candidateCount} candidate{attempt.candidateCount === 1 ? "" : "s"} · {attempt.modelIdentity}</small><em>{attempt.relationshipStatement || attempt.unresolvedQuestions[0] || "No relationship statement recorded."}</em>{attempt.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}{attempt.proposerError && <small className="warning-text">{attempt.proposerError}</small>}</span>
+            <span className="incident-shadow-activity"><strong>{attempt.decision === "ProposeLink" ? "Proposed link" : "Abstained"}</strong><small>{(attempt.proposerMilliseconds / 1000).toFixed(1)}s · uncertainty {Math.round(attempt.uncertainty * 100)}%</small></span>
+          </div>;
+        })}</div>
+        {!shadow.attempts.length && <p className="muted">This run has no sampled calls yet. It begins at its startup fence and does not backfill history.</p>}
+      </>}
+    </section>
     <section className="card incident-chain-card system-content-section">
       <SystemSectionHeader title="Incident Pipeline Inspector" description="Persisted incidents and dropped candidates, grouped by operator-facing outcome. Open a row to follow each call through the recorded decisions to its result." actions={pageCount > 1 ? <div className="pagination-row table-top-pagination"><button disabled={page <= 1} onClick={() => setPage(1)}>First</button><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button><span>Page {page} of {pageCount}</span><button disabled={page >= pageCount} onClick={() => setPage(page + 1)}>Next</button><button disabled={page >= pageCount} onClick={() => setPage(pageCount)}>Last</button></div> : null} />
       <PanelLoadState label="incident decision chains" state={chainResource.state} hasData={Boolean(chains)} onRetry={chainResource.refresh} />

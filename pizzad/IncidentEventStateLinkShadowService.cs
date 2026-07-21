@@ -68,6 +68,7 @@ public sealed class IncidentEventStateLinkShadowService : BackgroundService
 
     private async Task RunOnceAsync(CancellationToken ct)
     {
+        var runId = _config.AiInsights.IncidentEventLinkShadowRunId.Trim();
         var now = DateTimeOffset.UtcNow;
         var start = now.AddMinutes(-_config.AiInsights.IncidentEventLinkShadowLookbackMinutes)
             .ToUnixTimeSeconds();
@@ -78,10 +79,11 @@ public sealed class IncidentEventStateLinkShadowService : BackgroundService
 
         if (_lastSampledCallId is null)
         {
-            var latestEntry = await _database.GetLatestIncidentEventStateLinkShadowLedgerEntryAsync(ct);
+            var latestEntry = await _database.GetLatestIncidentEventStateLinkShadowLedgerEntryAsync(runId, ct);
             _lastSampledCallId = SourceCallId(latestEntry?.Entry) ?? calls.LastOrDefault()?.Id ?? 0;
             _logger.LogInformation(
-                "Link-only incident shadow initialized after call {CallId}; historical calls will not be backfilled",
+                "Link-only incident shadow run {RunId} initialized after call {CallId}; historical calls will not be backfilled",
+                runId,
                 _lastSampledCallId);
             return;
         }
@@ -92,7 +94,7 @@ public sealed class IncidentEventStateLinkShadowService : BackgroundService
         if (newCall is null)
             return;
 
-        var priorStored = await _database.GetLatestIncidentEventStateLinkShadowProjectionAsync(ct);
+        var priorStored = await _database.GetLatestIncidentEventStateLinkShadowProjectionAsync(runId, ct);
         var priorProjection = priorStored?.Projection;
         var matches = priorProjection is null
             ? []
@@ -111,14 +113,15 @@ public sealed class IncidentEventStateLinkShadowService : BackgroundService
             _config.AiInsights.IncidentEventLinkShadowCandidateLimit,
             now);
 
-        var proposer = new OpenAiIncidentEventStateLinkProposer(_config, _database, _logger);
+        var proposer = new OpenAiIncidentEventStateLinkProposer(_config, _database, _logger, runId);
         var coordinator = new IncidentEventStateLinkShadowCoordinator(proposer, _database);
         var callIdentity = newCall.Id.ToString(CultureInfo.InvariantCulture);
         var result = await coordinator.RunAsync(
             new IncidentEventStateLinkShadowRunRequest(
-                $"link-live:ledger:call:{callIdentity}",
-                $"link-live:projection:call:{callIdentity}",
-                $"link-live:event:call:{callIdentity}",
+                runId,
+                $"link-live:{runId}:ledger:call:{callIdentity}",
+                $"link-live:{runId}:projection:call:{callIdentity}",
+                $"link-live:{runId}:event:call:{callIdentity}",
                 Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown",
                 ConfigurationIdentity()),
             selection.Bundle,
@@ -129,7 +132,8 @@ public sealed class IncidentEventStateLinkShadowService : BackgroundService
 
         _lastSampledCallId = newCall.Id;
         _logger.LogInformation(
-            "Link-only incident shadow sampled call {CallId}: {Outcome}, candidates={CandidateCount}, proposerMs={DurationMs}, proposerError={HasError}; production incident state unchanged",
+            "Link-only incident shadow run {RunId} sampled call {CallId}: {Outcome}, candidates={CandidateCount}, proposerMs={DurationMs}, proposerError={HasError}; production incident state unchanged",
+            runId,
             newCall.Id,
             result.LedgerEntry.Entry.Transition.Outcome,
             selection.Candidates.Count,
@@ -138,12 +142,13 @@ public sealed class IncidentEventStateLinkShadowService : BackgroundService
     }
 
     private string ConfigurationIdentity() =>
-        $"incident-event-link-live-v1;interval={_config.AiInsights.IncidentEventLinkShadowIntervalSeconds};lookback={_config.AiInsights.IncidentEventLinkShadowLookbackMinutes};candidates={_config.AiInsights.IncidentEventLinkShadowCandidateLimit}";
+        $"incident-event-link-live-v2;run={_config.AiInsights.IncidentEventLinkShadowRunId.Trim()};interval={_config.AiInsights.IncidentEventLinkShadowIntervalSeconds};lookback={_config.AiInsights.IncidentEventLinkShadowLookbackMinutes};candidates={_config.AiInsights.IncidentEventLinkShadowCandidateLimit}";
 
     private bool IsEnabled() =>
         _config.Setup.Completed &&
         _config.AiInsights.Enabled &&
         _config.AiInsights.IncidentEventLinkShadowEnabled &&
+        !string.IsNullOrWhiteSpace(_config.AiInsights.IncidentEventLinkShadowRunId) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
@@ -259,12 +264,14 @@ public sealed class OpenAiIncidentEventStateLinkProposer : IIncidentEventStateLi
     private readonly EngineConfig _config;
     private readonly EngineDatabase _database;
     private readonly ILogger _logger;
+    private readonly string _runId;
 
-    public OpenAiIncidentEventStateLinkProposer(EngineConfig config, EngineDatabase database, ILogger logger)
+    public OpenAiIncidentEventStateLinkProposer(EngineConfig config, EngineDatabase database, ILogger logger, string runId)
     {
         _config = config;
         _database = database;
         _logger = logger;
+        _runId = runId;
     }
 
     public async Task<IncidentEventStateLinkProposal> ProposeAsync(
@@ -361,7 +368,7 @@ public sealed class OpenAiIncidentEventStateLinkProposer : IIncidentEventStateLi
             await _database.AddLmUsageAsync(new TokenUsageEntryDto(
                 0,
                 DateTime.UtcNow,
-                "incident link shadow",
+                $"incident link shadow:{_runId}",
                 "chat.completions",
                 success,
                 error,

@@ -244,6 +244,7 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
 
         CREATE TABLE IF NOT EXISTS incident_event_state_link_shadow_ledger (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL DEFAULT 'legacy',
             ledger_entry_id TEXT NOT NULL UNIQUE,
             recorded_at_utc TEXT NOT NULL,
             bundle_id TEXT NOT NULL,
@@ -259,11 +260,9 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
             ON incident_event_state_link_shadow_ledger(recorded_at_utc, sequence);
         CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_observation
             ON incident_event_state_link_shadow_ledger(new_observation_id, sequence);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_observation_unique
-            ON incident_event_state_link_shadow_ledger(new_observation_id);
-
         CREATE TABLE IF NOT EXISTS incident_event_state_link_shadow_projections (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL DEFAULT 'legacy',
             projection_id TEXT NOT NULL UNIQUE,
             generated_at_utc TEXT NOT NULL,
             content_hash TEXT NOT NULL,

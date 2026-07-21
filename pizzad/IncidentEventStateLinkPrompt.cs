@@ -147,6 +147,7 @@ public static class IncidentEventStateLinkPrompt
         IReadOnlyList<IncidentEventStateLinkCandidate> candidates) =>
         new(
             "prompt-validation",
+            "prompt-validation",
             DateTimeOffset.UnixEpoch,
             [],
             candidates.Select(candidate => new IncidentEventStateLinkProjectionEvent(

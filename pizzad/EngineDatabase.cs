@@ -4952,6 +4952,12 @@ public sealed partial class EngineDatabase
 
     private async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
     {
+        await AddColumnIfMissingAsync(connection, "incident_event_state_link_shadow_ledger", "run_id", "TEXT NOT NULL DEFAULT 'legacy'", ct);
+        await AddColumnIfMissingAsync(connection, "incident_event_state_link_shadow_projections", "run_id", "TEXT NOT NULL DEFAULT 'legacy'", ct);
+        await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_incident_event_state_link_shadow_ledger_observation_unique;", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_run_observation_unique ON incident_event_state_link_shadow_ledger(run_id, new_observation_id);", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_run_sequence ON incident_event_state_link_shadow_ledger(run_id, sequence);", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_projection_run_sequence ON incident_event_state_link_shadow_projections(run_id, sequence);", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "incident_key", "TEXT", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "category", "TEXT NOT NULL DEFAULT 'other'", ct);

@@ -824,6 +824,19 @@ app.MapGet("/api/v1/incidents/chains", async (HttpContext context, int? hours, i
 .WithName("IncidentDecisionChains")
 .WithOpenApi();
 
+app.MapGet("/api/v1/incidents/link-shadow", async (HttpContext context, string? runId, int? limit, AuthService authService, EngineConfig config, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await database.GetIncidentEventStateLinkShadowReportAsync(
+        config.AiInsights.IncidentEventLinkShadowEnabled,
+        config.AiInsights.IncidentEventLinkShadowRunId,
+        runId,
+        limit ?? 100,
+        context.RequestAborted));
+})
+.WithName("IncidentLinkShadowReport")
+.WithOpenApi();
+
 app.MapGet("/api/v1/troubleshoot/tr-health", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

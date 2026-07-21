@@ -42,6 +42,7 @@ public sealed record IncidentEventStateLinkProjectionEvent(
     IReadOnlyList<string> SourceLedgerEntryIds);
 
 public sealed record IncidentEventStateLinkProjection(
+    string RunId,
     string ProjectionId,
     DateTimeOffset GeneratedAtUtc,
     IReadOnlyList<string> LedgerEntryIds,
@@ -60,6 +61,7 @@ public sealed record IncidentEventStateLinkExecutionContext(
     string ProposerError);
 
 public sealed record IncidentEventStateLinkLedgerEntry(
+    string RunId,
     string LedgerEntryId,
     DateTimeOffset RecordedAtUtc,
     IncidentEventStateObservationBundle Bundle,
@@ -82,6 +84,7 @@ public sealed record IncidentEventStateStoredLinkProjection(
     IncidentEventStateLinkProjection Projection);
 
 public sealed record IncidentEventStateLinkShadowRunRequest(
+    string RunId,
     string LedgerEntryId,
     string ProjectionId,
     string SingletonProjectionEventId,
@@ -253,6 +256,7 @@ public static class IncidentEventStateLinkContractValidator
         IncidentEventStateLinkLedgerEntry entry)
     {
         var errors = new List<string>();
+        RequireValue(entry.RunId, "link shadow run id", errors);
         RequireValue(entry.LedgerEntryId, "link ledger entry id", errors);
         RequireValue(entry.SingletonProjectionEventId, "singleton projection event id", errors);
         if (entry.RecordedAtUtc == default)
@@ -298,6 +302,7 @@ public static class IncidentEventStateLinkContractValidator
         IncidentEventStateLinkProjection projection)
     {
         var errors = new List<string>();
+        RequireValue(projection.RunId, "link shadow run id", errors);
         RequireValue(projection.ProjectionId, "link projection id", errors);
         if (projection.GeneratedAtUtc == default)
             errors.Add("link projection generated timestamp is required");
@@ -436,6 +441,7 @@ public static class IncidentEventStateLinkProjector
         }
 
         var projection = new IncidentEventStateLinkProjection(
+            entry.RunId,
             projectionId,
             generatedAtUtc,
             (priorProjection?.LedgerEntryIds ?? []).Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList(),
@@ -471,6 +477,7 @@ public sealed class IncidentEventStateLinkShadowCoordinator
         IReadOnlyList<IncidentEventStateLinkCandidate> candidates,
         CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.RunId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.LedgerEntryId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ProjectionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SingletonProjectionEventId);
@@ -484,6 +491,8 @@ public sealed class IncidentEventStateLinkShadowCoordinator
             candidates);
         if (!inputValidation.IsValid)
             throw new ArgumentException(string.Join("; ", inputValidation.Errors), nameof(bundle));
+        if (priorProjection is not null && !string.Equals(priorProjection.RunId, request.RunId, StringComparison.Ordinal))
+            throw new ArgumentException("prior projection belongs to a different link shadow run", nameof(priorProjection));
 
         var now = _timeProvider.GetUtcNow();
         IncidentEventStateLinkProposal proposal;
@@ -563,6 +572,7 @@ public sealed class IncidentEventStateLinkShadowCoordinator
         }
 
         var entry = new IncidentEventStateLinkLedgerEntry(
+            request.RunId,
             request.LedgerEntryId,
             now,
             bundle,

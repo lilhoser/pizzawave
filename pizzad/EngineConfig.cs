@@ -403,6 +403,7 @@ public sealed class AiInsightsConfig
     public bool IncidentV3PlanExecutorEnabled { get; set; }
     public bool IncidentV3PlanExecutorDryRun { get; set; } = true;
     public bool IncidentEventLinkShadowEnabled { get; set; }
+    public string IncidentEventLinkShadowRunId { get; set; } = string.Empty;
     public int IncidentEventLinkShadowIntervalSeconds { get; set; } = 300;
     public int IncidentEventLinkShadowLookbackMinutes { get; set; } = 120;
     public int IncidentEventLinkShadowCandidateLimit { get; set; } = 4;

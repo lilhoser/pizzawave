@@ -208,6 +208,7 @@ public sealed class IncidentEventStateLinkShadowTests
             [priorCall, newCall],
             [new VectorSearchMatchDto(priorCall.Id, 0.91, "vector")],
             new IncidentEventStateLinkProjection(
+                "run-test",
                 "prior",
                 FixedNow,
                 [],
@@ -271,6 +272,7 @@ public sealed class IncidentEventStateLinkShadowTests
             Transcription = "New observation"
         };
         var projection = new IncidentEventStateLinkProjection(
+            "run-test",
             "prior",
             FixedNow,
             [],
@@ -312,14 +314,15 @@ public sealed class IncidentEventStateLinkShadowTests
         Assert.Equal(1, result.LedgerEntry.Sequence);
         Assert.Equal(1, result.Projection.Sequence);
         var listed = Assert.Single(await temp.Database.ListIncidentEventStateLinkShadowLedgerEntriesAsync(
+            "run-test",
             0,
             10,
             CancellationToken.None));
         Assert.Equal(result.LedgerEntry.ContentHash, listed.ContentHash);
-        var latest = await temp.Database.GetLatestIncidentEventStateLinkShadowProjectionAsync(CancellationToken.None);
+        var latest = await temp.Database.GetLatestIncidentEventStateLinkShadowProjectionAsync("run-test", CancellationToken.None);
         Assert.NotNull(latest);
         Assert.Equal(result.Projection.ContentHash, latest.ContentHash);
-        var latestEntry = await temp.Database.GetLatestIncidentEventStateLinkShadowLedgerEntryAsync(CancellationToken.None);
+        var latestEntry = await temp.Database.GetLatestIncidentEventStateLinkShadowLedgerEntryAsync("run-test", CancellationToken.None);
         Assert.NotNull(latestEntry);
         Assert.Equal(result.LedgerEntry.ContentHash, latestEntry.ContentHash);
 
@@ -335,8 +338,52 @@ public sealed class IncidentEventStateLinkShadowTests
             "UPDATE incident_event_state_link_shadow_projections SET projection_id='changed' WHERE projection_id='projection-link-1';"));
     }
 
+    [Fact]
+    public async Task RunsPersistIndependentlyAndReportOnlyTheSelectedRun()
+    {
+        await using var temp = await TestDatabase.CreateAsync(legacyLinkSchema: true);
+        var coordinator = new IncidentEventStateLinkShadowCoordinator(
+            new RecordingProposer(LinkProposal()),
+            temp.Database,
+            new FixedTimeProvider(FixedNow));
+        var bundle = Bundle() with { Observations = [Bundle().Observations[1]] };
+
+        foreach (var runId in new[] { "run-one", "run-two" })
+        {
+            await coordinator.RunAsync(
+                Request() with
+                {
+                    RunId = runId,
+                    LedgerEntryId = $"{runId}:ledger",
+                    ProjectionId = $"{runId}:projection",
+                    SingletonProjectionEventId = $"{runId}:event"
+                },
+                bundle,
+                null,
+                "observation-new",
+                [],
+                CancellationToken.None);
+        }
+
+        Assert.Single(await temp.Database.ListIncidentEventStateLinkShadowLedgerEntriesAsync("run-one", 0, 10, CancellationToken.None));
+        Assert.Single(await temp.Database.ListIncidentEventStateLinkShadowLedgerEntriesAsync("run-two", 0, 10, CancellationToken.None));
+        var report = await temp.Database.GetIncidentEventStateLinkShadowReportAsync(
+            true,
+            "run-two",
+            "run-two",
+            100,
+            CancellationToken.None);
+        Assert.Equal("run-two", report.SelectedRunId);
+        Assert.Equal(2, report.Runs.Count);
+        Assert.Equal(1, report.Totals.Attempts);
+        Assert.Equal(1, report.Totals.Abstentions);
+        Assert.Equal(1, report.Totals.ProjectedEvents);
+        Assert.Equal("run-two:event", Assert.Single(report.Attempts).ProjectionEventId);
+    }
+
     private static IncidentEventStateLinkShadowRunRequest Request() =>
         new(
+            "run-test",
             "ledger-link-1",
             "projection-link-1",
             "event-singleton-new",
@@ -377,6 +424,7 @@ public sealed class IncidentEventStateLinkShadowTests
 
     private static IncidentEventStateLinkProjection PriorProjection() =>
         new(
+            "run-test",
             "projection-prior",
             FixedNow.AddMinutes(-1),
             [],
@@ -482,16 +530,47 @@ public sealed class IncidentEventStateLinkShadowTests
 
         public EngineDatabase Database { get; }
 
-        public static async Task<TestDatabase> CreateAsync()
+        public static async Task<TestDatabase> CreateAsync(bool legacyLinkSchema = false)
         {
             var root = Path.Combine(Path.GetTempPath(), $"pizzawave-link-shadow-{Guid.NewGuid():N}");
             Directory.CreateDirectory(root);
+            var databasePath = Path.Combine(root, "pizzad.db");
+            if (legacyLinkSchema)
+            {
+                await using var legacyConnection = new SqliteConnection($"Data Source={databasePath}");
+                await legacyConnection.OpenAsync();
+                await using var legacyCommand = legacyConnection.CreateCommand();
+                legacyCommand.CommandText = """
+                    CREATE TABLE incident_event_state_link_shadow_ledger (
+                        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ledger_entry_id TEXT NOT NULL UNIQUE,
+                        recorded_at_utc TEXT NOT NULL,
+                        bundle_id TEXT NOT NULL,
+                        proposal_id TEXT NOT NULL,
+                        new_observation_id TEXT NOT NULL,
+                        transition_outcome TEXT NOT NULL,
+                        projection_event_id TEXT NOT NULL,
+                        content_hash TEXT NOT NULL,
+                        payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+                    );
+                    CREATE UNIQUE INDEX idx_incident_event_state_link_shadow_ledger_observation_unique
+                        ON incident_event_state_link_shadow_ledger(new_observation_id);
+                    CREATE TABLE incident_event_state_link_shadow_projections (
+                        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                        projection_id TEXT NOT NULL UNIQUE,
+                        generated_at_utc TEXT NOT NULL,
+                        content_hash TEXT NOT NULL,
+                        payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+                    );
+                    """;
+                await legacyCommand.ExecuteNonQueryAsync();
+            }
             var database = new EngineDatabase(
                 new EngineConfig
                 {
                     Storage = new StorageConfig
                     {
-                        DatabasePath = Path.Combine(root, "pizzad.db"),
+                        DatabasePath = databasePath,
                         AudioRoot = Path.Combine(root, "audio")
                     }
                 },
