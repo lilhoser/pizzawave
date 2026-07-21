@@ -171,6 +171,12 @@ public sealed class EngineConfig
         AiInsights.IncidentEventLinkShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentEventLinkShadowLookbackMinutes, 30, 720);
         if (AiInsights.IncidentEventLinkShadowCandidateLimit <= 0) AiInsights.IncidentEventLinkShadowCandidateLimit = 4;
         AiInsights.IncidentEventLinkShadowCandidateLimit = Math.Clamp(AiInsights.IncidentEventLinkShadowCandidateLimit, 1, IncidentEventStateLinkContractValidator.MaximumCandidateCount);
+        if (AiInsights.IncidentAssociationShadowIntervalSeconds <= 0) AiInsights.IncidentAssociationShadowIntervalSeconds = 300;
+        AiInsights.IncidentAssociationShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentAssociationShadowIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentAssociationShadowLookbackMinutes <= 0) AiInsights.IncidentAssociationShadowLookbackMinutes = 120;
+        AiInsights.IncidentAssociationShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentAssociationShadowLookbackMinutes, 30, 720);
+        if (AiInsights.IncidentAssociationShadowCandidateLimit <= 0) AiInsights.IncidentAssociationShadowCandidateLimit = 4;
+        AiInsights.IncidentAssociationShadowCandidateLimit = Math.Clamp(AiInsights.IncidentAssociationShadowCandidateLimit, 1, IncidentAssociationContract.MaximumCandidateCount);
         // Incident V3 is retained only as a read-only comparison baseline. Its
         // semantic executor is retired and must not be enabled by deployed
         // configuration left over from an earlier experiment.
@@ -407,6 +413,11 @@ public sealed class AiInsightsConfig
     public int IncidentEventLinkShadowIntervalSeconds { get; set; } = 300;
     public int IncidentEventLinkShadowLookbackMinutes { get; set; } = 120;
     public int IncidentEventLinkShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentAssociationShadowEnabled { get; set; }
+    public string IncidentAssociationShadowRunId { get; set; } = string.Empty;
+    public int IncidentAssociationShadowIntervalSeconds { get; set; } = 300;
+    public int IncidentAssociationShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentAssociationShadowCandidateLimit { get; set; } = 4;
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

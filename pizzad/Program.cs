@@ -46,7 +46,7 @@ builder.Services.AddSingleton<IncidentReconciliationService>();
 builder.Services.AddSingleton<RemoteBandwidthEstimatorService>();
 builder.Services.AddHttpClient<GeocodingService>();
 builder.Services.AddSingleton<AutomaticInsightsService>();
-builder.Services.AddSingleton<IncidentEventStateLinkShadowService>();
+builder.Services.AddSingleton<IncidentAssociationShadowService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
 builder.Services.AddSingleton<HealthStatusService>();
 builder.Services.AddSingleton<EnginePipeline>();
@@ -89,7 +89,7 @@ builder.Services.AddSingleton<RfSurveyService>();
 builder.Services.AddSingleton<RfSurveyInsightService>();
 builder.Services.AddHostedService<CallstreamListener>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentEventStateLinkShadowService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAssociationShadowService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TranscriptPostProcessingService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EmbeddingService>());
 builder.Services.AddHostedService<TrHealthCollector>();
@@ -774,10 +774,10 @@ app.MapGet("/api/v1/incidents/association-reviews", async (HttpContext context, 
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
     var selectedRunId = string.IsNullOrWhiteSpace(runId)
-        ? config.AiInsights.IncidentEventLinkShadowRunId
+        ? config.AiInsights.IncidentAssociationShadowRunId
         : runId;
     return Results.Ok(await database.GetIncidentAssociationReviewReportAsync(
-        config.AiInsights.IncidentEventLinkShadowEnabled,
+        config.AiInsights.IncidentAssociationShadowEnabled,
         selectedRunId,
         range.Start,
         range.End,
@@ -888,6 +888,19 @@ app.MapGet("/api/v1/incidents/link-shadow", async (HttpContext context, string? 
         context.RequestAborted));
 })
 .WithName("IncidentLinkShadowReport")
+.WithOpenApi();
+
+app.MapGet("/api/v1/incidents/association-shadow", async (HttpContext context, string? runId, int? limit, AuthService authService, EngineConfig config, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await database.GetIncidentAssociationShadowReportAsync(
+        config.AiInsights.IncidentAssociationShadowEnabled,
+        config.AiInsights.IncidentAssociationShadowRunId,
+        runId,
+        limit ?? 100,
+        context.RequestAborted));
+})
+.WithName("IncidentAssociationShadowReport")
 .WithOpenApi();
 
 app.MapGet("/api/v1/troubleshoot/tr-health", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>

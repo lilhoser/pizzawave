@@ -123,12 +123,12 @@ incident pipeline.
 ```mermaid
 flowchart LR
     A["Audio, transcript, and radio metadata"] --> B["Observation bundle"]
-    B --> C["Learned event-state proposer"]
-    C --> D["Proposed state changes with provenance and uncertainty"]
-    D --> E["Independent event-state critic"]
-    E --> F["Append-only shadow event ledger"]
-    F --> G["Current event-state projection"]
-    G --> H["Incident Pipeline Inspector"]
+    B --> C["Bounded candidate retrieval"]
+    C --> D["Typed learned relationships with provenance and uncertainty"]
+    D --> E["Deterministic schema and provenance validation"]
+    E --> F["Append-only constructor ledger"]
+    F --> G["Membership and provisional-association projection"]
+    G --> H["Review UX and Incident Pipeline Inspector"]
 ```
 
 ### Observation Bundle
@@ -265,6 +265,41 @@ admitted. A missing or rejected link does not prove a separate event. Even that
 link-only form remains a non-mutating shadow proposal until it independently
 meets precision, recall, stability, and Paxan gates.
 
+### Current Constructor Decision (2026-07-21)
+
+The successor to the binary link-only experiment is a typed, multi-candidate
+incident constructor. For each observation passed to the constructor:
+
+- application code creates a stable singleton event identity;
+- retrieval supplies a bounded set of existing shadow events but grants no
+  semantic authority;
+- one model generation may return at most one `confirmed_membership` and zero
+  or more `provisional_association` relationships;
+- every relationship must cite exact transcript identifiers on both sides and
+  preserve a natural-language explanation, alternatives, unresolved questions,
+  and uncertainty;
+- deterministic code validates only schema, identity, source ownership, and
+  exact provenance;
+- one valid confirmed membership assigns the observation to that existing
+  shadow event;
+- absent, invalid, or multiply confirmed output leaves the observation in its
+  application-owned singleton;
+- provisional associations are projected as reviewable edges and never merge
+  events.
+
+Omitted candidates remain unresolved. The model cannot assert that an omitted
+candidate is a distinct event, and application code contains no semantic score,
+keyword, category, talkgroup, label, or time threshold that upgrades a
+relationship. The live service remains a sampled, disabled-by-default shadow
+evaluation harness; it is not the future production ingestion adapter and does
+not imply that production should perform one model request per radio call.
+
+The previously described learned critic remains historical experiment
+scaffolding. It is not in the constructor's admission path because prior tests
+showed correlated approval of defects and unacceptable latency. A critic may be
+used offline to evaluate new model or prompt versions, but cannot authorize
+membership.
+
 ### Provenance
 
 Provenance points to source observations rather than application-owned semantic
@@ -279,7 +314,7 @@ labels. Depending on the source, it may contain:
 Application code verifies that cited material exists. It does not decide what
 the cited material means.
 
-### Independent Learned Critic
+### Independent Learned Critic (Historical Evaluation Option)
 
 The critic evaluates a proposal using the source bundle and prior state. It must
 be invoked independently of the proposer response and should identify:
@@ -468,7 +503,7 @@ This phase contains no semantic incident changes.
 ### Phase 1: Contract And Ledger
 
 - Define the observation-bundle schema.
-- Define the open-world proposal and critic schemas.
+- Define the typed multi-candidate relationship schema.
 - Add append-only shadow-ledger storage.
 - Add provenance, versioning, and projection records.
 - Add deterministic integrity tests only.
@@ -482,8 +517,8 @@ This phase contains no semantic incident changes.
 
 ### Phase 3: Shadow Prototypes
 
-- Implement transcript-plus-metadata and audio-inclusive proposers.
-- Implement an independently invoked critic.
+- Implement the transcript-based constructor proposer.
+- Keep optional learned critique outside the admission path.
 - Write only to the shadow ledger.
 - Expose chronological evidence and state changes in the inspector.
 
@@ -491,7 +526,7 @@ This phase contains no semantic incident changes.
 
 - Run repeated trials over development and held-out sets.
 - Compare complete event stories, not isolated accept/reject decisions.
-- Analyze proposer/critic correlation and shared failure modes.
+- Analyze model stability, provisional workload, and failure modes.
 - Decide whether either approach merits live shadow observation.
 
 ### Phase 5: Read-Only Live Shadow
@@ -513,7 +548,8 @@ The blank-slate experiment may proceed when:
 - every experiment output is append-only and shadow-only;
 - the corpus and human-adjudication procedure are versioned;
 - held-out gates are defined before results are viewed;
-- the proposer and critic can represent uncertainty and alternatives;
+- the constructor can represent uncertainty and alternatives without forcing a
+  semantic decision;
 - production incident tables are unreachable from the experiment path.
 
 ## Open Questions
@@ -532,7 +568,33 @@ These require explicit decisions during the contract phase:
 - What uncertainty should remain visible to operators rather than being collapsed
   into one projected story?
 
-## Implementation Status On 2026-07-17
+## Implementation Status On 2026-07-21
+
+The development branch now contains the current constructor architecture as a
+complete shadow path:
+
+- typed multi-candidate proposal, transition, and projection contracts;
+- exact source-side transcript citation validation and fail-closed transitions;
+- append-only, hash-verified `incident_association_shadow_ledger` and
+  `incident_association_shadow_projections` tables;
+- application-owned singleton creation, one-confirmed-membership projection,
+  and non-merging provisional-association edges;
+- a disabled-by-default sampled runtime with bounded embedding retrieval and a
+  single OpenAI-compatible model request per sampled observation;
+- model identity and token-use recording;
+- an Incident Constructor Shadow report in Performance > Incidents;
+- Dashboard inline and Review-tab projections sourced from the new provisional
+  association ledger;
+- append-only operator adjudications that cannot mutate production membership.
+
+The old link-only hosted service is retired. Its ledger, report endpoint, and
+tests remain readable as historical experiment evidence. The production
+`AutomaticInsightsService`, `incidents`, and `incident_calls` paths are not
+called by the new constructor. No production cutover adapter exists, and both
+the constructor runtime and any production writer remain disabled unless a
+later deployment explicitly configures the shadow run.
+
+### Earlier implementation history
 
 The isolated development branch now contains the Phase 0 and Phase 1 safety
 boundary:

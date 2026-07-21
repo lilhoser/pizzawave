@@ -26,14 +26,15 @@ public sealed class IncidentAssociationReviewTests
         }, CancellationToken.None);
         Assert.True(incidentId > 0);
 
-        var prior = new IncidentEventStateLinkProjection(
+        var prior = new IncidentAssociationProjection(
             "run-review",
             "projection-prior",
             FixedNow.AddMinutes(-3),
             [],
-            [new IncidentEventStateLinkProjectionEvent("event-radio", [$"call:{first}"], [])]);
-        var coordinator = new IncidentEventStateLinkShadowCoordinator(
-            new SourceCitedProposer(),
+            [new IncidentAssociationProjectionEvent("event-radio", [$"call:{first}"], [])],
+            []);
+        var coordinator = new IncidentAssociationShadowCoordinator(
+            new ProvisionalSourceCitedProposer(),
             temp.Database,
             new FixedTimeProvider(FixedNow));
 
@@ -42,14 +43,14 @@ public sealed class IncidentAssociationReviewTests
             Bundle(first, second),
             prior,
             $"call:{second}",
-            [new IncidentEventStateLinkCandidate("candidate-1", "event-radio", [$"call:{first}"])],
+            [new IncidentAssociationCandidate("candidate-1", "event-radio", [$"call:{first}"])],
             CancellationToken.None);
         var secondLink = await coordinator.RunAsync(
             Request("ledger-2", "projection-2", "singleton-3"),
             Bundle(first, second, third),
             firstLink.Projection.Projection,
             $"call:{third}",
-            [new IncidentEventStateLinkCandidate("candidate-1", "event-radio", [$"call:{first}", $"call:{second}"])],
+            [new IncidentAssociationCandidate("candidate-1", "event-radio", [$"call:{first}"])],
             CancellationToken.None);
 
         var report = await temp.Database.GetIncidentAssociationReviewReportAsync(
@@ -151,20 +152,20 @@ public sealed class IncidentAssociationReviewTests
 
     private static async Task AddSingleLinkAsync(EngineDatabase database, string runId, long priorCallId, long newCallId, string eventId)
     {
-        var coordinator = new IncidentEventStateLinkShadowCoordinator(
-            new SourceCitedProposer(),
+        var coordinator = new IncidentAssociationShadowCoordinator(
+            new ProvisionalSourceCitedProposer(),
             database,
             new FixedTimeProvider(FixedNow));
         await coordinator.RunAsync(
-            new IncidentEventStateLinkShadowRunRequest(runId, $"{runId}:ledger", $"{runId}:projection", $"{runId}:singleton", "software", "configuration"),
+            new IncidentAssociationShadowRunRequest(runId, $"{runId}:ledger", $"{runId}:projection", $"{runId}:singleton", "software", "configuration"),
             Bundle(priorCallId, newCallId),
-            new IncidentEventStateLinkProjection(runId, $"{runId}:prior", FixedNow.AddMinutes(-1), [], [new IncidentEventStateLinkProjectionEvent(eventId, [$"call:{priorCallId}"], [])]),
+            new IncidentAssociationProjection(runId, $"{runId}:prior", FixedNow.AddMinutes(-1), [], [new IncidentAssociationProjectionEvent(eventId, [$"call:{priorCallId}"], [])], []),
             $"call:{newCallId}",
-            [new IncidentEventStateLinkCandidate("candidate-1", eventId, [$"call:{priorCallId}"])],
+            [new IncidentAssociationCandidate("candidate-1", eventId, [$"call:{priorCallId}"])],
             CancellationToken.None);
     }
 
-    private static IncidentEventStateLinkShadowRunRequest Request(string ledgerId, string projectionId, string singletonId) =>
+    private static IncidentAssociationShadowRunRequest Request(string ledgerId, string projectionId, string singletonId) =>
         new("run-review", ledgerId, projectionId, singletonId, "software", "configuration");
 
     private static IncidentEventStateObservationBundle Bundle(params long[] callIds) =>
@@ -184,29 +185,31 @@ public sealed class IncidentAssociationReviewTests
     private static IncidentCallDto IncidentCall(long callId, long timestamp) =>
         new(callId, timestamp, string.Empty, string.Empty);
 
-    private sealed class SourceCitedProposer : IIncidentEventStateLinkProposer
+    private sealed class ProvisionalSourceCitedProposer : IIncidentAssociationProposer
     {
-        public Task<IncidentEventStateLinkProposal> ProposeAsync(
+        public Task<IncidentAssociationProposal> ProposeAsync(
             IncidentEventStateObservationBundle bundle,
             string newObservationId,
-            IReadOnlyList<IncidentEventStateLinkCandidate> candidates,
+            IReadOnlyList<IncidentAssociationCandidate> candidates,
             CancellationToken ct)
         {
             var selected = candidates[0];
             var newTranscript = bundle.Observations.Single(observation => observation.ObservationId == newObservationId).Transcripts[0];
             var candidateTranscript = bundle.Observations.Single(observation => observation.ObservationId == selected.ObservationIds[0]).Transcripts[0];
-            return Task.FromResult(new IncidentEventStateLinkProposal(
+            return Task.FromResult(new IncidentAssociationProposal(
                 $"proposal:{newObservationId}",
                 FixedNow,
                 "model",
                 "prompt",
-                IncidentEventStateLinkDecision.ProposeLink,
-                selected.CandidateToken,
-                "The transmissions may continue the same event.",
-                0.35,
-                [new IncidentEventStateTranscriptCitation(newTranscript.TranscriptId, newTranscript.Text)],
-                [new IncidentEventStateTranscriptCitation(candidateTranscript.TranscriptId, candidateTranscript.Text)],
-                ["Is there additional corroborating traffic?"]));
+                [new IncidentAssociationRelationship(
+                    selected.CandidateToken,
+                    IncidentAssociationDisposition.ProvisionalAssociation,
+                    "The transmissions may continue the same event.",
+                    0.35,
+                    [new IncidentEventStateTranscriptCitation(newTranscript.TranscriptId, newTranscript.Text)],
+                    [new IncidentEventStateTranscriptCitation(candidateTranscript.TranscriptId, candidateTranscript.Text)],
+                    ["The similarity could be coincidental."],
+                    ["Is there additional corroborating traffic?"])]));
         }
     }
 

@@ -13,7 +13,10 @@ public sealed class EngineConfigAiInsightsTests
                 IncidentV3FrameCandidateLimit = 100,
                 IncidentEventLinkShadowIntervalSeconds = 1,
                 IncidentEventLinkShadowLookbackMinutes = 10,
-                IncidentEventLinkShadowCandidateLimit = 100
+                IncidentEventLinkShadowCandidateLimit = 100,
+                IncidentAssociationShadowIntervalSeconds = 1,
+                IncidentAssociationShadowLookbackMinutes = 10,
+                IncidentAssociationShadowCandidateLimit = 100
             }
         };
 
@@ -29,6 +32,10 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(60, config.AiInsights.IncidentEventLinkShadowIntervalSeconds);
         Assert.Equal(30, config.AiInsights.IncidentEventLinkShadowLookbackMinutes);
         Assert.Equal(IncidentEventStateLinkContractValidator.MaximumCandidateCount, config.AiInsights.IncidentEventLinkShadowCandidateLimit);
+        Assert.False(config.AiInsights.IncidentAssociationShadowEnabled);
+        Assert.Equal(60, config.AiInsights.IncidentAssociationShadowIntervalSeconds);
+        Assert.Equal(30, config.AiInsights.IncidentAssociationShadowLookbackMinutes);
+        Assert.Equal(IncidentAssociationContract.MaximumCandidateCount, config.AiInsights.IncidentAssociationShadowCandidateLimit);
     }
 
     [Fact]

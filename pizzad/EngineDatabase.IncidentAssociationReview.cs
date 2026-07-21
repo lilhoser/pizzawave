@@ -124,13 +124,13 @@ public sealed partial class EngineDatabase
             return new IncidentAssociationReviewReportDto(enabled, runId, 0, 0, []);
 
         var sourceGroups = sourceEntries
-            .GroupBy(row => row.Entry.Transition.ProjectionEventId, StringComparer.Ordinal)
+            .GroupBy(row => row.Candidate.ProjectionEventId, StringComparer.Ordinal)
             .Select(group => new SourceAssociationGroup(
                 group.Key,
-                group.OrderBy(row => row.Sequence).ToList(),
+                group.OrderBy(row => row.StoredEntry.Sequence).ToList(),
                 SourceCallIds(group)))
             .Where(group => group.CallIds.Count >= 2)
-            .OrderByDescending(group => group.Entries.Max(row => row.Entry.RecordedAtUtc))
+            .OrderByDescending(group => group.Entries.Max(row => row.StoredEntry.Entry.RecordedAtUtc))
             .Take(100)
             .ToList();
 
@@ -218,7 +218,7 @@ public sealed partial class EngineDatabase
             if (callDtos.All(call => call.ReviewState == "established"))
                 continue;
 
-            var evidence = sourceGroup.Entries.Select(row => BuildEvidence(row.Entry)).ToList();
+            var evidence = sourceGroup.Entries.Select(BuildEvidence).ToList();
             var pending = callDtos.Count(call => call.ReviewState == "pending");
             var reviewed = callDtos.Count(call => call.ReviewState is "confirmed" or "rejected" or "deferred");
             var status = pending > 0
@@ -234,7 +234,7 @@ public sealed partial class EngineDatabase
                 sourceGroup.ProjectionEventId,
                 placement,
                 status,
-                sourceGroup.Entries.Max(row => row.Entry.RecordedAtUtc).UtcDateTime,
+                sourceGroup.Entries.Max(row => row.StoredEntry.Entry.RecordedAtUtc).UtcDateTime,
                 activeAnchorIds,
                 callDtos,
                 evidence,
@@ -251,36 +251,33 @@ public sealed partial class EngineDatabase
             groups);
     }
 
-    private static IncidentAssociationReviewEvidenceDto BuildEvidence(IncidentEventStateLinkLedgerEntry entry)
+    private static IncidentAssociationReviewEvidenceDto BuildEvidence(ProvisionalAssociationSource row)
     {
+        var entry = row.StoredEntry.Entry;
         var callIdsByObservation = entry.Bundle.Observations
             .Where(observation => observation.CallId > 0)
             .ToDictionary(observation => observation.ObservationId, observation => observation.CallId!.Value, StringComparer.Ordinal);
-        var selected = entry.Candidates.First(candidate =>
-            string.Equals(candidate.CandidateToken, entry.Proposal.CandidateToken, StringComparison.Ordinal));
         return new IncidentAssociationReviewEvidenceDto(
             callIdsByObservation.GetValueOrDefault(entry.NewObservationId),
-            selected.ObservationIds
+            row.Candidate.ObservationIds
                 .Select(observationId => callIdsByObservation.GetValueOrDefault(observationId))
                 .Where(callId => callId > 0)
                 .Distinct()
                 .ToList(),
-            entry.Proposal.RelationshipStatement,
-            entry.Proposal.Uncertainty,
-            entry.Proposal.NewObservationEvidence.Select(citation => citation.ExactQuote).Where(value => !string.IsNullOrWhiteSpace(value)).ToList(),
-            entry.Proposal.CandidateEvidence.Select(citation => citation.ExactQuote).Where(value => !string.IsNullOrWhiteSpace(value)).ToList(),
-            entry.Proposal.UnresolvedQuestions);
+            row.Relationship.RelationshipStatement,
+            row.Relationship.Uncertainty,
+            row.Relationship.NewObservationEvidence.Select(citation => citation.ExactQuote).Where(value => !string.IsNullOrWhiteSpace(value)).ToList(),
+            row.Relationship.CandidateEvidence.Select(citation => citation.ExactQuote).Where(value => !string.IsNullOrWhiteSpace(value)).ToList(),
+            row.Relationship.UnresolvedQuestions);
     }
 
-    private static HashSet<long> SourceCallIds(IEnumerable<IncidentEventStateStoredLinkLedgerEntry> entries)
+    private static HashSet<long> SourceCallIds(IEnumerable<ProvisionalAssociationSource> entries)
     {
         var callIds = new HashSet<long>();
         foreach (var row in entries)
         {
-            var entry = row.Entry;
-            var selected = entry.Candidates.FirstOrDefault(candidate =>
-                string.Equals(candidate.CandidateToken, entry.Proposal.CandidateToken, StringComparison.Ordinal));
-            var sourceObservationIds = (selected?.ObservationIds ?? []).Append(entry.NewObservationId).ToHashSet(StringComparer.Ordinal);
+            var entry = row.StoredEntry.Entry;
+            var sourceObservationIds = row.Candidate.ObservationIds.Append(entry.NewObservationId).ToHashSet(StringComparer.Ordinal);
             foreach (var observation in entry.Bundle.Observations)
             {
                 if (sourceObservationIds.Contains(observation.ObservationId) && observation.CallId > 0)
@@ -315,50 +312,52 @@ public sealed partial class EngineDatabase
         return Convert.ToInt64(await command.ExecuteScalarAsync(ct)) > 0;
     }
 
-    private static async Task<IReadOnlyList<IncidentEventStateStoredLinkLedgerEntry>> LoadAdmittedAssociationSourceEntriesAsync(
+    private static async Task<IReadOnlyList<ProvisionalAssociationSource>> LoadAdmittedAssociationSourceEntriesAsync(
         SqliteConnection connection,
         string runId,
         string? projectionEventId,
         CancellationToken ct)
     {
-        var rows = new List<IncidentEventStateStoredLinkLedgerEntry>();
+        var rows = new List<ProvisionalAssociationSource>();
         await using var command = connection.CreateCommand();
-        command.CommandText = projectionEventId is null
-            ? """
-                SELECT sequence, content_hash, payload_json
-                FROM incident_event_state_link_shadow_ledger
-                WHERE run_id=$run_id AND transition_outcome='LinkedToExistingEvent'
-                ORDER BY sequence DESC
-                LIMIT 1000;
-                """
-            : """
-                SELECT sequence, content_hash, payload_json
-                FROM incident_event_state_link_shadow_ledger
-                WHERE run_id=$run_id
-                  AND transition_outcome='LinkedToExistingEvent'
-                  AND projection_event_id=$projection_event_id
-                ORDER BY sequence;
-                """;
+        command.CommandText = """
+            SELECT sequence, content_hash, payload_json
+            FROM incident_association_shadow_ledger
+            WHERE run_id=$run_id
+            ORDER BY sequence DESC
+            LIMIT 1000;
+            """;
         command.Parameters.AddWithValue("$run_id", runId);
-        if (projectionEventId is not null)
-            command.Parameters.AddWithValue("$projection_event_id", projectionEventId);
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
             var sequence = reader.GetInt64(0);
             var contentHash = reader.GetString(1);
             var payload = reader.GetString(2);
-            VerifyContentHash("link ledger entry", sequence, payload, contentHash);
-            var entry = JsonSerializer.Deserialize<IncidentEventStateLinkLedgerEntry>(payload, EngineConfig.JsonOptions())
-                        ?? throw new InvalidDataException($"Incident event-state link ledger entry {sequence} has an empty payload.");
-            if (entry.ProposalValidationErrors.Count == 0 && entry.Proposal.Decision == IncidentEventStateLinkDecision.ProposeLink)
-                rows.Add(new IncidentEventStateStoredLinkLedgerEntry(sequence, contentHash, entry));
+            VerifyContentHash("association ledger entry", sequence, payload, contentHash);
+            var entry = JsonSerializer.Deserialize<IncidentAssociationLedgerEntry>(payload, EngineConfig.JsonOptions())
+                        ?? throw new InvalidDataException($"Incident association ledger entry {sequence} has an empty payload.");
+            if (entry.ProposalValidationErrors.Count > 0)
+                continue;
+            var stored = new IncidentAssociationStoredLedgerEntry(sequence, contentHash, entry);
+            foreach (var relationship in entry.Proposal.Relationships.Where(item =>
+                         item.Disposition == IncidentAssociationDisposition.ProvisionalAssociation))
+            {
+                var candidate = entry.Candidates.SingleOrDefault(item => item.CandidateToken == relationship.CandidateToken);
+                if (candidate is not null && (projectionEventId is null || candidate.ProjectionEventId == projectionEventId))
+                    rows.Add(new ProvisionalAssociationSource(stored, relationship, candidate));
+            }
         }
         return rows;
     }
 
     private sealed record SourceAssociationGroup(
         string ProjectionEventId,
-        IReadOnlyList<IncidentEventStateStoredLinkLedgerEntry> Entries,
+        IReadOnlyList<ProvisionalAssociationSource> Entries,
         HashSet<long> CallIds);
+
+    private sealed record ProvisionalAssociationSource(
+        IncidentAssociationStoredLedgerEntry StoredEntry,
+        IncidentAssociationRelationship Relationship,
+        IncidentAssociationCandidate Candidate);
 }
