@@ -272,6 +272,24 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_projections_generated
             ON incident_event_state_link_shadow_projections(generated_at_utc, sequence);
 
+        CREATE TABLE IF NOT EXISTS incident_association_review_ledger (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_entry_id TEXT NOT NULL UNIQUE,
+            recorded_at_utc TEXT NOT NULL,
+            proposal_key TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            projection_event_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            anchor_incident_id INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_association_review_proposal
+            ON incident_association_review_ledger(proposal_key, sequence);
+        CREATE INDEX IF NOT EXISTS idx_incident_association_review_recorded
+            ON incident_association_review_ledger(recorded_at_utc, sequence);
+
         CREATE TRIGGER IF NOT EXISTS incident_event_state_shadow_ledger_no_update
         BEFORE UPDATE ON incident_event_state_shadow_ledger
         BEGIN
@@ -318,6 +336,18 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         BEFORE DELETE ON incident_event_state_link_shadow_projections
         BEGIN
             SELECT RAISE(ABORT, 'incident event-state link shadow projections are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_association_review_ledger_no_update
+        BEFORE UPDATE ON incident_association_review_ledger
+        BEGIN
+            SELECT RAISE(ABORT, 'incident association review ledger is append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_association_review_ledger_no_delete
+        BEFORE DELETE ON incident_association_review_ledger
+        BEGIN
+            SELECT RAISE(ABORT, 'incident association review ledger is append-only');
         END;
         """;
 }

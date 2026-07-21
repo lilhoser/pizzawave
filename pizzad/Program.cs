@@ -769,6 +769,59 @@ app.MapGet("/api/v1/incidents", async (HttpContext context, long? start, long? e
 .WithName("Incidents")
 .WithOpenApi();
 
+app.MapGet("/api/v1/incidents/association-reviews", async (HttpContext context, long? start, long? end, string? runId, AuthService authService, EngineConfig config, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var range = new TimeRangeQuery(start, end).Resolve();
+    var selectedRunId = string.IsNullOrWhiteSpace(runId)
+        ? config.AiInsights.IncidentEventLinkShadowRunId
+        : runId;
+    return Results.Ok(await database.GetIncidentAssociationReviewReportAsync(
+        config.AiInsights.IncidentEventLinkShadowEnabled,
+        selectedRunId,
+        range.Start,
+        range.End,
+        context.RequestAborted));
+})
+.WithName("IncidentAssociationReviews")
+.WithOpenApi();
+
+app.MapPost("/api/v1/incidents/association-reviews", async (HttpContext context, IncidentAssociationReviewRequest request, AuthService authService, EngineDatabase database, EventStream events) =>
+{
+    if (!authService.IsWriteAllowed(context)) return Results.Unauthorized();
+    if (!IncidentAssociationReviewContract.TryParseAction(request.Action, out var action))
+        return Results.BadRequest(new { message = "Action must be ConfirmMembership, RejectMembership, or Defer." });
+    var entry = new IncidentAssociationReviewLedgerEntry(
+        $"operator-review:{Guid.NewGuid():N}",
+        DateTimeOffset.UtcNow,
+        request.ProposalKey,
+        request.RunId,
+        request.ProjectionEventId,
+        action,
+        request.AnchorIncidentId,
+        request.CallIds?.Distinct().ToList() ?? [],
+        "operator",
+        request.Note?.Trim() ?? string.Empty);
+    try
+    {
+        var stored = await database.AppendIncidentAssociationReviewAsync(entry, context.RequestAborted);
+        await events.PublishAsync("incident_association_reviewed", new
+        {
+            stored.Sequence,
+            entry.ProposalKey,
+            Action = entry.Action.ToString(),
+            entry.CallIds
+        }, context.RequestAborted);
+        return Results.Ok(stored);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+})
+.WithName("IncidentAssociationReviewRecord")
+.WithOpenApi();
+
 app.MapPost("/api/v1/incidents/{id:long}/alerts/dismiss", async (HttpContext context, long id, AuthService authService, EngineDatabase database, DashboardService dashboard, EventStream events) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();

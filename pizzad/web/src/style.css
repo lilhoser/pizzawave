@@ -4118,6 +4118,167 @@ textarea { width: 100%; min-height: 150px; font-family: Consolas, monospace; }
   width: 100%;
   height: 30px;
 }
+.association-review-badge {
+  border: 1px solid rgba(242, 201, 76, .55);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #ffe59a;
+  background: rgba(242, 201, 76, .1);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.association-review-explorer,
+.incident-association-reviews {
+  display: grid;
+  gap: 8px;
+}
+.incident-association-reviews {
+  margin: 8px 0;
+}
+.association-review-intro {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #46515c;
+  border-left: 3px solid #d29922;
+  border-radius: 6px;
+  background: #191d21;
+}
+.association-review-intro span {
+  color: #b7c2cc;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.association-review-group {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #4a5057;
+  border-left: 3px solid #d29922;
+  border-radius: 6px;
+  background: #1a1e22;
+}
+.association-review-group.inline {
+  background: #181c20;
+}
+.association-review-heading,
+.association-review-actions,
+.association-review-call > label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.association-review-heading {
+  justify-content: space-between;
+}
+.association-review-heading > div,
+.association-review-call > label > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.association-review-heading span,
+.association-review-call small,
+.association-review-actions > span {
+  color: #aeb8c2;
+  font-size: 11px;
+}
+.association-review-evidence {
+  display: grid;
+  gap: 6px;
+}
+.association-review-evidence > div {
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border: 1px solid #353c43;
+  border-radius: 5px;
+  background: #14181c;
+}
+.association-review-evidence strong {
+  color: #cbd5de;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.association-review-evidence p {
+  margin: 0;
+  color: #d6e2ec;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.association-review-evidence small {
+  color: #e6cc7a;
+}
+.association-review-call-list {
+  display: grid;
+  gap: 6px;
+}
+.association-review-call {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #353c43;
+  border-radius: 5px;
+  background: #20252a;
+}
+.association-review-call.state-established,
+.association-review-call.state-confirmed {
+  border-color: rgba(46, 160, 67, .6);
+}
+.association-review-call.state-rejected {
+  opacity: .72;
+  border-color: rgba(248, 81, 73, .55);
+}
+.association-review-call input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.association-review-call .transcript-block {
+  max-height: 90px;
+  overflow: auto;
+  font-size: 12px;
+}
+.association-review-call audio {
+  width: 100%;
+  height: 30px;
+}
+.association-review-state {
+  flex: 0 0 auto;
+  border: 1px solid #46515c;
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: #cbd5de;
+  font-size: 10px;
+  font-weight: 800;
+}
+.association-review-actions {
+  flex-wrap: wrap;
+}
+.association-review-actions button {
+  margin: 0;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.association-review-actions > span {
+  margin-left: auto;
+}
+.association-review-shadow-note {
+  margin: 0;
+  color: #8f9aa5;
+  font-size: 10px;
+  line-height: 1.3;
+}
+@media (max-width: 760px) {
+  .association-review-heading,
+  .association-review-actions {
+    align-items: flex-start;
+  }
+  .association-review-actions > span {
+    width: 100%;
+    margin-left: 0;
+  }
+}
 .job { border-bottom: 1px solid #30363d; padding: 9px 0; }
 .job-head, .job-actions {
   display: flex;

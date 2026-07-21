@@ -31,6 +31,47 @@ export type Incident = {
   confidence: number;
   calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string; category: string; talkgroupName: string; systemShortName: string; talkgroup: number; hasAlertMatch?: boolean; hasActiveAlert?: boolean; alertRules?: string }[];
 };
+export type IncidentAssociationReviewCall = {
+  callId: number;
+  timestamp: number;
+  transcript: string;
+  audioUrl: string;
+  systemShortName: string;
+  talkgroup: number;
+  talkgroupName: string;
+  currentIncidentId: number;
+  currentIncidentTitle: string;
+  currentIncidentStatus: string;
+  reviewState: "established" | "pending" | "confirmed" | "rejected" | "deferred";
+};
+export type IncidentAssociationReviewEvidence = {
+  newCallId: number;
+  candidateCallIds: number[];
+  relationshipStatement: string;
+  uncertainty: number;
+  newObservationQuotes: string[];
+  candidateQuotes: string[];
+  unresolvedQuestions: string[];
+};
+export type IncidentAssociationReviewGroup = {
+  proposalKey: string;
+  runId: string;
+  projectionEventId: string;
+  placement: "review" | "inlineIncident" | "inlineMerge";
+  status: "pending" | "partiallyReviewed" | "confirmed" | "rejected" | "deferred";
+  latestProposalUtc: string;
+  anchorIncidentIds: number[];
+  calls: IncidentAssociationReviewCall[];
+  evidence: IncidentAssociationReviewEvidence[];
+  pendingCallCount: number;
+};
+export type IncidentAssociationReviewReport = {
+  enabled: boolean;
+  runId: string;
+  pendingGroupCount: number;
+  standalonePendingGroupCount: number;
+  groups: IncidentAssociationReviewGroup[];
+};
 export type CategoryInsight = {
   id: number;
   title: string;

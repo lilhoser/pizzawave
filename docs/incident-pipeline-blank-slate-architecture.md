@@ -328,6 +328,42 @@ observation membership, alternatives, contradictions, and uncertainty. Display
 titles and summaries are generated from that current state and are never fed
 back as authoritative identity evidence.
 
+### Provisional Associations And Operator Review
+
+A source-grounded relationship proposal that has not earned automatic incident
+membership is a provisional association. It is not an incident and may not
+change production incident membership, titles, summaries, lifecycle, alerts,
+badges, notifications, or location aggregation merely because it exists.
+
+The review unit is a provisional group of two or more calls, not a forced pair.
+Each call remains independently reviewable so an operator can retain a supported
+subset without accepting a weak member or discarding the whole group. The
+evidence view must preserve which new call was connected to which prior calls;
+membership is not inferred transitively from the fact that calls were displayed
+together.
+
+Dashboard placement follows current production ownership:
+
+- a group touching one active incident appears inline as possible additions;
+- a group touching multiple established incidents appears inline as a possible
+  merge, with the effect requiring explicit review;
+- a group without an active incident anchor appears in the Dashboard Review tab;
+- evidence too weak to justify operator attention remains Inspector-only.
+
+Operator actions are `confirm membership`, `reject membership`, and `defer`.
+They are recorded as append-only adjudications against exact source calls and
+the exact proposal version. During shadow evaluation, those actions do not write
+`incidents` or `incident_calls`. Enabling an adjudication applier is a later,
+separate production decision with its own authorization, transaction, audit,
+undo, merge-preview, and rollout requirements.
+
+Adjudications provide replay constraints, not uncontrolled online training. A
+new model or prompt can be replayed against previously confirmed and rejected
+relationships to measure confirmed-link recovery, rejected-link violations,
+proposal workload per operating hour, latency, and malformed output. Because
+operators see a selected subset of proposals, these measurements are regression
+evidence and must not be presented as unbiased overall precision or recall.
+
 ## Relationship To Existing Work
 
 ### Retained Infrastructure

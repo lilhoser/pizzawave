@@ -8,7 +8,7 @@ import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import { locationDisplayName, locationKey, locationShortName } from "./features/dashboard/location";
-import type { IncidentDecisionChainPage, IncidentDecisionGroup, IncidentLinkShadowReport } from "./types";
+import type { IncidentAssociationReviewGroup, IncidentAssociationReviewReport, IncidentDecisionChainPage, IncidentDecisionGroup, IncidentLinkShadowReport } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
 import type { LiveRfStatus } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
@@ -33,7 +33,7 @@ const siteSetupRfApi = `${siteSetupApi}/rf`;
 const rfDetailUrl = (apiBase: string, id: string, compact = true) => `${apiBase}/${encodeURIComponent(id)}${compact ? "?compact=true" : ""}`;
 const waterfallStopUrl = (apiBase: string, surveyId: string) => `${apiBase}/${encodeURIComponent(surveyId)}/waterfall/stop`;
 type Page = "dashboard" | "setup" | "system" | "settings" | typeof categories[number];
-type DashboardMode = "incidents" | "alerts";
+type DashboardMode = "incidents" | "alerts" | "review";
 type CategorySortMode = "name" | "tgid" | "recent" | "frequent";
 type AuthPromptState = { request: AuthTokenRequest; resolve: (token: string | null) => void; token: string; message: string };
 const categoryColors: Record<string, string> = {
@@ -3193,6 +3193,12 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
   const [focusedLocationKey, setFocusedLocationKey] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationHeat | null>(null);
   const [mapResetToken, setMapResetToken] = useState(0);
+  const associationReviewResource = usePersistentRefresh({
+    key: `incident-association-reviews|${rangeHours}`,
+    enabled: true,
+    load: () => api.request<IncidentAssociationReviewReport>(`/api/v1/incidents/association-reviews?${rangeQuery(rangeHours)}`)
+  });
+  const associationReviews = associationReviewResource.data;
   useEffect(() => {
     setSelectedLocation(null);
     setFocusedLocationKey(null);
@@ -3213,7 +3219,7 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
       .filter(alert => selectedLocation.callIds?.some(callId => callId === alert.callId))
       .filter(alert => matchesAlertSearch(alert, searchQuery))
     : [];
-  const mapRows = mode === "alerts" ? alertLocationRows : incidentLocationRows;
+  const mapRows = mode === "alerts" ? alertLocationRows : mode === "incidents" ? incidentLocationRows : [];
   const closeLocationPanel = () => {
     setSelectedLocation(null);
     setFocusedLocationKey(null);
@@ -3221,11 +3227,11 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
   };
   return (
     <div className="dashboard-shell">
-      <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder="Search incidents and alerts" /></div>
+      <div className="page-context-bar"><PageSearch value={searchQuery} onChange={onSearchChange} placeholder="Search incidents, alerts, and reviews" /></div>
       <div className="dashboard dashboard-around">
         <section className="pane dashboard-map-pane">
           <React.Suspense fallback={<div className="card location-heat-card"><p className="muted">Loading map...</p></div>}>
-            <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} resetToken={mapResetToken} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : "No geolocated incidents detected in the selected range."} />
+            <LocationHeatMap key={mode} rows={mapRows} incidents={mode === "incidents" ? data.incidents : []} focusedKey={focusedLocationKey} resetToken={mapResetToken} onFocusKey={setFocusedLocationKey} onSelectLocation={setSelectedLocation} emptyText={mode === "alerts" ? "No geolocated alerts detected in the selected range." : mode === "review" ? "Review proposals do not affect the incident map." : "No geolocated incidents detected in the selected range."} />
           </React.Suspense>
         </section>
         <section className="pane dashboard-incidents-pane">
@@ -3234,8 +3240,10 @@ function DashboardView({ data, rangeHours, reload, focusedIncidentId, focusedHas
               ? <LocationAlertPanel location={selectedLocation} alerts={selectedAlerts} onClose={closeLocationPanel} reload={reload} searchQuery={searchQuery} />
               : <LocationIncidentPanel location={selectedLocation} incidents={selectedIncidents} onClose={closeLocationPanel} searchQuery={searchQuery} />
             : mode === "alerts"
-              ? <AlertsPanel alerts={data.alerts} locationMap={alertLocationMap} reload={reload} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />
-              : <Incidents rows={data.incidents} alerts={data.alerts} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} reload={reload} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={clearFocusedIncident} clearFocusedHashTarget={clearFocusedHashTarget} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />}
+              ? <AlertsPanel alerts={data.alerts} locationMap={alertLocationMap} reload={reload} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} reviewCount={associationReviews?.standalonePendingGroupCount ?? 0} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />
+              : mode === "review"
+                ? <AssociationReviewPanel report={associationReviews} state={associationReviewResource.state} refresh={associationReviewResource.refresh} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />
+                : <Incidents rows={data.incidents} alerts={data.alerts} associationReviews={associationReviews?.groups ?? []} onAssociationReviewed={associationReviewResource.refresh} locationMap={incidentLocationMap} onShowLocation={setFocusedLocationKey} reload={reload} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={clearFocusedIncident} clearFocusedHashTarget={clearFocusedHashTarget} mode={mode} setMode={setMode} incidentCount={data.incidents.length} alertCount={data.alerts.length} reviewCount={associationReviews?.standalonePendingGroupCount ?? 0} searchQuery={searchQuery} hiddenIncidentCount={hiddenIncidentCount} />}
         </section>
       </div>
     </div>
@@ -3421,7 +3429,7 @@ function PlayableAudio({ src }: { src?: string | null }) {
 type DashboardIncidentListItem = { kind: "incident"; incident: Incident } | { kind: "alert"; alert: AlertMatch };
 type PendingCardFocus = CardHashTarget & { key: string; page: number };
 
-function Incidents({ rows, alerts = [], locationMap, onShowLocation, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, incidentCount, alertCount, searchQuery, hiddenIncidentCount = 0 }: { rows: Incident[]; alerts?: AlertMatch[]; locationMap?: Map<number, LocationHeat>; onShowLocation?: (key: string) => void; reload?: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
+function Incidents({ rows, alerts = [], associationReviews = [], onAssociationReviewed, locationMap, onShowLocation, reload, focusedIncidentId, focusedHashTarget, clearFocusedIncident, clearFocusedHashTarget, mode, setMode, incidentCount, alertCount, reviewCount, searchQuery, hiddenIncidentCount = 0 }: { rows: Incident[]; alerts?: AlertMatch[]; associationReviews?: IncidentAssociationReviewGroup[]; onAssociationReviewed?: () => Promise<unknown>; locationMap?: Map<number, LocationHeat>; onShowLocation?: (key: string) => void; reload?: () => Promise<void>; focusedIncidentId?: number | null; focusedHashTarget?: string; clearFocusedIncident?: () => void; clearFocusedHashTarget?: () => void; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; reviewCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
   const [expanded, setExpanded] = useState(false);
   const [geolocatedOnly, setGeolocatedOnlyState] = useState(() => readDashboardGeolocatedOnly("incidents"));
   const [page, setPage] = useState(1);
@@ -3490,7 +3498,7 @@ function Incidents({ rows, alerts = [], locationMap, onShowLocation, reload, foc
   return <div className="incident-explorer">
     <div className="incident-toolbar">
       <div className="incident-toolbar-left">
-        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} hiddenIncidentCount={hiddenIncidentCount} />
+        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} reviewCount={reviewCount} hiddenIncidentCount={hiddenIncidentCount} />
         <div className="incident-filter-row">
           <label className="compact-toggle"><input type="checkbox" checked={expanded} onChange={event => { clearFocusForManualNavigation(); setExpanded(event.currentTarget.checked); }} /> {expanded ? "Collapse all" : "Expand all"}</label>
           <label className="compact-toggle"><input type="checkbox" checked={geolocatedOnly} onChange={event => { clearFocusForManualNavigation(); setPage(1); setExpanded(false); setGeolocatedOnly(event.currentTarget.checked); }} /> Geolocated</label>
@@ -3510,7 +3518,8 @@ function Incidents({ rows, alerts = [], locationMap, onShowLocation, reload, foc
       if (item.kind === "alert")
         return <StandaloneAlertCard alert={item.alert} expanded={expanded || activeFocusTarget.callId === item.alert.callId} onDismissAlert={reload} searchQuery={searchQuery} key={`alert-${item.alert.id}`} />;
       const linkedLocation = locationMap?.get(item.incident.id);
-      return <IncidentCard incident={item.incident} linkedLocation={linkedLocation} onShowLocation={onShowLocation} expanded={expanded} forceOpen={focusedIncidentId === item.incident.id || incidentMatchesFocus(item.incident, activeFocusTarget)} onDismissAlert={reload} searchQuery={searchQuery} key={`incident-${item.incident.id}`} />;
+      const incidentReviews = associationReviews.filter(group => group.pendingCallCount > 0 && group.anchorIncidentIds.includes(item.incident.id));
+      return <IncidentCard incident={item.incident} associationReviews={incidentReviews} onAssociationReviewed={onAssociationReviewed} linkedLocation={linkedLocation} onShowLocation={onShowLocation} expanded={expanded} forceOpen={focusedIncidentId === item.incident.id || incidentMatchesFocus(item.incident, activeFocusTarget)} onDismissAlert={reload} searchQuery={searchQuery} key={`incident-${item.incident.id}`} />;
     })}
   </div>;
 }
@@ -3561,7 +3570,7 @@ function LocationIncidentPanel({ location, incidents, onClose, searchQuery }: { 
   </div>;
 }
 
-function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount, alertCount, searchQuery, hiddenIncidentCount = 0 }: { alerts: AlertMatch[]; locationMap: Map<number, LocationHeat>; reload?: () => Promise<void>; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
+function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount, alertCount, reviewCount, searchQuery, hiddenIncidentCount = 0 }: { alerts: AlertMatch[]; locationMap: Map<number, LocationHeat>; reload?: () => Promise<void>; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; reviewCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
   const [geolocatedOnly, setGeolocatedOnlyState] = useState(() => readDashboardGeolocatedOnly("alerts"));
   const [page, setPage] = useState(1);
   function setGeolocatedOnly(value: boolean) {
@@ -3584,7 +3593,7 @@ function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount
   return <div className="incident-explorer">
     <div className="incident-toolbar">
       <div className="incident-toolbar-left">
-        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} hiddenIncidentCount={hiddenIncidentCount} />
+        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} reviewCount={reviewCount} hiddenIncidentCount={hiddenIncidentCount} />
         <div className="incident-filter-row">
           <label className="compact-toggle"><input type="checkbox" checked={geolocatedOnly} onChange={event => { setPage(1); setGeolocatedOnly(event.currentTarget.checked); }} /> Geolocated</label>
         </div>
@@ -3604,12 +3613,124 @@ function AlertsPanel({ alerts, locationMap, reload, mode, setMode, incidentCount
   </div>;
 }
 
-function DashboardModeToggle({ mode, setMode, incidentCount, alertCount, hiddenIncidentCount = 0 }: { mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; hiddenIncidentCount?: number }) {
+function DashboardModeToggle({ mode, setMode, incidentCount, alertCount, reviewCount, hiddenIncidentCount = 0 }: { mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; reviewCount: number; hiddenIncidentCount?: number }) {
   return <div className="dashboard-view-toggle compact" role="group" aria-label="Dashboard view">
     <button type="button" className={mode === "incidents" ? "active" : ""} onClick={() => setMode("incidents")}>Incidents ({incidentCount.toLocaleString()})</button>
     {hiddenIncidentCount > 0 && <span className="dashboard-hidden-policy-note">{hiddenIncidentCount.toLocaleString()} hidden by TG policy</span>}
     <button type="button" className={mode === "alerts" ? "active" : ""} onClick={() => setMode("alerts")}>Alerts ({alertCount.toLocaleString()})</button>
+    <button type="button" className={mode === "review" ? "active" : ""} onClick={() => setMode("review")}>Review ({reviewCount.toLocaleString()})</button>
   </div>;
+}
+
+function AssociationReviewPanel({ report, state, refresh, mode, setMode, incidentCount, alertCount, searchQuery, hiddenIncidentCount = 0 }: { report: IncidentAssociationReviewReport | null; state: RefreshState; refresh: () => Promise<unknown>; mode: DashboardMode; setMode: (mode: DashboardMode) => void; incidentCount: number; alertCount: number; searchQuery: string; hiddenIncidentCount?: number }) {
+  const groups = (report?.groups ?? [])
+    .filter(group => group.placement === "review" && group.pendingCallCount > 0)
+    .filter(group => associationReviewMatchesSearch(group, searchQuery));
+  return <div className="incident-explorer association-review-explorer">
+    <div className="incident-toolbar">
+      <div className="incident-toolbar-left">
+        <DashboardModeToggle mode={mode} setMode={setMode} incidentCount={incidentCount} alertCount={alertCount} reviewCount={report?.standalonePendingGroupCount ?? 0} hiddenIncidentCount={hiddenIncidentCount} />
+      </div>
+    </div>
+    <PanelLoadState label="association review proposals" state={state} hasData={Boolean(report)} onRetry={refresh} />
+    <div className="association-review-intro">
+      <strong>Possible relationships without an established incident</strong>
+      <span>Reviewing these proposals records evidence for this experiment. It does not change production incident membership.</span>
+    </div>
+    {groups.map(group => <AssociationReviewGroupCard group={group} onReviewed={refresh} searchQuery={searchQuery} key={group.proposalKey} />)}
+    {report && !groups.length && <div className="card"><p className="muted">No unanchored relationship proposals currently need review.</p></div>}
+  </div>;
+}
+
+function AssociationReviewGroupCard({ group, anchorIncidentId = 0, onReviewed, searchQuery = "" }: { group: IncidentAssociationReviewGroup; anchorIncidentId?: number; onReviewed?: () => Promise<unknown>; searchQuery?: string }) {
+  const selectableCallIds = group.calls.filter(call => call.reviewState === "pending").map(call => call.callId);
+  const [selectedCallIds, setSelectedCallIds] = useState<Set<number>>(() => new Set(selectableCallIds));
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setSelectedCallIds(new Set(selectableCallIds));
+    setBusy("");
+    setError("");
+  }, [group.proposalKey, selectableCallIds.join(",")]);
+  const selected = selectableCallIds.filter(callId => selectedCallIds.has(callId));
+  const canConfirm = anchorIncidentId > 0 ? selected.length >= 1 : selected.length >= 2;
+  const possibleMerge = group.placement === "inlineMerge";
+  function toggleCall(callId: number, checked: boolean) {
+    setSelectedCallIds(current => {
+      const next = new Set(current);
+      if (checked) next.add(callId); else next.delete(callId);
+      return next;
+    });
+  }
+  async function record(action: "ConfirmMembership" | "RejectMembership" | "Defer") {
+    if (!selected.length || (action === "ConfirmMembership" && !canConfirm))
+      return;
+    setBusy(action);
+    setError("");
+    try {
+      await api.request("/api/v1/incidents/association-reviews", {
+        method: "POST",
+        body: JSON.stringify({
+          proposalKey: group.proposalKey,
+          runId: group.runId,
+          projectionEventId: group.projectionEventId,
+          action,
+          anchorIncidentId,
+          callIds: selected,
+          note: ""
+        })
+      });
+      await onReviewed?.();
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Unable to record this review.");
+    } finally {
+      setBusy("");
+    }
+  }
+  return <section className={`association-review-group${anchorIncidentId > 0 ? " inline" : ""}`}>
+    <div className="association-review-heading">
+      <div>
+        <strong>{possibleMerge ? "Review possible incident merge" : anchorIncidentId > 0 ? "Review possible additions" : `${group.calls.length} possibly related calls`}</strong>
+        <span>{new Date(group.latestProposalUtc).toLocaleString()} · {group.pendingCallCount} awaiting review</span>
+      </div>
+      <span className="section-status warning">Provisional</span>
+    </div>
+    <div className="association-review-evidence">
+      {group.evidence.map((evidence, index) => <div key={`${evidence.newCallId}-${index}`}>
+        <strong>Why PizzaWave surfaced this</strong>
+        <p><HighlightedText text={evidence.relationshipStatement || "The model proposed a relationship but did not provide a readable explanation."} query={searchQuery} /></p>
+        {evidence.unresolvedQuestions.map(question => <small key={question}>Unresolved: <HighlightedText text={question} query={searchQuery} /></small>)}
+      </div>)}
+    </div>
+    <div className="association-review-call-list">
+      {group.calls.map(call => {
+        const pending = call.reviewState === "pending";
+        return <article className={`association-review-call state-${call.reviewState}`} key={call.callId}>
+          <label>
+            {pending ? <input type="checkbox" checked={selectedCallIds.has(call.callId)} onChange={event => toggleCall(call.callId, event.currentTarget.checked)} /> : <span className="association-review-state">{label(call.reviewState)}</span>}
+            <span><strong>{call.talkgroupName || `TG ${call.talkgroup}`} · Call {call.callId}</strong><small>{new Date(call.timestamp * 1000).toLocaleString()}{call.currentIncidentTitle ? ` · ${call.currentIncidentTitle}` : " · no current incident"}</small></span>
+          </label>
+          <div className="transcript-block"><HighlightedText text={call.transcript || "No transcript stored for this call."} query={searchQuery} /></div>
+          <PlayableAudio src={call.audioUrl} />
+        </article>;
+      })}
+    </div>
+    <div className="association-review-actions">
+      <button type="button" disabled={!canConfirm || Boolean(busy)} onClick={() => void record("ConfirmMembership")}>{busy === "ConfirmMembership" ? "Recording..." : anchorIncidentId > 0 ? possibleMerge ? "Confirm selected relationship" : "Confirm selected additions" : "Group selected calls"}</button>
+      <button type="button" disabled={!selected.length || Boolean(busy)} onClick={() => void record("RejectMembership")}>{busy === "RejectMembership" ? "Recording..." : "Keep selected separate"}</button>
+      <button type="button" disabled={!selected.length || Boolean(busy)} onClick={() => void record("Defer")}>{busy === "Defer" ? "Recording..." : "Not sure"}</button>
+      <span>{selected.length.toLocaleString()} selected</span>
+    </div>
+    {error && <div className="section-status error">{error}</div>}
+    <p className="association-review-shadow-note">Experiment only: this decision is append-only review evidence and does not yet merge or alter production incidents.</p>
+  </section>;
+}
+
+function associationReviewMatchesSearch(group: IncidentAssociationReviewGroup, query: string) {
+  return matchesTextSearch([
+    ...group.calls.flatMap(call => [String(call.callId), call.transcript, call.talkgroupName, call.currentIncidentTitle]),
+    ...group.evidence.flatMap(evidence => [evidence.relationshipStatement, ...evidence.unresolvedQuestions])
+  ], query);
 }
 
 function readDashboardGeolocatedOnly(kind: DashboardMode) {
@@ -3809,7 +3930,7 @@ function StandaloneAlertCard({ alert, expanded, onDismissAlert, searchQuery = ""
   </details>;
 }
 
-function IncidentCard({ incident, linkedLocation, onShowLocation, expanded, forceOpen, categoryOverride, onDismissAlert, searchQuery = "" }: { incident: Incident; linkedLocation?: LocationHeat; onShowLocation?: (key: string) => void; expanded?: boolean; forceOpen?: boolean; categoryOverride?: string; onDismissAlert?: () => Promise<void>; searchQuery?: string }) {
+function IncidentCard({ incident, associationReviews = [], onAssociationReviewed, linkedLocation, onShowLocation, expanded, forceOpen, categoryOverride, onDismissAlert, searchQuery = "" }: { incident: Incident; associationReviews?: IncidentAssociationReviewGroup[]; onAssociationReviewed?: () => Promise<unknown>; linkedLocation?: LocationHeat; onShowLocation?: (key: string) => void; expanded?: boolean; forceOpen?: boolean; categoryOverride?: string; onDismissAlert?: () => Promise<void>; searchQuery?: string }) {
   const [localOpen, setLocalOpen] = useState(false);
   const [playingCallId, setPlayingCallId] = useState<number | null>(null);
   const playlistAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -3899,10 +4020,13 @@ function IncidentCard({ incident, linkedLocation, onShowLocation, expanded, forc
         stopPlaylist();
     }}
   >
-    <IncidentSummary incident={incident} linkedLocation={linkedLocation} onShowLocation={onShowLocation} stripeCategories={stripeCategories} onDismissAlert={onDismissAlert} onTogglePlayback={toggleIncidentPlayback} isPlaying={playingCallId !== null} searchQuery={searchQuery} />
+    <IncidentSummary incident={incident} associationReviewCount={associationReviews.length} linkedLocation={linkedLocation} onShowLocation={onShowLocation} stripeCategories={stripeCategories} onDismissAlert={onDismissAlert} onTogglePlayback={toggleIncidentPlayback} isPlaying={playingCallId !== null} searchQuery={searchQuery} />
     {localOpen && <>
       <div className="incident-expanded-meta">{incident.calls.length} source call{incident.calls.length === 1 ? "" : "s"} / {Math.round(incident.confidence * 100)}% confidence</div>
       {incident.detail && <p className="incident-detail-text"><HighlightedText text={incident.detail} query={searchQuery} /></p>}
+      {associationReviews.length > 0 && <div className="incident-association-reviews">
+        {associationReviews.map(group => <AssociationReviewGroupCard group={group} anchorIncidentId={incident.id} onReviewed={onAssociationReviewed} searchQuery={searchQuery} key={group.proposalKey} />)}
+      </div>}
       <div className="incident-call-list">
         {incident.calls.map(c => <IncidentSourceCall call={c} incidentId={incident.id} playing={playingCallId === c.callId} searchQuery={searchQuery} key={c.callId} />)}
       </div>
@@ -3977,7 +4101,7 @@ function IncidentSourceCall({ call, incidentId, playing, searchQuery = "" }: { c
   </div>;
 }
 
-function IncidentSummary({ incident, linkedLocation, onShowLocation, stripeCategories, onDismissAlert, onTogglePlayback, isPlaying, searchQuery = "" }: { incident: Incident; linkedLocation?: LocationHeat; onShowLocation?: (key: string) => void; stripeCategories: { category: string; count: number }[]; onDismissAlert?: () => Promise<void>; onTogglePlayback?: (event: React.MouseEvent<HTMLButtonElement>) => void; isPlaying?: boolean; searchQuery?: string }) {
+function IncidentSummary({ incident, associationReviewCount = 0, linkedLocation, onShowLocation, stripeCategories, onDismissAlert, onTogglePlayback, isPlaying, searchQuery = "" }: { incident: Incident; associationReviewCount?: number; linkedLocation?: LocationHeat; onShowLocation?: (key: string) => void; stripeCategories: { category: string; count: number }[]; onDismissAlert?: () => Promise<void>; onTogglePlayback?: (event: React.MouseEvent<HTMLButtonElement>) => void; isPlaying?: boolean; searchQuery?: string }) {
   const alertRules = Array.from(new Set((incident.calls ?? [])
     .flatMap(call => (call.alertRules ?? "").split(","))
     .map(rule => rule.trim())
@@ -4002,6 +4126,7 @@ function IncidentSummary({ incident, linkedLocation, onShowLocation, stripeCateg
         {linkedLocation && <button type="button" className="geo-badge" title={`Show ${linkedLocation.locationText} on map`} onClick={event => { event.preventDefault(); event.stopPropagation(); onShowLocation?.(locationKey(linkedLocation)); }}>Map</button>}
         {hasAlertMatch(incident) && <span className={hasActiveAlert(incident) ? "alert-badge active" : "alert-badge"} title={alertRules.join(", ") || "Alert match"}>{hasActiveAlert(incident) ? "Active alert" : "Alert"}</span>}
         {hasActiveAlert(incident) && <button type="button" className="dismiss-alert-button" onClick={dismissAlert}>Dismiss</button>}
+        {associationReviewCount > 0 && <span className="association-review-badge">Possible links ({associationReviewCount.toLocaleString()})</span>}
         {incident.status && incident.status !== "active" && <span className="pill">{label(incident.status)}</span>}
         <span className="incident-time">{relativeIncidentTime(incident)}</span>
       </span>
