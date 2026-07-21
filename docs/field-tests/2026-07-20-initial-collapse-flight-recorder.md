@@ -486,6 +486,48 @@ energy while closing the modulation eye. A precisely overlapping co-channel
 signal remains possible. Source centering, broadband antenna fading, receiver
 gain, USB/sample corruption, and queue accounting do not fit both events.
 
+### RPI Raymond paired-capture result
+
+Raymond produced the required complete pair at 2026-07-21 00:47:31 EDT. The
+wide file contains the full ten seconds before and twenty seconds after trigger:
+25,714,285 complex samples at 857,142.857 samples/sec, 205,714,280 bytes. The
+narrow file contains the full 30/60-second window: 8,709,676 complex samples at
+96,774.194 samples/sec, 69,677,408 bytes. RPI remained healthy with zero TR
+restarts. Stable SHA-256 values are:
+
+- narrow IQ: `303e111dfcdcf4e914dfcb976c021277b9621cc52763876953b81cfe539c44bb`;
+- narrow JSON: `076baabcdaa7d42f6896730dac3364c8ef0fc65fc5a16392d3487e6194d05717`;
+- wide IQ: `671e6eda0de6586816a3015f6bed270f8a461ead187c22d154aa8ddac5f9c3e1`;
+- wide JSON: `5e1a65ee162ea3419cfdf1f7d0edf1bfe544b12967381c95ae94ac7e2f4c582d`.
+
+Both independent decoders collapsed together on the unchanged 773.781250 MHz
+primary. The pre-trigger live/shadow sequence descended from 15/15 and 12/12
+to 4/4, 1/1, 3/3, and finally 3/4 at trigger. This time there was no meaningful
+amplitude fade. Comparing the six pre-trigger intervals at <=3 live frames/s
+with the two at >=10 frames/s, raw wide-band power differed by 0.13 dB, the
+control-channel/outer-band ratio by 0.24 dB, and outer-band power by 0.16 dB.
+No neighboring 12.5 kHz component appeared at onset. Every sample was finite,
+with no zero, repeated-adjacent, or clipped values.
+
+Recovery again separated decoder policy from onset. While live cycled all
+three alternate control channels and remained at 1 frame/s, the fixed-primary
+shadow varied between 3 and 12 frames/s. Both reached 15 frames/s about 23
+seconds after trigger when live returned to the primary, but neither exceeded
+18 frames/s during the full minute and both later fell again. Retuning clearly
+extended the first recovery, but the retained primary waveform itself remained
+intermittently impaired.
+
+Raymond therefore corroborates the OT mechanism rather than the earlier idea
+of one simple amplitude fade. Across North Bradley, Hamilton, and Raymond,
+collapse occurs inside the P25 channel while surrounding spectrum and sample
+delivery remain stable; control-channel energy may fall, rise, or remain nearly
+unchanged. The common failure is modulation quality. Dynamic simulcast/multipath
+superposition is the leading physical explanation because it naturally changes
+the composite symbol trajectory without requiring a broadband power change. A
+precisely overlapping co-channel interferer remains the principal alternative.
+Frequency centering, antenna quality, host capacity, tuner gain, USB/sample
+loss, queue accounting, and recovery grace do not explain the shared onset.
+
 ### OT instrumentation stability
 
 The paired experiment itself is too expensive to leave active on OT. After
@@ -515,10 +557,10 @@ why both files exist despite `collapseCaptureMaxEvents: 1`.
 
 ## Limits
 
-The evidence contains natural events in both geographies, not enough to assign
-one universal physical cause or estimate prevalence. The paired capture closes
-the wide-versus-channel-local evidence gap for North Bradley, but Raymond's
-existing events remain narrowband. Replay applies another channelizer, so
-replay behavior is not by itself proof of decoder state. A natural RPI paired
-capture remains necessary before deciding whether Raymond shares North
-Bradley's frequency-selective signature.
+The three paired events establish a common channel-local failure class, not a
+direct measurement of propagation paths. They do not mathematically distinguish
+simulcast multipath from an exactly co-channel interferer, nor estimate how often
+each may occur. Replay applies another channelizer, so replay behavior alone is
+not proof of decoder state. The next useful experiment must measure or diversify
+demodulation quality; more centering, grace-period, or retune-policy A/B tests
+would not identify the physical onset.

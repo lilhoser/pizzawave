@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 22:35 EDT
+Last reconciled: 2026-07-21 00:50 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,7 +10,7 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond paired wide/narrow recorder and fixed-primary shadow active |
+| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond paired event complete, experimental TR cleanup pending |
 | OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorders and shadows restored |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
@@ -35,8 +35,9 @@ Cross-repository source state:
 
 ## Active
 
-- Initial-collapse flight recording and passive shadow decoding are active on
-  RPI Raymond and OT North Bradley/Hamilton. RPI captured a shadow-instrumented
+- Initial-collapse flight recording and analysis are complete; removing the
+  experimental RPI TR build is the remaining active operational step. RPI
+  captured a shadow-instrumented
   event immediately after activation: both decoders collapsed together at
   onset, but the fixed-primary shadow recovered to 22-36 frames/s while the
   live decoder cycled alternates. OT subsequently captured North Bradley: both
@@ -50,8 +51,11 @@ Cross-repository source state:
   stayed stable. Together these favor channel-local modulation destruction
   from dynamic simulcast/multipath over a simple fade. OT's two-system wide
   instrumentation also induced repeated Gardner/source-stall exits and was
-  removed at 22:34 EDT; RPI remains stable with an approximately 857 kHz paired branch to
-  determine whether Raymond has the same channel-local signature. See
+  removed at 22:34 EDT. RPI then captured the same channel-local signature:
+  decode collapsed with only 0.13 dB raw wide-power, 0.24 dB
+  control-channel/outer-band, and 0.16 dB outer-floor differences. The common
+  failure is modulation quality, with dynamic simulcast/multipath the leading
+  cause and exact co-channel interference the remaining alternative. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
