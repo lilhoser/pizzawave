@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 08:53 EDT
+Last reconciled: 2026-07-21 09:18 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -64,11 +64,16 @@ Cross-repository source state:
   2-4 frame/s, cycled alternates, spent long intervals at zero, and reached
   only 7 frame/s at the five-minute boundary. Gain 15 was restored and the new
   process immediately sustained 9-30 frame/s on the primary. Gain 12 is too
-  aggressive for this site and the prevention monitor is complete. The only
-  remaining bounded gain test is gain 14 with an immediate healthy-baseline
-  comparison; if it materially reduces decode, stop gain experiments and move
-  to retained-IQ demodulator/equalizer comparison. OT uses RTL-SDR receivers
-  behind an MCA208M while RPI uses Airspy receivers without that multicoupler;
+  aggressive for this site. Gain 14 then passed a strong 11-32 frame/s healthy
+  gate but admitted another natural collapse about 17 minutes later. That
+  event reproduced shared live/shadow failure with only a 0.02 dB onset-power
+  change; live spent 56 post-trigger samples at 0-1 frame/s and never sustained
+  three samples at or above 10 in the retained minute. Gain 15 is restored and
+  verified at 26-40 frame/s. Gain reduction did not prevent or weaken the
+  collapse, so gain testing is complete. Next is the offline retained-IQ
+  demodulator/equalizer comparison, not another live RF-policy A/B. OT uses
+  RTL-SDR receivers behind an MCA208M while RPI uses Airspy receivers without
+  that multicoupler;
   this hardware difference further weakens a single receiver/front-end-overload
   explanation. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).

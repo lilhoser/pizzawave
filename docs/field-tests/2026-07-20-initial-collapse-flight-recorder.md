@@ -676,11 +676,61 @@ This prevention attempt does not prove that gain 15 can never overload, because
 the RF path varies with time and the rollback included a process restart. It
 does show that a three-step LNA reduction costs too much Raymond margin under
 otherwise healthy conditions. Gain 12 and gain 9 should not be used as the
-standing configuration. If gain adjustment is tested once more, use only gain
-14, require healthy decode equivalence before leaving it active, and restore
-gain 15 immediately if the primary rate materially declines. If gain 14 cannot
-match the baseline, stop gain experiments and move to the retained-IQ
-demodulator/equalizer comparison described above.
+standing configuration.
+
+### Gain-14 prevention result
+
+The final bounded gain test changed only Raymond from LNA gain 15 to 14 at
+2026-07-21 08:56:58 EDT (Unix ms `1784638618508`). Source 1 remained at gain
+15. Gain 14 passed the healthy-window gate: it stayed on the 773.781250 MHz
+primary without retuning and sustained approximately 11-32 frames/sec for five
+minutes, with the final minutes mostly between 16 and 32. The active config
+SHA-256 was
+`651e37dd6806832afbe46a6932efcd75dcd176024ba7a18fc6374c4c431ce0ba`;
+TR ran as PID 437761 with zero automatic restarts.
+
+A natural Raymond collapse began at 09:14:17 EDT, approximately 17 minutes
+after gain-14 activation. Capture `1784639657025` completed at 09:15:17 EDT
+and retained 69,677,408 bytes of narrow IQ. Stable SHA-256 values are:
+
+- IQ: `3ca8e02039960886e49f1bffd4488ee2fc15bf030ac5144248e9d56ebe1247cb`;
+- JSON: `f688faf2359b950371acdfeec30675362ecd2f5f8328ada7ea24a5c2d518690d`.
+
+The gain-14 onset reproduced the established signature. Live and shadow fell
+together on the unchanged primary; trigger metadata was 1/3 frames/sec and the
+trigger-aligned timeline sample was 3/3. Narrow IQ onset power was only 0.02 dB
+below the capture's pre-event median. There were no non-finite, zero,
+repeated-adjacent, or clipped samples. This is modulation failure with retained
+channel energy, not a broadband front-end or sample-delivery collapse.
+
+Recovery was not better than the gain-15 controls. The fixed-primary shadow
+briefly reached 12, 30, and 29 frames/sec about five to seven seconds after
+trigger while live cycled alternates. Live then spent 56 post-trigger timeline
+samples at 0-1 frames/sec, performed 20 control-channel retunes, and never
+produced three consecutive samples at or above 10 within the retained minute.
+For comparison, gain-15 capture `1784635892019` spent 31 post-trigger samples
+at 0-1, recovered three consecutive live samples at or above 10 after about ten
+seconds, and contained eight retunes. Gain-15 paired capture `1784609251021`
+spent 45 samples at 0-1 and contained 14 retunes. One natural event cannot show
+that gain 14 caused the greater severity, but it does show that gain 14 did not
+prevent or materially weaken the collapse.
+
+The exact gain-15 config was restored at 09:17:29 EDT (Unix ms
+`1784639849005`) from
+`/var/backups/pizzawave/rpi-airspy-gain14-20260721T0857EDT/config.gain15-healthy.json`.
+Its SHA-256 is
+`6bcb77f651fd76c6036528275f3ec088cf0d56a4667b169d0f47536260facc02`.
+Both startup gain reports were 15. TR was active as PID 445238 with zero
+automatic restarts, PizzaWave live activity was current, and Raymond sustained
+26-40 frames/sec on the primary during verification.
+
+The practical gain conclusion is therefore bounded but decisive: lowering the
+Airspy LNA is not the stabilization fix. Gain 12 destroys healthy margin, gain
+9 cannot recover an outage, and gain 14 still admits the same natural collapse
+class. Keep RPI at gain 15 and stop gain A/B tests. The next experiment is the
+offline retained-IQ demodulator/equalizer comparison described above; it tests
+whether the distorted symbols can be recovered without another antenna or
+another live RF-policy experiment.
 
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is
