@@ -547,8 +547,58 @@ SHA-256 is
 `72ea0030c23456b511e0678215176fc668e22ed722e5593fe97f0056f57681cb`.
 TR restarted cleanly with zero automatic restarts and approximately 196 MiB
 of cgroup memory, down from about 1 GiB with the two wide branches. PizzaWave
-and live TR activity were healthy. The lighter single-system RPI wide
-deployment remained stable with zero restarts and continues overnight.
+and live TR activity were healthy.
+
+RPI was restored at approximately 2026-07-21 08:10 EDT after its qualifying
+Raymond pair completed. The pre-wide binary, standard plugins, and
+configuration came from
+`/var/backups/pizzawave/collapse-wide-20260720T233600Z-rpi`; all completed IQ
+and JSON evidence was preserved. The restored binary SHA-256 is
+`15824b7f8083d4b824d10d6e06a22b81a75eca93b4a7b8aa8499e76d299e0449`
+and `libcallstream.so` is
+`31ac526d66664e4fed8d0a43acf0549dac12ad6a35ec38b25704b53e1fc31450`.
+The three wide-capture settings are absent, while the bounded 30/60-second
+narrow recorder remains. TR was active as PID 421296 with zero automatic
+restarts; PizzaWave and live TR activity were healthy.
+
+## Repeatable offline analysis and mitigation direction
+
+`scripts/analyze_p25_collapse_iq.py` now turns a completed paired-wide capture
+into a reproducible JSON result. It validates sample count and narrow/wide
+pair identity, aligns one-second power measurements with the decoder timeline,
+checks sample integrity and neighboring 12.5 kHz bands, and applies an
+explicitly bounded broadband-versus-channel-local classification. It does not
+claim that power-spectrum measurements can distinguish multipath from an
+exactly co-channel interferer.
+
+Validation against Raymond group `1784609251021` reproduced the manual result:
+25,714,285 wide samples, a complete matching pair, no invalid, zero, repeated,
+or clipped samples, and low-minus-baseline changes of -0.14 dB in raw power,
+-0.25 dB in control-channel/outer-band ratio, and -0.18 dB in the outer-band
+floor. It found no neighboring-band change and classified the event as
+`channel_local_modulation_impairment`.
+
+The next implementation should use the retained IQ, not another antenna or
+another live wide recorder:
+
+1. Expose the existing OP25 Gardner timing `quality()` value and bounded
+   carrier/timing error statistics to an offline replay result, alongside valid
+   P25 frame count and acquisition latency.
+2. Replay each retained event through the unchanged decoder and a small set of
+   same-IQ candidates: alternate carrier/timing loop parameters and an adaptive
+   complex equalizer at the channelizer/demodulator boundary. Score healthy and
+   collapsed intervals separately.
+3. Accept an equalizer or loop change only if it increases valid frames during
+   all retained collapse intervals without materially reducing healthy-window
+   decode. This is the direct no-new-antenna mitigation for time-varying
+   simulcast/multipath distortion.
+4. If no single parameterization wins, test two passive demodulators fed from
+   the same channelized IQ and select only CRC/frame-valid P25 messages at one
+   ownership boundary. Do not feed duplicate messages into live trunking state.
+
+This sequence tests the leading mechanism and a remedy together. Recovery
+grace, control-channel ranking, and graph reset remain secondary safeguards;
+they do not explain or correct the initial modulation collapse.
 
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is

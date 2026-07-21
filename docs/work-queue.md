@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 00:50 EDT
+Last reconciled: 2026-07-21 08:15 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,7 +10,7 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond paired event complete, experimental TR cleanup pending |
+| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorder and shadow restored |
 | OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorders and shadows restored |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
@@ -35,8 +35,7 @@ Cross-repository source state:
 
 ## Active
 
-- Initial-collapse flight recording and analysis are complete; removing the
-  experimental RPI TR build is the remaining active operational step. RPI
+- Initial-collapse flight recording and paired-wide analysis are complete. RPI
   captured a shadow-instrumented
   event immediately after activation: both decoders collapsed together at
   onset, but the fixed-primary shadow recovered to 22-36 frames/s while the
@@ -55,7 +54,11 @@ Cross-repository source state:
   decode collapsed with only 0.13 dB raw wide-power, 0.24 dB
   control-channel/outer-band, and 0.16 dB outer-floor differences. The common
   failure is modulation quality, with dynamic simulcast/multipath the leading
-  cause and exact co-channel interference the remaining alternative. See
+  cause and exact co-channel interference the remaining alternative. Both
+  hosts have been restored to their pre-wide instrumentation. A repeatable
+  offline IQ classifier now reproduces Raymond's channel-local signature; the
+  active engineering step is same-IQ demodulator-quality and equalizer replay,
+  followed by a no-new-antenna decoder mitigation. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
@@ -147,13 +150,15 @@ Cross-repository source state:
      timeline as the first result; isolated replay independently reproduced
      repeated decode losses in the captured IQ, while live alternate-channel
      hopping amplified the production outage after the primary recovered;
-   - keep current-lineage candidate `51920b1` and exact RPI compatibility
-     candidate `c923e02c` isolated for maintainer review even though their
-     coherent artifacts are now deployed experimentally;
-   - use one bounded wider pre-channelizer capture, plus offline modulation-
-     quality analysis, to distinguish North Bradley in-channel distortion from
-     front-end behavior; do not add broad host metrics or another recovery
-     policy experiment;
+   - keep current-lineage and exact RPI compatibility candidates isolated for
+     maintainer review; their paired-wide branches are no longer deployed;
+   - run offline modulation-quality replay on the retained paired captures,
+     exposing the existing Gardner timing quality and bounded carrier/timing
+     statistics, valid-frame yield, and acquisition latency;
+   - compare the unchanged decoder with a small same-IQ set of loop and adaptive
+     equalizer candidates. If no single candidate wins across healthy and
+     collapsed windows, test same-IQ demodulator diversity with one validated
+     P25-message selector. Do not add antennas or another live wide recorder;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
