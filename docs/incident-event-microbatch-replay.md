@@ -163,6 +163,30 @@ transcript evidence, or violates the typed schema. Use `--sparse-link-mode true`
 with the review-package command to apply the same contract to the fixed review
 gate.
 
+A sparse proposal run can be adjudicated one proposed pair at a time without
+rerunning its batch stage:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --pairwise-adjudication-replay true `
+  --database C:\path\to\incident-replay.db `
+  --start 1784603146 `
+  --end 1784635663 `
+  --replay-id example-pairwise-adjudication `
+  --candidate-directory artifacts/incident-event-microbatch-replay/example-candidates `
+  --proposal-directory artifacts/incident-event-microbatch-replay/example-sparse-links `
+  --output artifacts/incident-event-microbatch-replay/example-pairwise-adjudication `
+  --model qwen/qwen3.6-35b-a3b@q8_0 `
+  --reasoning-effort none
+```
+
+This stage verifies that the proposal manifest names the same frozen database,
+candidate manifest, and sparse prompt. Each admitted source candidate is then
+mapped to an isolated one-pair prompt. Unknown or duplicate source tokens,
+source mismatches, model-routing errors, invalid evidence, and request failures
+remain rejected. First-stage and pairwise artifacts stay separate so a later
+report cannot hide which stage introduced or removed a link.
+
 For a resource preflight, candidate replay can enumerate every chronologically
 legal pair without calling a model or inspecting transcript content:
 
@@ -402,3 +426,13 @@ integrity but not semantic proof: Qwen 3.6 cited the correct records while
 inventing relationships between them. Do not open the sealed held-out corpus,
 tune the prompt to these inspected cases, or change incident persistence based
 on these runs.
+
+As a post-hoc architectural diagnostic, the four Qwen 3.6 batch proposals were
+then presented independently through the unchanged sparse contract. The two
+supported links were admitted in 16.3 and 14.0 seconds. The generic-validity
+and Tennessee/person-name false links were rejected in 4.1 and 3.2 seconds.
+All four outputs were contract-valid, for 38.4 seconds total model time. This
+single inspected trial is not accuracy or stability evidence, but it shows that
+candidate competition inside the batch contributed to the false admissions
+and that pairwise adjudication is worth testing as a separate stage. It does
+not justify persistence or a full-window run.

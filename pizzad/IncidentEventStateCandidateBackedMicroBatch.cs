@@ -13,6 +13,12 @@ public sealed record IncidentEventStateCandidateBackedMicroBatchPrompt(
     IncidentEventStateMicroBatchPromptPayload Prompt,
     IReadOnlyList<IncidentEventStateCandidateBackedLink> CandidateLinks);
 
+public sealed record IncidentEventStatePairwiseAdjudicationPlan(
+    string SourceCandidateToken,
+    string NewObservationId,
+    string TargetObservationId,
+    IncidentEventStateCandidateBackedMicroBatchPrompt PairwisePrompt);
+
 public sealed record IncidentEventStateSparseLinkProposal(
     string CandidateToken,
     string RelationshipStatement,
@@ -139,6 +145,55 @@ public static class IncidentEventStateCandidateBackedMicroBatch
         ids.OrderBy(id => observationsById[id].ObservedAtUnixSeconds)
             .ThenBy(id => observationsById[id].CallId ?? long.MaxValue)
             .ThenBy(id => id, StringComparer.Ordinal);
+}
+
+public static class IncidentEventStatePairwiseAdjudication
+{
+    public static IncidentEventStatePairwiseAdjudicationPlan Build(
+        string batchId,
+        int sequence,
+        string sourceCandidateToken,
+        IReadOnlyList<IncidentEventStateMicroBatchCandidate> candidates,
+        IReadOnlyDictionary<string, string> observationIdsByToken,
+        IReadOnlyDictionary<string, IncidentEventStateSourceObservation> observationsById)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(batchId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceCandidateToken);
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(observationIdsByToken);
+        ArgumentNullException.ThrowIfNull(observationsById);
+
+        var sourcePlan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            batchId,
+            sequence,
+            candidates,
+            observationIdsByToken,
+            observationsById);
+        var indexedLink = sourcePlan.CandidateLinks
+            .Select((link, index) => (Link: link, Index: index))
+            .SingleOrDefault(item => string.Equals(item.Link.CandidateToken, sourceCandidateToken, StringComparison.Ordinal));
+        if (indexedLink.Link is null)
+            throw new ArgumentException($"unknown source candidate token '{sourceCandidateToken}'", nameof(sourceCandidateToken));
+
+        var pairwisePrompt = IncidentEventStateCandidateBackedMicroBatch.Build(
+            $"{batchId}:pairwise:{sourceCandidateToken}",
+            sequence,
+            [candidates[indexedLink.Index]],
+            observationIdsByToken,
+            observationsById);
+        var pairwiseLink = pairwisePrompt.CandidateLinks.Single();
+        if (!string.Equals(pairwiseLink.NewObservationId, indexedLink.Link.NewObservationId, StringComparison.Ordinal) ||
+            !string.Equals(pairwiseLink.TargetObservationId, indexedLink.Link.TargetObservationId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("pairwise candidate endpoints do not match the source candidate");
+        }
+
+        return new IncidentEventStatePairwiseAdjudicationPlan(
+            sourceCandidateToken,
+            indexedLink.Link.NewObservationId,
+            indexedLink.Link.TargetObservationId,
+            pairwisePrompt);
+    }
 }
 
 public static class IncidentEventStateSparseLinkPrompt

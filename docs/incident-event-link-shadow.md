@@ -217,3 +217,12 @@ two records while inventing the bridge between them. Qwen 3.6 therefore has
 better recall than Qwen 3.5 27B in this slice, but neither configuration may be
 promoted. The Qwen 3.6 replay artifact identity is
 `ot-20260721-embedding-recent-sparse-qwen36-35b-q8-smoke-v1`.
+
+The four Qwen 3.6 proposals were subsequently rerun as isolated pairs through
+the same sparse prompt and model configuration. Both supported relationships
+were retained, while the generic-validity and Tennessee/person-name false
+relationships were withheld. All four outputs were contract-valid and used
+38.4 seconds of total model time. This was a post-hoc diagnostic on already
+inspected pairs, not a scored gate. It supports implementing an auditable
+proposal-then-pairwise replay, but cannot establish that same-model
+adjudication will generalize or remain stable.

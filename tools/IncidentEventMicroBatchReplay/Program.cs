@@ -5,6 +5,12 @@ using System.Text;
 using System.Text.Json;
 using pizzad;
 
+if (args.Contains("--pairwise-adjudication-replay", StringComparer.Ordinal))
+{
+    await PairwiseAdjudicationReplay.RunAsync(args);
+    return;
+}
+
 if (args.Contains("--candidate-backed-verification-replay", StringComparer.Ordinal))
 {
     await CandidateBackedVerificationReplay.RunAsync(args);

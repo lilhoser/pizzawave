@@ -548,6 +548,66 @@ public sealed class IncidentEventStateMicroBatchReplayTests
         Assert.Equal(4, validation.Errors.Count(error => error.Contains("another observation", StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public void PairwiseAdjudicationPreservesSelectedSourceCandidateEndpoints()
+    {
+        var observations = new[]
+        {
+            Observation("call:1", 100),
+            Observation("call:2", 101),
+            Observation("call:3", 102)
+        };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var tokenMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["new-1"] = "call:1",
+            ["new-2"] = "call:2",
+            ["new-3"] = "call:3"
+        };
+        var candidates = new[]
+        {
+            new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty),
+            new IncidentEventStateMicroBatchCandidate("new-3", "new-2", string.Empty)
+        };
+
+        var result = IncidentEventStatePairwiseAdjudication.Build(
+            "source-batch",
+            7,
+            "candidate-2",
+            candidates,
+            tokenMap,
+            lookup);
+
+        Assert.Equal("candidate-2", result.SourceCandidateToken);
+        Assert.Equal("call:3", result.NewObservationId);
+        Assert.Equal("call:2", result.TargetObservationId);
+        var pairwiseLink = Assert.Single(result.PairwisePrompt.CandidateLinks);
+        Assert.Equal("candidate-1", pairwiseLink.CandidateToken);
+        Assert.Equal(result.NewObservationId, pairwiseLink.NewObservationId);
+        Assert.Equal(result.TargetObservationId, pairwiseLink.TargetObservationId);
+    }
+
+    [Fact]
+    public void PairwiseAdjudicationRejectsUnknownSourceCandidateToken()
+    {
+        var observations = new[] { Observation("call:1", 100), Observation("call:2", 101) };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+
+        var error = Assert.Throws<ArgumentException>(() => IncidentEventStatePairwiseAdjudication.Build(
+            "source-batch",
+            1,
+            "candidate-2",
+            [new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty)],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["new-1"] = "call:1",
+                ["new-2"] = "call:2"
+            },
+            lookup));
+
+        Assert.Contains("unknown source candidate token", error.Message, StringComparison.Ordinal);
+    }
+
     private static IncidentEventStateSourceObservation Observation(string id, long observedAt) => new(
         id,
         long.Parse(id.AsSpan("call:".Length)),
