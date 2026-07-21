@@ -161,3 +161,36 @@ must not tune the prompt or validator to their answers.
 Only positive-link precision can justify further shadow work. Missed links
 remain visible as extra singleton events and must not be repaired with static
 semantic rules.
+
+## Hybrid-Candidate Sparse Verifier Smoke
+
+On 2026-07-21, the frozen OT replay window was used to test the next bounded
+shape without writing live or production state. Candidate routing used the
+union of four nearest local Nomic embedding results and four most recent
+eligible observations. It did not filter or rank by system, talkgroup, label,
+category, keyword, or regex. Qwen 3.5 27B Q4_K_M then received only the opaque
+candidate pairs and the sparse positive-link contract.
+
+The first ten chronological micro-batches contained 393 candidate pairs. All
+10 requests completed, all responses passed deterministic validation, and no
+request timed out. Average request latency was 9.2 seconds, interpolated p95 was
+34.6 seconds, and the maximum was 43.2 seconds. The requests used 44,555 total
+tokens. These measurements pass the small-sample contract and 60-second p95
+smoke gates, but they are not sustained-capacity evidence.
+
+Semantic inspection rejects this configuration for promotion:
+
+- `call:1404871` correctly linked to `call:1404845`; both describe the same
+  West Side Drive behind-the-store contact.
+- `call:1404933` correctly did not link to `call:1404895`; the shared Tennessee
+  and person-name fragments were not sufficient evidence.
+- `call:1404831` failed to link to candidate `call:1404821`; the supplied pair
+  is the same lost-lumber truck event. Because the pair was present in the
+  candidate set, this is verifier recall failure rather than retrieval failure.
+
+The run therefore admitted one of the two clear positive relationships in this
+slice and produced no observed false link. This tiny slice cannot estimate an
+accuracy rate, but the concrete miss is enough to withhold authority. Do not
+repair it with special vocabulary, metadata rules, or prompt tuning against
+these inspected answers. The replay artifact identity is
+`ot-20260721-embedding-recent-sparse-qwen35-27b-q4-smoke-v1`.
