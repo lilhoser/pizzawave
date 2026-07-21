@@ -334,6 +334,36 @@ public sealed class IncidentEventStateMicroBatchReplayTests
     }
 
     [Fact]
+    public void ExhaustiveCandidatesEnumerateEveryEarlierObservationWithoutMetadataRules()
+    {
+        var observations = Enumerable.Range(1, 5)
+            .Select(index => Observation($"call:{index}", 100 + index))
+            .ToList();
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var batch = new IncidentEventStateMicroBatchReplayBatch(
+            "exhaustive",
+            1,
+            101,
+            105,
+            ["call:3", "call:4", "call:5"],
+            ["call:1", "call:2"],
+            "hash");
+        var prompt = IncidentEventStateMicroBatchCandidatePrompt.Build(batch, lookup);
+
+        var candidates = IncidentEventStateMicroBatchExhaustiveCandidates.Build(batch, prompt);
+
+        Assert.Equal(9, candidates.Count);
+        Assert.Equal(
+            [
+                ("new-1", "context-1"), ("new-1", "context-2"),
+                ("new-2", "context-1"), ("new-2", "context-2"), ("new-2", "new-1"),
+                ("new-3", "context-1"), ("new-3", "context-2"), ("new-3", "new-1"), ("new-3", "new-2")
+            ],
+            candidates.Select(candidate => (candidate.NewObservationToken, candidate.TargetObservationToken)));
+        Assert.All(candidates, candidate => Assert.Equal(string.Empty, candidate.ReasonToCompare));
+    }
+
+    [Fact]
     public void CandidateBackedValidationRejectsAChronologicalButUnretrievedTarget()
     {
         var observations = new[]

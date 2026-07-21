@@ -18,8 +18,11 @@ internal static class CandidateReplay
         var end = long.Parse(Required("--end"));
         var replayId = Required("--replay-id");
         var outputDirectory = Path.GetFullPath(Required("--output"));
-        var endpoint = values.GetValueOrDefault("--endpoint", "http://127.0.0.1:1234/v1").TrimEnd('/');
-        var model = Required("--model");
+        var exhaustiveMode = values.TryGetValue("--exhaustive-mode", out var exhaustiveValue) && bool.Parse(exhaustiveValue);
+        var endpoint = exhaustiveMode
+            ? string.Empty
+            : values.GetValueOrDefault("--endpoint", "http://127.0.0.1:1234/v1").TrimEnd('/');
+        var model = exhaustiveMode ? IncidentEventStateMicroBatchExhaustiveCandidates.RetrieverIdentity : Required("--model");
         var timeoutSeconds = Integer("--timeout-seconds", 120);
         var maximumBatches = values.TryGetValue("--max-batches", out var maximumBatchesValue)
             ? int.Parse(maximumBatchesValue)
@@ -55,7 +58,9 @@ internal static class CandidateReplay
             end,
             endpoint,
             model,
-            IncidentEventStateMicroBatchCandidatePrompt.PromptIdentity);
+            exhaustiveMode
+                ? IncidentEventStateMicroBatchExhaustiveCandidates.RetrieverIdentity
+                : IncidentEventStateMicroBatchCandidatePrompt.PromptIdentity);
         if (priorManifest is not null)
         {
             if (!string.Equals(priorManifest.Plan.ContentHash, manifest.Plan.ContentHash, StringComparison.Ordinal) ||
@@ -88,6 +93,28 @@ internal static class CandidateReplay
                 break;
 
             var prompt = IncidentEventStateMicroBatchCandidatePrompt.Build(batch, observationsById);
+            if (exhaustiveMode)
+            {
+                var candidates = IncidentEventStateMicroBatchExhaustiveCandidates.Build(batch, prompt);
+                var deterministicResult = new CandidateBatchResult(
+                    batch.Sequence,
+                    batch.BatchId,
+                    batch.ContentHash,
+                    true,
+                    DateTimeOffset.UtcNow,
+                    0,
+                    0,
+                    0,
+                    0,
+                    prompt.ObservationIdsByToken,
+                    candidates,
+                    [],
+                    string.Empty);
+                await WriteJsonAtomicAsync(resultPath, deterministicResult, jsonOptions);
+                executed++;
+                Console.WriteLine($"batch {batch.Sequence}/{plan.Batches.Count}: success=True candidates={candidates.Count} deterministic=True");
+                continue;
+            }
             var requestBody = new
             {
                 model,

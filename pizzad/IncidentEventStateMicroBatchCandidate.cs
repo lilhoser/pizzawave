@@ -155,3 +155,31 @@ public static class IncidentEventStateMicroBatchCandidateValidator
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 }
+
+public static class IncidentEventStateMicroBatchExhaustiveCandidates
+{
+    public const string RetrieverIdentity = "incident-event-microbatch-exhaustive-chronological-v1";
+
+    public static IReadOnlyList<IncidentEventStateMicroBatchCandidate> Build(
+        IncidentEventStateMicroBatchReplayBatch batch,
+        IncidentEventStateMicroBatchCandidatePromptPayload prompt)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(prompt);
+        var tokenById = prompt.ObservationIdsByToken.ToDictionary(item => item.Value, item => item.Key, StringComparer.Ordinal);
+        var contextTokens = batch.ContextObservationIds.Select(id => tokenById[id]).ToList();
+        var newTokens = batch.NewObservationIds.Select(id => tokenById[id]).ToList();
+        var candidates = new List<IncidentEventStateMicroBatchCandidate>();
+        for (var newIndex = 0; newIndex < newTokens.Count; newIndex++)
+        {
+            foreach (var targetToken in contextTokens.Concat(newTokens.Take(newIndex)))
+            {
+                candidates.Add(new IncidentEventStateMicroBatchCandidate(
+                    newTokens[newIndex],
+                    targetToken,
+                    string.Empty));
+            }
+        }
+        return candidates;
+    }
+}

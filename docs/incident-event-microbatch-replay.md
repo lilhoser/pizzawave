@@ -163,6 +163,24 @@ transcript evidence, or violates the typed schema. Use `--sparse-link-mode true`
 with the review-package command to apply the same contract to the fixed review
 gate.
 
+For a resource preflight, candidate replay can enumerate every chronologically
+legal pair without calling a model or inspecting transcript content:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --candidate-replay true `
+  --exhaustive-mode true `
+  --database C:\path\to\incident-replay.db `
+  --start 1784603146 `
+  --end 1784635663 `
+  --replay-id example-exhaustive `
+  --output artifacts/incident-event-microbatch-replay/example-exhaustive
+```
+
+This mode is an audit tool, not a proposed retrieval policy. It uses only the
+frozen chronological batch and context boundaries and gives the resulting
+pairs no membership authority.
+
 This is an evaluation boundary, not a commitment to keep two large language
 models loaded in production. Paxan's 24 GB GPU cannot be assumed to hold both
 models concurrently. The experiment must separately establish whether a small
@@ -308,3 +326,13 @@ cases. Only then should the sparse verifier run a stratified or complete frozen
 window with semantic inspection, repeated-run stability, and the unchanged
 60-second p95 gate. Do not change persistence until that resource-feasible
 pipeline passes.
+
+An exhaustive chronological preflight then tested whether retrieval could be
+removed entirely. It deterministically enumerated every earlier context or
+same-batch observation for every new observation. The 2,253-observation window
+produced 59,804 pairs, or 26.54 per observation. Per-batch pair count had a
+median of 130, p95 of 285, and maximum of 354. This is rejected before model
+inference: peak prompts cannot be assumed to fit the verifier's 8,192-token
+runtime, and evaluating tens of thousands of obviously weak pairs is not a
+credible Paxan resource plan. Some learned, bounded retrieval is required, but
+its output remains routing rather than proof.
