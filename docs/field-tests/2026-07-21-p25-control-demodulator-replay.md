@@ -6,7 +6,7 @@ Host: RPI (`sdr1861`)
 
 System: Raymond/Hinds (`etv-raymond-hinds`)
 
-Status: offline replay and control-path separation complete; live confirmation pending
+Status: offline replay complete; exact-lineage live confirmation active
 
 ## Question
 
@@ -141,7 +141,8 @@ merged or deployed.
 
 ## Control-path separation gate
 
-Trunk Recorder commit `73fd134b` adds an optional per-system
+Trunk Recorder branch `codex/rpi-control-fsk4` at commit `4bb829fd` adds an
+optional per-system
 `controlChannelModulation` setting. The existing `modulation` setting remains
 unchanged and continues to select the traffic recorder. Both initial setup and
 control-channel graph reconstruction use the new control-only value.
@@ -162,16 +163,55 @@ Additional artifacts:
 - control-only candidate binary, SHA-256
   `a830c62a32a72596e79b9d8573d4dac29bbc4e1ad45c8605f36d392543e6ed45`.
 
+## Live deployment lineage and gate
+
+Two initial live candidates were rejected because they were built from the
+newer retune-grace source lineage rather than the exact older source used by
+RPI. The first aborted in `Call_Stream::find_callstream(Call*)` with
+`std::bad_alloc`. Moving the new virtual methods to the end of the interface
+removed that immediate mismatch, but the second aborted in
+`Call_Stream::make_rf_event/system_rates` while calling
+`Source::get_driver()`. Both failures occurred only after loading the installed
+callstream plugin, and both were immediately restored from the exact rollback.
+They are plugin ABI failures, not RF or decoder results.
+
+The final candidate was rebased onto RPI's exact pre-wide source lineage at
+`c923e02c`. The live rollback binary was reproduced byte-for-byte before the
+control-only patch was applied. An offline 90-second run then loaded the
+installed callstream plugin, emitted 32 accelerated `PIZZAWAVE_RF` callbacks,
+processed four real grants, and reached the expected end of the file without
+an allocation failure. Its retained artifacts are under the experiment root's
+`rpi-lineage/` directory.
+
+The exact-lineage candidate was activated at Unix ms `1784648415522`
+(2026-07-21 11:40:15 EDT):
+
+- live binary SHA-256:
+  `945bdcc91c882e4434902ea36fbc8f1356964ec64fb18d3c272b8adaf6cbda59`;
+- live config SHA-256:
+  `715af0a75af6e604a82be78216cf1e02fd786d467abb247db7129a4802e77f5e`;
+- Raymond: `modulation: qpsk`, `controlChannelModulation: fsk4`, Airspy LNA
+  gain 15;
+- exact rollback:
+  `/var/backups/pizzawave/rpi-control-fsk4-20260721T1101EDT`.
+
+The operational gate passed. TR remained active at PID `500187` with zero
+restarts. Raymond stayed on 773.781250 MHz and produced approximately 21-42
+valid messages/s. PizzaWave returned to current health after one transient
+stale reading, continued receiving periodic RF health, and ingested live
+calls. A real Phase 2 recorder started with `TDMA: true` and `QPSK: true`,
+confirming that only the control demodulator changed. The candidate remains
+active for one natural Raymond event.
+
 ## Next steps
 
-1. During a strong Raymond baseline, deploy the validated experimental binary
-   to RPI,
-   enable FSK4 only for its control channel, and require immediate healthy
-   control decode plus successful Phase 2 call recording. Roll back at once if
-   either gate fails.
-2. If the gates pass, hold that single change through the next natural Raymond
-   event and compare outage depth/duration with the three retained CQPSK
-   captures. Restore the prior binary and configuration after one conclusive
-   event unless the result is clearly superior and operationally safe.
-3. If live FSK4 still collapses, stop decoder tuning and test the existing
+1. Hold the gated exact-lineage FSK4-control candidate through one natural
+   Raymond event. Compare outage depth, duration, retunes, recovery, and IQ
+   integrity with CQPSK-control captures `1784609251021`, `1784635892019`, and
+   `1784639657025`.
+2. Keep FSK4 live only if it is operationally safe and materially suppresses
+   the collapse; otherwise restore and hash-verify the exact binary and config
+   rollback.
+3. If live FSK4 does not materially improve the collapse, stop decoder tuning
+   and test the existing
    BPF-800-M on RPI as the next hardware discriminator; do not add an antenna.

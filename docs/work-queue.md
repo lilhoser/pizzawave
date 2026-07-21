@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 11:02 EDT
+Last reconciled: 2026-07-21 11:43 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -32,6 +32,9 @@ Cross-repository source state:
   `codex/initial-collapse-capture-rpi` at `393a0732`;
 - the retune-grace experiment remains separately isolated on
   `codex/rf-stabilization` at `602a637`.
+- the exact-lineage RPI control-demodulator candidate remains isolated on
+  `codex/rpi-control-fsk4` at `4bb829fd`; it is not merged to Trunk Recorder
+  `master`.
 
 ## Active
 
@@ -81,7 +84,16 @@ Cross-repository source state:
   switch traffic recorders and reject Phase 2 calls. The isolated TR candidate
   now provides that separation and passed all three retained-IQ replays with
   traffic QPSK/control FSK4 logged independently and FSK4 yields reproduced.
-  A strong-baseline live RPI gate is next. OT uses
+  The first two live builds from the wrong newer TR lineage exposed callstream
+  plugin ABI mismatches and were immediately rolled back; they are deployment
+  failures, not RF results. The final candidate was rebuilt from the exact RPI
+  source lineage, passed an installed-plugin offline replay, and was activated
+  at 11:40:15 EDT with Raymond traffic QPSK/control FSK4. The live gate passed:
+  Raymond held 21-42 frame/s on the primary, TR stayed at zero restarts,
+  PizzaWave remained current after one transient stale reading, and a real
+  Phase 2 recorder started with QPSK enabled. The only active RF task is now to
+  hold this exact single change through one natural Raymond collapse and
+  compare it with the three CQPSK-control captures. OT uses
   RTL-SDR receivers behind an MCA208M while RPI uses Airspy receivers without
   that multicoupler;
   this hardware difference further weakens a single receiver/front-end-overload
@@ -184,10 +196,10 @@ Cross-repository source state:
    - retain the completed same-IQ demodulator result: FSK4 beat stock and
      half-timing CQPSK on all three Raymond captures, including every healthy
      pre-trigger portion and every collapsed post-trigger portion;
-   - run one control-channel-only FSK4 live confirmation on RPI while preserving
-     QPSK traffic recording and explicitly gating Phase 2 recording. Do not use
-     the system-level `modulation: fsk4` setting, add antennas, or add another
-     live wide recorder;
+   - finish the active control-channel-only FSK4 confirmation by retaining one
+     natural Raymond event; its healthy-primary and Phase 2 QPSK gates have
+     passed. Do not use the system-level `modulation: fsk4` setting, add
+     antennas, or add another live wide recorder;
    - if FSK4 does not materially reduce the next natural collapse, stop decoder
      tuning and test the available BPF-800-M on RPI as the next hardware
      discriminator;
