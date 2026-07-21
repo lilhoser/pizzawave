@@ -273,21 +273,38 @@ therefore failed both the zero-invalid-decision gate and the 60-second p95 gate.
 The larger frozen run was not performed, and Qwen 3.6 was restored with its
 previous Q8_0, 65,536-context, four-parallel-slot configuration.
 
-No live deployment is justified by this experiment. Full-coverage chronological
-planning, high-recall retrieval, opaque identifiers, source evidence, and
-candidate-backed fail-closed validation remain useful. Neither tested verifier
-contract is acceptable: grouped pairs lose reviewed positives, while the
-chronological linker admits a semantic-only false link and misses tail latency.
-The dense 27B result adds a separate warning: a model can pass the small review
-set perfectly while failing the ordinary output contract and latency gates.
+The sparse positive-link contract was then tested with the same Qwen 3.5 27B
+runtime. It again passed the six-case review gate with three of three reviewed
+positive links, no false link, both reviewer-unresolved pairs withheld, and no
+contract error. Case latency ranged from 23.46 to 52.21 seconds.
 
-Before spending time on another model, the next falsifiable experiment should
-remove mandatory negative-decision generation. A strict sparse verifier would
-emit only positively supported link proposals inside a completion envelope;
-omitted candidates would remain unlinked. Deterministic code would validate
-opaque observation tokens, evidence ownership, retrieval eligibility, schema
-completeness, and fail closed on malformed output. This is an output-boundary
-hypothesis, not evidence that Qwen 3.5 27B is acceptable. It must rerun the same
-review and frozen ordinary-traffic gates, including semantic inspection and the
-60-second p95 limit. Do not change persistence until one complete pipeline
-passes both gates.
+On the same first ten candidate-bearing ordinary requests, covering 26
+retrieved pairs, the sparse contract returned and admitted two links with no
+invalid proposal or failed request. Direct transcript inspection supports both:
+the unit-23 lost-lumber continuation and the officer arriving at the Westside
+Drive male-behind-the-store call. It did not reproduce the dense contract's
+Tennessee false link. Average request latency was 18.65 seconds, median was
+1.32 seconds, interpolated p90 was 46.72 seconds, interpolated p95 was 48.70
+seconds, and maximum was 50.68 seconds. The ten requests used 10,801 prompt
+tokens and only 455 completion tokens; empty-link responses completed in about
+0.95 to 1.40 seconds. The sparse boundary therefore passed this bounded smoke
+test.
+
+No live deployment is justified yet. Full-coverage chronological planning,
+high-recall retrieval, opaque identifiers, source evidence, sparse positive
+proposals, and candidate-backed fail-closed validation are the surviving
+architecture pieces. The grouped verifier and dense one-decision-per-observation
+contract are rejected.
+
+The sparse result qualifies the boundary for a larger frozen evaluation, not
+for persistence. Ten early candidate-bearing requests do not provide enough
+negative diversity or tail evidence. There is also no production resource plan
+yet: these candidates were precomputed by GPT-OSS, while the dense 27B verifier
+was loaded separately. Paxan cannot be assumed to keep both large models
+resident. The next complete-pipeline experiment should first replace the large
+candidate model with a resource-compatible high-recall retriever, such as the
+existing small embedding path, and prove candidate recall on the fixed review
+cases. Only then should the sparse verifier run a stratified or complete frozen
+window with semantic inspection, repeated-run stability, and the unchanged
+60-second p95 gate. Do not change persistence until that resource-feasible
+pipeline passes.
