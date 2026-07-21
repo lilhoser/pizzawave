@@ -436,3 +436,17 @@ single inspected trial is not accuracy or stability evidence, but it shows that
 candidate competition inside the batch contributed to the false admissions
 and that pairwise adjudication is worth testing as a separate stage. It does
 not justify persistence or a full-window run.
+
+Three automated repetitions of the four pairwise adjudications then produced
+identical membership outcomes. Every trial retained both supported links and
+withheld both unsupported links, with zero invalid response or request failure.
+Across 12 requests, average latency was 7.79 seconds, interpolated p95 was 14.00
+seconds, maximum was 15.96 seconds, and total usage was 7,765 tokens.
+
+Membership was stable on this inspected slice, but explanation quality was not
+uniformly adequate. One of the six admitted outputs stated only that one call
+was related to the other without describing the supporting connection. That is
+not a false relationship on this known pair, but it cannot serve as meaningful
+relationship provenance. The result therefore supports a broader falsification
+sample without changing the prompt; it still does not pass a general accuracy,
+explanation-quality, or production-capacity gate.

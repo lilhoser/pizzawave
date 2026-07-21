@@ -226,3 +226,12 @@ relationships were withheld. All four outputs were contract-valid and used
 inspected pairs, not a scored gate. It supports implementing an auditable
 proposal-then-pairwise replay, but cannot establish that same-model
 adjudication will generalize or remain stable.
+
+Three automated repetitions then returned the same membership result on all
+four pairs: both supported links retained and both false proposals withheld in
+every trial. The 12 requests had zero invalid response or failure, 7.79-second
+average latency, 14.00-second interpolated p95, and 15.96-second maximum
+latency. One admitted relationship statement was nevertheless tautological and
+did not explain the evidence connecting its two calls. Membership stability on
+this inspected slice is therefore established, while explanation adequacy and
+generalization remain unresolved.
