@@ -221,6 +221,14 @@ different person checks were joined because both mentioned Tennessee. This
 variant fails both the zero-high-impact-false-link gate and the 60-second tail
 gate.
 
+Gemma 4 26B-A4B Q4 was also tested locally on Paxan with full GPU offload and
+reasoning disabled. It completed the six chronological review cases in 3.16 to
+4.02 seconds each, but linked only two of three reviewed positives. Every case
+also contained at least one contract-invalid unresolved decision that selected
+a target, and one positive decision used `propose_link` as its relationship
+statement. It failed the accuracy and contract gates, so no ordinary-traffic
+run was performed.
+
 No live deployment is justified by this experiment. Full-coverage chronological
 planning, high-recall retrieval, opaque identifiers, source evidence, and
 candidate-backed fail-closed validation remain useful. Neither tested verifier
