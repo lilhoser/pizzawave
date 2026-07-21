@@ -339,8 +339,8 @@ public sealed class OpenAiIncidentEventStateLinkProposer : IIncidentEventStateLi
                 parsed.CandidateToken,
                 parsed.RelationshipStatement,
                 parsed.Uncertainty,
-                parsed.NewObservationEvidence.Select(citation => new IncidentEventStateTranscriptCitation(citation.TranscriptId, citation.ExactQuote)).ToList(),
-                parsed.CandidateEvidence.Select(citation => new IncidentEventStateTranscriptCitation(citation.TranscriptId, citation.ExactQuote)).ToList(),
+                parsed.NewObservationEvidence.Select(citation => IncidentEventStateLinkEvidence.MaterializeCitation(bundle, citation.TranscriptId)).ToList(),
+                parsed.CandidateEvidence.Select(citation => IncidentEventStateLinkEvidence.MaterializeCitation(bundle, citation.TranscriptId)).ToList(),
                 parsed.UnresolvedQuestions);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -422,6 +422,5 @@ public sealed class OpenAiIncidentEventStateLinkProposer : IIncidentEventStateLi
         [property: JsonPropertyName("unresolved_questions")] IReadOnlyList<string> UnresolvedQuestions);
 
     private sealed record LinkCitation(
-        [property: JsonPropertyName("transcript_id")] string TranscriptId,
-        [property: JsonPropertyName("exact_quote")] string ExactQuote);
+        [property: JsonPropertyName("transcript_id")] string TranscriptId);
 }

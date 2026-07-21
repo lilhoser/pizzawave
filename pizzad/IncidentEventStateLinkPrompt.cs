@@ -10,7 +10,7 @@ public sealed record IncidentEventStateLinkPromptPayload(
 
 public static class IncidentEventStateLinkPrompt
 {
-    public const string PromptIdentity = "incident-event-link-only-v1";
+    public const string PromptIdentity = "incident-event-link-only-v2";
 
     public static IncidentEventStateLinkPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -50,8 +50,8 @@ public static class IncidentEventStateLinkPrompt
         user.AppendLine("Otherwise use abstain. Abstention means unresolved; it does not mean the observations describe different events.");
         user.AppendLine("You may not declare a different event, create an event, split an event, assign a category or role, or change event state.");
         user.AppendLine("Timing, system, talkgroup, frequency, retrieval, and metadata may provide context, but none proves a link by itself.");
-        user.AppendLine("For propose_link, select exactly one supplied candidate_token and cite literal transcript substrings from both the new observation and that candidate.");
-        user.AppendLine("Do not alter a quote, combine separate fragments, or cite a transcript from an unselected candidate.");
+        user.AppendLine("For propose_link, select exactly one supplied candidate_token and cite transcript_id values from both the new observation and that candidate.");
+        user.AppendLine("Copy transcript_id values exactly as supplied. Do not invent an identifier or cite a transcript from an unselected candidate.");
         user.AppendLine("For abstain, return an empty candidate_token and at least one concrete unresolved question.");
         user.AppendLine();
         user.AppendLine("Source bundle:");
@@ -60,15 +60,23 @@ public static class IncidentEventStateLinkPrompt
         return new IncidentEventStateLinkPromptPayload(
             "You propose one source-grounded connection between a new radio observation and an existing event, or abstain. Your output is shadow evidence only. Application code owns identifiers, state projection, validation, and persistence.",
             user.ToString(),
-            ResponseFormat(candidates));
+            ResponseFormat(
+                candidates,
+                observationsById[newObservationId].Transcripts.Select(transcript => transcript.TranscriptId),
+                candidates.SelectMany(candidate => candidate.ObservationIds)
+                    .SelectMany(observationId => observationsById[observationId].Transcripts)
+                    .Select(transcript => transcript.TranscriptId)));
     }
 
-    public static object ResponseFormat(IReadOnlyList<IncidentEventStateLinkCandidate> candidates) => new
+    private static object ResponseFormat(
+        IReadOnlyList<IncidentEventStateLinkCandidate> candidates,
+        IEnumerable<string> newTranscriptIds,
+        IEnumerable<string> candidateTranscriptIds) => new
     {
         type = "json_schema",
         json_schema = new
         {
-            name = "pizzawave_incident_event_link_only_v1",
+            name = "pizzawave_incident_event_link_only_v2",
             strict = true,
             schema = new
             {
@@ -84,8 +92,8 @@ public static class IncidentEventStateLinkPrompt
                     },
                     relationship_statement = new { type = "string" },
                     uncertainty = new { type = "number", minimum = 0, maximum = 1 },
-                    new_observation_evidence = CitationArraySchema(),
-                    candidate_evidence = CitationArraySchema(),
+                    new_observation_evidence = CitationArraySchema(newTranscriptIds),
+                    candidate_evidence = CitationArraySchema(candidateTranscriptIds),
                     unresolved_questions = StringArraySchema()
                 },
                 required = new[]
@@ -121,7 +129,7 @@ public static class IncidentEventStateLinkPrompt
             StringComparer.Ordinal)
     };
 
-    private static object CitationArraySchema() => new
+    private static object CitationArraySchema(IEnumerable<string> transcriptIds) => new
     {
         type = "array",
         items = new
@@ -130,10 +138,9 @@ public static class IncidentEventStateLinkPrompt
             additionalProperties = false,
             properties = new
             {
-                transcript_id = new { type = "string" },
-                exact_quote = new { type = "string" }
+                transcript_id = new { type = "string", @enum = transcriptIds.Distinct(StringComparer.Ordinal).ToArray() }
             },
-            required = new[] { "transcript_id", "exact_quote" }
+            required = new[] { "transcript_id" }
         }
     };
 

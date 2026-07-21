@@ -129,6 +129,21 @@ public sealed class IncidentEventStateLinkShadowTests
         Assert.Contains("candidate-1", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.DoesNotContain("event-existing", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("does not mean the observations describe different events", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("exact_quote", responseFormat, StringComparison.Ordinal);
+        Assert.Contains("transcript_id", responseFormat, StringComparison.Ordinal);
+        Assert.Contains("transcript-new", responseFormat, StringComparison.Ordinal);
+        Assert.Contains("transcript-prior", responseFormat, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ApplicationMaterializesModelSelectedTranscriptAsExactSourceEvidence()
+    {
+        var citation = IncidentEventStateLinkEvidence.MaterializeCitation(Bundle(), "transcript-new");
+
+        Assert.Equal("transcript-new", citation.TranscriptId);
+        Assert.Equal("469, your radio is breaking up.", citation.ExactQuote);
+        var missing = IncidentEventStateLinkEvidence.MaterializeCitation(Bundle(), "invented-transcript");
+        Assert.Equal(string.Empty, missing.ExactQuote);
     }
 
     [Fact]

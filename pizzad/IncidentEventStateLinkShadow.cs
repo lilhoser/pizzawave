@@ -23,6 +23,22 @@ public sealed record IncidentEventStateTranscriptCitation(
     string TranscriptId,
     string ExactQuote);
 
+public static class IncidentEventStateLinkEvidence
+{
+    public static IncidentEventStateTranscriptCitation MaterializeCitation(
+        IncidentEventStateObservationBundle bundle,
+        string transcriptId)
+    {
+        var matches = bundle.Observations
+            .SelectMany(observation => observation.Transcripts)
+            .Where(transcript => string.Equals(transcript.TranscriptId, transcriptId, StringComparison.Ordinal))
+            .ToList();
+        return new IncidentEventStateTranscriptCitation(
+            transcriptId,
+            matches.Count == 1 ? matches[0].Text : string.Empty);
+    }
+}
+
 public sealed record IncidentEventStateLinkProposal(
     string ProposalId,
     DateTimeOffset GeneratedAtUtc,
