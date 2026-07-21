@@ -229,12 +229,39 @@ a target, and one positive decision used `propose_link` as its relationship
 statement. It failed the accuracy and contract gates, so no ordinary-traffic
 run was performed.
 
+Qwen 3.5 27B Q4_K_M was then tested locally on Paxan with full GPU offload,
+8,192 tokens of context, one parallel slot, and reasoning disabled. It passed
+the unchanged six-case chronological review gate: all three reviewed positives
+were linked, the definite negative and both reviewer-unresolved cases were
+withheld, and all six decisions were contract-valid. Request latency ranged
+from 5.66 to 52.42 seconds.
+
+That small review result did not generalize to the output contract under
+ordinary candidate-backed traffic. Across ten requests and 26 decisions, the
+model admitted two links; transcript inspection supports both as genuine
+continuations. However, 24 non-link decisions were contract-invalid because the
+model selected and cited a target while declaring the decision unresolved. The
+run averaged 25.29 seconds per request, had a 15.62-second median, an
+approximately 63.46-second interpolated p95, and a 66.24-second maximum. It
+therefore failed both the zero-invalid-decision gate and the 60-second p95 gate.
+The larger frozen run was not performed, and Qwen 3.6 was restored with its
+previous Q8_0, 65,536-context, four-parallel-slot configuration.
+
 No live deployment is justified by this experiment. Full-coverage chronological
 planning, high-recall retrieval, opaque identifiers, source evidence, and
 candidate-backed fail-closed validation remain useful. Neither tested verifier
 contract is acceptable: grouped pairs lose reviewed positives, while the
 chronological linker admits a semantic-only false link and misses tail latency.
-The next model experiment should keep the frozen corpus and unchanged gates and
-test a fully GPU-resident verifier that can coexist with a small embedding
-retriever on Paxan. Do not change persistence until one verifier passes both the
-fixed relationship review and production-shaped false-link and tail gates.
+The dense 27B result adds a separate warning: a model can pass the small review
+set perfectly while failing the ordinary output contract and latency gates.
+
+Before spending time on another model, the next falsifiable experiment should
+remove mandatory negative-decision generation. A strict sparse verifier would
+emit only positively supported link proposals inside a completion envelope;
+omitted candidates would remain unlinked. Deterministic code would validate
+opaque observation tokens, evidence ownership, retrieval eligibility, schema
+completeness, and fail closed on malformed output. This is an output-boundary
+hypothesis, not evidence that Qwen 3.5 27B is acceptable. It must rerun the same
+review and frozen ordinary-traffic gates, including semantic inspection and the
+60-second p95 limit. Do not change persistence until one complete pipeline
+passes both gates.
