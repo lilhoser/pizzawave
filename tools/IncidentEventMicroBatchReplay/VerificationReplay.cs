@@ -21,6 +21,7 @@ internal static class VerificationReplay
         var outputDirectory = Path.GetFullPath(Required("--output"));
         var endpoint = values.GetValueOrDefault("--endpoint", "http://127.0.0.1:1234/v1").TrimEnd('/');
         var model = Required("--model");
+        var reasoningEffort = values.GetValueOrDefault("--reasoning-effort");
         var timeoutSeconds = Integer("--timeout-seconds", 180);
         var maximumRequests = values.TryGetValue("--max-requests", out var maximumRequestsValue)
             ? int.Parse(maximumRequestsValue)
@@ -44,6 +45,7 @@ internal static class VerificationReplay
             candidateManifestHash,
             endpoint,
             model,
+            reasoningEffort ?? string.Empty,
             IncidentEventStateMicroBatchVerificationPrompt.PromptIdentity);
         if (File.Exists(manifestPath))
         {
@@ -106,6 +108,7 @@ internal static class VerificationReplay
                 model,
                 temperature = 0.1,
                 max_tokens = 2400,
+                reasoning_effort = reasoningEffort,
                 response_format = prompt.ResponseFormat,
                 messages = new object[]
                 {
@@ -284,6 +287,7 @@ internal static class VerificationReplay
         string CandidateManifestSha256,
         string Endpoint,
         string Model,
+        string ReasoningEffort,
         string PromptIdentity);
     private sealed record CandidateBatchSource(
         int Sequence,

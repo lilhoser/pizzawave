@@ -108,8 +108,14 @@ dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatch
   --replay-id example-verification `
   --candidate-directory artifacts/incident-event-microbatch-replay/example-candidates `
   --output artifacts/incident-event-microbatch-replay/example-verification `
-  --model qwen/qwen3.6-35b-a3b@q8_0
+  --model qwen/qwen3.6-35b-a3b@q8_0 `
+  --reasoning-effort none
 ```
+
+`--reasoning-effort` is optional and is recorded in the verification manifest.
+Use it only when the endpoint advertises that exact option for the selected
+model. This is an inference-mode control, not a substitute for the unchanged
+accuracy and latency gates.
 
 This is an evaluation boundary, not a commitment to keep two large language
 models loaded in production. Paxan's 24 GB GPU cannot be assumed to hold both
@@ -164,6 +170,16 @@ Other available model paths did not solve both constraints:
   reviewed positive pair.
 - GLM 4.7 Flash did not return a single reviewed pair within 120 seconds.
 - Gemma 4 did not return the first ordinary batch within 180 seconds.
+
+Qwen 3.5 9B Q8 was then tested in isolation on Paxan with full GPU offload.
+With the model's default reasoning mode, all six requests returned empty answer
+content after 37.6 to 44.7 seconds because the 1,200-token output allowance was
+consumed before a structured answer was emitted. LM Studio advertises `off` and
+`on` as the model's supported reasoning modes. Repeating the unchanged review
+with `reasoning_effort=none` produced structurally valid answers in 3.5 to 28.9
+seconds, but rejected all three reviewed positive links. It therefore had zero
+false positives and zero positive recall. The ordinary-traffic replay was not
+run because the model had already failed the accuracy gate.
 
 No live deployment is justified by this experiment. The architectural boundary
 is worth retaining, but the production implementation should not alternate two
