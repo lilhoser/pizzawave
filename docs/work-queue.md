@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 19:36 EDT
+Last reconciled: 2026-07-20 21:47 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -44,9 +44,14 @@ Cross-repository source state:
   opposite direction, with live recovering to 36 while shadow remained at 1.
   Hamilton stayed healthy throughout. A paired 800 kHz OT capture now shows
   North Bradley's collapse was channel selective: outer-band power was stable
-  within 0.14 dB while control-channel energy tracked recovery. RPI is armed
-  with an approximately 857 kHz paired wide branch to determine whether
-  Raymond's next onset has the same selective signature. See
+  within 0.14 dB while control-channel energy tracked recovery. A subsequent
+  centered Hamilton pair showed the inverse amplitude behavior: control-channel
+  energy rose about 2 dB into shared decoder failure while the outer spectrum
+  stayed stable. Together these favor channel-local modulation destruction
+  from dynamic simulcast/multipath over a simple fade. OT's two-system wide
+  instrumentation also induced repeated Gardner/source-stall exits and must be
+  removed; RPI remains stable with an approximately 857 kHz paired branch to
+  determine whether Raymond has the same channel-local signature. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.

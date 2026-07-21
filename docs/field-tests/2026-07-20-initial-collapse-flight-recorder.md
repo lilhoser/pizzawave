@@ -450,6 +450,54 @@ retuned, then remained at 1 frame/s while live recovered through 19, 30, 39,
 and 36 frames/s on the primary. Neither fixed tuning nor retuning is a universal
 fix, and this divergence cannot explain the initial simultaneous collapse.
 
+### Hamilton paired-capture result
+
+Hamilton produced a complete paired event at 2026-07-20 21:44:56 EDT. This is
+an especially useful control because its 855.212500 MHz SDR source is centered
+exactly on the 855.212500 MHz control channel. Both independent decoders fell
+together before trigger: the live/shadow sequence over the last four seconds
+was 3/9, 1/3, 2/3, and 3/6 frames/s. The wide file contains the full 10/20
+second window (24,000,000 complex samples, 192,000,000 bytes), and the narrow
+file contains the full 30/60 second window (8,640,000 complex samples,
+69,120,000 bytes). Stable SHA-256 values are:
+
+- narrow IQ: `1a3482fd4a967e85113ca2a93753cb4e756780401c05324d846e27250f41cdcb`;
+- narrow JSON: `aa9aa0298a298f74ebf07406c85c67110ab2cdea9aeb8ecd23c63d6d86039357`;
+- wide IQ: `b7caecfcbd1eafd5a85fe4076885d2ca55d4eaea7de6cb148b35e5bbddb7ae4a`;
+- wide JSON: `e194b6528df922f4044d102c52c798a2b4d43bed6caae665425ca58e80d32568`.
+
+Hamilton rejects a simple fade more directly than North Bradley. During the
+shared onset, control-channel energy increased by approximately 2 dB relative
+to the stable outer-band floor while decode fell to 1-3 frames/s. Across the
+complete wide window, the 16 intervals at <=3 live frames/s had a mean
+control-channel/outer-band ratio 1.35 dB *higher* than the seven intervals at
+>=15 frames/s; mean outer-band power differed by only 0.10 dB. Several distant
+12.5 kHz channels varied independently, but no neighboring spectral component
+appeared at onset. All samples were finite with no zero, repeated-adjacent, or
+clipped values.
+
+The combined OT evidence therefore points to lost modulation quality rather
+than insufficient total control-channel energy. North Bradley's failed decode
+coincided with lower channel energy; Hamilton's coincided with higher channel
+energy. What they share is an impairment confined to the P25 channel while the
+surrounding receiver spectrum remains stable. Dynamic simulcast/multipath
+superposition is the leading explanation because it can either cancel or add
+energy while closing the modulation eye. A precisely overlapping co-channel
+signal remains possible. Source centering, broadband antenna fading, receiver
+gain, USB/sample corruption, and queue accounting do not fit both events.
+
+### OT instrumentation stability
+
+The paired experiment itself is too expensive to leave active on OT. After
+deployment, TR repeatedly logged GNU Radio `gardner_cc` failures with
+`mmse_fir_interpolator_cc: imu out of bounds`; Source 2 or Source 4 then stopped
+delivering samples and TR exited. By 21:10 EDT systemd had restarted it 13
+times. No matching error or source stall occurred in the 17:00-19:23
+pre-deployment journal window. This is an experiment-induced service stability
+problem, separate from the RF evidence retained in the completed files. OT's
+wide branches should be removed after preserving the captures; the lighter
+single-system RPI deployment remained stable with zero restarts.
+
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is
 not the primary result above. Automatic quota is process-local, which explains
