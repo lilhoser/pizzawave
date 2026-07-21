@@ -137,6 +137,32 @@ Application validation admits a proposed link only when the selected endpoint
 pair appeared in retrieval output. A chronological but unretrieved target is
 left unresolved.
 
+The sparse link experiment uses the same candidate-backed source context but
+does not require the model to generate a negative record for every candidate:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --candidate-backed-verification-replay true `
+  --sparse-link-mode true `
+  --database C:\path\to\incident-replay.db `
+  --start 1784603146 `
+  --end 1784635663 `
+  --replay-id example-sparse-links `
+  --candidate-directory artifacts/incident-event-microbatch-replay/example-candidates `
+  --output artifacts/incident-event-microbatch-replay/example-sparse-links `
+  --model qwen/qwen3.5-27b@q4_k_m `
+  --reasoning-effort none
+```
+
+The model must mark the envelope complete after examining every supplied
+candidate and returns only positively supported candidate tokens. Omission
+means no link; an empty link list is valid. Deterministic validation admits no
+links if the envelope is incomplete or any proposal has an unknown or duplicate
+candidate, gives one new observation multiple targets, lacks endpoint-owned
+transcript evidence, or violates the typed schema. Use `--sparse-link-mode true`
+with the review-package command to apply the same contract to the fixed review
+gate.
+
 This is an evaluation boundary, not a commitment to keep two large language
 models loaded in production. Paxan's 24 GB GPU cannot be assumed to hold both
 models concurrently. The experiment must separately establish whether a small

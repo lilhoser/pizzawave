@@ -23,7 +23,10 @@ internal static class ReviewEvaluation
             : (int?)null;
         var candidateMode = values.TryGetValue("--candidate-mode", out var candidateValue) && bool.Parse(candidateValue);
         var groupedVerifierMode = values.TryGetValue("--grouped-verifier-mode", out var groupedValue) && bool.Parse(groupedValue);
+        var sparseLinkMode = values.TryGetValue("--sparse-link-mode", out var sparseLinkValue) && bool.Parse(sparseLinkValue);
         var selectedCaseId = values.GetValueOrDefault("--case-id", string.Empty);
+        if (new[] { candidateMode, groupedVerifierMode, sparseLinkMode }.Count(enabled => enabled) > 1)
+            throw new ArgumentException("candidate, grouped verifier, and sparse link modes are mutually exclusive");
 
         using var package = JsonDocument.Parse(ReadPackageJson(packagePath));
         using var review = JsonDocument.Parse(await File.ReadAllTextAsync(reviewPath));
@@ -77,6 +80,20 @@ internal static class ReviewEvaluation
                     batch,
                     lookup));
                 Console.WriteLine($"{caseId}: assessment={results[^1].Assessment} candidate={results[^1].AdmittedLink} ms={results[^1].DurationMilliseconds} error={results[^1].Error}");
+                continue;
+            }
+            if (sparseLinkMode)
+            {
+                results.Add(await EvaluateSparseLinksAsync(
+                    client,
+                    endpoint,
+                    model,
+                    reasoningEffort,
+                    reasoningTokens,
+                    caseId,
+                    assessments.GetValueOrDefault(caseId, string.Empty),
+                    lookup));
+                Console.WriteLine($"{caseId}: assessment={results[^1].Assessment} admitted={results[^1].AdmittedLink} ms={results[^1].DurationMilliseconds} error={results[^1].Error}");
                 continue;
             }
             var prompt = IncidentEventStateMicroBatchPrompt.Build(batch, lookup);
@@ -159,12 +176,20 @@ internal static class ReviewEvaluation
             model,
             reasoningEffort ?? string.Empty,
             reasoningTokens,
-            groupedVerifierMode ? "grouped_verification" : candidateMode ? "candidate_retrieval" : "final_verification",
+            groupedVerifierMode
+                ? "grouped_verification"
+                : candidateMode
+                    ? "candidate_retrieval"
+                    : sparseLinkMode
+                        ? "sparse_link_verification"
+                        : "final_verification",
             groupedVerifierMode
                 ? IncidentEventStateMicroBatchVerificationPrompt.PromptIdentity
                 : candidateMode
                     ? IncidentEventStateMicroBatchCandidatePrompt.PromptIdentity
-                    : IncidentEventStateMicroBatchPrompt.PromptIdentity,
+                    : sparseLinkMode
+                        ? IncidentEventStateSparseLinkPrompt.PromptIdentity
+                        : IncidentEventStateMicroBatchPrompt.PromptIdentity,
             Path.GetFileName(packagePath),
             Path.GetFileName(reviewPath),
             results,
@@ -177,6 +202,93 @@ internal static class ReviewEvaluation
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
         await File.WriteAllTextAsync(outputPath, JsonSerializer.Serialize(report, EngineConfig.JsonOptions()));
         Console.WriteLine(JsonSerializer.Serialize(report, EngineConfig.JsonOptions()));
+    }
+
+    private static async Task<ReviewCaseResult> EvaluateSparseLinksAsync(
+        HttpClient client,
+        string endpoint,
+        string model,
+        string? reasoningEffort,
+        int? reasoningTokens,
+        string caseId,
+        string assessment,
+        IReadOnlyDictionary<string, IncidentEventStateSourceObservation> lookup)
+    {
+        var ordered = lookup.Values
+            .OrderBy(observation => observation.ObservedAtUnixSeconds)
+            .ThenBy(observation => observation.ObservationId, StringComparer.Ordinal)
+            .ToList();
+        var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            caseId,
+            1,
+            [new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty)],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["new-1"] = ordered[0].ObservationId,
+                ["new-2"] = ordered[1].ObservationId
+            },
+            lookup);
+        var prompt = IncidentEventStateSparseLinkPrompt.Build(plan, lookup);
+        var requestBody = new
+        {
+            model,
+            temperature = 0.1,
+            max_tokens = 1200,
+            reasoning_effort = reasoningEffort,
+            reasoning_tokens = reasoningTokens,
+            response_format = prompt.ResponseFormat,
+            messages = new object[]
+            {
+                new { role = "system", content = prompt.SystemPrompt },
+                new { role = "user", content = prompt.UserPrompt }
+            }
+        };
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            using var content = new StringContent(
+                JsonSerializer.Serialize(requestBody, EngineConfig.JsonOptions()),
+                Encoding.UTF8,
+                "application/json");
+            using var response = await client.PostAsync($"{endpoint}/chat/completions", content);
+            var responseJson = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"HTTP {(int)response.StatusCode}: {responseJson[..Math.Min(1000, responseJson.Length)]}");
+            using var responseEnvelope = JsonDocument.Parse(responseJson);
+            var responseModel = responseEnvelope.RootElement.GetProperty("model").GetString() ?? string.Empty;
+            if (!string.Equals(responseModel, model, StringComparison.Ordinal))
+                throw new InvalidDataException($"model identity mismatch: requested '{model}', received '{responseModel}'");
+            var responseContent = responseEnvelope.RootElement.GetProperty("choices")[0].GetProperty("message")
+                .GetProperty("content").GetString() ?? throw new InvalidDataException("model response content was empty");
+            var sparseEnvelope = ParseSparseLinks(responseModel, responseContent);
+            var validation = IncidentEventStateSparseLinkValidator.Validate(plan, lookup, sparseEnvelope);
+            var link = sparseEnvelope.Links.FirstOrDefault();
+            timer.Stop();
+            return new ReviewCaseResult(
+                caseId,
+                assessment,
+                link is null ? IncidentEventStateMicroBatchDecision.Unresolved.ToString() : IncidentEventStateMicroBatchDecision.ProposeLink.ToString(),
+                link?.CandidateToken ?? string.Empty,
+                link?.RelationshipStatement ?? string.Empty,
+                validation.IsValid && link is not null,
+                validation.Errors,
+                timer.ElapsedMilliseconds,
+                string.Empty);
+        }
+        catch (Exception ex)
+        {
+            timer.Stop();
+            return new ReviewCaseResult(
+                caseId,
+                assessment,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                false,
+                [],
+                timer.ElapsedMilliseconds,
+                ex.GetBaseException().Message);
+        }
     }
 
     private static async Task<ReviewCaseResult> EvaluateGroupedVerifierAsync(
@@ -431,6 +543,24 @@ internal static class ReviewEvaluation
                 ReadStrings(row.GetProperty("new_evidence_transcript_ids")),
                 ReadStrings(row.GetProperty("target_evidence_transcript_ids")),
                 ReadStrings(row.GetProperty("unresolved_questions")))).ToList();
+    }
+
+    private static IncidentEventStateSparseLinkEnvelope ParseSparseLinks(string model, string contentJson)
+    {
+        using var document = JsonDocument.Parse(contentJson);
+        var root = document.RootElement;
+        var links = root.GetProperty("links").EnumerateArray().Select(row =>
+            new IncidentEventStateSparseLinkProposal(
+                row.GetProperty("candidate_token").GetString() ?? string.Empty,
+                row.GetProperty("relationship_statement").GetString() ?? string.Empty,
+                row.GetProperty("uncertainty").GetDouble(),
+                ReadStrings(row.GetProperty("new_evidence_transcript_ids")),
+                ReadStrings(row.GetProperty("target_evidence_transcript_ids")))).ToList();
+        return new IncidentEventStateSparseLinkEnvelope(
+            model,
+            IncidentEventStateSparseLinkPrompt.PromptIdentity,
+            root.GetProperty("completed").GetBoolean(),
+            links);
     }
 
     private static IReadOnlyList<string> ReadStrings(JsonElement array) =>

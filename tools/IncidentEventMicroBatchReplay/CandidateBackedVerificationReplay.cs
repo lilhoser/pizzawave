@@ -29,6 +29,7 @@ internal static class CandidateBackedVerificationReplay
         var maximumRequests = values.TryGetValue("--max-requests", out var maximumRequestsValue)
             ? int.Parse(maximumRequestsValue)
             : (int?)null;
+        var sparseLinkMode = values.TryGetValue("--sparse-link-mode", out var sparseLinkValue) && bool.Parse(sparseLinkValue);
 
         Directory.CreateDirectory(outputDirectory);
         var jsonOptions = EngineConfig.JsonOptions();
@@ -47,7 +48,9 @@ internal static class CandidateBackedVerificationReplay
             model,
             reasoningEffort ?? string.Empty,
             reasoningTokens,
-            IncidentEventStateMicroBatchPrompt.PromptIdentity);
+            sparseLinkMode
+                ? IncidentEventStateSparseLinkPrompt.PromptIdentity
+                : IncidentEventStateMicroBatchPrompt.PromptIdentity);
         var manifestPath = Path.Combine(outputDirectory, "manifest.json");
         if (File.Exists(manifestPath))
         {
@@ -93,18 +96,21 @@ internal static class CandidateBackedVerificationReplay
                 source.Candidates,
                 source.ObservationIdsByToken,
                 observationsById);
+            var sparsePrompt = sparseLinkMode
+                ? IncidentEventStateSparseLinkPrompt.Build(plan, observationsById)
+                : null;
             var requestBody = new
             {
                 model,
                 temperature = 0.1,
-                max_tokens = 2400,
+                max_tokens = sparseLinkMode ? 1200 : 2400,
                 reasoning_effort = reasoningEffort,
                 reasoning_tokens = reasoningTokens,
-                response_format = plan.Prompt.ResponseFormat,
+                response_format = sparsePrompt?.ResponseFormat ?? plan.Prompt.ResponseFormat,
                 messages = new object[]
                 {
-                    new { role = "system", content = plan.Prompt.SystemPrompt },
-                    new { role = "user", content = plan.Prompt.UserPrompt }
+                    new { role = "system", content = sparsePrompt?.SystemPrompt ?? plan.Prompt.SystemPrompt },
+                    new { role = "user", content = sparsePrompt?.UserPrompt ?? plan.Prompt.UserPrompt }
                 }
             };
             var timer = Stopwatch.StartNew();
@@ -122,35 +128,59 @@ internal static class CandidateBackedVerificationReplay
                     throw new InvalidDataException($"model identity mismatch: requested '{model}', received '{responseModel}'");
                 var responseContent = envelope.RootElement.GetProperty("choices")[0].GetProperty("message")
                     .GetProperty("content").GetString() ?? throw new InvalidDataException("model response content was empty");
-                var decisions = ParseDecisions(responseContent);
-                var proposal = new IncidentEventStateMicroBatchProposal(responseModel, IncidentEventStateMicroBatchPrompt.PromptIdentity, decisions);
-                var baseValidation = IncidentEventStateMicroBatchProposalValidator.Validate(plan.Batch, observationsById, plan.Prompt, proposal);
-                var expectedTokens = plan.Batch.NewObservationIds
-                    .Select(id => plan.Prompt.ObservationIdsByToken.Single(item => item.Value == id).Key)
-                    .ToList();
-                var shapeIsValid = decisions.Select(decision => decision.NewObservationToken)
-                    .SequenceEqual(expectedTokens, StringComparer.Ordinal);
-                var checkedDecisions = decisions.Select(decision => new
+                IReadOnlyList<IncidentEventStateMicroBatchObservationDecision> decisions;
+                IReadOnlyList<string> admitted;
+                IReadOnlyList<string> invalid;
+                IReadOnlyList<string> validationErrors;
+                if (sparseLinkMode)
                 {
-                    Decision = decision,
-                    Validation = IncidentEventStateCandidateBackedMicroBatch.ValidateDecision(plan, observationsById, decision)
-                }).ToList();
-                var admitted = shapeIsValid
-                    ? checkedDecisions
-                        .Where(item => item.Decision.Decision == IncidentEventStateMicroBatchDecision.ProposeLink && item.Validation.IsValid)
-                        .Select(item => IncidentEventStateCandidateBackedMicroBatch.CandidateTokenFor(plan, item.Decision))
-                        .Where(token => token is not null)
-                        .Cast<string>()
-                        .ToList()
-                    : [];
-                var invalid = checkedDecisions
-                    .Where(item => !item.Validation.IsValid)
-                    .Select(item => item.Decision.NewObservationToken)
-                    .ToList();
-                var validationErrors = baseValidation.Errors
-                    .Concat(checkedDecisions.SelectMany(item => item.Validation.Errors))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToList();
+                    var sparseEnvelope = ParseSparseLinks(responseModel, responseContent);
+                    var sparseValidation = IncidentEventStateSparseLinkValidator.Validate(plan, observationsById, sparseEnvelope);
+                    decisions = sparseEnvelope.Links
+                        .Select(link => ToDecision(plan, link))
+                        .Where(decision => decision is not null)
+                        .Cast<IncidentEventStateMicroBatchObservationDecision>()
+                        .ToList();
+                    admitted = sparseValidation.IsValid
+                        ? sparseEnvelope.Links.Select(link => link.CandidateToken).ToList()
+                        : [];
+                    invalid = sparseValidation.IsValid
+                        ? []
+                        : sparseEnvelope.Links.Select(link => link.CandidateToken).Distinct(StringComparer.Ordinal).ToList();
+                    validationErrors = sparseValidation.Errors;
+                }
+                else
+                {
+                    decisions = ParseDecisions(responseContent);
+                    var proposal = new IncidentEventStateMicroBatchProposal(responseModel, IncidentEventStateMicroBatchPrompt.PromptIdentity, decisions);
+                    var baseValidation = IncidentEventStateMicroBatchProposalValidator.Validate(plan.Batch, observationsById, plan.Prompt, proposal);
+                    var expectedTokens = plan.Batch.NewObservationIds
+                        .Select(id => plan.Prompt.ObservationIdsByToken.Single(item => item.Value == id).Key)
+                        .ToList();
+                    var shapeIsValid = decisions.Select(decision => decision.NewObservationToken)
+                        .SequenceEqual(expectedTokens, StringComparer.Ordinal);
+                    var checkedDecisions = decisions.Select(decision => new
+                    {
+                        Decision = decision,
+                        Validation = IncidentEventStateCandidateBackedMicroBatch.ValidateDecision(plan, observationsById, decision)
+                    }).ToList();
+                    admitted = shapeIsValid
+                        ? checkedDecisions
+                            .Where(item => item.Decision.Decision == IncidentEventStateMicroBatchDecision.ProposeLink && item.Validation.IsValid)
+                            .Select(item => IncidentEventStateCandidateBackedMicroBatch.CandidateTokenFor(plan, item.Decision))
+                            .Where(token => token is not null)
+                            .Cast<string>()
+                            .ToList()
+                        : [];
+                    invalid = checkedDecisions
+                        .Where(item => !item.Validation.IsValid)
+                        .Select(item => item.Decision.NewObservationToken)
+                        .ToList();
+                    validationErrors = baseValidation.Errors
+                        .Concat(checkedDecisions.SelectMany(item => item.Validation.Errors))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                }
                 var usage = ReadUsage(envelope.RootElement);
                 timer.Stop();
                 result = new BatchResult(
@@ -236,6 +266,44 @@ internal static class CandidateBackedVerificationReplay
                 ReadStrings(row.GetProperty("new_evidence_transcript_ids")),
                 ReadStrings(row.GetProperty("target_evidence_transcript_ids")),
                 ReadStrings(row.GetProperty("unresolved_questions")))).ToList();
+    }
+
+    private static IncidentEventStateSparseLinkEnvelope ParseSparseLinks(string model, string responseContent)
+    {
+        using var document = JsonDocument.Parse(responseContent);
+        var root = document.RootElement;
+        var links = root.GetProperty("links").EnumerateArray().Select(row =>
+            new IncidentEventStateSparseLinkProposal(
+                row.GetProperty("candidate_token").GetString() ?? string.Empty,
+                row.GetProperty("relationship_statement").GetString() ?? string.Empty,
+                row.GetProperty("uncertainty").GetDouble(),
+                ReadStrings(row.GetProperty("new_evidence_transcript_ids")),
+                ReadStrings(row.GetProperty("target_evidence_transcript_ids")))).ToList();
+        return new IncidentEventStateSparseLinkEnvelope(
+            model,
+            IncidentEventStateSparseLinkPrompt.PromptIdentity,
+            root.GetProperty("completed").GetBoolean(),
+            links);
+    }
+
+    private static IncidentEventStateMicroBatchObservationDecision? ToDecision(
+        IncidentEventStateCandidateBackedMicroBatchPrompt plan,
+        IncidentEventStateSparseLinkProposal proposal)
+    {
+        var candidate = plan.CandidateLinks.SingleOrDefault(link =>
+            string.Equals(link.CandidateToken, proposal.CandidateToken, StringComparison.Ordinal));
+        if (candidate is null)
+            return null;
+        var tokenById = plan.Prompt.ObservationIdsByToken.ToDictionary(item => item.Value, item => item.Key, StringComparer.Ordinal);
+        return new IncidentEventStateMicroBatchObservationDecision(
+            tokenById[candidate.NewObservationId],
+            IncidentEventStateMicroBatchDecision.ProposeLink,
+            tokenById[candidate.TargetObservationId],
+            proposal.RelationshipStatement,
+            proposal.Uncertainty,
+            proposal.NewEvidenceTranscriptIds,
+            proposal.TargetEvidenceTranscriptIds,
+            []);
     }
 
     private static IReadOnlyList<string> ReadStrings(JsonElement array) =>

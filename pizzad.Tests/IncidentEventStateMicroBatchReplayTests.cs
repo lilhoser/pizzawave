@@ -374,6 +374,102 @@ public sealed class IncidentEventStateMicroBatchReplayTests
         Assert.Contains(validation.Errors, error => error.Contains("outside retrieved candidates", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void SparseLinkPromptContainsCandidatesAndTranscriptEvidenceOnly()
+    {
+        var observations = new[] { Observation("call:1", 100), Observation("call:2", 101) };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            "sparse",
+            1,
+            [new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty)],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["new-1"] = "call:1",
+                ["new-2"] = "call:2"
+            },
+            lookup);
+
+        var prompt = IncidentEventStateSparseLinkPrompt.Build(plan, lookup);
+
+        Assert.Contains("candidate-1", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("call:1:transcript", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("forbidden-category", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("forbidden-talkgroup", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("unresolved", prompt.UserPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SparseLinkValidatorAcceptsCompleteEmptyEnvelopeAndGroundedLink()
+    {
+        var observations = new[] { Observation("call:1", 100), Observation("call:2", 101) };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            "sparse",
+            1,
+            [new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty)],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["new-1"] = "call:1",
+                ["new-2"] = "call:2"
+            },
+            lookup);
+        var empty = new IncidentEventStateSparseLinkEnvelope(
+            "model",
+            IncidentEventStateSparseLinkPrompt.PromptIdentity,
+            true,
+            []);
+        var linked = empty with
+        {
+            Links =
+            [
+                new IncidentEventStateSparseLinkProposal(
+                    "candidate-1",
+                    "the second transmission explicitly continues the first",
+                    0.1,
+                    ["call:2:transcript"],
+                    ["call:1:transcript"])
+            ]
+        };
+
+        Assert.True(IncidentEventStateSparseLinkValidator.Validate(plan, lookup, empty).IsValid);
+        Assert.True(IncidentEventStateSparseLinkValidator.Validate(plan, lookup, linked).IsValid);
+    }
+
+    [Fact]
+    public void SparseLinkValidatorFailsClosedOnDuplicateOrForeignEvidence()
+    {
+        var observations = new[] { Observation("call:1", 100), Observation("call:2", 101) };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            "sparse",
+            1,
+            [new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty)],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["new-1"] = "call:1",
+                ["new-2"] = "call:2"
+            },
+            lookup);
+        var badLink = new IncidentEventStateSparseLinkProposal(
+            "candidate-1",
+            "unsupported",
+            0.1,
+            ["call:1:transcript"],
+            ["call:2:transcript"]);
+        var envelope = new IncidentEventStateSparseLinkEnvelope(
+            "model",
+            IncidentEventStateSparseLinkPrompt.PromptIdentity,
+            true,
+            [badLink, badLink]);
+
+        var validation = IncidentEventStateSparseLinkValidator.Validate(plan, lookup, envelope);
+
+        Assert.False(validation.IsValid);
+        Assert.Contains(validation.Errors, error => error.Contains("more than once", StringComparison.Ordinal));
+        Assert.Equal(4, validation.Errors.Count(error => error.Contains("another observation", StringComparison.Ordinal)));
+    }
+
     private static IncidentEventStateSourceObservation Observation(string id, long observedAt) => new(
         id,
         long.Parse(id.AsSpan("call:".Length)),
