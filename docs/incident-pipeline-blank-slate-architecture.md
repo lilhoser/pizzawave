@@ -594,6 +594,28 @@ called by the new constructor. No production cutover adapter exists, and both
 the constructor runtime and any production writer remain disabled unless a
 later deployment explicitly configures the shadow run.
 
+### Initial OT shadow checkpoint
+
+Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
+The new run is `ot-association-shadow-20260721-a`, configured for a 300-second
+sample interval, 120-minute lookback, and four candidate events. The retired
+link shadow remains disabled. The pre-run configuration is preserved on OT at:
+
+`/etc/pizzawave/pizzad.json.pre-association-shadow-20260721T205446Z.bak`
+
+Its SHA-256 is
+`64c9b503379ec9bd4b9afe2eeba4a6495c701200adcfecac27d03848869aaa2a`.
+
+The runtime established a no-backfill startup fence at call `1418733`. The
+first three sampled observations produced three valid singleton events. The
+third attempt was the first candidate-backed model path: Qwen reviewed one
+candidate in 3.448 seconds, returned no relationship, and the constructor
+retained the new singleton. At that checkpoint the report showed one model
+request, 496 prompt tokens, 10 completion tokens, zero invalid proposals, zero
+proposer errors, zero provisional associations, and zero production incident
+changes. OT health, ingestion, transcription, embeddings, and AI completion
+health were all `ok` with clear queues.
+
 ### Earlier implementation history
 
 The isolated development branch now contains the Phase 0 and Phase 1 safety
