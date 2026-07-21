@@ -235,3 +235,18 @@ latency. One admitted relationship statement was nevertheless tautological and
 did not explain the evidence connecting its two calls. Membership stability on
 this inspected slice is therefore established, while explanation adequacy and
 generalization remain unresolved.
+
+A subsequent 24-batch falsification sample combined 12 time-coverage batches
+with the 12 highest candidate-count batches, selected without transcript
+content. Qwen 3.6 examined 1,479 candidate pairs but returned 11 invalid
+decisions among 19 proposals; four batches failed deterministic validation.
+Coverage-batch p95 latency was 35.56 seconds, while the deliberately
+oversampled pressure-batch p95 was 89.02 seconds and maximum was 115.47 seconds.
+
+Eight valid proposals received pairwise adjudication and four survived. Direct
+transcript inspection supported three. The fourth linked two calls solely from
+the name Jake or Jake Hanson without evidence of a shared event. The two-stage
+same-model configuration is therefore rejected for semantic precision,
+contract reliability, and pressure-tail headroom. The result does not justify
+prompt tuning, special-case vocabulary, live persistence, or a larger Qwen 3.6
+run.

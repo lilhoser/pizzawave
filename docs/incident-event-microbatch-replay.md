@@ -450,3 +450,37 @@ not a false relationship on this known pair, but it cannot serve as meaningful
 relationship provenance. The result therefore supports a broader falsification
 sample without changing the prompt; it still does not pass a general accuracy,
 explanation-quality, or production-capacity gate.
+
+A broader falsification sample was then frozen without inspecting transcript
+content: 12 batches centered across equal time strata of the nine-hour window
+and the 12 highest candidate-count batches outside the original ten-batch
+smoke. The 24 batches contained 1,479 hybrid candidate pairs.
+
+The Qwen 3.6 sparse proposer completed all 24 requests without HTTP failure,
+using 156,656 tokens, but failed the contract and pressure gates. It returned
+19 proposed decisions; 11 were invalid and withheld because they duplicated a
+new observation's link or cited transcript IDs owned by different candidate
+endpoints. Four of 24 batches contained invalid output. The 12 time-coverage
+batches averaged 22.72 seconds, with 35.56-second interpolated p95 and
+43.49-second maximum latency. The deliberately oversampled 12 pressure batches
+averaged 45.79 seconds, with 89.02-second interpolated p95 and 115.47-second
+maximum. Combined p95 was 66.18 seconds. The pressure result is not an estimate
+of ordinary traffic frequency, but it demonstrates inadequate headroom at the
+observed candidate-count tail.
+
+Eight proposals survived first-stage validation and received isolated pairwise
+adjudication. All eight pairwise requests completed and validated, using 5,344
+tokens with 7.52-second average and 14.80-second maximum latency. Four links
+survived. Transcript inspection supported three: the Brainerd Road tow
+cancellation, the located tree branch, and the response to 539 Osage Drive. The
+fourth linked `call:1407157` to `call:1407107` only because both contained the
+name Jake or Jake Hanson; the transcripts do not establish a shared real-world
+event.
+
+The current two-stage same-model configuration is rejected. Pairwise
+adjudication removed four proposals but did not satisfy the zero-false-link
+gate, while the first stage independently exceeded the allowed contract-failure
+rate and showed insufficient pressure-tail latency. Do not tune the prompt or
+add name, keyword, system, talkgroup, or category rules in response. Hybrid
+retrieval and the fail-closed replay/ledger boundaries remain useful; Qwen 3.6
+cannot authorize their semantic links under this configuration.
