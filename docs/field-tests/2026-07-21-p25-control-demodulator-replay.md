@@ -6,7 +6,7 @@ Host: RPI (`sdr1861`)
 
 System: Raymond/Hinds (`etv-raymond-hinds`)
 
-Status: offline replay complete; exact-lineage live confirmation active
+Status: complete; live candidate rolled back after one natural event
 
 ## Question
 
@@ -200,18 +200,77 @@ restarts. Raymond stayed on 773.781250 MHz and produced approximately 21-42
 valid messages/s. PizzaWave returned to current health after one transient
 stale reading, continued receiving periodic RF health, and ingested live
 calls. A real Phase 2 recorder started with `TDMA: true` and `QPSK: true`,
-confirming that only the control demodulator changed. The candidate remains
-active for one natural Raymond event.
+confirming that only the control demodulator changed. The candidate was then
+held for one natural Raymond event.
+
+## Natural-event result
+
+Capture `1784648731014` triggered at 2026-07-21 11:45:31 EDT and completed at
+11:46:31. The 69,677,408-byte IQ file and matching JSON were stable across two
+checks. Their SHA-256 values are:
+
+- IQ: `c27b23fe4d63de770ba82bd88a460860f61f1ac8fee1c6bce110dd58c2c0c00d`;
+- JSON: `35d3dc83573c921960bc542171ded1d1acf33efb567c5e816649f029499eb2e7`.
+
+This was a real received-waveform event, not a process or sample-delivery
+failure. Trigger-aligned live/shadow rates were 1/1 frame/s. Narrow-channel IQ
+power at the trigger was 4.93 dB below the healthy pre-event median. Every
+sample was finite, with no zero, repeated-adjacent, or clipped samples.
+
+The live FSK4-control process recovered much faster than the three retained
+CQPSK-control events: it had 10 post-trigger samples at 0-1 frame/s, made three
+alternate-frequency transitions, and sustained at least three primary samples
+above 10 frame/s beginning about ten seconds after the trigger. The earlier
+events had 31, 45, and 56 post-trigger samples at 0-1 and 8, 14, and 20
+transitions. Phase 2 QPSK traffic continued before and after recovery.
+
+That cross-event difference was not enough to credit FSK4, because the new RF
+event was not the same as the older events. A fixed-primary replay therefore
+ran the new IQ once through both decoder families using the same validated
+replay binary and the same 30-second pre/60-second post windows. Both decoded
+the correct `2AD` / `BEE00` / `2A4` identity and stayed on 773.781250 MHz:
+
+| Decoder | All valid messages | Pre-trigger | Post-trigger | Post zero / <=1 windows |
+| --- | ---: | ---: | ---: | ---: |
+| CQPSK | 2,217 | 618 | 1,599 | 1 / 2 |
+| FSK4 | 2,161 | 590 | 1,571 | 1 / 2 |
+
+CQPSK produced 56 more messages overall and both decoders had the same number
+of deep post-trigger windows. This event therefore does not show a material
+FSK4 advantage. Combined with the earlier three-capture result, the bounded
+conclusion is that FSK4 is more tolerant of some Raymond impairment shapes but
+is not a general solution for every physical RF event.
+
+The candidate was rolled back after the comparison. At 11:59:46 EDT the exact
+prior binary and configuration were restored from
+`/var/backups/pizzawave/rpi-control-fsk4-20260721T1101EDT`. Verified SHA-256
+values are `15824b7f8083d4b824d10d6e06a22b81a75eca93b4a7b8aa8499e76d299e0449`
+for the binary and
+`6bcb77f651fd76c6036528275f3ec088cf0d56a4667b169d0f47536260facc02`
+for the config. TR returned as PID `506742` with zero restarts, both gains at
+15, PizzaWave current, primary decode at 28-39 frame/s after a subsequent RF
+dip, and a verified Phase 2 recorder with `QPSK: true`.
+
+Fixed-primary replay artifacts are under
+`fixed-new-event-1784648731014/`. Config/log SHA-256 values are:
+
+- CQPSK config/log: `a5f25a565dcc9b06ca009818b9da35155ecb64794c5a342c61d9bbfab1849876` /
+  `8f7a3b47ff988942a0b527db0296037013abdb1f1efde6f1d0b1a541146e9112`;
+- FSK4 config/log: `1314191a7366a6ebb619ce84b6d6d03eb996c4bc35303b517ca1e57eb895dd5f` /
+  `39d6de661d616d042ca17c7ececefcb759f70a1563dd4949355408bf3b4976ae`.
 
 ## Next steps
 
-1. Hold the gated exact-lineage FSK4-control candidate through one natural
-   Raymond event. Compare outage depth, duration, retunes, recovery, and IQ
-   integrity with CQPSK-control captures `1784609251021`, `1784635892019`, and
-   `1784639657025`.
-2. Keep FSK4 live only if it is operationally safe and materially suppresses
-   the collapse; otherwise restore and hash-verify the exact binary and config
-   rollback.
-3. If live FSK4 does not materially improve the collapse, stop decoder tuning
-   and test the existing
-   BPF-800-M on RPI as the next hardware discriminator; do not add an antenna.
+1. Keep the exact restored CQPSK binary/config and gain 15 baseline in service.
+   Do not deploy FSK4 as the general stabilization fix from this evidence.
+2. Test the existing BPF-800-M inline on RPI's Raymond RF path. The
+   [published specification](https://www.scannermaster.com/BPF_800_M_p/24-531520.htm)
+   gives a 769-872 MHz passband, which includes the 773.781250 MHz control
+   channel. This is a direct discriminator for out-of-band/cellular front-end
+   stress without adding an antenna.
+3. First require that insertion does not materially reduce a healthy Raymond
+   baseline. If that gate passes, retain one natural event with the filter and
+   compare its raw IQ, integrity, depth, and duration with the four unfiltered
+   captures. Persistent same-signature failure would reject out-of-band
+   overload and leave dynamic simulcast/multipath or exact co-channel
+   interference as the likely physical causes.

@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 11:43 EDT
+Last reconciled: 2026-07-21 12:01 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -91,9 +91,18 @@ Cross-repository source state:
   at 11:40:15 EDT with Raymond traffic QPSK/control FSK4. The live gate passed:
   Raymond held 21-42 frame/s on the primary, TR stayed at zero restarts,
   PizzaWave remained current after one transient stale reading, and a real
-  Phase 2 recorder started with QPSK enabled. The only active RF task is now to
-  hold this exact single change through one natural Raymond collapse and
-  compare it with the three CQPSK-control captures. OT uses
+  Phase 2 recorder started with QPSK enabled. The candidate was held through
+  one natural Raymond collapse and compared with the three CQPSK-control
+  captures. That event is now complete.
+  It contained a real 4.93 dB narrow-channel power loss with clean samples.
+  Live FSK4 recovered in about ten seconds with only three transitions, much
+  faster than the older CQPSK-control events, but a fixed-primary same-IQ
+  replay did not attribute that improvement to FSK4: CQPSK produced 2,217
+  messages versus FSK4's 2,161 with identical post-trigger deep-window counts.
+  The exact pre-test CQPSK binary/config is restored and verified healthy.
+  FSK4 helps some retained impairment shapes but is not a general fix. The next
+  bounded discriminator is the existing BPF-800-M on RPI's Raymond RF path.
+  OT uses
   RTL-SDR receivers behind an MCA208M while RPI uses Airspy receivers without
   that multicoupler;
   this hardware difference further weakens a single receiver/front-end-overload
@@ -196,13 +205,13 @@ Cross-repository source state:
    - retain the completed same-IQ demodulator result: FSK4 beat stock and
      half-timing CQPSK on all three Raymond captures, including every healthy
      pre-trigger portion and every collapsed post-trigger portion;
-   - finish the active control-channel-only FSK4 confirmation by retaining one
-     natural Raymond event; its healthy-primary and Phase 2 QPSK gates have
-     passed. Do not use the system-level `modulation: fsk4` setting, add
-     antennas, or add another live wide recorder;
-   - if FSK4 does not materially reduce the next natural collapse, stop decoder
-     tuning and test the available BPF-800-M on RPI as the next hardware
-     discriminator;
+   - retain the completed control-only FSK4 result: it was operationally safe
+     but the same-IQ replay did not reproduce a material advantage on its live
+     event, so the exact CQPSK baseline was restored;
+   - install the available 769-872 MHz BPF-800-M inline on RPI's Raymond RF
+     path, gate it against a healthy baseline, then hold it through one natural
+     event as the next hardware discriminator. Do not add an antenna or another
+     live wide recorder;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
