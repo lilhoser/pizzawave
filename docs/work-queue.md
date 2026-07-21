@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 09:18 EDT
+Last reconciled: 2026-07-21 11:02 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -70,13 +70,25 @@ Cross-repository source state:
   change; live spent 56 post-trigger samples at 0-1 frame/s and never sustained
   three samples at or above 10 in the retained minute. Gain 15 is restored and
   verified at 26-40 frame/s. Gain reduction did not prevent or weaken the
-  collapse, so gain testing is complete. Next is the offline retained-IQ
-  demodulator/equalizer comparison, not another live RF-policy A/B. OT uses
+  collapse, so gain testing is complete. The retained-IQ demodulator comparison
+  is now complete. Across three captures and three runs each, the existing FSK4
+  control decoder beat stock CQPSK before and after every trigger while always
+  decoding the correct site identity. Halving the CQPSK Gardner timing gain
+  also improved every capture, but still trailed FSK4 substantially. This
+  establishes a decoder-tolerance contributor on top of the real channel-local
+  RF impairment. The next bounded test is control-channel-only FSK4 on RPI;
+  the system-level modulation setting cannot be used because it would also
+  switch traffic recorders and reject Phase 2 calls. The isolated TR candidate
+  now provides that separation and passed all three retained-IQ replays with
+  traffic QPSK/control FSK4 logged independently and FSK4 yields reproduced.
+  A strong-baseline live RPI gate is next. OT uses
   RTL-SDR receivers behind an MCA208M while RPI uses Airspy receivers without
   that multicoupler;
   this hardware difference further weakens a single receiver/front-end-overload
   explanation. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
+  The replay procedure and exact results are in
+  [field-tests/2026-07-21-p25-control-demodulator-replay.md](field-tests/2026-07-21-p25-control-demodulator-replay.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
 
@@ -169,13 +181,16 @@ Cross-repository source state:
      hopping amplified the production outage after the primary recovered;
    - keep current-lineage and exact RPI compatibility candidates isolated for
      maintainer review; their paired-wide branches are no longer deployed;
-   - run offline modulation-quality replay on the retained paired captures,
-     exposing the existing Gardner timing quality and bounded carrier/timing
-     statistics, valid-frame yield, and acquisition latency;
-   - compare the unchanged decoder with a small same-IQ set of loop and adaptive
-     equalizer candidates. If no single candidate wins across healthy and
-     collapsed windows, test same-IQ demodulator diversity with one validated
-     P25-message selector. Do not add antennas or another live wide recorder;
+   - retain the completed same-IQ demodulator result: FSK4 beat stock and
+     half-timing CQPSK on all three Raymond captures, including every healthy
+     pre-trigger portion and every collapsed post-trigger portion;
+   - run one control-channel-only FSK4 live confirmation on RPI while preserving
+     QPSK traffic recording and explicitly gating Phase 2 recording. Do not use
+     the system-level `modulation: fsk4` setting, add antennas, or add another
+     live wide recorder;
+   - if FSK4 does not materially reduce the next natural collapse, stop decoder
+     tuning and test the available BPF-800-M on RPI as the next hardware
+     discriminator;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
