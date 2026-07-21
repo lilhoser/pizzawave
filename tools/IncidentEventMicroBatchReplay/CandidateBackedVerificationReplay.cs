@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using pizzad;
 
-internal static class VerificationReplay
+internal static class CandidateBackedVerificationReplay
 {
     public static async Task RunAsync(string[] args)
     {
@@ -39,24 +39,22 @@ internal static class VerificationReplay
         var candidateManifestPath = Path.Combine(candidateDirectory, "manifest.json");
         if (!File.Exists(candidateManifestPath))
             throw new FileNotFoundException("candidate replay manifest is missing", candidateManifestPath);
-        var candidateManifestHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(candidateManifestPath)));
-        var databaseHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(databasePath)));
-        var manifestPath = Path.Combine(outputDirectory, "manifest.json");
-        var manifest = new VerificationReplayManifest(
+        var manifest = new ReplayManifest(
             replayId,
-            databaseHash,
-            candidateManifestHash,
+            Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(databasePath))),
+            Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(candidateManifestPath))),
             endpoint,
             model,
             reasoningEffort ?? string.Empty,
             reasoningTokens,
-            IncidentEventStateMicroBatchVerificationPrompt.PromptIdentity);
+            IncidentEventStateMicroBatchPrompt.PromptIdentity);
+        var manifestPath = Path.Combine(outputDirectory, "manifest.json");
         if (File.Exists(manifestPath))
         {
-            var prior = JsonSerializer.Deserialize<VerificationReplayManifest>(await File.ReadAllTextAsync(manifestPath), jsonOptions)
+            var prior = JsonSerializer.Deserialize<ReplayManifest>(await File.ReadAllTextAsync(manifestPath), jsonOptions)
                 ?? throw new InvalidDataException("existing verification manifest is empty");
             if (prior != manifest)
-                throw new InvalidDataException("existing verification manifest does not match the snapshot, candidate run, endpoint, model, and prompt");
+                throw new InvalidDataException("existing verification manifest does not match the snapshot, candidate run, endpoint, model, reasoning settings, and prompt");
         }
         else
         {
@@ -77,33 +75,21 @@ internal static class VerificationReplay
             var resultPath = Path.Combine(outputDirectory, $"batch-{source.Sequence:D5}.json");
             if (File.Exists(resultPath))
             {
-                var prior = JsonSerializer.Deserialize<VerificationBatchResult>(await File.ReadAllTextAsync(resultPath), jsonOptions);
+                var prior = JsonSerializer.Deserialize<BatchResult>(await File.ReadAllTextAsync(resultPath), jsonOptions);
                 if (prior is not null && prior.Success && string.Equals(prior.CandidateBatchContentHash, source.BatchContentHash, StringComparison.Ordinal))
                     continue;
             }
             if (source.Candidates.Count == 0)
             {
-                await WriteJsonAtomicAsync(resultPath, new VerificationBatchResult(
-                    source.Sequence,
-                    source.BatchContentHash,
-                    true,
-                    DateTimeOffset.UtcNow,
-                    0,
-                    0,
-                    0,
-                    0,
-                    source.ObservationIdsByToken,
-                    [],
-                    [],
-                    [],
-                    [],
-                    string.Empty), jsonOptions);
+                await WriteJsonAtomicAsync(resultPath, BatchResult.Empty(source.Sequence, source.BatchContentHash), jsonOptions);
                 continue;
             }
             if (maximumRequests is not null && requests >= maximumRequests.Value)
                 break;
 
-            var prompt = IncidentEventStateMicroBatchVerificationPrompt.Build(
+            var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+                $"{replayId}:batch:{source.Sequence:D5}",
+                source.Sequence,
                 source.Candidates,
                 source.ObservationIdsByToken,
                 observationsById);
@@ -114,19 +100,18 @@ internal static class VerificationReplay
                 max_tokens = 2400,
                 reasoning_effort = reasoningEffort,
                 reasoning_tokens = reasoningTokens,
-                response_format = prompt.ResponseFormat,
+                response_format = plan.Prompt.ResponseFormat,
                 messages = new object[]
                 {
-                    new { role = "system", content = prompt.SystemPrompt },
-                    new { role = "user", content = prompt.UserPrompt }
+                    new { role = "system", content = plan.Prompt.SystemPrompt },
+                    new { role = "user", content = plan.Prompt.UserPrompt }
                 }
             };
             var timer = Stopwatch.StartNew();
-            VerificationBatchResult result;
+            BatchResult result;
             try
             {
-                var requestJson = JsonSerializer.Serialize(requestBody, jsonOptions);
-                using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                using var content = new StringContent(JsonSerializer.Serialize(requestBody, jsonOptions), Encoding.UTF8, "application/json");
                 using var response = await client.PostAsync($"{endpoint}/chat/completions", content);
                 var responseJson = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
@@ -138,56 +123,56 @@ internal static class VerificationReplay
                 var responseContent = envelope.RootElement.GetProperty("choices")[0].GetProperty("message")
                     .GetProperty("content").GetString() ?? throw new InvalidDataException("model response content was empty");
                 var decisions = ParseDecisions(responseContent);
-                var proposal = new IncidentEventStateMicroBatchVerificationProposal(
-                    responseModel,
-                    IncidentEventStateMicroBatchVerificationPrompt.PromptIdentity,
-                    decisions);
-                var validation = IncidentEventStateMicroBatchVerificationValidator.Validate(prompt, observationsById, proposal);
-                var expectedTokens = prompt.Pairs.Select(pair => pair.CandidateToken).ToList();
-                var shapeIsValid = decisions.Select(decision => decision.CandidateToken)
+                var proposal = new IncidentEventStateMicroBatchProposal(responseModel, IncidentEventStateMicroBatchPrompt.PromptIdentity, decisions);
+                var baseValidation = IncidentEventStateMicroBatchProposalValidator.Validate(plan.Batch, observationsById, plan.Prompt, proposal);
+                var expectedTokens = plan.Batch.NewObservationIds
+                    .Select(id => plan.Prompt.ObservationIdsByToken.Single(item => item.Value == id).Key)
+                    .ToList();
+                var shapeIsValid = decisions.Select(decision => decision.NewObservationToken)
                     .SequenceEqual(expectedTokens, StringComparer.Ordinal);
-                var decisionValidations = decisions.Select(decision => new
+                var checkedDecisions = decisions.Select(decision => new
                 {
                     Decision = decision,
-                    Validation = IncidentEventStateMicroBatchVerificationValidator.ValidateDecision(
-                        prompt,
-                        observationsById,
-                        decision)
+                    Validation = IncidentEventStateCandidateBackedMicroBatch.ValidateDecision(plan, observationsById, decision)
                 }).ToList();
-                var verified = shapeIsValid
-                    ? decisionValidations
-                        .Where(item =>
-                            item.Decision.Decision == IncidentEventStateMicroBatchVerificationDecisionKind.VerifyLink &&
-                            item.Validation.IsValid)
-                        .Select(item => item.Decision.CandidateToken)
+                var admitted = shapeIsValid
+                    ? checkedDecisions
+                        .Where(item => item.Decision.Decision == IncidentEventStateMicroBatchDecision.ProposeLink && item.Validation.IsValid)
+                        .Select(item => IncidentEventStateCandidateBackedMicroBatch.CandidateTokenFor(plan, item.Decision))
+                        .Where(token => token is not null)
+                        .Cast<string>()
                         .ToList()
                     : [];
-                var invalid = decisionValidations
+                var invalid = checkedDecisions
                     .Where(item => !item.Validation.IsValid)
-                    .Select(item => item.Decision.CandidateToken)
+                    .Select(item => item.Decision.NewObservationToken)
+                    .ToList();
+                var validationErrors = baseValidation.Errors
+                    .Concat(checkedDecisions.SelectMany(item => item.Validation.Errors))
+                    .Distinct(StringComparer.Ordinal)
                     .ToList();
                 var usage = ReadUsage(envelope.RootElement);
                 timer.Stop();
-                result = new VerificationBatchResult(
+                result = new BatchResult(
                     source.Sequence,
                     source.BatchContentHash,
-                    shapeIsValid,
+                    true,
                     DateTimeOffset.UtcNow,
                     timer.ElapsedMilliseconds,
                     usage.PromptTokens,
                     usage.CompletionTokens,
                     usage.TotalTokens,
-                    source.ObservationIdsByToken,
+                    plan.Prompt.ObservationIdsByToken,
                     decisions,
-                    verified,
+                    admitted,
                     invalid,
-                    validation.Errors,
-                    shapeIsValid ? string.Empty : "verifier output did not account for every candidate exactly once");
+                    validationErrors,
+                    string.Empty);
             }
             catch (Exception ex)
             {
                 timer.Stop();
-                result = new VerificationBatchResult(
+                result = new BatchResult(
                     source.Sequence,
                     source.BatchContentHash,
                     false,
@@ -196,7 +181,7 @@ internal static class VerificationReplay
                     0,
                     0,
                     0,
-                    source.ObservationIdsByToken,
+                    plan.Prompt.ObservationIdsByToken,
                     [],
                     [],
                     [],
@@ -205,26 +190,25 @@ internal static class VerificationReplay
             }
             await WriteJsonAtomicAsync(resultPath, result, jsonOptions);
             requests++;
-            Console.WriteLine($"batch {source.Sequence}: candidates={source.Candidates.Count} verified={result.VerifiedCandidateTokens.Count} success={result.Success} ms={result.DurationMilliseconds} tokens={result.TotalTokens} error={result.Error}");
+            Console.WriteLine($"batch {source.Sequence}: candidates={source.Candidates.Count} admitted={result.AdmittedCandidateTokens.Count} ms={result.DurationMilliseconds} success={result.Success}");
         }
 
-        var results = new List<VerificationBatchResult>();
-        foreach (var path in Directory.GetFiles(outputDirectory, "batch-*.json").OrderBy(path => path, StringComparer.Ordinal))
-        {
-            var result = JsonSerializer.Deserialize<VerificationBatchResult>(await File.ReadAllTextAsync(path), jsonOptions);
-            if (result is not null)
-                results.Add(result);
-        }
+        var results = Directory.GetFiles(outputDirectory, "batch-*.json")
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(path => JsonSerializer.Deserialize<BatchResult>(File.ReadAllText(path), jsonOptions))
+            .Where(result => result is not null)
+            .Cast<BatchResult>()
+            .ToList();
         var successful = results.Where(result => result.Success).ToList();
         var modelResults = successful.Where(result => result.DurationMilliseconds > 0).ToList();
-        var report = new VerificationReplayReport(
+        var report = new ReplayReport(
             replayId,
             candidateFiles.Count,
             results.Count,
             modelResults.Count,
             successful.Sum(result => result.Decisions.Count),
-            successful.Sum(result => result.VerifiedCandidateTokens.Count),
-            successful.Sum(result => result.InvalidCandidateTokens.Count),
+            successful.Sum(result => result.AdmittedCandidateTokens.Count),
+            successful.Sum(result => result.InvalidNewObservationTokens.Count),
             results.Count(result => !result.Success),
             successful.Sum(result => result.TotalTokens),
             modelResults.Count == 0 ? 0 : modelResults.Average(result => result.DurationMilliseconds),
@@ -234,18 +218,19 @@ internal static class VerificationReplay
         Console.WriteLine(JsonSerializer.Serialize(report, jsonOptions));
     }
 
-    private static IReadOnlyList<IncidentEventStateMicroBatchVerificationDecision> ParseDecisions(string responseContent)
+    private static IReadOnlyList<IncidentEventStateMicroBatchObservationDecision> ParseDecisions(string responseContent)
     {
         using var document = JsonDocument.Parse(responseContent);
         return document.RootElement.GetProperty("decisions").EnumerateArray().Select(row =>
-            new IncidentEventStateMicroBatchVerificationDecision(
-                row.GetProperty("candidate_token").GetString() ?? string.Empty,
+            new IncidentEventStateMicroBatchObservationDecision(
+                row.GetProperty("new_observation_token").GetString() ?? string.Empty,
                 row.GetProperty("decision").GetString() switch
                 {
-                    "verify_link" => IncidentEventStateMicroBatchVerificationDecisionKind.VerifyLink,
-                    "reject" => IncidentEventStateMicroBatchVerificationDecisionKind.Reject,
-                    var value => throw new InvalidDataException($"unsupported verification decision '{value}'")
+                    "propose_link" => IncidentEventStateMicroBatchDecision.ProposeLink,
+                    "unresolved" => IncidentEventStateMicroBatchDecision.Unresolved,
+                    var value => throw new InvalidDataException($"unsupported decision '{value}'")
                 },
+                row.GetProperty("target_observation_token").GetString() ?? string.Empty,
                 row.GetProperty("relationship_statement").GetString() ?? string.Empty,
                 row.GetProperty("uncertainty").GetDouble(),
                 ReadStrings(row.GetProperty("new_evidence_transcript_ids")),
@@ -272,7 +257,7 @@ internal static class VerificationReplay
         for (var index = 0; index < args.Length; index += 2)
         {
             if (index + 1 >= args.Length || !args[index].StartsWith("--", StringComparison.Ordinal))
-                throw new ArgumentException("verification replay arguments must be --name value pairs");
+                throw new ArgumentException("candidate-backed verification arguments must be --name value pairs");
             values[args[index]] = args[index + 1];
         }
         return values;
@@ -286,7 +271,7 @@ internal static class VerificationReplay
     }
 
     private sealed record Usage(int PromptTokens, int CompletionTokens, int TotalTokens);
-    private sealed record VerificationReplayManifest(
+    private sealed record ReplayManifest(
         string ReplayId,
         string DatabaseSha256,
         string CandidateManifestSha256,
@@ -301,7 +286,7 @@ internal static class VerificationReplay
         bool Success,
         IReadOnlyDictionary<string, string> ObservationIdsByToken,
         IReadOnlyList<IncidentEventStateMicroBatchCandidate> Candidates);
-    private sealed record VerificationBatchResult(
+    private sealed record BatchResult(
         int Sequence,
         string CandidateBatchContentHash,
         bool Success,
@@ -311,18 +296,23 @@ internal static class VerificationReplay
         int CompletionTokens,
         int TotalTokens,
         IReadOnlyDictionary<string, string> ObservationIdsByToken,
-        IReadOnlyList<IncidentEventStateMicroBatchVerificationDecision> Decisions,
-        IReadOnlyList<string> VerifiedCandidateTokens,
-        IReadOnlyList<string> InvalidCandidateTokens,
+        IReadOnlyList<IncidentEventStateMicroBatchObservationDecision> Decisions,
+        IReadOnlyList<string> AdmittedCandidateTokens,
+        IReadOnlyList<string> InvalidNewObservationTokens,
         IReadOnlyList<string> ValidationErrors,
-        string Error);
-    private sealed record VerificationReplayReport(
+        string Error)
+    {
+        public static BatchResult Empty(int sequence, string contentHash) => new(
+            sequence, contentHash, true, DateTimeOffset.UtcNow, 0, 0, 0, 0,
+            new Dictionary<string, string>(StringComparer.Ordinal), [], [], [], [], string.Empty);
+    }
+    private sealed record ReplayReport(
         string ReplayId,
         int AvailableCandidateBatches,
         int ProcessedBatches,
         int ModelRequests,
-        int CandidatePairs,
-        int VerifiedLinks,
+        int Decisions,
+        int AdmittedLinks,
         int InvalidDecisions,
         int FailedBatches,
         int TotalTokens,

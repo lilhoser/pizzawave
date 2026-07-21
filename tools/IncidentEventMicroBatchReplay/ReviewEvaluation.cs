@@ -18,6 +18,9 @@ internal static class ReviewEvaluation
         var model = Required("--model");
         var timeoutSeconds = values.TryGetValue("--timeout-seconds", out var timeout) ? int.Parse(timeout) : 180;
         var reasoningEffort = values.GetValueOrDefault("--reasoning-effort");
+        var reasoningTokens = values.TryGetValue("--reasoning-tokens", out var reasoningTokensValue)
+            ? int.Parse(reasoningTokensValue)
+            : (int?)null;
         var candidateMode = values.TryGetValue("--candidate-mode", out var candidateValue) && bool.Parse(candidateValue);
         var groupedVerifierMode = values.TryGetValue("--grouped-verifier-mode", out var groupedValue) && bool.Parse(groupedValue);
         var selectedCaseId = values.GetValueOrDefault("--case-id", string.Empty);
@@ -54,6 +57,7 @@ internal static class ReviewEvaluation
                     endpoint,
                     model,
                     reasoningEffort,
+                    reasoningTokens,
                     caseId,
                     assessments.GetValueOrDefault(caseId, string.Empty),
                     lookup));
@@ -67,6 +71,7 @@ internal static class ReviewEvaluation
                     endpoint,
                     model,
                     reasoningEffort,
+                    reasoningTokens,
                     caseId,
                     assessments.GetValueOrDefault(caseId, string.Empty),
                     batch,
@@ -81,6 +86,7 @@ internal static class ReviewEvaluation
                 temperature = 0.1,
                 max_tokens = 1800,
                 reasoning_effort = reasoningEffort,
+                reasoning_tokens = reasoningTokens,
                 response_format = prompt.ResponseFormat,
                 messages = new object[]
                 {
@@ -152,6 +158,7 @@ internal static class ReviewEvaluation
         var report = new ReviewEvaluationReport(
             model,
             reasoningEffort ?? string.Empty,
+            reasoningTokens,
             groupedVerifierMode ? "grouped_verification" : candidateMode ? "candidate_retrieval" : "final_verification",
             groupedVerifierMode
                 ? IncidentEventStateMicroBatchVerificationPrompt.PromptIdentity
@@ -177,6 +184,7 @@ internal static class ReviewEvaluation
         string endpoint,
         string model,
         string? reasoningEffort,
+        int? reasoningTokens,
         string caseId,
         string assessment,
         IReadOnlyDictionary<string, IncidentEventStateSourceObservation> lookup)
@@ -198,6 +206,7 @@ internal static class ReviewEvaluation
             temperature = 0.1,
             max_tokens = 1200,
             reasoning_effort = reasoningEffort,
+            reasoning_tokens = reasoningTokens,
             response_format = prompt.ResponseFormat,
             messages = new object[]
             {
@@ -278,6 +287,7 @@ internal static class ReviewEvaluation
         string endpoint,
         string model,
         string? reasoningEffort,
+        int? reasoningTokens,
         string caseId,
         string assessment,
         IncidentEventStateMicroBatchReplayBatch batch,
@@ -290,6 +300,7 @@ internal static class ReviewEvaluation
             temperature = 0.1,
             max_tokens = 1000,
             reasoning_effort = reasoningEffort,
+            reasoning_tokens = reasoningTokens,
             response_format = prompt.ResponseFormat,
             messages = new object[]
             {
@@ -439,6 +450,7 @@ internal static class ReviewEvaluation
     private sealed record ReviewEvaluationReport(
         string Model,
         string ReasoningEffort,
+        int? ReasoningTokens,
         string Mode,
         string PromptIdentity,
         string PackageFile,

@@ -112,10 +112,30 @@ dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatch
   --reasoning-effort none
 ```
 
-`--reasoning-effort` is optional and is recorded in the verification manifest.
-Use it only when the endpoint advertises that exact option for the selected
-model. This is an inference-mode control, not a substitute for the unchanged
-accuracy and latency gates.
+`--reasoning-effort` and `--reasoning-tokens` are optional and are recorded in
+the verification manifest. Use them only when the endpoint advertises those
+options for the selected model. They are inference-mode controls, not a
+substitute for the unchanged accuracy and latency gates.
+
+The candidate-backed chronological variant keeps the retriever's bounded
+context but uses the chronological link contract instead of a pair-verifier
+contract:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --candidate-backed-verification-replay true `
+  --database C:\path\to\incident-replay.db `
+  --start 1784603146 `
+  --end 1784635663 `
+  --replay-id example-candidate-backed `
+  --candidate-directory artifacts/incident-event-microbatch-replay/example-candidates `
+  --output artifacts/incident-event-microbatch-replay/example-candidate-backed `
+  --model qwen/qwen3.6-35b-a3b@q8_0
+```
+
+Application validation admits a proposed link only when the selected endpoint
+pair appeared in retrieval output. A chronological but unretrieved target is
+left unresolved.
 
 This is an evaluation boundary, not a commitment to keep two large language
 models loaded in production. Paxan's 24 GB GPU cannot be assumed to hold both
@@ -147,9 +167,11 @@ review, candidate retrieval included all three reviewed positive pairs, excluded
 the one definite negative, and excluded both unresolved pairs. This is retrieval
 evidence only, not membership accuracy.
 
-Qwen 3.6 35B-A3B Q8 correctly handled the same six review cases as a final
-verifier: three positive links verified, the definite negative rejected, and
-both unresolved cases rejected. In grouped ordinary-traffic verification:
+Qwen 3.6 35B-A3B Q8 correctly handled the same six review cases with the
+chronological link-only contract: three positive links verified, the definite
+negative left unresolved, and both reviewer-unresolved cases left unresolved.
+That result did not establish the accuracy of the later grouped pair-verifier
+contract. In grouped ordinary-traffic verification:
 
 - Ventax processed ten requests containing 27 pairs at a 36.37-second average
   and 79.91-second maximum.
@@ -181,10 +203,30 @@ seconds, but rejected all three reviewed positive links. It therefore had zero
 false positives and zero positive recall. The ordinary-traffic replay was not
 run because the model had already failed the accuracy gate.
 
-No live deployment is justified by this experiment. The architectural boundary
-is worth retaining, but the production implementation should not alternate two
-large resident models on Paxan. The next model experiment should keep the frozen
-corpus and unchanged gates, replace GPT-OSS candidate retrieval with embeddings
-or another small high-recall retriever, and evaluate a faster verifier that fits
-beside that retriever on Paxan. Do not change persistence until that combination
-passes both the fixed relationship review and production-shaped tail latency.
+The grouped pair-verifier contract was subsequently run against the six review
+cases. Qwen 3.6 Q8 verified only one of three positive pairs with default
+reasoning, with reasoning disabled, and with low reasoning capped at 512 tokens.
+Changing the negative decision name from `reject` to `unresolved` and aligning
+the weak-signal wording with the chronological contract did not change that
+result. The grouped pair-verifier boundary is therefore rejected for false
+negative behavior; its earlier ordinary-traffic smoke was not accuracy proof.
+
+The candidate-backed chronological variant retained the successful link-only
+decision contract and deterministically blocked targets outside retrieval. On
+ten frozen ordinary-traffic requests it produced 26 decisions, admitted four
+links, had no invalid decisions or failed requests, averaged 35.97 seconds, and
+had a 65.20-second p90 and 65.88-second p95/maximum. Direct transcript inspection
+found three plausible continuations and one clear semantic-only false link: two
+different person checks were joined because both mentioned Tennessee. This
+variant fails both the zero-high-impact-false-link gate and the 60-second tail
+gate.
+
+No live deployment is justified by this experiment. Full-coverage chronological
+planning, high-recall retrieval, opaque identifiers, source evidence, and
+candidate-backed fail-closed validation remain useful. Neither tested verifier
+contract is acceptable: grouped pairs lose reviewed positives, while the
+chronological linker admits a semantic-only false link and misses tail latency.
+The next model experiment should keep the frozen corpus and unchanged gates and
+test a fully GPU-resident verifier that can coexist with a small embedding
+retriever on Paxan. Do not change persistence until one verifier passes both the
+fixed relationship review and production-shaped false-link and tail gates.

@@ -301,6 +301,79 @@ public sealed class IncidentEventStateMicroBatchReplayTests
         Assert.Equal(2, validation.Errors.Count(error => error.Contains("another observation", StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public void CandidateBackedPromptKeepsOnlyRetrievedTargetsInChronologicalContext()
+    {
+        var observations = new[]
+        {
+            Observation("call:1", 100),
+            Observation("call:2", 101),
+            Observation("call:3", 102)
+        };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var tokenMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["new-1"] = "call:1",
+            ["new-2"] = "call:2",
+            ["new-3"] = "call:3"
+        };
+
+        var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            "candidate-backed",
+            1,
+            [
+                new IncidentEventStateMicroBatchCandidate("new-3", "new-1", string.Empty),
+                new IncidentEventStateMicroBatchCandidate("new-3", "new-2", string.Empty)
+            ],
+            tokenMap,
+            lookup);
+
+        Assert.Equal(["call:3"], plan.Batch.NewObservationIds);
+        Assert.Equal(["call:1", "call:2"], plan.Batch.ContextObservationIds);
+        Assert.Equal(2, plan.CandidateLinks.Count);
+    }
+
+    [Fact]
+    public void CandidateBackedValidationRejectsAChronologicalButUnretrievedTarget()
+    {
+        var observations = new[]
+        {
+            Observation("call:1", 100),
+            Observation("call:2", 101),
+            Observation("call:3", 102)
+        };
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var tokenMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["new-1"] = "call:1",
+            ["new-2"] = "call:2",
+            ["new-3"] = "call:3"
+        };
+        var plan = IncidentEventStateCandidateBackedMicroBatch.Build(
+            "candidate-backed",
+            1,
+            [
+                new IncidentEventStateMicroBatchCandidate("new-2", "new-1", string.Empty),
+                new IncidentEventStateMicroBatchCandidate("new-3", "new-1", string.Empty)
+            ],
+            tokenMap,
+            lookup);
+        var decision = new IncidentEventStateMicroBatchObservationDecision(
+            "new-2",
+            IncidentEventStateMicroBatchDecision.ProposeLink,
+            "new-1",
+            "continued exchange",
+            0.2,
+            ["call:3:transcript"],
+            ["call:2:transcript"],
+            []);
+
+        var validation = IncidentEventStateCandidateBackedMicroBatch.ValidateDecision(plan, lookup, decision);
+
+        Assert.False(validation.IsValid);
+        Assert.Contains(validation.Errors, error => error.Contains("outside retrieved candidates", StringComparison.Ordinal));
+    }
+
     private static IncidentEventStateSourceObservation Observation(string id, long observedAt) => new(
         id,
         long.Parse(id.AsSpan("call:".Length)),
