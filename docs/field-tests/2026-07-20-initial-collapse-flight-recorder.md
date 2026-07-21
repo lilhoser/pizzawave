@@ -643,12 +643,44 @@ live outage:
 
 Reducing front-end gain by three or six decibels did not cure an established
 collapse. This argues against a simple gain-compression condition that remains
-recoverable merely by backing off the Airspy LNA. It does not yet answer the
-separate prevention question: whether operating at gain 12 before onset makes
-a future collapse less likely. The active monitor will wait for three
-consecutive healthy primary-channel samples at gain 15, activate gain 12 once,
-and retain the next natural event. It will not touch OT or change source
-centering, control-channel lists, or recovery policy.
+recoverable merely by backing off the Airspy LNA.
+
+The separate prevention test began only after Raymond had naturally returned
+to the 773.781250 MHz primary and produced eleven consecutive samples between
+13 and 26 frames/sec. At 2026-07-21 08:46:14 EDT (Unix ms
+`1784637974086`), only Raymond's LNA gain changed from 15 to 12. Source 1
+remained at gain 15. The gain-12 config SHA-256 was
+`69678b83fd206daa98c016b7e92cce20c440b9c6d21dbd3f9bcaedc0997492e6`,
+TR started as PID 433591 with zero automatic restarts, and startup logs
+confirmed gains 12 and 15.
+
+Gain 12 immediately reduced primary decode to 2-4 frames/sec and repeatedly
+forced alternate-channel cycling. Raymond then spent long intervals at zero.
+At the five-minute boundary it had recovered only to 7 frames/sec, not the
+required three consecutive samples at or above 10. After the boundary it
+briefly produced intermittent 9-11 frame/sec samples, but did not return to
+the pre-test baseline. This made gain 12 unsuitable for an overnight
+prevention test.
+
+The exact healthy gain-15 config was restored at 08:52:18 EDT (Unix ms
+`1784638338341`) from
+`/var/backups/pizzawave/rpi-airspy-gain-20260721T0845EDT/config.gain15-healthy.json`.
+Its SHA-256 is
+`6bcb77f651fd76c6036528275f3ec088cf0d56a4667b169d0f47536260facc02`.
+Both startup gain reports were 15. The new process, PID 435796 with zero
+automatic restarts, stayed on the primary and produced 9, 23, 24, 28, 24, 30,
+14, 15, and 16 frames/sec in its first nine samples. PizzaWave live activity
+was current.
+
+This prevention attempt does not prove that gain 15 can never overload, because
+the RF path varies with time and the rollback included a process restart. It
+does show that a three-step LNA reduction costs too much Raymond margin under
+otherwise healthy conditions. Gain 12 and gain 9 should not be used as the
+standing configuration. If gain adjustment is tested once more, use only gain
+14, require healthy decode equivalence before leaving it active, and restore
+gain 15 immediately if the primary rate materially declines. If gain 14 cannot
+match the baseline, stop gain experiments and move to the retained-IQ
+demodulator/equalizer comparison described above.
 
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is

@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 08:40 EDT
+Last reconciled: 2026-07-21 08:53 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -59,12 +59,18 @@ Cross-repository source state:
   offline IQ classifier now reproduces Raymond's channel-local signature. A
   new natural Raymond event at 08:11 EDT enabled an immediate gain-recovery
   test: an unchanged restart and LNA gain reductions from 15 to 12 and 9 all
-  failed to restore normal decode. Gain 15 is restored and healthy telemetry is
-  current. The active monitor will start gain 12 only after Raymond naturally
-  returns to a strong baseline, then determine whether lower gain prevents or
-  weakens the next collapse. OT uses RTL-SDR receivers behind an MCA208M while
-  RPI uses Airspy receivers without that multicoupler; this hardware difference
-  further weakens a single receiver/front-end-overload explanation. See
+  failed to restore normal decode. A separate prevention test then started
+  gain 12 from a strong 13-26 frame/s baseline. Decode immediately fell to
+  2-4 frame/s, cycled alternates, spent long intervals at zero, and reached
+  only 7 frame/s at the five-minute boundary. Gain 15 was restored and the new
+  process immediately sustained 9-30 frame/s on the primary. Gain 12 is too
+  aggressive for this site and the prevention monitor is complete. The only
+  remaining bounded gain test is gain 14 with an immediate healthy-baseline
+  comparison; if it materially reduces decode, stop gain experiments and move
+  to retained-IQ demodulator/equalizer comparison. OT uses RTL-SDR receivers
+  behind an MCA208M while RPI uses Airspy receivers without that multicoupler;
+  this hardware difference further weakens a single receiver/front-end-overload
+  explanation. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
