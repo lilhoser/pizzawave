@@ -194,3 +194,26 @@ accuracy rate, but the concrete miss is enough to withhold authority. Do not
 repair it with special vocabulary, metadata rules, or prompt tuning against
 these inspected answers. The replay artifact identity is
 `ot-20260721-embedding-recent-sparse-qwen35-27b-q4-smoke-v1`.
+
+The identical ten batches were then replayed through Paxan's resident
+Qwen 3.6 35B-A3B Q8_0 model without changing candidates, prompt, validator, or
+timeout. All 10 requests again completed with no deterministic contract
+failure. Average request latency was 20.8 seconds, interpolated p95 was 33.9
+seconds, and the maximum was 36.6 seconds under shared endpoint load. The run
+used 45,002 total tokens and admitted four links.
+
+Inspection found two supported and two unsupported admissions. Qwen 3.6
+recovered both the lost-lumber and West Side Drive relationships. It also
+linked `call:1404933` to `call:1404895` by treating different people names as
+transcription variants merely because both calls mention Tennessee, and linked
+`call:1404931` to `call:1404883` by treating generic validity language about
+warrants and vehicle registration as a continuation. The source transcripts do
+not establish either relationship.
+
+This fails the mandatory source and positive-link precision gates. It also
+demonstrates that deterministic validation of endpoint ownership for cited
+transcript IDs is necessary but not semantic proof: a model can cite the right
+two records while inventing the bridge between them. Qwen 3.6 therefore has
+better recall than Qwen 3.5 27B in this slice, but neither configuration may be
+promoted. The Qwen 3.6 replay artifact identity is
+`ot-20260721-embedding-recent-sparse-qwen36-35b-q8-smoke-v1`.
