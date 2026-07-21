@@ -183,3 +183,81 @@ public static class IncidentEventStateMicroBatchExhaustiveCandidates
         return candidates;
     }
 }
+
+public static class IncidentEventStateMicroBatchEmbeddingCandidates
+{
+    public const string RetrieverIdentity = "incident-event-microbatch-embedding-recent-union-v1";
+
+    public static IReadOnlyList<IncidentEventStateMicroBatchCandidate> Build(
+        IncidentEventStateMicroBatchReplayBatch batch,
+        IncidentEventStateMicroBatchCandidatePromptPayload prompt,
+        IReadOnlyDictionary<string, IncidentEventStateSourceObservation> observationsById,
+        IReadOnlyDictionary<string, float[]> embeddingsByObservationId,
+        int semanticLimit,
+        int recentLimit)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(observationsById);
+        ArgumentNullException.ThrowIfNull(embeddingsByObservationId);
+        if (semanticLimit is < 0 or > 32)
+            throw new ArgumentOutOfRangeException(nameof(semanticLimit));
+        if (recentLimit is < 0 or > 32)
+            throw new ArgumentOutOfRangeException(nameof(recentLimit));
+        if (semanticLimit + recentLimit == 0)
+            throw new ArgumentException("at least one embedding or recent candidate is required");
+
+        var tokenById = prompt.ObservationIdsByToken.ToDictionary(item => item.Value, item => item.Key, StringComparer.Ordinal);
+        var candidates = new List<IncidentEventStateMicroBatchCandidate>();
+        for (var newIndex = 0; newIndex < batch.NewObservationIds.Count; newIndex++)
+        {
+            var newId = batch.NewObservationIds[newIndex];
+            if (!embeddingsByObservationId.TryGetValue(newId, out var queryVector))
+                continue;
+            var eligibleIds = batch.ContextObservationIds.Concat(batch.NewObservationIds.Take(newIndex))
+                .Where(embeddingsByObservationId.ContainsKey)
+                .ToList();
+            var selectedIds = eligibleIds
+                .Select(id => new
+                {
+                    Id = id,
+                    Similarity = Cosine(queryVector, embeddingsByObservationId[id])
+                })
+                .OrderByDescending(item => item.Similarity)
+                .ThenBy(item => item.Id, StringComparer.Ordinal)
+                .Take(semanticLimit)
+                .Select(item => item.Id)
+                .Concat(eligibleIds
+                    .OrderByDescending(id => observationsById[id].ObservedAtUnixSeconds)
+                    .ThenByDescending(id => observationsById[id].CallId ?? long.MinValue)
+                    .ThenBy(id => id, StringComparer.Ordinal)
+                    .Take(recentLimit))
+                .ToHashSet(StringComparer.Ordinal);
+
+            foreach (var targetId in eligibleIds.Where(selectedIds.Contains))
+            {
+                candidates.Add(new IncidentEventStateMicroBatchCandidate(
+                    tokenById[newId],
+                    tokenById[targetId],
+                    string.Empty));
+            }
+        }
+        return candidates;
+    }
+
+    private static double Cosine(float[] left, float[] right)
+    {
+        if (left.Length == 0 || left.Length != right.Length)
+            throw new ArgumentException("embedding vectors must have the same non-zero dimensions");
+        double dot = 0;
+        double leftNorm = 0;
+        double rightNorm = 0;
+        for (var index = 0; index < left.Length; index++)
+        {
+            dot += left[index] * right[index];
+            leftNorm += left[index] * left[index];
+            rightNorm += right[index] * right[index];
+        }
+        return leftNorm == 0 || rightNorm == 0 ? 0 : dot / Math.Sqrt(leftNorm * rightNorm);
+    }
+}

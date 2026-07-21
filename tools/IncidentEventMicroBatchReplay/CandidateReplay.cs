@@ -19,10 +19,16 @@ internal static class CandidateReplay
         var replayId = Required("--replay-id");
         var outputDirectory = Path.GetFullPath(Required("--output"));
         var exhaustiveMode = values.TryGetValue("--exhaustive-mode", out var exhaustiveValue) && bool.Parse(exhaustiveValue);
+        var embeddingMode = values.TryGetValue("--embedding-mode", out var embeddingValue) && bool.Parse(embeddingValue);
+        if (exhaustiveMode && embeddingMode)
+            throw new ArgumentException("exhaustive and embedding candidate modes are mutually exclusive");
         var endpoint = exhaustiveMode
             ? string.Empty
             : values.GetValueOrDefault("--endpoint", "http://127.0.0.1:1234/v1").TrimEnd('/');
         var model = exhaustiveMode ? IncidentEventStateMicroBatchExhaustiveCandidates.RetrieverIdentity : Required("--model");
+        var semanticCandidates = Integer("--semantic-candidates", 4);
+        var recentCandidates = Integer("--recent-candidates", 4);
+        var embeddingBatchSize = Integer("--embedding-batch-size", 32);
         var timeoutSeconds = Integer("--timeout-seconds", 120);
         var maximumBatches = values.TryGetValue("--max-batches", out var maximumBatchesValue)
             ? int.Parse(maximumBatchesValue)
@@ -60,7 +66,9 @@ internal static class CandidateReplay
             model,
             exhaustiveMode
                 ? IncidentEventStateMicroBatchExhaustiveCandidates.RetrieverIdentity
-                : IncidentEventStateMicroBatchCandidatePrompt.PromptIdentity);
+                : embeddingMode
+                    ? $"{IncidentEventStateMicroBatchEmbeddingCandidates.RetrieverIdentity};semantic={semanticCandidates};recent={recentCandidates}"
+                    : IncidentEventStateMicroBatchCandidatePrompt.PromptIdentity);
         if (priorManifest is not null)
         {
             if (!string.Equals(priorManifest.Plan.ContentHash, manifest.Plan.ContentHash, StringComparison.Ordinal) ||
@@ -79,6 +87,19 @@ internal static class CandidateReplay
         Console.WriteLine($"planned observations={plan.PlannedObservationCount} batches={plan.Batches.Count} hash={plan.ContentHash}");
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
+        IReadOnlyDictionary<string, float[]> embeddingsByObservationId = new Dictionary<string, float[]>(StringComparer.Ordinal);
+        if (embeddingMode)
+        {
+            embeddingsByObservationId = await LoadOrCreateEmbeddingsAsync(
+                Path.Combine(outputDirectory, "embedding-vectors.json"),
+                plan.ContentHash,
+                endpoint,
+                model,
+                bundle.Observations,
+                embeddingBatchSize,
+                client,
+                jsonOptions);
+        }
         var executed = 0;
         foreach (var batch in plan.Batches)
         {
@@ -93,9 +114,17 @@ internal static class CandidateReplay
                 break;
 
             var prompt = IncidentEventStateMicroBatchCandidatePrompt.Build(batch, observationsById);
-            if (exhaustiveMode)
+            if (exhaustiveMode || embeddingMode)
             {
-                var candidates = IncidentEventStateMicroBatchExhaustiveCandidates.Build(batch, prompt);
+                var candidates = exhaustiveMode
+                    ? IncidentEventStateMicroBatchExhaustiveCandidates.Build(batch, prompt)
+                    : IncidentEventStateMicroBatchEmbeddingCandidates.Build(
+                        batch,
+                        prompt,
+                        observationsById,
+                        embeddingsByObservationId,
+                        semanticCandidates,
+                        recentCandidates);
                 var deterministicResult = new CandidateBatchResult(
                     batch.Sequence,
                     batch.BatchId,
@@ -112,7 +141,7 @@ internal static class CandidateReplay
                     string.Empty);
                 await WriteJsonAtomicAsync(resultPath, deterministicResult, jsonOptions);
                 executed++;
-                Console.WriteLine($"batch {batch.Sequence}/{plan.Batches.Count}: success=True candidates={candidates.Count} deterministic=True");
+                Console.WriteLine($"batch {batch.Sequence}/{plan.Batches.Count}: success=True candidates={candidates.Count} retriever={(exhaustiveMode ? "exhaustive" : "embedding_recent")}");
                 continue;
             }
             var requestBody = new
@@ -221,6 +250,84 @@ internal static class CandidateReplay
         Console.WriteLine(JsonSerializer.Serialize(report, jsonOptions));
     }
 
+    private static async Task<IReadOnlyDictionary<string, float[]>> LoadOrCreateEmbeddingsAsync(
+        string cachePath,
+        string planContentHash,
+        string endpoint,
+        string model,
+        IReadOnlyList<IncidentEventStateSourceObservation> observations,
+        int batchSize,
+        HttpClient client,
+        JsonSerializerOptions jsonOptions)
+    {
+        if (batchSize is < 1 or > 128)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+        var embeddingInputs = observations
+            .Select(observation => new EmbeddingInput(
+                observation.ObservationId,
+                string.Join('\n', observation.Transcripts
+                    .Select(transcript => transcript.Text.Trim())
+                    .Where(value => !string.IsNullOrWhiteSpace(value)))))
+            .Where(input => !string.IsNullOrWhiteSpace(input.Text))
+            .ToList();
+        if (File.Exists(cachePath))
+        {
+            var cached = JsonSerializer.Deserialize<EmbeddingVectorCache>(await File.ReadAllTextAsync(cachePath), jsonOptions)
+                ?? throw new InvalidDataException("embedding vector cache is empty");
+            if (!string.Equals(cached.PlanContentHash, planContentHash, StringComparison.Ordinal) ||
+                !string.Equals(cached.Endpoint, endpoint, StringComparison.Ordinal) ||
+                !string.Equals(cached.Model, model, StringComparison.Ordinal) ||
+                cached.SourceObservationCount != observations.Count ||
+                cached.VectorsByObservationId.Count != embeddingInputs.Count ||
+                cached.Dimensions <= 0 ||
+                cached.VectorsByObservationId.Values.Any(vector => vector.Length != cached.Dimensions))
+            {
+                throw new InvalidDataException("embedding vector cache does not match this plan, endpoint, model, and observation count");
+            }
+            return new Dictionary<string, float[]>(cached.VectorsByObservationId, StringComparer.Ordinal);
+        }
+
+        var vectors = new Dictionary<string, float[]>(StringComparer.Ordinal);
+        var dimensions = 0;
+        Console.WriteLine($"embedding inputs={embeddingInputs.Count}; transcriptless observations={observations.Count - embeddingInputs.Count}");
+        for (var offset = 0; offset < embeddingInputs.Count; offset += batchSize)
+        {
+            var rows = embeddingInputs.Skip(offset).Take(batchSize).ToList();
+            var body = new { model, input = rows.Select(row => row.Text).ToList() };
+            using var content = new StringContent(JsonSerializer.Serialize(body, jsonOptions), Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync($"{endpoint}/embeddings", content);
+            var responseText = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"embedding endpoint returned HTTP {(int)response.StatusCode}: {responseText[..Math.Min(1000, responseText.Length)]}");
+            using var envelope = JsonDocument.Parse(responseText);
+            var responseModel = envelope.RootElement.GetProperty("model").GetString() ?? string.Empty;
+            if (!string.Equals(responseModel, model, StringComparison.Ordinal))
+                throw new InvalidDataException($"embedding model identity mismatch: requested '{model}', received '{responseModel}'");
+            var responseRows = envelope.RootElement.GetProperty("data").EnumerateArray()
+                .OrderBy(row => row.GetProperty("index").GetInt32())
+                .ToList();
+            if (responseRows.Count != rows.Count)
+                throw new InvalidDataException($"embedding endpoint returned {responseRows.Count} vectors for {rows.Count} inputs");
+            for (var index = 0; index < rows.Count; index++)
+            {
+                var vector = responseRows[index].GetProperty("embedding").EnumerateArray()
+                    .Select(value => value.GetSingle())
+                    .ToArray();
+                if (dimensions == 0)
+                    dimensions = vector.Length;
+                if (vector.Length == 0 || vector.Length != dimensions)
+                    throw new InvalidDataException("embedding endpoint returned inconsistent vector dimensions");
+                vectors[rows[index].ObservationId] = vector;
+            }
+            Console.WriteLine($"embedded {Math.Min(offset + rows.Count, embeddingInputs.Count)}/{embeddingInputs.Count} transcript observations; dimensions={dimensions}");
+        }
+        await WriteJsonAtomicAsync(
+            cachePath,
+            new EmbeddingVectorCache(planContentHash, endpoint, model, observations.Count, dimensions, vectors),
+            jsonOptions);
+        return vectors;
+    }
+
     private static Dictionary<string, string> ParseArguments(string[] args)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -251,6 +358,14 @@ internal static class CandidateReplay
     }
 
     private sealed record Usage(int PromptTokens, int CompletionTokens, int TotalTokens);
+    private sealed record EmbeddingVectorCache(
+        string PlanContentHash,
+        string Endpoint,
+        string Model,
+        int SourceObservationCount,
+        int Dimensions,
+        IReadOnlyDictionary<string, float[]> VectorsByObservationId);
+    private sealed record EmbeddingInput(string ObservationId, string Text);
     private sealed record CandidateReplayManifest(
         IncidentEventStateMicroBatchReplayPlan Plan,
         string DatabaseSha256,

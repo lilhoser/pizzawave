@@ -181,6 +181,31 @@ This mode is an audit tool, not a proposed retrieval policy. It uses only the
 frozen chronological batch and context boundaries and gives the resulting
 pairs no membership authority.
 
+The resource-compatible hybrid candidate replay embeds transcript text locally,
+then unions a fixed number of nearest embedding neighbors with recent eligible
+observations. It exposes neither score nor rank to the verifier and does not
+filter by system, category, talkgroup, label, keyword, or regex:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --candidate-replay true `
+  --embedding-mode true `
+  --database C:\path\to\incident-replay.db `
+  --start 1784603146 `
+  --end 1784635663 `
+  --replay-id example-embedding-recent `
+  --output artifacts/incident-event-microbatch-replay/example-embedding-recent `
+  --endpoint http://127.0.0.1:1234/v1 `
+  --model experiment/nomic-embed-text-v1.5 `
+  --semantic-candidates 4 `
+  --recent-candidates 4
+```
+
+The exact embedding endpoint and model identity are frozen in the manifest.
+Vectors are cached only in the ignored replay directory. Transcriptless source
+observations remain in the full-coverage plan but cannot become semantic
+candidates because they cannot supply transcript evidence.
+
 This is an evaluation boundary, not a commitment to keep two large language
 models loaded in production. Paxan's 24 GB GPU cannot be assumed to hold both
 models concurrently. The experiment must separately establish whether a small
@@ -336,3 +361,19 @@ inference: peak prompts cannot be assumed to fit the verifier's 8,192-token
 runtime, and evaluating tens of thousands of obviously weak pairs is not a
 credible Paxan resource plan. Some learned, bounded retrieval is required, but
 its output remains routing rather than proof.
+
+A local-Paxan Nomic Embed Text v1.5 Q4_K_M pass then tested a four-nearest plus
+four-recent union over the same window. The 84 MB, 768-dimensional embedding
+model coexisted with Qwen 3.6 and embedded 2,232 transcript-bearing observations
+in about 28 seconds; 21 transcriptless observations remained planned but
+unembedded. Candidate generation produced 16,386 pairs, or 7.27 per planned
+observation. Per-batch pair count had a median of 37, p95 of 74, and maximum of
+94. The experiment-only local embedding model was unloaded afterward.
+
+The hybrid set contained 521 of the 955 GPT-OSS-proposed pairs. That 54.6%
+overlap is comparison evidence, not recall: neither retriever's ordinary
+proposals are reference truth. The hybrid must not be tuned to imitate GPT-OSS.
+Its remaining falsifiable question is whether the resource-feasible hybrid plus
+sparse verifier preserves reviewed links and behaves safely on production-shaped
+traffic. Until that complete pipeline is tested, candidate recall remains
+unresolved.

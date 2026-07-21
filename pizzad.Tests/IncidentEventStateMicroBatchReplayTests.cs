@@ -364,6 +364,54 @@ public sealed class IncidentEventStateMicroBatchReplayTests
     }
 
     [Fact]
+    public void EmbeddingCandidatesUnionSemanticAndRecentTargetsWithoutExposingRank()
+    {
+        var observations = Enumerable.Range(1, 5)
+            .Select(index => Observation($"call:{index}", 100 + index))
+            .ToList();
+        var lookup = observations.ToDictionary(observation => observation.ObservationId, StringComparer.Ordinal);
+        var batch = new IncidentEventStateMicroBatchReplayBatch(
+            "embedding",
+            1,
+            101,
+            105,
+            ["call:5"],
+            ["call:1", "call:2", "call:3", "call:4"],
+            "hash");
+        var prompt = IncidentEventStateMicroBatchCandidatePrompt.Build(batch, lookup);
+        var embeddings = new Dictionary<string, float[]>(StringComparer.Ordinal)
+        {
+            ["call:1"] = [1, 0],
+            ["call:2"] = [0, 1],
+            ["call:3"] = [0, 1],
+            ["call:4"] = [-1, 0],
+            ["call:5"] = [1, 0]
+        };
+
+        var candidates = IncidentEventStateMicroBatchEmbeddingCandidates.Build(
+            batch,
+            prompt,
+            lookup,
+            embeddings,
+            semanticLimit: 1,
+            recentLimit: 2);
+
+        Assert.Equal(
+            [("new-1", "context-1"), ("new-1", "context-3"), ("new-1", "context-4")],
+            candidates.Select(candidate => (candidate.NewObservationToken, candidate.TargetObservationToken)));
+        Assert.All(candidates, candidate => Assert.Equal(string.Empty, candidate.ReasonToCompare));
+
+        embeddings.Remove("call:5");
+        Assert.Empty(IncidentEventStateMicroBatchEmbeddingCandidates.Build(
+            batch,
+            prompt,
+            lookup,
+            embeddings,
+            semanticLimit: 1,
+            recentLimit: 2));
+    }
+
+    [Fact]
     public void CandidateBackedValidationRejectsAChronologicalButUnretrievedTarget()
     {
         var observations = new[]
