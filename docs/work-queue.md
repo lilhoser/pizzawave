@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-20 21:47 EDT
+Last reconciled: 2026-07-20 22:35 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -11,7 +11,7 @@ read-only, but must not deploy.
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
 | RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Raymond paired wide/narrow recorder and fixed-primary shadow active |
-| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; North Bradley/Hamilton paired wide/narrow recorders and shadows active |
+| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorders and shadows restored |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
@@ -49,8 +49,8 @@ Cross-repository source state:
   energy rose about 2 dB into shared decoder failure while the outer spectrum
   stayed stable. Together these favor channel-local modulation destruction
   from dynamic simulcast/multipath over a simple fade. OT's two-system wide
-  instrumentation also induced repeated Gardner/source-stall exits and must be
-  removed; RPI remains stable with an approximately 857 kHz paired branch to
+  instrumentation also induced repeated Gardner/source-stall exits and was
+  removed at 22:34 EDT; RPI remains stable with an approximately 857 kHz paired branch to
   determine whether Raymond has the same channel-local signature. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing

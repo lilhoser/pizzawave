@@ -495,8 +495,18 @@ delivering samples and TR exited. By 21:10 EDT systemd had restarted it 13
 times. No matching error or source stall occurred in the 17:00-19:23
 pre-deployment journal window. This is an experiment-induced service stability
 problem, separate from the RF evidence retained in the completed files. OT's
-wide branches should be removed after preserving the captures; the lighter
-single-system RPI deployment remained stable with zero restarts.
+wide branches were removed after preserving the captures. At 2026-07-20
+22:34 EDT, the pre-wide coherent binary, standard plugins, and configuration
+were restored from
+`/var/backups/pizzawave/collapse-wide-20260720T231500Z-ot`. The restored binary
+SHA-256 is
+`368a068a973ae5fe9fd3f6b3b3734e8bcf0eb765ce0bdde645fde45aa5b326f1`;
+`libcallstream.so` remained unchanged at
+`72ea0030c23456b511e0678215176fc668e22ed722e5593fe97f0056f57681cb`.
+TR restarted cleanly with zero automatic restarts and approximately 196 MiB
+of cgroup memory, down from about 1 GiB with the two wide branches. PizzaWave
+and live TR activity were healthy. The lighter single-system RPI wide
+deployment remained stable with zero restarts and continues overnight.
 
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is
