@@ -563,6 +563,17 @@ restarts; PizzaWave and live TR activity were healthy.
 
 ## Repeatable offline analysis and mitigation direction
 
+### Hardware-path correction
+
+OT uses RTL-SDR receivers, not Airspy receivers. Its antenna feed passes through
+an MCA208M active multicoupler before the receivers. The MCA208M provides a
+broadband LNA and input protection, but its standard filter is a 25 MHz
+high-pass filter across a nominal 25 MHz-to-1 GHz receive path, not a narrow
+700/800 MHz preselector. A BPF-800-M band-pass filter is available but is not
+installed on OT. RPI instead uses two Airspy receivers and no MCA208M. The
+common collapse signature therefore spans different tuner and front-end
+hardware; neither the multicoupler nor one receiver model is a common cause.
+
 `scripts/analyze_p25_collapse_iq.py` now turns a completed paired-wide capture
 into a reproducible JSON result. It validates sample count and narrow/wide
 pair identity, aligns one-second power measurements with the decoder timeline,
@@ -599,6 +610,45 @@ another live wide recorder:
 This sequence tests the leading mechanism and a remedy together. Recovery
 grace, control-channel ranking, and graph reset remain secondary safeguards;
 they do not explain or correct the initial modulation collapse.
+
+## RPI Airspy gain experiment
+
+RPI produced another complete natural Raymond narrow capture at 2026-07-21
+08:11:32 EDT, before any gain change. Capture `1784635892019` contains the full
+30/60-second window: 8,709,676 complex samples at 96,774.194 samples/sec and
+69,677,408 bytes. Its live and fixed-primary shadow rates moved together from
+as high as 27 frames/sec to 1 at trigger and later to zero. Stable SHA-256
+values are:
+
+- IQ: `ff33c4ae99fb6ecac1ce8ee58dd1687493ebb9ddc07459b5770611c6ffc75831`;
+- JSON: `fd6ee510f7eb0e98998fa1b3c4d388380a6ea925043b8411a82f968462d7f3a3`.
+
+Raymond remained in a sustained zero-decode cycle at the configured maximum
+Airspy LNA gain of 15. This allowed a bounded recovery test against the same
+live outage:
+
+1. An unchanged gain-15 TR restart briefly produced 2-4 frames/sec, then
+   returned to the zero-decode cycle; restart alone did not restore normal
+   service.
+2. Only Raymond's source was changed to LNA gain 12. The separate 855 MHz
+   Airspy remained at gain 15. Raymond produced zero frames/sec throughout the
+   first observed minute.
+3. Raymond was then changed to LNA gain 9, six decibels below the original
+   setting. It again produced zero frames/sec throughout the observed window.
+4. The exact gain-15 configuration was restored from
+   `/var/backups/pizzawave/rpi-airspy-gain-20260721T0835EDT`. Its SHA-256 is
+   `6bcb77f651fd76c6036528275f3ec088cf0d56a4667b169d0f47536260facc02`.
+   TR was active as PID 430741 with zero automatic restarts and PizzaWave live
+   TR telemetry was current.
+
+Reducing front-end gain by three or six decibels did not cure an established
+collapse. This argues against a simple gain-compression condition that remains
+recoverable merely by backing off the Airspy LNA. It does not yet answer the
+separate prevention question: whether operating at gain 12 before onset makes
+a future collapse less likely. The active monitor will wait for three
+consecutive healthy primary-channel samples at gain 15, activate gain 12 once,
+and retain the next natural event. It will not touch OT or change source
+centering, control-channel lists, or recovery policy.
 
 An earlier Raymond automatic file at 15:36:20 EDT came from a process replaced
 during deployment correction. It remains useful corroborating evidence but is

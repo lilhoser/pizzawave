@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 08:15 EDT
+Last reconciled: 2026-07-21 08:40 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -56,9 +56,15 @@ Cross-repository source state:
   failure is modulation quality, with dynamic simulcast/multipath the leading
   cause and exact co-channel interference the remaining alternative. Both
   hosts have been restored to their pre-wide instrumentation. A repeatable
-  offline IQ classifier now reproduces Raymond's channel-local signature; the
-  active engineering step is same-IQ demodulator-quality and equalizer replay,
-  followed by a no-new-antenna decoder mitigation. See
+  offline IQ classifier now reproduces Raymond's channel-local signature. A
+  new natural Raymond event at 08:11 EDT enabled an immediate gain-recovery
+  test: an unchanged restart and LNA gain reductions from 15 to 12 and 9 all
+  failed to restore normal decode. Gain 15 is restored and healthy telemetry is
+  current. The active monitor will start gain 12 only after Raymond naturally
+  returns to a strong baseline, then determine whether lower gain prevents or
+  weakens the next collapse. OT uses RTL-SDR receivers behind an MCA208M while
+  RPI uses Airspy receivers without that multicoupler; this hardware difference
+  further weakens a single receiver/front-end-overload explanation. See
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
