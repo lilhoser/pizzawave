@@ -377,3 +377,28 @@ Its remaining falsifiable question is whether the resource-feasible hybrid plus
 sparse verifier preserves reviewed links and behaves safely on production-shaped
 traffic. Until that complete pipeline is tested, candidate recall remains
 unresolved.
+
+That question was then tested on the first ten hybrid batches. Qwen 3.5 27B
+Q4_K_M processed 393 candidate pairs with no request or contract failure. It
+averaged 9.2 seconds per batch, had a 34.6-second interpolated p95 and
+43.2-second maximum, and used 44,555 tokens. It admitted the supported West
+Side Drive link and rejected the misleading Tennessee pair, but missed the
+supported lost-lumber link even though retrieval supplied it. The hybrid
+retriever therefore passed these known-pair checks while the verifier failed
+recall.
+
+The identical batches were then run through the resident Qwen 3.6 35B-A3B Q8_0
+model under shared endpoint load. All ten requests and contracts completed; the
+20.8-second average, 33.9-second interpolated p95, and 36.6-second maximum were
+within the bounded latency gate. It recovered both supported links but also
+admitted two unsupported links: the known Tennessee/person-name challenge and
+an unrelated match based on generic validity language about warrants and
+vehicle registration. Four admitted links therefore contained two supported
+and two unsupported relationships.
+
+Both tested verifier configurations are rejected for authority. The experiment
+also establishes that endpoint-owned transcript identifiers provide reference
+integrity but not semantic proof: Qwen 3.6 cited the correct records while
+inventing relationships between them. Do not open the sealed held-out corpus,
+tune the prompt to these inspected cases, or change incident persistence based
+on these runs.
