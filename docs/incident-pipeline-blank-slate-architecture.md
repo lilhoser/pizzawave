@@ -808,6 +808,26 @@ model-owned reconsideration path for such unresolved observations; it must not
 be implemented with phrase rules or by treating retrieval similarity as event
 membership.
 
+Run E's second batch supplied four bounded candidates, including the visible
+missing-juvenile event; this verifies that operator-visible events remain in
+candidate context without an embedding match. Nevertheless, the model omitted
+a new source saying `I have the juvenile` and also omitted separately supported
+conditions involving breathing/shock and a child who blacked out. It accepted
+one chest-pain event and independently rejected a routine unit-status draft
+that the model itself described as something it intended to omit but still
+returned without evidence. The result took 58.027 seconds and had no proposer
+error.
+
+Prompt contract v5 addresses this general decision-boundary failure without
+introducing content labels or deterministic semantic checks. It tells the
+model not to require complete locations, identities, chronology, or clean
+surrounding transcription when exact words still establish a concrete
+operator-relevant condition; missing details belong in uncertainty. After
+drafting, it must compare every omitted observation with every drafted and
+candidate event and use supported multi-observation membership, confirmed
+membership, or provisional association as appropriate. A discarded draft
+must be removed from the response rather than returned with empty evidence.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

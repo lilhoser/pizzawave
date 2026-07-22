@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v4";
+    public const string PromptIdentity = "incident-batch-constructor-v5";
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -34,6 +34,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("Operator relevance must come from the underlying real-world condition affecting people, property, or public safety. The mechanics of communicating, documenting, identifying, or coordinating workflow are not themselves an operator-relevant event when the underlying situation is absent or unknown.");
         user.AppendLine("Do not promote an observation merely because it mentions a person, vehicle, place, identifier, action, or unit activity.");
         user.AppendLine("Omit routine, unclear, unsupported, low-information, or non-event observations. Omitted observations remain unresolved and are not classified as non-incidents.");
+        user.AppendLine("Do not require a complete location, identity, chronology, or perfectly transcribed surrounding text when exact cited words still establish a concrete operator-relevant condition. Preserve missing or garbled details as uncertainty instead of omitting that supported condition.");
         user.AppendLine("Returning an empty events array is correct when none of the supplied observations clears that bar.");
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         user.AppendLine("Use disposition new_event when the cited new observations establish an event without relying on a candidate event.");
@@ -41,10 +42,12 @@ public static class IncidentBatchPrompt
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
         user.AppendLine("Review every new observation before choosing events; finding one event is not a reason to stop evaluating the remaining observations.");
+        user.AppendLine("After drafting events, compare every still-omitted new observation with every drafted event and candidate event. Add it to a drafted event when its cited words support the same unfolding situation; use confirmed_membership for a candidate when both cited sides directly support the same event; use provisional_association when the cited relationship is plausible and operator-relevant but remains meaningfully uncertain. Leave it unresolved only when its words cannot support either an event or a relationship.");
         user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");
         user.AppendLine("For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate.");
         user.AppendLine("Titles and summaries must state only what the cited transcripts support. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
+        user.AppendLine("Remove every discarded draft from the events array entirely. Never return an event that you decided should be omitted, and never return an event without exact evidence for every included new observation.");
         user.AppendLine("Copy every identifier exactly.");
         user.AppendLine();
         user.AppendLine("Source bundle:");
