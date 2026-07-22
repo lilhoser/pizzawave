@@ -1371,6 +1371,28 @@ groups before retrieval fills the remaining candidate slots. Candidate count
 does not increase, and retrieval remains a context-bounding aid rather than
 membership evidence.
 
+Run S completed five batches covering 66 new observations. It accepted 15
+Review groups, retained 50 observations as unresolved, and produced no invalid
+proposal, proposer error, confirmed membership, or provisional association.
+Four candidate-backed relationship requests validly abstained. Combined
+constructor-plus-relationship latency averaged 63.379 seconds and peaked at
+88.056 seconds. Production incident analysis remained current, most recently by
+two minutes, with healthy AI completion and embedding services. The stream was
+permissive—several Review groups represented routine or weakly contextualized
+activity—but none became operator-visible. This is a prioritization constraint
+for the future Review surface, not evidence for weakening the confirmed-
+membership visibility gate.
+
+Balanced selection v2 was deployed to OT only in clean shadow run
+`ot-batch-constructor-shadow-20260722-t`, fenced after call `1427563`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13t-20260722T092100Z.bak`;
+its SHA-256 is
+`b4f3f20495ceecad78d63d2297d73e8c62589dbec49c87ac681d4a623a0b60bb`.
+Post-restart service, production incident freshness, AI completion, and
+embedding health were `ok`; live radio was in its normal startup warming
+interval. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
