@@ -705,6 +705,14 @@ runs retain their original interpretation. This changes only structural
 failure isolation; it does not weaken exact-quote validation or add semantic
 application authority.
 
+Per-event acceptance began in clean OT run
+`ot-batch-constructor-shadow-20260722-c`, retaining the 24-observation,
+300-second cadence and establishing its startup fence at call `1424871`. The
+pre-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v2c-20260722T032430Z.bak`;
+its SHA-256 is
+`b18e12c2c458b9713ca6ee9ed4bdf3f4aa1d22822f8b99894f8b06a5590247e8`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
