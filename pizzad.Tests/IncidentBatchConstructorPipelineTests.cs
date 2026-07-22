@@ -62,6 +62,31 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public async Task ProvisionalEventIsGroupedForReviewWithoutBecomingVisible()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "A young person may need assistance."),
+            Observation("call:2", "transcript:2", "The caller is still gathering details."));
+        var item = Event(
+            "event:possible-assistance",
+            IncidentBatchEventDisposition.ProvisionalEvent,
+            string.Empty,
+            ["call:1", "call:2"],
+            "Possible assistance request",
+            "A developing situation may require assistance.",
+            [Citation("transcript:1", "may need assistance"), Citation("transcript:2", "still gathering details")],
+            []);
+
+        var result = await RunAsync(bundle, ["call:1", "call:2"], [], new FixedProposer(Proposal([item])));
+
+        var projected = Assert.Single(result.Projection.Projection.Events);
+        Assert.False(projected.OperatorVisible);
+        Assert.True(projected.OperatorReview);
+        Assert.Equal(["call:1", "call:2"], projected.ObservationIds);
+        Assert.Equal("may need assistance … still gathering details", projected.Summary);
+    }
+
+    [Fact]
     public async Task ConfirmedMembershipAddsNewObservationsToExistingEvent()
     {
         var prior = PriorProjection(new IncidentBatchProjectionEvent(
@@ -70,6 +95,7 @@ public sealed class IncidentBatchConstructorPipelineTests
             "Vehicle crash",
             "A vehicle crash is active.",
             true,
+            false,
             ["ledger:prior"]));
         var bundle = Bundle(
             Observation("call:10", "transcript:10", "White truck crashed on County Road 725."),
@@ -101,6 +127,7 @@ public sealed class IncidentBatchConstructorPipelineTests
             "Worker locked in room",
             "A cleaning worker was locked in a room.",
             true,
+            false,
             ["ledger:prior"]));
         var bundle = Bundle(
             Observation("call:10", "transcript:10", "Cleaning worker is locked inside the room."),
@@ -207,7 +234,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var oldCall = Call(10, "White truck crashed on County Road 725.", 1000) with { TalkgroupName = "Static label", Talkgroup = 999 };
         var firstNew = Call(11, "Critical injuries in that white truck crash.", 1010) with { TalkgroupName = "Other label", Talkgroup = 123 };
         var secondNew = Call(12, "Routine status traffic.", 1020);
-        var prior = PriorProjection(new IncidentBatchProjectionEvent("projection:event:existing", ["call:10"], "Crash", "Crash", true, ["ledger:prior"]));
+        var prior = PriorProjection(new IncidentBatchProjectionEvent("projection:event:existing", ["call:10"], "Crash", "Crash", true, false, ["ledger:prior"]));
 
         var selection = IncidentBatchLiveSelection.Build(
             [firstNew, secondNew],
@@ -235,6 +262,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
         Assert.Contains("operator_basis", schema, StringComparison.Ordinal);
         Assert.Contains("exact_quotes", schema, StringComparison.Ordinal);
+        Assert.Contains("provisional_event", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("relationship_statement", schema, StringComparison.Ordinal);
     }
 
@@ -244,7 +272,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var priorCall = Call(10, "Firefighter emergency traffic with one firefighter on board.", 1000);
         var newCall = Call(11, "We need to pick that firefighter up.", 1010);
         var prior = PriorProjection(new IncidentBatchProjectionEvent(
-            "projection:event:firefighter", ["call:10"], "Firefighter emergency", "Emergency traffic involving a firefighter.", true, ["ledger:prior"]));
+            "projection:event:firefighter", ["call:10"], "Firefighter emergency", "Emergency traffic involving a firefighter.", true, false, ["ledger:prior"]));
 
         var selection = IncidentBatchLiveSelection.Build(
             [newCall],

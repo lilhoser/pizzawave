@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v6";
+    public const string PromptIdentity = "incident-batch-constructor-v7";
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -38,6 +38,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
         user.AppendLine("Use disposition new_event when the cited new observations establish an event without relying on a candidate event.");
+        user.AppendLine("Use provisional_event when cited new observations support a candidate-free possible situation worth operator review, but meaningful uncertainty about what is happening makes full new_event membership premature. A provisional event is review evidence, not an operator-visible incident.");
         user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
@@ -89,7 +90,7 @@ public static class IncidentBatchPrompt
                                 properties = new
                                 {
                                     proposal_token = new { type = "string" },
-                                    disposition = new { type = "string", @enum = new[] { "new_event", "confirmed_membership", "provisional_association" } },
+                                    disposition = new { type = "string", @enum = new[] { "new_event", "provisional_event", "confirmed_membership", "provisional_association" } },
                                     candidate_token = new { type = "string", @enum = candidateTokens },
                                     new_observation_ids = StringArraySchema(newObservationIds),
                                     title = new { type = "string" },
@@ -215,6 +216,7 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 item.Disposition switch
                 {
                     "new_event" => IncidentBatchEventDisposition.NewEvent,
+                    "provisional_event" => IncidentBatchEventDisposition.ProvisionalEvent,
                     "confirmed_membership" => IncidentBatchEventDisposition.ConfirmedMembership,
                     "provisional_association" => IncidentBatchEventDisposition.ProvisionalAssociation,
                     _ => throw new InvalidDataException($"Unsupported batch event disposition '{item.Disposition}'.")

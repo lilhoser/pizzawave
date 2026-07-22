@@ -5,6 +5,7 @@ namespace pizzad;
 public enum IncidentBatchEventDisposition
 {
     NewEvent,
+    ProvisionalEvent,
     ConfirmedMembership,
     ProvisionalAssociation
 }
@@ -41,6 +42,7 @@ public sealed record IncidentBatchProjectionEvent(
     string Title,
     string Summary,
     bool OperatorVisible,
+    bool OperatorReview,
     IReadOnlyList<string> SourceLedgerEntryIds);
 
 public sealed record IncidentBatchProjectedAssociation(
@@ -201,12 +203,12 @@ public static class IncidentBatchContract
             }
             if (double.IsNaN(item.Uncertainty) || double.IsInfinity(item.Uncertainty) || item.Uncertainty is < 0 or > 1)
                 errors.Add($"uncertainty for event proposal '{item.ProposalToken}' must be between 0 and 1");
-            if (item.Disposition == IncidentBatchEventDisposition.NewEvent)
+            if (item.Disposition is IncidentBatchEventDisposition.NewEvent or IncidentBatchEventDisposition.ProvisionalEvent)
             {
                 if (!string.IsNullOrWhiteSpace(item.CandidateToken))
-                    errors.Add($"new event proposal '{item.ProposalToken}' cannot reference a candidate");
+                    errors.Add($"candidate-free event proposal '{item.ProposalToken}' cannot reference a candidate");
                 if (item.CandidateEvidence.Count > 0)
-                    errors.Add($"new event proposal '{item.ProposalToken}' cannot cite candidate evidence");
+                    errors.Add($"candidate-free event proposal '{item.ProposalToken}' cannot cite candidate evidence");
             }
             else if (!candidateMap.TryGetValue(item.CandidateToken, out var candidate))
             {
@@ -307,6 +309,10 @@ public static class IncidentBatchContract
                 errors.Add($"projected event '{item.ProjectionEventId}' contains no observations");
             if (item.OperatorVisible && (string.IsNullOrWhiteSpace(item.Title) || string.IsNullOrWhiteSpace(item.Summary)))
                 errors.Add($"operator-visible projected event '{item.ProjectionEventId}' lacks a title or summary");
+            if (item.OperatorReview && (string.IsNullOrWhiteSpace(item.Title) || string.IsNullOrWhiteSpace(item.Summary)))
+                errors.Add($"operator-review projected event '{item.ProjectionEventId}' lacks a title or summary");
+            if (item.OperatorVisible && item.OperatorReview)
+                errors.Add($"projected event '{item.ProjectionEventId}' cannot be both operator-visible and operator-review");
             foreach (var observationId in item.ObservationIds)
                 if (!owners.TryAdd(observationId, item.ProjectionEventId))
                     errors.Add($"observation '{observationId}' belongs to more than one projected event");
@@ -416,6 +422,7 @@ public static class IncidentBatchProjector
             string.Empty,
             string.Empty,
             false,
+            false,
             [entry.LedgerEntryId])));
 
         var links = (priorProjection?.ProvisionalAssociations ?? []).ToList();
@@ -441,6 +448,7 @@ public static class IncidentBatchProjector
                     Title = proposal.Title,
                     Summary = AppendEvidenceSummary(target.Summary, evidenceSummary),
                     OperatorVisible = true,
+                    OperatorReview = false,
                     SourceLedgerEntryIds = target.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
                 };
                 events.RemoveAll(item => singletonIds.Contains(item.ProjectionEventId));
@@ -455,6 +463,7 @@ public static class IncidentBatchProjector
                     Title = proposal.Title,
                     Summary = evidenceSummary,
                     OperatorVisible = proposal.Disposition == IncidentBatchEventDisposition.NewEvent,
+                    OperatorReview = proposal.Disposition == IncidentBatchEventDisposition.ProvisionalEvent,
                     SourceLedgerEntryIds = source.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
                 };
                 events.RemoveAll(item => item.ProjectionEventId != sourceEventId && singletonIds.Contains(item.ProjectionEventId));

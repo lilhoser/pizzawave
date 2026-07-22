@@ -131,11 +131,12 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         _lastSampledCallId = newCalls.Max(call => call.Id);
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
         _logger.LogInformation(
-            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, confirmed={ConfirmedCount}, provisional={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, proposerMs={DurationMs}, invalid={Invalid}, proposerError={HasError}; production incident state unchanged",
+            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, proposerMs={DurationMs}, invalid={Invalid}, proposerError={HasError}; production incident state unchanged",
             runId,
             newCalls.Count,
             _lastSampledCallId,
             validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.NewEvent),
+            validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalEvent),
             validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership),
             validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation),
             newCalls.Count - validEvents.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count(),

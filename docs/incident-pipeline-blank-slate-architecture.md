@@ -892,6 +892,28 @@ its SHA-256 is
 Immediately after deployment, production incident analysis was current by
 eight minutes and overall, AI-completion, and embedding health were all `ok`.
 
+Run G's first batch accepted three structurally valid singleton events from 16
+observations in 95.141 seconds. The evidence-only projection behaved as
+designed: its summaries contained only exact validated source excerpts. The
+semantic boundary remained inadequate. It promoted a highly uncertain fragment
+about a young girl and an unclear `volo` as a full event while assigning 0.7
+uncertainty and asking whether the girl was missing, at risk, or involved in an
+incident. It also omitted a concrete medical update reporting three liters of
+oxygen and 90 percent saturation. A custody/transport status update was also
+promoted despite the precision-first instruction against workflow mechanics.
+
+That result exposes a missing state type rather than a useful confidence
+threshold. Candidate-free evidence currently has only two destinations: full
+new-event membership or unresolved invisibility. Prompt v7 adds
+`provisional_event` for a source-cited, candidate-free possible situation that
+is worth operator review but too uncertain for a full event. Its observations
+are grouped in the shadow projection with `operatorReview=true` and
+`operatorVisible=false`; it does not create production membership. This is
+distinct from `provisional_association`, which links new evidence to an existing
+candidate without merging it. The report exposes both provisional-event and
+review-queue counts. Application code does not convert model uncertainty scores
+into outcomes or apply content-specific labels, categories, or thresholds.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
