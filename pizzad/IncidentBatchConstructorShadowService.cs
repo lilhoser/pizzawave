@@ -97,8 +97,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         var matches = new List<VectorSearchMatchDto>();
         if (prior is not null)
         {
-            var matchSets = await _embeddings.SearchSimilarAcrossSystemsBatchAsync(
-                newCalls.Select(call => call.Transcription).ToList(),
+            var matchSets = await _embeddings.SearchSimilarStoredCallsAcrossSystemsBatchAsync(
+                newCalls.Select(call => new StoredVectorSearchSource(call.Id, call.Transcription)).ToList(),
                 start,
                 now.ToUnixTimeSeconds(),
                 12,

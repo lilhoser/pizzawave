@@ -1874,6 +1874,29 @@ The pre-stop configuration is preserved at
 `trunk-recorder` retained PID `3068317`; RPI and production incident rows were
 not changed.
 
+Run `ot-batch-constructor-capacity-20260722-c` tested an initial batching
+implementation and was aborted after seven completed batches. Sending all 24
+transcripts to the shared embedding endpoint in one request repeatedly produced
+`LM Link connection closed` and `No models loaded` responses. The retrieval
+helper converted those errors to empty matches, and a later successful health
+probe could clear the shared embedding error. Consequently, Run C's apparent
+sub-second retrievals and throughput are invalid as capacity evidence: those
+cycles did not have reliable vector candidates. Legacy incident execution was
+restored immediately; production health recovered and no production incident
+rows were changed.
+
+The durable correction removes online embedding inference from constructor
+retrieval. Eligible calls already have durable vectors in Qdrant, keyed by call
+ID. The constructor now retrieves those exact stored vectors by ID and submits
+one Qdrant batch search. A missing vector receives one explicit single-call
+embedding fallback; a malformed vector or failed fallback aborts the shadow
+cycle without advancing its cursor instead of silently removing candidate evidence.
+A live 24-call protocol probe returned all 24 stored 768-dimensional vectors
+and 24 sets of 12 search results in 147 milliseconds without contacting LM
+Link. The ordinary single-text embedding path remains unchanged for production
+ingestion. A fresh run ID is required for the next capacity measurement; Run C
+must not be combined with it.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

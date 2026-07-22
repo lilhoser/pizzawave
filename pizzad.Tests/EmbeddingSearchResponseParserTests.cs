@@ -5,6 +5,32 @@ namespace pizzad.Tests;
 public sealed class EmbeddingSearchResponseParserTests
 {
     [Fact]
+    public void ParsePointVectorMapReadsVectorsByCallId()
+    {
+        const string json = """
+            {"result":[{"id":22,"vector":[0.2,0.3]},{"id":11,"vector":[0.0,0.1]}],"status":"ok"}
+            """;
+
+        var vectors = EmbeddingSearchResponseParser.ParsePointVectorMap(json, 2);
+
+        Assert.Equal([0.0f, 0.1f], vectors[11]);
+        Assert.Equal([0.2f, 0.3f], vectors[22]);
+    }
+
+    [Fact]
+    public void ParsePointVectorMapRejectsWrongDimensions()
+    {
+        const string json = """
+            {"result":[{"id":11,"vector":[0.0,0.1]}],"status":"ok"}
+            """;
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            EmbeddingSearchResponseParser.ParsePointVectorMap(json, 3));
+
+        Assert.Contains("size 2", error.Message);
+    }
+
+    [Fact]
     public void ParseSingleReadsValidMatchesAndSkipsInvalidIds()
     {
         const string json = """

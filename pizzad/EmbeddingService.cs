@@ -88,22 +88,21 @@ public sealed class EmbeddingService : BackgroundService
     public Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAcrossSystemsAsync(string queryText, long start, long end, int limit, CancellationToken ct)
         => SearchSimilarAsync(queryText, systemShortName: null, requireOkQuality: false, start, end, limit, ct);
 
-    public async Task<IReadOnlyList<IReadOnlyList<VectorSearchMatchDto>>> SearchSimilarAcrossSystemsBatchAsync(
-        IReadOnlyList<string> queryTexts,
+    public async Task<IReadOnlyList<IReadOnlyList<VectorSearchMatchDto>>> SearchSimilarStoredCallsAcrossSystemsBatchAsync(
+        IReadOnlyList<StoredVectorSearchSource> sources,
         long start,
         long end,
         int limit,
         CancellationToken ct)
     {
-        if (queryTexts.Count == 0)
+        if (sources.Count == 0)
             return [];
-        var empty = queryTexts.Select(_ => (IReadOnlyList<VectorSearchMatchDto>)[]).ToList();
-        if (!IsEnabled() || queryTexts.Any(string.IsNullOrWhiteSpace))
-            return empty;
+        if (!IsEnabled())
+            throw new InvalidOperationException("Stored-vector search requires an enabled embedding service.");
         try
         {
             await EnsureCollectionAsync(ct);
-            var vectors = await CreateEmbeddingsAsync(queryTexts, ct);
+            var vectors = await GetStoredVectorsAsync(sources, ct);
             var must = new object[]
             {
                 new { key = "startTime", range = new { gte = start, lte = end } }
@@ -128,16 +127,43 @@ public sealed class EmbeddingService : BackgroundService
             sw.Stop();
             _lastSearchMs = sw.Elapsed.TotalMilliseconds;
             var results = EmbeddingSearchResponseParser.ParseBatch(text);
-            if (results.Count != queryTexts.Count)
-                throw new InvalidDataException($"Qdrant batch search returned {results.Count} result sets for {queryTexts.Count} queries.");
+            if (results.Count != sources.Count)
+                throw new InvalidDataException($"Qdrant batch search returned {results.Count} result sets for {sources.Count} calls.");
             return results;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _lastError = ex.Message;
-            _logger.LogWarning(ex, "Qdrant vector batch search failed");
-            return empty;
+            _logger.LogWarning(ex, "Qdrant stored-vector batch search failed");
+            throw;
         }
+    }
+
+    private async Task<IReadOnlyList<float[]>> GetStoredVectorsAsync(IReadOnlyList<StoredVectorSearchSource> sources, CancellationToken ct)
+    {
+        var callIds = sources.Select(source => source.CallId).ToList();
+        using var client = CreateQdrantClient();
+        using var content = JsonContent(new { ids = callIds, with_payload = false, with_vector = true });
+        using var response = await client.PostAsync(
+            $"{QdrantBaseUrl()}/collections/{Uri.EscapeDataString(Collection())}/points",
+            content,
+            ct);
+        var text = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Qdrant point retrieval failed with HTTP {(int)response.StatusCode}: {Trim(text, 500)}");
+        var stored = EmbeddingSearchResponseParser.ParsePointVectorMap(text, _config.Embeddings.VectorSize);
+        var vectors = new List<float[]>(sources.Count);
+        foreach (var source in sources)
+        {
+            if (stored.TryGetValue(source.CallId, out var vector))
+            {
+                vectors.Add(vector);
+                continue;
+            }
+            _logger.LogWarning("Qdrant has no stored vector for call {CallId}; creating one transiently for candidate retrieval", source.CallId);
+            vectors.Add(await CreateEmbeddingAsync(source.Text, ct));
+        }
+        return vectors;
     }
 
     private async Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAsync(
@@ -392,37 +418,20 @@ public sealed class EmbeddingService : BackgroundService
     }
 
     private async Task<float[]> CreateEmbeddingAsync(string text, CancellationToken ct)
-        => (await CreateEmbeddingsAsync([text], ct))[0];
-
-    private async Task<IReadOnlyList<float[]>> CreateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken ct)
     {
-        if (texts.Count == 0)
-            return [];
         using var client = CreateEmbeddingClient();
-        var body = new { model = _config.Embeddings.OpenAiModel, input = texts };
+        var body = new { model = _config.Embeddings.OpenAiModel, input = text };
         using var content = JsonContent(body);
         using var response = await client.PostAsync($"{_config.Embeddings.OpenAiBaseUrl.TrimEnd('/')}/embeddings", content, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"Embedding endpoint failed with HTTP {(int)response.StatusCode}: {Trim(json, 500)}");
         using var doc = JsonDocument.Parse(json);
-        var rows = doc.RootElement.GetProperty("data")
-            .EnumerateArray()
-            .Select(item => new
-            {
-                Index = item.GetProperty("index").GetInt32(),
-                Values = item.GetProperty("embedding").EnumerateArray().Select(v => (float)v.GetDouble()).ToArray()
-            })
-            .OrderBy(item => item.Index)
-            .ToList();
-        if (rows.Count != texts.Count || rows.Select(item => item.Index).Where((index, position) => index != position).Any())
-            throw new InvalidDataException($"Embedding endpoint returned indexes that do not cover all {texts.Count} inputs exactly once.");
-        foreach (var row in rows)
-        {
-            if (row.Values.Length != _config.Embeddings.VectorSize)
-                throw new InvalidOperationException($"Embedding vector size {row.Values.Length} does not match configured qdrant size {_config.Embeddings.VectorSize}.");
-        }
-        return rows.Select(item => item.Values).ToList();
+        var embedding = doc.RootElement.GetProperty("data")[0].GetProperty("embedding");
+        var values = embedding.EnumerateArray().Select(v => (float)v.GetDouble()).ToArray();
+        if (values.Length != _config.Embeddings.VectorSize)
+            throw new InvalidOperationException($"Embedding vector size {values.Length} does not match configured qdrant size {_config.Embeddings.VectorSize}.");
+        return values;
     }
 
     private async Task<bool> CheckQdrantAsync(CancellationToken ct)
@@ -550,8 +559,33 @@ public sealed class EmbeddingService : BackgroundService
         string.IsNullOrWhiteSpace(value) || value.Length <= max ? value : value[..max];
 }
 
+public sealed record StoredVectorSearchSource(long CallId, string Text);
+
 public static class EmbeddingSearchResponseParser
 {
+    public static IReadOnlyDictionary<long, float[]> ParsePointVectorMap(string text, int vectorSize)
+    {
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Qdrant point retrieval response did not contain a result array.");
+        var vectorsById = new Dictionary<long, float[]>();
+        foreach (var item in result.EnumerateArray())
+        {
+            if (!item.TryGetProperty("id", out var idElement)
+                || idElement.ValueKind != JsonValueKind.Number
+                || !idElement.TryGetInt64(out var id)
+                || !item.TryGetProperty("vector", out var vectorElement)
+                || vectorElement.ValueKind != JsonValueKind.Array)
+                continue;
+            var vector = vectorElement.EnumerateArray().Select(value => (float)value.GetDouble()).ToArray();
+            if (vector.Length != vectorSize)
+                throw new InvalidDataException($"Stored vector for call {id} has size {vector.Length}; expected {vectorSize}.");
+            if (!vectorsById.TryAdd(id, vector))
+                throw new InvalidDataException($"Qdrant returned duplicate stored vectors for call {id}.");
+        }
+        return vectorsById;
+    }
+
     public static IReadOnlyList<VectorSearchMatchDto> ParseSingle(string text)
     {
         using var doc = JsonDocument.Parse(text);
