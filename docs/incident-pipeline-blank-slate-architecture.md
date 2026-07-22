@@ -1561,6 +1561,35 @@ Post-restart service, live radio, production incident freshness, AI completion,
 and embeddings were all `ok`. No production incident rows were changed and RPI
 was not changed.
 
+Run Y confirmed that the response bounds eliminated truncation: both
+candidate-backed relationship requests ended with `finish_reason=stop`, using
+654 and 1,732 completion tokens. It also exposed a distinct semantic failure.
+The model admitted eight provisional associations, including pairs it described
+as having different locations, different patients, contradictory urgency, no
+overlapping details, or as otherwise unrelated. Exact citations grounded the
+individual transcript statements but did not establish the claimed connection.
+The six-item response cap had become a target for generic similarity rather
+than a ceiling for sparse evidence, so the run was ended early.
+
+Selective-relationship commit `3cf0783` changes the model contract without
+adding phrase matching, static categories, talkgroup rules, regex, or a numeric
+admission threshold. Empty output is explicitly normal and expected. A
+provisional association now requires a concrete cross-reference or operational
+continuation between the two evidence boundaries; topical resemblance, shared
+words, generic dispatch language, and citations that merely prove what each
+side says are expressly insufficient.
+
+That commit began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-z`, fenced after call `1429343`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13z-20260722T124059Z.bak`;
+the active configuration SHA-256 is
+`53235286b6f41aabb684865f57844cbb3175a9a8e100d0bbfad8a88215c62cb0`.
+The configuration remains owned by `root:pizzawave` with mode `0660`.
+Post-restart service, production incident freshness, AI completion, and
+embeddings were all `ok`. No production incident rows were changed and RPI was
+not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
