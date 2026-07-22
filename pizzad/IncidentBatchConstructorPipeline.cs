@@ -72,7 +72,8 @@ public sealed record IncidentBatchExecutionContext(
     string SoftwareVersion,
     string ConfigurationIdentity,
     long ProposerDurationMilliseconds,
-    string ProposerError);
+    string ProposerError,
+    long RetrievalDurationMilliseconds = 0);
 
 public sealed record IncidentBatchLedgerEntry(
     string RunId,
@@ -102,7 +103,8 @@ public sealed record IncidentBatchRunRequest(
     string ProjectionId,
     IReadOnlyList<IncidentBatchSingletonIdentity> SingletonEvents,
     string SoftwareVersion,
-    string ConfigurationIdentity);
+    string ConfigurationIdentity,
+    long RetrievalDurationMilliseconds = 0);
 
 public interface IIncidentBatchProposer
 {
@@ -887,7 +889,12 @@ public sealed class IncidentBatchCoordinator
             candidates,
             proposal,
             proposalValidation.Errors,
-            new IncidentBatchExecutionContext(request.SoftwareVersion, request.ConfigurationIdentity, timer.ElapsedMilliseconds, proposerError),
+            new IncidentBatchExecutionContext(
+                request.SoftwareVersion,
+                request.ConfigurationIdentity,
+                timer.ElapsedMilliseconds,
+                proposerError,
+                request.RetrievalDurationMilliseconds),
             relationshipProposal,
             relationshipValidationErrors,
             relationshipExecution,

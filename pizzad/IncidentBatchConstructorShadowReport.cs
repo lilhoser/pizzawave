@@ -17,6 +17,8 @@ public sealed record IncidentBatchShadowTotalsDto(
     int UnresolvedObservations,
     int InvalidProposals,
     int ProposerErrors,
+    double AverageRetrievalMilliseconds,
+    long MaximumRetrievalMilliseconds,
     double AverageProposerMilliseconds,
     long MaximumProposerMilliseconds,
     int ProjectedEvents,
@@ -44,6 +46,7 @@ public sealed record IncidentBatchShadowAttemptDto(
     IReadOnlyList<string> EventTitles,
     IReadOnlyList<IncidentBatchShadowRelationshipDto> Relationships,
     IReadOnlyList<string> ValidationErrors,
+    long RetrievalMilliseconds,
     long ProposerMilliseconds,
     string ProposerError);
 
@@ -115,6 +118,8 @@ public sealed partial class EngineDatabase
             allAttempts.Sum(row => row.UnresolvedObservationCount),
             entries.Count(row => !IsValid(row)),
             allAttempts.Count(row => !string.IsNullOrWhiteSpace(row.ProposerError)),
+            allAttempts.Count == 0 ? 0 : allAttempts.Average(row => row.RetrievalMilliseconds),
+            allAttempts.Count == 0 ? 0 : allAttempts.Max(row => row.RetrievalMilliseconds),
             allAttempts.Count == 0 ? 0 : allAttempts.Average(row => row.ProposerMilliseconds),
             allAttempts.Count == 0 ? 0 : allAttempts.Max(row => row.ProposerMilliseconds),
             projectedEvents.Count,
@@ -219,6 +224,7 @@ public sealed partial class EngineDatabase
                 IncidentBatchProjector.BuildEvidenceSummary(item.NewObservationEvidence))).ToList(),
             relationshipRows,
             validationErrors,
+            entry.Execution.RetrievalDurationMilliseconds,
             entry.Execution.ProposerDurationMilliseconds +
             (entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0) +
             (entry.ConfirmationExecution?.VerifierDurationMilliseconds ?? 0),
@@ -241,6 +247,6 @@ public sealed partial class EngineDatabase
         row.Entry.ProposalValidationErrors.Count == 0 &&
         (row.Entry.RelationshipProposalValidationErrors ?? []).Count == 0 &&
         (row.Entry.ConfirmationProposalValidationErrors ?? []).Count == 0;
-    private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     private static DateTime? ParseBatchUtc(string value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
 }

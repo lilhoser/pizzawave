@@ -88,6 +88,58 @@ public sealed class EmbeddingService : BackgroundService
     public Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAcrossSystemsAsync(string queryText, long start, long end, int limit, CancellationToken ct)
         => SearchSimilarAsync(queryText, systemShortName: null, requireOkQuality: false, start, end, limit, ct);
 
+    public async Task<IReadOnlyList<IReadOnlyList<VectorSearchMatchDto>>> SearchSimilarAcrossSystemsBatchAsync(
+        IReadOnlyList<string> queryTexts,
+        long start,
+        long end,
+        int limit,
+        CancellationToken ct)
+    {
+        if (queryTexts.Count == 0)
+            return [];
+        var empty = queryTexts.Select(_ => (IReadOnlyList<VectorSearchMatchDto>)[]).ToList();
+        if (!IsEnabled() || queryTexts.Any(string.IsNullOrWhiteSpace))
+            return empty;
+        try
+        {
+            await EnsureCollectionAsync(ct);
+            var vectors = await CreateEmbeddingsAsync(queryTexts, ct);
+            var must = new object[]
+            {
+                new { key = "startTime", range = new { gte = start, lte = end } }
+            };
+            var searches = vectors.Select(vector => new
+            {
+                vector,
+                limit = Math.Clamp(limit, 1, Math.Max(1, _config.Embeddings.SearchLimit)),
+                with_payload = true,
+                filter = new { must }
+            }).ToList();
+            var sw = Stopwatch.StartNew();
+            using var client = CreateQdrantClient();
+            using var content = JsonContent(new { searches });
+            using var response = await client.PostAsync(
+                $"{QdrantBaseUrl()}/collections/{Uri.EscapeDataString(Collection())}/points/search/batch",
+                content,
+                ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Qdrant batch search failed with HTTP {(int)response.StatusCode}: {Trim(text, 500)}");
+            sw.Stop();
+            _lastSearchMs = sw.Elapsed.TotalMilliseconds;
+            var results = EmbeddingSearchResponseParser.ParseBatch(text);
+            if (results.Count != queryTexts.Count)
+                throw new InvalidDataException($"Qdrant batch search returned {results.Count} result sets for {queryTexts.Count} queries.");
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _lastError = ex.Message;
+            _logger.LogWarning(ex, "Qdrant vector batch search failed");
+            return empty;
+        }
+    }
+
     private async Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAsync(
         string queryText,
         string? systemShortName,
@@ -340,20 +392,37 @@ public sealed class EmbeddingService : BackgroundService
     }
 
     private async Task<float[]> CreateEmbeddingAsync(string text, CancellationToken ct)
+        => (await CreateEmbeddingsAsync([text], ct))[0];
+
+    private async Task<IReadOnlyList<float[]>> CreateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken ct)
     {
+        if (texts.Count == 0)
+            return [];
         using var client = CreateEmbeddingClient();
-        var body = new { model = _config.Embeddings.OpenAiModel, input = text };
+        var body = new { model = _config.Embeddings.OpenAiModel, input = texts };
         using var content = JsonContent(body);
         using var response = await client.PostAsync($"{_config.Embeddings.OpenAiBaseUrl.TrimEnd('/')}/embeddings", content, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"Embedding endpoint failed with HTTP {(int)response.StatusCode}: {Trim(json, 500)}");
         using var doc = JsonDocument.Parse(json);
-        var embedding = doc.RootElement.GetProperty("data")[0].GetProperty("embedding");
-        var values = embedding.EnumerateArray().Select(v => (float)v.GetDouble()).ToArray();
-        if (values.Length != _config.Embeddings.VectorSize)
-            throw new InvalidOperationException($"Embedding vector size {values.Length} does not match configured qdrant size {_config.Embeddings.VectorSize}.");
-        return values;
+        var rows = doc.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Select(item => new
+            {
+                Index = item.GetProperty("index").GetInt32(),
+                Values = item.GetProperty("embedding").EnumerateArray().Select(v => (float)v.GetDouble()).ToArray()
+            })
+            .OrderBy(item => item.Index)
+            .ToList();
+        if (rows.Count != texts.Count || rows.Select(item => item.Index).Where((index, position) => index != position).Any())
+            throw new InvalidDataException($"Embedding endpoint returned indexes that do not cover all {texts.Count} inputs exactly once.");
+        foreach (var row in rows)
+        {
+            if (row.Values.Length != _config.Embeddings.VectorSize)
+                throw new InvalidOperationException($"Embedding vector size {row.Values.Length} does not match configured qdrant size {_config.Embeddings.VectorSize}.");
+        }
+        return rows.Select(item => item.Values).ToList();
     }
 
     private async Task<bool> CheckQdrantAsync(CancellationToken ct)
@@ -455,20 +524,7 @@ public sealed class EmbeddingService : BackgroundService
         new(JsonSerializer.Serialize(body, EngineConfig.JsonOptions()), Encoding.UTF8, "application/json");
 
     private static IReadOnlyList<VectorSearchMatchDto> ParseSearch(string text)
-    {
-        using var doc = JsonDocument.Parse(text);
-        if (!doc.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
-            return [];
-        var rows = new List<VectorSearchMatchDto>();
-        foreach (var item in result.EnumerateArray())
-        {
-            var id = item.TryGetProperty("id", out var idElement) && idElement.TryGetInt64(out var parsedId) ? parsedId : 0;
-            var score = item.TryGetProperty("score", out var scoreElement) && scoreElement.TryGetDouble(out var parsedScore) ? parsedScore : 0;
-            if (id > 0)
-                rows.Add(new VectorSearchMatchDto(id, score, "qdrant"));
-        }
-        return rows;
-    }
+        => EmbeddingSearchResponseParser.ParseSingle(text);
 
     private static string BuildEmbeddingText(EngineCall call, IReadOnlyList<CallLocationDashboardRow> locations)
     {
@@ -492,4 +548,48 @@ public sealed class EmbeddingService : BackgroundService
 
     private static string Trim(string value, int max) =>
         string.IsNullOrWhiteSpace(value) || value.Length <= max ? value : value[..max];
+}
+
+public static class EmbeddingSearchResponseParser
+{
+    public static IReadOnlyList<VectorSearchMatchDto> ParseSingle(string text)
+    {
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+            return [];
+        return ParseResultSet(result);
+    }
+
+    public static IReadOnlyList<IReadOnlyList<VectorSearchMatchDto>> ParseBatch(string text)
+    {
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+            return [];
+        return result.EnumerateArray()
+            .Select(item => item.ValueKind == JsonValueKind.Array
+                ? ParseResultSet(item)
+                : (IReadOnlyList<VectorSearchMatchDto>)[])
+            .ToList();
+    }
+
+    private static IReadOnlyList<VectorSearchMatchDto> ParseResultSet(JsonElement result)
+    {
+        var rows = new List<VectorSearchMatchDto>();
+        foreach (var item in result.EnumerateArray())
+        {
+            var id = item.TryGetProperty("id", out var idElement)
+                     && idElement.ValueKind == JsonValueKind.Number
+                     && idElement.TryGetInt64(out var parsedId)
+                ? parsedId
+                : 0;
+            var score = item.TryGetProperty("score", out var scoreElement)
+                        && scoreElement.ValueKind == JsonValueKind.Number
+                        && scoreElement.TryGetDouble(out var parsedScore)
+                ? parsedScore
+                : 0;
+            if (id > 0)
+                rows.Add(new VectorSearchMatchDto(id, score, "qdrant"));
+        }
+        return rows;
+    }
 }

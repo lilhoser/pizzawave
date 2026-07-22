@@ -91,20 +91,19 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         var newCalls = IncidentBatchLiveCursor.SelectNext(calls, _lastSampledCallId.Value, batchSize);
         if (newCalls.Count == 0)
             return;
+        var retrievalTimer = Stopwatch.StartNew();
         var priorStored = await _database.GetLatestIncidentBatchProjectionAsync(runId, ct);
         var prior = priorStored?.Projection;
         var matches = new List<VectorSearchMatchDto>();
         if (prior is not null)
         {
-            foreach (var call in newCalls)
-            {
-                matches.AddRange(await _embeddings.SearchSimilarAcrossSystemsAsync(
-                    call.Transcription,
-                    start,
-                    now.ToUnixTimeSeconds(),
-                    12,
-                    ct));
-            }
+            var matchSets = await _embeddings.SearchSimilarAcrossSystemsBatchAsync(
+                newCalls.Select(call => call.Transcription).ToList(),
+                start,
+                now.ToUnixTimeSeconds(),
+                12,
+                ct);
+            matches.AddRange(matchSets.SelectMany(items => items));
         }
         var selection = IncidentBatchLiveSelection.Build(
             newCalls,
@@ -113,6 +112,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             prior,
             _config.AiInsights.IncidentBatchConstructorShadowCandidateLimit,
             now);
+        retrievalTimer.Stop();
         var batchIdentity = $"{newCalls.First().Id.ToString(CultureInfo.InvariantCulture)}-{newCalls.Last().Id.ToString(CultureInfo.InvariantCulture)}";
         var singletons = newCalls.Select(call => new IncidentBatchSingletonIdentity(
             $"call:{call.Id.ToString(CultureInfo.InvariantCulture)}",
@@ -128,7 +128,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
                 $"batch-live:{runId}:projection:{batchIdentity}",
                 singletons,
                 Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown",
-                ConfigurationIdentity()),
+                ConfigurationIdentity(),
+                retrievalTimer.ElapsedMilliseconds),
             selection.Bundle,
             prior,
             selection.NewObservationIds,
@@ -138,7 +139,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
         var validRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(result.LedgerEntry.Entry);
         _logger.LogInformation(
-            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, confirmationMs={ConfirmationDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, confirmationInvalid={ConfirmationInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}, confirmationError={HasConfirmationError}; production incident state unchanged",
+            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, retrievalMs={RetrievalDurationMs}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, confirmationMs={ConfirmationDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, confirmationInvalid={ConfirmationInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}, confirmationError={HasConfirmationError}; production incident state unchanged",
             runId,
             newCalls.Count,
             _lastSampledCallId,
@@ -148,6 +149,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             validRelationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation),
             newCalls.Count - validEvents.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count(),
             selection.Candidates.Count,
+            result.LedgerEntry.Entry.Execution.RetrievalDurationMilliseconds,
             result.LedgerEntry.Entry.Execution.ProposerDurationMilliseconds,
             result.LedgerEntry.Entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0,
             result.LedgerEntry.Entry.ConfirmationExecution?.VerifierDurationMilliseconds ?? 0,

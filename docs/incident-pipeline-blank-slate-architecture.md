@@ -1827,6 +1827,53 @@ Post-restart production incident analysis, AI completion, embeddings, ingestion,
 and overall health were all `ok`. `trunk-recorder` was not restarted and retained
 PID `3068317`. No production incident rows or RPI services were changed.
 
+### Run B replacement-load capacity checkpoint
+
+Run `ot-batch-constructor-capacity-20260722-b` removed both Run AB capacity
+confounders. From 19:17 through 19:47 UTC, legacy production incident inference
+was paused while its durable jobs continued to accumulate, the constructor ran
+continuously instead of on a 300-second cadence, and transcription, ingestion,
+embeddings, alerts, and all other permanent services remained active. The
+constructor remained shadow-only and did not write production incidents. Qwen
+3.6 35B A3B Q8 was verified as physically loaded on Paxan during the run; it was
+not served by Ventax.
+
+The exclusive constructor completed nine 24-observation batches, including
+eight candidate-backed batches: 216 observations in 28.59 minutes, or 7.56
+observations per minute. In the same bounded window OT received 266 calls, 262
+of which had usable transcript evidence, or 8.82 usable observations per
+minute. The constructor therefore fell 46 usable observations behind even with
+legacy inference paused and missed the 1.5-times-arrival recovery target by a
+wide margin. It made 20 successful requests with no request failures, consuming
+64,333 prompt tokens and 15,703 completion tokens. Model-stage time totaled
+18.53 minutes; average model time per batch was 123.532 seconds and the maximum
+was 285.735 seconds.
+
+This result corrects rather than reinstates the earlier overclaim. Run AB's
+side-by-side lag did not prove replacement capacity. Run B does show that the
+current serial implementation lacks production headroom on Paxan. It does not
+show that the evidence architecture or Paxan itself is unsuitable. Before each
+candidate-backed model pass, the service issued one embedding and one Qdrant
+search per new observation in series. That retrieval added approximately 50 to
+88 seconds to typical cycles. Both live endpoints were verified to support a
+single 24-input embedding request and a single Qdrant batch-search request.
+Removing those serial round trips is therefore the next bounded optimization;
+the semantic candidates, prompts, validation, and persistence boundary remain
+unchanged. A repeat replacement-load run must measure explicit retrieval time
+and total throughput before considering model-stage reduction or different
+hardware.
+
+The run produced one confirmed membership, one provisional association, 30
+Review events, three fail-closed invalid batches, and no proposer errors. These
+are correctness observations, not a basis for relaxing validation. At stop,
+legacy execution was restored from its durable queue. Within about one minute
+its latest completed source-call age recovered to 3.9 minutes while ingestion,
+transcription, AI completion, embeddings, and overall health were all `ok`.
+The pre-stop configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-capacity-v15b-stop-20260722T194710Z.bak`.
+`trunk-recorder` retained PID `3068317`; RPI and production incident rows were
+not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
