@@ -2,7 +2,7 @@ namespace pizzad;
 
 public static class IncidentTranscriptCitationResolver
 {
-    public const string ConfigurationToken = "citations=source-segments-v2";
+    public const string ConfigurationToken = "citations=source-segments-v3";
 
     public static string Resolve(string transcript, string proposedQuote)
     {
@@ -15,7 +15,17 @@ public static class IncidentTranscriptCitationResolver
         var normalizedTranscript = NormalizeTypography(transcript);
         var normalizedQuote = NormalizeTypography(proposedQuote);
         var sourceIndex = normalizedTranscript.IndexOf(normalizedQuote, StringComparison.Ordinal);
-        return sourceIndex < 0
+        if (sourceIndex >= 0)
+            return transcript.Substring(sourceIndex, proposedQuote.Length);
+
+        sourceIndex = normalizedTranscript.IndexOf(normalizedQuote, StringComparison.OrdinalIgnoreCase);
+        if (sourceIndex < 0)
+            return proposedQuote;
+        var duplicateIndex = normalizedTranscript.IndexOf(
+            normalizedQuote,
+            sourceIndex + 1,
+            StringComparison.OrdinalIgnoreCase);
+        return duplicateIndex >= 0
             ? proposedQuote
             : transcript.Substring(sourceIndex, proposedQuote.Length);
     }

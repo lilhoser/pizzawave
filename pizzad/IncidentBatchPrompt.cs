@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v12";
+    public const string PromptIdentity = "incident-batch-constructor-v13";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
@@ -60,6 +60,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
         user.AppendLine("Review every new observation before choosing events; finding one event is not a reason to stop evaluating the remaining observations.");
         user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans.");
+        user.AppendLine("Every new_observation_evidence citation must come from an observation listed in that same event's new_observation_ids. If evidence from another observation is necessary, either include that observation as a member of the same event or omit the event when membership is unresolved.");
         if (candidates.Count > 0)
             user.AppendLine("Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");
         user.AppendLine(candidates.Count > 0

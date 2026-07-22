@@ -3,6 +3,26 @@ namespace pizzad.Tests;
 public sealed class IncidentTranscriptCitationResolverTests
 {
     [Fact]
+    public void Resolve_MapsUniqueCasingDifferenceBackToExactSource()
+    {
+        const string transcript = "Hey, as you talk the engine one just stays behind our bumper.";
+
+        var resolved = IncidentTranscriptCitationResolver.Resolve(transcript, "Engine one just stays behind our bumper");
+
+        Assert.Equal("engine one just stays behind our bumper", resolved);
+        Assert.Contains(resolved, transcript, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_FailsClosedWhenCaseInsensitivePassageIsAmbiguous()
+    {
+        const string transcript = "engine one is staged. ENGINE ONE is moving.";
+        const string proposed = "Engine one";
+
+        Assert.Equal(proposed, IncidentTranscriptCitationResolver.Resolve(transcript, proposed));
+    }
+
+    [Fact]
     public void Resolve_ReturnsLiteralSourceSubstringForTypographicApostrophe()
     {
         const string transcript = "Engine 1, I'll show you responding. It's at Kinsor Road.";

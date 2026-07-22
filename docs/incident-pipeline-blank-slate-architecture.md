@@ -1333,6 +1333,20 @@ Immediately after restart, overall health, live radio, AI completion, and
 embedding health were `ok`, and production incident analysis was current by 15
 minutes. Run R remains shadow-only and RPI was not changed.
 
+Run R's first batch considered 21 new observations with no prior candidate
+state. The isolated constructor proposed two groups and deterministic validation
+rejected both. One otherwise source-grounded fire response quote differed from
+the literal transcript only by capitalizing `Engine`; the source contained a
+single case-insensitive match. The other proposal declared call `1427325` as
+its only member but cited firearm evidence from call `1427327`, while its own
+alternative interpretation said the custody and firearm reports might be
+unrelated. The latter remains rejected; application code must not repair that
+uncertainty by silently adding event membership. The citation resolver now maps
+only a unique case-insensitive match back to the exact source span and fails
+closed when that match is ambiguous. Constructor prompt v13 also states the
+bidirectional provenance rule explicitly: every cited new transcript must
+belong to an observation declared in that same group.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
