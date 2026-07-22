@@ -1186,6 +1186,41 @@ Immediately after deployment, production incident analysis was current by
 eight minutes and overall, live-radio, AI-completion, and embedding health were
 all `ok`. RPI was not changed.
 
+Run O's first two batches considered 21 observations and returned four accepted
+proposals with no invalid output or proposer error. They exposed a state-context
+gap before v10 could be meaningfully evaluated. The first batch retained a
+single bleeding call at `9505 Thornberry Drive` in Review. The next batch
+received a detailed heavy-bleeding call at `9505 Dornberry Drive`, but the only
+candidate supplied to the model was an unrelated unresolved fire call. The
+Review event had no completed embedding match and was therefore absent from
+candidate context. Prompt v10 cannot propose a cited association to state it
+never receives.
+
+Candidate selection now reserves bounded context for the newest visible event
+and newest Review event, then fills remaining slots from embedding-backed
+retrieval. The versioned token is `candidate-context=balanced-state-v1`. This
+makes provisional state capable of accumulating an immediate follow-up before
+embedding indexing or similarity retrieval completes. Candidate inclusion
+remains context only and cannot prove membership or an association.
+
+Run O also promoted a two-observation DHS/CPS exchange that did not establish a
+concrete underlying situation. Its exact-source projection makes the weak
+evidence obvious, but the result confirms that two cited observations are not
+by themselves a sufficient semantic relevance guarantee. No content rule,
+confidence threshold, or static phrase check was added to conceal that failure;
+promotion quality remains an open architecture issue for subsequent evidence.
+
+Balanced visible-and-Review candidate context began in clean OT run
+`ot-batch-constructor-shadow-20260722-p`, retaining prompt v10, the
+24-observation, 300-second cadence, and establishing a startup fence at call
+`1426879`. The prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v10p-20260722T072237Z.bak`;
+its SHA-256 is
+`6a3384fbeedfac5da8211cd6f8b273b9c482059bc4d0eebc58cb31057e131bb1`.
+Immediately after deployment, production incident analysis was current by
+eight minutes and overall, live-radio, AI-completion, and embedding health were
+all `ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
