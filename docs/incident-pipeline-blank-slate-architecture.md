@@ -1551,6 +1551,16 @@ The prompt explicitly chooses the strongest specific relationships and omits
 weaker pairs. These are resource and schema bounds, not semantic labels or
 content-based admission rules.
 
+Bounded-relationship commit `06e5922` began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-y`, fenced after call `1428957`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13y-20260722T120837Z.bak`;
+its SHA-256 is
+`d2a8a394fdf65a9954bf91c2bd3a727f6804c6ec697596199c0d041fdd45ecaa`.
+Post-restart service, live radio, production incident freshness, AI completion,
+and embeddings were all `ok`. No production incident rows were changed and RPI
+was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
