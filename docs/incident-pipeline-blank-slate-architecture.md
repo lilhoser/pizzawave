@@ -763,6 +763,21 @@ with embedding-matched unresolved events. This preserves the four-candidate
 cap and does not make visibility, recency, or retrieval proof of membership;
 the model must still cite both sides for confirmed or provisional association.
 
+Run D's third batch found two materially important observations—a potential
+suicide threat at a stated address and an unresponsive young child—but rejected
+both because each returned quote spliced several source spans with ellipses.
+The evidence checker correctly refused those altered strings. Prompt v3's prose
+instruction alone was therefore insufficient to make a single quote field fit
+multi-span evidence.
+
+Prompt contract v4 changes the response shape: each cited transcript contains
+an `exact_quotes` array of one to four short, separately contiguous source
+spans. Application code expands and exact-checks every span. Multiple verified
+spans from one transcript are allowed, while duplicate transcript-and-quote
+pairs remain invalid. This lets a proposal cite location, condition, and
+response from separate parts of one transcript without inserting omitted text
+or weakening source verification.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

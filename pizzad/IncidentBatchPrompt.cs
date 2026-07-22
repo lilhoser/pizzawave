@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v3";
+    public const string PromptIdentity = "incident-batch-constructor-v4";
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -41,7 +41,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
         user.AppendLine("Review every new observation before choosing events; finding one event is not a reason to stop evaluating the remaining observations.");
-        user.AppendLine("Every returned event must cite a short exact quote from a transcript in every included new observation. Each exact_quote must be one contiguous verbatim substring. Never insert ellipses, omit intervening words, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite short exact quotes from candidate-event transcripts.");
+        user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");
         user.AppendLine("For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate.");
         user.AppendLine("Titles and summaries must state only what the cited transcripts support. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
@@ -131,9 +131,15 @@ public static class IncidentBatchPrompt
             properties = new
             {
                 transcript_id = new { type = "string", @enum = transcriptIds.ToArray() },
-                exact_quote = new { type = "string" }
+                exact_quotes = new
+                {
+                    type = "array",
+                    minItems = 1,
+                    maxItems = 4,
+                    items = new { type = "string" }
+                }
             },
-            required = new[] { "transcript_id", "exact_quote" }
+            required = new[] { "transcript_id", "exact_quotes" }
         }
     };
 
@@ -217,8 +223,8 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 item.Summary,
                 item.OperatorBasis,
                 item.Uncertainty,
-                item.NewObservationEvidence.Select(citation => new IncidentEventStateTranscriptCitation(citation.TranscriptId, citation.ExactQuote)).ToList(),
-                item.CandidateEvidence.Select(citation => new IncidentEventStateTranscriptCitation(citation.TranscriptId, citation.ExactQuote)).ToList(),
+                item.NewObservationEvidence.SelectMany(citation => citation.ExactQuotes.Select(quote => new IncidentEventStateTranscriptCitation(citation.TranscriptId, quote))).ToList(),
+                item.CandidateEvidence.SelectMany(citation => citation.ExactQuotes.Select(quote => new IncidentEventStateTranscriptCitation(citation.TranscriptId, quote))).ToList(),
                 item.AlternativeInterpretations,
                 item.UnresolvedQuestions)).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
@@ -283,5 +289,5 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
         [property: JsonPropertyName("unresolved_questions")] IReadOnlyList<string> UnresolvedQuestions);
     private sealed record BatchCitationResponse(
         [property: JsonPropertyName("transcript_id")] string TranscriptId,
-        [property: JsonPropertyName("exact_quote")] string ExactQuote);
+        [property: JsonPropertyName("exact_quotes")] IReadOnlyList<string> ExactQuotes);
 }

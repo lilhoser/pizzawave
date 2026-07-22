@@ -205,11 +205,11 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.Contains("Critical injuries", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("A radio transmission is not automatically an event", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("underlying real-world condition", prompt.UserPrompt, StringComparison.Ordinal);
-        Assert.Contains("one contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("one short contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Review every new observation", prompt.UserPrompt, StringComparison.Ordinal);
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
         Assert.Contains("operator_basis", schema, StringComparison.Ordinal);
-        Assert.Contains("exact_quote", schema, StringComparison.Ordinal);
+        Assert.Contains("exact_quotes", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("relationship_statement", schema, StringComparison.Ordinal);
     }
 
@@ -263,6 +263,32 @@ public sealed class IncidentBatchConstructorPipelineTests
         var projected = Assert.Single(result.Projection.Projection.Events);
         Assert.True(projected.OperatorVisible);
         Assert.Equal(4, projected.ObservationIds.Count);
+    }
+
+    [Fact]
+    public async Task OneTranscriptMaySupplySeveralSeparatelyVerifiedEvidenceSpans()
+    {
+        var bundle = Bundle(Observation(
+            "call:1",
+            "transcript:1",
+            "1717 East Rebel Road. He sent a message to a friend and said he wanted it to be over."));
+        var item = Event(
+            "event:threat",
+            IncidentBatchEventDisposition.NewEvent,
+            string.Empty,
+            ["call:1"],
+            "Potential threat at East Rebel Road",
+            "A message indicated a potential threat at a stated location.",
+            [
+                Citation("transcript:1", "1717 East Rebel Road"),
+                Citation("transcript:1", "said he wanted it to be over")
+            ],
+            []);
+
+        var result = await RunAsync(bundle, ["call:1"], [], new FixedProposer(Proposal([item])));
+
+        Assert.Empty(result.LedgerEntry.Entry.ProposalValidationErrors);
+        Assert.True(Assert.Single(result.Projection.Projection.Events).OperatorVisible);
     }
 
     private static async Task<IncidentBatchRunResult> RunAsync(

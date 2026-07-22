@@ -339,7 +339,7 @@ public static class IncidentBatchContract
     {
         if (required && citations.Count == 0)
             errors.Add($"{owner} must include at least one exact transcript citation");
-        RequireUnique(citations.Select(item => item.TranscriptId), $"transcript id in {owner}", errors);
+        RequireUnique(citations.Select(item => $"{item.TranscriptId}\u001f{item.ExactQuote}"), $"transcript citation in {owner}", errors);
         var transcripts = bundle.Observations
             .Where(observation => allowedObservationIds.Contains(observation.ObservationId, StringComparer.Ordinal))
             .SelectMany(observation => observation.Transcripts)
