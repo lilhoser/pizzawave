@@ -1139,6 +1139,17 @@ Immediately after deployment, production incident analysis was current by 15
 minutes and overall, live-radio, AI-completion, and embedding health were all
 `ok`. RPI was not changed.
 
+Run N's first batch considered 21 observations in 118.597 seconds and returned
+four accepted proposals: one two-observation visible event for an AC unit
+arcing at a specific address, plus three single-observation Review events. The
+response stopped normally at 1,642 completion tokens, well below the 4,000-token
+cap. It produced no invalid proposal, proposer error, confirmed membership,
+provisional association, or parallel ambiguous full-event draft. This first
+batch verifies bounded completion and the visibility split; it is not yet a
+positive example of sibling consolidation. Production incident analysis was
+current by 12 minutes with no stale calls, and overall, live-radio,
+AI-completion, and embedding health were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
