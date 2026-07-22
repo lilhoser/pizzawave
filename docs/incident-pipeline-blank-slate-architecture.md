@@ -956,6 +956,22 @@ its SHA-256 is
 Immediately after deployment, production incident analysis was current by 11
 minutes and overall, AI-completion, and embedding health were all `ok`.
 
+Run I verified the scheduler correction with live overflow. Its first batch
+filled the 24-observation cap through call `1425765` and took 82.524 seconds.
+The next batch began at exactly the next eligible call, `1425767`, processed 12
+observations through `1425799`, and took 38.376 seconds. No call-ID gap was
+introduced. The service started the second iteration on the fixed 300-second
+schedule rather than waiting 300 seconds after the first generation finished.
+
+The first batch accepted an exact-source seizure event and a burglary
+cancellation, while rejecting a shooting proposal whose quote changed source
+lowercase `that` to uppercase `That`. The second accepted an exact-source
+vehicle/deer collision and a phone crash notification, made no candidate link,
+and returned no provisional event. Production health remained `ok`. This is
+positive evidence for cursor coverage, cadence, exact validation, and
+evidence-only summaries; it is not yet evidence that the model uses the new
+review type reliably.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
