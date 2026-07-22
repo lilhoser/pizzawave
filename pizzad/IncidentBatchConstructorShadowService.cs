@@ -154,7 +154,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {
@@ -178,6 +178,8 @@ public sealed record IncidentBatchLiveSelection(
     IReadOnlyList<string> NewObservationIds,
     IReadOnlyList<IncidentBatchCandidate> Candidates)
 {
+    public const string ConfigurationToken = "candidate-context=balanced-state-v1";
+
     public static IncidentBatchLiveSelection Build(
         IReadOnlyList<EngineCall> newCalls,
         IReadOnlyList<EngineCall> recentCalls,
@@ -192,7 +194,7 @@ public sealed record IncidentBatchLiveSelection(
             .Where(match => !newIds.Contains(ObservationId(match.CallId)))
             .GroupBy(match => ObservationId(match.CallId), StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Max(item => item.Score), StringComparer.Ordinal);
-        var groups = (priorProjection?.Events ?? [])
+        var eligibleGroups = (priorProjection?.Events ?? [])
             .Select(projectedEvent => new
             {
                 Event = projectedEvent,
@@ -201,12 +203,26 @@ public sealed record IncidentBatchLiveSelection(
                     .Select(observationId => new { ObservationId = observationId, Call = callsByObservation[observationId], Score = scores.GetValueOrDefault(observationId, double.NegativeInfinity) })
                     .ToList()
             })
-            .Where(item => item.SourceCalls.Count > 0 && (item.Event.OperatorVisible || item.SourceCalls.Any(source => double.IsFinite(source.Score))))
-            .OrderByDescending(item => item.Event.OperatorVisible)
-            .ThenByDescending(item => item.SourceCalls.Any(source => double.IsFinite(source.Score)))
+            .Where(item => item.SourceCalls.Count > 0 && (item.Event.OperatorVisible || item.Event.OperatorReview || item.SourceCalls.Any(source => double.IsFinite(source.Score))))
+            .ToList();
+        var rankedGroups = eligibleGroups
+            .OrderByDescending(item => item.SourceCalls.Any(source => double.IsFinite(source.Score)))
+            .ThenByDescending(item => item.Event.OperatorVisible)
+            .ThenByDescending(item => item.Event.OperatorReview)
             .ThenByDescending(item => item.SourceCalls.Max(source => source.Score))
             .ThenByDescending(item => item.SourceCalls.Max(source => source.Call.StartTime))
-            .ThenBy(item => item.Event.ProjectionEventId, StringComparer.Ordinal)
+            .ThenBy(item => item.Event.ProjectionEventId, StringComparer.Ordinal);
+        var stateAnchors = eligibleGroups
+            .Where(item => item.Event.OperatorVisible)
+            .OrderByDescending(item => item.SourceCalls.Max(source => source.Call.StartTime))
+            .Take(1)
+            .Concat(eligibleGroups
+                .Where(item => item.Event.OperatorReview)
+                .OrderByDescending(item => item.SourceCalls.Max(source => source.Call.StartTime))
+                .Take(1));
+        var groups = stateAnchors
+            .Concat(rankedGroups)
+            .DistinctBy(item => item.Event.ProjectionEventId, StringComparer.Ordinal)
             .Take(Math.Clamp(candidateLimit, 1, IncidentBatchContract.MaximumCandidateCount))
             .ToList();
         var sourceCalls = newCalls.ToList();

@@ -298,6 +298,30 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void LiveSelectionKeepsRecentReviewEventInCandidateSetWithoutEmbeddingMatch()
+    {
+        var reviewCall = Call(10, "Circle 65 bleeding at 9505 Thornberry Drive.", 1000);
+        var retrievedCall = Call(11, "Unrelated structure fire report.", 1010);
+        var newCall = Call(12, "Heavy bleeding at 9505 Dornberry Drive.", 1020);
+        var prior = PriorProjection(
+            new IncidentBatchProjectionEvent("projection:event:review", ["call:10"], "Bleeding", "Bleeding", false, true, ["ledger:prior"]),
+            new IncidentBatchProjectionEvent("projection:event:retrieved", ["call:11"], string.Empty, string.Empty, false, false, ["ledger:prior"]));
+
+        var selection = IncidentBatchLiveSelection.Build(
+            [newCall],
+            [reviewCall, retrievedCall, newCall],
+            [new VectorSearchMatchDto(11, 0.9, "similar")],
+            prior,
+            2,
+            Now);
+
+        Assert.Equal(2, selection.Candidates.Count);
+        Assert.Contains(selection.Candidates, item => item.ProjectionEventId == "projection:event:review");
+        Assert.Contains(selection.Candidates, item => item.ProjectionEventId == "projection:event:retrieved");
+        Assert.Contains(selection.Bundle.Observations, item => item.ObservationId == "call:10");
+    }
+
+    [Fact]
     public void LiveCursorProcessesOldestUnseenCallsWithoutSkippingOverflow()
     {
         var calls = Enumerable.Range(1, 30).Select(id => Call(id, $"Call {id}", 1000 + id)).ToList();
