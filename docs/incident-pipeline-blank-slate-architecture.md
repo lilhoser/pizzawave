@@ -1393,6 +1393,19 @@ Post-restart service, production incident freshness, AI completion, and
 embedding health were `ok`; live radio was in its normal startup warming
 interval. RPI was not changed.
 
+Run V's first candidate-backed cycle admitted one provisional association but
+also demonstrated why provisional state must remain visibly non-authoritative.
+The new group mentioned `Medical 17`; the candidate contained the ambiguous
+phrase `mileage, 17.4`. The proposer retained that the candidate did not confirm
+the new group's bank location or patient status and that `major 14` might be an
+unrelated designation. The association did not merge membership or create a
+visible incident, which is the correct safety result, but the semantic basis is
+weak enough that an operator may reasonably reject it. The future Review UI
+must therefore show the exact evidence from both sides, relationship statement,
+counterinterpretations, and unresolved questions together. A provisional link
+is a question for review, not a recommendation, score, or inferred membership.
+No phrase-, number-, unit-, or incident-type rule was added for this example.
+
 The Inspector attempt list previously displayed the model's free-form event
 titles even though admitted projection state already derives its title and
 summary only from validated exact evidence. This could make safe shadow state
