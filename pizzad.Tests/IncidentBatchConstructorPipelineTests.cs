@@ -40,6 +40,28 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public async Task ProjectionSummaryUsesValidatedEvidenceInsteadOfModelNarrative()
+    {
+        var bundle = Bundle(Observation("call:1", "transcript:1", "The vehicle is sparking near Notting Hill."));
+        var item = Event(
+            "event:vehicle",
+            IncidentBatchEventDisposition.NewEvent,
+            string.Empty,
+            ["call:1"],
+            "Sparking vehicle",
+            "The road is badly damaged and the occupants are fleeing.",
+            [Citation("transcript:1", "vehicle is sparking"), Citation("transcript:1", "near Notting Hill")],
+            []);
+
+        var result = await RunAsync(bundle, ["call:1"], [], new FixedProposer(Proposal([item])));
+
+        var projected = Assert.Single(result.Projection.Projection.Events);
+        Assert.Equal("vehicle is sparking … near Notting Hill", projected.Summary);
+        Assert.DoesNotContain("road is badly damaged", projected.Summary, StringComparison.Ordinal);
+        Assert.Contains("road is badly damaged", result.LedgerEntry.Entry.Proposal.Events[0].Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ConfirmedMembershipAddsNewObservationsToExistingEvent()
     {
         var prior = PriorProjection(new IncidentBatchProjectionEvent(

@@ -838,6 +838,31 @@ its SHA-256 is
 Immediately after deployment, production incident analysis was current by six
 minutes and overall, AI-completion, and embedding health were all `ok`.
 
+Run F's first batch considered 24 observations in 111.558 seconds. V5 grouped
+three calls into one missing-child event and two calls into one sparking-vehicle
+event, demonstrating materially better multi-call construction than the prior
+prompt. A separately plausible pediatric-seizure event was rejected because
+one of four evidence spans changed a source ASCII apostrophe to a typographic
+apostrophe; the other two events survived. The model still omitted a call that
+said the sought juvenile had been positively identified.
+
+Source inspection exposed a distinct narrative-provenance failure. The
+accepted vehicle summary asserted that the road was "pretty tore up" using a
+different observation from the same batch, but the model left that observation
+outside the event and supplied no citation for it. Exact event citations alone
+therefore do not prove that a free-form generated summary is limited to those
+citations. Adding semantic string checks would recreate the brittle policy
+layer this architecture is replacing, while a mandatory second live model pass
+would materially increase resource use.
+
+The shadow projection now separates those responsibilities under versioned
+policy `projection=evidence-summary-v1`: the append-only ledger retains the
+model's proposed narrative for audit, but the operator-visible projection
+summary is composed only from exact citations that passed validation. Confirmed
+updates append their validated new-source excerpts to the existing projected
+evidence. The model-generated title remains a non-authoritative display label;
+stable event identity and membership do not depend on either title or summary.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

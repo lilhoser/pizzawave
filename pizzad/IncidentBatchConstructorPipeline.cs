@@ -119,6 +119,7 @@ public static class IncidentBatchContract
     public const int MaximumCandidateCount = 8;
     public const int MaximumObservationsPerCandidate = 12;
     public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
+    public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-summary-v1";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -420,6 +421,7 @@ public static class IncidentBatchProjector
         var links = (priorProjection?.ProvisionalAssociations ?? []).ToList();
         foreach (var proposal in IncidentBatchContract.AcceptedEvents(entry))
         {
+            var evidenceSummary = BuildEvidenceSummary(proposal.NewObservationEvidence);
             var singletonIds = entry.SingletonEvents
                 .Where(item => proposal.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
                 .Select(item => item.ProjectionEventId)
@@ -437,7 +439,7 @@ public static class IncidentBatchProjector
                 {
                     ObservationIds = target.ObservationIds.Concat(proposal.NewObservationIds).Distinct(StringComparer.Ordinal).ToList(),
                     Title = proposal.Title,
-                    Summary = proposal.Summary,
+                    Summary = AppendEvidenceSummary(target.Summary, evidenceSummary),
                     OperatorVisible = true,
                     SourceLedgerEntryIds = target.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
                 };
@@ -451,7 +453,7 @@ public static class IncidentBatchProjector
                 {
                     ObservationIds = proposal.NewObservationIds.ToList(),
                     Title = proposal.Title,
-                    Summary = proposal.Summary,
+                    Summary = evidenceSummary,
                     OperatorVisible = proposal.Disposition == IncidentBatchEventDisposition.NewEvent,
                     SourceLedgerEntryIds = source.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
                 };
@@ -486,6 +488,19 @@ public static class IncidentBatchProjector
         if (!validation.IsValid)
             throw new InvalidDataException(string.Join("; ", validation.Errors));
         return projection;
+    }
+
+    private static string BuildEvidenceSummary(IReadOnlyList<IncidentEventStateTranscriptCitation> citations) =>
+        string.Join(" … ", citations
+            .Select(item => item.ExactQuote.Trim())
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.Ordinal));
+
+    private static string AppendEvidenceSummary(string existing, string added)
+    {
+        if (string.IsNullOrWhiteSpace(existing)) return added;
+        if (string.IsNullOrWhiteSpace(added) || existing.Contains(added, StringComparison.Ordinal)) return existing;
+        return $"{existing} … {added}";
     }
 }
 
