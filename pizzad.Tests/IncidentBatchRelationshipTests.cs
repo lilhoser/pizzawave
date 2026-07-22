@@ -98,6 +98,57 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public void OversizedSourceRelationshipSetIsRejectedWithoutDiscardingIndependentSource()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "Source one has a concrete follow-up."),
+            Observation("call:2", "transcript:2", "Source two continues candidate one."),
+            Observation("call:3", "transcript:3", "Candidate one concrete event."),
+            Observation("call:4", "transcript:4", "Candidate two concrete event."),
+            Observation("call:5", "transcript:5", "Candidate three concrete event."),
+            Observation("call:6", "transcript:6", "Candidate four concrete event."));
+        var sources = new[]
+        {
+            new IncidentBatchRelationshipSource("event:one", ["call:1"]),
+            new IncidentBatchRelationshipSource("event:two", ["call:2"])
+        };
+        var candidates = Enumerable.Range(1, 4)
+            .Select(index => new IncidentBatchCandidate($"candidate:{index}", $"projection:{index}", [$"call:{index + 2}"]))
+            .ToList();
+        var oversized = candidates.Select((candidate, index) => Relationship(
+            "event:one", candidate.CandidateToken, "transcript:1", "concrete follow-up",
+            $"transcript:{index + 3}", $"Candidate {new[] { "one", "two", "three", "four" }[index]} concrete event"));
+        var independent = Relationship(
+            "event:two", "candidate:1", "transcript:2", "continues candidate one",
+            "transcript:3", "Candidate one concrete event");
+        var proposal = Proposal(oversized.Append(independent).ToArray());
+
+        var validation = IncidentBatchRelationshipContract.ValidateProposal(bundle, sources, candidates, proposal);
+        var accepted = IncidentBatchRelationshipContract.AcceptedRelationships(bundle, sources, candidates, proposal);
+
+        Assert.False(validation.IsValid);
+        Assert.Contains(validation.Errors, error => error.Contains($"more than {IncidentBatchRelationshipContract.MaximumRelationshipsPerSource} relationships", StringComparison.Ordinal));
+        Assert.Equal(independent, Assert.Single(accepted));
+    }
+
+    [Fact]
+    public void RelationshipPromptSchemaBoundsResponseSize()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "A concrete source event."),
+            Observation("call:2", "transcript:2", "A concrete candidate event."));
+        var prompt = IncidentBatchRelationshipPrompt.Build(
+            bundle,
+            [new IncidentBatchRelationshipSource("event:source", ["call:1"])],
+            [new IncidentBatchCandidate("candidate:one", "projection:one", ["call:2"])]);
+        var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
+
+        Assert.Contains($"Return at most {IncidentBatchRelationshipContract.MaximumReturnedRelationships} relationships", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains($"\"maxItems\": {IncidentBatchRelationshipContract.MaximumReturnedRelationships}", schema, StringComparison.Ordinal);
+        Assert.Contains($"\"maxLength\": {IncidentBatchRelationshipContract.MaximumTextLength}", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CandidateFactCannotValidateAsConstructedGroupEvidence()
     {
         var bundle = Bundle(

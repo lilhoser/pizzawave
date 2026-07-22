@@ -1538,6 +1538,19 @@ The configuration replacement preserved the service-required
 production incident freshness, AI completion, and embeddings were all `ok`.
 No production incident rows were changed and RPI was not changed.
 
+Run X sequence 80 exposed an unbounded-output failure in the relationship
+stage. The constructor completed normally and retained four grounded Review
+groups, but the relationship response used all 2,400 completion tokens and
+ended with `finish_reason=length` before closing its JSON. Parsing failed after
+182.7 seconds; the coordinator correctly retained the constructor output and
+admitted no relationships. The relationship contract now caps one response at
+six relationships and one constructed group at three relationships, so a group
+can still surface more than two plausible candidates. It also bounds citation
+groups, exact spans, alternatives, unresolved questions, and free-text length.
+The prompt explicitly chooses the strongest specific relationships and omits
+weaker pairs. These are resource and schema bounds, not semantic labels or
+content-based admission rules.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

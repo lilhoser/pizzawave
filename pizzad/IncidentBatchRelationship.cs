@@ -50,7 +50,13 @@ public static class IncidentBatchRelationshipContract
 {
     public const int MaximumSourceCount = IncidentBatchPrompt.MaximumReturnedEvents;
     public const int MaximumCandidateCount = IncidentBatchContract.MaximumCandidateCount;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1";
+    public const int MaximumReturnedRelationships = 6;
+    public const int MaximumRelationshipsPerSource = 3;
+    public const int MaximumEvidenceSpansPerSide = 4;
+    public const int MaximumAlternatives = 2;
+    public const int MaximumUnresolvedQuestions = 2;
+    public const int MaximumTextLength = 320;
+    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-v1";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -112,6 +118,8 @@ public static class IncidentBatchRelationshipContract
         RequireValue(proposal.PromptIdentity, "relationship prompt identity", errors);
         if (proposal.GeneratedAtUtc == default)
             errors.Add("relationship proposal generated timestamp is required");
+        if (proposal.Relationships.Count > MaximumReturnedRelationships)
+            errors.Add($"relationship proposal contains more than {MaximumReturnedRelationships} relationships");
 
         var sourceMap = sources.ToDictionary(item => item.SourceProposalToken, StringComparer.Ordinal);
         var candidateMap = candidates.ToDictionary(item => item.CandidateToken, StringComparer.Ordinal);
@@ -120,8 +128,12 @@ public static class IncidentBatchRelationshipContract
             "source-candidate relationship pair",
             errors);
         foreach (var group in proposal.Relationships.GroupBy(item => item.SourceProposalToken, StringComparer.Ordinal))
+        {
+            if (group.Count() > MaximumRelationshipsPerSource)
+                errors.Add($"source proposal '{group.Key}' has more than {MaximumRelationshipsPerSource} relationships");
             if (group.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership) > 1)
                 errors.Add($"source proposal '{group.Key}' has more than one confirmed membership");
+        }
 
         foreach (var relationship in proposal.Relationships)
         {
@@ -138,6 +150,8 @@ public static class IncidentBatchRelationshipContract
             if (!Enum.IsDefined(relationship.Disposition))
                 errors.Add($"relationship '{relationship.SourceProposalToken}' to '{relationship.CandidateToken}' has an invalid disposition");
             RequireValue(relationship.RelationshipStatement, "relationship statement", errors);
+            if (relationship.RelationshipStatement?.Length > MaximumTextLength)
+                errors.Add($"relationship statement exceeds {MaximumTextLength} characters");
             if (double.IsNaN(relationship.Uncertainty) || double.IsInfinity(relationship.Uncertainty) || relationship.Uncertainty is < 0 or > 1)
                 errors.Add($"relationship '{relationship.SourceProposalToken}' to '{relationship.CandidateToken}' has invalid uncertainty");
             if (relationship.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
@@ -151,6 +165,14 @@ public static class IncidentBatchRelationshipContract
             ValidateCitations(bundle, candidate.ObservationIds, relationship.CandidateEvidence, "candidate evidence", errors);
             ValidateStrings(relationship.AlternativeInterpretations, "alternative interpretation", errors);
             ValidateStrings(relationship.UnresolvedQuestions, "unresolved question", errors);
+            if (relationship.SourceEvidence.Count > MaximumEvidenceSpansPerSide)
+                errors.Add($"relationship source evidence contains more than {MaximumEvidenceSpansPerSide} spans");
+            if (relationship.CandidateEvidence.Count > MaximumEvidenceSpansPerSide)
+                errors.Add($"relationship candidate evidence contains more than {MaximumEvidenceSpansPerSide} spans");
+            if (relationship.AlternativeInterpretations.Count > MaximumAlternatives)
+                errors.Add($"relationship contains more than {MaximumAlternatives} alternative interpretations");
+            if (relationship.UnresolvedQuestions.Count > MaximumUnresolvedQuestions)
+                errors.Add($"relationship contains more than {MaximumUnresolvedQuestions} unresolved questions");
         }
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
@@ -164,6 +186,8 @@ public static class IncidentBatchRelationshipContract
         var headerValidation = ValidateProposal(bundle, sources, candidates, proposal with { Relationships = [] });
         if (!headerValidation.IsValid)
             return [];
+        if (proposal.Relationships.Count > MaximumReturnedRelationships)
+            return [];
 
         var duplicatePairs = proposal.Relationships
             .GroupBy(item => $"{item.SourceProposalToken}\u001f{item.CandidateToken}", StringComparer.Ordinal)
@@ -176,9 +200,15 @@ public static class IncidentBatchRelationshipContract
             .Where(group => group.Count() > 1)
             .Select(group => group.Key)
             .ToHashSet(StringComparer.Ordinal);
+        var oversizedSources = proposal.Relationships
+            .GroupBy(item => item.SourceProposalToken, StringComparer.Ordinal)
+            .Where(group => group.Count() > MaximumRelationshipsPerSource)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
         return proposal.Relationships
             .Where(item => !duplicatePairs.Contains($"{item.SourceProposalToken}\u001f{item.CandidateToken}"))
             .Where(item => item.Disposition != IncidentBatchRelationshipDisposition.ConfirmedMembership || !duplicateConfirmedSources.Contains(item.SourceProposalToken))
+            .Where(item => !oversizedSources.Contains(item.SourceProposalToken))
             .Where(item => ValidateProposal(bundle, sources, candidates, proposal with { Relationships = [item] }).IsValid)
             .ToList();
     }
@@ -228,11 +258,14 @@ public static class IncidentBatchRelationshipContract
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
         foreach (var citation in citations)
         {
+            var exactQuote = citation.ExactQuote ?? string.Empty;
             RequireValue(citation.TranscriptId, $"transcript id in {owner}", errors);
-            RequireValue(citation.ExactQuote, $"exact quote in {owner}", errors);
+            RequireValue(exactQuote, $"exact quote in {owner}", errors);
+            if (exactQuote.Length > MaximumTextLength)
+                errors.Add($"exact quote in {owner} exceeds {MaximumTextLength} characters");
             if (!transcripts.TryGetValue(citation.TranscriptId, out var matches) || matches.Count != 1)
                 errors.Add($"{owner} cites a transcript outside its source boundary");
-            else if (!matches[0].Text.Contains(citation.ExactQuote, StringComparison.Ordinal))
+            else if (!matches[0].Text.Contains(exactQuote, StringComparison.Ordinal))
                 errors.Add($"{owner} quote does not occur exactly in transcript '{citation.TranscriptId}'");
         }
     }
@@ -241,7 +274,12 @@ public static class IncidentBatchRelationshipContract
     {
         RequireUnique(values, description, errors);
         foreach (var value in values)
-            RequireValue(value, description, errors);
+        {
+            var text = value ?? string.Empty;
+            RequireValue(text, description, errors);
+            if (text.Length > MaximumTextLength)
+                errors.Add($"{description} exceeds {MaximumTextLength} characters");
+        }
     }
 
     private static void RequireUnique(IEnumerable<string> values, string description, List<string> errors)
@@ -263,7 +301,7 @@ public sealed record IncidentBatchRelationshipPromptPayload(string SystemPrompt,
 
 public static class IncidentBatchRelationshipPrompt
 {
-    public const string PromptIdentity = "incident-batch-relationship-v1-source-isolated";
+    public const string PromptIdentity = "incident-batch-relationship-v2-source-isolated-bounded";
 
     public static IncidentBatchRelationshipPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -304,6 +342,7 @@ public static class IncidentBatchRelationshipPrompt
         user.AppendLine("Return confirmed_membership only when exact evidence from both sides directly establishes one unfolding real-world event. Return at most one confirmed membership for each constructed group.");
         user.AppendLine("A confirmed_membership must use uncertainty 0 and empty alternative_interpretations and unresolved_questions. If either side contains a material discrepancy, counterinterpretation, or unresolved question, return provisional_association or omit the pair; never confirm it.");
         user.AppendLine("Return provisional_association when exact evidence from both sides establishes a specific operational relationship but meaningful uncertainty remains. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");
+        user.AppendLine($"Return at most {IncidentBatchRelationshipContract.MaximumReturnedRelationships} relationships total and at most {IncidentBatchRelationshipContract.MaximumRelationshipsPerSource} for one constructed group. Choose the strongest specific relationships and omit weaker pairs rather than producing an oversized response.");
         user.AppendLine("Omit unsupported pairs. Timing, retrieval rank, radio metadata, generic similarity, and shared event type do not prove a relationship.");
         user.AppendLine("Each returned relationship must cite short contiguous verbatim spans from both source boundaries. Never borrow a candidate fact into constructed-group evidence or the reverse.");
         user.AppendLine("Copy source_proposal_token, candidate_token, and transcript_id values exactly.");
@@ -328,6 +367,7 @@ public static class IncidentBatchRelationshipPrompt
         {
             type = "array",
             minItems = 1,
+            maxItems = 2,
             items = new
             {
                 type = "object",
@@ -335,18 +375,18 @@ public static class IncidentBatchRelationshipPrompt
                 properties = new
                 {
                     transcript_id = new { type = "string", @enum = transcriptIds },
-                    exact_quotes = new { type = "array", minItems = 1, maxItems = 4, items = new { type = "string" } }
+                    exact_quotes = new { type = "array", minItems = 1, maxItems = 2, items = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength } }
                 },
                 required = new[] { "transcript_id", "exact_quotes" }
             }
         };
-        object Strings() => new { type = "array", items = new { type = "string" } };
+        object Strings(int maximum) => new { type = "array", maxItems = maximum, items = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength } };
         return new
         {
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_v1",
+                name = "pizzawave_incident_batch_relationship_v2_bounded",
                 strict = true,
                 schema = new
                 {
@@ -357,6 +397,7 @@ public static class IncidentBatchRelationshipPrompt
                         relationships = new
                         {
                             type = "array",
+                            maxItems = IncidentBatchRelationshipContract.MaximumReturnedRelationships,
                             items = new
                             {
                                 type = "object",
@@ -366,12 +407,12 @@ public static class IncidentBatchRelationshipPrompt
                                     source_proposal_token = new { type = "string", @enum = sources.Select(item => item.SourceProposalToken).ToArray() },
                                     candidate_token = new { type = "string", @enum = candidates.Select(item => item.CandidateToken).ToArray() },
                                     disposition = new { type = "string", @enum = new[] { "confirmed_membership", "provisional_association" } },
-                                    relationship_statement = new { type = "string" },
+                                    relationship_statement = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength },
                                     uncertainty = new { type = "number", minimum = 0, maximum = 1 },
                                     source_evidence = CitationSchema(sourceTranscriptIds),
                                     candidate_evidence = CitationSchema(candidateTranscriptIds),
-                                    alternative_interpretations = Strings(),
-                                    unresolved_questions = Strings()
+                                    alternative_interpretations = Strings(IncidentBatchRelationshipContract.MaximumAlternatives),
+                                    unresolved_questions = Strings(IncidentBatchRelationshipContract.MaximumUnresolvedQuestions)
                                 },
                                 required = new[] { "source_proposal_token", "candidate_token", "disposition", "relationship_statement", "uncertainty", "source_evidence", "candidate_evidence", "alternative_interpretations", "unresolved_questions" }
                             }
