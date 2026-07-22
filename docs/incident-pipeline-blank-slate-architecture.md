@@ -674,6 +674,19 @@ and 2,665 completion tokens for the indiscriminate v1 output. This single batch
 is encouraging evidence for the contract correction, not yet a precision or
 recall benchmark.
 
+For broader relationship coverage, OT then started clean run
+`ot-batch-constructor-shadow-20260722-b` with 24 observations every 300 seconds.
+Run A's v1 and v2 entries remain append-only and selectable in the report. The
+new cadence is still one bounded generation and is guarded by production
+incident freshness; it should be disabled or reduced if that freshness or
+model latency degrades. Its startup fence is call `1424703`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v2b-20260722T031151Z.bak`;
+its SHA-256 is
+`9a4cde19b7190b2ea11c7406618de789023d27dee875c3a4d2ccd234a109d098`.
+The report now exposes each batch's prompt and configuration identities so
+mixed-version evidence cannot be mistaken for a single experiment.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
