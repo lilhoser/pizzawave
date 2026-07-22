@@ -778,6 +778,36 @@ pairs remain invalid. This lets a proposal cite location, condition, and
 response from separate parts of one transcript without inserting omitted text
 or weakening source verification.
 
+Prompt v4 and the bounded visible-event candidate policy began in clean OT run
+`ot-batch-constructor-shadow-20260722-e` with the same 24-observation,
+300-second cadence and startup fence at call `1425193`. The prior configuration
+is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v4e-20260722T035837Z.bak`;
+its SHA-256 is
+`fc2c31f377ffcaa98c58f0679f1ac5ccadd78a07cd15dbed55c8e7aaac0659c7`.
+The deployment changed only the shadow path on OT. It did not backfill calls,
+write production incident state, or deploy to RPI.
+
+Run E's first batch considered 24 observations and returned three proposed new
+events in 91.610 seconds. Two were independently accepted: a missing-juvenile
+search and a self-harm/medical response. Each used several separately
+contiguous, exact spans from one source transcript, demonstrating that the v4
+evidence shape works with the deployed model. A lift-assist proposal was
+rejected because one of its three proposed spans changed source punctuation;
+the other two events survived under the per-event acceptance policy. No
+proposer error occurred and production health remained `ok`.
+
+The same source batch also included a later call stating that "this juvenile"
+had turned a phone back on. The model left that call unresolved rather than
+including it in the newly constructed missing-juvenile event. This is evidence
+of a constructor recall gap, not a reason to weaken exact citation validation:
+a plausible same-batch follow-up omitted by the model currently becomes an
+unresolved singleton and is not automatically reconsidered against the event
+created from its sibling observation. The architecture needs a bounded,
+model-owned reconsideration path for such unresolved observations; it must not
+be implemented with phrase rules or by treating retrieval similarity as event
+membership.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
