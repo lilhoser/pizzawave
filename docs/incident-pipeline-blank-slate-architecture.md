@@ -1415,6 +1415,15 @@ otherwise deterministic validation fails closed and leaves both memberships
 unchanged. This rule reads typed epistemic state, not content strings, event
 labels, categories, radio metadata, or model confidence thresholds.
 
+The conflict-free confirmation invariant began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-u`, fenced after call `1427739`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13u-20260722T095200Z.bak`;
+its SHA-256 is
+`3588c35f3a89399f1c525e095be0bfc08bc2331b2f8ed246217c42bd87741aab`.
+Post-restart service, live radio, production incident freshness, AI completion,
+and embedding health were all `ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
