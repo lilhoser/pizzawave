@@ -1063,6 +1063,35 @@ Immediately after deployment, production incident analysis was current by 14
 minutes and overall, live-radio, AI-completion, and embedding health were all
 `ok`. RPI was not changed.
 
+Run L's first two batches considered 41 observations and accepted all five
+proposals without a citation error. Four single-observation proposals were
+routed to Review. One proposal joined an initial domestic-response call to a
+later verbal-argument resolution and became the run's first corroborated,
+operator-visible event. The two batches took 84.016 and 47.535 seconds, so the
+oldest-unseen cursor remained caught up on the fixed cadence.
+
+Run L also exposed a remaining narrative ownership defect. Projected summaries
+were built only from validated exact quotes, but projected titles still copied
+the model's free-form title. One review event added `Hamilton
+County/Chattanooga` to its title even though neither location appeared in that
+event's citations. The projection now builds its title from the same validated
+evidence summary, capped at 120 characters for display. The model-authored
+title remains in the append-only ledger for audit but cannot reach operator
+projection. Confirmed membership retains the existing evidence-owned title
+rather than replacing it with a new model title. The versioned configuration
+token is `projection=evidence-narrative-v2`.
+
+The complete evidence-narrative projection began in clean OT run
+`ot-batch-constructor-shadow-20260722-m`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1426375`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v8m-20260722T060742Z.bak`;
+its SHA-256 is
+`7b566ee5d66f67305ab2e052f0e29e9521e8245e4fb6f812678983805da7c51e`.
+Immediately after deployment, production incident analysis was current by 18
+minutes and overall, live-radio, AI-completion, and embedding health were all
+`ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
