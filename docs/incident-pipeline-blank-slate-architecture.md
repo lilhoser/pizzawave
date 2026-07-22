@@ -1006,6 +1006,37 @@ its SHA-256 is
 Immediately after deployment, production incident analysis was current by 17
 minutes and overall, AI-completion, and embedding health were all `ok`.
 
+Run J's first two batches verified the intended visibility split but exposed a
+mechanical citation-boundary defect. In the first batch, three valid
+single-observation proposals were retained as Review events and none became
+operator-visible. In the second batch, the model proposed three singleton
+events plus a two-observation Ford Ranger tow event. The latter was the first
+candidate-free proposal in this run with separate corroborating calls and
+therefore qualified for full shadow visibility. All four proposals failed
+exact-source validation because the model changed ASCII apostrophes in copied
+quotes (`I'll`, `It's`, `ain't`, `She's`, and `I'm`) into typographic
+apostrophes. The cited wording was otherwise present literally in the named
+source transcript. This was a representation failure, not evidence that the
+events were semantically invalid.
+
+The citation ingestion boundary now resolves only one-for-one typographic
+apostrophe, quotation-mark, and dash variants against the named transcript,
+then stores the literal source substring as the citation. It does not normalize
+case or whitespace, repair changed words or numbers, perform fuzzy matching,
+or weaken the exact-source validator. The versioned configuration token is
+`citations=source-punctuation-v1`. The full test suite passes with 646 tests.
+
+The source-authoritative citation repair began in clean OT run
+`ot-batch-constructor-shadow-20260722-k`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1426155`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v8k-20260722T053945Z.bak`;
+its SHA-256 is
+`fa207fcb255e0db93364764758f6c74e4c69bfa7653fc769b548d0a4e0b90fef`.
+Immediately after deployment, production incident analysis was current by nine
+minutes and overall, live-radio, AI-completion, and embedding health were all
+`ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
