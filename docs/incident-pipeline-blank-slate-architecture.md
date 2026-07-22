@@ -1674,6 +1674,53 @@ live radio activity, production incident freshness, AI completion, and
 embeddings were all `ok`. No production incident rows were changed and RPI was
 not changed.
 
+### Park Hill missed-candidate replay
+
+OT alerts exposed a useful failure case after Run AA stopped. Calls `1426373`,
+`1426513`, and `1426529` independently described the same Park Hill lift-assist
+event, including complementary references to 1159 Harrison Pike, apartment
+2208, Engine 1, and EMS 509. Production incident `6945` contained only the last
+call plus two weak calls. The Alerts UI correctly showed separate alert-match
+records; the upstream incident state had never supplied the complete event to
+group them under.
+
+A read-only, calls-only snapshot froze 494 OT observations in the surrounding
+two-hour window. The failure occurred before semantic construction. Call
+`1426373`, which contained the strongest address and apartment evidence, was
+excluded from both embedding and batch input because its transcription was
+labeled `poor_quality` / `repetitive`. Call `1426513` arrived through North
+Bradley while the other two arrived through Cleveland, and the existing vector
+search required an exact system match. Transcription quality and radio-system
+identity are operational metadata, not evidence that observations describe
+different events.
+
+The snapshot contained 451 `complete` / `ok` usable transcripts and 31 usable
+transcripts labeled `poor_quality` / `repetitive`; admitting the latter expands
+the retrieval corpus by about 6.9 percent rather than admitting empty or tiny
+fragments. A diagnostic embedding of `1426373` ranked it tenth for `1426513`
+with score 0.6361 and third for `1426529` with score 0.7424 when the system and
+quality filters were removed. Both ranks fit the existing per-call limit of 12.
+The scores remain routing evidence only.
+
+The durable correction defines usable retrieval evidence as a nonblank
+transcript of at least 12 characters, indexes such evidence regardless of
+transcription status or quality label, and gives only the new batch constructor
+a cross-system, quality-label-neutral search. Existing embedding consumers keep
+their legacy filters. Imported-call and configured downstream-profile scope
+remain operational admission boundaries. No address, phrase, category,
+talkgroup, system, or quality label gains semantic membership authority.
+
+The focused scenario replay then ran the actual constructor, relationship
+proposer, independent verifier, deterministic contracts, and append-only shadow
+ledger. The two later calls formed one new lift-assist event, and the verifier
+confirmed only `1426373` as prior membership. It rejected a vague EMS 509
+fragment and did not accept two unrelated candidates. Both new calls were
+covered; all validation-error lists were empty. Constructor, relationship, and
+verification calls took 24.528, 30.571, and 39.515 seconds respectively. This
+is a successful regression of the known failure, not general accuracy proof.
+The next safe step is a fresh OT-only, non-mutating shadow run on newly indexed
+traffic; no production incident rows or RPI service were changed by this replay.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

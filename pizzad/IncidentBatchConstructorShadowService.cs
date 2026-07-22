@@ -58,7 +58,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         var now = DateTimeOffset.UtcNow;
         var start = now.AddMinutes(-_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes).ToUnixTimeSeconds();
         var calls = (await _database.ListCallsAsync(start, now.ToUnixTimeSeconds(), null, ct))
-            .Where(IncidentAssociationLiveSelection.IsEligibleSourceObservation)
+            .Where(IncidentBatchLiveSelection.IsEligibleSourceObservation)
             .OrderBy(call => call.Id)
             .ToList();
         if (_lastSampledCallId is null)
@@ -92,9 +92,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         {
             foreach (var call in newCalls)
             {
-                matches.AddRange(await _embeddings.SearchSimilarAsync(
+                matches.AddRange(await _embeddings.SearchSimilarAcrossSystemsAsync(
                     call.Transcription,
-                    call.SystemShortName,
                     start,
                     now.ToUnixTimeSeconds(),
                     12,
@@ -187,7 +186,10 @@ public sealed record IncidentBatchLiveSelection(
     IReadOnlyList<string> NewObservationIds,
     IReadOnlyList<IncidentBatchCandidate> Candidates)
 {
-    public const string ConfigurationToken = "candidate-context=balanced-state-v2";
+    public const string ConfigurationToken = "candidate-context=balanced-state-v3;retrieval=cross-system-transcript-evidence-v1";
+
+    public static bool IsEligibleSourceObservation(EngineCall call) =>
+        TranscriptRetrievalEvidence.IsUsable(call);
 
     public static IncidentBatchLiveSelection Build(
         IReadOnlyList<EngineCall> newCalls,

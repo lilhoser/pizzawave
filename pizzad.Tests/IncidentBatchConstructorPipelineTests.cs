@@ -310,6 +310,35 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void LiveSelectionAdmitsNonemptyRepetitiveEvidenceAcrossSystemBoundaries()
+    {
+        var priorCall = Call(10, "1159 Harrison Pike West, apartment 2208.", 1000) with
+        {
+            SystemShortName = "whiteoakmt-cleveland",
+            TranscriptionStatus = "poor_quality",
+            QualityReason = "repetitive"
+        };
+        var newCall = Call(11, "Engine 1 responding to the lift assist at 1159 Harrison Pike.", 1010) with
+        {
+            SystemShortName = "whiteoakmt-nbradley"
+        };
+        var prior = PriorProjection(new IncidentBatchProjectionEvent(
+            "projection:event:park-hill", ["call:10"], "Park Hill", "Park Hill", false, true, ["ledger:prior"]));
+
+        var selection = IncidentBatchLiveSelection.Build(
+            [newCall],
+            [priorCall, newCall],
+            [new VectorSearchMatchDto(10, 0.74, "cross-system")],
+            prior,
+            4,
+            Now);
+
+        Assert.True(IncidentBatchLiveSelection.IsEligibleSourceObservation(priorCall));
+        Assert.Equal("projection:event:park-hill", Assert.Single(selection.Candidates).ProjectionEventId);
+        Assert.Contains(selection.Bundle.Observations, item => item.ObservationId == "call:10");
+    }
+
+    [Fact]
     public void LiveSelectionKeepsRecentVisibleEventsInCandidateSetWithoutEmbeddingMatch()
     {
         var priorCall = Call(10, "Firefighter emergency traffic with one firefighter on board.", 1000);

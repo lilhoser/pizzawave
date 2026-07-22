@@ -5,6 +5,12 @@ using System.Text;
 using System.Text.Json;
 using pizzad;
 
+if (args.Contains("--batch-constructor-scenario-replay", StringComparer.Ordinal))
+{
+    await BatchConstructorScenarioReplay.RunAsync(args);
+    return;
+}
+
 if (args.Contains("--pairwise-adjudication-replay", StringComparer.Ordinal))
 {
     await PairwiseAdjudicationReplay.RunAsync(args);

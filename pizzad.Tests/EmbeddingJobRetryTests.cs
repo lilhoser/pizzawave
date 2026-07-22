@@ -5,6 +5,21 @@ namespace pizzad.Tests;
 public sealed class EmbeddingJobRetryTests
 {
     [Fact]
+    public void RetrievalEvidenceUsesTranscriptContentRatherThanQualityLabels()
+    {
+        var call = Call("retrieval-evidence") with
+        {
+            Transcription = "1159 Harrison Pike West, apartment 2208.",
+            TranscriptionStatus = "poor_quality",
+            QualityReason = "repetitive"
+        };
+
+        Assert.True(TranscriptRetrievalEvidence.IsUsable(call));
+        Assert.False(TranscriptRetrievalEvidence.IsUsable(call with { Transcription = "10-4" }));
+        Assert.False(TranscriptRetrievalEvidence.IsUsable(call with { Transcription = "   " }));
+    }
+
+    [Fact]
     public async Task ListPendingEmbeddingJobs_DoesNotImmediatelyRetryFailedJobs()
     {
         using var temp = new TempStore();

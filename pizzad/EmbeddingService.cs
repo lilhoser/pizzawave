@@ -7,6 +7,15 @@ using System.Text.Json;
 
 namespace pizzad;
 
+public static class TranscriptRetrievalEvidence
+{
+    public const int MinimumCharacters = 12;
+
+    public static bool IsUsable(EngineCall call) =>
+        !string.IsNullOrWhiteSpace(call.Transcription) &&
+        call.Transcription.Trim().Length >= MinimumCharacters;
+}
+
 public sealed class EmbeddingService : BackgroundService
 {
     private readonly EngineConfig _config;
@@ -73,7 +82,20 @@ public sealed class EmbeddingService : BackgroundService
         await _events.PublishAsync("job_updated", new { type = "embeddings", queueDepth = QueueDepth }, ct);
     }
 
-    public async Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAsync(string queryText, string systemShortName, long start, long end, int limit, CancellationToken ct)
+    public Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAsync(string queryText, string systemShortName, long start, long end, int limit, CancellationToken ct)
+        => SearchSimilarAsync(queryText, systemShortName, requireOkQuality: true, start, end, limit, ct);
+
+    public Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAcrossSystemsAsync(string queryText, long start, long end, int limit, CancellationToken ct)
+        => SearchSimilarAsync(queryText, systemShortName: null, requireOkQuality: false, start, end, limit, ct);
+
+    private async Task<IReadOnlyList<VectorSearchMatchDto>> SearchSimilarAsync(
+        string queryText,
+        string? systemShortName,
+        bool requireOkQuality,
+        long start,
+        long end,
+        int limit,
+        CancellationToken ct)
     {
         if (!IsEnabled() || string.IsNullOrWhiteSpace(queryText))
             return [];
@@ -83,20 +105,18 @@ public sealed class EmbeddingService : BackgroundService
             var vector = await CreateEmbeddingAsync(queryText, ct);
             var sw = Stopwatch.StartNew();
             using var client = CreateQdrantClient();
+            var must = new List<object>();
+            if (!string.IsNullOrWhiteSpace(systemShortName))
+                must.Add(new { key = "systemShortName", match = new { value = systemShortName } });
+            if (requireOkQuality)
+                must.Add(new { key = "qualityReason", match = new { value = "ok" } });
+            must.Add(new { key = "startTime", range = new { gte = start, lte = end } });
             var body = new
             {
                 vector,
                 limit = Math.Clamp(limit, 1, Math.Max(1, _config.Embeddings.SearchLimit)),
                 with_payload = true,
-                filter = new
-                {
-                    must = new object[]
-                    {
-                        new { key = "systemShortName", match = new { value = systemShortName } },
-                        new { key = "qualityReason", match = new { value = "ok" } },
-                        new { key = "startTime", range = new { gte = start, lte = end } }
-                    }
-                }
+                filter = new { must }
             };
             using var content = JsonContent(body);
             using var response = await client.PostAsync($"{QdrantBaseUrl()}/collections/{Uri.EscapeDataString(Collection())}/points/search", content, ct);
@@ -401,12 +421,9 @@ public sealed class EmbeddingService : BackgroundService
 
     private bool ShouldEmbed(EngineCall call) =>
         IsEnabled() &&
-        string.Equals(call.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(call.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
         !call.IsImported &&
         DownstreamProfilePolicy.Allows(_config, _catalog, call) &&
-        !string.IsNullOrWhiteSpace(call.Transcription) &&
-        call.Transcription.Trim().Length >= 12;
+        TranscriptRetrievalEvidence.IsUsable(call);
 
     private bool IsEnabled() =>
         _config.Setup.Completed &&

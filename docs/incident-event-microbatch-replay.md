@@ -236,6 +236,35 @@ models concurrently. The experiment must separately establish whether a small
 retriever, embedding retrieval, or a single-model alternative can preserve
 candidate recall within the production resource envelope.
 
+## Focused constructor scenario replay
+
+The scenario runner exercises the production-shaped constructor, relationship
+proposer, independent confirmation verifier, deterministic contracts, and
+append-only shadow ledger against named calls in a frozen snapshot. It is for
+reproducing a concrete missed or false relationship without changing live
+incident state:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --batch-constructor-scenario-replay `
+  --database C:\path\to\incident-replay.db `
+  --scenario C:\path\to\scenario.json `
+  --output artifacts/incident-event-microbatch-replay/example-scenario `
+  --endpoint http://127.0.0.1:1234/v1 `
+  --model qwen/qwen3.6-35b-a3b@q8_0
+```
+
+The scenario names the half-open snapshot window, new call IDs, opaque
+candidate tokens, candidate projection IDs, candidate call IDs, and three
+falsifiable expectations: candidates that must be confirmed, candidates that
+must not be accepted, and new calls that must be covered by an accepted event.
+It contains no address, phrase, category, talkgroup, or system rule. The runner
+refuses to overwrite a prior result and records the snapshot SHA-256, exact
+configuration identity, raw ledger entry, accepted events and relationships,
+and expectation results in `result.json`. Scenario files, snapshot databases,
+telemetry databases, and results belong under the ignored `artifacts/`
+directory and must not be committed.
+
 ## Decision gates
 
 This experiment is not a route around the gates in
