@@ -1760,6 +1760,65 @@ constructor quote and two rejected verification records with empty confirmation
 statements. These did not admit a relationship, but latency and rejected-output
 contract quality remain explicit checkpoint gates rather than accepted noise.
 
+### Run AB checkpoint
+
+Run AB stopped at its planned boundary after 25 candidate-backed batches plus
+one seed batch. It processed 624 observations from 2026-07-22 16:25 UTC through
+18:47 UTC. The final projection admitted five confirmed memberships and two
+provisional associations. Direct transcript inspection supports all five
+confirmations: one missing-person/vehicle continuation, one breathing-emergency
+continuation, and three successive continuations of the same wanted silver
+Cadillac. The two provisional records concern that Cadillac but lack the exact
+identifier evidence required for membership; retaining them only as uncertain
+Review associations is appropriate. Nineteen other proposed relationships were
+rejected, including shared names, generic medical language, unrelated gas-line
+and gas-leak calls, unrelated uses of `North`, and distinct vehicle or welfare
+events. No evident high-impact false relationship entered confirmed membership.
+
+The metadata-neutral retrieval correction worked end to end. All 81 usable
+post-boundary transcripts carrying a non-`ok` quality or status label received
+an embedding job and were embedded; none failed and none lacked a job. This is
+the intended use of quality-neutral transcript evidence as candidate routing,
+not proof of event membership.
+
+The current runtime nevertheless fails the Paxan production-capacity gate. It
+processed 624 observations in 142.2 minutes, or 4.39 observations per minute,
+while its source cursor fell 5,008 seconds (83.5 minutes) behind current radio
+traffic. Constructor latency averaged 167.364 seconds and reached 427.714
+seconds under shared production-model load. The run made 26 constructor, 23
+relationship, and 11 confirmation calls, consuming 191,952 prompt tokens and
+51,850 completion tokens. All 60 requests succeeded, so the shortfall is the
+three-stage inference budget rather than an endpoint outage.
+
+Six of 26 batches retained deterministic validation errors: inexact quotes,
+duplicate event ownership or relationship pairs, multiple confirmed targets
+for one source event, missing rejection statements, and out-of-range
+uncertainty. Fail-closed validation prevented these defects from authorizing
+membership, but the 23.1 percent invalid-batch rate causes material recall loss.
+The multiple-target failures also expose fragmented prior state: later exact
+missing-person evidence matched more than one earlier projection fragment, but
+the current contract cannot merge those fragments safely.
+
+The architectural conclusion is split. Cross-system, quality-neutral embedding
+retrieval, opaque candidate boundaries, exact source citations, separate
+confirmation, confirmed versus provisional projection state, and fail-closed
+ledger validation survive. The current sequential constructor plus relationship
+proposer plus verifier does not. Do not connect Run AB to production incident
+persistence. The next offline design should remove one broad model stage,
+preserve independent verification only for sparse proposed relationships, and
+add an explicit multi-fragment merge proposal that can remain provisional for
+operator review. It must replay this frozen evidence and demonstrate sustained
+throughput above live arrival rate before another OT shadow run.
+
+Run AB was disabled at 2026-07-22 18:50 UTC. The pre-stop configuration is
+preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v14ab-stop-20260722T185043Z.bak`;
+the disabled active configuration SHA-256 is
+`60f2079c7477170f23d273367433e0cda281951d0554ee31cf5027e3bc8042fe`.
+Post-restart production incident analysis, AI completion, embeddings, ingestion,
+and overall health were all `ok`. `trunk-recorder` was not restarted and retained
+PID `3068317`. No production incident rows or RPI services were changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
