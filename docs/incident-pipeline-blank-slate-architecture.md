@@ -882,6 +882,16 @@ summary, and basis may use only that event's own exact quotes, never omitted or
 sibling observations. The evidence-only projection remains the operator-facing
 summary authority even if the model violates the latter instruction.
 
+Prompt v6 and the evidence-only projection began in clean OT run
+`ot-batch-constructor-shadow-20260722-g`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1425497`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v6g-20260722T043224Z.bak`;
+its SHA-256 is
+`8d72647888e4a62c1bd7fbd4a079b400a1334c0bd45c750307b77e58bca2b303`.
+Immediately after deployment, production incident analysis was current by
+eight minutes and overall, AI-completion, and embedding health were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
