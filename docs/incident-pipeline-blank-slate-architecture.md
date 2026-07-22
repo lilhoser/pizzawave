@@ -594,6 +594,41 @@ called by the new constructor. No production cutover adapter exists, and both
 the constructor runtime and any production writer remain disabled unless a
 later deployment explicitly configures the shadow run.
 
+### Production-Shaped Micro-Batch Constructor (2026-07-22)
+
+Live recovery exposed that the production admission authority still depended
+on `IncidentCandidateValidator`, including semantic regexes, fixed event
+classes, and phrase-driven acceptance. It rejected current candidates such as
+an MVC with critical injuries and a four-call hostage/knife proposal. That code
+is not being tuned as the successor architecture.
+
+The development branch now also contains a bounded micro-batch constructor
+that preserves the source-cited association design while matching Paxan's
+resource boundary:
+
+- one model generation considers several fresh observations plus a bounded set
+  of retrieved candidate events;
+- the model may propose a new event, confirmed membership in one candidate, or
+  a provisional association;
+- every proposed event cites a transcript from every included new observation;
+- confirmed and provisional relationships cite transcripts on both sides;
+- omitted observations remain unresolved application-owned singletons;
+- invalid output and proposer failure fail closed to those singletons;
+- deterministic code validates only schema, identity, exact citations,
+  ownership, and projection integrity;
+- provisional associations never mutate candidate membership;
+- only source-cited new events and confirmed membership become
+  operator-visible in the shadow projection;
+- the append-only shadow ledger and projections are hash verified and protected
+  from update and delete by database triggers;
+- the runtime pauses itself whenever production incident processing freshness
+  is unhealthy and cannot write `incidents` or `incident_calls`.
+
+The shadow runtime is disabled by default. Its report endpoint is
+`/api/v1/incidents/batch-constructor-shadow`. Structural replay tests cover the
+current tree, MVC, hostage, and unresolved-worker relationship shapes without
+embedding their vocabulary as application policy.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
