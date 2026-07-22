@@ -1492,6 +1492,19 @@ quotes never become projected facts. This is a typed provenance rule and does
 not inspect incident labels, transcript phrases, talkgroups, categories, or
 confidence thresholds.
 
+Per-citation admission commit `81e02d0` began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-w`, fenced after call `1428083`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13w-20260722T105355Z.bak`;
+its SHA-256 is
+`2c8c1e231fe864e6ff9d550e2579bc1fddc3343515d198e5c575c995257bef20`.
+The first configuration rewrite installed the file as `root:root` rather than
+the service-required `root:pizzawave`, causing an approximately one-minute OT
+restart loop. Restoring group ownership and mode `0640` recovered the service;
+post-recovery service, live radio, production incident freshness, AI
+completion, and embeddings were all `ok`. No production incident rows were
+changed and RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
