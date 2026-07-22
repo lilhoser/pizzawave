@@ -1424,6 +1424,15 @@ its SHA-256 is
 Post-restart service, live radio, production incident freshness, AI completion,
 and embedding health were all `ok`. RPI was not changed.
 
+Relationship admission now mirrors the constructor's per-item safety boundary.
+A malformed or internally conflicted relationship is retained with its
+deterministic validation errors but cannot discard an independent valid
+relationship from another constructed group in the same response. Duplicate
+source-candidate pairs and competing confirmations are excluded together;
+remaining relationships are validated and projected independently. This keeps
+failure closed at the smallest source-owned unit without converting or repairing
+the model's semantic disposition.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

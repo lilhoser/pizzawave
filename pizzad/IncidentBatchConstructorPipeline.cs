@@ -534,16 +534,25 @@ public static class IncidentBatchProjector
             }
         }
 
-        if (entry.RelationshipProposal is not null && (entry.RelationshipProposalValidationErrors ?? []).Count == 0)
+        if (entry.RelationshipProposal is not null)
         {
-            var acceptedSources = IncidentBatchContract.AcceptedEvents(entry)
+            var acceptedSourceEvents = IncidentBatchContract.AcceptedEvents(entry);
+            var acceptedSources = acceptedSourceEvents
+                .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+                .ToList();
+            var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(
+                entry.Bundle,
+                acceptedSources,
+                entry.Candidates,
+                entry.RelationshipProposal);
+            var sourceEventsByToken = acceptedSourceEvents
                 .ToDictionary(item => item.ProposalToken, StringComparer.Ordinal);
-            var sourceEventIds = acceptedSources.ToDictionary(
+            var sourceEventIds = sourceEventsByToken.ToDictionary(
                 item => item.Key,
                 item => entry.SingletonEvents.First(singleton => singleton.ObservationId == item.Value.NewObservationIds[0]).ProjectionEventId,
                 StringComparer.Ordinal);
 
-            foreach (var relationship in entry.RelationshipProposal.Relationships
+            foreach (var relationship in acceptedRelationships
                          .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership))
             {
                 var sourceEventId = sourceEventIds[relationship.SourceProposalToken];
@@ -567,7 +576,7 @@ public static class IncidentBatchProjector
                 sourceEventIds[relationship.SourceProposalToken] = candidate.ProjectionEventId;
             }
 
-            foreach (var relationship in entry.RelationshipProposal.Relationships
+            foreach (var relationship in acceptedRelationships
                          .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation))
             {
                 var candidate = entry.Candidates.Single(item => item.CandidateToken == relationship.CandidateToken);

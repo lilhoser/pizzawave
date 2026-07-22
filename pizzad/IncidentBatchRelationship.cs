@@ -50,7 +50,7 @@ public static class IncidentBatchRelationshipContract
 {
     public const int MaximumSourceCount = IncidentBatchPrompt.MaximumReturnedEvents;
     public const int MaximumCandidateCount = IncidentBatchContract.MaximumCandidateCount;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1";
+    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -153,6 +153,34 @@ public static class IncidentBatchRelationshipContract
             ValidateStrings(relationship.UnresolvedQuestions, "unresolved question", errors);
         }
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
+    }
+
+    public static IReadOnlyList<IncidentBatchRelationship> AcceptedRelationships(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        IncidentBatchRelationshipProposal proposal)
+    {
+        var headerValidation = ValidateProposal(bundle, sources, candidates, proposal with { Relationships = [] });
+        if (!headerValidation.IsValid)
+            return [];
+
+        var duplicatePairs = proposal.Relationships
+            .GroupBy(item => $"{item.SourceProposalToken}\u001f{item.CandidateToken}", StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        var duplicateConfirmedSources = proposal.Relationships
+            .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
+            .GroupBy(item => item.SourceProposalToken, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        return proposal.Relationships
+            .Where(item => !duplicatePairs.Contains($"{item.SourceProposalToken}\u001f{item.CandidateToken}"))
+            .Where(item => item.Disposition != IncidentBatchRelationshipDisposition.ConfirmedMembership || !duplicateConfirmedSources.Contains(item.SourceProposalToken))
+            .Where(item => ValidateProposal(bundle, sources, candidates, proposal with { Relationships = [item] }).IsValid)
+            .ToList();
     }
 
     private static void ValidateCitations(

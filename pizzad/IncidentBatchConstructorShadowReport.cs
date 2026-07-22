@@ -138,9 +138,16 @@ public sealed partial class EngineDatabase
             .Order()
             .ToList();
         var proposedObservationCount = events.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count();
-        var relationships = (entry.RelationshipProposalValidationErrors ?? []).Count == 0
-            ? entry.RelationshipProposal?.Relationships ?? []
-            : [];
+        var relationshipSources = events
+            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+            .ToList();
+        var relationships = entry.RelationshipProposal is null
+            ? []
+            : IncidentBatchRelationshipContract.AcceptedRelationships(
+                entry.Bundle,
+                relationshipSources,
+                entry.Candidates,
+                entry.RelationshipProposal);
         var validationErrors = entry.ProposalValidationErrors
             .Concat(entry.RelationshipProposalValidationErrors ?? [])
             .ToList();

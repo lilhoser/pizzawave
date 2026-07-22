@@ -166,6 +166,42 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public void InvalidConfirmationDoesNotDiscardIndependentProvisionalRelationship()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "A two-year-old female is receiving CPAP."),
+            Observation("call:2", "transcript:2", "A worker asked whether her supervisor was notified."),
+            Observation("call:3", "transcript:3", "A 19-year-old female has difficulty breathing at Ringgold Road."),
+            Observation("call:4", "transcript:4", "A cleaning worker is locked inside the room."));
+        var sources = new[]
+        {
+            new IncidentBatchRelationshipSource("event:pediatric", ["call:1"]),
+            new IncidentBatchRelationshipSource("event:worker-question", ["call:2"])
+        };
+        var candidates = new[]
+        {
+            new IncidentBatchCandidate("candidate:adult", "projection:adult", ["call:3"]),
+            new IncidentBatchCandidate("candidate:worker", "projection:worker", ["call:4"])
+        };
+        var invalidConfirmation = Relationship(
+            "event:pediatric", "candidate:adult", "transcript:1", "two-year-old female", "transcript:3", "19-year-old female") with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+            Uncertainty = 0,
+            UnresolvedQuestions = ["The ages conflict."]
+        };
+        var validProvisional = Relationship(
+            "event:worker-question", "candidate:worker", "transcript:2", "worker", "transcript:4", "cleaning worker");
+        var proposal = Proposal(invalidConfirmation, validProvisional);
+
+        var validation = IncidentBatchRelationshipContract.ValidateProposal(bundle, sources, candidates, proposal);
+        var accepted = IncidentBatchRelationshipContract.AcceptedRelationships(bundle, sources, candidates, proposal);
+
+        Assert.False(validation.IsValid);
+        Assert.Equal(validProvisional, Assert.Single(accepted));
+    }
+
+    [Fact]
     public async Task CoordinatorKeepsCandidatesOutOfConstructionThenAppliesConfirmedRelationship()
     {
         var bundle = Bundle(

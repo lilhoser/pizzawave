@@ -130,9 +130,16 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             ct);
         _lastSampledCallId = newCalls.Max(call => call.Id);
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
-        var validRelationships = (result.LedgerEntry.Entry.RelationshipProposalValidationErrors ?? []).Count == 0
-            ? result.LedgerEntry.Entry.RelationshipProposal?.Relationships ?? []
-            : [];
+        var relationshipSources = validEvents
+            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+            .ToList();
+        var validRelationships = result.LedgerEntry.Entry.RelationshipProposal is null
+            ? []
+            : IncidentBatchRelationshipContract.AcceptedRelationships(
+                result.LedgerEntry.Entry.Bundle,
+                relationshipSources,
+                result.LedgerEntry.Entry.Candidates,
+                result.LedgerEntry.Entry.RelationshipProposal);
         _logger.LogInformation(
             "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}; production incident state unchanged",
             runId,
