@@ -1735,6 +1735,31 @@ and embedding health were all `ok`. The run will stop at the earlier of 25
 candidate-backed batches or eight hours. RPI and production incident rows were
 not changed.
 
+The first live audit after that deployment found a second ownership boundary:
+`EnginePipeline` still placed embedding and incident-analysis enqueueing behind
+the transcription classifier's `IncludeInSummaries` decision. Four new usable
+repetitive transcripts therefore had no embedding job even though
+`EmbeddingService` would now accept them. Commit `7f22d3c` separates those
+routes: usable transcript evidence may enter retrieval, while poor-quality
+transcripts remain excluded from production incident analysis. All 674 backend
+tests passed. The correction was deployed to OT only at about 16:30 UTC; Run AB
+resumed from its latest append-only ledger boundary after call `1433135`. It did
+not backfill old embedding jobs. New numeric-noise call `1433265` and repetitive
+call `1433343` were both subsequently embedded, directly verifying the complete
+live enqueue path.
+
+Run AB's seed batch processed 24 observations with no prior candidates, formed
+two source-grounded Review groups, left 21 observations unresolved, and had no
+validation or request error. Its first candidate-backed batch processed another
+24 observations with four prior-event candidates. The relationship proposer
+offered two weak associations based on the word `Gordon` and a party reference;
+the independent verifier rejected both, so neither entered shadow membership.
+The constructor took 184.959 seconds under concurrent production-model load.
+The attempt also retained three fail-closed validation errors: one inexact
+constructor quote and two rejected verification records with empty confirmation
+statements. These did not admit a relationship, but latency and rejected-output
+contract quality remain explicit checkpoint gates rather than accepted noise.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
