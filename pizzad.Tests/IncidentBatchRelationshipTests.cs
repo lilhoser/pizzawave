@@ -5,6 +5,52 @@ public sealed class IncidentBatchRelationshipTests
     private static readonly DateTimeOffset Now = new(2026, 7, 22, 8, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void ConstructionPromptOmitsAllCandidateStateAndRelationshipChoices()
+    {
+        var bundle = Bundle(Observation("call:1", "transcript:1", "A vehicle is on fire beside the roadway."));
+
+        var prompt = IncidentBatchPrompt.Build(bundle, ["call:1"], []);
+
+        Assert.Contains("source-isolated construction stage", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("candidate_events", prompt.UserPrompt, StringComparison.Ordinal);
+        var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
+        Assert.DoesNotContain("confirmed_membership", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("provisional_association", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LegacyBatchLedgerPayloadWithoutRelationshipFieldsRemainsReadable()
+    {
+        var bundle = Bundle(Observation("call:1", "transcript:1", "Routine radio traffic."));
+        var entry = new IncidentBatchLedgerEntry(
+            "run:legacy",
+            "ledger:legacy",
+            Now,
+            bundle,
+            ["call:1"],
+            [new IncidentBatchSingletonIdentity("call:1", "projection:call:1")],
+            [],
+            new IncidentBatchProposal("proposal:legacy", Now, "test-model", "legacy-prompt", []),
+            [],
+            new IncidentBatchExecutionContext(
+                "test",
+                $"legacy;{IncidentBatchContract.PerEventAcceptanceConfigurationToken}",
+                10,
+                string.Empty));
+        var json = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(entry, EngineConfig.JsonOptions()))!.AsObject();
+        json.Remove("relationshipProposal");
+        json.Remove("relationshipProposalValidationErrors");
+        json.Remove("relationshipExecution");
+
+        var restored = System.Text.Json.JsonSerializer.Deserialize<IncidentBatchLedgerEntry>(json.ToJsonString(), EngineConfig.JsonOptions());
+
+        Assert.NotNull(restored);
+        Assert.Null(restored.RelationshipProposal);
+        var validation = IncidentBatchContract.ValidateLedgerEntry(restored);
+        Assert.True(validation.IsValid, string.Join("; ", validation.Errors));
+    }
+
+    [Fact]
     public void PromptKeepsConstructionAndCandidateSourcesExplicitlySeparated()
     {
         var bundle = Bundle(
@@ -91,6 +137,112 @@ public sealed class IncidentBatchRelationshipTests
         Assert.Contains(validation.Errors, error => error.Contains("more than one confirmed membership", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task CoordinatorKeepsCandidatesOutOfConstructionThenAppliesConfirmedRelationship()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "White truck crashed on County Road 725."),
+            Observation("call:2", "transcript:2", "Critical injuries in that same white truck crash."));
+        var construction = new IncidentBatchEventProposal(
+            "event:update",
+            IncidentBatchEventDisposition.ProvisionalEvent,
+            string.Empty,
+            ["call:2"],
+            "model title",
+            "model summary",
+            "The cited source describes an operator-relevant update.",
+            0.2,
+            [new IncidentEventStateTranscriptCitation("transcript:2", "Critical injuries")],
+            [],
+            [],
+            []);
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction", Now, "test-model", IncidentBatchPrompt.PromptIdentity, [construction]));
+        var confirmed = Relationship(
+            "event:update",
+            "candidate:crash",
+            "transcript:2",
+            "same white truck crash",
+            "transcript:1",
+            "White truck crashed") with { Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership };
+        var relationship = new CapturingRelationshipProposer(Proposal(confirmed));
+        var coordinator = new IncidentBatchCoordinator(constructor, relationship, new MemoryStore(), new FixedTimeProvider(Now));
+        var prior = new IncidentBatchProjection(
+            "run:two-pass",
+            "projection:prior",
+            Now.AddMinutes(-1),
+            ["ledger:prior"],
+            [new IncidentBatchProjectionEvent("projection:crash", ["call:1"], "Existing crash", "White truck crash.", false, true, ["ledger:prior"])],
+            []);
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:two-pass",
+                "ledger:new",
+                "projection:new",
+                [new IncidentBatchSingletonIdentity("call:2", "projection:update")],
+                "test",
+                $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken}"),
+            bundle,
+            prior,
+            ["call:2"],
+            [new IncidentBatchCandidate("candidate:crash", "projection:crash", ["call:1"])],
+            CancellationToken.None);
+
+        Assert.Empty(constructor.ReceivedCandidates);
+        Assert.Equal("event:update", Assert.Single(relationship.ReceivedSources).SourceProposalToken);
+        var projected = Assert.Single(result.Projection.Projection.Events);
+        Assert.Equal("projection:crash", projected.ProjectionEventId);
+        Assert.Equal(["call:1", "call:2"], projected.ObservationIds);
+        Assert.True(projected.OperatorVisible);
+        Assert.False(projected.OperatorReview);
+        Assert.NotNull(result.LedgerEntry.Entry.RelationshipExecution);
+    }
+
+    [Fact]
+    public async Task CoordinatorProjectsSeveralProvisionalAssociationsWithoutMerging()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "A cleaning worker is locked inside the room."),
+            Observation("call:2", "transcript:2", "The supervisor is responding to the building."),
+            Observation("call:3", "transcript:3", "Did the worker notify her supervisor?"));
+        var construction = new IncidentBatchEventProposal(
+            "event:question", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:3"],
+            "model title", "model summary", "The cited source describes a follow-up question.", 0.5,
+            [new IncidentEventStateTranscriptCitation("transcript:3", "worker notify her supervisor")], [], [], []);
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction", Now, "test-model", IncidentBatchPrompt.PromptIdentity, [construction]));
+        var relationships = new CapturingRelationshipProposer(Proposal(
+            Relationship("event:question", "candidate:worker", "transcript:3", "worker notify her supervisor", "transcript:1", "cleaning worker"),
+            Relationship("event:question", "candidate:supervisor", "transcript:3", "supervisor", "transcript:2", "supervisor is responding")));
+        var coordinator = new IncidentBatchCoordinator(constructor, relationships, new MemoryStore(), new FixedTimeProvider(Now));
+        var prior = new IncidentBatchProjection(
+            "run:links", "projection:prior", Now.AddMinutes(-1), ["ledger:prior"],
+            [
+                new IncidentBatchProjectionEvent("projection:worker", ["call:1"], "Worker", "Worker", false, true, ["ledger:prior"]),
+                new IncidentBatchProjectionEvent("projection:supervisor", ["call:2"], "Supervisor", "Supervisor", false, true, ["ledger:prior"])
+            ],
+            []);
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:links", "ledger:new", "projection:new",
+                [new IncidentBatchSingletonIdentity("call:3", "projection:question")],
+                "test", $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken}"),
+            bundle,
+            prior,
+            ["call:3"],
+            [
+                new IncidentBatchCandidate("candidate:worker", "projection:worker", ["call:1"]),
+                new IncidentBatchCandidate("candidate:supervisor", "projection:supervisor", ["call:2"])
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(3, result.Projection.Projection.Events.Count);
+        Assert.Equal(2, result.Projection.Projection.ProvisionalAssociations.Count);
+        Assert.All(result.Projection.Projection.ProvisionalAssociations, link => Assert.Equal("projection:question", link.SourceProjectionEventId));
+    }
+
     private static IncidentBatchRelationship Relationship(
         string source,
         string candidate,
@@ -119,4 +271,50 @@ public sealed class IncidentBatchRelationshipTests
         new(observationId, long.Parse(observationId.AsSpan("call:".Length)), 1000, string.Empty, null,
             [new IncidentEventStateTranscriptObservation(transcriptId, text, "test", Now)],
             new Dictionary<string, IncidentEventStateMetadataObservation>());
+
+    private sealed class CapturingConstructorProposer(IncidentBatchProposal proposal) : IIncidentBatchProposer
+    {
+        public IReadOnlyList<IncidentBatchCandidate> ReceivedCandidates { get; private set; } = [];
+
+        public Task<IncidentBatchProposal> ProposeAsync(
+            IncidentEventStateObservationBundle bundle,
+            IReadOnlyList<string> newObservationIds,
+            IReadOnlyList<IncidentBatchCandidate> candidates,
+            CancellationToken ct)
+        {
+            ReceivedCandidates = candidates;
+            return Task.FromResult(proposal);
+        }
+    }
+
+    private sealed class CapturingRelationshipProposer(IncidentBatchRelationshipProposal proposal) : IIncidentBatchRelationshipProposer
+    {
+        public IReadOnlyList<IncidentBatchRelationshipSource> ReceivedSources { get; private set; } = [];
+
+        public Task<IncidentBatchRelationshipProposal> ProposeAsync(
+            IncidentEventStateObservationBundle bundle,
+            IReadOnlyList<IncidentBatchRelationshipSource> sources,
+            IReadOnlyList<IncidentBatchCandidate> candidates,
+            CancellationToken ct)
+        {
+            ReceivedSources = sources;
+            return Task.FromResult(proposal);
+        }
+    }
+
+    private sealed class MemoryStore : IIncidentBatchStore
+    {
+        public Task<IncidentBatchRunResult> AppendIncidentBatchRunAsync(
+            IncidentBatchLedgerEntry entry,
+            IncidentBatchProjection projection,
+            CancellationToken ct) =>
+            Task.FromResult(new IncidentBatchRunResult(
+                new IncidentBatchStoredLedgerEntry(1, "entry-hash", entry),
+                new IncidentBatchStoredProjection(1, "projection-hash", projection)));
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
 }

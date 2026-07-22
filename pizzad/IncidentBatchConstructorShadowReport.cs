@@ -95,9 +95,9 @@ public sealed partial class EngineDatabase
             allAttempts.Sum(row => row.ProvisionalAssociationCount),
             allAttempts.Sum(row => row.UnresolvedObservationCount),
             entries.Count(row => !IsValid(row)),
-            entries.Count(row => !string.IsNullOrWhiteSpace(row.Entry.Execution.ProposerError)),
-            entries.Count == 0 ? 0 : entries.Average(row => row.Entry.Execution.ProposerDurationMilliseconds),
-            entries.Count == 0 ? 0 : entries.Max(row => row.Entry.Execution.ProposerDurationMilliseconds),
+            allAttempts.Count(row => !string.IsNullOrWhiteSpace(row.ProposerError)),
+            allAttempts.Count == 0 ? 0 : allAttempts.Average(row => row.ProposerMilliseconds),
+            allAttempts.Count == 0 ? 0 : allAttempts.Max(row => row.ProposerMilliseconds),
             projectedEvents.Count,
             projectedEvents.Count(item => item.OperatorVisible),
             projectedEvents.Count(item => item.OperatorReview));
@@ -138,6 +138,14 @@ public sealed partial class EngineDatabase
             .Order()
             .ToList();
         var proposedObservationCount = events.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count();
+        var relationships = (entry.RelationshipProposalValidationErrors ?? []).Count == 0
+            ? entry.RelationshipProposal?.Relationships ?? []
+            : [];
+        var validationErrors = entry.ProposalValidationErrors
+            .Concat(entry.RelationshipProposalValidationErrors ?? [])
+            .ToList();
+        var proposerError = string.Join("; ", new[] { entry.Execution.ProposerError, entry.RelationshipExecution?.ProposerError }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
         return new IncidentBatchShadowAttemptDto(
             row.Sequence,
             entry.RecordedAtUtc.UtcDateTime,
@@ -150,19 +158,24 @@ public sealed partial class EngineDatabase
             Math.Max(0, proposedEvents - events.Count),
             events.Count(IncidentBatchContract.IsOperatorVisibleNewEvent),
             events.Count(IncidentBatchContract.IsOperatorReviewEvent),
-            events.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership),
-            events.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation),
+            entry.RelationshipProposal is null
+                ? events.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
+                : relationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership),
+            entry.RelationshipProposal is null
+                ? events.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation)
+                : relationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation),
             Math.Max(0, entry.NewObservationIds.Count - proposedObservationCount),
             entry.Proposal.ModelIdentity,
             entry.Proposal.PromptIdentity,
             entry.Execution.ConfigurationIdentity,
             events.Select(item => item.Title).ToList(),
-            entry.ProposalValidationErrors,
-            entry.Execution.ProposerDurationMilliseconds,
-            entry.Execution.ProposerError);
+            validationErrors,
+            entry.Execution.ProposerDurationMilliseconds + (entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0),
+            proposerError);
     }
 
-    private static bool IsValid(IncidentBatchStoredLedgerEntry row) => row.Entry.ProposalValidationErrors.Count == 0;
+    private static bool IsValid(IncidentBatchStoredLedgerEntry row) =>
+        row.Entry.ProposalValidationErrors.Count == 0 && (row.Entry.RelationshipProposalValidationErrors ?? []).Count == 0;
     private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     private static DateTime? ParseBatchUtc(string value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
 }

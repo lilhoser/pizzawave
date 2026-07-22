@@ -1310,6 +1310,18 @@ link abstraction would not support the agreed operator workflow. This is a
 source-ownership rule, not a prompt-only preference, confidence threshold,
 event taxonomy, phrase list, talkgroup rule, or static semantic classifier.
 
+The local shadow implementation now enforces that split. The coordinator calls
+the constructor with an empty candidate set and the constructor's JSON schema
+does not offer relationship dispositions. Only accepted constructed groups are
+passed to a second model request alongside the bounded candidate set. The
+relationship result is stored with separate validation errors, latency, and
+proposer-error provenance in the same append-only batch ledger. Valid confirmed
+membership moves the immutable group's observations into one candidate event;
+valid provisional associations retain separate membership and can connect the
+group to several candidate events. Invalid or failed relationship output leaves
+the constructed Review state unchanged. Legacy one-pass ledger rows remain
+readable. This implementation is not a production incident writer.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v11";
+    public const string PromptIdentity = "incident-batch-constructor-v12";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
@@ -18,15 +18,18 @@ public static class IncidentBatchPrompt
         IReadOnlyList<IncidentBatchCandidate> candidates)
     {
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
-        var source = new
-        {
-            new_observations = newObservationIds.Select(id => PromptObservation(observations[id])).ToList(),
-            candidate_events = candidates.Select(candidate => new
+        var newObservations = newObservationIds.Select(id => PromptObservation(observations[id])).ToList();
+        object source = candidates.Count == 0
+            ? new { new_observations = newObservations }
+            : new
             {
-                candidate_token = candidate.CandidateToken,
-                source_observations = candidate.ObservationIds.Select(id => PromptObservation(observations[id])).ToList()
-            }).ToList()
-        };
+                new_observations = newObservations,
+                candidate_events = candidates.Select(candidate => new
+                {
+                    candidate_token = candidate.CandidateToken,
+                    source_observations = candidate.ObservationIds.Select(id => PromptObservation(observations[id])).ToList()
+                }).ToList()
+            };
         var user = new StringBuilder();
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
@@ -38,18 +41,30 @@ public static class IncidentBatchPrompt
         user.AppendLine("Returning an empty events array is correct when none of the supplied observations clears that bar.");
         user.AppendLine($"Return at most {MaximumReturnedEvents} events. Choose the strongest source-grounded events and leave lower-priority observations unresolved rather than producing an oversized response.");
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
-        user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
+        if (candidates.Count > 0)
+            user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
         user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event. A candidate-free new_event remains in Review; it does not become operator-visible until a later confirmed_membership transition or operator action.");
         user.AppendLine("Use provisional_event for a source-grounded candidate-free possible situation that lacks two-observation corroboration or otherwise has meaningful uncertainty. A provisional event is review evidence, not an operator-visible incident. A single-observation event must always be provisional_event.");
         user.AppendLine("No candidate-free proposal becomes operator-visible directly, regardless of how many observations it groups. Automatic visibility requires a separately evaluated confirmed_membership against prior Review state.");
-        user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
-        user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
-        user.AppendLine("A provisional association does not require the two sides to be the same event. Use it when new evidence explicitly refers back to, recurs after, follows up on, or may be confused with a supplied candidate, but should remain a distinct event. Cite both sides; the association is review context and does not merge their observations.");
-        user.AppendLine("Do not return a candidate-free event when its operator_basis, alternatives, or unresolved questions rely on a supplied candidate to explain a prior clearance, recurrence, follow-up, relationship, or distinction.");
+        if (candidates.Count > 0)
+        {
+            user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
+            user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
+            user.AppendLine("A provisional association does not require the two sides to be the same event. Use it when new evidence explicitly refers back to, recurs after, follows up on, or may be confused with a supplied candidate, but should remain a distinct event. Cite both sides; the association is review context and does not merge their observations.");
+            user.AppendLine("Do not return a candidate-free event when its operator_basis, alternatives, or unresolved questions rely on a supplied candidate to explain a prior clearance, recurrence, follow-up, relationship, or distinction.");
+        }
+        else
+        {
+            user.AppendLine("This source-isolated construction stage contains no prior event state. Do not infer, describe, confirm, reject, or cite a relationship to an earlier event. A separate stage evaluates relationships after construction.");
+        }
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
         user.AppendLine("Review every new observation before choosing events; finding one event is not a reason to stop evaluating the remaining observations.");
-        user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");
-        user.AppendLine("For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate.");
+        user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans.");
+        if (candidates.Count > 0)
+            user.AppendLine("Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");
+        user.AppendLine(candidates.Count > 0
+            ? "For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate."
+            : "For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up.");
         user.AppendLine("For each event, use only that event's own exact_quotes to write its title, summary, and operator_basis. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
         user.AppendLine("Compare every pair of drafted events before returning them. If two drafts may describe the same unfolding situation and the cited evidence cannot reliably separate them, combine their observations and evidence into one provisional_event for review instead of returning parallel new_event drafts.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
@@ -59,7 +74,9 @@ public static class IncidentBatchPrompt
         user.AppendLine("Source bundle:");
         user.AppendLine(JsonSerializer.Serialize(source, EngineConfig.JsonOptions()));
         return new IncidentBatchPromptPayload(
-            "You construct source-grounded incident events. Application code validates identity, ownership, and citations but does not interpret semantic meaning. Unsupported observations remain unresolved. Provisional associations never change event membership.",
+            candidates.Count == 0
+                ? "You construct immutable source-grounded incident groups from new observations only. Application code validates identity, ownership, and citations. A separate source-cited stage evaluates relationships to prior state."
+                : "You construct source-grounded incident events. Application code validates identity, ownership, and citations but does not interpret semantic meaning. Unsupported observations remain unresolved. Provisional associations never change event membership.",
             user.ToString(),
             ResponseFormat(bundle, newObservationIds, candidates));
     }
@@ -97,7 +114,13 @@ public static class IncidentBatchPrompt
                                 properties = new
                                 {
                                     proposal_token = new { type = "string" },
-                                    disposition = new { type = "string", @enum = new[] { "new_event", "provisional_event", "confirmed_membership", "provisional_association" } },
+                                    disposition = new
+                                    {
+                                        type = "string",
+                                        @enum = candidates.Count == 0
+                                            ? new[] { "new_event", "provisional_event" }
+                                            : new[] { "new_event", "provisional_event", "confirmed_membership", "provisional_association" }
+                                    },
                                     candidate_token = new { type = "string", @enum = candidateTokens },
                                     new_observation_ids = StringArraySchema(newObservationIds),
                                     title = new { type = "string" },

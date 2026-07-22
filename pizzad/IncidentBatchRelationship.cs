@@ -1,5 +1,7 @@
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace pizzad;
 
@@ -30,6 +32,19 @@ public sealed record IncidentBatchRelationshipProposal(
     string ModelIdentity,
     string PromptIdentity,
     IReadOnlyList<IncidentBatchRelationship> Relationships);
+
+public sealed record IncidentBatchRelationshipExecutionContext(
+    long ProposerDurationMilliseconds,
+    string ProposerError);
+
+public interface IIncidentBatchRelationshipProposer
+{
+    Task<IncidentBatchRelationshipProposal> ProposeAsync(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        CancellationToken ct);
+}
 
 public static class IncidentBatchRelationshipContract
 {
@@ -302,4 +317,156 @@ public static class IncidentBatchRelationshipPrompt
             }
         };
     }
+}
+
+public sealed class OpenAiIncidentBatchRelationshipProposer : IIncidentBatchRelationshipProposer
+{
+    private readonly EngineConfig _config;
+    private readonly EngineDatabase _database;
+    private readonly ILogger _logger;
+    private readonly string _runId;
+
+    public OpenAiIncidentBatchRelationshipProposer(EngineConfig config, EngineDatabase database, ILogger logger, string runId)
+    {
+        _config = config;
+        _database = database;
+        _logger = logger;
+        _runId = runId;
+    }
+
+    public async Task<IncidentBatchRelationshipProposal> ProposeAsync(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        CancellationToken ct)
+    {
+        var prompt = IncidentBatchRelationshipPrompt.Build(bundle, sources, candidates);
+        var model = _config.AiInsights.OpenAiModel;
+        var body = new
+        {
+            model,
+            temperature = 0.1,
+            max_tokens = 2400,
+            response_format = prompt.ResponseFormat,
+            messages = new object[]
+            {
+                new { role = "system", content = prompt.SystemPrompt },
+                new { role = "user", content = prompt.UserPrompt }
+            }
+        };
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, _config.AiInsights.TimeoutMs)) };
+        if (!string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiApiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _config.AiInsights.OpenAiApiKey);
+        var endpoint = $"{_config.AiInsights.OpenAiBaseUrl.TrimEnd('/')}/chat/completions";
+        var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
+        var responseText = string.Empty;
+        try
+        {
+            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync(endpoint, content, ct);
+            responseText = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Batch relationship proposer returned HTTP {(int)response.StatusCode}: {Trim(responseText, 500)}");
+            using var envelope = JsonDocument.Parse(responseText);
+            var responseModel = envelope.RootElement.TryGetProperty("model", out var modelElement) ? modelElement.GetString() ?? string.Empty : string.Empty;
+            if (!string.Equals(responseModel, model, StringComparison.Ordinal))
+                throw new InvalidDataException($"Batch relationship model identity mismatch: requested '{model}', received '{responseModel}'.");
+            var json = envelope.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()
+                       ?? throw new InvalidDataException("Batch relationship response content was empty.");
+            var parsed = JsonSerializer.Deserialize<RelationshipResponse>(json, EngineConfig.JsonOptions())
+                         ?? throw new InvalidDataException("Batch relationship JSON was empty.");
+            var transcripts = bundle.Observations
+                .SelectMany(item => item.Transcripts)
+                .ToDictionary(item => item.TranscriptId, item => item.Text, StringComparer.Ordinal);
+            var relationships = parsed.Relationships.Select(item => new IncidentBatchRelationship(
+                item.SourceProposalToken,
+                item.CandidateToken,
+                item.Disposition switch
+                {
+                    "confirmed_membership" => IncidentBatchRelationshipDisposition.ConfirmedMembership,
+                    "provisional_association" => IncidentBatchRelationshipDisposition.ProvisionalAssociation,
+                    _ => throw new InvalidDataException($"Unsupported batch relationship disposition '{item.Disposition}'.")
+                },
+                item.RelationshipStatement,
+                item.Uncertainty,
+                ResolveCitations(item.SourceEvidence, transcripts),
+                ResolveCitations(item.CandidateEvidence, transcripts),
+                item.AlternativeInterpretations,
+                item.UnresolvedQuestions)).ToList();
+            await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
+            return new IncidentBatchRelationshipProposal(
+                $"model:incident-batch-relationship:{Guid.NewGuid():N}",
+                DateTimeOffset.UtcNow,
+                responseModel,
+                IncidentBatchRelationshipPrompt.PromptIdentity,
+                relationships);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            await RecordUsageAsync(responseText, endpoint, model, payload.Length, false, ex.GetBaseException().Message, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task RecordUsageAsync(string responseText, string endpoint, string requestedModel, int payloadChars, bool success, string error, CancellationToken ct)
+    {
+        var usage = ReadUsage(responseText);
+        try
+        {
+            await _database.AddLmUsageAsync(new TokenUsageEntryDto(
+                0, DateTime.UtcNow, $"incident batch relationship shadow:{_runId}", "chat.completions", success, error,
+                endpoint, requestedModel, usage.ResponseModel, usage.FinishReason, payloadChars, payloadChars,
+                usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Could not record incident batch relationship model usage");
+        }
+    }
+
+    private static IReadOnlyList<IncidentEventStateTranscriptCitation> ResolveCitations(
+        IEnumerable<RelationshipCitationResponse> citations,
+        IReadOnlyDictionary<string, string> transcripts) =>
+        citations.SelectMany(citation => citation.ExactQuotes.SelectMany(quote =>
+        {
+            var quotes = transcripts.TryGetValue(citation.TranscriptId, out var transcript)
+                ? IncidentTranscriptCitationResolver.ResolveSegments(transcript, quote)
+                : [quote];
+            return quotes.Select(resolved => new IncidentEventStateTranscriptCitation(citation.TranscriptId, resolved));
+        })).ToList();
+
+    private static (int PromptTokens, int CompletionTokens, int TotalTokens, string ResponseModel, string FinishReason) ReadUsage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return (0, 0, 0, string.Empty, string.Empty);
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            var root = document.RootElement;
+            var usage = root.TryGetProperty("usage", out var usageElement) ? usageElement : default;
+            var prompt = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("prompt_tokens", out var p) ? p.GetInt32() : 0;
+            var completion = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("completion_tokens", out var c) ? c.GetInt32() : 0;
+            var total = usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("total_tokens", out var t) ? t.GetInt32() : 0;
+            var responseModel = root.TryGetProperty("model", out var m) ? m.GetString() ?? string.Empty : string.Empty;
+            var finishReason = root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0 && choices[0].TryGetProperty("finish_reason", out var f) ? f.GetString() ?? string.Empty : string.Empty;
+            return (prompt, completion, total, responseModel, finishReason);
+        }
+        catch { return (0, 0, 0, string.Empty, string.Empty); }
+    }
+
+    private static string Trim(string value, int limit) => value.Length <= limit ? value : value[..limit];
+
+    private sealed record RelationshipResponse([property: JsonPropertyName("relationships")] IReadOnlyList<RelationshipItemResponse> Relationships);
+    private sealed record RelationshipItemResponse(
+        [property: JsonPropertyName("source_proposal_token")] string SourceProposalToken,
+        [property: JsonPropertyName("candidate_token")] string CandidateToken,
+        [property: JsonPropertyName("disposition")] string Disposition,
+        [property: JsonPropertyName("relationship_statement")] string RelationshipStatement,
+        [property: JsonPropertyName("uncertainty")] double Uncertainty,
+        [property: JsonPropertyName("source_evidence")] IReadOnlyList<RelationshipCitationResponse> SourceEvidence,
+        [property: JsonPropertyName("candidate_evidence")] IReadOnlyList<RelationshipCitationResponse> CandidateEvidence,
+        [property: JsonPropertyName("alternative_interpretations")] IReadOnlyList<string> AlternativeInterpretations,
+        [property: JsonPropertyName("unresolved_questions")] IReadOnlyList<string> UnresolvedQuestions);
+    private sealed record RelationshipCitationResponse(
+        [property: JsonPropertyName("transcript_id")] string TranscriptId,
+        [property: JsonPropertyName("exact_quotes")] IReadOnlyList<string> ExactQuotes);
 }
