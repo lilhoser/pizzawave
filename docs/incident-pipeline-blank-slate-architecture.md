@@ -1102,6 +1102,43 @@ to projection. At this checkpoint the cursor remained current and
 overall, live-radio, AI-completion, embedding, and incident-analysis health
 were all `ok`.
 
+Three further Run M iterations exposed two independent limits. A batch with 18
+observations and four candidates reached the 4,000-token completion cap after
+252.631 seconds. LM usage recorded `finish_reason=length`, 4,642 prompt tokens,
+and exactly 4,000 completion tokens; the incomplete JSON failed closed and all
+18 observations remained unresolved. Production incident analysis remained
+current, and AI-completion health recovered after three subsequent successful
+requests.
+
+The preceding batch also produced two visible sibling events that likely
+described different fragments of one vehicle-extraction response. One cited an
+unconscious call at 6708 Ringgold Road, locked vehicle doors, and responders
+getting occupants out. The other cited a command being established, shallow
+breathing, and responders getting someone out of a vehicle. The second
+proposal's own alternatives acknowledged that it might be related to the first,
+but the contract had no safe sibling-uncertainty instruction, so both obtained
+full visibility from two cited observations apiece.
+
+Prompt v9 bounds each response to at most six strongest source-grounded events;
+lower-priority observations remain unresolved rather than consuming an
+unbounded completion. It also requires the proposer to compare sibling drafts
+and combine possibly duplicate drafts into one `provisional_event` when the
+cited evidence cannot reliably separate them. This does not infer membership
+in application code: the model still owns the semantic proposal, while
+uncertain sibling identity now fails toward Review rather than parallel full
+events.
+
+The bounded sibling-aware contract began in clean OT run
+`ot-batch-constructor-shadow-20260722-n`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1426597`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v9n-20260722T063808Z.bak`;
+its SHA-256 is
+`f3565d35910714f5d14ffb6b11b9f7f0d77cda7d040458de7b7cfeaeeb3e80a7`.
+Immediately after deployment, production incident analysis was current by 15
+minutes and overall, live-radio, AI-completion, and embedding health were all
+`ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
