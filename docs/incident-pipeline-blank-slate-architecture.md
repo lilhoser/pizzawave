@@ -1932,6 +1932,60 @@ model. Run D was stopped at its planned boundary; legacy incident freshness
 recovered to 4.9 minutes, all health domains were `ok`, `trunk-recorder`
 retained PID `3068317`, and RPI was not changed.
 
+### Run E micro-batch and cursor checkpoint
+
+Run `ot-batch-constructor-capacity-20260722-e` varied only the batch size from
+24 to 12 observations under the same replacement-load conditions and stored-
+vector retrieval architecture. It completed 15 batches, including 14
+candidate-backed batches, from 21:58:09 through 22:27:41 UTC. The constructor
+processed 161 observations in 29.53 minutes, or 5.45 observations per minute.
+OT received 250 usable transcript observations in the identical interval, or
+8.46 per minute. Run E therefore achieved only 64.4 percent of arrival rate and
+fell 89 observations behind. Batch size 12 is rejected for production capacity;
+it is materially worse than Run D's 24-observation result.
+
+The smaller prompts did not amortize the fixed semantic-stage work. All 35
+model requests succeeded, consuming 72,583 prompt tokens and 24,464 completion
+tokens. Run E used approximately 603 tokens and 10.53 seconds of model work per
+observation, compared with approximately 391 tokens and 5.72 seconds in Run D.
+Total model time was 1,695.462 seconds: 1,114.106 seconds in construction,
+302.829 seconds in relationship review, and 278.527 seconds in independent
+confirmation. Average total model time was 113.031 seconds per batch and the
+maximum was 229.497 seconds. Stored-vector retrieval remained negligible at
+5.535 seconds total; one missing vector used the explicit single-call fallback
+in 4.025 seconds and every other batch retrieved in 156 milliseconds or less.
+
+The projection admitted 43 Review events and one provisional association, with
+no confirmed memberships. Four invalid stage outputs remained fail-closed and
+there were no proposer or retrieval errors. These correctness outcomes do not
+justify removing the relationship or confirmation stages. The next capacity
+work must return to 24-observation batches and improve the dominant model
+execution shape or compare a smaller capable local model on Paxan. It must not
+retry batch size 12, remove independent validation merely for speed, or restore
+online embedding inference.
+
+Run E also exposed a cursor correctness defect independent of throughput. Calls
+`1439627` and `1439629` were above the run's startup fence but their
+transcriptions completed a few seconds after the first selection pass. The old
+highest-call-ID cursor advanced through `1439631`, permanently excluding both
+late-ready calls. The durable correction hydrates the set of already processed
+call IDs from the append-only run ledger, selects every usable unprocessed call
+above the original startup fence, and adds IDs to that set only after a
+successful ledger append. This remains restart-safe and makes no semantic
+decision from call IDs, transcript strings, categories, talkgroups, or quality
+labels. A regression test simulates a lower-ID call becoming usable after
+higher IDs were processed. The incident-batch tests pass 20/20 and the complete
+backend suite passes 680/680.
+
+Run E stopped at its planned boundary and legacy incident execution recovered
+to an 8.4-minute latest-source age while overall, AI completion, embedding, and
+incident health were all `ok`. The start and stop configurations are preserved
+at `/etc/pizzawave/pizzad.json.pre-batch-capacity-v18e-20260722T215733Z.bak`
+and
+`/etc/pizzawave/pizzad.json.pre-batch-capacity-v18e-stop-20260722T222754Z.bak`.
+`trunk-recorder` retained PID `3068317`; RPI and production incident rows were
+not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

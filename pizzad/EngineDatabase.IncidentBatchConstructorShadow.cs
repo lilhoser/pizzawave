@@ -139,6 +139,37 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
         return rows;
     }
 
+    public async Task<IReadOnlySet<long>> ListIncidentBatchProcessedCallIdsAsync(string runId, CancellationToken ct)
+    {
+        var callIds = new HashSet<long>();
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT sequence, content_hash, payload_json
+            FROM incident_batch_constructor_shadow_ledger
+            WHERE run_id=$run_id
+            ORDER BY sequence;
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var sequence = reader.GetInt64(0);
+            var hash = reader.GetString(1);
+            var payload = reader.GetString(2);
+            VerifyContentHash("incident batch ledger entry", sequence, payload, hash);
+            var entry = JsonSerializer.Deserialize<IncidentBatchLedgerEntry>(payload, EngineConfig.JsonOptions())
+                        ?? throw new InvalidDataException($"Incident batch ledger entry {sequence} has an empty payload.");
+            var newObservationIds = entry.NewObservationIds.ToHashSet(StringComparer.Ordinal);
+            foreach (var observation in entry.Bundle.Observations.Where(item => newObservationIds.Contains(item.ObservationId)))
+            {
+                if (observation.CallId is long callId)
+                    callIds.Add(callId);
+            }
+        }
+        return callIds;
+    }
+
     private static async Task ValidateBatchProjectionLedgerReferencesAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

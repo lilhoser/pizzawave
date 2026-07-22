@@ -410,16 +410,28 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
-    public void LiveCursorProcessesOldestUnseenCallsWithoutSkippingOverflow()
+    public void LiveCursorProcessesOldestUnseenCallsWithoutSkippingOverflowOrLateEligibility()
+    {
+        var calls = Enumerable.Range(1, 30).Select(id => Call(id, $"Call {id}", 1000 + id)).ToList();
+        var processed = new HashSet<long>();
+
+        var first = IncidentBatchLiveCursor.SelectNext(calls.Where(call => call.Id != 2).ToList(), 0, processed, 24);
+        processed.UnionWith(first.Select(call => call.Id));
+        var second = IncidentBatchLiveCursor.SelectNext(calls, 0, processed, 24);
+
+        Assert.Equal(new long[] { 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 }, first.Select(call => call.Id));
+        Assert.Equal(new long[] { 2, 26, 27, 28, 29, 30 }, second.Select(call => call.Id));
+        Assert.Equal(30, first.Concat(second).Select(call => call.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public void LiveCursorKeepsNewRunsNoBackfillUnlessAStartFenceIsConfigured()
     {
         var calls = Enumerable.Range(1, 30).Select(id => Call(id, $"Call {id}", 1000 + id)).ToList();
 
-        var first = IncidentBatchLiveCursor.SelectNext(calls, 0, 24);
-        var second = IncidentBatchLiveCursor.SelectNext(calls, first[^1].Id, 24);
-
-        Assert.Equal(Enumerable.Range(1, 24).Select(id => (long)id), first.Select(call => call.Id));
-        Assert.Equal(Enumerable.Range(25, 6).Select(id => (long)id), second.Select(call => call.Id));
-        Assert.Equal(30, first.Concat(second).Select(call => call.Id).Distinct().Count());
+        Assert.Equal(30, IncidentBatchLiveCursor.ResolveStartFence(0, new HashSet<long>(), calls));
+        Assert.Equal(12, IncidentBatchLiveCursor.ResolveStartFence(12, new HashSet<long>(), calls));
+        Assert.Equal(4, IncidentBatchLiveCursor.ResolveStartFence(0, new HashSet<long> { 5, 9 }, calls));
     }
 
     [Fact]

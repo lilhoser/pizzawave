@@ -37,8 +37,10 @@ public sealed class IncidentBatchConstructorPersistenceTests
 
             var loadedEntry = await database.GetLatestIncidentBatchLedgerEntryAsync("run:1", CancellationToken.None);
             var loadedProjection = await database.GetLatestIncidentBatchProjectionAsync("run:1", CancellationToken.None);
+            var processedCallIds = await database.ListIncidentBatchProcessedCallIdsAsync("run:1", CancellationToken.None);
             Assert.Equal(result.LedgerEntry.ContentHash, loadedEntry?.ContentHash);
             Assert.Equal(result.Projection.ContentHash, loadedProjection?.ContentHash);
+            Assert.Equal([1L], processedCallIds);
             var loadedEvent = Assert.Single(loadedProjection!.Projection.Events);
             Assert.False(loadedEvent.OperatorVisible);
             Assert.True(loadedEvent.OperatorReview);

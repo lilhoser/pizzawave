@@ -10,7 +10,9 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
     private readonly EngineDatabase _database;
     private readonly EmbeddingService _embeddings;
     private readonly ILogger<IncidentBatchConstructorShadowService> _logger;
-    private long? _lastSampledCallId;
+    private string _activeRunId = string.Empty;
+    private HashSet<long>? _processedCallIds;
+    private long _effectiveStartAfterCallId;
 
     public IncidentBatchConstructorShadowService(
         EngineConfig config,
@@ -62,20 +64,20 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             .Where(IncidentBatchLiveSelection.IsEligibleSourceObservation)
             .OrderBy(call => call.Id)
             .ToList();
-        if (_lastSampledCallId is null)
+        if (_processedCallIds is null || !string.Equals(_activeRunId, runId, StringComparison.Ordinal))
         {
-            var latest = await _database.GetLatestIncidentBatchLedgerEntryAsync(runId, ct);
-            _lastSampledCallId = latest?.Entry.Bundle.Observations
-                .Where(item => latest.Entry.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
-                .Max(item => item.CallId)
-                ?? (_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId > 0
-                    ? _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId
-                    : calls.LastOrDefault()?.Id ?? 0);
-            _logger.LogInformation(
-                "Incident batch constructor shadow run {RunId} initialized after call {CallId}; configuredStart={ConfiguredStartCallId}, continuous={Continuous}",
-                runId,
-                _lastSampledCallId,
+            _processedCallIds = (await _database.ListIncidentBatchProcessedCallIdsAsync(runId, ct)).ToHashSet();
+            _activeRunId = runId;
+            _effectiveStartAfterCallId = IncidentBatchLiveCursor.ResolveStartFence(
                 _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId,
+                _processedCallIds,
+                calls);
+            _logger.LogInformation(
+                "Incident batch constructor shadow run {RunId} initialized above fence {EffectiveStartCallId} (configured {ConfiguredStartCallId}) with {ProcessedCount} durably processed observations; continuous={Continuous}",
+                runId,
+                _effectiveStartAfterCallId,
+                _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId,
+                _processedCallIds.Count,
                 _config.AiInsights.IncidentBatchConstructorShadowContinuous);
             return;
         }
@@ -88,7 +90,11 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         }
 
         var batchSize = _config.AiInsights.IncidentBatchConstructorShadowBatchSize;
-        var newCalls = IncidentBatchLiveCursor.SelectNext(calls, _lastSampledCallId.Value, batchSize);
+        var newCalls = IncidentBatchLiveCursor.SelectNext(
+            calls,
+            _effectiveStartAfterCallId,
+            _processedCallIds,
+            batchSize);
         if (newCalls.Count == 0)
             return;
         var retrievalTimer = Stopwatch.StartNew();
@@ -135,14 +141,15 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             selection.NewObservationIds,
             selection.Candidates,
             ct);
-        _lastSampledCallId = newCalls.Max(call => call.Id);
+        foreach (var call in newCalls)
+            _processedCallIds.Add(call.Id);
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
         var validRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(result.LedgerEntry.Entry);
         _logger.LogInformation(
             "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, retrievalMs={RetrievalDurationMs}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, confirmationMs={ConfirmationDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, confirmationInvalid={ConfirmationInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}, confirmationError={HasConfirmationError}; production incident state unchanged",
             runId,
             newCalls.Count,
-            _lastSampledCallId,
+            newCalls.Max(call => call.Id),
             validEvents.Count(IncidentBatchContract.IsOperatorVisibleNewEvent),
             validEvents.Count(IncidentBatchContract.IsOperatorReviewEvent),
             validRelationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership),
@@ -170,7 +177,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {
@@ -192,9 +199,25 @@ public static class IncidentBatchShadowCadence
 
 public static class IncidentBatchLiveCursor
 {
-    public static IReadOnlyList<EngineCall> SelectNext(IReadOnlyList<EngineCall> eligibleCalls, long lastSampledCallId, int batchSize) =>
+    public static long ResolveStartFence(
+        long configuredStartAfterCallId,
+        IReadOnlySet<long> processedCallIds,
+        IReadOnlyList<EngineCall> eligibleCalls)
+    {
+        if (configuredStartAfterCallId > 0)
+            return configuredStartAfterCallId;
+        if (processedCallIds.Count > 0)
+            return Math.Max(0, processedCallIds.Min() - 1);
+        return eligibleCalls.LastOrDefault()?.Id ?? 0;
+    }
+
+    public static IReadOnlyList<EngineCall> SelectNext(
+        IReadOnlyList<EngineCall> eligibleCalls,
+        long startAfterCallId,
+        IReadOnlySet<long> processedCallIds,
+        int batchSize) =>
         eligibleCalls
-            .Where(call => call.Id > lastSampledCallId)
+            .Where(call => call.Id > startAfterCallId && !processedCallIds.Contains(call.Id))
             .OrderBy(call => call.Id)
             .Take(Math.Max(1, batchSize))
             .ToList();
