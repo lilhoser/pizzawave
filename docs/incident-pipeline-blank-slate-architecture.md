@@ -661,6 +661,19 @@ exact quotes rather than allowing the application to materialize the entire
 transcript as a nominal citation. Application code verifies those quotes
 exactly and fails closed when they are absent or changed.
 
+The first v2 batch considered 12 later observations plus two retrieved
+candidate events. It returned one valid new event, a vehicle crash located by
+the source at Armstrong Road and Bayfront Road, and left the other 11
+observations unresolved. Its exact quote contained the crash and both roads;
+the operator basis explained the concrete traffic situation, and unresolved
+questions retained ambiguity about a poorly transcribed vehicle description
+and whether injuries were involved. It did not force either retrieved
+candidate into the event. Generation took 22.703 seconds and used 2,612 prompt
+tokens plus 347 completion tokens (2,959 total), compared with 127.674 seconds
+and 2,665 completion tokens for the indiscriminate v1 output. This single batch
+is encouraging evidence for the contract correction, not yet a precision or
+recall benchmark.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
