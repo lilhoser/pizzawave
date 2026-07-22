@@ -828,6 +828,16 @@ candidate event and use supported multi-observation membership, confirmed
 membership, or provisional association as appropriate. A discarded draft
 must be removed from the response rather than returned with empty evidence.
 
+Prompt v5 began in clean OT run
+`ot-batch-constructor-shadow-20260722-f`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1425341`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v5f-20260722T041447Z.bak`;
+its SHA-256 is
+`b631944a8378fca3c561f6cf1aeb08c1100b5bb0157b1bbe175e9221806373ce`.
+Immediately after deployment, production incident analysis was current by six
+minutes and overall, AI-completion, and embedding health were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
