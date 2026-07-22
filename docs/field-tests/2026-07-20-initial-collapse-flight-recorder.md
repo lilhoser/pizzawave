@@ -813,6 +813,65 @@ checks. The new bounded conclusion is therefore that dynamic same-network
 co-channel interference is now at least as plausible as diffuse simulcast
 multipath for Raymond.
 
+### OT exact-frequency reuse and rejected-network-ID replay
+
+The same discriminator was applied to OT before assuming that Raymond's
+co-channel candidate explains both locations. The current TACN records identify
+real reuse of North Bradley's control channels:
+
+| Site | Distance from North Bradley | NAC | Relevant reuse |
+| --- | ---: | ---: | --- |
+| [North Bradley](https://www.radioreference.com/db/site/16061) | 0 miles | `2AD` | 769.606250 and 770.531250 MHz controls |
+| [Sharps Ridge](https://www.radioreference.com/db/site/15787) | 69.4 miles | `2A3` | both North Bradley controls |
+| [Arnold AFB](https://www.radioreference.com/db/site/46243) | 74.7 miles | `2A0` | 769.606250 MHz control |
+| [West Point](https://www.radioreference.com/db/site/24701) | 154.9 miles | `2A9` | 769.606250 MHz control |
+| [Bethel Springs](https://www.radioreference.com/db/site/22202) | 209.5 miles | `2AA` | 769.606250 MHz control |
+
+Sharps Ridge is the important candidate because it reuses both configured
+North Bradley controls. This makes co-channel interference physically possible
+at North Bradley, although the records alone do not show that its signal
+reached OT during an event.
+
+Hamilton is different. [Chattanooga Simulcast](https://www.radioreference.com/db/site/15541)
+uses NAC `2A0` and 855.212500 MHz as a control. No nearby continuous control
+site using that exact frequency was identified in the current regional records.
+The nearest identified reuse was only as a traffic frequency: the
+[Talladega site](https://www.radioreference.com/db/site/35849), NAC `1D0`, at
+134.9 miles and [Troup County](https://www.radioreference.com/db/site/45804),
+NAC `C41`, at 139.2 miles. Their control channels are on other frequencies, so
+they are much weaker explanations for Hamilton's long control-channel events.
+
+Four retained OT files were then replayed with an exact-lineage, offline-only
+Trunk Recorder binary instrumented to log P25 network-ID codewords rejected by
+BCH correction. No expected WACN, system ID, or NAC was configured. The
+instrumented binary SHA-256 was
+`74dafd9f6b58d6b7950203f3bd27df4976ed176027e7aebbc11188e25d836555`;
+it was never installed or merged into the live service.
+
+| Capture | Rejected NIDs | Exact local NAC | Within 2 bits of local | Exact plausible foreign NAC | Valid identity |
+| --- | ---: | ---: | ---: | ---: | --- |
+| North Bradley `1784584105012` | 1 | 0 | 1 | 0 | only `BEE00 / 2A5 / 2AD`, site 2-26 |
+| North Bradley `1784590157013` | 7 | 3 | 6 | 0 | only `BEE00 / 2A5 / 2AD`, site 2-26 |
+| Hamilton `1784598296012` | 77 | 29 | 61 | 0 | only `BEE00 / 2A5 / 2A0`, site 2-10 |
+| Hamilton `1784619531022` | 104 | 40 | 83 | 0 | only `BEE00 / 2A5 / 2A0`, site 2-10 |
+
+For North Bradley, none of the rejected words exactly matched Sharps Ridge
+`2A3`, Arnold `2A0`, West Point `2A9`, or Bethel Springs `2AA`. Near matches to
+West Point are not diagnostic because local `2AD` and `2A9` already differ by
+one bit. For Hamilton, neither event had an exact or one-bit match to Talladega
+`1D0` or Troup `C41`; one of 181 rejected words was within two bits of Troup,
+which is not meaningful without an exact NAC or foreign site identity.
+
+The replay therefore finds no positive evidence of a second independently
+identifiable P25 signal at OT. It cannot exclude a weaker overlapping signal
+that destroys symbols before its own identity can survive. The bounded result
+is nevertheless asymmetric: exact-frequency interference remains a credible
+North Bradley alternative because nearby control reuse exists, while Hamilton
+has neither a strong reuse candidate nor foreign identity evidence. Combined
+with Hamilton's stable outer-band power, increased in-channel energy, and lost
+decode, dynamic simulcast/multipath modulation destruction remains the primary
+OT explanation.
+
 ### July 22 sounding comparison
 
 Surface observations still show an association: the 120 half-hour RF buckets
@@ -858,14 +917,18 @@ The likely cause set is narrower:
 2. For Raymond, a distant MSWIN site reusing the exact same control frequencies
    is a concrete physical source. Dynamic co-channel interference and changing
    simulcast paths are both viable; the present IQ cannot separate them.
-3. The current CQPSK decoder and alternate-frequency cycling can lengthen the
+3. OT does not positively corroborate that co-channel mechanism. North Bradley
+   has plausible exact-control reuse but no foreign identity in retained IQ;
+   Hamilton has no identified nearby continuous-control reuse and strongly
+   favors changing simulcast/multipath geometry.
+4. The current CQPSK decoder and alternate-frequency cycling can lengthen the
    impairment, but neither creates the initial edge.
 
 Next:
 
-1. Keep RPI at the verified gain-15 CQPSK baseline and deploy only the new
-   PizzaWave episode summary during a normal reviewed deployment.
-2. On the next collapse, examine failed or near-valid P25 network-ID words for
+1. Keep both rigs at their verified baseline RF and decoder settings and
+   deploy the new PizzaWave episode summary during a normal reviewed deployment.
+2. On the next Raymond collapse, examine failed or near-valid P25 network-ID words for
    NAC `2A2` (West), `2A0` (Ashcroft), and `2A4` (Raymond), including candidates
    that fail the full message CRC. This is the smallest no-new-antenna
    discriminator for co-channel energy.
@@ -873,7 +936,11 @@ Next:
    an independent MSWIN status source is available. A matching West control
    channel during Raymond failure would be much stronger evidence than weather
    correlation.
-4. Do not prioritize the BPF-800-M as the next root-cause test. An in-band P25
+4. On the next OT blip, use the episode boundaries and retained IQ to compare
+   North Bradley, Hamilton, and Cleveland on the same host. Do not continue
+   pursuing OT co-channel identity unless a nonlocal NAC or site identity
+   appears; prioritize modulation-quality and simulcast-path evidence instead.
+5. Do not prioritize the BPF-800-M as the next root-cause test. An in-band P25
    signal at the exact same frequency will pass that filter; it remains useful
    only as a final check for unrelated out-of-band front-end stress.
 

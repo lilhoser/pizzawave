@@ -123,6 +123,19 @@ Cross-repository source state:
   collapse episodes and retain decoder quality at both onset and recovery from
   the existing sample stream. RPI remained on its exact gain-15 CQPSK baseline
   throughout this read-only work.
+  The same rejected-network-ID test was then applied to four OT captures.
+  North Bradley has concrete control-channel reuse: Sharps Ridge, 69.4 miles
+  away, reuses both controls with NAC `2A3`, and Arnold AFB, 74.7 miles away,
+  uses 769.606250 MHz with NAC `2A0`. However, eight rejected NIDs across the
+  two retained North Bradley captures contained no exact plausible foreign NAC
+  and all valid identities remained local `2AD`. Hamilton has no identified
+  nearby continuous control reuse of 855.212500 MHz; 181 rejected NIDs across
+  two events contained 69 exact local `2A0` words, 144 within two bits of local,
+  no exact plausible foreign NAC, and no foreign valid identity. OT therefore
+  does not positively corroborate Raymond's co-channel candidate. Treat dynamic
+  simulcast/multipath modulation destruction as the primary OT explanation,
+  while retaining exact-frequency reuse as a North Bradley alternative and a
+  stronger Raymond candidate.
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
 
@@ -225,6 +238,11 @@ Cross-repository source state:
      Raymond NAC `2A4`, West NAC `2A2`, and Ashcroft NAC `2A0`, including words
      that do not survive full-message CRC; independently confirm West's active
      control channel if an MSWIN status source is available;
+   - on the next OT blip, compare the episode boundaries for North Bradley,
+     Hamilton, and Cleveland on the same host. Do not prioritize more OT
+     co-channel replay unless a nonlocal NAC or site identity appears; use the
+     retained IQ to characterize modulation-quality and changing simulcast-path
+     evidence instead;
    - keep the available BPF-800-M as a later out-of-band-overload check, not the
      next root-cause test: it cannot reject an in-band P25 transmitter on the
      exact same frequency. Do not add an antenna or another live wide recorder;
