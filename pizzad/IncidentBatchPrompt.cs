@@ -211,6 +211,9 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                        ?? throw new InvalidDataException("Batch constructor response content was empty.");
             var parsed = JsonSerializer.Deserialize<BatchResponse>(json, EngineConfig.JsonOptions())
                          ?? throw new InvalidDataException("Batch constructor JSON was empty.");
+            var transcripts = bundle.Observations
+                .SelectMany(observation => observation.Transcripts)
+                .ToDictionary(transcript => transcript.TranscriptId, transcript => transcript.Text, StringComparer.Ordinal);
             var events = parsed.Events.Select(item => new IncidentBatchEventProposal(
                 item.ProposalToken,
                 item.Disposition switch
@@ -227,8 +230,8 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 item.Summary,
                 item.OperatorBasis,
                 item.Uncertainty,
-                item.NewObservationEvidence.SelectMany(citation => citation.ExactQuotes.Select(quote => new IncidentEventStateTranscriptCitation(citation.TranscriptId, quote))).ToList(),
-                item.CandidateEvidence.SelectMany(citation => citation.ExactQuotes.Select(quote => new IncidentEventStateTranscriptCitation(citation.TranscriptId, quote))).ToList(),
+                ResolveCitations(item.NewObservationEvidence, transcripts),
+                ResolveCitations(item.CandidateEvidence, transcripts),
                 item.AlternativeInterpretations,
                 item.UnresolvedQuestions)).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
@@ -276,6 +279,15 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
     }
 
     private static string Trim(string value, int limit) => value.Length <= limit ? value : value[..limit];
+
+    private static IReadOnlyList<IncidentEventStateTranscriptCitation> ResolveCitations(
+        IEnumerable<BatchCitationResponse> citations,
+        IReadOnlyDictionary<string, string> transcripts) =>
+        citations.SelectMany(citation => citation.ExactQuotes.Select(quote => new IncidentEventStateTranscriptCitation(
+            citation.TranscriptId,
+            transcripts.TryGetValue(citation.TranscriptId, out var transcript)
+                ? IncidentTranscriptCitationResolver.Resolve(transcript, quote)
+                : quote))).ToList();
 
     private sealed record BatchResponse([property: JsonPropertyName("events")] IReadOnlyList<BatchEventResponse> Events);
     private sealed record BatchEventResponse(
