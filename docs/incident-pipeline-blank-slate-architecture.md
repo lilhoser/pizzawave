@@ -737,6 +737,18 @@ with the same 24-observation, 300-second cadence and startup fence at call
 its SHA-256 is
 `85522d72b1933729b086712c7c0218459686194b2674d9ac9900b7093f04a275`.
 
+Run D's first five-minute window contained 20 eligible observations. V3
+returned one valid event for firefighter emergency traffic, citing the exact
+contiguous words `I'm 20 emergency traffic. One firefighter on board.` It
+returned no administrative event, no spliced quote, and left 19 observations
+unresolved. The source set also contained lower-certainty suspicious-activity
+text and badly garbled suicide-related fragments; further batches are required
+to determine whether v3's omission behavior is appropriately cautious or still
+misses too much. Generation took 32.839 seconds and used 3,696 prompt tokens
+plus 323 completion tokens (4,019 total). Immediately afterward, production
+incident freshness was seven minutes, overall health was `ok`, and recent AI
+completions had no failures.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
