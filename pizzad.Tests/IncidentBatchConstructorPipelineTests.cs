@@ -214,6 +214,27 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void LiveSelectionKeepsRecentVisibleEventsInCandidateSetWithoutEmbeddingMatch()
+    {
+        var priorCall = Call(10, "Firefighter emergency traffic with one firefighter on board.", 1000);
+        var newCall = Call(11, "We need to pick that firefighter up.", 1010);
+        var prior = PriorProjection(new IncidentBatchProjectionEvent(
+            "projection:event:firefighter", ["call:10"], "Firefighter emergency", "Emergency traffic involving a firefighter.", true, ["ledger:prior"]));
+
+        var selection = IncidentBatchLiveSelection.Build(
+            [newCall],
+            [priorCall, newCall],
+            [],
+            prior,
+            4,
+            Now);
+
+        var candidate = Assert.Single(selection.Candidates);
+        Assert.Equal("projection:event:firefighter", candidate.ProjectionEventId);
+        Assert.Contains(selection.Bundle.Observations, item => item.ObservationId == "call:10");
+    }
+
+    [Fact]
     public async Task MultiCallHostageProposalIsNotSubjectToStaticSemanticAdmission()
     {
         var bundle = Bundle(

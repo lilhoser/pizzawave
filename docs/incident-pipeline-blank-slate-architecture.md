@@ -749,6 +749,20 @@ plus 323 completion tokens (4,019 total). Immediately afterward, production
 incident freshness was seven minutes, overall health was `ok`, and recent AI
 completions had no failures.
 
+Run D's second batch returned three exact-source new events from 24
+observations: a level-one trauma/bypass notice, two suicidal-ideation patients,
+and reported ingestion of 17 vodka shots. It proposed no administrative event
+and rejected nothing. Generation took 60.356 seconds. Inspection found one
+candidate-coverage miss: a new call about picking up “that firefighter” did not
+receive the prior visible firefighter-emergency event as a candidate because
+raw-call embedding search did not return its source transcript near the top.
+
+Candidate selection now reserves bounded context for recent operator-visible
+shadow events even without an embedding match, then fills remaining capacity
+with embedding-matched unresolved events. This preserves the four-candidate
+cap and does not make visibility, recency, or retrieval proof of membership;
+the model must still cite both sides for confirmed or provisional association.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
