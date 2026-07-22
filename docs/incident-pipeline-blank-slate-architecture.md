@@ -656,6 +656,15 @@ precision/admission result rather than queue starvation. Subsequent maintenance
 passes retained another 51 aged-out rows as skipped. No RPI deployment or
 production-row deletion occurred.
 
+Live verification also showed that degrading health for any row a few seconds
+past the cleanup boundary would make the System badge oscillate during normal
+model work. Follow-up commit `9db524b`, deployed to OT at 01:18 UTC, makes the
+latest completed source-call age the health authority while retaining oldest
+pending age and stale counts as diagnostics. After restart, overall health was
+`ok`; the latest completed source call was 13 minutes old, 386 calls were
+pending, AI completion health was `ok`, and the worker immediately began the
+next current North Bradley batch.
+
 ### Earlier implementation history
 
 The isolated development branch now contains the Phase 0 and Phase 1 safety
