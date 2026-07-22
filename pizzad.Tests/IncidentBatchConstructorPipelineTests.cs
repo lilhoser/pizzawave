@@ -195,9 +195,9 @@ public sealed class IncidentBatchConstructorPipelineTests
 
         Assert.Single(result.LedgerEntry.Entry.ProposalValidationErrors);
         Assert.Equal(["event:tree"], IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry).Select(item => item.ProposalToken));
-        var visible = Assert.Single(result.Projection.Projection.Events, item => item.OperatorVisible);
-        Assert.Equal(["call:1"], visible.ObservationIds);
-        var unresolved = Assert.Single(result.Projection.Projection.Events, item => !item.OperatorVisible);
+        var review = Assert.Single(result.Projection.Projection.Events, item => item.OperatorReview);
+        Assert.Equal(["call:1"], review.ObservationIds);
+        var unresolved = Assert.Single(result.Projection.Projection.Events, item => !item.OperatorVisible && !item.OperatorReview);
         Assert.Equal(["call:2"], unresolved.ObservationIds);
     }
 
@@ -354,7 +354,9 @@ public sealed class IncidentBatchConstructorPipelineTests
         var result = await RunAsync(bundle, ["call:1"], [], new FixedProposer(Proposal([item])));
 
         Assert.Empty(result.LedgerEntry.Entry.ProposalValidationErrors);
-        Assert.True(Assert.Single(result.Projection.Projection.Events).OperatorVisible);
+        var projected = Assert.Single(result.Projection.Projection.Events);
+        Assert.False(projected.OperatorVisible);
+        Assert.True(projected.OperatorReview);
     }
 
     private static async Task<IncidentBatchRunResult> RunAsync(

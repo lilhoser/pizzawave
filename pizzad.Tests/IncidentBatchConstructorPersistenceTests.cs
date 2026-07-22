@@ -39,7 +39,9 @@ public sealed class IncidentBatchConstructorPersistenceTests
             var loadedProjection = await database.GetLatestIncidentBatchProjectionAsync("run:1", CancellationToken.None);
             Assert.Equal(result.LedgerEntry.ContentHash, loadedEntry?.ContentHash);
             Assert.Equal(result.Projection.ContentHash, loadedProjection?.ContentHash);
-            Assert.True(Assert.Single(loadedProjection!.Projection.Events).OperatorVisible);
+            var loadedEvent = Assert.Single(loadedProjection!.Projection.Events);
+            Assert.False(loadedEvent.OperatorVisible);
+            Assert.True(loadedEvent.OperatorReview);
             var report = await database.GetIncidentBatchShadowReportAsync(true, "run:1", null, 100, CancellationToken.None);
             Assert.True(report.Enabled);
             Assert.Equal(1, report.Totals.Batches);
@@ -47,7 +49,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
             Assert.Equal(1, report.Totals.ProposedEvents);
             Assert.Equal(1, report.Totals.AcceptedEvents);
             Assert.Equal(0, report.Totals.RejectedEvents);
-            Assert.Equal(1, report.Totals.NewEvents);
+            Assert.Equal(0, report.Totals.NewEvents);
+            Assert.Equal(1, report.Totals.ProvisionalEvents);
             Assert.Equal(0, report.Totals.UnresolvedObservations);
             Assert.Equal("Tree blocking roadway", Assert.Single(report.ProjectedEvents).Title);
             var attempt = Assert.Single(report.Attempts);

@@ -123,6 +123,14 @@ public static class IncidentBatchContract
     public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
     public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-summary-v1";
     public const string OldestUnseenCursorConfigurationToken = "cursor=oldest-unseen-v1;cadence=fixed-start-v1";
+    public const string CorroboratedVisibilityConfigurationToken = "visibility=corroborated-new-v1";
+
+    public static bool IsOperatorVisibleNewEvent(IncidentBatchEventProposal proposal) =>
+        proposal.Disposition == IncidentBatchEventDisposition.NewEvent && proposal.NewObservationIds.Count >= 2;
+
+    public static bool IsOperatorReviewEvent(IncidentBatchEventProposal proposal) =>
+        proposal.Disposition == IncidentBatchEventDisposition.ProvisionalEvent ||
+        (proposal.Disposition == IncidentBatchEventDisposition.NewEvent && proposal.NewObservationIds.Count < 2);
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -463,8 +471,8 @@ public static class IncidentBatchProjector
                     ObservationIds = proposal.NewObservationIds.ToList(),
                     Title = proposal.Title,
                     Summary = evidenceSummary,
-                    OperatorVisible = proposal.Disposition == IncidentBatchEventDisposition.NewEvent,
-                    OperatorReview = proposal.Disposition == IncidentBatchEventDisposition.ProvisionalEvent,
+                    OperatorVisible = IncidentBatchContract.IsOperatorVisibleNewEvent(proposal),
+                    OperatorReview = IncidentBatchContract.IsOperatorReviewEvent(proposal),
                     SourceLedgerEntryIds = source.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
                 };
                 events.RemoveAll(item => item.ProjectionEventId != sourceEventId && singletonIds.Contains(item.ProjectionEventId));

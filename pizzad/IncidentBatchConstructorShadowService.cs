@@ -134,8 +134,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             runId,
             newCalls.Count,
             _lastSampledCallId,
-            validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.NewEvent),
-            validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalEvent),
+            validEvents.Count(IncidentBatchContract.IsOperatorVisibleNewEvent),
+            validEvents.Count(IncidentBatchContract.IsOperatorReviewEvent),
             validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership),
             validEvents.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation),
             newCalls.Count - validEvents.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count(),
@@ -154,7 +154,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {

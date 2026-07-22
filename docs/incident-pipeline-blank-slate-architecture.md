@@ -972,6 +972,30 @@ positive evidence for cursor coverage, cadence, exact validation, and
 evidence-only summaries; it is not yet evidence that the model uses the new
 review type reliably.
 
+Two further Run I batches kept the cursor caught up but failed the semantic
+promotion boundary. The model interpreted the exact words `negative stolen` as
+a stolen-vehicle incident, promoted routine vehicle-stop instructions, and
+interpreted likely ASR text `homicidic` as a homicide investigation. In the
+same traffic it omitted clear calls about a 91-year-old nearly passing out and
+a 73-year-old with shortness of breath on oxygen. Across four batches and 66
+observations, it produced nine accepted full events, no provisional events, no
+confirmed memberships, and no provisional associations. Exact evidence made
+the failures auditable but did not make the single-transcript interpretations
+safe.
+
+The successor projection policy is therefore
+`visibility=corroborated-new-v1`. A model-proposed candidate-free new event is
+operator-visible only when at least two separately cited new observations
+support it. A valid single-observation proposal is retained with its exact
+evidence but application code demotes it to `operatorReview=true`; it is not
+discarded and does not become a full incident. Explicit `provisional_event`
+proposals also remain in Review. Confirmed membership may contain one new
+observation because it must independently cite both that observation and an
+existing candidate event. The prompt names the same boundary, but application
+projection enforces it even if the model returns `new_event` for a singleton.
+This is a source-corroboration rule, not a semantic category, phrase check,
+regex, static talkgroup policy, or threshold on model-reported confidence.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
