@@ -1267,6 +1267,23 @@ completed without invalid output or proposer error in 100.769 and 46.186
 seconds. Production incident analysis remained current and all monitored health
 domains were `ok`.
 
+Across five Run Q batches and 66 observations, 13 source-grounded groups
+entered Review, none became visible, and no output was invalid or truncated.
+The observed rate is approximately 31 Review groups per hour at this traffic
+level, which is too high to expose as an undifferentiated operator queue. That
+is a presentation and prioritization constraint; it is not evidence for
+discarding the underlying append-only state.
+
+Run Q still produced no confirmed membership or provisional association. A
+weapon-related call after suicide-related traffic initially looked like a
+possible missed transition, but inspection showed that the supplied candidate
+was a different Hickson Pike mental-health/missing-person event while the new
+call concerned transport seating and a weapon already secured. No relationship
+was established by the cited words. The run therefore has not yet presented a
+clear candidate-backed follow-up that would fairly test confirmation-gated
+promotion. The safe state policy remains unchanged while such evidence
+accumulates.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
