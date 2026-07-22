@@ -8,7 +8,7 @@ import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import { locationDisplayName, locationKey, locationShortName } from "./features/dashboard/location";
-import type { IncidentAssociationReviewGroup, IncidentAssociationReviewReport, IncidentAssociationShadowReport, IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
+import type { IncidentAssociationReviewGroup, IncidentAssociationReviewReport, IncidentAssociationShadowReport, IncidentBatchShadowReport, IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
 import type { LiveRfStatus } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
@@ -9498,6 +9498,7 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
   const [page, setPage] = useState(1);
   const [openChain, setOpenChain] = useState<string | null>(null);
   const [selectedShadowRun, setSelectedShadowRun] = useState("");
+  const [selectedBatchShadowRun, setSelectedBatchShadowRun] = useState("");
   useEffect(() => { setPage(1); setOpenChain(null); }, [rangeHours]);
   const chainResource = usePersistentRefresh({
     key: `incident-chains|${rangeHours}|${page}|${refreshToken}`,
@@ -9511,6 +9512,12 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
     load: () => api.request<IncidentAssociationShadowReport>(`/api/v1/incidents/association-shadow?limit=100${selectedShadowRun ? `&runId=${encodeURIComponent(selectedShadowRun)}` : ""}`)
   });
   const shadow = shadowResource.data;
+  const batchShadowResource = usePersistentRefresh({
+    key: `incident-batch-constructor-shadow|${selectedBatchShadowRun}|${refreshToken}`,
+    enabled: true,
+    load: () => api.request<IncidentBatchShadowReport>(`/api/v1/incidents/batch-constructor-shadow?limit=100${selectedBatchShadowRun ? `&runId=${encodeURIComponent(selectedBatchShadowRun)}` : ""}`)
+  });
+  const batchShadow = batchShadowResource.data;
   if (!dashboard || !chains) return <div className="card">Loading incident performance...</div>;
 
   const categoryCounts = Array.from(new Set(dashboard.incidents.map(incident => incident.category))).map(category => ({ label: label(category), value: dashboard.incidents.filter(incident => incident.category === category).length })).sort((a, b) => b.value - a.value);
@@ -9540,7 +9547,35 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
       <section className="system-content-section"><SystemSectionHeader title="Retained Calls per Incident" /><Bars title="Retained Calls per Incident" rows={callBars} showTitle={false} /></section>
     </div>
     <section className="card incident-shadow-card system-content-section">
-      <SystemSectionHeader title="Incident Constructor Shadow" description="Read-only evidence from the new constructor. Confirmed membership affects only its shadow grouping; provisional associations remain separate for review. Production incidents are unchanged." actions={shadow?.runs.length ? <label className="incident-shadow-run-picker">Run <select value={shadow.selectedRunId} onChange={event => setSelectedShadowRun(event.target.value)}>{shadow.runs.map(run => <option value={run.runId} key={run.runId}>{run.runId}{run.isConfiguredRun ? " (configured)" : ""}</option>)}</select></label> : null} />
+      <SystemSectionHeader title="Micro-Batch Incident Constructor" description="Current read-only architecture experiment. Source-cited events may be new, confirmed against an existing shadow event, or retained as provisional associations. Invalid and omitted output remains unresolved; production incidents are unchanged." actions={batchShadow?.runs.length ? <label className="incident-shadow-run-picker">Run <select value={batchShadow.selectedRunId} onChange={event => setSelectedBatchShadowRun(event.target.value)}>{batchShadow.runs.map(run => <option value={run.runId} key={run.runId}>{run.runId}{run.isConfiguredRun ? " (configured)" : ""}</option>)}</select></label> : null} />
+      <PanelLoadState label="micro-batch incident constructor" state={batchShadowResource.state} hasData={Boolean(batchShadow)} onRetry={batchShadowResource.refresh} />
+      {batchShadow && <>
+        <div className="incident-outcome-summary incident-shadow-summary" aria-label="Micro-batch constructor outcomes">
+          <span><strong>{batchShadow.totals.batches.toLocaleString()}</strong> batches</span>
+          <span><strong>{batchShadow.totals.newObservations.toLocaleString()}</strong> observations</span>
+          <span><strong>{batchShadow.totals.newEvents.toLocaleString()}</strong> new events</span>
+          <span><strong>{batchShadow.totals.confirmedMemberships.toLocaleString()}</strong> confirmed memberships</span>
+          <span><strong>{batchShadow.totals.provisionalAssociations.toLocaleString()}</strong> provisional associations</span>
+          <span><strong>{batchShadow.totals.unresolvedObservations.toLocaleString()}</strong> unresolved</span>
+          <span><strong>{batchShadow.totals.invalidProposals.toLocaleString()}</strong> invalid</span>
+          <span><strong>{(batchShadow.totals.averageProposerMilliseconds / 1000).toFixed(1)}s</strong> average model time</span>
+          <span><strong>{batchShadow.totals.operatorVisibleEvents.toLocaleString()}</strong> visible shadow events</span>
+        </div>
+        <div className="incident-shadow-list">{batchShadow.attempts.map(attempt => {
+          const failed = Boolean(attempt.validationErrors.length || attempt.proposerError);
+          const produced = attempt.newEventCount + attempt.confirmedMembershipCount;
+          const status = failed ? "Invalid" : produced ? "Event" : attempt.provisionalAssociationCount ? "Provisional" : "Unresolved";
+          return <div className="incident-shadow-row" key={attempt.sequence}>
+            <span className={`section-status ${failed ? "warning" : produced ? "ok" : "neutral"}`}>{status}</span>
+            <span className="incident-shadow-identity"><strong>Calls {attempt.firstCallId || "?"}{attempt.lastCallId && attempt.lastCallId !== attempt.firstCallId ? `–${attempt.lastCallId}` : ""}</strong><small>{new Date(attempt.recordedAtUtc).toLocaleString()} · {attempt.newObservationCount} observations · {attempt.candidateCount} candidates · {attempt.modelIdentity}</small><em>{attempt.eventTitles.join(" · ") || "No source-grounded event was proposed."}</em>{attempt.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}{attempt.proposerError && <small className="warning-text">{attempt.proposerError}</small>}</span>
+            <span className="incident-shadow-activity"><strong>{attempt.proposedEventCount} proposed · {attempt.unresolvedObservationCount} unresolved</strong><small>{(attempt.proposerMilliseconds / 1000).toFixed(1)}s · {attempt.confirmedMembershipCount} confirmed · {attempt.provisionalAssociationCount} provisional</small></span>
+          </div>;
+        })}</div>
+        {!batchShadow.attempts.length && <p className="muted">This run begins at a startup fence and does not backfill history. The first bounded batch appears after its configured interval.</p>}
+      </>}
+    </section>
+    <section className="card incident-shadow-card system-content-section">
+      <SystemSectionHeader title="Legacy Incremental Constructor Shadow" description="Historical one-observation sampling evidence retained for comparison. This runtime is disabled and production incidents are unchanged." actions={shadow?.runs.length ? <label className="incident-shadow-run-picker">Run <select value={shadow.selectedRunId} onChange={event => setSelectedShadowRun(event.target.value)}>{shadow.runs.map(run => <option value={run.runId} key={run.runId}>{run.runId}{run.isConfiguredRun ? " (configured)" : ""}</option>)}</select></label> : null} />
       <PanelLoadState label="incident constructor shadow" state={shadowResource.state} hasData={Boolean(shadow)} onRetry={shadowResource.refresh} />
       {shadow && <>
         <div className="incident-outcome-summary incident-shadow-summary" aria-label="Link shadow outcomes">
