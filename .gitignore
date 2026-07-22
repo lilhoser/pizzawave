@@ -45,6 +45,8 @@ artifacts/
 *.nupkg
 *.snupkg
 *.symbols.nupkg
+__pycache__/
+*.py[cod]
 
 # Publish output
 publish/

@@ -665,13 +665,16 @@ public sealed class SystemRecommendationService
             .Where(row => DateTime.TryParse(row.ResolvedAtUtc, out var resolvedAt) && resolvedAt.ToUniversalTime() >= now.AddDays(-7))
             .ToList();
 
+        var activeNow = active
+            .Where(r => !string.Equals(r.ActivityState, "quiet", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         return new SystemRecommendationsDto(
-            active.Count,
-            active.Count(r => r.Kind == "problem"),
-            active.Count(r => r.Kind == "improvement"),
-            active.Count(r => r.Severity is "critical" or "high"),
-            active.Count(r => r.Severity == "medium"),
-            active.Count(r => r.Severity == "low"),
+            activeNow.Count,
+            activeNow.Count(r => r.Kind == "problem"),
+            activeNow.Count(r => r.Kind == "improvement"),
+            activeNow.Count(r => r.Severity is "critical" or "high"),
+            activeNow.Count(r => r.Severity == "medium"),
+            activeNow.Count(r => r.Severity == "low"),
             active,
             findings.KnownIssues,
             recentlyResolved,

@@ -108,6 +108,64 @@ public sealed class RfTelemetryPersistenceTests
             var point = Assert.Single(site.Points);
             Assert.Equal(595, point.AverageAbsoluteFrequencyErrorHz);
             Assert.Single(summary.Transitions);
+            Assert.Empty(summary.Episodes);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Summary_RecordsConfirmedCollapseOnsetAndRecoveryQuality()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rf-episodes-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var database = new EngineDatabase(new EngineConfig
+            {
+                Storage = new StorageConfig
+                {
+                    DatabasePath = Path.Combine(root, "pizzad.db"),
+                    AudioRoot = Path.Combine(root, "audio")
+                }
+            }, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+
+            var start = new DateTime(2026, 7, 22, 1, 20, 0, DateTimeKind.Utc);
+            var rates = new double[] { 25, 2, 1, 0, 4, 0, 12, 14, 18, 30 };
+            var events = rates.Select((rate, index) => Event($"sample-{index}", "rf_sample", start.AddSeconds(index * 15), "raymond") with
+            {
+                DecodeRate = rate,
+                ControlChannelHz = 773_781_250,
+                FrequencyErrorHz = 700 + index
+            }).ToList();
+            await database.UpsertRfTelemetryEventsAsync(events, CancellationToken.None);
+
+            var summary = await database.BuildRfTelemetrySummaryAsync(
+                new DateTimeOffset(start).ToUnixTimeSeconds(),
+                new DateTimeOffset(start.AddMinutes(3)).ToUnixTimeSeconds(),
+                CancellationToken.None);
+
+            Assert.Equal(3, summary.CollapseMaxDecodeRate);
+            Assert.Equal(3, summary.CollapseSamplesRequired);
+            Assert.Equal(10, summary.RecoveryMinDecodeRate);
+            Assert.Equal(3, summary.RecoverySamplesRequired);
+            var episode = Assert.Single(summary.Episodes);
+            Assert.Equal(start.AddSeconds(15), episode.OnsetUtc);
+            Assert.Equal(2, episode.OnsetDecodeRate);
+            Assert.Equal(701, episode.OnsetFrequencyErrorHz);
+            Assert.Equal(start.AddSeconds(90), episode.RecoveryUtc);
+            Assert.Equal(12, episode.RecoveryDecodeRate);
+            Assert.Equal(706, episode.RecoveryFrequencyErrorHz);
+            Assert.Equal(0, episode.MinimumDecodeRate);
+            Assert.Equal(6, episode.Samples);
+            Assert.Equal(75, episode.DurationSeconds);
+            Assert.False(episode.StartedBeforeWindow);
+            Assert.True(episode.RecoveryObserved);
         }
         finally
         {

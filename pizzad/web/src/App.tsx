@@ -127,6 +127,14 @@ function PageSearch({ value, onChange, placeholder }: { value: string; onChange:
   </label>;
 }
 
+function countActiveAlerts(alerts: AlertMatch[]) {
+  return alerts.filter(alert => alert.active !== false).length;
+}
+
+function countActiveSystemProblems(recommendations: SystemRecommendations) {
+  return recommendations.items.filter(item => item.kind === "problem" && item.activityState !== "quiet").length;
+}
+
 function App() {
   const [page, setPageState] = useState<Page>(() => normalizePage(localStorage.getItem("pizzawave-page")));
   const [rangeHours, setRangeHours] = useState(24);
@@ -312,7 +320,7 @@ function App() {
     setStatusSummary(summary);
     setProfileState(profiles);
     setAlertSettings(alertConfig.values ?? alertConfig);
-    setActiveAlertCount(alertRows.filter(alert => alert.active !== false).length);
+    setActiveAlertCount(countActiveAlerts(alertRows));
     if (recommendations)
       setSystemProblemCount(recommendations.problemCount);
     const latestActiveAlert = alertRows.find(alert => alert.active !== false && !alert.notificationSuppressed);
@@ -356,7 +364,10 @@ function App() {
     key: `dashboard|${rangeHours}`,
     enabled: page === "dashboard" && setupStatus?.completed !== false,
     load: () => api.request<Dashboard>(`/api/v1/dashboard?${rangeQuery(rangeHours)}`),
-    onSuccess: maybeAutoplayDashboard
+    onSuccess: nextDashboard => {
+      setActiveAlertCount(countActiveAlerts(nextDashboard.alerts));
+      maybeAutoplayDashboard(nextDashboard);
+    }
   });
   const categoryResource = usePersistentRefresh({
     key: categoryPageKey(page, rangeHours, debouncedCategorySearch),
@@ -394,6 +405,12 @@ function App() {
     else if (pageRef.current === "system") setSystemRefreshSignal(current => current + 1);
     else if (pageRef.current === "settings" && !settingsDirty) await settingsResource.refresh();
   }, [categoryResource.refresh, dashboardResource.refresh, settingsDirty, settingsResource.refresh, setupResource.refresh]);
+  const refreshDashboardAfterMutation = useCallback(async () => {
+    await Promise.all([
+      dashboardResource.refreshFresh(),
+      summaryResource.refreshFresh()
+    ]);
+  }, [dashboardResource.refreshFresh, summaryResource.refreshFresh]);
 
   useEffect(() => { pageRef.current = page; }, [page]);
   useEffect(() => { rangeHoursRef.current = rangeHours; }, [rangeHours]);
@@ -887,7 +904,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
         {setupStatus?.completed && page === "dashboard" && <div className="refresh-page-shell">
           <RefreshNotice state={dashboardResource.state} hasData={Boolean(dashboard)} onRetry={dashboardResource.refresh} />
-          <DashboardView data={dashboard} rangeHours={rangeHours} reload={load} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={currentSearch} onSearchChange={value => setPageSearches(searches => ({ ...searches, [page]: value }))} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />
+          <DashboardView data={dashboard} rangeHours={rangeHours} reload={refreshDashboardAfterMutation} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={currentSearch} onSearchChange={value => setPageSearches(searches => ({ ...searches, [page]: value }))} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />
         </div>}
         {setupStatus?.completed && categories.includes(page as any) && <div className="refresh-page-shell">
           <RefreshNotice state={categoryResource.state} hasData={Boolean(category)} onRetry={categoryResource.refresh} />
@@ -916,7 +933,7 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
             void refreshSharedStatus();
         }} /></div>}
         {setupStatus?.completed && page === "system" && <div className="refresh-page-shell">
-          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={refreshSharedStatus} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onLiveResources={updateLiveCpuSnapshot} onOpenSetup={goSetup} onOpenIncident={incidentId => {
+          <SystemView rangeHours={rangeHours} engineHealth={engineHealth} refreshSharedStatus={refreshSharedStatus} refreshSignal={systemRefreshSignal} targetTab={systemTargetTab} clearTargetTab={() => setSystemTargetTab(null)} onLiveResources={updateLiveCpuSnapshot} onSystemProblemCount={setSystemProblemCount} onOpenSetup={goSetup} onOpenIncident={incidentId => {
             setFocusedIncidentId(incidentId);
             setFocusedHashTarget(`incident-${incidentId}`);
             setDashboardMode("incidents");
@@ -4339,7 +4356,7 @@ function SystemSectionHeader({ title, description, meta, actions }: { title: str
 
 type RfChartCategory = "all" | "decode" | "activity" | "events";
 
-function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSignal, targetTab, clearTargetTab, onLiveResources, onOpenSetup, onOpenTalkgroup, onOpenIncident }: { rangeHours: number; engineHealth: EngineHealth | null; refreshSharedStatus: () => Promise<unknown>; refreshSignal: number; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onLiveResources?: (sample: SystemRuntimeResourceSample) => void; onOpenSetup?: (section?: string) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void; onOpenIncident: (incidentId: number) => void }) {
+function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSignal, targetTab, clearTargetTab, onLiveResources, onSystemProblemCount, onOpenSetup, onOpenTalkgroup, onOpenIncident }: { rangeHours: number; engineHealth: EngineHealth | null; refreshSharedStatus: () => Promise<unknown>; refreshSignal: number; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onLiveResources?: (sample: SystemRuntimeResourceSample) => void; onSystemProblemCount?: (count: number) => void; onOpenSetup?: (section?: string) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void; onOpenIncident: (incidentId: number) => void }) {
   const [topTab, setTopTabState] = useState<SystemTopTab>(() => normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
   const [trTab, setTrTabState] = useState<SystemTrTab>(() => {
     const saved = localStorage.getItem("pizzawave-system-tr-tab");
@@ -4406,7 +4423,8 @@ function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSign
   const recommendationsResource = usePersistentRefresh({
     key: "system-health",
     enabled: topTab === "recommendations",
-    load: () => api.request<SystemRecommendations>("/api/v1/system/recommendations")
+    load: () => api.request<SystemRecommendations>("/api/v1/system/recommendations"),
+    onSuccess: recommendations => onSystemProblemCount?.(countActiveSystemProblems(recommendations))
   });
   const servicesRuntimeResource = usePersistentRefresh({
     key: "system-services-runtime",

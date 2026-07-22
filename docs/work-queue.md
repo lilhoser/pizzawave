@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-19 22:20 EDT
+Last reconciled: 2026-07-22 09:15 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,33 +10,151 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; passive RF emitters active; live RF controls verified |
-| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; Cleveland retune-only state verified as degraded, not critical |
+| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorder and shadow restored |
+| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorders and shadows restored |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
-telemetry emitters; RPI's TR emitter is based on its exact prior `766a553`
-revision rather than the newer upstream base used by OT.
+telemetry emitters, bounded initial-collapse flight recorder, and passive
+fixed-primary shadow decoder described below; RPI's TR build remains based on
+its exact prior `766a553` lineage rather than the newer upstream base used by
+OT.
 
 Cross-repository source state:
 
 - callstream RF sampling/reacquisition telemetry is merged and pushed on
   callstream `main` at `1cdd5c4`; its temporary feature branch is retired;
-- upstream Trunk Recorder `master` remains untouched at `382f5f2`;
-- the Trunk Recorder telemetry and retune-grace candidates are consolidated in
-  one clean local branch/worktree, `codex/rf-stabilization` at `602a637` under
-  `C:\projects\trunk-recorder-rf-stabilization`. It is intentionally not merged
-  into upstream `master` or deployed; hardening and upstream/fork disposition
-  belong to the next RF task.
+- local and remote Trunk Recorder `master` remain aligned and untouched at
+  `382f5f2`; current-lineage telemetry, flight-recorder, and passive-shadow
+  work remains isolated on `codex/initial-collapse-capture-live` at `313d247`
+  for maintainer review and possible upstream submission;
+- the exact older RPI compatibility candidate remains on
+  `codex/initial-collapse-capture-rpi` at `393a0732`;
+- the retune-grace experiment remains separately isolated on
+  `codex/rf-stabilization` at `602a637`.
+- the exact-lineage RPI control-demodulator candidate remains isolated on
+  `codex/rpi-control-fsk4` at `4bb829fd`; it is not merged to Trunk Recorder
+  `master`.
 
 ## Active
 
-- None. RF stabilization is the next implementation priority. The incident
-  pipeline redesign remains independently owned by its existing session and
-  must not be merged or deployed as part of RF work.
+- Initial-collapse flight recording and paired-wide analysis are complete. RPI
+  captured a shadow-instrumented
+  event immediately after activation: both decoders collapsed together at
+  onset, but the fixed-primary shadow recovered to 22-36 frames/s while the
+  live decoder cycled alternates. OT subsequently captured North Bradley: both
+  decoders again collapsed together at onset, but recovery diverged in the
+  opposite direction, with live recovering to 36 while shadow remained at 1.
+  Hamilton stayed healthy throughout. A paired 800 kHz OT capture now shows
+  North Bradley's collapse was channel selective: outer-band power was stable
+  within 0.14 dB while control-channel energy tracked recovery. A subsequent
+  centered Hamilton pair showed the inverse amplitude behavior: control-channel
+  energy rose about 2 dB into shared decoder failure while the outer spectrum
+  stayed stable. Together these favor channel-local modulation destruction
+  from dynamic simulcast/multipath over a simple fade. OT's two-system wide
+  instrumentation also induced repeated Gardner/source-stall exits and was
+  removed at 22:34 EDT. RPI then captured the same channel-local signature:
+  decode collapsed with only 0.13 dB raw wide-power, 0.24 dB
+  control-channel/outer-band, and 0.16 dB outer-floor differences. The common
+  failure is modulation quality, with dynamic simulcast/multipath the leading
+  cause and exact co-channel interference the remaining alternative. Both
+  hosts have been restored to their pre-wide instrumentation. A repeatable
+  offline IQ classifier now reproduces Raymond's channel-local signature. A
+  new natural Raymond event at 08:11 EDT enabled an immediate gain-recovery
+  test: an unchanged restart and LNA gain reductions from 15 to 12 and 9 all
+  failed to restore normal decode. A separate prevention test then started
+  gain 12 from a strong 13-26 frame/s baseline. Decode immediately fell to
+  2-4 frame/s, cycled alternates, spent long intervals at zero, and reached
+  only 7 frame/s at the five-minute boundary. Gain 15 was restored and the new
+  process immediately sustained 9-30 frame/s on the primary. Gain 12 is too
+  aggressive for this site. Gain 14 then passed a strong 11-32 frame/s healthy
+  gate but admitted another natural collapse about 17 minutes later. That
+  event reproduced shared live/shadow failure with only a 0.02 dB onset-power
+  change; live spent 56 post-trigger samples at 0-1 frame/s and never sustained
+  three samples at or above 10 in the retained minute. Gain 15 is restored and
+  verified at 26-40 frame/s. Gain reduction did not prevent or weaken the
+  collapse, so gain testing is complete. The retained-IQ demodulator comparison
+  is now complete. Across three captures and three runs each, the existing FSK4
+  control decoder beat stock CQPSK before and after every trigger while always
+  decoding the correct site identity. Halving the CQPSK Gardner timing gain
+  also improved every capture, but still trailed FSK4 substantially. This
+  establishes a decoder-tolerance contributor on top of the real channel-local
+  RF impairment. The next bounded test is control-channel-only FSK4 on RPI;
+  the system-level modulation setting cannot be used because it would also
+  switch traffic recorders and reject Phase 2 calls. The isolated TR candidate
+  now provides that separation and passed all three retained-IQ replays with
+  traffic QPSK/control FSK4 logged independently and FSK4 yields reproduced.
+  The first two live builds from the wrong newer TR lineage exposed callstream
+  plugin ABI mismatches and were immediately rolled back; they are deployment
+  failures, not RF results. The final candidate was rebuilt from the exact RPI
+  source lineage, passed an installed-plugin offline replay, and was activated
+  at 11:40:15 EDT with Raymond traffic QPSK/control FSK4. The live gate passed:
+  Raymond held 21-42 frame/s on the primary, TR stayed at zero restarts,
+  PizzaWave remained current after one transient stale reading, and a real
+  Phase 2 recorder started with QPSK enabled. The candidate was held through
+  one natural Raymond collapse and compared with the three CQPSK-control
+  captures. That event is now complete.
+  It contained a real 4.93 dB narrow-channel power loss with clean samples.
+  Live FSK4 recovered in about ten seconds with only three transitions, much
+  faster than the older CQPSK-control events, but a fixed-primary same-IQ
+  replay did not attribute that improvement to FSK4: CQPSK produced 2,217
+  messages versus FSK4's 2,161 with identical post-trigger deep-window counts.
+  The exact pre-test CQPSK binary/config is restored and verified healthy.
+  FSK4 helps some retained impairment shapes but is not a general fix. The next
+  bounded discriminator is the existing BPF-800-M on RPI's Raymond RF path.
+  OT uses
+  RTL-SDR receivers behind an MCA208M while RPI uses Airspy receivers without
+  that multicoupler;
+  this hardware difference further weakens a single receiver/front-end-overload
+  explanation. See
+  [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
+  The replay procedure and exact results are in
+  [field-tests/2026-07-21-p25-control-demodulator-replay.md](field-tests/2026-07-21-p25-control-demodulator-replay.md).
+  A July 22 follow-up found a concrete exact-frequency alternative to generic
+  simulcast multipath: MSWIN West, approximately 79.7 miles from Raymond, lists
+  all four of Raymond's control-capable frequencies and uses NAC `2A2` versus
+  Raymond's `2A4`. Ashcroft also reuses the set at longer range. An
+  identity-unfiltered replay of severe capture `1784687418024` reproduced the
+  0-4 frame/sec failure and decoded only Raymond; that rejects a second strong,
+  decodable control channel but not a weaker signal corrupting Raymond frames.
+  The July 22 KJAN soundings weaken a simple stable-duct explanation: 00Z near
+  onset lacked a low-level inversion, while 12Z during recovery had a sharp
+  shallow inversion. PizzaWave telemetry summaries now derive confirmed
+  collapse episodes and retain decoder quality at both onset and recovery from
+  the existing sample stream. RPI remained on its exact gain-15 CQPSK baseline
+  throughout this read-only work.
+  The incident pipeline redesign remains independently owned by its existing
+  session and must not be merged or deployed as part of RF work.
 
 ## Recently Completed
 
+- The first natural initial-collapse IQ capture is complete on RPI Raymond.
+  Live decode reached 0 msg/s on the unchanged 773.781250 MHz primary while a
+  fresh replay of the exact trigger-aligned samples fell only to 8 msg/s and
+  immediately recovered. IQ power fell approximately 3.45 dB at the same edge
+  while spectral centroid remained stable. This establishes a real modest RF
+  dip amplified into a full live-decoder collapse; it rejects both total RF
+  loss and a pure counter artifact. The recorder remains active to obtain OT
+  evidence.
+- Deterministic P25 retune-state replay is complete and recorded in
+  [field-tests/2026-07-20-p25-retune-state-replay.md](field-tests/2026-07-20-p25-retune-state-replay.md).
+  Five fixed-sample runs per decoder variant forced three noise-only Raymond
+  channel visits before returning to the captured primary. Both persistent
+  and fully reconstructed P25 graphs decoded the correct site and system in
+  5/5 runs. Mean primary rates were 20.00 and 19.65 msg/s, respectively, with
+  effectively identical acquisition latency. Full graph reset is not a
+  supported stabilization fix and was not deployed. Durable configs, logs,
+  binaries, hashes, source, and machine-readable analysis remain on RPI under
+  `/var/lib/pizzawave/rf-surveys/manual/20260720T-rpi-raymond-demod-state-replay`.
+- The supervised source-centering A-B-A on OT and RPI is complete and recorded
+  in
+  [field-tests/2026-07-20-source-centering-aba.md](field-tests/2026-07-20-source-centering-aba.md).
+  Candidate centers were installed for one exact 30-minute phase, followed by
+  an exact 30-minute restored-center confirmation. Raymond worsened under the
+  candidate and was strongest after restoration. North Bradley's higher
+  candidate average coincided with improvement on unchanged Hamilton and the
+  candidate did not prevent short fades. Original configs were restored and
+  hash-verified; both TR services and PizzaWave health checks finished clean.
 - Thread source-control reconciliation confirmed that all Package 5-11,
   System, recovery, temporal-analysis, and RF work from this thread is present
   on `main`. Merged, patch-equivalent, or explicitly superseded local package
@@ -87,9 +205,31 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
-   - add supervised Setup validation of every alternate control channel;
-   - harden and test Trunk Recorder retune grace, then propose it upstream;
-   - repeat the controlled OT source-centering experiment.
+   - retain OT North Bradley capture `1784584105012` as the completed cross-
+     geography discriminator: its IQ power/CNR changed only about 0.4/0.5 dB,
+     sample continuity was clean, and a fresh replay reproduced the low decode;
+     Hamilton remained healthy on the same host;
+   - retain Raymond capture `1784582765019` and its 78-sample live/shadow
+     timeline as the first result; isolated replay independently reproduced
+     repeated decode losses in the captured IQ, while live alternate-channel
+     hopping amplified the production outage after the primary recovered;
+   - keep current-lineage and exact RPI compatibility candidates isolated for
+     maintainer review; their paired-wide branches are no longer deployed;
+   - retain the completed same-IQ demodulator result: FSK4 beat stock and
+     half-timing CQPSK on all three Raymond captures, including every healthy
+     pre-trigger portion and every collapsed post-trigger portion;
+   - retain the completed control-only FSK4 result: it was operationally safe
+     but the same-IQ replay did not reproduce a material advantage on its live
+     event, so the exact CQPSK baseline was restored;
+   - on the next Raymond collapse, inspect near-valid P25 network-ID words for
+     Raymond NAC `2A4`, West NAC `2A2`, and Ashcroft NAC `2A0`, including words
+     that do not survive full-message CRC; independently confirm West's active
+     control channel if an MSWIN status source is available;
+   - keep the available BPF-800-M as a later out-of-band-overload check, not the
+     next root-cause test: it cannot reject an in-band P25 transmitter on the
+     exact same frequency. Do not add an antenna or another live wide recorder;
+   - keep alternate-channel validation and Trunk Recorder retune grace as
+     secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and
    experimental branches. Another session owns this work; it must not be mixed
    into RF stabilization.

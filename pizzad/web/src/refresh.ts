@@ -134,6 +134,12 @@ export function usePersistentRefresh<T>({ key, enabled, load, onSuccess }: Persi
   }, [clearRetry]);
 
   const refresh = useCallback(() => run(keyRef.current), [run]);
+  const refreshFresh = useCallback(async () => {
+    const inFlight = inFlightRef.current;
+    if (inFlight?.key === keyRef.current)
+      await inFlight.promise;
+    return run(keyRef.current);
+  }, [run]);
   const setData = useCallback((value: T) => {
     const now = Date.now();
     dataRef.current = value;
@@ -175,5 +181,5 @@ export function usePersistentRefresh<T>({ key, enabled, load, onSuccess }: Persi
 
   useEffect(() => () => clearRetry(), [clearRetry]);
 
-  return { data, state, refresh, setData };
+  return { data, state, refresh, refreshFresh, setData };
 }

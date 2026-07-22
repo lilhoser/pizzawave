@@ -3517,6 +3517,10 @@ public sealed partial class EngineDatabase
 
     public async Task<RfTelemetrySummaryDto> BuildRfTelemetrySummaryAsync(long start, long end, CancellationToken ct)
     {
+        const double collapseMaxDecodeRate = 3;
+        const int collapseSamplesRequired = 3;
+        const double recoveryMinDecodeRate = 10;
+        const int recoverySamplesRequired = 3;
         var duration = Math.Max(1, end - start);
         var bucketSeconds = duration <= 6 * 3600 ? 60
             : duration <= 24 * 3600 ? 300
@@ -3600,8 +3604,145 @@ public sealed partial class EngineDatabase
                 row.LowDecodeSeconds,
                 row.Success))
             .ToList();
-        return new RfTelemetrySummaryDto(start, end, bucketSeconds, sites, transitions);
+
+        var episodeSamples = new List<RfEpisodeSample>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT timestamp_utc, system_short_name, control_channel_hz,
+                       decode_rate, frequency_error_hz
+                FROM rf_telemetry_events
+                WHERE event_type='rf_sample'
+                  AND unixepoch(timestamp_utc) >= $start
+                  AND unixepoch(timestamp_utc) <= $end
+                ORDER BY system_short_name, timestamp_utc;
+                """;
+            Add(command, "$start", start);
+            Add(command, "$end", end);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                episodeSamples.Add(new RfEpisodeSample(
+                    DateTime.Parse(reader.GetString(0), null, DateTimeStyles.RoundtripKind),
+                    reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetDouble(2),
+                    reader.GetDouble(3),
+                    reader.IsDBNull(4) ? null : reader.GetDouble(4)));
+            }
+        }
+        var episodes = BuildRfTelemetryEpisodes(
+            episodeSamples,
+            collapseMaxDecodeRate,
+            collapseSamplesRequired,
+            recoveryMinDecodeRate,
+            recoverySamplesRequired);
+        return new RfTelemetrySummaryDto(
+            start,
+            end,
+            bucketSeconds,
+            sites,
+            transitions,
+            collapseMaxDecodeRate,
+            collapseSamplesRequired,
+            recoveryMinDecodeRate,
+            recoverySamplesRequired,
+            episodes);
     }
+
+    private static IReadOnlyList<RfTelemetryEpisodeDto> BuildRfTelemetryEpisodes(
+        IReadOnlyList<RfEpisodeSample> samples,
+        double collapseMaxDecodeRate,
+        int collapseSamplesRequired,
+        double recoveryMinDecodeRate,
+        int recoverySamplesRequired)
+    {
+        var episodes = new List<RfTelemetryEpisodeDto>();
+        foreach (var group in samples.GroupBy(row => row.SystemShortName, StringComparer.OrdinalIgnoreCase))
+        {
+            var ordered = group.OrderBy(row => row.TimestampUtc).ToList();
+            var pendingCollapse = new List<RfEpisodeSample>();
+            var active = new List<RfEpisodeSample>();
+            var pendingRecovery = new List<RfEpisodeSample>();
+            var startedBeforeWindow = false;
+
+            foreach (var sample in ordered)
+            {
+                if (active.Count == 0)
+                {
+                    if (sample.DecodeRate <= collapseMaxDecodeRate)
+                    {
+                        pendingCollapse.Add(sample);
+                        if (pendingCollapse.Count == collapseSamplesRequired)
+                        {
+                            startedBeforeWindow = pendingCollapse[0] == ordered[0];
+                            active.AddRange(pendingCollapse);
+                            pendingCollapse.Clear();
+                        }
+                    }
+                    else
+                    {
+                        pendingCollapse.Clear();
+                    }
+                    continue;
+                }
+
+                active.Add(sample);
+                if (sample.DecodeRate >= recoveryMinDecodeRate)
+                {
+                    pendingRecovery.Add(sample);
+                    if (pendingRecovery.Count == recoverySamplesRequired)
+                    {
+                        episodes.Add(BuildRfTelemetryEpisode(active, pendingRecovery[0], startedBeforeWindow));
+                        active.Clear();
+                        pendingRecovery.Clear();
+                    }
+                }
+                else
+                {
+                    pendingRecovery.Clear();
+                }
+            }
+
+            if (active.Count > 0)
+                episodes.Add(BuildRfTelemetryEpisode(active, null, startedBeforeWindow));
+        }
+        return episodes.OrderBy(row => row.OnsetUtc).ToList();
+    }
+
+    private static RfTelemetryEpisodeDto BuildRfTelemetryEpisode(
+        IReadOnlyList<RfEpisodeSample> samples,
+        RfEpisodeSample? recovery,
+        bool startedBeforeWindow)
+    {
+        var onset = samples[0];
+        var evidenceEnd = recovery?.TimestampUtc ?? samples[^1].TimestampUtc;
+        var impairmentSamples = recovery is null
+            ? samples
+            : samples.TakeWhile(row => row.TimestampUtc <= recovery.TimestampUtc).ToList();
+        return new RfTelemetryEpisodeDto(
+            onset.SystemShortName,
+            onset.TimestampUtc,
+            onset.DecodeRate,
+            onset.ControlChannelHz,
+            onset.FrequencyErrorHz,
+            recovery?.TimestampUtc,
+            recovery?.DecodeRate,
+            recovery?.ControlChannelHz,
+            recovery?.FrequencyErrorHz,
+            impairmentSamples.Min(row => row.DecodeRate),
+            impairmentSamples.Average(row => row.DecodeRate),
+            impairmentSamples.Count,
+            Math.Max(0, (evidenceEnd - onset.TimestampUtc).TotalSeconds),
+            startedBeforeWindow,
+            recovery is not null);
+    }
+
+    private sealed record RfEpisodeSample(
+        DateTime TimestampUtc,
+        string SystemShortName,
+        double? ControlChannelHz,
+        double DecodeRate,
+        double? FrequencyErrorHz);
 
     private static RfTelemetryEventDto ReadRfTelemetryEvent(SqliteDataReader reader) => new()
     {
