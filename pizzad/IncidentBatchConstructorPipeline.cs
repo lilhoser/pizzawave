@@ -122,6 +122,7 @@ public static class IncidentBatchContract
     public const int MaximumObservationsPerCandidate = 12;
     public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
     public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-summary-v1";
+    public const string OldestUnseenCursorConfigurationToken = "cursor=oldest-unseen-v1;cadence=fixed-start-v1";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,

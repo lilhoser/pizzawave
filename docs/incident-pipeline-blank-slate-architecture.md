@@ -924,6 +924,28 @@ its SHA-256 is
 Immediately after deployment, production incident analysis was current by 14
 minutes and overall, AI-completion, and embedding health were all `ok`.
 
+Run H's first batch considered 19 observations in 85.231 seconds and returned
+three exact-source full events: reported shots near a named entrance, a
+high-speed vehicle, and a suspected theft. It returned no provisional event.
+The evidence-only projected summaries remained limited to the accepted exact
+quotes. Inspection still found omitted calls that plausibly continued the
+shots/building response, so the new type does not by itself resolve same-batch
+relationship recall.
+
+That inspection also exposed a content-independent call-loss defect in the
+runtime scheduler. When more than the configured batch size arrived, the
+service selected the newest calls and advanced its cursor to the newest ID,
+permanently skipping the older overflow. It also waited the full configured
+interval after generation completed, so a 300-second interval plus 85–123
+seconds of model time produced a roughly 6.5–7-minute actual cadence. The
+runtime now selects the oldest unseen calls in ascending order and advances
+only through the processed batch. Its delay is measured from batch start, with
+a 30-second safety rest if generation exceeds the interval. The versioned
+configuration tokens are `cursor=oldest-unseen-v1` and
+`cadence=fixed-start-v1`. This provides bounded, exactly-once cursor coverage
+for unseen calls that remain inside the configured lookback while improving
+capacity without parallel model requests.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

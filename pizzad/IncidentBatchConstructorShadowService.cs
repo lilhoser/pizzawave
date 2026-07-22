@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using System.Diagnostics;
 
 namespace pizzad;
 
@@ -32,6 +33,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
                 await DelayAsync(TimeSpan.FromSeconds(30), stoppingToken);
                 continue;
             }
+            var iterationStarted = Stopwatch.GetTimestamp();
             try
             {
                 await RunOnceAsync(stoppingToken);
@@ -44,7 +46,9 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             {
                 _logger.LogWarning(ex, "Incident batch constructor shadow failed; production incident state was not changed");
             }
-            await DelayAsync(TimeSpan.FromSeconds(_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds), stoppingToken);
+            var interval = TimeSpan.FromSeconds(_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds);
+            var remaining = interval - Stopwatch.GetElapsedTime(iterationStarted);
+            await DelayAsync(remaining > TimeSpan.Zero ? remaining : TimeSpan.FromSeconds(30), stoppingToken);
         }
     }
 
@@ -78,12 +82,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         }
 
         var batchSize = _config.AiInsights.IncidentBatchConstructorShadowBatchSize;
-        var newCalls = calls
-            .Where(call => call.Id > _lastSampledCallId.Value)
-            .OrderByDescending(call => call.Id)
-            .Take(batchSize)
-            .OrderBy(call => call.Id)
-            .ToList();
+        var newCalls = IncidentBatchLiveCursor.SelectNext(calls, _lastSampledCallId.Value, batchSize);
         if (newCalls.Count == 0)
             return;
         var priorStored = await _database.GetLatestIncidentBatchProjectionAsync(runId, ct);
@@ -155,13 +154,23 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
+}
+
+public static class IncidentBatchLiveCursor
+{
+    public static IReadOnlyList<EngineCall> SelectNext(IReadOnlyList<EngineCall> eligibleCalls, long lastSampledCallId, int batchSize) =>
+        eligibleCalls
+            .Where(call => call.Id > lastSampledCallId)
+            .OrderBy(call => call.Id)
+            .Take(Math.Max(1, batchSize))
+            .ToList();
 }
 
 public sealed record IncidentBatchLiveSelection(

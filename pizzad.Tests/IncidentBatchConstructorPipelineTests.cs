@@ -288,6 +288,19 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void LiveCursorProcessesOldestUnseenCallsWithoutSkippingOverflow()
+    {
+        var calls = Enumerable.Range(1, 30).Select(id => Call(id, $"Call {id}", 1000 + id)).ToList();
+
+        var first = IncidentBatchLiveCursor.SelectNext(calls, 0, 24);
+        var second = IncidentBatchLiveCursor.SelectNext(calls, first[^1].Id, 24);
+
+        Assert.Equal(Enumerable.Range(1, 24).Select(id => (long)id), first.Select(call => call.Id));
+        Assert.Equal(Enumerable.Range(25, 6).Select(id => (long)id), second.Select(call => call.Id));
+        Assert.Equal(30, first.Concat(second).Select(call => call.Id).Distinct().Count());
+    }
+
+    [Fact]
     public async Task MultiCallHostageProposalIsNotSubjectToStaticSemanticAdmission()
     {
         var bundle = Bundle(
