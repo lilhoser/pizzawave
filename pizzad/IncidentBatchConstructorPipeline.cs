@@ -294,16 +294,16 @@ public static class IncidentBatchContract
                 sources,
                 entry.Candidates,
                 entry.RelationshipProposal);
-            var confirmations = acceptedRelationships
-                .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
-                .ToList();
+            var relationshipsToVerify = IncidentBatchConfirmationContract.VerifiesAllRelationships(entry.Execution.ConfigurationIdentity)
+                ? acceptedRelationships
+                : acceptedRelationships.Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership).ToList();
             if (entry.ConfirmationProposal is not null)
             {
                 var confirmationValidation = IncidentBatchConfirmationContract.ValidateProposal(
                     entry.Bundle,
                     sources,
                     entry.Candidates,
-                    confirmations,
+                    relationshipsToVerify,
                     entry.ConfirmationProposal);
                 if (!(entry.ConfirmationProposalValidationErrors ?? []).SequenceEqual(confirmationValidation.Errors, StringComparer.Ordinal))
                     errors.Add("batch ledger confirmation validation errors do not match deterministic validation");
@@ -840,21 +840,19 @@ public sealed class IncidentBatchCoordinator
             if (_confirmationVerifier is not null)
             {
                 var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(bundle, sources, candidates, relationshipProposal);
-                var confirmations = acceptedRelationships
-                    .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
-                    .ToList();
+                var relationshipsToVerify = acceptedRelationships;
                 var confirmationTimer = Stopwatch.StartNew();
                 var confirmationError = string.Empty;
                 try
                 {
-                    confirmationProposal = confirmations.Count == 0
+                    confirmationProposal = relationshipsToVerify.Count == 0
                         ? new IncidentBatchConfirmationProposal(
                             $"application:no-confirmation-input:{request.LedgerEntryId}",
                             now,
                             "application",
                             IncidentBatchConfirmationPrompt.PromptIdentity,
                             [])
-                        : await _confirmationVerifier.VerifyAsync(bundle, sources, candidates, confirmations, ct);
+                        : await _confirmationVerifier.VerifyAsync(bundle, sources, candidates, relationshipsToVerify, ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
@@ -874,7 +872,7 @@ public sealed class IncidentBatchCoordinator
                     bundle,
                     sources,
                     candidates,
-                    confirmations,
+                    relationshipsToVerify,
                     confirmationProposal).Errors;
                 confirmationExecution = new IncidentBatchConfirmationExecutionContext(confirmationTimer.ElapsedMilliseconds, confirmationError);
             }

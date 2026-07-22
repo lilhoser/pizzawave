@@ -224,22 +224,23 @@ public static class IncidentBatchRelationshipContract
         if (!IncidentBatchConfirmationContract.UsesIndependentVerifier(entry.Execution.ConfigurationIdentity))
             return accepted;
 
-        var provisional = accepted
-            .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation)
-            .ToList();
         if (entry.ConfirmationProposal is null)
-            return provisional;
-        var confirmations = accepted
-            .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
-            .ToList();
+            return [];
+        var verifiesAll = IncidentBatchConfirmationContract.VerifiesAllRelationships(entry.Execution.ConfigurationIdentity);
+        var verifiedInput = verifiesAll
+            ? accepted
+            : accepted.Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership).ToList();
         var verifiedPairs = IncidentBatchConfirmationContract.AcceptedVerifiedPairs(
             entry.Bundle,
             sources,
             entry.Candidates,
-            confirmations,
-            entry.ConfirmationProposal);
-        provisional.AddRange(confirmations.Where(item => verifiedPairs.Contains(IncidentBatchConfirmationContract.RelationshipKey(item))));
-        return provisional;
+            verifiedInput,
+            entry.ConfirmationProposal,
+            IncidentBatchConfirmationContract.UsesPerCitationEvidence(entry.Execution.ConfigurationIdentity));
+        return accepted
+            .Where(item => (item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation && !verifiesAll) ||
+                           verifiedPairs.Contains(IncidentBatchConfirmationContract.RelationshipKey(item)))
+            .ToList();
     }
 
     private static void ValidateCitations(
