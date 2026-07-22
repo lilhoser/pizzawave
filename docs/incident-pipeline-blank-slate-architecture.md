@@ -1322,6 +1322,17 @@ group to several candidate events. Invalid or failed relationship output leaves
 the constructed Review state unchanged. Legacy one-pass ledger rows remain
 readable. This implementation is not a production incident writer.
 
+The source-isolated implementation was deployed to OT only in clean shadow run
+`ot-batch-constructor-shadow-20260722-r` on 2026-07-22. The service established
+a no-backfill startup fence after call `1427315`. The prior configuration is
+preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v12r-20260722T084300Z.bak`;
+its SHA-256 is
+`92409fac774b02820ed1e7cb4e6aa93a2831e3e469c76d72a9baf52a34ab224a`.
+Immediately after restart, overall health, live radio, AI completion, and
+embedding health were `ok`, and production incident analysis was current by 15
+minutes. Run R remains shadow-only and RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
