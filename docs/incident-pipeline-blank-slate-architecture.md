@@ -1527,6 +1527,17 @@ cannot merge membership; candidate-free Review groups are likewise unchanged.
 This concentrates the additional inference cost on rare merge proposals and
 adds no phrase, address, incident-type, category, talkgroup, or score rule.
 
+Independent-confirmation commit `a1cd46f` began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-x`, fenced after call `1428419`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13x-20260722T112840Z.bak`;
+its SHA-256 is
+`326d835669d61a57f7845fb720336a40c807218341ffa3bf6294bd9b4915eeac`.
+The configuration replacement preserved the service-required
+`root:pizzawave` ownership and mode `0660`. Post-restart service, live radio,
+production incident freshness, AI completion, and embeddings were all `ok`.
+No production incident rows were changed and RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
