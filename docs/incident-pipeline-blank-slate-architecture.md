@@ -730,6 +730,13 @@ explicitly forbids ellipses, omitted intervening words, normalized wording, or
 joined spans. These are general evidence and relevance instructions, not a
 content-category allowlist.
 
+Prompt v3 began in clean OT run `ot-batch-constructor-shadow-20260722-d`
+with the same 24-observation, 300-second cadence and startup fence at call
+`1424985`. The prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v3d-20260722T033426Z.bak`;
+its SHA-256 is
+`85522d72b1933729b086712c7c0218459686194b2674d9ac9900b7093f04a275`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
