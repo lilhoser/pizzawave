@@ -1092,6 +1092,16 @@ Immediately after deployment, production incident analysis was current by 18
 minutes and overall, live-radio, AI-completion, and embedding health were all
 `ok`. RPI was not changed.
 
+Run M's first batch considered 21 observations in 108.005 seconds and accepted
+two proposals without a citation error. Three separately cited calls at the
+same address formed one visible chest-pain event. A detailed missing-minor call
+remained a single-observation Review event despite the model returning
+`new_event`. Both projected titles and summaries contain only validated source
+quotes; the model's polished title and summary paraphrases did not pass through
+to projection. At this checkpoint the cursor remained current and
+overall, live-radio, AI-completion, embedding, and incident-analysis health
+were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
