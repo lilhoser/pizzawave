@@ -283,11 +283,13 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
     private static IReadOnlyList<IncidentEventStateTranscriptCitation> ResolveCitations(
         IEnumerable<BatchCitationResponse> citations,
         IReadOnlyDictionary<string, string> transcripts) =>
-        citations.SelectMany(citation => citation.ExactQuotes.Select(quote => new IncidentEventStateTranscriptCitation(
-            citation.TranscriptId,
-            transcripts.TryGetValue(citation.TranscriptId, out var transcript)
-                ? IncidentTranscriptCitationResolver.Resolve(transcript, quote)
-                : quote))).ToList();
+        citations.SelectMany(citation => citation.ExactQuotes.SelectMany(quote =>
+        {
+            var quotes = transcripts.TryGetValue(citation.TranscriptId, out var transcript)
+                ? IncidentTranscriptCitationResolver.ResolveSegments(transcript, quote)
+                : [quote];
+            return quotes.Select(resolved => new IncidentEventStateTranscriptCitation(citation.TranscriptId, resolved));
+        })).ToList();
 
     private sealed record BatchResponse([property: JsonPropertyName("events")] IReadOnlyList<BatchEventResponse> Events);
     private sealed record BatchEventResponse(

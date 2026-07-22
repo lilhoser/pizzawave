@@ -35,4 +35,27 @@ public sealed class IncidentTranscriptCitationResolverTests
         Assert.Equal(proposed, IncidentTranscriptCitationResolver.Resolve(transcript, proposed));
         Assert.Equal("A 90 year old female", IncidentTranscriptCitationResolver.Resolve(transcript, "A 90 year old female"));
     }
+
+    [Fact]
+    public void ResolveSegments_SeparatesOrderedLiteralPassagesJoinedByEllipsis()
+    {
+        const string transcript = "2321 Lifestyle Way at the Embassy Suisse, radio traffic omitted here. There's going to be a party in the Crown Victoria.";
+
+        var resolved = IncidentTranscriptCitationResolver.ResolveSegments(
+            transcript,
+            "2321 Lifestyle Way at the Embassy Suisse... There’s going to be a party in the Crown Victoria.");
+
+        Assert.Equal(
+            ["2321 Lifestyle Way at the Embassy Suisse", "There's going to be a party in the Crown Victoria."],
+            resolved);
+    }
+
+    [Fact]
+    public void ResolveSegments_FailsClosedWhenAnyOmittedSpanSegmentIsNotInSource()
+    {
+        const string transcript = "2321 Lifestyle Way at the Embassy Suisse. The vehicle was empty.";
+        const string proposed = "2321 Lifestyle Way at the Embassy Suisse... A patient was in the vehicle.";
+
+        Assert.Equal([proposed], IncidentTranscriptCitationResolver.ResolveSegments(transcript, proposed));
+    }
 }
