@@ -324,6 +324,32 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void LiveSelectionKeepsTwoRecentReviewEventsBeforeRetrievalFill()
+    {
+        var olderReviewCall = Call(10, "Vehicle stopped on the shoulder with flashers.", 1000);
+        var newerReviewCall = Call(11, "Medical transport is identifying the patient.", 1010);
+        var retrievedCall = Call(12, "Embedding-retrieved unrelated source.", 1020);
+        var newCall = Call(13, "Check whether that passenger car is involved.", 1030);
+        var prior = PriorProjection(
+            new IncidentBatchProjectionEvent("projection:event:older-review", ["call:10"], "Vehicle", "Vehicle", false, true, ["ledger:prior"]),
+            new IncidentBatchProjectionEvent("projection:event:newer-review", ["call:11"], "Medical", "Medical", false, true, ["ledger:prior"]),
+            new IncidentBatchProjectionEvent("projection:event:retrieved", ["call:12"], string.Empty, string.Empty, false, false, ["ledger:prior"]));
+
+        var selection = IncidentBatchLiveSelection.Build(
+            [newCall],
+            [olderReviewCall, newerReviewCall, retrievedCall, newCall],
+            [new VectorSearchMatchDto(12, 0.9, "similar")],
+            prior,
+            4,
+            Now);
+
+        Assert.Equal(3, selection.Candidates.Count);
+        Assert.Equal("projection:event:newer-review", selection.Candidates[0].ProjectionEventId);
+        Assert.Equal("projection:event:older-review", selection.Candidates[1].ProjectionEventId);
+        Assert.Contains(selection.Candidates, item => item.ProjectionEventId == "projection:event:retrieved");
+    }
+
+    [Fact]
     public void LiveCursorProcessesOldestUnseenCallsWithoutSkippingOverflow()
     {
         var calls = Enumerable.Range(1, 30).Select(id => Call(id, $"Call {id}", 1000 + id)).ToList();

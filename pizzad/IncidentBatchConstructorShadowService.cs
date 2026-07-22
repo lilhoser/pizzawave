@@ -185,7 +185,7 @@ public sealed record IncidentBatchLiveSelection(
     IReadOnlyList<string> NewObservationIds,
     IReadOnlyList<IncidentBatchCandidate> Candidates)
 {
-    public const string ConfigurationToken = "candidate-context=balanced-state-v1";
+    public const string ConfigurationToken = "candidate-context=balanced-state-v2";
 
     public static IncidentBatchLiveSelection Build(
         IReadOnlyList<EngineCall> newCalls,
@@ -226,7 +226,7 @@ public sealed record IncidentBatchLiveSelection(
             .Concat(eligibleGroups
                 .Where(item => item.Event.OperatorReview)
                 .OrderByDescending(item => item.SourceCalls.Max(source => source.Call.StartTime))
-                .Take(1));
+                .Take(2));
         var groups = stateAnchors
             .Concat(rankedGroups)
             .DistinctBy(item => item.Event.ProjectionEventId, StringComparer.Ordinal)

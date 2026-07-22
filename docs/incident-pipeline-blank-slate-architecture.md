@@ -1357,6 +1357,20 @@ Post-restart service, production incident freshness, AI completion, and
 embedding health were `ok`; live-radio health was still in its normal startup
 warming interval. RPI was not changed.
 
+Run S's second batch verified the complete split under live candidate context:
+the constructor received only 12 new observations, while the later relationship
+stage received four prior candidates, completed in 8.103 seconds, and validly
+abstained. Production incident freshness remained `ok`. Candidate inspection
+also showed that only the single newest Review group was guaranteed context.
+Consequently, a new white-passenger-car check did not receive the immediately
+preceding shoulder-flashers Review group; embedding retrieval selected three
+other groups. The relationship is not proven, but the architecture cannot
+evaluate even a modest association unless both sides are supplied. Balanced
+selection v2 therefore reserves bounded context for the two newest Review
+groups before retrieval fills the remaining candidate slots. Candidate count
+does not increase, and retrieval remains a context-bounding aid rather than
+membership evidence.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
