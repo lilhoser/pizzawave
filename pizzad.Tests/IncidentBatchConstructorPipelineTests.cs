@@ -17,7 +17,7 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
-    public async Task SourceCitedNewEventGroupsObservationsAndBecomesVisible()
+    public async Task SourceCitedNewEventGroupsObservationsForReviewUntilLaterConfirmation()
     {
         var bundle = Bundle(
             Observation("call:1", "transcript:1", "Tree down across the southbound lane."),
@@ -34,7 +34,8 @@ public sealed class IncidentBatchConstructorPipelineTests
         var result = await RunAsync(bundle, ["call:1", "call:2"], [], new FixedProposer(Proposal([item])));
 
         var projected = Assert.Single(result.Projection.Projection.Events);
-        Assert.True(projected.OperatorVisible);
+        Assert.False(projected.OperatorVisible);
+        Assert.True(projected.OperatorReview);
         Assert.Equal(["call:1", "call:2"], projected.ObservationIds);
         Assert.Equal("Tree down … same tree", projected.Title);
     }
@@ -256,6 +257,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.Contains("Critical injuries", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("A radio transmission is not automatically an event", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("underlying real-world condition", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("No candidate-free proposal becomes operator-visible directly", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains($"Return at most {IncidentBatchPrompt.MaximumReturnedEvents} events", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("one short contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Review every new observation", prompt.UserPrompt, StringComparison.Ordinal);
@@ -335,7 +337,7 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
-    public async Task MultiCallHostageProposalIsNotSubjectToStaticSemanticAdmission()
+    public async Task MultiCallHostageProposalIsAcceptedIntoReviewWithoutStaticSemanticAdmission()
     {
         var bundle = Bundle(
             Observation("call:1", "transcript:1", "Caller reports a man holding a woman inside."),
@@ -361,7 +363,8 @@ public sealed class IncidentBatchConstructorPipelineTests
 
         Assert.Empty(result.LedgerEntry.Entry.ProposalValidationErrors);
         var projected = Assert.Single(result.Projection.Projection.Events);
-        Assert.True(projected.OperatorVisible);
+        Assert.False(projected.OperatorVisible);
+        Assert.True(projected.OperatorReview);
         Assert.Equal(4, projected.ObservationIds.Count);
     }
 

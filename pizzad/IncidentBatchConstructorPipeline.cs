@@ -123,14 +123,13 @@ public static class IncidentBatchContract
     public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
     public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-narrative-v2";
     public const string OldestUnseenCursorConfigurationToken = "cursor=oldest-unseen-v1;cadence=fixed-start-v1";
-    public const string CorroboratedVisibilityConfigurationToken = "visibility=corroborated-new-v1";
+    public const string CorroboratedVisibilityConfigurationToken = "visibility=confirmed-membership-v2";
 
-    public static bool IsOperatorVisibleNewEvent(IncidentBatchEventProposal proposal) =>
-        proposal.Disposition == IncidentBatchEventDisposition.NewEvent && proposal.NewObservationIds.Count >= 2;
+    public static bool IsOperatorVisibleNewEvent(IncidentBatchEventProposal _) => false;
 
     public static bool IsOperatorReviewEvent(IncidentBatchEventProposal proposal) =>
         proposal.Disposition == IncidentBatchEventDisposition.ProvisionalEvent ||
-        (proposal.Disposition == IncidentBatchEventDisposition.NewEvent && proposal.NewObservationIds.Count < 2);
+        proposal.Disposition == IncidentBatchEventDisposition.NewEvent;
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,

@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v10";
+    public const string PromptIdentity = "incident-batch-constructor-v11";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
@@ -39,8 +39,9 @@ public static class IncidentBatchPrompt
         user.AppendLine($"Return at most {MaximumReturnedEvents} events. Choose the strongest source-grounded events and leave lower-priority observations unresolved rather than producing an oversized response.");
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
-        user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event.");
+        user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event. A candidate-free new_event remains in Review; it does not become operator-visible until a later confirmed_membership transition or operator action.");
         user.AppendLine("Use provisional_event for a source-grounded candidate-free possible situation that lacks two-observation corroboration or otherwise has meaningful uncertainty. A provisional event is review evidence, not an operator-visible incident. A single-observation event must always be provisional_event.");
+        user.AppendLine("No candidate-free proposal becomes operator-visible directly, regardless of how many observations it groups. Automatic visibility requires a separately evaluated confirmed_membership against prior Review state.");
         user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
         user.AppendLine("A provisional association does not require the two sides to be the same event. Use it when new evidence explicitly refers back to, recurs after, follows up on, or may be confused with a supplied candidate, but should remain a distinct event. Cite both sides; the association is review context and does not merge their observations.");
