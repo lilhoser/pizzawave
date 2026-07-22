@@ -1590,6 +1590,42 @@ Post-restart service, production incident freshness, AI completion, and
 embeddings were all `ok`. No production incident rows were changed and RPI was
 not changed.
 
+Run Z eliminated the earlier response-filling behavior but proved that prompt
+selectivity alone is not an admission boundary. Across its candidate-backed
+batches, the proposer still returned weak provisional pairs based on concurrent
+medical responses, different recovered vehicles, or statements that explicitly
+said no direct operational link existed. Those provisionals bypassed the
+confirmation-only verifier and were therefore admitted. In the same run, the
+proposer found an apparently strong accident continuation at Blue Springs Road
+South and Dockery Lane Southeast. The independent verifier agreed, citing the
+same location and accident-with-injuries description on both sides, but also
+borrowed one extra candidate quote into the source citation list. Deterministic
+validation correctly rejected that citation, but the all-or-nothing decision
+discarded the remaining sufficient exact evidence and the relationship.
+
+Relationship-verification commit `ee3cc62` moves the verifier boundary to every
+proposed relationship. A provisional association is now surfaced only when the
+independent verifier establishes a concrete operational connection; generic
+similarity and explicitly unconnected pairs fail closed. Confirmed membership
+retains its stricter same-event standard. Verification evidence now uses
+configuration-pinned per-citation acceptance: an invalid extra citation is
+discarded independently, while a decision still requires at least one exact
+source citation and one exact candidate citation. The raw proposal, raw
+verification response, and validation errors remain in the ledger and
+Inspector. Legacy runs keep their original confirmation-only and all-or-nothing
+semantics.
+
+That commit began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-aa`, fenced after call `1429989`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13aa-20260722T132555Z.bak`;
+the active configuration SHA-256 is
+`6c8119cfbe0c840a5477fbdc7b8188d511b0b93e12bec410a2918471dac1f51a`.
+The configuration remains owned by `root:pizzawave` with mode `0660`.
+Post-restart service, production incident freshness, AI completion, and
+embeddings were all `ok`. No production incident rows were changed and RPI was
+not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
