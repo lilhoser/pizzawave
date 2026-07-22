@@ -161,6 +161,8 @@ public sealed class EngineConfig
         AiInsights.IncidentRunIntervalSeconds = Math.Clamp(AiInsights.IncidentRunIntervalSeconds, 60, 1800);
         if (AiInsights.IncidentPromptCandidateLimit <= 0) AiInsights.IncidentPromptCandidateLimit = 18;
         AiInsights.IncidentPromptCandidateLimit = Math.Clamp(AiInsights.IncidentPromptCandidateLimit, 6, 40);
+        if (AiInsights.IncidentAnalysisMaximumAgeMinutes <= 0) AiInsights.IncidentAnalysisMaximumAgeMinutes = 60;
+        AiInsights.IncidentAnalysisMaximumAgeMinutes = Math.Clamp(AiInsights.IncidentAnalysisMaximumAgeMinutes, 15, 360);
         if (AiInsights.IncidentV2ShadowCandidateLimit <= 0) AiInsights.IncidentV2ShadowCandidateLimit = 18;
         AiInsights.IncidentV2ShadowCandidateLimit = Math.Clamp(AiInsights.IncidentV2ShadowCandidateLimit, 6, 40);
         if (AiInsights.IncidentV3FrameCandidateLimit <= 0) AiInsights.IncidentV3FrameCandidateLimit = 18;
@@ -402,6 +404,7 @@ public sealed class AiInsightsConfig
     public int MaxQueueDepthForManualSummary { get; set; } = 100;
     public int IncidentRunIntervalSeconds { get; set; } = 300;
     public int IncidentPromptCandidateLimit { get; set; } = 18;
+    public int IncidentAnalysisMaximumAgeMinutes { get; set; } = 60;
     public bool IncidentV2ShadowEnabled { get; set; }
     public int IncidentV2ShadowCandidateLimit { get; set; } = 18;
     public bool IncidentV3FrameShadowEnabled { get; set; }

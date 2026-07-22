@@ -559,8 +559,11 @@ function App() {
   const embeddingIssue = engineHealth?.embeddingHealth?.enabled && !["ok", "disabled", "unknown"].includes(engineHealth.embeddingHealth.status)
     ? (engineHealth.embeddingHealth.lastError || (engineHealth.embeddingHealth.embeddingEndpointOk ? "Embedding pipeline health is degraded." : "Embedding endpoint health check failed."))
     : "";
-  const queueBlockedNotes = [engineHealth?.aiWorkBlockedReason, aiCompletionIssue, embeddingIssue].filter(Boolean);
-  const queueHealth = aiCompletionIssue || embeddingIssue ? "blocked" : queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
+  const incidentAnalysisIssue = engineHealth?.incidentAnalysisQueueHealth && engineHealth.incidentAnalysisQueueHealth.status !== "ok"
+    ? engineHealth.incidentAnalysisQueueHealth.message
+    : "";
+  const queueBlockedNotes = [engineHealth?.aiWorkBlockedReason, aiCompletionIssue, incidentAnalysisIssue, embeddingIssue].filter(Boolean);
+  const queueHealth = aiCompletionIssue || incidentAnalysisIssue || embeddingIssue ? "blocked" : queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
   const audioTranscribedPerMinute = engineHealth?.recentAudioSecondsTranscribedPerMinute ?? 0;
   const audioIngestedPerMinute = engineHealth?.recentAudioSecondsIngestedPerMinute ?? 0;
   const ingestPaused = Boolean(engineHealth?.ingest?.paused);

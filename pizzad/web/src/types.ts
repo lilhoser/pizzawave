@@ -265,6 +265,16 @@ export type EngineHealth = {
     message: string;
   };
   aiWorkBlockedReason?: string | null;
+  incidentAnalysisQueueHealth: {
+    status: string;
+    message: string;
+    pendingCalls: number;
+    stalePendingCalls: number;
+    skippedStaleCalls: number;
+    oldestPendingCallUtc?: string | null;
+    oldestPendingAgeMinutes: number;
+    maximumAgeMinutes: number;
+  };
   aiCompletionHealth: AiCompletionHealth;
   embeddingHealth: EmbeddingPipelineHealth;
   workBlockedReason?: string | null;

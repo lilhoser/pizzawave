@@ -11,6 +11,7 @@ public sealed class EngineConfigAiInsightsTests
             {
                 IncidentV2ShadowCandidateLimit = 100,
                 IncidentV3FrameCandidateLimit = 100,
+                IncidentAnalysisMaximumAgeMinutes = 1,
                 IncidentEventLinkShadowIntervalSeconds = 1,
                 IncidentEventLinkShadowLookbackMinutes = 10,
                 IncidentEventLinkShadowCandidateLimit = 100,
@@ -26,6 +27,7 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(40, config.AiInsights.IncidentV2ShadowCandidateLimit);
         Assert.False(config.AiInsights.IncidentV3FrameShadowEnabled);
         Assert.Equal(40, config.AiInsights.IncidentV3FrameCandidateLimit);
+        Assert.Equal(15, config.AiInsights.IncidentAnalysisMaximumAgeMinutes);
         Assert.False(config.AiInsights.IncidentV3PlanExecutorEnabled);
         Assert.True(config.AiInsights.IncidentV3PlanExecutorDryRun);
         Assert.False(config.AiInsights.IncidentEventLinkShadowEnabled);

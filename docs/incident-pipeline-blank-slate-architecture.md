@@ -616,6 +616,37 @@ proposer errors, zero provisional associations, and zero production incident
 changes. OT health, ingestion, transcription, embeddings, and AI completion
 health were all `ok` with clear queues.
 
+At approximately 2026-07-22 00:22 UTC, operator observation exposed a separate
+production incident-analysis queue failure. Production AI completions were
+successful, but strict oldest-first processing had accumulated 11,521 pending
+jobs and was constructing incidents from calls approximately 29.5 hours old.
+The health endpoint incorrectly remained `ok` because it measured completion
+request success without measuring incident-source age. OT was receiving about
+457 incident-analysis jobs per hour while clearing about 230, so the queue could
+not recover. The oldest jobs retained repeated `LM Link connection closed`
+errors from the earlier outage.
+
+The constructor shadow was not the source of that backlog, but it was disabled
+immediately to stop consuming inference capacity. Run
+`ot-association-shadow-20260721-a` retained 38 append-only attempts. No shadow
+rows or production incidents were deleted.
+
+The local corrective change establishes the missing operational boundary:
+
+- pending incident analysis is limited to a configurable live window, 60
+  minutes by default;
+- stale pending jobs are retained as `skipped_stale` rather than deleted or
+  processed into misleading late incidents;
+- durable retrieval is newest-first;
+- each generation cycle is bounded by the configured batch size and selects
+  recent calls fairly across radio systems;
+- `/api/v1/health` reports pending count, stale count, oldest source age, skipped
+  count, and a degraded status when the live window is exceeded.
+
+Production cleanup and deployment remain an explicit operator decision because
+reclassifying the old queue abandons retrospective incident generation for
+those calls.
+
 ### Earlier implementation history
 
 The isolated development branch now contains the Phase 0 and Phase 1 safety

@@ -2075,6 +2075,9 @@ public sealed partial class EngineDatabase
     }
 
     public async Task<List<EngineCall>> ListPendingIncidentAnalysisCallsAsync(int limit, CancellationToken ct)
+        => await ListPendingIncidentAnalysisCallsAsync(limit, 0, ct);
+
+    public async Task<List<EngineCall>> ListPendingIncidentAnalysisCallsAsync(int limit, long minimumStartTime, CancellationToken ct)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
@@ -2082,14 +2085,71 @@ public sealed partial class EngineDatabase
             SELECT c.* FROM incident_analysis_jobs j
             JOIN calls c ON c.id=j.call_id
             WHERE j.status='pending'
-            ORDER BY c.start_time ASC, c.id ASC
+              AND c.start_time >= $minimum_start_time
+            ORDER BY c.start_time DESC, c.id DESC
             LIMIT $limit;
             """;
         Add(command, "$limit", Math.Max(1, limit));
+        Add(command, "$minimum_start_time", Math.Max(0, minimumStartTime));
         var calls = new List<EngineCall>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) calls.Add(ReadCall(reader));
         return calls;
+    }
+
+    public async Task<int> SkipStaleIncidentAnalysisJobsAsync(long minimumStartTime, string reason, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE incident_analysis_jobs
+            SET status='skipped_stale', error=$reason, updated_at_utc=$now
+            WHERE status='pending'
+              AND call_id IN (SELECT id FROM calls WHERE start_time < $minimum_start_time);
+            """;
+        Add(command, "$minimum_start_time", Math.Max(0, minimumStartTime));
+        Add(command, "$reason", reason.Length <= 500 ? reason : reason[..500]);
+        Add(command, "$now", DateTime.UtcNow.ToString("O"));
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IncidentAnalysisQueueHealthDto> GetIncidentAnalysisQueueHealthAsync(int maximumAgeMinutes, CancellationToken ct)
+    {
+        maximumAgeMinutes = Math.Clamp(maximumAgeMinutes, 15, 360);
+        var now = DateTimeOffset.UtcNow;
+        var cutoff = now.AddMinutes(-maximumAgeMinutes).ToUnixTimeSeconds();
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COALESCE(SUM(CASE WHEN j.status='pending' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN j.status='pending' AND c.start_time < $cutoff THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN j.status='skipped_stale' THEN 1 ELSE 0 END), 0),
+                MIN(CASE WHEN j.status='pending' THEN c.start_time END)
+            FROM incident_analysis_jobs j
+            JOIN calls c ON c.id=j.call_id;
+            """;
+        Add(command, "$cutoff", cutoff);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        var pending = reader.GetInt64(0);
+        var stale = reader.GetInt64(1);
+        var skipped = reader.GetInt64(2);
+        DateTime? oldestUtc = null;
+        var ageMinutes = 0d;
+        if (!reader.IsDBNull(3))
+        {
+            var oldest = reader.GetInt64(3);
+            oldestUtc = DateTimeOffset.FromUnixTimeSeconds(oldest).UtcDateTime;
+            ageMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(oldest)).TotalMinutes);
+        }
+        var status = stale > 0 ? "degraded" : "ok";
+        var message = stale > 0
+            ? $"Incident analysis is {ageMinutes:N0} minutes behind: {stale:N0} stale call(s) exceed the {maximumAgeMinutes}-minute live-processing window."
+            : pending > 0
+                ? $"Incident analysis has {pending:N0} current call(s) pending; oldest age is {ageMinutes:N0} minutes."
+                : "Incident analysis queue is current.";
+        return new IncidentAnalysisQueueHealthDto(status, message, pending, stale, skipped, oldestUtc, ageMinutes, maximumAgeMinutes);
     }
 
     public async Task MarkIncidentAnalysisCompletedAsync(IEnumerable<long> callIds, CancellationToken ct)

@@ -560,10 +560,21 @@ public sealed record HealthDto(
     IngestControlStatusDto Ingest,
     LiveTrActivityStatusDto LiveTrActivity,
     string? AiWorkBlockedReason,
+    IncidentAnalysisQueueHealthDto IncidentAnalysisQueueHealth,
     AiCompletionHealthDto AiCompletionHealth,
     EmbeddingPipelineHealthDto EmbeddingHealth,
     string? WorkBlockedReason,
     DateTime ServerTimeUtc);
+
+public sealed record IncidentAnalysisQueueHealthDto(
+    string Status,
+    string Message,
+    long PendingCalls,
+    long StalePendingCalls,
+    long SkippedStaleCalls,
+    DateTime? OldestPendingCallUtc,
+    double OldestPendingAgeMinutes,
+    int MaximumAgeMinutes);
 
 public sealed record LiveTrActivityStatusDto(
     string Status,
