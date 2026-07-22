@@ -44,6 +44,9 @@ public sealed class IncidentBatchConstructorPersistenceTests
             Assert.True(report.Enabled);
             Assert.Equal(1, report.Totals.Batches);
             Assert.Equal(1, report.Totals.NewObservations);
+            Assert.Equal(1, report.Totals.ProposedEvents);
+            Assert.Equal(1, report.Totals.AcceptedEvents);
+            Assert.Equal(0, report.Totals.RejectedEvents);
             Assert.Equal(1, report.Totals.NewEvents);
             Assert.Equal(0, report.Totals.UnresolvedObservations);
             Assert.Equal("Tree blocking roadway", Assert.Single(report.ProjectedEvents).Title);

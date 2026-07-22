@@ -128,7 +128,32 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
-    public void ObservationCannotBelongToTwoProposals()
+    public async Task InvalidSiblingDoesNotDiscardIndependentlyValidEvent()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "Tree down across the roadway."),
+            Observation("call:2", "transcript:2", "Medical response at Salem Road for a hand laceration."));
+        var valid = Event(
+            "event:tree", IncidentBatchEventDisposition.NewEvent, string.Empty, ["call:1"],
+            "Tree blocking roadway", "A tree is blocking the roadway.",
+            [Citation("transcript:1", "Tree down across the roadway")], []);
+        var invalid = Event(
+            "event:medical", IncidentBatchEventDisposition.NewEvent, string.Empty, ["call:2"],
+            "Medical response", "A medical response is active.",
+            [Citation("transcript:2", "Medical response ... hand laceration")], []);
+
+        var result = await RunAsync(bundle, ["call:1", "call:2"], [], new FixedProposer(Proposal([valid, invalid])));
+
+        Assert.Single(result.LedgerEntry.Entry.ProposalValidationErrors);
+        Assert.Equal(["event:tree"], IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry).Select(item => item.ProposalToken));
+        var visible = Assert.Single(result.Projection.Projection.Events, item => item.OperatorVisible);
+        Assert.Equal(["call:1"], visible.ObservationIds);
+        var unresolved = Assert.Single(result.Projection.Projection.Events, item => !item.OperatorVisible);
+        Assert.Equal(["call:2"], unresolved.ObservationIds);
+    }
+
+    [Fact]
+    public async Task ObservationCannotBelongToTwoProposals()
     {
         var bundle = Bundle(Observation("call:1", "transcript:1", "MVC with critical injuries."));
         var first = Event("event:1", IncidentBatchEventDisposition.NewEvent, string.Empty, ["call:1"], "MVC", "A crash occurred.", [Citation("transcript:1", "MVC")], []);
@@ -138,6 +163,9 @@ public sealed class IncidentBatchConstructorPipelineTests
 
         Assert.False(validation.IsValid);
         Assert.Contains(validation.Errors, error => error.Contains("more than one event proposal", StringComparison.Ordinal));
+        var result = await RunAsync(bundle, ["call:1"], [], new FixedProposer(Proposal([first, second])));
+        Assert.Empty(IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry));
+        Assert.False(Assert.Single(result.Projection.Projection.Events).OperatorVisible);
     }
 
     [Fact]
@@ -223,7 +251,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var singletons = newObservationIds.Select(id => new IncidentBatchSingletonIdentity(id, $"projection:singleton:{id}")).ToList();
         var coordinator = new IncidentBatchCoordinator(proposer, new MemoryStore(), new FixedTimeProvider(Now));
         return await coordinator.RunAsync(
-            new IncidentBatchRunRequest("run:1", "ledger:1", "projection:1", singletons, "test", "test-config"),
+            new IncidentBatchRunRequest("run:1", "ledger:1", "projection:1", singletons, "test", $"test-config;{IncidentBatchContract.PerEventAcceptanceConfigurationToken}"),
             bundle,
             prior,
             newObservationIds,

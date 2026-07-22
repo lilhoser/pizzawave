@@ -129,9 +129,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             selection.Candidates,
             ct);
         _lastSampledCallId = newCalls.Max(call => call.Id);
-        var validEvents = result.LedgerEntry.Entry.ProposalValidationErrors.Count == 0
-            ? result.LedgerEntry.Entry.Proposal.Events
-            : [];
+        var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
         _logger.LogInformation(
             "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, confirmed={ConfirmedCount}, provisional={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, proposerMs={DurationMs}, invalid={Invalid}, proposerError={HasError}; production incident state unchanged",
             runId,
@@ -156,7 +154,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {

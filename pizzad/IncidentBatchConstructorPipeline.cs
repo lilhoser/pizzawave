@@ -118,6 +118,7 @@ public static class IncidentBatchContract
     public const int MaximumNewObservationCount = 24;
     public const int MaximumCandidateCount = 8;
     public const int MaximumObservationsPerCandidate = 12;
+    public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -255,6 +256,36 @@ public static class IncidentBatchContract
         return Result(errors);
     }
 
+    public static IReadOnlyList<IncidentBatchEventProposal> AcceptedEvents(IncidentBatchLedgerEntry entry)
+    {
+        if (!UsesPerEventAcceptance(entry.Execution.ConfigurationIdentity))
+            return entry.ProposalValidationErrors.Count == 0 ? entry.Proposal.Events : [];
+
+        var headerValidation = ValidateProposal(
+            entry.Bundle,
+            entry.NewObservationIds,
+            entry.Candidates,
+            entry.Proposal with { Events = [] });
+        if (!headerValidation.IsValid)
+            return [];
+
+        var duplicateProposalTokens = Duplicates(entry.Proposal.Events.Select(item => item.ProposalToken));
+        var duplicateObservationIds = Duplicates(entry.Proposal.Events.SelectMany(item => item.NewObservationIds));
+        var duplicateConfirmedCandidates = Duplicates(entry.Proposal.Events
+            .Where(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
+            .Select(item => item.CandidateToken));
+        return entry.Proposal.Events
+            .Where(item => !duplicateProposalTokens.Contains(item.ProposalToken ?? string.Empty))
+            .Where(item => !item.NewObservationIds.Any(duplicateObservationIds.Contains))
+            .Where(item => item.Disposition != IncidentBatchEventDisposition.ConfirmedMembership || !duplicateConfirmedCandidates.Contains(item.CandidateToken ?? string.Empty))
+            .Where(item => ValidateProposal(
+                entry.Bundle,
+                entry.NewObservationIds,
+                entry.Candidates,
+                entry.Proposal with { Events = [item] }).IsValid)
+            .ToList();
+    }
+
     public static IncidentEventStateContractValidationResult ValidateProjection(IncidentBatchProjection projection)
     {
         var errors = new List<string>();
@@ -340,6 +371,17 @@ public static class IncidentBatchContract
                 errors.Add($"duplicate {owner} '{value}'");
     }
 
+    private static HashSet<string> Duplicates(IEnumerable<string> values) => values
+        .Select(value => value ?? string.Empty)
+        .GroupBy(value => value, StringComparer.Ordinal)
+        .Where(group => group.Count() > 1)
+        .Select(group => group.Key)
+        .ToHashSet(StringComparer.Ordinal);
+
+    private static bool UsesPerEventAcceptance(string configurationIdentity) =>
+        configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains(PerEventAcceptanceConfigurationToken, StringComparer.Ordinal);
+
     private static void RequireValue(string? value, string owner, List<string> errors)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -376,62 +418,59 @@ public static class IncidentBatchProjector
             [entry.LedgerEntryId])));
 
         var links = (priorProjection?.ProvisionalAssociations ?? []).ToList();
-        if (entry.ProposalValidationErrors.Count == 0)
+        foreach (var proposal in IncidentBatchContract.AcceptedEvents(entry))
         {
-            foreach (var proposal in entry.Proposal.Events)
+            var singletonIds = entry.SingletonEvents
+                .Where(item => proposal.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
+                .Select(item => item.ProjectionEventId)
+                .ToHashSet(StringComparer.Ordinal);
+            var sourceEventId = entry.SingletonEvents.First(item => item.ObservationId == proposal.NewObservationIds[0]).ProjectionEventId;
+            if (proposal.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
             {
-                var singletonIds = entry.SingletonEvents
-                    .Where(item => proposal.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
-                    .Select(item => item.ProjectionEventId)
-                    .ToHashSet(StringComparer.Ordinal);
-                var sourceEventId = entry.SingletonEvents.First(item => item.ObservationId == proposal.NewObservationIds[0]).ProjectionEventId;
-                if (proposal.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
+                var candidate = entry.Candidates.Single(item => item.CandidateToken == proposal.CandidateToken);
+                sourceEventId = candidate.ProjectionEventId;
+                var targetIndex = events.FindIndex(item => item.ProjectionEventId == candidate.ProjectionEventId);
+                if (targetIndex < 0)
+                    throw new InvalidOperationException($"confirmed candidate event '{candidate.ProjectionEventId}' is absent from the projection");
+                var target = events[targetIndex];
+                events[targetIndex] = target with
+                {
+                    ObservationIds = target.ObservationIds.Concat(proposal.NewObservationIds).Distinct(StringComparer.Ordinal).ToList(),
+                    Title = proposal.Title,
+                    Summary = proposal.Summary,
+                    OperatorVisible = true,
+                    SourceLedgerEntryIds = target.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
+                };
+                events.RemoveAll(item => singletonIds.Contains(item.ProjectionEventId));
+            }
+            else
+            {
+                var sourceIndex = events.FindIndex(item => item.ProjectionEventId == sourceEventId);
+                var source = events[sourceIndex];
+                events[sourceIndex] = source with
+                {
+                    ObservationIds = proposal.NewObservationIds.ToList(),
+                    Title = proposal.Title,
+                    Summary = proposal.Summary,
+                    OperatorVisible = proposal.Disposition == IncidentBatchEventDisposition.NewEvent,
+                    SourceLedgerEntryIds = source.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
+                };
+                events.RemoveAll(item => item.ProjectionEventId != sourceEventId && singletonIds.Contains(item.ProjectionEventId));
+                if (proposal.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation)
                 {
                     var candidate = entry.Candidates.Single(item => item.CandidateToken == proposal.CandidateToken);
-                    sourceEventId = candidate.ProjectionEventId;
-                    var targetIndex = events.FindIndex(item => item.ProjectionEventId == candidate.ProjectionEventId);
-                    if (targetIndex < 0)
-                        throw new InvalidOperationException($"confirmed candidate event '{candidate.ProjectionEventId}' is absent from the projection");
-                    var target = events[targetIndex];
-                    events[targetIndex] = target with
-                    {
-                        ObservationIds = target.ObservationIds.Concat(proposal.NewObservationIds).Distinct(StringComparer.Ordinal).ToList(),
-                        Title = proposal.Title,
-                        Summary = proposal.Summary,
-                        OperatorVisible = true,
-                        SourceLedgerEntryIds = target.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
-                    };
-                    events.RemoveAll(item => singletonIds.Contains(item.ProjectionEventId));
-                }
-                else
-                {
-                    var sourceIndex = events.FindIndex(item => item.ProjectionEventId == sourceEventId);
-                    var source = events[sourceIndex];
-                    events[sourceIndex] = source with
-                    {
-                        ObservationIds = proposal.NewObservationIds.ToList(),
-                        Title = proposal.Title,
-                        Summary = proposal.Summary,
-                        OperatorVisible = proposal.Disposition == IncidentBatchEventDisposition.NewEvent,
-                        SourceLedgerEntryIds = source.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
-                    };
-                    events.RemoveAll(item => item.ProjectionEventId != sourceEventId && singletonIds.Contains(item.ProjectionEventId));
-                    if (proposal.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation)
-                    {
-                        var candidate = entry.Candidates.Single(item => item.CandidateToken == proposal.CandidateToken);
-                        links.Add(new IncidentBatchProjectedAssociation(
-                            $"{entry.LedgerEntryId}:{proposal.ProposalToken}",
-                            sourceEventId,
-                            candidate.ProjectionEventId,
-                            proposal.RelationshipStatement,
-                            proposal.Uncertainty,
-                            proposal.NewObservationEvidence,
-                            proposal.CandidateEvidence,
-                            proposal.AlternativeInterpretations,
-                            proposal.UnresolvedQuestions,
-                            entry.Proposal.ProposalId,
-                            entry.LedgerEntryId));
-                    }
+                    links.Add(new IncidentBatchProjectedAssociation(
+                        $"{entry.LedgerEntryId}:{proposal.ProposalToken}",
+                        sourceEventId,
+                        candidate.ProjectionEventId,
+                        proposal.RelationshipStatement,
+                        proposal.Uncertainty,
+                        proposal.NewObservationEvidence,
+                        proposal.CandidateEvidence,
+                        proposal.AlternativeInterpretations,
+                        proposal.UnresolvedQuestions,
+                        entry.Proposal.ProposalId,
+                        entry.LedgerEntryId));
                 }
             }
         }
@@ -490,7 +529,7 @@ public sealed class IncidentBatchCoordinator
                 $"application:proposer-error:{request.LedgerEntryId}",
                 now,
                 "application",
-                "incident-batch-constructor-v1",
+                IncidentBatchPrompt.PromptIdentity,
                 []);
             proposerError = ex.GetBaseException().Message;
         }

@@ -9553,6 +9553,8 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
         <div className="incident-outcome-summary incident-shadow-summary" aria-label="Micro-batch constructor outcomes">
           <span><strong>{batchShadow.totals.batches.toLocaleString()}</strong> batches</span>
           <span><strong>{batchShadow.totals.newObservations.toLocaleString()}</strong> observations</span>
+          <span><strong>{batchShadow.totals.acceptedEvents.toLocaleString()}</strong> accepted proposals</span>
+          <span><strong>{batchShadow.totals.rejectedEvents.toLocaleString()}</strong> rejected proposals</span>
           <span><strong>{batchShadow.totals.newEvents.toLocaleString()}</strong> new events</span>
           <span><strong>{batchShadow.totals.confirmedMemberships.toLocaleString()}</strong> confirmed memberships</span>
           <span><strong>{batchShadow.totals.provisionalAssociations.toLocaleString()}</strong> provisional associations</span>
@@ -9564,11 +9566,11 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
         <div className="incident-shadow-list">{batchShadow.attempts.map(attempt => {
           const failed = Boolean(attempt.validationErrors.length || attempt.proposerError);
           const produced = attempt.newEventCount + attempt.confirmedMembershipCount;
-          const status = failed ? "Invalid" : produced ? "Event" : attempt.provisionalAssociationCount ? "Provisional" : "Unresolved";
+          const status = failed && attempt.acceptedEventCount ? "Partial" : failed ? "Invalid" : produced ? "Event" : attempt.provisionalAssociationCount ? "Provisional" : "Unresolved";
           return <div className="incident-shadow-row" key={attempt.sequence}>
             <span className={`section-status ${failed ? "warning" : produced ? "ok" : "neutral"}`}>{status}</span>
             <span className="incident-shadow-identity"><strong>Calls {attempt.firstCallId || "?"}{attempt.lastCallId && attempt.lastCallId !== attempt.firstCallId ? `–${attempt.lastCallId}` : ""}</strong><small>{new Date(attempt.recordedAtUtc).toLocaleString()} · {attempt.newObservationCount} observations · {attempt.candidateCount} candidates · {attempt.modelIdentity} · {attempt.promptIdentity}</small><small>{attempt.configurationIdentity}</small><em>{attempt.eventTitles.join(" · ") || "No source-grounded event was proposed."}</em>{attempt.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}{attempt.proposerError && <small className="warning-text">{attempt.proposerError}</small>}</span>
-            <span className="incident-shadow-activity"><strong>{attempt.proposedEventCount} proposed · {attempt.unresolvedObservationCount} unresolved</strong><small>{(attempt.proposerMilliseconds / 1000).toFixed(1)}s · {attempt.confirmedMembershipCount} confirmed · {attempt.provisionalAssociationCount} provisional</small></span>
+            <span className="incident-shadow-activity"><strong>{attempt.acceptedEventCount}/{attempt.proposedEventCount} accepted · {attempt.unresolvedObservationCount} unresolved</strong><small>{(attempt.proposerMilliseconds / 1000).toFixed(1)}s · {attempt.rejectedEventCount} rejected · {attempt.confirmedMembershipCount} confirmed · {attempt.provisionalAssociationCount} provisional</small></span>
           </div>;
         })}</div>
         {!batchShadow.attempts.length && <p className="muted">This run begins at a startup fence and does not backfill history. The first bounded batch appears after its configured interval.</p>}

@@ -8,6 +8,8 @@ public sealed record IncidentBatchShadowTotalsDto(
     int Batches,
     int NewObservations,
     int ProposedEvents,
+    int AcceptedEvents,
+    int RejectedEvents,
     int NewEvents,
     int ConfirmedMemberships,
     int ProvisionalAssociations,
@@ -27,6 +29,8 @@ public sealed record IncidentBatchShadowAttemptDto(
     int NewObservationCount,
     int CandidateCount,
     int ProposedEventCount,
+    int AcceptedEventCount,
+    int RejectedEventCount,
     int NewEventCount,
     int ConfirmedMembershipCount,
     int ProvisionalAssociationCount,
@@ -67,6 +71,7 @@ public sealed partial class EngineDatabase
             return new IncidentBatchShadowReportDto(enabled, configuredRunId, string.Empty, runs, EmptyBatchTotals(), [], []);
         var entries = await ListIncidentBatchLedgerEntriesAsync(selectedRunId, 500, ct);
         var attempts = entries.Take(Math.Clamp(limit, 1, 500)).Select(ToAttempt).ToList();
+        var allAttempts = entries.Select(ToAttempt).ToList();
         var projection = await GetLatestIncidentBatchProjectionAsync(selectedRunId, ct);
         var projectedEvents = (projection?.Projection.Events ?? [])
             .Select(item => new IncidentBatchShadowProjectedEventDto(item.ProjectionEventId, item.ObservationIds.Count, item.Title, item.Summary, item.OperatorVisible))
@@ -77,11 +82,13 @@ public sealed partial class EngineDatabase
         var totals = new IncidentBatchShadowTotalsDto(
             entries.Count,
             entries.Sum(row => row.Entry.NewObservationIds.Count),
-            entries.Where(IsValid).Sum(row => row.Entry.Proposal.Events.Count),
-            entries.Where(IsValid).Sum(row => row.Entry.Proposal.Events.Count(item => item.Disposition == IncidentBatchEventDisposition.NewEvent)),
-            entries.Where(IsValid).Sum(row => row.Entry.Proposal.Events.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)),
-            entries.Where(IsValid).Sum(row => row.Entry.Proposal.Events.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation)),
-            entries.Sum(row => ToAttempt(row).UnresolvedObservationCount),
+            allAttempts.Sum(row => row.ProposedEventCount),
+            allAttempts.Sum(row => row.AcceptedEventCount),
+            allAttempts.Sum(row => row.RejectedEventCount),
+            allAttempts.Sum(row => row.NewEventCount),
+            allAttempts.Sum(row => row.ConfirmedMembershipCount),
+            allAttempts.Sum(row => row.ProvisionalAssociationCount),
+            allAttempts.Sum(row => row.UnresolvedObservationCount),
             entries.Count(row => !IsValid(row)),
             entries.Count(row => !string.IsNullOrWhiteSpace(row.Entry.Execution.ProposerError)),
             entries.Count == 0 ? 0 : entries.Average(row => row.Entry.Execution.ProposerDurationMilliseconds),
@@ -116,7 +123,8 @@ public sealed partial class EngineDatabase
     private static IncidentBatchShadowAttemptDto ToAttempt(IncidentBatchStoredLedgerEntry row)
     {
         var entry = row.Entry;
-        var events = IsValid(row) ? entry.Proposal.Events : [];
+        var events = IncidentBatchContract.AcceptedEvents(entry);
+        var proposedEvents = entry.Proposal.Events.Count;
         var callIds = entry.Bundle.Observations
             .Where(item => entry.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
             .Select(item => item.CallId ?? 0)
@@ -131,7 +139,9 @@ public sealed partial class EngineDatabase
             callIds.LastOrDefault(),
             entry.NewObservationIds.Count,
             entry.Candidates.Count,
+            proposedEvents,
             events.Count,
+            Math.Max(0, proposedEvents - events.Count),
             events.Count(item => item.Disposition == IncidentBatchEventDisposition.NewEvent),
             events.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership),
             events.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation),
@@ -146,6 +156,6 @@ public sealed partial class EngineDatabase
     }
 
     private static bool IsValid(IncidentBatchStoredLedgerEntry row) => row.Entry.ProposalValidationErrors.Count == 0;
-    private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     private static DateTime? ParseBatchUtc(string value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
 }

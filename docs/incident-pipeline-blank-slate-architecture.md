@@ -687,6 +687,24 @@ its SHA-256 is
 The report now exposes each batch's prompt and configuration identities so
 mixed-version evidence cannot be mistaken for a single experiment.
 
+Run B's first 24-observation batch took 86.624 seconds and proposed three
+plausible events: an automatic fire alarm, a medical response for a hand
+laceration, and an established fire command. Two citations inserted ellipses
+that were not present in the source transcripts; the third citation was exact.
+The then-current all-or-nothing validation correctly refused to treat the
+altered quotes as evidence, but unnecessarily discarded the independently
+valid third event as well.
+
+The successor projection policy therefore validates and accepts each proposed
+event independently. An event with invalid evidence remains an unresolved
+singleton without poisoning a valid sibling. Cross-event ownership conflicts,
+duplicate proposal identities, and duplicate confirmed membership targets
+reject every conflicting sibling. The policy is versioned in the recorded
+configuration identity as `acceptance=per-event-v1`, so historical all-or-none
+runs retain their original interpretation. This changes only structural
+failure isolation; it does not weaken exact-quote validation or add semantic
+application authority.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
