@@ -10,8 +10,8 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `1b94f87` | `d1583777...` | `b9fc3fba...` | Healthy; baseline RF/decoder settings, narrow recorder, shadow, and episode summaries live |
-| OT (`omicrontheta`) | `main` at `1b94f87` | `d1583777...` | `b9fc3fba...` | Healthy; baseline RF/decoder settings, narrow recorders, shadows, and episode summaries live |
+| RPI (`sdr1861`) | `main` at `1b94f87` | `d1583777...` | `b9fc3fba...` | Healthy; baseline RF/decoder settings, narrow recorder, shadow, episode summaries, and persistent six-hour capture quota live |
+| OT (`omicrontheta`) | `main` at `1b94f87` | `d1583777...` | `b9fc3fba...` | Healthy; baseline RF/decoder settings, narrow recorders, shadows, episode summaries, and persistent six-hour capture quotas live |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
@@ -24,8 +24,8 @@ Cross-repository source state:
 
 - callstream RF sampling/reacquisition telemetry is merged and pushed on
   callstream `main` at `1cdd5c4`; its temporary feature branch is retired;
-- local and remote Trunk Recorder `master` remain aligned and untouched at
-  `382f5f2`; current-lineage telemetry, flight-recorder, and passive-shadow
+- local and remote Trunk Recorder `master` remain aligned and untouched by this
+  experiment at `6c00945`; current-lineage telemetry, flight-recorder, and passive-shadow
   work remains isolated on `codex/initial-collapse-capture-live` at `313d247`
   for maintainer review and possible upstream submission;
 - the exact older RPI compatibility candidate remains on

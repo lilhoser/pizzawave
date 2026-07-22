@@ -949,6 +949,13 @@ restored four North Bradley captures and the interrupted Hamilton capture from
 disk, created no new file, and held quota as intended. The feature branches
 remain separate from upstream TR master: current-lineage OT commit `7e03a80e`
 and exact older RPI-lineage commit `2f6ca268`.
+The RPI build subsequently restored two recent Raymond captures from disk,
+created no new file, and kept TR/PizzaWave healthy at zero restarts. Installed
+executable SHA-256 values are
+`8141e35ea4be28ba15036755b7287922675e051aaacee8d76fb6549e8f9a9d72`
+on OT and
+`85e0ee88a86fcbc1327f01953ff952bf2d0c6f7023ba977dfefed90eca29ca8b`
+on RPI.
 
 ### Updated conclusion and next steps
 
