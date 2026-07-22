@@ -437,11 +437,11 @@ public sealed class EnginePipeline
             }
 
             await _events.PublishAsync("call_transcribed", new { callId = item.CallId, imported = item.Imported, backlog, notificationSuppressed = delayedRecovery }, ct);
-            if (!suppressDownstream && quality.IncludeInSummaries)
-            {
+            if (TranscriptDownstreamRouting.ShouldEnqueueEmbedding(suppressDownstream, updatedCall))
                 await _embeddings.EnqueueAsync(updatedCall, ct);
+
+            if (TranscriptDownstreamRouting.ShouldEnqueueInsights(suppressDownstream, quality))
                 await _insights.EnqueueAsync(updatedCall, ct);
-            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -853,6 +853,15 @@ public sealed class EnginePipeline
     private sealed record BacklogTranscriberSet(int WorkerId, ITranscriber Fast, ITranscriber Primary, string FastModel, string PrimaryModel);
     private sealed record TranscriptionPerformanceSample(DateTimeOffset CompletedAt, double WallSeconds, double AudioSeconds, bool Backlog);
     private enum TranscriptionWorkKind { Live, DeferredLive, Backlog }
+}
+
+public static class TranscriptDownstreamRouting
+{
+    public static bool ShouldEnqueueEmbedding(bool suppressDownstream, EngineCall call) =>
+        !suppressDownstream && TranscriptRetrievalEvidence.IsUsable(call);
+
+    public static bool ShouldEnqueueInsights(bool suppressDownstream, TranscriptionQuality quality) =>
+        !suppressDownstream && quality.IncludeInSummaries;
 }
 
 public sealed record TranscriptionPerformanceSnapshot(
