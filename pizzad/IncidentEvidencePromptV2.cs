@@ -233,7 +233,7 @@ public static class IncidentEvidencePromptV2
                 call_id = new { type = "number" },
                 start_char = new { type = "number" },
                 end_char = new { type = "number" },
-                text = new { type = "string", pattern = "^(?!.*\\.\\.\\.).+$" }
+                text = new { type = "string" }
             },
             required = new[] { "call_id", "start_char", "end_char", "text" }
         }

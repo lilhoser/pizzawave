@@ -99,6 +99,31 @@ public sealed class TokenUsageHealthTests
         Assert.Equal(8.00, report.OpenAiReferenceOutputCostPerMillion);
     }
 
+    [Fact]
+    public async Task TokenUsage_PreservesUtcInstantWhenBuildingTimeBuckets()
+    {
+        using var temp = new TempStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var timestampUtc = new DateTime(2026, 7, 20, 12, 12, 0, DateTimeKind.Utc);
+        await database.AddLmUsageAsync(
+            Usage(true, string.Empty, 100, 25, 125, timestampUtc),
+            CancellationToken.None);
+
+        var report = await database.GetTokenUsageAsync(
+            new DateTimeOffset(timestampUtc.AddHours(-1)).ToUnixTimeSeconds(),
+            new DateTimeOffset(timestampUtc.AddHours(1)).ToUnixTimeSeconds(),
+            CancellationToken.None);
+
+        var entry = Assert.Single(report.Entries);
+        var bucket = Assert.Single(report.ByTime);
+        Assert.Equal(DateTimeKind.Utc, entry.TimestampUtc.Kind);
+        Assert.Equal(timestampUtc, entry.TimestampUtc);
+        Assert.Equal(
+            new DateTimeOffset(new DateTime(2026, 7, 20, 12, 0, 0, DateTimeKind.Utc)).ToUnixTimeSeconds(),
+            bucket.Start);
+    }
+
     private static TokenUsageEntryDto Usage(
         bool success,
         string error,

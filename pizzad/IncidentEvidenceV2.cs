@@ -133,6 +133,12 @@ public static class IncidentEvidenceClaimVerifier
         var errors = new List<string>();
         foreach (var span in AllSpans(hypothesis))
         {
+            if (ContainsEllipsis(span.Text))
+            {
+                errors.Add($"call {span.CallId}: evidence span contains an ellipsis");
+                continue;
+            }
+
             if (!transcriptsByCallId.TryGetValue(span.CallId, out var transcript))
             {
                 errors.Add($"call {span.CallId}: transcript unavailable for evidence span");
@@ -158,6 +164,9 @@ public static class IncidentEvidenceClaimVerifier
         EvidenceSpanV2 span,
         IReadOnlyDictionary<long, string> transcriptsByCallId)
     {
+        if (ContainsEllipsis(span.Text))
+            return false;
+
         if (!transcriptsByCallId.TryGetValue(span.CallId, out var transcript))
             return false;
 
@@ -173,6 +182,9 @@ public static class IncidentEvidenceClaimVerifier
         IEnumerable<EvidenceSpanV2> spans,
         IReadOnlyDictionary<long, string> transcriptsByCallId) =>
         spans.Any(span => IsSpanGrounded(span, transcriptsByCallId));
+
+    private static bool ContainsEllipsis(string value) =>
+        value.Contains("...", StringComparison.Ordinal) || value.Contains('…');
 
     private static bool CanResolveQuotedText(string transcript, string quotedText)
     {
