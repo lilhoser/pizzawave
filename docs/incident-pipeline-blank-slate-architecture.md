@@ -914,6 +914,16 @@ candidate without merging it. The report exposes both provisional-event and
 review-queue counts. Application code does not convert model uncertainty scores
 into outcomes or apply content-specific labels, categories, or thresholds.
 
+Prompt v7 and the provisional-event projection began in clean OT run
+`ot-batch-constructor-shadow-20260722-h`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1425617`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v7h-20260722T044452Z.bak`;
+its SHA-256 is
+`9330ad66a646983008cb297c9e21086cea1304fe20a3bc9d580b26671c2fa276`.
+Immediately after deployment, production incident analysis was current by 14
+minutes and overall, AI-completion, and embedding health were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
