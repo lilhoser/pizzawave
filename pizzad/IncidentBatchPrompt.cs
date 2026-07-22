@@ -9,7 +9,8 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v8";
+    public const string PromptIdentity = "incident-batch-constructor-v9";
+    public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -35,6 +36,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("Do not promote an observation merely because it mentions a person, vehicle, place, identifier, action, or unit activity.");
         user.AppendLine("Omit routine, unclear, unsupported, low-information, or non-event observations. Omitted observations remain unresolved and are not classified as non-incidents.");
         user.AppendLine("Returning an empty events array is correct when none of the supplied observations clears that bar.");
+        user.AppendLine($"Return at most {MaximumReturnedEvents} events. Choose the strongest source-grounded events and leave lower-priority observations unresolved rather than producing an oversized response.");
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
         user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event.");
@@ -46,6 +48,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");
         user.AppendLine("For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate.");
         user.AppendLine("For each event, use only that event's own exact_quotes to write its title, summary, and operator_basis. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
+        user.AppendLine("Compare every pair of drafted events before returning them. If two drafts may describe the same unfolding situation and the cited evidence cannot reliably separate them, combine their observations and evidence into one provisional_event for review instead of returning parallel new_event drafts.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
         user.AppendLine("Remove every discarded draft from the events array entirely. Never return an event that you decided should be omitted, and never return an event without exact evidence for every included new observation.");
         user.AppendLine("Copy every identifier exactly.");
@@ -83,6 +86,7 @@ public static class IncidentBatchPrompt
                         events = new
                         {
                             type = "array",
+                            maxItems = MaximumReturnedEvents,
                             items = new
                             {
                                 type = "object",

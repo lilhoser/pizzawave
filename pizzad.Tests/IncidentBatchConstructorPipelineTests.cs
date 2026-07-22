@@ -256,12 +256,18 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.Contains("Critical injuries", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("A radio transmission is not automatically an event", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("underlying real-world condition", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains($"Return at most {IncidentBatchPrompt.MaximumReturnedEvents} events", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("one short contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Review every new observation", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("do not also return them in a new_event or any second proposal", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Never borrow facts from omitted observations", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("combine their observations and evidence into one provisional_event", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Remove every discarded draft from the events array entirely", prompt.UserPrompt, StringComparison.Ordinal);
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
+        using var schemaDocument = System.Text.Json.JsonDocument.Parse(schema);
+        Assert.Equal(
+            IncidentBatchPrompt.MaximumReturnedEvents,
+            schemaDocument.RootElement.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").GetProperty("events").GetProperty("maxItems").GetInt32());
         Assert.Contains("operator_basis", schema, StringComparison.Ordinal);
         Assert.Contains("exact_quotes", schema, StringComparison.Ordinal);
         Assert.Contains("provisional_event", schema, StringComparison.Ordinal);
