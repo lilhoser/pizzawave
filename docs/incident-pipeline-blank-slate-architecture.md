@@ -1476,6 +1476,22 @@ interpretations, and unresolved questions. This makes weak provisional links
 and failed-closed confirmations diagnosable without reading the raw ledger and
 without promoting either kind of output into production incident state.
 
+Run V also exposed an admission-granularity defect inside otherwise coherent
+constructor groups. A repeated five-call missing-person broadcast supplied six
+citations. Five were exact and collectively covered every claimed member call;
+one citation copied wording from a different broadcast and failed exact-match
+validation. Per-event admission correctly refused the contaminated raw event,
+but unnecessarily discarded the five independently valid citations with it.
+The constructor now applies the same fail-small boundary to citations: an
+inexact citation is omitted, never repaired, and the event is revalidated from
+scratch. The event remains rejected unless at least one exact citation survives
+for every claimed observation (and, for candidate-backed dispositions, valid
+evidence also survives on the candidate side). Projection wording continues to
+come only from the surviving exact citations; model title, summary, and rejected
+quotes never become projected facts. This is a typed provenance rule and does
+not inspect incident labels, transcript phrases, talkgroups, categories, or
+confidence thresholds.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

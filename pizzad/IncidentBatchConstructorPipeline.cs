@@ -124,6 +124,7 @@ public static class IncidentBatchContract
     public const int MaximumCandidateCount = 8;
     public const int MaximumObservationsPerCandidate = 12;
     public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
+    public const string PerCitationAcceptanceConfigurationToken = "acceptance=per-citation-v1";
     public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-narrative-v2";
     public const string OldestUnseenCursorConfigurationToken = "cursor=oldest-unseen-v1;cadence=fixed-start-v1";
     public const string CorroboratedVisibilityConfigurationToken = "visibility=confirmed-membership-v2";
@@ -324,7 +325,10 @@ public static class IncidentBatchContract
         var duplicateConfirmedCandidates = Duplicates(proposal.Events
             .Where(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
             .Select(item => item.CandidateToken));
-        return proposal.Events
+        var events = UsesPerCitationAcceptance(configurationIdentity)
+            ? proposal.Events.Select(item => RetainExactCitations(bundle, candidates, item)).ToList()
+            : proposal.Events;
+        return events
             .Where(item => !duplicateProposalTokens.Contains(item.ProposalToken ?? string.Empty))
             .Where(item => !item.NewObservationIds.Any(duplicateObservationIds.Contains))
             .Where(item => item.Disposition != IncidentBatchEventDisposition.ConfirmedMembership || !duplicateConfirmedCandidates.Contains(item.CandidateToken ?? string.Empty))
@@ -334,6 +338,45 @@ public static class IncidentBatchContract
                 candidates,
                 proposal with { Events = [item] }).IsValid)
             .ToList();
+    }
+
+    private static IncidentBatchEventProposal RetainExactCitations(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        IncidentBatchEventProposal proposal)
+    {
+        var newEvidence = proposal.NewObservationEvidence
+            .Where(citation => IsExactCitation(bundle, proposal.NewObservationIds, citation))
+            .ToList();
+        var candidateEvidence = proposal.CandidateEvidence;
+        if (proposal.Disposition is IncidentBatchEventDisposition.ConfirmedMembership or IncidentBatchEventDisposition.ProvisionalAssociation)
+        {
+            var candidate = candidates.SingleOrDefault(item => item.CandidateToken == proposal.CandidateToken);
+            if (candidate is not null)
+                candidateEvidence = proposal.CandidateEvidence
+                    .Where(citation => IsExactCitation(bundle, candidate.ObservationIds, citation))
+                    .ToList();
+        }
+        return proposal with
+        {
+            NewObservationEvidence = newEvidence,
+            CandidateEvidence = candidateEvidence
+        };
+    }
+
+    private static bool IsExactCitation(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<string> allowedObservationIds,
+        IncidentEventStateTranscriptCitation citation)
+    {
+        if (string.IsNullOrWhiteSpace(citation.TranscriptId) || string.IsNullOrWhiteSpace(citation.ExactQuote))
+            return false;
+        var matches = bundle.Observations
+            .Where(observation => allowedObservationIds.Contains(observation.ObservationId, StringComparer.Ordinal))
+            .SelectMany(observation => observation.Transcripts)
+            .Where(transcript => transcript.TranscriptId == citation.TranscriptId)
+            .ToList();
+        return matches.Count == 1 && matches[0].Text.Contains(citation.ExactQuote, StringComparison.Ordinal);
     }
 
     public static IncidentEventStateContractValidationResult ValidateProjection(IncidentBatchProjection projection)
@@ -435,6 +478,10 @@ public static class IncidentBatchContract
     private static bool UsesPerEventAcceptance(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Contains(PerEventAcceptanceConfigurationToken, StringComparer.Ordinal);
+
+    private static bool UsesPerCitationAcceptance(string configurationIdentity) =>
+        configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains(PerCitationAcceptanceConfigurationToken, StringComparer.Ordinal);
 
     private static void RequireValue(string? value, string owner, List<string> errors)
     {

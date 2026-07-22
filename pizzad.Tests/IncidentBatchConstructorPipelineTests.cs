@@ -180,6 +180,37 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public async Task InvalidCitationIsDiscardedWithoutRejectingIndependentlyGroundedEvent()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "All units stand by for a missing person."),
+            Observation("call:2", "transcript:2", "The missing person is a 30-year-old male wearing a green shirt."));
+        var item = Event(
+            "event:missing-person",
+            IncidentBatchEventDisposition.NewEvent,
+            string.Empty,
+            ["call:1", "call:2"],
+            "Missing person search",
+            "Units are looking for a missing person.",
+            [
+                Citation("transcript:1", "All units stand by for a missing person"),
+                Citation("transcript:1", "The missing person is suicidal"),
+                Citation("transcript:2", "30-year-old male wearing a green shirt")
+            ],
+            []);
+
+        var result = await RunAsync(bundle, ["call:1", "call:2"], [], new FixedProposer(Proposal([item])));
+
+        Assert.Contains(result.LedgerEntry.Entry.ProposalValidationErrors, error => error.Contains("does not occur exactly", StringComparison.Ordinal));
+        var accepted = Assert.Single(IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry));
+        Assert.Equal(2, accepted.NewObservationEvidence.Count);
+        Assert.DoesNotContain(accepted.NewObservationEvidence, citation => citation.ExactQuote == "The missing person is suicidal");
+        var projected = Assert.Single(result.Projection.Projection.Events, projectedEvent => projectedEvent.OperatorReview);
+        Assert.Equal(["call:1", "call:2"], projected.ObservationIds);
+        Assert.DoesNotContain("suicidal", projected.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task InvalidSiblingDoesNotDiscardIndependentlyValidEvent()
     {
         var bundle = Bundle(
@@ -432,7 +463,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var singletons = newObservationIds.Select(id => new IncidentBatchSingletonIdentity(id, $"projection:singleton:{id}")).ToList();
         var coordinator = new IncidentBatchCoordinator(proposer, new MemoryStore(), new FixedTimeProvider(Now));
         return await coordinator.RunAsync(
-            new IncidentBatchRunRequest("run:1", "ledger:1", "projection:1", singletons, "test", $"test-config;{IncidentBatchContract.PerEventAcceptanceConfigurationToken}"),
+            new IncidentBatchRunRequest("run:1", "ledger:1", "projection:1", singletons, "test", $"test-config;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken}"),
             bundle,
             prior,
             newObservationIds,
