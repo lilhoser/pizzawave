@@ -87,7 +87,10 @@ public sealed record IncidentBatchLedgerEntry(
     IncidentBatchExecutionContext Execution,
     IncidentBatchRelationshipProposal? RelationshipProposal = null,
     IReadOnlyList<string>? RelationshipProposalValidationErrors = null,
-    IncidentBatchRelationshipExecutionContext? RelationshipExecution = null);
+    IncidentBatchRelationshipExecutionContext? RelationshipExecution = null,
+    IncidentBatchConfirmationProposal? ConfirmationProposal = null,
+    IReadOnlyList<string>? ConfirmationProposalValidationErrors = null,
+    IncidentBatchConfirmationExecutionContext? ConfirmationExecution = null);
 
 public sealed record IncidentBatchStoredLedgerEntry(long Sequence, string ContentHash, IncidentBatchLedgerEntry Entry);
 public sealed record IncidentBatchStoredProjection(long Sequence, string ContentHash, IncidentBatchProjection Projection);
@@ -285,6 +288,34 @@ public static class IncidentBatchContract
                 errors.Add("source-isolated relationship proposal requires execution provenance");
             else if (entry.RelationshipExecution.ProposerDurationMilliseconds < 0)
                 errors.Add("relationship proposer duration cannot be negative");
+
+            var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(
+                entry.Bundle,
+                sources,
+                entry.Candidates,
+                entry.RelationshipProposal);
+            var confirmations = acceptedRelationships
+                .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
+                .ToList();
+            if (entry.ConfirmationProposal is not null)
+            {
+                var confirmationValidation = IncidentBatchConfirmationContract.ValidateProposal(
+                    entry.Bundle,
+                    sources,
+                    entry.Candidates,
+                    confirmations,
+                    entry.ConfirmationProposal);
+                if (!(entry.ConfirmationProposalValidationErrors ?? []).SequenceEqual(confirmationValidation.Errors, StringComparer.Ordinal))
+                    errors.Add("batch ledger confirmation validation errors do not match deterministic validation");
+                if (entry.ConfirmationExecution is null)
+                    errors.Add("confirmation proposal requires execution provenance");
+                else if (entry.ConfirmationExecution.VerifierDurationMilliseconds < 0)
+                    errors.Add("confirmation verifier duration cannot be negative");
+            }
+            else if (IncidentBatchConfirmationContract.UsesIndependentVerifier(entry.Execution.ConfigurationIdentity))
+            {
+                errors.Add("independent confirmation configuration requires a confirmation proposal");
+            }
         }
         return Result(errors);
     }
@@ -587,11 +618,7 @@ public static class IncidentBatchProjector
             var acceptedSources = acceptedSourceEvents
                 .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
                 .ToList();
-            var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(
-                entry.Bundle,
-                acceptedSources,
-                entry.Candidates,
-                entry.RelationshipProposal);
+            var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(entry);
             var sourceEventsByToken = acceptedSourceEvents
                 .ToDictionary(item => item.ProposalToken, StringComparer.Ordinal);
             var sourceEventIds = sourceEventsByToken.ToDictionary(
@@ -685,6 +712,7 @@ public sealed class IncidentBatchCoordinator
 {
     private readonly IIncidentBatchProposer _proposer;
     private readonly IIncidentBatchRelationshipProposer? _relationshipProposer;
+    private readonly IIncidentBatchConfirmationVerifier? _confirmationVerifier;
     private readonly IIncidentBatchStore _store;
     private readonly TimeProvider _timeProvider;
 
@@ -703,6 +731,17 @@ public sealed class IncidentBatchCoordinator
         : this(proposer, store, timeProvider)
     {
         _relationshipProposer = relationshipProposer;
+    }
+
+    public IncidentBatchCoordinator(
+        IIncidentBatchProposer proposer,
+        IIncidentBatchRelationshipProposer relationshipProposer,
+        IIncidentBatchConfirmationVerifier confirmationVerifier,
+        IIncidentBatchStore store,
+        TimeProvider? timeProvider = null)
+        : this(proposer, relationshipProposer, store, timeProvider)
+    {
+        _confirmationVerifier = confirmationVerifier;
     }
 
     public async Task<IncidentBatchRunResult> RunAsync(
@@ -749,6 +788,9 @@ public sealed class IncidentBatchCoordinator
         IncidentBatchRelationshipProposal? relationshipProposal = null;
         IReadOnlyList<string>? relationshipValidationErrors = null;
         IncidentBatchRelationshipExecutionContext? relationshipExecution = null;
+        IncidentBatchConfirmationProposal? confirmationProposal = null;
+        IReadOnlyList<string>? confirmationValidationErrors = null;
+        IncidentBatchConfirmationExecutionContext? confirmationExecution = null;
         if (_relationshipProposer is not null)
         {
             var sources = IncidentBatchContract.AcceptedEvents(
@@ -794,6 +836,48 @@ public sealed class IncidentBatchCoordinator
                 candidates,
                 relationshipProposal).Errors;
             relationshipExecution = new IncidentBatchRelationshipExecutionContext(relationshipTimer.ElapsedMilliseconds, relationshipError);
+
+            if (_confirmationVerifier is not null)
+            {
+                var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(bundle, sources, candidates, relationshipProposal);
+                var confirmations = acceptedRelationships
+                    .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
+                    .ToList();
+                var confirmationTimer = Stopwatch.StartNew();
+                var confirmationError = string.Empty;
+                try
+                {
+                    confirmationProposal = confirmations.Count == 0
+                        ? new IncidentBatchConfirmationProposal(
+                            $"application:no-confirmation-input:{request.LedgerEntryId}",
+                            now,
+                            "application",
+                            IncidentBatchConfirmationPrompt.PromptIdentity,
+                            [])
+                        : await _confirmationVerifier.VerifyAsync(bundle, sources, candidates, confirmations, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    confirmationProposal = new IncidentBatchConfirmationProposal(
+                        $"application:confirmation-verifier-error:{request.LedgerEntryId}",
+                        now,
+                        "application",
+                        IncidentBatchConfirmationPrompt.PromptIdentity,
+                        []);
+                    confirmationError = ex.GetBaseException().Message;
+                }
+                finally
+                {
+                    confirmationTimer.Stop();
+                }
+                confirmationValidationErrors = IncidentBatchConfirmationContract.ValidateProposal(
+                    bundle,
+                    sources,
+                    candidates,
+                    confirmations,
+                    confirmationProposal).Errors;
+                confirmationExecution = new IncidentBatchConfirmationExecutionContext(confirmationTimer.ElapsedMilliseconds, confirmationError);
+            }
         }
         var entry = new IncidentBatchLedgerEntry(
             request.RunId,
@@ -808,7 +892,10 @@ public sealed class IncidentBatchCoordinator
             new IncidentBatchExecutionContext(request.SoftwareVersion, request.ConfigurationIdentity, timer.ElapsedMilliseconds, proposerError),
             relationshipProposal,
             relationshipValidationErrors,
-            relationshipExecution);
+            relationshipExecution,
+            confirmationProposal,
+            confirmationValidationErrors,
+            confirmationExecution);
         var entryValidation = IncidentBatchContract.ValidateLedgerEntry(entry);
         if (!entryValidation.IsValid)
             throw new InvalidDataException(string.Join("; ", entryValidation.Errors));

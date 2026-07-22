@@ -9586,6 +9586,13 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
                   <div><strong>Candidate evidence</strong>{relationship.candidateEvidence.map(evidence => <small key={evidence}>{evidence}</small>)}</div>
                   {relationship.alternativeInterpretations.length > 0 && <div><strong>Alternative interpretations</strong>{relationship.alternativeInterpretations.map(value => <small key={value}>{value}</small>)}</div>}
                   {relationship.unresolvedQuestions.length > 0 && <div><strong>Unresolved questions</strong>{relationship.unresolvedQuestions.map(value => <small key={value}>{value}</small>)}</div>}
+                  {relationship.confirmationDecision && <>
+                    <p><strong>Independent confirmation check: {relationship.confirmationDecision}</strong> · {relationship.confirmationStatement}</p>
+                    <div><strong>Verifier source evidence</strong>{relationship.confirmationSourceEvidence.map(evidence => <small key={evidence}>{evidence}</small>)}</div>
+                    <div><strong>Verifier candidate evidence</strong>{relationship.confirmationCandidateEvidence.map(evidence => <small key={evidence}>{evidence}</small>)}</div>
+                    {relationship.confirmationCounterEvidence.length > 0 && <div><strong>Verifier counterevidence</strong>{relationship.confirmationCounterEvidence.map(value => <small key={value}>{value}</small>)}</div>}
+                    {relationship.confirmationUnresolvedQuestions.length > 0 && <div><strong>Verifier unresolved questions</strong>{relationship.confirmationUnresolvedQuestions.map(value => <small key={value}>{value}</small>)}</div>}
+                  </>}
                 </div>
               </details>;
             })}

@@ -1505,6 +1505,28 @@ post-recovery service, live radio, production incident freshness, AI
 completion, and embeddings were all `ok`. No production incident rows were
 changed and RPI was not changed.
 
+Run W then proved that conflict-free self-reporting by the relationship proposer
+is not sufficient authority for membership. One source group explicitly cited
+`Medical 13` at `3405 Brandon Avenue`; its candidate explicitly cited
+`Medical 15` at `9701 Mountain Lake Drive`. The proposer nevertheless asserted
+that location and medical nature matched, returned zero uncertainty, and
+omitted all counterinterpretations, causing a false shadow merge. This is not a
+transcription-normalization or static-anchor problem: the contradictory facts
+were already present verbatim on the two source boundaries.
+
+Confirmed membership now has an independent, confirmation-only verification
+stage. The verifier receives only structurally valid proposed confirmations,
+the immutable source and candidate transcripts, and the untrusted proposer
+statement. It must independently verify or reject every pair with exact
+citations from both boundaries. Verification fails closed if the response is
+missing, malformed, cites outside either boundary, retains counterevidence or
+unresolved questions, or encounters a model error. The raw relationship and
+the separate verifier decision both remain in the append-only ledger and
+Inspector. Provisional associations bypass this extra model call because they
+cannot merge membership; candidate-free Review groups are likewise unchanged.
+This concentrates the additional inference cost on rare merge proposals and
+adds no phrase, address, incident-type, category, talkgroup, or score rule.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

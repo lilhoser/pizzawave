@@ -183,6 +183,35 @@ public static class IncidentBatchRelationshipContract
             .ToList();
     }
 
+    public static IReadOnlyList<IncidentBatchRelationship> AcceptedRelationships(IncidentBatchLedgerEntry entry)
+    {
+        if (entry.RelationshipProposal is null)
+            return [];
+        var sources = IncidentBatchContract.AcceptedEvents(entry)
+            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+            .ToList();
+        var accepted = AcceptedRelationships(entry.Bundle, sources, entry.Candidates, entry.RelationshipProposal);
+        if (!IncidentBatchConfirmationContract.UsesIndependentVerifier(entry.Execution.ConfigurationIdentity))
+            return accepted;
+
+        var provisional = accepted
+            .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation)
+            .ToList();
+        if (entry.ConfirmationProposal is null)
+            return provisional;
+        var confirmations = accepted
+            .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
+            .ToList();
+        var verifiedPairs = IncidentBatchConfirmationContract.AcceptedVerifiedPairs(
+            entry.Bundle,
+            sources,
+            entry.Candidates,
+            confirmations,
+            entry.ConfirmationProposal);
+        provisional.AddRange(confirmations.Where(item => verifiedPairs.Contains(IncidentBatchConfirmationContract.RelationshipKey(item))));
+        return provisional;
+    }
+
     private static void ValidateCitations(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<string> allowedObservationIds,

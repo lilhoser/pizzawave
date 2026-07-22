@@ -114,7 +114,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             $"batch-live:{runId}:event:call:{call.Id.ToString(CultureInfo.InvariantCulture)}")).ToList();
         var proposer = new OpenAiIncidentBatchProposer(_config, _database, _logger, runId);
         var relationshipProposer = new OpenAiIncidentBatchRelationshipProposer(_config, _database, _logger, runId);
-        var coordinator = new IncidentBatchCoordinator(proposer, relationshipProposer, _database);
+        var confirmationVerifier = new OpenAiIncidentBatchConfirmationVerifier(_config, _database, _logger, runId);
+        var coordinator = new IncidentBatchCoordinator(proposer, relationshipProposer, confirmationVerifier, _database);
         var result = await coordinator.RunAsync(
             new IncidentBatchRunRequest(
                 runId,
@@ -130,18 +131,9 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             ct);
         _lastSampledCallId = newCalls.Max(call => call.Id);
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
-        var relationshipSources = validEvents
-            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-            .ToList();
-        var validRelationships = result.LedgerEntry.Entry.RelationshipProposal is null
-            ? []
-            : IncidentBatchRelationshipContract.AcceptedRelationships(
-                result.LedgerEntry.Entry.Bundle,
-                relationshipSources,
-                result.LedgerEntry.Entry.Candidates,
-                result.LedgerEntry.Entry.RelationshipProposal);
+        var validRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(result.LedgerEntry.Entry);
         _logger.LogInformation(
-            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}; production incident state unchanged",
+            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, confirmationMs={ConfirmationDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, confirmationInvalid={ConfirmationInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}, confirmationError={HasConfirmationError}; production incident state unchanged",
             runId,
             newCalls.Count,
             _lastSampledCallId,
@@ -153,10 +145,13 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             selection.Candidates.Count,
             result.LedgerEntry.Entry.Execution.ProposerDurationMilliseconds,
             result.LedgerEntry.Entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0,
+            result.LedgerEntry.Entry.ConfirmationExecution?.VerifierDurationMilliseconds ?? 0,
             result.LedgerEntry.Entry.ProposalValidationErrors.Count > 0,
             (result.LedgerEntry.Entry.RelationshipProposalValidationErrors ?? []).Count > 0,
+            (result.LedgerEntry.Entry.ConfirmationProposalValidationErrors ?? []).Count > 0,
             !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.Execution.ProposerError),
-            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.RelationshipExecution?.ProposerError));
+            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.RelationshipExecution?.ProposerError),
+            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.ConfirmationExecution?.VerifierError));
     }
 
     private bool IsEnabled() =>
@@ -168,7 +163,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {

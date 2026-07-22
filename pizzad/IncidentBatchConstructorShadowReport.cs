@@ -57,7 +57,13 @@ public sealed record IncidentBatchShadowRelationshipDto(
     IReadOnlyList<string> SourceEvidence,
     IReadOnlyList<string> CandidateEvidence,
     IReadOnlyList<string> AlternativeInterpretations,
-    IReadOnlyList<string> UnresolvedQuestions);
+    IReadOnlyList<string> UnresolvedQuestions,
+    string ConfirmationDecision,
+    string ConfirmationStatement,
+    IReadOnlyList<string> ConfirmationSourceEvidence,
+    IReadOnlyList<string> ConfirmationCandidateEvidence,
+    IReadOnlyList<string> ConfirmationCounterEvidence,
+    IReadOnlyList<string> ConfirmationUnresolvedQuestions);
 
 public sealed record IncidentBatchShadowProjectedEventDto(string ProjectionEventId, int ObservationCount, string Title, string Summary, bool OperatorVisible, bool OperatorReview);
 
@@ -151,36 +157,41 @@ public sealed partial class EngineDatabase
             .Order()
             .ToList();
         var proposedObservationCount = events.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count();
-        var relationshipSources = events
-            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-            .ToList();
-        var relationships = entry.RelationshipProposal is null
-            ? []
-            : IncidentBatchRelationshipContract.AcceptedRelationships(
-                entry.Bundle,
-                relationshipSources,
-                entry.Candidates,
-                entry.RelationshipProposal);
+        var relationships = IncidentBatchRelationshipContract.AcceptedRelationships(entry);
         var acceptedRelationshipKeys = relationships
             .Select(RelationshipKey)
             .ToHashSet(StringComparer.Ordinal);
+        var confirmationDecisions = (entry.ConfirmationProposal?.Decisions ?? [])
+            .GroupBy(ConfirmationKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var relationshipRows = (entry.RelationshipProposal?.Relationships ?? [])
-            .Select(item => new IncidentBatchShadowRelationshipDto(
-                acceptedRelationshipKeys.Contains(RelationshipKey(item)),
-                item.Disposition.ToString(),
-                item.SourceProposalToken,
-                item.CandidateToken,
-                item.RelationshipStatement,
-                item.Uncertainty,
-                item.SourceEvidence.Select(FormatCitation).ToList(),
-                item.CandidateEvidence.Select(FormatCitation).ToList(),
-                item.AlternativeInterpretations,
-                item.UnresolvedQuestions))
+            .Select(item =>
+            {
+                confirmationDecisions.TryGetValue(ConfirmationKey(item.SourceProposalToken, item.CandidateToken), out var confirmation);
+                return new IncidentBatchShadowRelationshipDto(
+                    acceptedRelationshipKeys.Contains(RelationshipKey(item)),
+                    item.Disposition.ToString(),
+                    item.SourceProposalToken,
+                    item.CandidateToken,
+                    item.RelationshipStatement,
+                    item.Uncertainty,
+                    item.SourceEvidence.Select(FormatCitation).ToList(),
+                    item.CandidateEvidence.Select(FormatCitation).ToList(),
+                    item.AlternativeInterpretations,
+                    item.UnresolvedQuestions,
+                    confirmation?.Decision.ToString() ?? string.Empty,
+                    confirmation?.VerificationStatement ?? string.Empty,
+                    confirmation?.SourceEvidence.Select(FormatCitation).ToList() ?? [],
+                    confirmation?.CandidateEvidence.Select(FormatCitation).ToList() ?? [],
+                    confirmation?.CounterEvidence ?? [],
+                    confirmation?.UnresolvedQuestions ?? []);
+            })
             .ToList();
         var validationErrors = entry.ProposalValidationErrors
             .Concat(entry.RelationshipProposalValidationErrors ?? [])
+            .Concat(entry.ConfirmationProposalValidationErrors ?? [])
             .ToList();
-        var proposerError = string.Join("; ", new[] { entry.Execution.ProposerError, entry.RelationshipExecution?.ProposerError }
+        var proposerError = string.Join("; ", new[] { entry.Execution.ProposerError, entry.RelationshipExecution?.ProposerError, entry.ConfirmationExecution?.VerifierError }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
         return new IncidentBatchShadowAttemptDto(
             row.Sequence,
@@ -208,18 +219,28 @@ public sealed partial class EngineDatabase
                 IncidentBatchProjector.BuildEvidenceSummary(item.NewObservationEvidence))).ToList(),
             relationshipRows,
             validationErrors,
-            entry.Execution.ProposerDurationMilliseconds + (entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0),
+            entry.Execution.ProposerDurationMilliseconds +
+            (entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0) +
+            (entry.ConfirmationExecution?.VerifierDurationMilliseconds ?? 0),
             proposerError);
     }
 
     private static string RelationshipKey(IncidentBatchRelationship relationship) =>
         $"{relationship.SourceProposalToken}\u001f{relationship.CandidateToken}\u001f{relationship.Disposition}";
 
+    private static string ConfirmationKey(IncidentBatchConfirmationDecision decision) =>
+        ConfirmationKey(decision.SourceProposalToken, decision.CandidateToken);
+
+    private static string ConfirmationKey(string sourceProposalToken, string candidateToken) =>
+        $"{sourceProposalToken}\u001f{candidateToken}";
+
     private static string FormatCitation(IncidentEventStateTranscriptCitation citation) =>
         $"{citation.TranscriptId}: \u201c{citation.ExactQuote}\u201d";
 
     private static bool IsValid(IncidentBatchStoredLedgerEntry row) =>
-        row.Entry.ProposalValidationErrors.Count == 0 && (row.Entry.RelationshipProposalValidationErrors ?? []).Count == 0;
+        row.Entry.ProposalValidationErrors.Count == 0 &&
+        (row.Entry.RelationshipProposalValidationErrors ?? []).Count == 0 &&
+        (row.Entry.ConfirmationProposalValidationErrors ?? []).Count == 0;
     private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     private static DateTime? ParseBatchUtc(string value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
 }

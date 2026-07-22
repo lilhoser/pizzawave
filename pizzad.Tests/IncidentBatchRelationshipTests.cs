@@ -41,11 +41,15 @@ public sealed class IncidentBatchRelationshipTests
         json.Remove("relationshipProposal");
         json.Remove("relationshipProposalValidationErrors");
         json.Remove("relationshipExecution");
+        json.Remove("confirmationProposal");
+        json.Remove("confirmationProposalValidationErrors");
+        json.Remove("confirmationExecution");
 
         var restored = System.Text.Json.JsonSerializer.Deserialize<IncidentBatchLedgerEntry>(json.ToJsonString(), EngineConfig.JsonOptions());
 
         Assert.NotNull(restored);
         Assert.Null(restored.RelationshipProposal);
+        Assert.Null(restored.ConfirmationProposal);
         var validation = IncidentBatchContract.ValidateLedgerEntry(restored);
         Assert.True(validation.IsValid, string.Join("; ", validation.Errors));
     }
@@ -264,6 +268,108 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public async Task IndependentVerifierRejectsFalseConfirmationWithoutMergingEvents()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "Medical 15 at 9701 Mountain Lake Drive."),
+            Observation("call:2", "transcript:2", "Medical 13 at 3405 Brandon Avenue."));
+        var construction = new IncidentBatchEventProposal(
+            "event:brandon", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:2"],
+            "model title", "model summary", "medical response", 0.1,
+            [new IncidentEventStateTranscriptCitation("transcript:2", "Medical 13 at 3405 Brandon Avenue")], [], [], []);
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction", Now, "test-model", IncidentBatchPrompt.PromptIdentity, [construction]));
+        var confirmed = Relationship(
+            "event:brandon", "candidate:mountain", "transcript:2", "Medical 13 at 3405 Brandon Avenue",
+            "transcript:1", "Medical 15 at 9701 Mountain Lake Drive") with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+            Uncertainty = 0
+        };
+        var relationship = new CapturingRelationshipProposer(Proposal(confirmed));
+        var verifier = new CapturingConfirmationVerifier(new IncidentBatchConfirmationProposal(
+            "confirmation:reject", Now, "test-model", IncidentBatchConfirmationPrompt.PromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                "event:brandon", "candidate:mountain", IncidentBatchConfirmationDecisionKind.Reject,
+                "The explicit locations and medical identifiers differ.",
+                [new IncidentEventStateTranscriptCitation("transcript:2", "3405 Brandon Avenue")],
+                [new IncidentEventStateTranscriptCitation("transcript:1", "9701 Mountain Lake Drive")],
+                ["The source boundaries name different addresses."], [])]));
+        var prior = new IncidentBatchProjection(
+            "run:verify", "projection:prior", Now.AddMinutes(-1), ["ledger:prior"],
+            [new IncidentBatchProjectionEvent("projection:mountain", ["call:1"], "Mountain Lake medical", "Medical response", false, true, ["ledger:prior"])], []);
+        var coordinator = new IncidentBatchCoordinator(constructor, relationship, verifier, new MemoryStore(), new FixedTimeProvider(Now));
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:verify", "ledger:new", "projection:new",
+                [new IncidentBatchSingletonIdentity("call:2", "projection:brandon")],
+                "test", $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken}"),
+            bundle,
+            prior,
+            ["call:2"],
+            [new IncidentBatchCandidate("candidate:mountain", "projection:mountain", ["call:1"])],
+            CancellationToken.None);
+
+        Assert.Single(result.LedgerEntry.Entry.RelationshipProposal!.Relationships);
+        Assert.Empty(IncidentBatchRelationshipContract.AcceptedRelationships(result.LedgerEntry.Entry));
+        Assert.Equal(2, result.Projection.Projection.Events.Count);
+        Assert.Contains(result.Projection.Projection.Events, item => item.ProjectionEventId == "projection:brandon" && item.OperatorReview);
+        Assert.NotNull(result.LedgerEntry.Entry.ConfirmationExecution);
+    }
+
+    [Fact]
+    public async Task IndependentVerifierAllowsGroundedConfirmationToMergeEvents()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "White truck crashed on County Road 725."),
+            Observation("call:2", "transcript:2", "Critical injuries in that same white truck crash."));
+        var construction = new IncidentBatchEventProposal(
+            "event:update", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:2"],
+            "model title", "model summary", "crash update", 0.1,
+            [new IncidentEventStateTranscriptCitation("transcript:2", "same white truck crash")], [], [], []);
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction", Now, "test-model", IncidentBatchPrompt.PromptIdentity, [construction]));
+        var confirmed = Relationship(
+            "event:update", "candidate:crash", "transcript:2", "same white truck crash",
+            "transcript:1", "White truck crashed") with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+            Uncertainty = 0
+        };
+        var relationship = new CapturingRelationshipProposer(Proposal(confirmed));
+        var verifier = new CapturingConfirmationVerifier(new IncidentBatchConfirmationProposal(
+            "confirmation:verify", Now, "test-model", IncidentBatchConfirmationPrompt.PromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                "event:update", "candidate:crash", IncidentBatchConfirmationDecisionKind.Verify,
+                "Both sides explicitly identify the same white-truck crash.",
+                [new IncidentEventStateTranscriptCitation("transcript:2", "same white truck crash")],
+                [new IncidentEventStateTranscriptCitation("transcript:1", "White truck crashed")],
+                [], [])]));
+        var prior = new IncidentBatchProjection(
+            "run:verify", "projection:prior", Now.AddMinutes(-1), ["ledger:prior"],
+            [new IncidentBatchProjectionEvent("projection:crash", ["call:1"], "Crash", "White truck crash", false, true, ["ledger:prior"])], []);
+        var coordinator = new IncidentBatchCoordinator(constructor, relationship, verifier, new MemoryStore(), new FixedTimeProvider(Now));
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:verify", "ledger:new", "projection:new",
+                [new IncidentBatchSingletonIdentity("call:2", "projection:update")],
+                "test", $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken}"),
+            bundle,
+            prior,
+            ["call:2"],
+            [new IncidentBatchCandidate("candidate:crash", "projection:crash", ["call:1"])],
+            CancellationToken.None);
+
+        Assert.Single(IncidentBatchRelationshipContract.AcceptedRelationships(result.LedgerEntry.Entry));
+        var projected = Assert.Single(result.Projection.Projection.Events);
+        Assert.Equal("projection:crash", projected.ProjectionEventId);
+        Assert.Equal(["call:1", "call:2"], projected.ObservationIds);
+        Assert.True(projected.OperatorVisible);
+    }
+
+    [Fact]
     public async Task CoordinatorProjectsSeveralProvisionalAssociationsWithoutMerging()
     {
         var bundle = Bundle(
@@ -364,6 +470,16 @@ public sealed class IncidentBatchRelationshipTests
             ReceivedSources = sources;
             return Task.FromResult(proposal);
         }
+    }
+
+    private sealed class CapturingConfirmationVerifier(IncidentBatchConfirmationProposal proposal) : IIncidentBatchConfirmationVerifier
+    {
+        public Task<IncidentBatchConfirmationProposal> VerifyAsync(
+            IncidentEventStateObservationBundle bundle,
+            IReadOnlyList<IncidentBatchRelationshipSource> sources,
+            IReadOnlyList<IncidentBatchCandidate> candidates,
+            IReadOnlyList<IncidentBatchRelationship> confirmations,
+            CancellationToken ct) => Task.FromResult(proposal);
     }
 
     private sealed class MemoryStore : IIncidentBatchStore
