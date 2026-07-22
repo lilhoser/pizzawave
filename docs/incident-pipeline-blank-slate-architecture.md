@@ -629,6 +629,38 @@ The shadow runtime is disabled by default. Its report endpoint is
 current tree, MVC, hostage, and unresolved-worker relationship shapes without
 embedding their vocabulary as application policy.
 
+### Initial micro-batch OT checkpoint
+
+Commit `8d80080` was deployed to OT only on 2026-07-22. Run
+`ot-batch-constructor-shadow-20260722-a` established a no-backfill startup fence
+at call `1424239`, with a 600-second interval, 120-minute lookback, 12 fresh
+observations per batch, and at most four retrieved candidate events. The prior
+constructor shadows were disabled. The pre-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-shadow-20260722T024031Z.bak`;
+its SHA-256 is
+`6995bd11e4a0c873beea3bc346721c4f02a94b61edb0d7fd1fa515a0c4b9fb40`.
+
+The first generation considered calls `1424353` through `1424375` and took
+127.674 seconds on `qwen/qwen3.6-35b-a3b@q8_0`. It returned structured output
+without a proposer error, but proposed a separate event for all 12 calls,
+including routine identifiers, status traffic, a scheduled non-emergent
+transfer, and low-information transcription fragments. The deterministic
+contract rejected the entire proposal because each event left its required
+basis statement empty. All 12 observations therefore remained invisible,
+unresolved singletons and production incidents were unchanged.
+
+That result is evidence against simply relaxing the validator. Prompt contract
+v2 keeps the required basis statement but names and defines it as
+`operator_basis`: the model must state what exact source words establish and
+why the situation merits operator awareness or follow-up. It explicitly treats
+an empty event array as valid and asks the model to omit observations that do
+not clear that semantic bar. This decision remains model-owned; application
+code does not introduce event labels, content categories, phrase lists,
+talkgroup rules, or regex admission. V2 also requires the model to return short
+exact quotes rather than allowing the application to materialize the entire
+transcript as a nominal citation. Application code verifies those quotes
+exactly and fails closed when they are absent or changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

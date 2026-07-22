@@ -372,10 +372,12 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("pizzawave-system-incident-performance-hours", source, StringComparison.Ordinal);
         Assert.Contains("/api/v1/incidents/chains?hours=", source, StringComparison.Ordinal);
         Assert.Contains("/api/v1/incidents/association-shadow?limit=100", source, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/incidents/batch-constructor-shadow?limit=100", source, StringComparison.Ordinal);
         Assert.Contains("Incident performance window", source, StringComparison.Ordinal);
         Assert.Contains("Incident Pipeline Inspector", source, StringComparison.Ordinal);
-        Assert.Contains("Incident Constructor Shadow", source, StringComparison.Ordinal);
-        Assert.Contains("Production incidents are unchanged", source, StringComparison.Ordinal);
+        Assert.Contains("Micro-Batch Incident Constructor", source, StringComparison.Ordinal);
+        Assert.Contains("Legacy Incremental Constructor Shadow", source, StringComparison.Ordinal);
+        Assert.Contains("production incidents are unchanged", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Incident Evidence Paths", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Created incidents over time", source, StringComparison.Ordinal);
         Assert.Contains("function IncidentEvidenceDag", source, StringComparison.Ordinal);

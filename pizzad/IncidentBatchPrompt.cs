@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v1";
+    public const string PromptIdentity = "incident-batch-constructor-v2";
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -30,14 +30,19 @@ public static class IncidentBatchPrompt
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
         user.AppendLine("Construct concrete operator-relevant real-world events from the new radio observations using only the supplied transcripts.");
-        user.AppendLine("Omit routine, unclear, unsupported, or non-event observations. Omitted observations remain unresolved and are not classified as non-incidents.");
+        user.AppendLine("A radio transmission is not automatically an event. Return an event only when its cited words establish a concrete unfolding situation that merits operator awareness or follow-up beyond the exchange itself.");
+        user.AppendLine("Do not promote an observation merely because it mentions a person, vehicle, place, identifier, action, or unit activity.");
+        user.AppendLine("Omit routine, unclear, unsupported, low-information, or non-event observations. Omitted observations remain unresolved and are not classified as non-incidents.");
+        user.AppendLine("Returning an empty events array is correct when none of the supplied observations clears that bar.");
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         user.AppendLine("Use disposition new_event when the cited new observations establish an event without relying on a candidate event.");
         user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
-        user.AppendLine("Every returned event must cite a transcript from every included new observation. Confirmed and provisional relationships must also cite candidate-event transcripts.");
+        user.AppendLine("Every returned event must cite a short exact quote from a transcript in every included new observation. Confirmed and provisional relationships must also cite short exact quotes from candidate-event transcripts.");
+        user.AppendLine("For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate.");
         user.AppendLine("Titles and summaries must state only what the cited transcripts support. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
+        user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
         user.AppendLine("Copy every identifier exactly.");
         user.AppendLine();
         user.AppendLine("Source bundle:");
@@ -85,7 +90,7 @@ public static class IncidentBatchPrompt
                                     new_observation_ids = StringArraySchema(newObservationIds),
                                     title = new { type = "string" },
                                     summary = new { type = "string" },
-                                    relationship_statement = new { type = "string" },
+                                    operator_basis = new { type = "string" },
                                     uncertainty = new { type = "number", minimum = 0, maximum = 1 },
                                     new_observation_evidence = CitationArraySchema(newTranscriptIds),
                                     candidate_evidence = CitationArraySchema(candidateTranscriptIds),
@@ -95,7 +100,7 @@ public static class IncidentBatchPrompt
                                 required = new[]
                                 {
                                     "proposal_token", "disposition", "candidate_token", "new_observation_ids", "title", "summary",
-                                    "relationship_statement", "uncertainty", "new_observation_evidence", "candidate_evidence",
+                                    "operator_basis", "uncertainty", "new_observation_evidence", "candidate_evidence",
                                     "alternative_interpretations", "unresolved_questions"
                                 }
                             }
@@ -121,8 +126,12 @@ public static class IncidentBatchPrompt
         {
             type = "object",
             additionalProperties = false,
-            properties = new { transcript_id = new { type = "string", @enum = transcriptIds.ToArray() } },
-            required = new[] { "transcript_id" }
+            properties = new
+            {
+                transcript_id = new { type = "string", @enum = transcriptIds.ToArray() },
+                exact_quote = new { type = "string" }
+            },
+            required = new[] { "transcript_id", "exact_quote" }
         }
     };
 
@@ -204,10 +213,10 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 item.NewObservationIds,
                 item.Title,
                 item.Summary,
-                item.RelationshipStatement,
+                item.OperatorBasis,
                 item.Uncertainty,
-                item.NewObservationEvidence.Select(citation => IncidentEventStateLinkEvidence.MaterializeCitation(bundle, citation.TranscriptId)).ToList(),
-                item.CandidateEvidence.Select(citation => IncidentEventStateLinkEvidence.MaterializeCitation(bundle, citation.TranscriptId)).ToList(),
+                item.NewObservationEvidence.Select(citation => new IncidentEventStateTranscriptCitation(citation.TranscriptId, citation.ExactQuote)).ToList(),
+                item.CandidateEvidence.Select(citation => new IncidentEventStateTranscriptCitation(citation.TranscriptId, citation.ExactQuote)).ToList(),
                 item.AlternativeInterpretations,
                 item.UnresolvedQuestions)).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
@@ -264,11 +273,13 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
         [property: JsonPropertyName("new_observation_ids")] IReadOnlyList<string> NewObservationIds,
         [property: JsonPropertyName("title")] string Title,
         [property: JsonPropertyName("summary")] string Summary,
-        [property: JsonPropertyName("relationship_statement")] string RelationshipStatement,
+        [property: JsonPropertyName("operator_basis")] string OperatorBasis,
         [property: JsonPropertyName("uncertainty")] double Uncertainty,
         [property: JsonPropertyName("new_observation_evidence")] IReadOnlyList<BatchCitationResponse> NewObservationEvidence,
         [property: JsonPropertyName("candidate_evidence")] IReadOnlyList<BatchCitationResponse> CandidateEvidence,
         [property: JsonPropertyName("alternative_interpretations")] IReadOnlyList<string> AlternativeInterpretations,
         [property: JsonPropertyName("unresolved_questions")] IReadOnlyList<string> UnresolvedQuestions);
-    private sealed record BatchCitationResponse([property: JsonPropertyName("transcript_id")] string TranscriptId);
+    private sealed record BatchCitationResponse(
+        [property: JsonPropertyName("transcript_id")] string TranscriptId,
+        [property: JsonPropertyName("exact_quote")] string ExactQuote);
 }
