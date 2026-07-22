@@ -50,7 +50,7 @@ public static class IncidentBatchRelationshipContract
 {
     public const int MaximumSourceCount = IncidentBatchPrompt.MaximumReturnedEvents;
     public const int MaximumCandidateCount = IncidentBatchContract.MaximumCandidateCount;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v1";
+    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -140,6 +140,13 @@ public static class IncidentBatchRelationshipContract
             RequireValue(relationship.RelationshipStatement, "relationship statement", errors);
             if (double.IsNaN(relationship.Uncertainty) || double.IsInfinity(relationship.Uncertainty) || relationship.Uncertainty is < 0 or > 1)
                 errors.Add($"relationship '{relationship.SourceProposalToken}' to '{relationship.CandidateToken}' has invalid uncertainty");
+            if (relationship.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership)
+            {
+                if (relationship.Uncertainty != 0)
+                    errors.Add($"confirmed membership '{relationship.SourceProposalToken}' to '{relationship.CandidateToken}' cannot express uncertainty");
+                if (relationship.AlternativeInterpretations.Count > 0 || relationship.UnresolvedQuestions.Count > 0)
+                    errors.Add($"confirmed membership '{relationship.SourceProposalToken}' to '{relationship.CandidateToken}' cannot retain counterinterpretations or unresolved questions");
+            }
             ValidateCitations(bundle, source.NewObservationIds, relationship.SourceEvidence, "constructed-group evidence", errors);
             ValidateCitations(bundle, candidate.ObservationIds, relationship.CandidateEvidence, "candidate evidence", errors);
             ValidateStrings(relationship.AlternativeInterpretations, "alternative interpretation", errors);
@@ -238,6 +245,7 @@ public static class IncidentBatchRelationshipPrompt
         user.AppendLine("Evaluate relationships between every constructed group and every supplied candidate using only their transcripts.");
         user.AppendLine("The constructed groups are immutable. Do not rewrite, split, combine, discard, or add facts to them.");
         user.AppendLine("Return confirmed_membership only when exact evidence from both sides directly establishes one unfolding real-world event. Return at most one confirmed membership for each constructed group.");
+        user.AppendLine("A confirmed_membership must use uncertainty 0 and empty alternative_interpretations and unresolved_questions. If either side contains a material discrepancy, counterinterpretation, or unresolved question, return provisional_association or omit the pair; never confirm it.");
         user.AppendLine("Return provisional_association when exact evidence from both sides establishes a specific operational relationship but meaningful uncertainty remains. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");
         user.AppendLine("Omit unsupported pairs. Timing, retrieval rank, radio metadata, generic similarity, and shared event type do not prove a relationship.");
         user.AppendLine("Each returned relationship must cite short contiguous verbatim spans from both source boundaries. Never borrow a candidate fact into constructed-group evidence or the reverse.");

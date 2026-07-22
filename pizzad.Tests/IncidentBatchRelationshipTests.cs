@@ -138,6 +138,34 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public void ConfirmedMembershipCannotRetainMaterialCounterevidence()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "A two-year-old female is receiving CPAP."),
+            Observation("call:2", "transcript:2", "A 19-year-old female has difficulty breathing at Ringgold Road."));
+        var sources = new[] { new IncidentBatchRelationshipSource("event:pediatric", ["call:1"]) };
+        var candidates = new[] { new IncidentBatchCandidate("candidate:adult", "projection:adult", ["call:2"]) };
+        var relationship = Relationship(
+            "event:pediatric",
+            "candidate:adult",
+            "transcript:1",
+            "two-year-old female",
+            "transcript:2",
+            "19-year-old female") with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+            Uncertainty = 0,
+            AlternativeInterpretations = ["The ages describe different patients."],
+            UnresolvedQuestions = ["Are these the same patient?"]
+        };
+
+        var validation = IncidentBatchRelationshipContract.ValidateProposal(bundle, sources, candidates, Proposal(relationship));
+
+        Assert.False(validation.IsValid);
+        Assert.Contains(validation.Errors, error => error.Contains("cannot retain counterinterpretations", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CoordinatorKeepsCandidatesOutOfConstructionThenAppliesConfirmedRelationship()
     {
         var bundle = Bundle(
@@ -164,7 +192,7 @@ public sealed class IncidentBatchRelationshipTests
             "transcript:2",
             "same white truck crash",
             "transcript:1",
-            "White truck crashed") with { Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership };
+            "White truck crashed") with { Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership, Uncertainty = 0 };
         var relationship = new CapturingRelationshipProposer(Proposal(confirmed));
         var coordinator = new IncidentBatchCoordinator(constructor, relationship, new MemoryStore(), new FixedTimeProvider(Now));
         var prior = new IncidentBatchProjection(

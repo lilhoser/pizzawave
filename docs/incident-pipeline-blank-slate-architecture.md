@@ -1400,6 +1400,21 @@ look as though it had admitted unsupported narrative. The report now uses the
 same evidence-title projection as state; raw model wording remains available
 only in the append-only ledger for diagnosis.
 
+Run T produced the first structurally valid `confirmed_membership`, and it was
+semantically false. The candidate described a 19-year-old female with difficulty
+breathing at 1487 Ringgold Road. The new group described a two-year-old female
+receiving CPAP and contained no Ringgold location. The relationship proposer
+nevertheless claimed a location match and confirmed membership, while its own
+alternative interpretation and unresolved question explicitly retained the
+19-versus-2 age conflict. Exact citations on both sides protected provenance but
+could not make that disposition coherent. The typed relationship contract now
+requires confirmed membership to have zero expressed uncertainty and no
+alternative interpretation or unresolved question. Any model output that
+retains material counterevidence must choose provisional association or abstain;
+otherwise deterministic validation fails closed and leaves both memberships
+unchanged. This rule reads typed epistemic state, not content strings, event
+labels, categories, radio metadata, or model confidence thresholds.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
