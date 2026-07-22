@@ -1284,6 +1284,32 @@ clear candidate-backed follow-up that would fairly test confirmation-gated
 promotion. The safe state policy remains unchanged while such evidence
 accumulates.
 
+Later Run Q evidence disproved the one-pass constructor boundary. In batch
+sequence 43, a prior Review candidate described a patient with Parkinson's who
+had hit his head. A new observation described a different 75-year-old patient
+who slid from a chair and reported tailbone pain. The model's own alternative
+interpretation said the new call appeared to continue the candidate, but it
+returned a candidate-free event, omitted the required provisional association,
+and cited `He did hit his head` as new-event evidence even though that sentence
+occurred only in the candidate transcript. It also returned a normalized,
+ellipsis-joined quote that was absent from the source transcript. Deterministic
+exact-source validation rejected the proposal, so no false state transition
+occurred, but validation cannot make a contaminated one-pass proposal useful.
+
+This establishes a new architectural constraint: construction and relationship
+evaluation must be source-isolated model stages. The construction stage receives
+only new observations and may create immutable provisional groups. A later,
+bounded relationship stage receives those accepted groups plus prior candidate
+evidence and may attach zero or more typed relationships. It cannot rewrite,
+split, combine, or add facts to a constructed group. Every relationship cites
+exact evidence independently from both source boundaries; at most one candidate
+may receive confirmed membership for a group, while several provisional
+associations may remain available for operator review without merging events.
+The relationship contract is deliberately multi-candidate because a two-call
+link abstraction would not support the agreed operator workflow. This is a
+source-ownership rule, not a prompt-only preference, confidence threshold,
+event taxonomy, phrase list, talkgroup rule, or static semantic classifier.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
