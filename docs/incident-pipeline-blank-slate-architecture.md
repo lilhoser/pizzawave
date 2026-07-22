@@ -1721,6 +1721,20 @@ is a successful regression of the known failure, not general accuracy proof.
 The next safe step is a fresh OT-only, non-mutating shadow run on newly indexed
 traffic; no production incident rows or RPI service were changed by this replay.
 
+Commit `5c48102` was deployed to OT only on 2026-07-22. The fresh non-mutating
+run is `ot-batch-constructor-shadow-20260722-ab`, with the existing 300-second
+interval, 120-minute lookback, batch size of 24, and candidate limit of four.
+The service established its no-backfill fence after call `1433087`. The
+pre-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v14ab-20260722T161932Z.bak`;
+the active configuration SHA-256 is
+`822bf8ca47728bd9fce06b8a23a36ae0edf4c6e4552b4dcc2c00c8495457563d`.
+The active file and backup remain owned by `root:pizzawave` with mode `0660`.
+Post-restart service, ingestion, production incident freshness, AI completion,
+and embedding health were all `ok`. The run will stop at the earlier of 25
+candidate-backed batches or eight hours. RPI and production incident rows were
+not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
