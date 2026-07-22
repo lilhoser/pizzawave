@@ -204,6 +204,9 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.DoesNotContain("999", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Critical injuries", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("A radio transmission is not automatically an event", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("underlying real-world condition", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("one contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Review every new observation", prompt.UserPrompt, StringComparison.Ordinal);
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
         Assert.Contains("operator_basis", schema, StringComparison.Ordinal);
         Assert.Contains("exact_quote", schema, StringComparison.Ordinal);

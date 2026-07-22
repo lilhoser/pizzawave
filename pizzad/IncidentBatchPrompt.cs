@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v2";
+    public const string PromptIdentity = "incident-batch-constructor-v3";
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -31,6 +31,7 @@ public static class IncidentBatchPrompt
         user.AppendLine("Return only JSON matching the supplied schema.");
         user.AppendLine("Construct concrete operator-relevant real-world events from the new radio observations using only the supplied transcripts.");
         user.AppendLine("A radio transmission is not automatically an event. Return an event only when its cited words establish a concrete unfolding situation that merits operator awareness or follow-up beyond the exchange itself.");
+        user.AppendLine("Operator relevance must come from the underlying real-world condition affecting people, property, or public safety. The mechanics of communicating, documenting, identifying, or coordinating workflow are not themselves an operator-relevant event when the underlying situation is absent or unknown.");
         user.AppendLine("Do not promote an observation merely because it mentions a person, vehicle, place, identifier, action, or unit activity.");
         user.AppendLine("Omit routine, unclear, unsupported, low-information, or non-event observations. Omitted observations remain unresolved and are not classified as non-incidents.");
         user.AppendLine("Returning an empty events array is correct when none of the supplied observations clears that bar.");
@@ -39,7 +40,8 @@ public static class IncidentBatchPrompt
         user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
-        user.AppendLine("Every returned event must cite a short exact quote from a transcript in every included new observation. Confirmed and provisional relationships must also cite short exact quotes from candidate-event transcripts.");
+        user.AppendLine("Review every new observation before choosing events; finding one event is not a reason to stop evaluating the remaining observations.");
+        user.AppendLine("Every returned event must cite a short exact quote from a transcript in every included new observation. Each exact_quote must be one contiguous verbatim substring. Never insert ellipses, omit intervening words, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite short exact quotes from candidate-event transcripts.");
         user.AppendLine("For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate.");
         user.AppendLine("Titles and summaries must state only what the cited transcripts support. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");

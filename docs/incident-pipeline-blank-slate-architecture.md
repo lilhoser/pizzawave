@@ -713,6 +713,23 @@ pre-run configuration is preserved at
 its SHA-256 is
 `b18e12c2c458b9713ca6ee9ed4bdf3f4aa1d22822f8b99894f8b06a5590247e8`.
 
+Run C's first batch proved the failure isolation: of two returned proposals,
+one exact-source proposal was accepted and one proposal with a spliced quote
+was rejected. Inspection also showed that the accepted proposal described
+complaint-number coordination, while the same batch omitted source text about
+an 18-year-old female, threats, and statements about a “next life.” That is a
+semantic precision and recall failure even though the structural policy worked.
+
+Prompt contract v3 responds at the model boundary. It defines relevance by the
+underlying real-world condition affecting people, property, or public safety,
+and says that communication, documentation, identification, or workflow
+mechanics are not themselves an event when that underlying condition is absent
+or unknown. It requires the model to review every observation before choosing
+events. It also defines an exact quote as one contiguous verbatim substring and
+explicitly forbids ellipses, omitted intervening words, normalized wording, or
+joined spans. These are general evidence and relevance instructions, not a
+content-category allowlist.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
