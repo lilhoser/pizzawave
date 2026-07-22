@@ -1221,6 +1221,40 @@ Immediately after deployment, production incident analysis was current by
 eight minutes and overall, live-radio, AI-completion, and embedding health were
 all `ok`. RPI was not changed.
 
+Run P verified that balanced state context works mechanically: its second
+batch received four candidates after the first retained two Review events,
+without waiting for those events to win embedding retrieval. It returned no
+association or confirmed membership in the first two batches because the new
+traffic did not clearly connect to the supplied state.
+
+Run P also produced another false visible candidate-free event. Two short
+observations said only `Can you come to me?` and gave a vague location, but the
+model promoted them as a request-for-assistance event. Together with Run O's
+DHS/CPS exchange, this disproves the application policy that two separately
+cited observations are sufficient for automatic visibility. The failure is
+semantic relevance, not citation integrity, source count, retrieval, or model
+confidence calibration.
+
+The successor state policy is `visibility=confirmed-membership-v2` and prompt
+v11. Every candidate-free proposal remains in Review, whether it groups one or
+several observations. Application code automatically makes an event visible
+only when a later, separately evaluated `confirmed_membership` transition cites
+both new evidence and that prior Review state. Operator action may eventually
+provide the other promotion path. This replaces a weak source-count proxy with
+a temporal state transition and adds no content taxonomy, phrase rule, address
+parser, talkgroup rule, or confidence threshold.
+
+Confirmation-gated visibility began in clean OT run
+`ot-batch-constructor-shadow-20260722-q`, retaining balanced candidate context,
+the 24-observation, 300-second cadence, and establishing a startup fence at
+call `1426963`. The prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v11q-20260722T073646Z.bak`;
+its SHA-256 is
+`3f27f4bdabf0a11047a62c50936c6ab10d6425fecf0357327159a5a7ad0c1485`.
+Immediately after deployment, production incident analysis was current by four
+minutes and overall, live-radio, AI-completion, and embedding health were all
+`ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
