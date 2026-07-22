@@ -1150,6 +1150,42 @@ positive example of sibling consolidation. Production incident analysis was
 current by 12 minutes with no stale calls, and overall, live-radio,
 AI-completion, and embedding health were all `ok`.
 
+Across five Run N batches and 82 observations, the bounded contract returned 16
+accepted proposals with no invalid output, proposer error, or truncation. One
+corroborated event became visible and 15 single-observation proposals remained
+in Review. It still returned no confirmed membership or provisional
+association.
+
+One missed association isolates the cause. The initial alarm at 4940 Azalea
+Avenue was supplied in a later batch as `candidate-2`. A new call cited the
+same address and explicitly said it was the address responders had just
+cleared, followed by a new 911 call. The proposer used that prior clearance to
+explain why the situation was recurring and distinct, but returned a
+candidate-free event. Retrieval therefore succeeded; prompt v9 had described
+provisional association mainly as uncertain membership and did not make clear
+that distinct but operationally related events can retain separate membership
+while carrying a reviewable link.
+
+Prompt v10 makes that boundary explicit. New evidence that refers back to,
+recurs after, follows up on, or may be confused with a supplied candidate may
+use `provisional_association` even when it is a distinct event. Both sides must
+still be cited exactly, and the association remains review context without
+merging observations. The model is also told not to return a candidate-free
+event when its own explanation relies on a supplied candidate to establish
+that relationship or distinction. Application code still performs no phrase,
+address, category, or semantic matching.
+
+The cross-event association contract began in clean OT run
+`ot-batch-constructor-shadow-20260722-o`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1426789`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v10o-20260722T070628Z.bak`;
+its SHA-256 is
+`9955c62595b19fbfa0a41a241c0a446b6b7028376c5d16efddbd5ea044339e2d`.
+Immediately after deployment, production incident analysis was current by
+eight minutes and overall, live-radio, AI-completion, and embedding health were
+all `ok`. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
