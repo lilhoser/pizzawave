@@ -52,7 +52,7 @@ public sealed class IncidentBatchConstructorPersistenceTests
             Assert.Equal(0, report.Totals.NewEvents);
             Assert.Equal(1, report.Totals.ProvisionalEvents);
             Assert.Equal(0, report.Totals.UnresolvedObservations);
-            Assert.Equal("Tree blocking roadway", Assert.Single(report.ProjectedEvents).Title);
+            Assert.Equal("Tree down", Assert.Single(report.ProjectedEvents).Title);
             var attempt = Assert.Single(report.Attempts);
             Assert.Equal(IncidentBatchPrompt.PromptIdentity, attempt.PromptIdentity);
             Assert.Equal("test-config", attempt.ConfigurationIdentity);

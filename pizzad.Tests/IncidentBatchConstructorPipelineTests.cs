@@ -36,7 +36,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var projected = Assert.Single(result.Projection.Projection.Events);
         Assert.True(projected.OperatorVisible);
         Assert.Equal(["call:1", "call:2"], projected.ObservationIds);
-        Assert.Equal("Tree blocking roadway", projected.Title);
+        Assert.Equal("Tree down … same tree", projected.Title);
     }
 
     [Fact]
@@ -56,7 +56,9 @@ public sealed class IncidentBatchConstructorPipelineTests
         var result = await RunAsync(bundle, ["call:1"], [], new FixedProposer(Proposal([item])));
 
         var projected = Assert.Single(result.Projection.Projection.Events);
+        Assert.Equal("vehicle is sparking … near Notting Hill", projected.Title);
         Assert.Equal("vehicle is sparking … near Notting Hill", projected.Summary);
+        Assert.DoesNotContain("Sparking vehicle", projected.Title, StringComparison.Ordinal);
         Assert.DoesNotContain("road is badly damaged", projected.Summary, StringComparison.Ordinal);
         Assert.Contains("road is badly damaged", result.LedgerEntry.Entry.Proposal.Events[0].Summary, StringComparison.Ordinal);
     }
@@ -115,7 +117,7 @@ public sealed class IncidentBatchConstructorPipelineTests
         var projected = Assert.Single(result.Projection.Projection.Events);
         Assert.Equal(["call:10", "call:11"], projected.ObservationIds);
         Assert.True(projected.OperatorVisible);
-        Assert.Equal("Critical-injury crash on County Road 725", projected.Title);
+        Assert.Equal("Vehicle crash", projected.Title);
     }
 
     [Fact]

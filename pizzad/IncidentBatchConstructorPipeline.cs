@@ -121,7 +121,7 @@ public static class IncidentBatchContract
     public const int MaximumCandidateCount = 8;
     public const int MaximumObservationsPerCandidate = 12;
     public const string PerEventAcceptanceConfigurationToken = "acceptance=per-event-v1";
-    public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-summary-v1";
+    public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-narrative-v2";
     public const string OldestUnseenCursorConfigurationToken = "cursor=oldest-unseen-v1;cadence=fixed-start-v1";
     public const string CorroboratedVisibilityConfigurationToken = "visibility=corroborated-new-v1";
 
@@ -438,6 +438,7 @@ public static class IncidentBatchProjector
         foreach (var proposal in IncidentBatchContract.AcceptedEvents(entry))
         {
             var evidenceSummary = BuildEvidenceSummary(proposal.NewObservationEvidence);
+            var evidenceTitle = BuildEvidenceTitle(evidenceSummary);
             var singletonIds = entry.SingletonEvents
                 .Where(item => proposal.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
                 .Select(item => item.ProjectionEventId)
@@ -454,7 +455,7 @@ public static class IncidentBatchProjector
                 events[targetIndex] = target with
                 {
                     ObservationIds = target.ObservationIds.Concat(proposal.NewObservationIds).Distinct(StringComparer.Ordinal).ToList(),
-                    Title = proposal.Title,
+                    Title = string.IsNullOrWhiteSpace(target.Title) ? evidenceTitle : target.Title,
                     Summary = AppendEvidenceSummary(target.Summary, evidenceSummary),
                     OperatorVisible = true,
                     OperatorReview = false,
@@ -469,7 +470,7 @@ public static class IncidentBatchProjector
                 events[sourceIndex] = source with
                 {
                     ObservationIds = proposal.NewObservationIds.ToList(),
-                    Title = proposal.Title,
+                    Title = evidenceTitle,
                     Summary = evidenceSummary,
                     OperatorVisible = IncidentBatchContract.IsOperatorVisibleNewEvent(proposal),
                     OperatorReview = IncidentBatchContract.IsOperatorReviewEvent(proposal),
@@ -513,6 +514,15 @@ public static class IncidentBatchProjector
             .Select(item => item.ExactQuote.Trim())
             .Where(item => item.Length > 0)
             .Distinct(StringComparer.Ordinal));
+
+    private static string BuildEvidenceTitle(string evidenceSummary)
+    {
+        const int maximumLength = 120;
+        if (evidenceSummary.Length <= maximumLength)
+            return evidenceSummary;
+
+        return $"{evidenceSummary[..(maximumLength - 1)].TrimEnd()}\u2026";
+    }
 
     private static string AppendEvidenceSummary(string existing, string added)
     {
