@@ -1626,6 +1626,42 @@ Post-restart service, production incident freshness, AI completion, and
 embeddings were all `ok`. No production incident rows were changed and RPI was
 not changed.
 
+### Run AA checkpoint
+
+Run AA reached its planned checkpoint after 22 attempts, including 21
+candidate-backed batches and three raw confirmed-membership proposals. It
+processed 528 new observations, constructed 72 source-grounded Review groups,
+and left 450 observations unresolved. The relationship proposer returned 13
+pairs: three claimed confirmations and ten claimed provisional associations.
+The independent verifier admitted one confirmation and rejected the other 12
+pairs. It admitted no provisional associations.
+
+The admitted pair was a concrete continuation: both sides independently
+described a male motorcyclist slumped over or passed out on the roadside, one
+about 70 seconds after the other. The verifier supplied exact evidence from
+both boundaries. It also emitted one borrowed extra source citation; the
+per-citation acceptance boundary discarded that citation while retaining the
+sufficient exact source and candidate evidence.
+
+Rejected pairs included different recovered vehicles, unrelated welfare
+checks, concurrent but unconnected medical responses, a truck driver versus a
+motorcyclist, generic `force 3` wording, conflicting fire-alarm addresses, and
+an invented address match where the candidate contained no Buchanan Road
+reference. These are the same generic-similarity and source-boundary failures
+that previously entered the provisional projection. The independent verifier
+prevented every one from becoming membership or an operator Review item.
+
+Across the run, 22 constructor calls, 21 relationship calls, and eight batched
+verifier calls used 183,438 model tokens. Every model request succeeded and
+ended with `finish_reason=stop`; none hit the response limit. Seven
+deterministic validation errors were retained in the ledger, primarily
+fail-small citation errors. OT production incident analysis remained current,
+with no completion-failure streak. The checkpoint supports the verifier as an
+effective precision boundary, but does not establish recall: only one true
+continuation was admitted and no useful uncertain association appeared. The
+live shadow remains non-mutating. Disabling it requires an OT `pizzad` restart
+and was deferred to avoid disturbing the concurrent RF experiment.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
