@@ -863,6 +863,25 @@ updates append their validated new-source excerpts to the existing projected
 evidence. The model-generated title remains a non-authoritative display label;
 stable event identity and membership do not depend on either title or summary.
 
+Run F's second batch showed that v5's permissive reconsideration language is
+not a viable balance. The model found three plausible missing-child updates
+and received the prior missing-child event as a candidate, but returned one
+observation simultaneously in a new event and as confirmed membership. The
+candidate relationship also omitted all required candidate evidence, so the
+deterministic ownership and evidence checks rejected both proposals. Of five
+proposals, the only two accepted events were routine airport/weather
+coordination and a vehicle-registration lookup—the false-positive behavior the
+relevance contract explicitly forbids. The request took 122.553 seconds.
+
+V5 is therefore retired after two batches. Prompt v6 removes its permissive
+incomplete-condition and exhaustive-reconsideration additions, returning to
+the precision-first v4 relevance boundary while retaining multi-span exact
+citations. It makes two structural obligations explicit: observations related
+to a candidate cannot simultaneously create a new event, and an event's title,
+summary, and basis may use only that event's own exact quotes, never omitted or
+sibling observations. The evidence-only projection remains the operator-facing
+summary authority even if the model violates the latter instruction.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

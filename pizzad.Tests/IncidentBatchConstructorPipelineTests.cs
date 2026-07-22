@@ -229,8 +229,8 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.Contains("underlying real-world condition", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("one short contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Review every new observation", prompt.UserPrompt, StringComparison.Ordinal);
-        Assert.Contains("compare every still-omitted new observation with every drafted event and candidate event", prompt.UserPrompt, StringComparison.Ordinal);
-        Assert.Contains("Preserve missing or garbled details as uncertainty", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("do not also return them in a new_event or any second proposal", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Never borrow facts from omitted observations", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Remove every discarded draft from the events array entirely", prompt.UserPrompt, StringComparison.Ordinal);
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
         Assert.Contains("operator_basis", schema, StringComparison.Ordinal);
