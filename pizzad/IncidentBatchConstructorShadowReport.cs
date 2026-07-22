@@ -42,9 +42,22 @@ public sealed record IncidentBatchShadowAttemptDto(
     string PromptIdentity,
     string ConfigurationIdentity,
     IReadOnlyList<string> EventTitles,
+    IReadOnlyList<IncidentBatchShadowRelationshipDto> Relationships,
     IReadOnlyList<string> ValidationErrors,
     long ProposerMilliseconds,
     string ProposerError);
+
+public sealed record IncidentBatchShadowRelationshipDto(
+    bool Accepted,
+    string Disposition,
+    string SourceProposalToken,
+    string CandidateToken,
+    string RelationshipStatement,
+    double Uncertainty,
+    IReadOnlyList<string> SourceEvidence,
+    IReadOnlyList<string> CandidateEvidence,
+    IReadOnlyList<string> AlternativeInterpretations,
+    IReadOnlyList<string> UnresolvedQuestions);
 
 public sealed record IncidentBatchShadowProjectedEventDto(string ProjectionEventId, int ObservationCount, string Title, string Summary, bool OperatorVisible, bool OperatorReview);
 
@@ -148,6 +161,22 @@ public sealed partial class EngineDatabase
                 relationshipSources,
                 entry.Candidates,
                 entry.RelationshipProposal);
+        var acceptedRelationshipKeys = relationships
+            .Select(RelationshipKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var relationshipRows = (entry.RelationshipProposal?.Relationships ?? [])
+            .Select(item => new IncidentBatchShadowRelationshipDto(
+                acceptedRelationshipKeys.Contains(RelationshipKey(item)),
+                item.Disposition.ToString(),
+                item.SourceProposalToken,
+                item.CandidateToken,
+                item.RelationshipStatement,
+                item.Uncertainty,
+                item.SourceEvidence.Select(FormatCitation).ToList(),
+                item.CandidateEvidence.Select(FormatCitation).ToList(),
+                item.AlternativeInterpretations,
+                item.UnresolvedQuestions))
+            .ToList();
         var validationErrors = entry.ProposalValidationErrors
             .Concat(entry.RelationshipProposalValidationErrors ?? [])
             .ToList();
@@ -177,10 +206,17 @@ public sealed partial class EngineDatabase
             entry.Execution.ConfigurationIdentity,
             events.Select(item => IncidentBatchProjector.BuildEvidenceTitle(
                 IncidentBatchProjector.BuildEvidenceSummary(item.NewObservationEvidence))).ToList(),
+            relationshipRows,
             validationErrors,
             entry.Execution.ProposerDurationMilliseconds + (entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0),
             proposerError);
     }
+
+    private static string RelationshipKey(IncidentBatchRelationship relationship) =>
+        $"{relationship.SourceProposalToken}\u001f{relationship.CandidateToken}\u001f{relationship.Disposition}";
+
+    private static string FormatCitation(IncidentEventStateTranscriptCitation citation) =>
+        $"{citation.TranscriptId}: \u201c{citation.ExactQuote}\u201d";
 
     private static bool IsValid(IncidentBatchStoredLedgerEntry row) =>
         row.Entry.ProposalValidationErrors.Count == 0 && (row.Entry.RelationshipProposalValidationErrors ?? []).Count == 0;

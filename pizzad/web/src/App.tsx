@@ -9570,10 +9570,25 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
           const produced = attempt.newEventCount + attempt.confirmedMembershipCount;
           const provisional = attempt.provisionalEventCount + attempt.provisionalAssociationCount;
           const status = failed && attempt.acceptedEventCount ? "Partial" : failed ? "Invalid" : produced ? "Event" : provisional ? "Review" : "Unresolved";
-          return <div className="incident-shadow-row" key={attempt.sequence}>
-            <span className={`section-status ${failed ? "warning" : produced ? "ok" : "neutral"}`}>{status}</span>
-            <span className="incident-shadow-identity"><strong>Calls {attempt.firstCallId || "?"}{attempt.lastCallId && attempt.lastCallId !== attempt.firstCallId ? `–${attempt.lastCallId}` : ""}</strong><small>{new Date(attempt.recordedAtUtc).toLocaleString()} · {attempt.newObservationCount} observations · {attempt.candidateCount} candidates · {attempt.modelIdentity} · {attempt.promptIdentity}</small><small>{attempt.configurationIdentity}</small><em>{attempt.eventTitles.join(" · ") || "No source-grounded event was proposed."}</em>{attempt.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}{attempt.proposerError && <small className="warning-text">{attempt.proposerError}</small>}</span>
-            <span className="incident-shadow-activity"><strong>{attempt.acceptedEventCount}/{attempt.proposedEventCount} accepted · {attempt.unresolvedObservationCount} unresolved</strong><small>{(attempt.proposerMilliseconds / 1000).toFixed(1)}s · {attempt.rejectedEventCount} rejected · {attempt.confirmedMembershipCount} confirmed · {attempt.provisionalEventCount} review · {attempt.provisionalAssociationCount} provisional links</small></span>
+          return <div className="incident-shadow-attempt" key={attempt.sequence}>
+            <div className="incident-shadow-row">
+              <span className={`section-status ${failed ? "warning" : produced ? "ok" : "neutral"}`}>{status}</span>
+              <span className="incident-shadow-identity"><strong>Calls {attempt.firstCallId || "?"}{attempt.lastCallId && attempt.lastCallId !== attempt.firstCallId ? `–${attempt.lastCallId}` : ""}</strong><small>{new Date(attempt.recordedAtUtc).toLocaleString()} · {attempt.newObservationCount} observations · {attempt.candidateCount} candidates · {attempt.modelIdentity} · {attempt.promptIdentity}</small><small>{attempt.configurationIdentity}</small><em>{attempt.eventTitles.join(" · ") || "No source-grounded event was proposed."}</em>{attempt.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}{attempt.proposerError && <small className="warning-text">{attempt.proposerError}</small>}</span>
+              <span className="incident-shadow-activity"><strong>{attempt.acceptedEventCount}/{attempt.proposedEventCount} accepted · {attempt.unresolvedObservationCount} unresolved</strong><small>{(attempt.proposerMilliseconds / 1000).toFixed(1)}s · {attempt.rejectedEventCount} rejected · {attempt.confirmedMembershipCount} confirmed · {attempt.provisionalEventCount} review · {attempt.provisionalAssociationCount} provisional links</small></span>
+            </div>
+            {attempt.relationships.map((relationship, index) => {
+              const confirmed = relationship.disposition === "ConfirmedMembership";
+              return <details className={`incident-shadow-relationship ${relationship.accepted ? "accepted" : "rejected"}`} open={!relationship.accepted || !confirmed} key={`${relationship.sourceProposalToken}-${relationship.candidateToken}-${index}`}>
+                <summary><span className={`section-status ${relationship.accepted && confirmed ? "ok" : relationship.accepted ? "neutral" : "warning"}`}>{relationship.accepted ? "Accepted" : "Rejected"}</span><strong>{confirmed ? "Confirmation" : "Provisional association"}: {relationship.sourceProposalToken} → {relationship.candidateToken}</strong><small>{Math.round(relationship.uncertainty * 100)}% uncertainty</small></summary>
+                <div className="incident-shadow-relationship-body">
+                  <p>{relationship.relationshipStatement}</p>
+                  <div><strong>New evidence</strong>{relationship.sourceEvidence.map(evidence => <small key={evidence}>{evidence}</small>)}</div>
+                  <div><strong>Candidate evidence</strong>{relationship.candidateEvidence.map(evidence => <small key={evidence}>{evidence}</small>)}</div>
+                  {relationship.alternativeInterpretations.length > 0 && <div><strong>Alternative interpretations</strong>{relationship.alternativeInterpretations.map(value => <small key={value}>{value}</small>)}</div>}
+                  {relationship.unresolvedQuestions.length > 0 && <div><strong>Unresolved questions</strong>{relationship.unresolvedQuestions.map(value => <small key={value}>{value}</small>)}</div>}
+                </div>
+              </details>;
+            })}
           </div>;
         })}</div>
         {!batchShadow.attempts.length && <p className="muted">This run begins at a startup fence and does not backfill history. The first bounded batch appears after its configured interval.</p>}

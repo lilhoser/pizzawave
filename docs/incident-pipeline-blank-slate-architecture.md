@@ -1468,6 +1468,14 @@ Post-restart service, production incident freshness, AI completion, and
 embedding health were `ok`; live radio was in its normal startup warming
 interval. RPI was not changed.
 
+The micro-batch Inspector report now preserves the relationship-stage decision
+surface instead of reducing it to aggregate counts. Each proposed relationship
+is shown as accepted or rejected with its disposition, source and candidate
+tokens, uncertainty, exact citations from both sides, alternative
+interpretations, and unresolved questions. This makes weak provisional links
+and failed-closed confirmations diagnosable without reading the raw ledger and
+without promoting either kind of output into production incident state.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
