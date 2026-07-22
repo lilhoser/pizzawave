@@ -907,16 +907,62 @@ average rate, sample count, duration, and whether recovery was observed. This
 automatically preserves both edges for the next retained-IQ capture while
 filtering one-sample retunes.
 
+### July 22 restart-boundary captures and persistent rearm
+
+A controlled restart rearmed the original process-lifetime capture quota on
+both hosts. It immediately retained two useful events:
+
+| Host/system | Trigger | IQ SHA-256 | Result |
+| --- | ---: | --- | --- |
+| OT North Bradley | `1784730613018` | `022a960a3ab2fa833281030f978961e2f270fbc637fafa4102e9ea54ba689869` | Live and fixed-primary shadow decode fell together while Hamilton and Cleveland stayed healthy. The shortened startup capture had clean samples and only a 1.40 dB narrow-power difference between low and healthy pre-trigger seconds. |
+| RPI Raymond | `1784730680020` | `841ce737467a693a1a6a1997c23dbf265cef0572e4a0fa36abba3cce5c6c893b` | An unchanged restart did not restore the sustained collapse. The 90-second capture had clean samples, a median live rate of 1 frame/sec, 77 low-rate seconds, and 24 live control-frequency changes. |
+
+The first timer-based rearm candidate then retained a cleaner healthy-to-failed
+edge on each host:
+
+| Host/system | Trigger | IQ SHA-256 | Onset result |
+| --- | ---: | --- | --- |
+| OT North Bradley | `1784732498025` | `288a628bd22972d09be27416799b4adf75b7cc68468e9f51936d9853b8abd7c7` | Both decoders fell to zero with only a 0.16 dB pre-trigger narrow-power change, then recovered. |
+| RPI Raymond | `1784732675023` | `4ed6805c31b8b25986ccd665dca8735fc50e8fcea3fa4cf3b825b6f20e3d48a4` | Both decoders fell while narrow-channel power dropped 5.09 dB between healthy and low pre-trigger seconds. |
+
+These edges show that the two rigs reach the same decoder-failure state through
+more than one RF shape. OT again shows modulation destruction with essentially
+unchanged received channel power. Raymond can also experience a real received
+control-channel fade. Neither capture contained nonfinite, zero, or repeated
+adjacent samples, so neither edge is an SDR sample-delivery artifact.
+
+The first rearm implementation exposed a quota flaw. OT began an incomplete
+Hamilton capture at `1784732621084`; North Bradley retune/Gardner scheduler
+errors had already begun about seven seconds earlier, and source 3 stopped
+delivering samples 21 seconds after the capture began. Systemd restarted TR,
+which reset the in-memory quota and allowed another North Bradley capture at
+`1784732699026`. The capture did not initiate the scheduler error, but the
+restart proved that a process-local timer could permit a capture storm.
+
+The revised isolated TR candidates therefore reconstruct recent automatic
+capture history from both completed JSON/IQ pairs and interrupted IQ-only files
+in `collapseCaptureDir`. With `collapseCaptureMaxEvents: 1` and
+`collapseCaptureQuotaResetSeconds: 21600`, service restarts, deployments, and
+reboots no longer rearm the recorder. A new capture becomes eligible after six
+hours and only after a fresh healthy boundary. On OT startup the revised build
+restored four North Bradley captures and the interrupted Hamilton capture from
+disk, created no new file, and held quota as intended. The feature branches
+remain separate from upstream TR master: current-lineage OT commit `7e03a80e`
+and exact older RPI-lineage commit `2f6ca268`.
+
 ### Updated conclusion and next steps
 
-The likely cause set is narrower:
+The likely cause set is narrower, but it is not one identical propagation event
+at both sites:
 
-1. A real channel-local P25 modulation impairment starts the collapse. It is
-   not sample loss, broadband overload, antenna mistuning, gain, or frequency
-   centering.
+1. A real sample-common RF/P25 modulation impairment starts each collapse. It
+   is not queue accounting, antenna mistuning, gain, frequency centering, or
+   invalid SDR samples. OT can fail at nearly unchanged power; Raymond can also
+   show a several-decibel channel fade.
 2. For Raymond, a distant MSWIN site reusing the exact same control frequencies
    is a concrete physical source. Dynamic co-channel interference and changing
-   simulcast paths are both viable; the present IQ cannot separate them.
+   simulcast paths are both viable for unchanged-power events; ordinary fading
+   is also supported for the 5.09 dB event.
 3. OT does not positively corroborate that co-channel mechanism. North Bradley
    has plausible exact-control reuse but no foreign identity in retained IQ;
    Hamilton has no identified nearby continuous-control reuse and strongly
@@ -926,8 +972,9 @@ The likely cause set is narrower:
 
 Next:
 
-1. Keep both rigs at their verified baseline RF and decoder settings and
-   deploy the new PizzaWave episode summary during a normal reviewed deployment.
+1. Keep both rigs at their verified baseline RF and decoder settings. Let the
+   persistent recorder take at most one automatic capture per system per six
+   hours; do not restart TR to rearm it.
 2. On the next Raymond collapse, examine failed or near-valid P25 network-ID words for
    NAC `2A2` (West), `2A0` (Ashcroft), and `2A4` (Raymond), including candidates
    that fail the full message CRC. This is the smallest no-new-antenna
@@ -936,7 +983,7 @@ Next:
    an independent MSWIN status source is available. A matching West control
    channel during Raymond failure would be much stronger evidence than weather
    correlation.
-4. On the next OT blip, use the episode boundaries and retained IQ to compare
+4. On the next OT blip, use the deployed episode boundaries and retained IQ to compare
    North Bradley, Hamilton, and Cleveland on the same host. Do not continue
    pursuing OT co-channel identity unless a nonlocal NAC or site identity
    appears; prioritize modulation-quality and simulcast-path evidence instead.

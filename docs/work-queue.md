@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-22 09:15 EDT
+Last reconciled: 2026-07-22 11:13 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -10,8 +10,8 @@ read-only, but must not deploy.
 
 | Host | PizzaWave source | Backend hash | Web hash | State |
 | --- | --- | --- | --- | --- |
-| RPI (`sdr1861`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorder and shadow restored |
-| OT (`omicrontheta`) | `main` at `ec5572f` | `4a6b67d8...` | `e05e0275...` | Healthy; wide experiment removed, pre-wide narrow recorders and shadows restored |
+| RPI (`sdr1861`) | `main` at `1b94f87` | `d1583777...` | `b9fc3fba...` | Healthy; baseline RF/decoder settings, narrow recorder, shadow, and episode summaries live |
+| OT (`omicrontheta`) | `main` at `1b94f87` | `d1583777...` | `b9fc3fba...` | Healthy; baseline RF/decoder settings, narrow recorders, shadows, and episode summaries live |
 
 The hosts share the same PizzaWave deployable build. Neither host runs the
 experimental Trunk Recorder retune-grace binary. Both hosts run the passive RF
@@ -35,6 +35,10 @@ Cross-repository source state:
 - the exact-lineage RPI control-demodulator candidate remains isolated on
   `codex/rpi-control-fsk4` at `4bb829fd`; it is not merged to Trunk Recorder
   `master`.
+- restart-persistent automatic capture rearm remains isolated from TR master on
+  `codex/collapse-auto-rearm-ot` at `7e03a80e` and
+  `codex/collapse-auto-rearm-rpi` at `2f6ca268`. The configured six-hour quota
+  is reconstructed from completed and interrupted files across restarts.
 
 ## Active
 
@@ -136,6 +140,15 @@ Cross-repository source state:
   simulcast/multipath modulation destruction as the primary OT explanation,
   while retaining exact-frequency reuse as a North Bradley alternative and a
   stronger Raymond candidate.
+  July 22 restart-boundary captures then showed two onset shapes: OT North
+  Bradley lost both decoders with only a 0.16 dB narrow-power change, while a
+  new Raymond event lost both decoders with a 5.09 dB channel-power drop. Clean
+  sample integrity in both rejects SDR delivery corruption. The first automatic
+  rearm candidate also proved that an in-memory quota is insufficient because
+  a known OT retune/Gardner source-stall restart reset the quota. The revised TR
+  candidates rebuild quota state from existing JSON and IQ files, including an
+  interrupted Hamilton IQ-only file, so routine restarts no longer rearm the
+  experiment. See the field-test log for hashes and exact boundaries.
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
 
