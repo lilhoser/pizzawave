@@ -737,6 +737,146 @@ during deployment correction. It remains useful corroborating evidence but is
 not the primary result above. Automatic quota is process-local, which explains
 why both files exist despite `collapseCaptureMaxEvents: 1`.
 
+## July 22 RPI follow-up: symbol damage, frequency reuse, and weather
+
+The following analysis used read-only RPI telemetry and retained IQ. RPI stayed
+on its exact gain-15 CQPSK baseline: TR PID `694645`, zero restarts, binary
+SHA-256 `15824b7f8083d4b824d10d6e06a22b81a75eca93b4a7b8aa8499e76d299e0449`,
+and config SHA-256
+`6bcb77f651fd76c6036528275f3ec088cf0d56a4667b169d0f47536260facc02`.
+No live configuration or service was changed.
+
+### Last-24-hour event shape
+
+Raymond entered the large degradation at 2026-07-21 21:13:01 EDT. Three
+consecutive 15-second samples were at or below 3 frames/sec and the process did
+not produce three consecutive samples at or above 10 until 07:02:57 EDT. It
+relapsed one minute later for another 40.5 minutes, then again from 07:51:12 to
+08:18:42 EDT. The stable high-rate plateau began around 08:18 EDT. This is not
+one binary eleven-hour outage; it is one long severe episode followed by two
+shorter relapses during recovery.
+
+The severe retained capture `1784687418024`, triggered at 22:30:18 EDT, has IQ
+SHA-256 `025396f7ed22670ef6e8bd82bf24ffcb18b33f255df9f2c79bf891cd9c4cc0d6`.
+Across 145 one-second windows from six Raymond captures, 63 healthy
+fixed-primary windows at or above 15 frames/sec were compared with 82 failed
+windows at or below 1 frame/sec:
+
+| Metric | Healthy median | Failed median | Change |
+| --- | ---: | ---: | ---: |
+| Differential phase error | 14.30 degrees | 19.02 degrees | +33% |
+| Differential amplitude variation | 0.253 | 0.335 | +32% |
+| Exact P25 frame-sync detections | 12/sec | 6/sec | -50% |
+| Carrier-bias estimate | 419.9 Hz | 421.3 Hz | effectively unchanged |
+
+Broad autocorrelation weakened during failure at delays from roughly 31 to 124
+microseconds, but no repeatable single echo emerged. The failed-versus-healthy
+spectral-ripple delay proxy was only 0.531 dB, close to the 0.337 dB
+healthy-versus-healthy null, and its peak-to-median ratio was not stronger than
+the null. The samples therefore show symbol/modulation damage but do not prove
+one stable delayed simulcast path. A changing collection of paths or an exact
+co-channel signal remains consistent with the evidence.
+
+### Exact-frequency reuse is a concrete candidate
+
+The [national 700 MHz channel table](https://www.caprad.org/NlectcRm/Plans/docs/700_NB_channel_centers-finalversion%20wInterop%20ch%20names%20updated%209-15-15%20%282%29%20r1.pdf)
+classifies 773.781250 MHz as a state-license channel, so FCC site search is not
+a complete inventory of transmitters using it. The current
+[MSWIN site table](https://www.radioreference.com/db/sid/4879)
+lists the same four Raymond control-capable frequencies at other MSWIN sites:
+
+| Site | Distance from ETV Raymond | NAC | 773.781250 MHz |
+| --- | ---: | ---: | --- |
+| ETV Raymond | 0 miles | `2A4` | control capable |
+| West, Holmes County | 79.7 miles | `2A2` | control capable |
+| Ashcroft, Monroe County | 173.1 miles | `2A0` | control capable |
+
+The focused [West site record](https://www.radioreference.com/db/site/20524)
+confirms that 773.031250, 773.281250, 773.531250, and 773.781250 MHz are all
+control capable there. This means control-channel rotation within Raymond's
+existing list cannot avoid West when the two sites choose the same member.
+
+The severe IQ was replayed through the validated fixed-primary CQPSK decoder
+with no expected WACN, system ID, or NAC configured. Config SHA-256 was
+`3acbfe3692577dff3cdc736afc805cec39f5eed5f73aef54792ef0342a51b7f5` and log
+SHA-256 was
+`b2843f2df2d6b592be88855d49ce38a4f37efb9f325f01d4d3c47907ef7ceb8b`.
+The replay reproduced the failure, mostly 0-4 frames/sec with a brief peak at
+6, and decoded only Raymond's `BEE00 / 2AD / 2A4` identity. It did not decode
+West's `2A2` NAC or another system identity.
+
+That negative result rules out a second strong, independently decodable P25
+control channel in this capture. It does not rule out a weaker exact-frequency
+West signal: two overlapping P25 signals can destroy each other's symbols
+while only the stronger Raymond frames occasionally pass CRC and identity
+checks. The new bounded conclusion is therefore that dynamic same-network
+co-channel interference is now at least as plausible as diffuse simulcast
+multipath for Raymond.
+
+### July 22 sounding comparison
+
+Surface observations still show an association: the 120 half-hour RF buckets
+from July 19-22 had lower decode with high humidity, zero wind, and small
+temperature/dew-point spread. Rate correlations were -0.403 with relative
+humidity, +0.394 with dew-point spread, and +0.379 with wind. Nighttime decode
+averaged 12.50 frames/sec with 48.3% zero samples versus 25.28 and 15.5% during
+the day. These are associations with time of day, not proof of propagation.
+
+The official [NWS latest JAN sounding page](https://www.weather.gov/bmx/latestjansounding)
+and underlying SPC observed soundings provide a sharper test for this event:
+
+| KJAN sounding | Relation to RF event | Lowest low-layer M gradient | Temperature behavior |
+| --- | --- | ---: | --- |
+| July 22 00Z | about 1 hour before sustained onset | -65.0 M/km over 91-181 m | temperature fell 0.6 C; no inversion |
+| July 22 12Z | during final recovery | -331.5 M/km over the 91-117 m surface layer | temperature rose 1.8 C |
+
+The strong shallow inversion was observed during recovery, while the sounding
+nearest onset lacked one. That contradicts a simple explanation in which a
+stable nocturnal duct alone turns the outage on and its disappearance turns it
+off. Weather may still change the strength of a distant co-channel site between
+soundings, but the July 22 profile does not establish that mechanism.
+
+### Durable onset and recovery evidence
+
+PizzaWave now derives confirmed RF episodes from its existing 15-second
+`rf_sample` stream; no new collector or Trunk Recorder change was added. An
+episode begins after three consecutive samples at or below 3 frames/sec and
+recovers after three consecutive samples at or above 10. The authenticated
+`/api/v1/system/rf/telemetry-summary` response now includes onset and recovery
+timestamps, decode rate, control frequency, frequency error, minimum and
+average rate, sample count, duration, and whether recovery was observed. This
+automatically preserves both edges for the next retained-IQ capture while
+filtering one-sample retunes.
+
+### Updated conclusion and next steps
+
+The likely cause set is narrower:
+
+1. A real channel-local P25 modulation impairment starts the collapse. It is
+   not sample loss, broadband overload, antenna mistuning, gain, or frequency
+   centering.
+2. For Raymond, a distant MSWIN site reusing the exact same control frequencies
+   is a concrete physical source. Dynamic co-channel interference and changing
+   simulcast paths are both viable; the present IQ cannot separate them.
+3. The current CQPSK decoder and alternate-frequency cycling can lengthen the
+   impairment, but neither creates the initial edge.
+
+Next:
+
+1. Keep RPI at the verified gain-15 CQPSK baseline and deploy only the new
+   PizzaWave episode summary during a normal reviewed deployment.
+2. On the next collapse, examine failed or near-valid P25 network-ID words for
+   NAC `2A2` (West), `2A0` (Ashcroft), and `2A4` (Raymond), including candidates
+   that fail the full message CRC. This is the smallest no-new-antenna
+   discriminator for co-channel energy.
+3. Correlate the next episode with the actual control channel in use at West if
+   an independent MSWIN status source is available. A matching West control
+   channel during Raymond failure would be much stronger evidence than weather
+   correlation.
+4. Do not prioritize the BPF-800-M as the next root-cause test. An in-band P25
+   signal at the exact same frequency will pass that filter; it remains useful
+   only as a final check for unrelated out-of-band front-end stress.
+
 ## Limits
 
 The three paired events establish a common channel-local failure class, not a

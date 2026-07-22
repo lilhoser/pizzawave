@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-21 12:01 EDT
+Last reconciled: 2026-07-22 09:15 EDT
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -110,6 +110,19 @@ Cross-repository source state:
   [field-tests/2026-07-20-initial-collapse-flight-recorder.md](field-tests/2026-07-20-initial-collapse-flight-recorder.md).
   The replay procedure and exact results are in
   [field-tests/2026-07-21-p25-control-demodulator-replay.md](field-tests/2026-07-21-p25-control-demodulator-replay.md).
+  A July 22 follow-up found a concrete exact-frequency alternative to generic
+  simulcast multipath: MSWIN West, approximately 79.7 miles from Raymond, lists
+  all four of Raymond's control-capable frequencies and uses NAC `2A2` versus
+  Raymond's `2A4`. Ashcroft also reuses the set at longer range. An
+  identity-unfiltered replay of severe capture `1784687418024` reproduced the
+  0-4 frame/sec failure and decoded only Raymond; that rejects a second strong,
+  decodable control channel but not a weaker signal corrupting Raymond frames.
+  The July 22 KJAN soundings weaken a simple stable-duct explanation: 00Z near
+  onset lacked a low-level inversion, while 12Z during recovery had a sharp
+  shallow inversion. PizzaWave telemetry summaries now derive confirmed
+  collapse episodes and retain decoder quality at both onset and recovery from
+  the existing sample stream. RPI remained on its exact gain-15 CQPSK baseline
+  throughout this read-only work.
   The incident pipeline redesign remains independently owned by its existing
   session and must not be merged or deployed as part of RF work.
 
@@ -208,10 +221,13 @@ Cross-repository source state:
    - retain the completed control-only FSK4 result: it was operationally safe
      but the same-IQ replay did not reproduce a material advantage on its live
      event, so the exact CQPSK baseline was restored;
-   - install the available 769-872 MHz BPF-800-M inline on RPI's Raymond RF
-     path, gate it against a healthy baseline, then hold it through one natural
-     event as the next hardware discriminator. Do not add an antenna or another
-     live wide recorder;
+   - on the next Raymond collapse, inspect near-valid P25 network-ID words for
+     Raymond NAC `2A4`, West NAC `2A2`, and Ashcroft NAC `2A0`, including words
+     that do not survive full-message CRC; independently confirm West's active
+     control channel if an MSWIN status source is available;
+   - keep the available BPF-800-M as a later out-of-band-overload check, not the
+     next root-cause test: it cannot reject an in-band P25 transmitter on the
+     exact same frequency. Do not add an antenna or another live wide recorder;
    - keep alternate-channel validation and Trunk Recorder retune grace as
      secondary recovery work, not as the presumed root-cause fix.
 2. Incident pipeline redesign, using its dedicated handoff, worktree, and

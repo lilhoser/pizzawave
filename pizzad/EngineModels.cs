@@ -851,12 +851,34 @@ public sealed record RfTelemetryTransitionDto(
     double? LowDecodeSeconds,
     bool? Success);
 
+public sealed record RfTelemetryEpisodeDto(
+    string SystemShortName,
+    DateTime OnsetUtc,
+    double OnsetDecodeRate,
+    double? OnsetControlChannelHz,
+    double? OnsetFrequencyErrorHz,
+    DateTime? RecoveryUtc,
+    double? RecoveryDecodeRate,
+    double? RecoveryControlChannelHz,
+    double? RecoveryFrequencyErrorHz,
+    double MinimumDecodeRate,
+    double AverageDecodeRate,
+    int Samples,
+    double DurationSeconds,
+    bool StartedBeforeWindow,
+    bool RecoveryObserved);
+
 public sealed record RfTelemetrySummaryDto(
     long Start,
     long End,
     int BucketSeconds,
     IReadOnlyList<RfTelemetrySiteSeriesDto> Sites,
-    IReadOnlyList<RfTelemetryTransitionDto> Transitions);
+    IReadOnlyList<RfTelemetryTransitionDto> Transitions,
+    double CollapseMaxDecodeRate,
+    int CollapseSamplesRequired,
+    double RecoveryMinDecodeRate,
+    int RecoverySamplesRequired,
+    IReadOnlyList<RfTelemetryEpisodeDto> Episodes);
 
 public sealed record TrHealthMetricDto(string Metric, string Value, string Notes, bool IsIssue);
 
