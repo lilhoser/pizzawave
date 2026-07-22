@@ -1019,12 +1019,11 @@ apostrophes. The cited wording was otherwise present literally in the named
 source transcript. This was a representation failure, not evidence that the
 events were semantically invalid.
 
-The citation ingestion boundary now resolves only one-for-one typographic
+The citation ingestion boundary resolves only one-for-one typographic
 apostrophe, quotation-mark, and dash variants against the named transcript,
 then stores the literal source substring as the citation. It does not normalize
 case or whitespace, repair changed words or numbers, perform fuzzy matching,
-or weaken the exact-source validator. The versioned configuration token is
-`citations=source-punctuation-v1`. The full test suite passes with 646 tests.
+or weaken the exact-source validator.
 
 The source-authoritative citation repair began in clean OT run
 `ot-batch-constructor-shadow-20260722-k`, retaining the 24-observation,
@@ -1034,6 +1033,33 @@ prior configuration is preserved at
 its SHA-256 is
 `fa207fcb255e0db93364764758f6c74e4c69bfa7653fc769b548d0a4e0b90fef`.
 Immediately after deployment, production incident analysis was current by nine
+minutes and overall, live-radio, AI-completion, and embedding health were all
+`ok`. RPI was not changed.
+
+Run K's first batch considered 22 observations in 65.068 seconds. A
+single-observation fentanyl-overdose proposal was accepted and correctly routed
+to Review rather than full visibility. A separately proposed EMS event cited
+two calls at the same address: one reported an unresponsive patient and the
+other described the vehicle scene. That corroborated proposal failed closed
+because the model joined two non-contiguous literal passages with `...` inside
+one quote despite the prompt requiring separate quote items.
+
+The citation boundary now separates an ellipsis-joined quote only when every
+non-empty segment resolves, in order, to literal text in the named transcript.
+It stores those resolved passages as separate citations. If any segment is
+absent, changed, or out of order, the original proposal remains invalid. This
+is deterministic source extraction and does not infer that the passages or
+calls describe the same event. The versioned configuration token is
+`citations=source-segments-v2`; the full test suite passes with 648 tests.
+
+The ordered-segment repair began in clean OT run
+`ot-batch-constructor-shadow-20260722-l`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1426259`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v8l-20260722T055140Z.bak`;
+its SHA-256 is
+`382cfdc4b25e89fc932c859ec7b31cd53514b853fd8cab8e29d0a2da9ef34d5e`.
+Immediately after deployment, production incident analysis was current by 14
 minutes and overall, live-radio, AI-completion, and embedding health were all
 `ok`. RPI was not changed.
 
