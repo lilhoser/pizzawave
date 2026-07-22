@@ -996,6 +996,16 @@ projection enforces it even if the model returns `new_event` for a singleton.
 This is a source-corroboration rule, not a semantic category, phrase check,
 regex, static talkgroup policy, or threshold on model-reported confidence.
 
+The corroborated-visibility policy began in clean OT run
+`ot-batch-constructor-shadow-20260722-j`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1425957`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v8j-20260722T052315Z.bak`;
+its SHA-256 is
+`3063341fb4cbdd4822d18e2f4938e7aeb4efce42b9675f66a405991a20d9541a`.
+Immediately after deployment, production incident analysis was current by 17
+minutes and overall, AI-completion, and embedding health were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
