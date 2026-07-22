@@ -1897,6 +1897,41 @@ Link. The ordinary single-text embedding path remains unchanged for production
 ingestion. A fresh run ID is required for the next capacity measurement; Run C
 must not be combined with it.
 
+Run `ot-batch-constructor-capacity-20260722-d` supplied that clean measurement.
+It completed 12 batches, including 11 candidate-backed batches, from 20:27:14
+through 20:55:40 UTC. The constructor processed 288 observations in 28.43
+minutes, or 10.13 observations per minute. OT received 301 usable transcript
+observations in the identical interval, or 10.59 per minute. The optimized
+pipeline therefore achieved 95.7 percent of arrival rate and fell 13
+observations behind. It cannot recover a backlog or absorb a sustained traffic
+burst and remains well below the 1.5-times-arrival checkpoint gate.
+
+Stored-vector retrieval is no longer the capacity problem. It averaged 262
+milliseconds per batch and reached 1.263 seconds once, when one missing stored
+vector successfully used the explicit single-call fallback. There were no
+retrieval failures or silent omissions. Model work averaged 137.249 seconds per
+batch and reached 276.235 seconds. Constructor requests consumed 1,163.537
+seconds, relationship requests 280.155 seconds, and four independently invoked
+confirmation requests 203.290 seconds: approximately 70.6, 17.0, and 12.3
+percent of model time respectively. All 27 requests succeeded, consuming 87,736
+prompt tokens and 24,806 completion tokens. Two invalid batches remained
+fail-closed. The projection admitted one confirmed membership, no provisional
+association, 47 Review events, and no production incident change.
+
+This checkpoint resolves the capacity question for the current 24-observation,
+three-stage implementation on Paxan. The evidence architecture remains viable,
+and the retrieval implementation is now production-shaped, but this execution
+shape does not have enough headroom. Removing independent confirmation solely
+for speed is not justified: earlier runs showed that it rejects plausible but
+false links, and it represents only 12.3 percent of measured model time. The
+next low-risk capacity experiment should retain every semantic and validation
+stage while varying only micro-batch size. A 12-observation replacement-load
+run can determine whether smaller prompts improve observations per minute and
+tail latency before considering pipelined concurrency or a different local
+model. Run D was stopped at its planned boundary; legacy incident freshness
+recovered to 4.9 minutes, all health domains were `ok`, `trunk-recorder`
+retained PID `3068317`, and RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
