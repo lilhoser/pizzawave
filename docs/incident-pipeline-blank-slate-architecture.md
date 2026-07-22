@@ -1255,6 +1255,18 @@ Immediately after deployment, production incident analysis was current by four
 minutes and overall, live-radio, AI-completion, and embedding health were all
 `ok`. RPI was not changed.
 
+Run Q's first two batches considered 32 observations and accepted five
+candidate-free proposals into Review. None became visible, verifying the new
+application-owned gate even though the model continued to return its normal
+candidate-free dispositions. The second batch received four candidates;
+`candidate-1` was the newest Review event from the preceding batch despite
+having no required embedding match, which verifies balanced state carryover.
+The new traffic did not clearly refer to that state, so the proposer correctly
+returned no confirmed membership or provisional association. Both batches
+completed without invalid output or proposer error in 100.769 and 46.186
+seconds. Production incident analysis remained current and all monitored health
+domains were `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
