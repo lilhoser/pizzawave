@@ -9,7 +9,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 
 public static class IncidentBatchPrompt
 {
-    public const string PromptIdentity = "incident-batch-constructor-v9";
+    public const string PromptIdentity = "incident-batch-constructor-v10";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
@@ -43,6 +43,8 @@ public static class IncidentBatchPrompt
         user.AppendLine("Use provisional_event for a source-grounded candidate-free possible situation that lacks two-observation corroboration or otherwise has meaningful uncertainty. A provisional event is review evidence, not an operator-visible incident. A single-observation event must always be provisional_event.");
         user.AppendLine("Use confirmed_membership only when cited evidence on both sides directly supports one unfolding real-world event.");
         user.AppendLine("Use provisional_association when cited evidence makes a relationship plausible and operator-relevant but meaningful uncertainty remains. Provisional associations never merge membership.");
+        user.AppendLine("A provisional association does not require the two sides to be the same event. Use it when new evidence explicitly refers back to, recurs after, follows up on, or may be confused with a supplied candidate, but should remain a distinct event. Cite both sides; the association is review context and does not merge their observations.");
+        user.AppendLine("Do not return a candidate-free event when its operator_basis, alternatives, or unresolved questions rely on a supplied candidate to explain a prior clearance, recurrence, follow-up, relationship, or distinction.");
         user.AppendLine("Do not create or rely on event classes, categories, roles, talkgroup rules, radio-system meaning, retrieval rank, or timing as proof.");
         user.AppendLine("Review every new observation before choosing events; finding one event is not a reason to stop evaluating the remaining observations.");
         user.AppendLine("Every returned event must cite a transcript in every included new observation. Put each separate supporting span in exact_quotes; every item must be one short contiguous verbatim substring. When evidence is separated in a transcript, return several exact_quotes items. Never insert ellipses, omit intervening words inside an item, normalize wording, or join separated spans. Confirmed and provisional relationships must also cite exact source spans from candidate-event transcripts.");

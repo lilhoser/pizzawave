@@ -260,6 +260,8 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.Contains("one short contiguous verbatim substring", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Review every new observation", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("do not also return them in a new_event or any second proposal", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("A provisional association does not require the two sides to be the same event", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not return a candidate-free event when its operator_basis", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Never borrow facts from omitted observations", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("combine their observations and evidence into one provisional_event", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Remove every discarded draft from the events array entirely", prompt.UserPrompt, StringComparison.Ordinal);
