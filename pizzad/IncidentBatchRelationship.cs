@@ -56,7 +56,7 @@ public static class IncidentBatchRelationshipContract
     public const int MaximumAlternatives = 2;
     public const int MaximumUnresolvedQuestions = 2;
     public const int MaximumTextLength = 320;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-v1";
+    public const string ConfigurationToken = "relationship-stage=source-isolated-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -301,7 +301,7 @@ public sealed record IncidentBatchRelationshipPromptPayload(string SystemPrompt,
 
 public static class IncidentBatchRelationshipPrompt
 {
-    public const string PromptIdentity = "incident-batch-relationship-v2-source-isolated-bounded";
+    public const string PromptIdentity = "incident-batch-relationship-v3-source-isolated-selective";
 
     public static IncidentBatchRelationshipPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -337,13 +337,14 @@ public static class IncidentBatchRelationshipPrompt
         var user = new StringBuilder();
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
-        user.AppendLine("Evaluate relationships between every constructed group and every supplied candidate using only their transcripts.");
+        user.AppendLine("Search for a small number of evidence-established relationships between constructed groups and supplied candidates using only their transcripts. Most pairs are unrelated; returning an empty relationships array is a correct and expected result.");
         user.AppendLine("The constructed groups are immutable. Do not rewrite, split, combine, discard, or add facts to them.");
         user.AppendLine("Return confirmed_membership only when exact evidence from both sides directly establishes one unfolding real-world event. Return at most one confirmed membership for each constructed group.");
         user.AppendLine("A confirmed_membership must use uncertainty 0 and empty alternative_interpretations and unresolved_questions. If either side contains a material discrepancy, counterinterpretation, or unresolved question, return provisional_association or omit the pair; never confirm it.");
-        user.AppendLine("Return provisional_association when exact evidence from both sides establishes a specific operational relationship but meaningful uncertainty remains. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");
+        user.AppendLine("Return provisional_association only when exact evidence from both sides establishes a specific operational connection: one side continues, answers, updates, acts on, or explicitly refers to a concrete subject, location, vehicle, identifier, circumstance, or request from the other side, but meaningful uncertainty prevents confirmed membership. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");
+        user.AppendLine("Do not return a provisional association for broad topical similarity, shared words or phonetic fragments, generic dispatch language, the same facility or event class, different incidents with superficial resemblance, or a pair whose best explanation is that it is unrelated. Exact citations prove what each transcript says; they do not by themselves prove a connection.");
         user.AppendLine($"Return at most {IncidentBatchRelationshipContract.MaximumReturnedRelationships} relationships total and at most {IncidentBatchRelationshipContract.MaximumRelationshipsPerSource} for one constructed group. Choose the strongest specific relationships and omit weaker pairs rather than producing an oversized response.");
-        user.AppendLine("Omit unsupported pairs. Timing, retrieval rank, radio metadata, generic similarity, and shared event type do not prove a relationship.");
+        user.AppendLine("Omit unsupported pairs. Timing, retrieval rank, radio metadata, generic similarity, and shared event type do not prove a relationship. If the relationship statement would need words such as potentially, possibly, merely, or unrelated because no concrete cross-reference exists, omit the pair.");
         user.AppendLine("Each returned relationship must cite short contiguous verbatim spans from both source boundaries. Never borrow a candidate fact into constructed-group evidence or the reverse.");
         user.AppendLine("Copy source_proposal_token, candidate_token, and transcript_id values exactly.");
         user.AppendLine();
@@ -386,7 +387,7 @@ public static class IncidentBatchRelationshipPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_v2_bounded",
+                name = "pizzawave_incident_batch_relationship_v3_selective",
                 strict = true,
                 schema = new
                 {

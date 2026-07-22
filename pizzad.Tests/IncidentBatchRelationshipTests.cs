@@ -149,6 +149,23 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public void RelationshipPromptTreatsAbstentionAsExpectedAndRequiresConcreteCrossReference()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "A ceiling is leaking in the surgery area."),
+            Observation("call:2", "transcript:2", "A vehicle is stopped beside the roadway."));
+        var prompt = IncidentBatchRelationshipPrompt.Build(
+            bundle,
+            [new IncidentBatchRelationshipSource("event:source", ["call:1"])],
+            [new IncidentBatchCandidate("candidate:one", "projection:one", ["call:2"])]);
+
+        Assert.Contains("returning an empty relationships array is a correct and expected result", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("specific operational connection", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("superficial resemblance", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("citations prove what each transcript says; they do not by themselves prove a connection", prompt.UserPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CandidateFactCannotValidateAsConstructedGroupEvidence()
     {
         var bundle = Bundle(
