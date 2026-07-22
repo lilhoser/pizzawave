@@ -27,16 +27,25 @@ public sealed class IncidentAnalysisQueueTests
             Assert.Equal("degraded", degraded.Status);
             Assert.Equal(2, degraded.PendingCalls);
             Assert.Equal(1, degraded.StalePendingCalls);
+            Assert.Null(degraded.LatestCompletedCallUtc);
+
+            await database.MarkIncidentAnalysisCompletedAsync([currentId], CancellationToken.None);
+            var current = await database.GetIncidentAnalysisQueueHealthAsync(60, CancellationToken.None);
+            Assert.Equal("ok", current.Status);
+            Assert.Equal(1, current.PendingCalls);
+            Assert.Equal(1, current.StalePendingCalls);
+            Assert.NotNull(current.LatestCompletedCallUtc);
+            Assert.InRange(current.LatestCompletedAgeMinutes, 0, 5);
 
             var cutoff = now.AddMinutes(-60).ToUnixTimeSeconds();
             var skipped = await database.SkipStaleIncidentAnalysisJobsAsync(cutoff, "expired from live window", CancellationToken.None);
             Assert.Equal(1, skipped);
             var pending = await database.ListPendingIncidentAnalysisCallsAsync(10, cutoff, CancellationToken.None);
-            Assert.Equal(currentId, Assert.Single(pending).Id);
+            Assert.Empty(pending);
 
             var healthy = await database.GetIncidentAnalysisQueueHealthAsync(60, CancellationToken.None);
             Assert.Equal("ok", healthy.Status);
-            Assert.Equal(1, healthy.PendingCalls);
+            Assert.Equal(0, healthy.PendingCalls);
             Assert.Equal(0, healthy.StalePendingCalls);
             Assert.Equal(1, healthy.SkippedStaleCalls);
         }

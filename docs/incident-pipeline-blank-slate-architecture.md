@@ -640,12 +640,21 @@ The local corrective change establishes the missing operational boundary:
 - durable retrieval is newest-first;
 - each generation cycle is bounded by the configured batch size and selects
   recent calls fairly across radio systems;
-- `/api/v1/health` reports pending count, stale count, oldest source age, skipped
-  count, and a degraded status when the live window is exceeded.
+- `/api/v1/health` reports pending count, stale count, oldest pending source age,
+  skipped count, latest completed source age, and a degraded status when
+  completed work is no longer current. Transient rows awaiting the next
+  30-second cleanup remain visible without creating an oscillating false alarm.
 
-Production cleanup and deployment remain an explicit operator decision because
-reclassifying the old queue abandons retrospective incident generation for
-those calls.
+The operator approved the production transition. Commit `c27cabf` deployed to
+OT at 2026-07-22 01:06 UTC. Startup retained 11,227 old rows as
+`skipped_stale`, then completed a bounded batch of 20 recent calls across North
+Bradley, Cleveland, and Hamilton without failure or truncation. The resulting
+decision audit referenced 13 source calls from 00:12 through 01:03 UTC, proving
+that incident analysis had moved from the July 20 backlog to current-hour
+traffic. The batch admitted no production incidents; that is a separate
+precision/admission result rather than queue starvation. Subsequent maintenance
+passes retained another 51 aged-out rows as skipped. No RPI deployment or
+production-row deletion occurred.
 
 ### Earlier implementation history
 

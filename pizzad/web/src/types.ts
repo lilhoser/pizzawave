@@ -273,6 +273,8 @@ export type EngineHealth = {
     skippedStaleCalls: number;
     oldestPendingCallUtc?: string | null;
     oldestPendingAgeMinutes: number;
+    latestCompletedCallUtc?: string | null;
+    latestCompletedAgeMinutes: number;
     maximumAgeMinutes: number;
   };
   aiCompletionHealth: AiCompletionHealth;

@@ -574,6 +574,8 @@ public sealed record IncidentAnalysisQueueHealthDto(
     long SkippedStaleCalls,
     DateTime? OldestPendingCallUtc,
     double OldestPendingAgeMinutes,
+    DateTime? LatestCompletedCallUtc,
+    double LatestCompletedAgeMinutes,
     int MaximumAgeMinutes);
 
 public sealed record LiveTrActivityStatusDto(

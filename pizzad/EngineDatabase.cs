@@ -2125,7 +2125,8 @@ public sealed partial class EngineDatabase
                 COALESCE(SUM(CASE WHEN j.status='pending' THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN j.status='pending' AND c.start_time < $cutoff THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN j.status='skipped_stale' THEN 1 ELSE 0 END), 0),
-                MIN(CASE WHEN j.status='pending' THEN c.start_time END)
+                MIN(CASE WHEN j.status='pending' THEN c.start_time END),
+                MAX(CASE WHEN j.status='completed' THEN c.start_time END)
             FROM incident_analysis_jobs j
             JOIN calls c ON c.id=j.call_id;
             """;
@@ -2143,13 +2144,35 @@ public sealed partial class EngineDatabase
             oldestUtc = DateTimeOffset.FromUnixTimeSeconds(oldest).UtcDateTime;
             ageMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(oldest)).TotalMinutes);
         }
-        var status = stale > 0 ? "degraded" : "ok";
-        var message = stale > 0
-            ? $"Incident analysis is {ageMinutes:N0} minutes behind: {stale:N0} stale call(s) exceed the {maximumAgeMinutes}-minute live-processing window."
+        DateTime? latestCompletedUtc = null;
+        var latestCompletedAgeMinutes = 0d;
+        if (!reader.IsDBNull(4))
+        {
+            var latestCompleted = reader.GetInt64(4);
+            latestCompletedUtc = DateTimeOffset.FromUnixTimeSeconds(latestCompleted).UtcDateTime;
+            latestCompletedAgeMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(latestCompleted)).TotalMinutes);
+        }
+        var processingStale = pending > 0
+            && (latestCompletedUtc is null || latestCompletedAgeMinutes > maximumAgeMinutes);
+        var status = processingStale ? "degraded" : "ok";
+        var message = processingStale
+            ? latestCompletedUtc is null
+                ? $"Incident analysis has {pending:N0} pending call(s) but has not completed any source calls."
+                : $"Incident analysis is processing stale source data: the latest completed call is {latestCompletedAgeMinutes:N0} minutes old."
             : pending > 0
-                ? $"Incident analysis has {pending:N0} current call(s) pending; oldest age is {ageMinutes:N0} minutes."
+                ? $"Incident analysis is current: the latest completed source call is {latestCompletedAgeMinutes:N0} minutes old; {pending:N0} call(s) are pending."
                 : "Incident analysis queue is current.";
-        return new IncidentAnalysisQueueHealthDto(status, message, pending, stale, skipped, oldestUtc, ageMinutes, maximumAgeMinutes);
+        return new IncidentAnalysisQueueHealthDto(
+            status,
+            message,
+            pending,
+            stale,
+            skipped,
+            oldestUtc,
+            ageMinutes,
+            latestCompletedUtc,
+            latestCompletedAgeMinutes,
+            maximumAgeMinutes);
     }
 
     public async Task MarkIncidentAnalysisCompletedAsync(IEnumerable<long> callIds, CancellationToken ct)
