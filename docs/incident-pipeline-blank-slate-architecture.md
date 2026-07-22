@@ -1662,6 +1662,18 @@ continuation was admitted and no useful uncertain association appeared. The
 live shadow remains non-mutating. Disabling it requires an OT `pizzad` restart
 and was deferred to avoid disturbing the concurrent RF experiment.
 
+After the RF experiment made an OT restart safe, Run AA was stopped at
+2026-07-22 15:53 UTC by disabling only
+`incidentBatchConstructorShadowEnabled`. The completed run identifier remains
+in configuration for inspection. The pre-stop configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13aa-stop-20260722T155318Z.bak`;
+the disabled active configuration SHA-256 is
+`d5eb54ebaee210159f71ddd516401e951648520047bbd2fc4bf7ab980734e8d3`.
+Ownership remains `root:pizzawave` with mode `0660`. After restart, `pizzad`,
+live radio activity, production incident freshness, AI completion, and
+embeddings were all `ok`. No production incident rows were changed and RPI was
+not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
