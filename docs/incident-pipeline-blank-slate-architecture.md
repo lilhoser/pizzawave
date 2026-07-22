@@ -1433,6 +1433,28 @@ remaining relationships are validated and projected independently. This keeps
 failure closed at the smallest source-owned unit without converting or repairing
 the model's semantic disposition.
 
+Run U's second batch produced the first defensible live relationship response.
+The confirmed link joined a prior report of a 24-year-old diabetic female found
+unresponsive with a later report that the same 24-year-old female was beginning
+to respond and had glucose 244. Both sides directly cited the age, sex, and
+passed-out condition; the relationship retained no counterinterpretation or
+unresolved question. In the same response, a Jeep plate-match investigation was
+provisionally associated with a prior report of a male fleeing a transcribed
+`GP`. The proposer explicitly retained the Jeep-versus-GP ambiguity and did not
+merge membership. This is the first live result matching the intended operator
+semantics: strong continuation becomes confirmed state while a modest related
+hypothesis remains a non-merging review association.
+
+Per-relationship admission began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-v`, fenced after call `1427853`. The prior
+configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13v-20260722T100700Z.bak`;
+its SHA-256 is
+`ddc580fca8070d85f2dc3c7aa43f4dfe6186f60d96c80519479d33e4af9aa352`.
+Post-restart service, production incident freshness, AI completion, and
+embedding health were `ok`; live radio was in its normal startup warming
+interval. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
