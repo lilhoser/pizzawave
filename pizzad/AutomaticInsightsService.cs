@@ -140,10 +140,13 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private void DrainQueue()
     {
+        var minimumStartTime = IncidentAnalysisMinimumStartTime();
         lock (_gate)
         {
             while (_queue.TryDequeue(out var call))
             {
+                if (call.StartTime < minimumStartTime)
+                    continue;
                 if (_pending.Any(c => c.Id == call.Id))
                     continue;
                 _pending.Add(call);
@@ -157,10 +160,26 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (DateTimeOffset.UtcNow < _nextDurableQueueRefreshAt)
             return;
         _nextDurableQueueRefreshAt = DateTimeOffset.UtcNow.AddSeconds(30);
+        var minimumStartTime = IncidentAnalysisMinimumStartTime();
+        var skipped = await _database.SkipStaleIncidentAnalysisJobsAsync(
+            minimumStartTime,
+            $"Skipped because the call aged beyond the {_config.AiInsights.IncidentAnalysisMaximumAgeMinutes}-minute live incident-analysis window.",
+            ct);
+        if (skipped > 0)
+        {
+            _logger.LogWarning(
+                "Skipped {Count:N0} stale incident-analysis job(s) older than {MaximumAgeMinutes} minutes so current traffic cannot be starved",
+                skipped,
+                _config.AiInsights.IncidentAnalysisMaximumAgeMinutes);
+        }
         HashSet<long> known;
         lock (_gate)
+        {
+            _pending.RemoveAll(call => call.StartTime < minimumStartTime);
             known = _pending.Select(call => call.Id).ToHashSet();
-        foreach (var call in await _database.ListPendingIncidentAnalysisCallsAsync(Math.Max(5000, _config.AiInsights.MaxPendingCalls), ct))
+        }
+        var durableLimit = Math.Max(BatchSize(), Math.Max(1, _config.AiInsights.MaxPendingCalls));
+        foreach (var call in await _database.ListPendingIncidentAnalysisCallsAsync(durableLimit, minimumStartTime, ct))
         {
             if (!known.Contains(call.Id))
                 _queue.Enqueue(call);
@@ -199,7 +218,7 @@ public sealed class AutomaticInsightsService : BackgroundService
             if (_pending.Count == 0)
                 return;
 
-            batch = _pending.ToList();
+            batch = SelectCurrentIncidentBatch(_pending, BatchSize()).ToList();
         }
 
         if (batch.Count == 0)
@@ -305,6 +324,38 @@ public sealed class AutomaticInsightsService : BackgroundService
             }
         }
         return slices.OrderBy(slice => slice.Calls[0].StartTime).ToList();
+    }
+
+    public static IReadOnlyList<EngineCall> SelectCurrentIncidentBatch(IReadOnlyList<EngineCall> pending, int maxCalls)
+    {
+        maxCalls = Math.Max(1, maxCalls);
+        var groups = pending
+            .GroupBy(call => call.SystemShortName?.Trim() ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                System = group.Key,
+                Calls = new Queue<EngineCall>(group
+                    .OrderByDescending(call => call.StartTime)
+                    .ThenByDescending(call => call.Id))
+            })
+            .OrderByDescending(group => group.Calls.Peek().StartTime)
+            .ThenBy(group => group.System, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var selected = new List<EngineCall>(Math.Min(maxCalls, pending.Count));
+        while (selected.Count < maxCalls && groups.Any(group => group.Calls.Count > 0))
+        {
+            foreach (var group in groups)
+            {
+                if (selected.Count >= maxCalls)
+                    break;
+                if (group.Calls.TryDequeue(out var call))
+                    selected.Add(call);
+            }
+        }
+        return selected
+            .OrderBy(call => call.StartTime)
+            .ThenBy(call => call.Id)
+            .ToList();
     }
 
     public sealed record IncidentProcessingSlice(string SystemShortName, long Start, long End, IReadOnlyList<EngineCall> Calls);
@@ -5300,6 +5351,9 @@ public sealed class AutomaticInsightsService : BackgroundService
     private int BatchSize() => Math.Max(1, _config.AiInsights.BatchSize <= 0 ? DefaultBatchSize : _config.AiInsights.BatchSize);
 
     private int IncidentRunIntervalSeconds() => Math.Clamp(_config.AiInsights.IncidentRunIntervalSeconds <= 0 ? 300 : _config.AiInsights.IncidentRunIntervalSeconds, 60, 1800);
+
+    private long IncidentAnalysisMinimumStartTime() =>
+        DateTimeOffset.UtcNow.AddMinutes(-_config.AiInsights.IncidentAnalysisMaximumAgeMinutes).ToUnixTimeSeconds();
 
     private int IncidentPromptCandidateLimit() => Math.Clamp(_config.AiInsights.IncidentPromptCandidateLimit <= 0 ? 18 : _config.AiInsights.IncidentPromptCandidateLimit, 6, 40);
 

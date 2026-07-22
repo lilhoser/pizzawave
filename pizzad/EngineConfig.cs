@@ -161,10 +161,32 @@ public sealed class EngineConfig
         AiInsights.IncidentRunIntervalSeconds = Math.Clamp(AiInsights.IncidentRunIntervalSeconds, 60, 1800);
         if (AiInsights.IncidentPromptCandidateLimit <= 0) AiInsights.IncidentPromptCandidateLimit = 18;
         AiInsights.IncidentPromptCandidateLimit = Math.Clamp(AiInsights.IncidentPromptCandidateLimit, 6, 40);
+        if (AiInsights.IncidentAnalysisMaximumAgeMinutes <= 0) AiInsights.IncidentAnalysisMaximumAgeMinutes = 60;
+        AiInsights.IncidentAnalysisMaximumAgeMinutes = Math.Clamp(AiInsights.IncidentAnalysisMaximumAgeMinutes, 15, 360);
         if (AiInsights.IncidentV2ShadowCandidateLimit <= 0) AiInsights.IncidentV2ShadowCandidateLimit = 18;
         AiInsights.IncidentV2ShadowCandidateLimit = Math.Clamp(AiInsights.IncidentV2ShadowCandidateLimit, 6, 40);
         if (AiInsights.IncidentV3FrameCandidateLimit <= 0) AiInsights.IncidentV3FrameCandidateLimit = 18;
         AiInsights.IncidentV3FrameCandidateLimit = Math.Clamp(AiInsights.IncidentV3FrameCandidateLimit, 6, 40);
+        if (AiInsights.IncidentEventLinkShadowIntervalSeconds <= 0) AiInsights.IncidentEventLinkShadowIntervalSeconds = 300;
+        AiInsights.IncidentEventLinkShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentEventLinkShadowIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentEventLinkShadowLookbackMinutes <= 0) AiInsights.IncidentEventLinkShadowLookbackMinutes = 120;
+        AiInsights.IncidentEventLinkShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentEventLinkShadowLookbackMinutes, 30, 720);
+        if (AiInsights.IncidentEventLinkShadowCandidateLimit <= 0) AiInsights.IncidentEventLinkShadowCandidateLimit = 4;
+        AiInsights.IncidentEventLinkShadowCandidateLimit = Math.Clamp(AiInsights.IncidentEventLinkShadowCandidateLimit, 1, IncidentEventStateLinkContractValidator.MaximumCandidateCount);
+        if (AiInsights.IncidentAssociationShadowIntervalSeconds <= 0) AiInsights.IncidentAssociationShadowIntervalSeconds = 300;
+        AiInsights.IncidentAssociationShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentAssociationShadowIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentAssociationShadowLookbackMinutes <= 0) AiInsights.IncidentAssociationShadowLookbackMinutes = 120;
+        AiInsights.IncidentAssociationShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentAssociationShadowLookbackMinutes, 30, 720);
+        if (AiInsights.IncidentAssociationShadowCandidateLimit <= 0) AiInsights.IncidentAssociationShadowCandidateLimit = 4;
+        AiInsights.IncidentAssociationShadowCandidateLimit = Math.Clamp(AiInsights.IncidentAssociationShadowCandidateLimit, 1, IncidentAssociationContract.MaximumCandidateCount);
+        if (AiInsights.IncidentBatchConstructorShadowIntervalSeconds <= 0) AiInsights.IncidentBatchConstructorShadowIntervalSeconds = 600;
+        AiInsights.IncidentBatchConstructorShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentBatchConstructorShadowIntervalSeconds, 300, 1800);
+        if (AiInsights.IncidentBatchConstructorShadowLookbackMinutes <= 0) AiInsights.IncidentBatchConstructorShadowLookbackMinutes = 120;
+        AiInsights.IncidentBatchConstructorShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentBatchConstructorShadowLookbackMinutes, 30, 360);
+        if (AiInsights.IncidentBatchConstructorShadowBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowBatchSize = 12;
+        AiInsights.IncidentBatchConstructorShadowBatchSize = Math.Clamp(AiInsights.IncidentBatchConstructorShadowBatchSize, 2, IncidentBatchContract.MaximumNewObservationCount);
+        if (AiInsights.IncidentBatchConstructorShadowCandidateLimit <= 0) AiInsights.IncidentBatchConstructorShadowCandidateLimit = 4;
+        AiInsights.IncidentBatchConstructorShadowCandidateLimit = Math.Clamp(AiInsights.IncidentBatchConstructorShadowCandidateLimit, 1, IncidentBatchContract.MaximumCandidateCount);
         // Incident V3 is retained only as a read-only comparison baseline. Its
         // semantic executor is retired and must not be enabled by deployed
         // configuration left over from an earlier experiment.
@@ -390,12 +412,29 @@ public sealed class AiInsightsConfig
     public int MaxQueueDepthForManualSummary { get; set; } = 100;
     public int IncidentRunIntervalSeconds { get; set; } = 300;
     public int IncidentPromptCandidateLimit { get; set; } = 18;
+    public int IncidentAnalysisMaximumAgeMinutes { get; set; } = 60;
     public bool IncidentV2ShadowEnabled { get; set; }
     public int IncidentV2ShadowCandidateLimit { get; set; } = 18;
     public bool IncidentV3FrameShadowEnabled { get; set; }
     public int IncidentV3FrameCandidateLimit { get; set; } = 18;
     public bool IncidentV3PlanExecutorEnabled { get; set; }
     public bool IncidentV3PlanExecutorDryRun { get; set; } = true;
+    public bool IncidentEventLinkShadowEnabled { get; set; }
+    public string IncidentEventLinkShadowRunId { get; set; } = string.Empty;
+    public int IncidentEventLinkShadowIntervalSeconds { get; set; } = 300;
+    public int IncidentEventLinkShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentEventLinkShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentAssociationShadowEnabled { get; set; }
+    public string IncidentAssociationShadowRunId { get; set; } = string.Empty;
+    public int IncidentAssociationShadowIntervalSeconds { get; set; } = 300;
+    public int IncidentAssociationShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentAssociationShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentBatchConstructorShadowEnabled { get; set; }
+    public string IncidentBatchConstructorShadowRunId { get; set; } = string.Empty;
+    public int IncidentBatchConstructorShadowIntervalSeconds { get; set; } = 600;
+    public int IncidentBatchConstructorShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentBatchConstructorShadowBatchSize { get; set; } = 12;
+    public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

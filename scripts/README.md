@@ -20,6 +20,16 @@ This folder contains operational helpers for PizzaWave deployments.
 | `deploy_pizzad_web.ps1` | Fast frontend-only deploy helper; rebuilds and copies `wwwroot` without restarting `pizzad` |
 | `deploy_pizzad_tar.ps1` | Automatic development deploy helper with hashed build reuse, live artifact comparison, per-stage timing, and health polling |
 
+## Incident Pipeline Experiment Helpers
+
+| Script | Purpose |
+| --- | --- |
+| `run_incident_observation_interpretation_bakeoff.py` | Runs a development-only, single-observation interpretation and same-model critique with strict source-provenance validation; refuses sealed held-out paths |
+| `run_incident_observation_cross_critic.py` | Re-critiques a validated interpretation artifact with a separately loaded model; refuses sealed held-out paths |
+| `run_incident_observation_relationship_bakeoff.py` | Tests source-grounded relationships between explicit development-observation pairs without creating events or incident membership |
+| `run_incident_direct_audio_bakeoff.py` | Runs transcription and source-grounded audio understanding against explicitly selected development clips; refuses sealed held-out paths |
+| `convert_direct_audio_bakeoff_to_asr_artifact.py` | Converts selected direct-audio transcription results into the common ASR artifact contract for blind review |
+
 ## Notes
 
 The preferred release path is the `.deb` package. Direct tar deployment is for

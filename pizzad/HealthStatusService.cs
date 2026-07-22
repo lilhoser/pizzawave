@@ -76,16 +76,22 @@ public sealed class HealthStatusService
             && !string.Equals(aiCompletionHealth.Status, "unknown", StringComparison.OrdinalIgnoreCase)
             ? aiCompletionHealth.Message
             : null;
+        var incidentAnalysisQueueHealth = await _database.GetIncidentAnalysisQueueHealthAsync(
+            _config.AiInsights.IncidentAnalysisMaximumAgeMinutes,
+            ct);
+        var incidentAnalysisBlockedReason = !string.Equals(incidentAnalysisQueueHealth.Status, "ok", StringComparison.OrdinalIgnoreCase)
+            ? incidentAnalysisQueueHealth.Message
+            : null;
         var embeddingHealth = await _embeddings.GetHealthAsync(ct);
         var embeddingBlockedReason = EmbeddingBlockedReason(embeddingHealth);
-        var blockedReason = string.Join(" ", new[] { aiBlockedReason, aiCompletionBlockedReason, embeddingBlockedReason }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var blockedReason = string.Join(" ", new[] { aiBlockedReason, aiCompletionBlockedReason, incidentAnalysisBlockedReason, embeddingBlockedReason }.Where(s => !string.IsNullOrWhiteSpace(s)));
         if (string.IsNullOrWhiteSpace(blockedReason))
             blockedReason = null;
         var trFault = TrServiceFaultReader.ReadLatest();
         var trControlState = TrServiceControlStateReader.ReadLatest();
         var liveTrStatus = _liveTrActivity.GetStatus(now, trFault, trControlState);
         return new HealthDto(
-            aiCompletionBlockedReason is not null || embeddingBlockedReason is not null ? "degraded" : "ok",
+            aiCompletionBlockedReason is not null || incidentAnalysisBlockedReason is not null || embeddingBlockedReason is not null ? "degraded" : "ok",
             Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev",
             _config.Branding.StackName,
             _config.Storage.DatabasePath,
@@ -117,6 +123,7 @@ public sealed class HealthStatusService
             _ingestControl.GetStatus(_pipeline.QueueDepth),
             liveTrStatus,
             aiBlockedReason,
+            incidentAnalysisQueueHealth,
             aiCompletionHealth,
             embeddingHealth,
             blockedReason,

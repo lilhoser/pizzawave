@@ -31,6 +31,47 @@ export type Incident = {
   confidence: number;
   calls: { callId: number; rawTimestamp: number; transcript: string; audioUrl: string; category: string; talkgroupName: string; systemShortName: string; talkgroup: number; hasAlertMatch?: boolean; hasActiveAlert?: boolean; alertRules?: string }[];
 };
+export type IncidentAssociationReviewCall = {
+  callId: number;
+  timestamp: number;
+  transcript: string;
+  audioUrl: string;
+  systemShortName: string;
+  talkgroup: number;
+  talkgroupName: string;
+  currentIncidentId: number;
+  currentIncidentTitle: string;
+  currentIncidentStatus: string;
+  reviewState: "established" | "pending" | "confirmed" | "rejected" | "deferred";
+};
+export type IncidentAssociationReviewEvidence = {
+  newCallId: number;
+  candidateCallIds: number[];
+  relationshipStatement: string;
+  uncertainty: number;
+  newObservationQuotes: string[];
+  candidateQuotes: string[];
+  unresolvedQuestions: string[];
+};
+export type IncidentAssociationReviewGroup = {
+  proposalKey: string;
+  runId: string;
+  projectionEventId: string;
+  placement: "review" | "inlineIncident" | "inlineMerge";
+  status: "pending" | "partiallyReviewed" | "confirmed" | "rejected" | "deferred";
+  latestProposalUtc: string;
+  anchorIncidentIds: number[];
+  calls: IncidentAssociationReviewCall[];
+  evidence: IncidentAssociationReviewEvidence[];
+  pendingCallCount: number;
+};
+export type IncidentAssociationReviewReport = {
+  enabled: boolean;
+  runId: string;
+  pendingGroupCount: number;
+  standalonePendingGroupCount: number;
+  groups: IncidentAssociationReviewGroup[];
+};
 export type CategoryInsight = {
   id: number;
   title: string;
@@ -224,6 +265,18 @@ export type EngineHealth = {
     message: string;
   };
   aiWorkBlockedReason?: string | null;
+  incidentAnalysisQueueHealth: {
+    status: string;
+    message: string;
+    pendingCalls: number;
+    stalePendingCalls: number;
+    skippedStaleCalls: number;
+    oldestPendingCallUtc?: string | null;
+    oldestPendingAgeMinutes: number;
+    latestCompletedCallUtc?: string | null;
+    latestCompletedAgeMinutes: number;
+    maximumAgeMinutes: number;
+  };
   aiCompletionHealth: AiCompletionHealth;
   embeddingHealth: EmbeddingPipelineHealth;
   workBlockedReason?: string | null;
@@ -680,6 +733,17 @@ export type IncidentDecisionChain = { chainKey: string; timestampUtc: string; sy
 export type IncidentDecisionEvidenceCall = { callId: number; timestamp: number; talkgroupName: string; talkgroup: number; category: string; transcriptSnippet: string };
 export type IncidentDecisionGroup = { groupKey: string; displayTitle: string; systemShortName: string; category: string; latestTimestampUtc: string; outcome: "created" | "updated" | "dropped"; createdCount: number; updatedCount: number; droppedCount: number; evidenceCalls: IncidentDecisionEvidenceCall[]; chains: IncidentDecisionChain[] };
 export type IncidentDecisionChainPage = { rangeStart: number; rangeEnd: number; bucketSeconds: number; page: number; pageSize: number; totalChains: number; created: number; updated: number; dropped: number; buckets: IncidentDecisionBucket[]; chains: IncidentDecisionChain[]; totalGroups: number; groups: IncidentDecisionGroup[] };
+export type IncidentAssociationShadowRunSummary = { runId: string; attempts: number; firstAttemptUtc?: string | null; lastAttemptUtc?: string | null; isConfiguredRun: boolean };
+export type IncidentAssociationShadowTotals = { attempts: number; candidateBackedAttempts: number; confirmedMemberships: number; provisionalAssociations: number; singletonEvents: number; invalidProposals: number; proposerErrors: number; averageProposerMilliseconds: number; maximumProposerMilliseconds: number; projectedEvents: number; projectedObservations: number; modelRequests: number; promptTokens: number; completionTokens: number; totalTokens: number };
+export type IncidentAssociationShadowAttempt = { sequence: number; recordedAtUtc: string; callId: number; candidateCount: number; confirmedMembershipCount: number; provisionalAssociationCount: number; outcome: string; modelIdentity: string; projectionEventId: string; relationshipStatements: string[]; uncertainties: number[]; validationErrors: string[]; unresolvedQuestions: string[]; proposerMilliseconds: number; proposerError: string };
+export type IncidentAssociationShadowProjectedEvent = { projectionEventId: string; observationCount: number };
+export type IncidentAssociationShadowReport = { enabled: boolean; configuredRunId: string; selectedRunId: string; runs: IncidentAssociationShadowRunSummary[]; totals: IncidentAssociationShadowTotals; attempts: IncidentAssociationShadowAttempt[]; projectedEvents: IncidentAssociationShadowProjectedEvent[] };
+export type IncidentBatchShadowRunSummary = { runId: string; batches: number; firstBatchUtc?: string | null; lastBatchUtc?: string | null; isConfiguredRun: boolean };
+export type IncidentBatchShadowTotals = { batches: number; newObservations: number; proposedEvents: number; acceptedEvents: number; rejectedEvents: number; newEvents: number; provisionalEvents: number; confirmedMemberships: number; provisionalAssociations: number; unresolvedObservations: number; invalidProposals: number; proposerErrors: number; averageProposerMilliseconds: number; maximumProposerMilliseconds: number; projectedEvents: number; operatorVisibleEvents: number; operatorReviewEvents: number };
+export type IncidentBatchShadowRelationship = { accepted: boolean; disposition: string; sourceProposalToken: string; candidateToken: string; relationshipStatement: string; uncertainty: number; sourceEvidence: string[]; candidateEvidence: string[]; alternativeInterpretations: string[]; unresolvedQuestions: string[]; confirmationDecision: string; confirmationStatement: string; confirmationSourceEvidence: string[]; confirmationCandidateEvidence: string[]; confirmationCounterEvidence: string[]; confirmationUnresolvedQuestions: string[] };
+export type IncidentBatchShadowAttempt = { sequence: number; recordedAtUtc: string; firstCallId: number; lastCallId: number; newObservationCount: number; candidateCount: number; proposedEventCount: number; acceptedEventCount: number; rejectedEventCount: number; newEventCount: number; provisionalEventCount: number; confirmedMembershipCount: number; provisionalAssociationCount: number; unresolvedObservationCount: number; modelIdentity: string; promptIdentity: string; configurationIdentity: string; eventTitles: string[]; relationships: IncidentBatchShadowRelationship[]; validationErrors: string[]; proposerMilliseconds: number; proposerError: string };
+export type IncidentBatchShadowProjectedEvent = { projectionEventId: string; observationCount: number; title: string; summary: string; operatorVisible: boolean; operatorReview: boolean };
+export type IncidentBatchShadowReport = { enabled: boolean; configuredRunId: string; selectedRunId: string; runs: IncidentBatchShadowRunSummary[]; totals: IncidentBatchShadowTotals; attempts: IncidentBatchShadowAttempt[]; projectedEvents: IncidentBatchShadowProjectedEvent[] };
 export type ProfileTalkgroupSetting = { key?: string; systemShortName?: string; id: number; enabled?: boolean | null; label?: string; category?: string; incidentEligible?: boolean | null };
 export type ProcessingProfile = { id: string; name: string; includePolice: boolean; includeFire: boolean; includeEMS: boolean; includeTraffic: boolean; includeUtilities: boolean; includeOther: boolean; talkgroups?: ProfileTalkgroupSetting[]; createdAtUtc?: string; updatedAtUtc?: string };
 export type ProfileState = { activeProfileId: string; profiles: ProcessingProfile[]; restartRecommended?: boolean; generatedCsvPath?: string; message?: string };

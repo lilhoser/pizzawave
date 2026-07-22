@@ -31,6 +31,7 @@ public sealed partial class EngineDatabase
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=ON;", ct);
         await ExecuteNonQueryAsync(connection, SchemaSql, ct);
         await ExecuteNonQueryAsync(connection, WorkspaceSchemaSql, ct);
+        await ExecuteNonQueryAsync(connection, IncidentEventStateShadowSchemaSql, ct);
         await EnsureSchemaMigrationsAsync(connection, ct);
         _logger.LogInformation("SQLite engine store ready at {Path}", _config.Storage.DatabasePath);
     }
@@ -2074,6 +2075,9 @@ public sealed partial class EngineDatabase
     }
 
     public async Task<List<EngineCall>> ListPendingIncidentAnalysisCallsAsync(int limit, CancellationToken ct)
+        => await ListPendingIncidentAnalysisCallsAsync(limit, 0, ct);
+
+    public async Task<List<EngineCall>> ListPendingIncidentAnalysisCallsAsync(int limit, long minimumStartTime, CancellationToken ct)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
@@ -2081,14 +2085,94 @@ public sealed partial class EngineDatabase
             SELECT c.* FROM incident_analysis_jobs j
             JOIN calls c ON c.id=j.call_id
             WHERE j.status='pending'
-            ORDER BY c.start_time ASC, c.id ASC
+              AND c.start_time >= $minimum_start_time
+            ORDER BY c.start_time DESC, c.id DESC
             LIMIT $limit;
             """;
         Add(command, "$limit", Math.Max(1, limit));
+        Add(command, "$minimum_start_time", Math.Max(0, minimumStartTime));
         var calls = new List<EngineCall>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) calls.Add(ReadCall(reader));
         return calls;
+    }
+
+    public async Task<int> SkipStaleIncidentAnalysisJobsAsync(long minimumStartTime, string reason, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE incident_analysis_jobs
+            SET status='skipped_stale', error=$reason, updated_at_utc=$now
+            WHERE status='pending'
+              AND call_id IN (SELECT id FROM calls WHERE start_time < $minimum_start_time);
+            """;
+        Add(command, "$minimum_start_time", Math.Max(0, minimumStartTime));
+        Add(command, "$reason", reason.Length <= 500 ? reason : reason[..500]);
+        Add(command, "$now", DateTime.UtcNow.ToString("O"));
+        return await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IncidentAnalysisQueueHealthDto> GetIncidentAnalysisQueueHealthAsync(int maximumAgeMinutes, CancellationToken ct)
+    {
+        maximumAgeMinutes = Math.Clamp(maximumAgeMinutes, 15, 360);
+        var now = DateTimeOffset.UtcNow;
+        var cutoff = now.AddMinutes(-maximumAgeMinutes).ToUnixTimeSeconds();
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COALESCE(SUM(CASE WHEN j.status='pending' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN j.status='pending' AND c.start_time < $cutoff THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN j.status='skipped_stale' THEN 1 ELSE 0 END), 0),
+                MIN(CASE WHEN j.status='pending' THEN c.start_time END),
+                MAX(CASE WHEN j.status='completed' THEN c.start_time END)
+            FROM incident_analysis_jobs j
+            JOIN calls c ON c.id=j.call_id;
+            """;
+        Add(command, "$cutoff", cutoff);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        var pending = reader.GetInt64(0);
+        var stale = reader.GetInt64(1);
+        var skipped = reader.GetInt64(2);
+        DateTime? oldestUtc = null;
+        var ageMinutes = 0d;
+        if (!reader.IsDBNull(3))
+        {
+            var oldest = reader.GetInt64(3);
+            oldestUtc = DateTimeOffset.FromUnixTimeSeconds(oldest).UtcDateTime;
+            ageMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(oldest)).TotalMinutes);
+        }
+        DateTime? latestCompletedUtc = null;
+        var latestCompletedAgeMinutes = 0d;
+        if (!reader.IsDBNull(4))
+        {
+            var latestCompleted = reader.GetInt64(4);
+            latestCompletedUtc = DateTimeOffset.FromUnixTimeSeconds(latestCompleted).UtcDateTime;
+            latestCompletedAgeMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(latestCompleted)).TotalMinutes);
+        }
+        var processingStale = pending > 0
+            && (latestCompletedUtc is null || latestCompletedAgeMinutes > maximumAgeMinutes);
+        var status = processingStale ? "degraded" : "ok";
+        var message = processingStale
+            ? latestCompletedUtc is null
+                ? $"Incident analysis has {pending:N0} pending call(s) but has not completed any source calls."
+                : $"Incident analysis is processing stale source data: the latest completed call is {latestCompletedAgeMinutes:N0} minutes old."
+            : pending > 0
+                ? $"Incident analysis is current: the latest completed source call is {latestCompletedAgeMinutes:N0} minutes old; {pending:N0} call(s) are pending."
+                : "Incident analysis queue is current.";
+        return new IncidentAnalysisQueueHealthDto(
+            status,
+            message,
+            pending,
+            stale,
+            skipped,
+            oldestUtc,
+            ageMinutes,
+            latestCompletedUtc,
+            latestCompletedAgeMinutes,
+            maximumAgeMinutes);
     }
 
     public async Task MarkIncidentAnalysisCompletedAsync(IEnumerable<long> callIds, CancellationToken ct)
@@ -4651,7 +4735,7 @@ public sealed partial class EngineDatabase
         }
     }
 
-    private static EngineCall ReadCall(SqliteDataReader reader) => new()
+    internal static EngineCall ReadCall(SqliteDataReader reader) => new()
     {
         Id = reader.GetInt64(reader.GetOrdinal("id")),
         UniqueKey = reader.GetString(reader.GetOrdinal("unique_key")),
@@ -5092,6 +5176,12 @@ public sealed partial class EngineDatabase
 
     private async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
     {
+        await AddColumnIfMissingAsync(connection, "incident_event_state_link_shadow_ledger", "run_id", "TEXT NOT NULL DEFAULT 'legacy'", ct);
+        await AddColumnIfMissingAsync(connection, "incident_event_state_link_shadow_projections", "run_id", "TEXT NOT NULL DEFAULT 'legacy'", ct);
+        await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_incident_event_state_link_shadow_ledger_observation_unique;", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_run_observation_unique ON incident_event_state_link_shadow_ledger(run_id, new_observation_id);", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_ledger_run_sequence ON incident_event_state_link_shadow_ledger(run_id, sequence);", ct);
+        await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_incident_event_state_link_shadow_projection_run_sequence ON incident_event_state_link_shadow_projections(run_id, sequence);", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "incident_score", "REAL NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "incident_key", "TEXT", ct);
         await AddColumnIfMissingAsync(connection, "incidents", "category", "TEXT NOT NULL DEFAULT 'other'", ct);

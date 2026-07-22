@@ -39,6 +39,8 @@ artifacts/
 *.dll
 *.exe
 *.pdb
+__pycache__/
+*.py[cod]
 *.ilk
 *.exp
 *.lastcodeanalysissucceeded
