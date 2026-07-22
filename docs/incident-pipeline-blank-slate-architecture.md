@@ -946,6 +946,16 @@ configuration tokens are `cursor=oldest-unseen-v1` and
 for unseen calls that remain inside the configured lookback while improving
 capacity without parallel model requests.
 
+The corrected cursor and fixed-start cadence began in clean OT run
+`ot-batch-constructor-shadow-20260722-i`, retaining the 24-observation,
+300-second cadence and establishing a startup fence at call `1425715`. The
+prior configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v7i-20260722T045455Z.bak`;
+its SHA-256 is
+`4503ec16637428040ac2dea526b43fe0f30aee6ca2f70b35ea65d24197642425`.
+Immediately after deployment, production incident analysis was current by 11
+minutes and overall, AI-completion, and embedding health were all `ok`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
