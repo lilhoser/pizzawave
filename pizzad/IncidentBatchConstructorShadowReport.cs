@@ -168,7 +168,8 @@ public sealed partial class EngineDatabase
             entry.Proposal.ModelIdentity,
             entry.Proposal.PromptIdentity,
             entry.Execution.ConfigurationIdentity,
-            events.Select(item => item.Title).ToList(),
+            events.Select(item => IncidentBatchProjector.BuildEvidenceTitle(
+                IncidentBatchProjector.BuildEvidenceSummary(item.NewObservationEvidence))).ToList(),
             validationErrors,
             entry.Execution.ProposerDurationMilliseconds + (entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0),
             proposerError);

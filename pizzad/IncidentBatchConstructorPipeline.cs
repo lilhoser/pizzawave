@@ -602,13 +602,13 @@ public static class IncidentBatchProjector
         return projection;
     }
 
-    private static string BuildEvidenceSummary(IReadOnlyList<IncidentEventStateTranscriptCitation> citations) =>
+    public static string BuildEvidenceSummary(IReadOnlyList<IncidentEventStateTranscriptCitation> citations) =>
         string.Join(" … ", citations
             .Select(item => item.ExactQuote.Trim())
             .Where(item => item.Length > 0)
             .Distinct(StringComparer.Ordinal));
 
-    private static string BuildEvidenceTitle(string evidenceSummary)
+    public static string BuildEvidenceTitle(string evidenceSummary)
     {
         const int maximumLength = 120;
         if (evidenceSummary.Length <= maximumLength)

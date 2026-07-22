@@ -56,6 +56,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
             var attempt = Assert.Single(report.Attempts);
             Assert.Equal(IncidentBatchPrompt.PromptIdentity, attempt.PromptIdentity);
             Assert.Equal("test-config", attempt.ConfigurationIdentity);
+            Assert.Equal("Tree down", Assert.Single(attempt.EventTitles));
+            Assert.DoesNotContain("Tree blocking roadway", attempt.EventTitles);
 
             await using var connection = new SqliteConnection($"Data Source={path}");
             await connection.OpenAsync();

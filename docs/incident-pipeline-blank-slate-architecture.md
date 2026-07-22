@@ -1393,6 +1393,13 @@ Post-restart service, production incident freshness, AI completion, and
 embedding health were `ok`; live radio was in its normal startup warming
 interval. RPI was not changed.
 
+The Inspector attempt list previously displayed the model's free-form event
+titles even though admitted projection state already derives its title and
+summary only from validated exact evidence. This could make safe shadow state
+look as though it had admitted unsupported narrative. The report now uses the
+same evidence-title projection as state; raw model wording remains available
+only in the append-only ledger for diagnosis.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
