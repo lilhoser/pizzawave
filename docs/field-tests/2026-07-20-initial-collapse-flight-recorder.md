@@ -957,6 +957,47 @@ on OT and
 `85e0ee88a86fcbc1327f01953ff952bf2d0c6f7023ba977dfefed90eca29ca8b`
 on RPI.
 
+### July 22 post-quota paired captures
+
+The restart-persistent six-hour quota reopened at 17:03-17:08 EDT. The first
+eligible natural event on each rig was retained without a service restart:
+
+| Host/system | Trigger | IQ SHA-256 | Decoder and IQ result |
+| --- | ---: | --- | --- |
+| RPI Raymond | `1784754504018` | `1d679c505fb92060bf8c9f3b28f4f02947f2253cea6226b3fdace81ea1368b86` | Decode fell during a short 6-10 dB received-power dip. Power had already recovered by the trigger, the fixed-primary shadow immediately returned to 27-42 frames/sec, and live alternate-channel cycling extended recovery to about 11 seconds. |
+| OT North Bradley | `1784754546018` | `d422e04801f2398fd43c9b105d3f78c415b4d04bc0143105de46f9ff0c2f34ae` | Both decoders fell while in-channel energy was 2.34 dB below the earlier healthy baseline and 12.5-45 kHz outer-band energy changed only +0.03 dB. Live recovered after retune/reset; the fixed-primary shadow remained near 1 frame/sec. |
+
+Both files were complete and stable on two later checks. Raymond's file was
+69,677,408 bytes and North Bradley's was 69,120,000 bytes. Neither contained
+nonfinite, zero, or repeated adjacent complex samples. Their JSON SHA-256
+values were respectively
+`0ba96ac83e2ebacd734c74718800157d38d311f9cfdf2bf882ce1071268a10d0`
+and
+`57f3e7ea722483efadcede98969dff00a6cc3293aac31d2ae3780dcaf4998ac3`.
+
+Raymond's long-window onset average is misleading because it straddles the
+rapid recovery. One-second power moved from -62.69 dB at trigger minus 11
+seconds to -74.47 dB at minus 7 seconds; decode then stayed at 1 frame/sec
+through minus 1 second. At the trigger, power was back to -64.68 dB and the
+fixed-primary decoder recovered one second later. This independently confirms
+the earlier Raymond fade signature and shows that live control-channel hunting,
+not continued RF loss, creates most of the visible outage tail.
+
+North Bradley was site-local. During its event Hamilton decoded at 32-39
+frames/sec and Cleveland at 39-41 frames/sec on the same host. The unchanged
+outer-band power, clean samples, and healthy peer receivers reject a broadband
+front-end, USB, scheduler, or host-load failure. Together with the earlier
+0.16 dB onset event, North Bradley has more than one amplitude signature:
+dynamic phase/modulation geometry can destroy decode with nearly unchanged
+power or with a modest channel-only cancellation. Simulcast multipath remains
+the best single explanation; exact-frequency co-channel interference remains
+a North Bradley-specific alternative without positive foreign-NAC evidence.
+
+The triggers were 42 seconds apart, but that is not evidence of a shared
+geographic interferer. Both systems had frequent short blips, and the recorder
+selected the first qualifying event after two independently expiring quota
+windows. The RF signatures and recovery behavior are different.
+
 ### Updated conclusion and next steps
 
 The likely cause set is narrower, but it is not one identical propagation event
@@ -964,37 +1005,50 @@ at both sites:
 
 1. A real sample-common RF/P25 modulation impairment starts each collapse. It
    is not queue accounting, antenna mistuning, gain, frequency centering, or
-   invalid SDR samples. OT can fail at nearly unchanged power; Raymond can also
-   show a several-decibel channel fade.
-2. For Raymond, a distant MSWIN site reusing the exact same control frequencies
-   is a concrete physical source. Dynamic co-channel interference and changing
-   simulcast paths are both viable for unchanged-power events; ordinary fading
-   is also supported for the 5.09 dB event.
+   invalid SDR samples. OT can fail at nearly unchanged power; two independent
+   Raymond edges now show a several-decibel received-channel fade.
+2. Raymond's most likely cause is a short frequency-selective fade or
+   cancellation. A distant MSWIN site reusing the exact control frequencies is
+   a concrete physical source, so changing co-channel geometry remains a
+   plausible mechanism alongside local multipath. The fixed-primary decoder's
+   immediate recovery after power returns makes a persistent decoder failure
+   unlikely as the initial cause.
 3. OT does not positively corroborate that co-channel mechanism. North Bradley
    has plausible exact-control reuse but no foreign identity in retained IQ;
    Hamilton has no identified nearby continuous-control reuse and strongly
    favors changing simulcast/multipath geometry.
 4. The current CQPSK decoder and alternate-frequency cycling can lengthen the
-   impairment, but neither creates the initial edge.
+   impairment, but neither creates the initial edge. OT's fixed-primary shadow
+   can also remain stuck after the live decoder recovers, so shadow duration is
+   not a direct measurement of physical fade duration.
 
 Next:
 
 1. Keep both rigs at their verified baseline RF and decoder settings. Let the
    persistent recorder take at most one automatic capture per system per six
    hours; do not restart TR to rearm it.
-2. On the next Raymond collapse, examine failed or near-valid P25 network-ID words for
-   NAC `2A2` (West), `2A0` (Ashcroft), and `2A4` (Raymond), including candidates
-   that fail the full message CRC. This is the smallest no-new-antenna
-   discriminator for co-channel energy.
-3. Correlate the next episode with the actual control channel in use at West if
+2. Treat Raymond's initial edge as a physical fade. The least-invasive hardware
+   test is to move the existing antenna or feed point by roughly one-half to one
+   wavelength at 770 MHz (about 8-15 inches), without adding an antenna or
+   changing gain, then compare episode rate and depth over a full day. A small
+   position change is the standard way to move a fixed receiver out of a
+   multipath cancellation null.
+3. As a secondary discriminator, examine failed or near-valid Raymond P25
+   network-ID words for NAC `2A2` (West), `2A0` (Ashcroft), and `2A4`
+   (Raymond), including candidates that fail the full message CRC. Correlate the
+   episode with the actual control channel in use at West if
    an independent MSWIN status source is available. A matching West control
    channel during Raymond failure would be much stronger evidence than weather
    correlation.
-4. On the next OT blip, use the deployed episode boundaries and retained IQ to compare
-   North Bradley, Hamilton, and Cleveland on the same host. Do not continue
-   pursuing OT co-channel identity unless a nonlocal NAC or site identity
-   appears; prioritize modulation-quality and simulcast-path evidence instead.
-5. Do not prioritize the BPF-800-M as the next root-cause test. An in-band P25
+4. For OT, do not add another antenna and do not use the BPF-800-M as the next
+   test. First move the existing omni by roughly one wavelength if physically
+   practical and compare North Bradley episode rate while Hamilton and
+   Cleveland remain controls. If relocation is impossible or ineffective, the
+   durable hardware remedy is replacing, not supplementing, the omni with a
+   site-favoring directional antenna or using a receiver/demodulator designed
+   for P25 LSM. Keep co-channel work secondary unless a nonlocal NAC or site
+   identity appears.
+5. Do not prioritize the BPF-800-M as a root-cause test. An in-band P25
    signal at the exact same frequency will pass that filter; it remains useful
    only as a final check for unrelated out-of-band front-end stress.
 

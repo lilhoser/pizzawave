@@ -231,6 +231,18 @@ Cross-repository source state:
 ## Pending
 
 1. RF stabilization:
+   - retain the post-quota paired result: Raymond capture `1784754504018`
+     shows a short 6-10 dB received-channel dip followed by immediate
+     fixed-primary recovery, while North Bradley capture `1784754546018`
+     shows a repeatable 2.34 dB channel-only drop with flat outer-band power,
+     clean samples, and healthy Hamilton/Cleveland controls;
+   - treat Raymond frequency-selective fading/cancellation and OT dynamic
+     simulcast/multipath as the leading per-rig causes. The two triggers being
+     42 seconds apart is a quota-selection artifact, not evidence of one shared
+     interferer;
+   - use relocation of each existing antenna by roughly 8-15 inches as the
+     next no-new-antenna hardware test. Keep gain, centering, and recovery policy
+     unchanged during the comparison;
    - retain OT North Bradley capture `1784584105012` as the completed cross-
      geography discriminator: its IQ power/CNR changed only about 0.4/0.5 dB,
      sample continuity was clean, and a fresh replay reproduced the low decode;
