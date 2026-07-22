@@ -1347,6 +1347,16 @@ closed when that match is ambiguous. Constructor prompt v13 also states the
 bidirectional provenance rule explicitly: every cited new transcript must
 belong to an observation declared in that same group.
 
+That scoped provenance repair began clean OT shadow run
+`ot-batch-constructor-shadow-20260722-s`, fenced after call `1427399`. Its
+pre-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-batch-constructor-v13s-20260722T085300Z.bak`
+with SHA-256
+`8dcffe791988dcba2f8e5bb64788ac0a8460bc033442e28824baf391f5a4662f`.
+Post-restart service, production incident freshness, AI completion, and
+embedding health were `ok`; live-radio health was still in its normal startup
+warming interval. RPI was not changed.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
