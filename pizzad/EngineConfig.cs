@@ -398,6 +398,7 @@ public sealed class TranscriptionConfig
 public sealed class AiInsightsConfig
 {
     public bool Enabled { get; set; } = true;
+    public bool IncidentAnalysisExecutionEnabled { get; set; } = true;
     public string ExecutionMode { get; set; } = string.Empty;
     public string OpenAiBaseUrl { get; set; } = string.Empty;
     public string OpenAiApiKey { get; set; } = string.Empty;
@@ -435,6 +436,8 @@ public sealed class AiInsightsConfig
     public int IncidentBatchConstructorShadowLookbackMinutes { get; set; } = 120;
     public int IncidentBatchConstructorShadowBatchSize { get; set; } = 12;
     public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentBatchConstructorShadowContinuous { get; set; }
+    public long IncidentBatchConstructorShadowStartAfterCallId { get; set; }
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

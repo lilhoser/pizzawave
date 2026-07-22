@@ -28,6 +28,7 @@ public sealed class EngineConfigAiInsightsTests
         config.ApplyDefaults();
 
         Assert.False(config.AiInsights.IncidentV2ShadowEnabled);
+        Assert.True(config.AiInsights.IncidentAnalysisExecutionEnabled);
         Assert.Equal(40, config.AiInsights.IncidentV2ShadowCandidateLimit);
         Assert.False(config.AiInsights.IncidentV3FrameShadowEnabled);
         Assert.Equal(40, config.AiInsights.IncidentV3FrameCandidateLimit);
@@ -47,6 +48,16 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(30, config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes);
         Assert.Equal(IncidentBatchContract.MaximumNewObservationCount, config.AiInsights.IncidentBatchConstructorShadowBatchSize);
         Assert.Equal(IncidentBatchContract.MaximumCandidateCount, config.AiInsights.IncidentBatchConstructorShadowCandidateLimit);
+        Assert.False(config.AiInsights.IncidentBatchConstructorShadowContinuous);
+        Assert.Equal(0, config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId);
+    }
+
+    [Fact]
+    public void BatchShadowCadence_CapacityModeRunsBackToBackWithoutChangingNormalCadence()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(5), IncidentBatchShadowCadence.NextDelay(true, 300, TimeSpan.FromSeconds(200)));
+        Assert.Equal(TimeSpan.FromSeconds(100), IncidentBatchShadowCadence.NextDelay(false, 300, TimeSpan.FromSeconds(200)));
+        Assert.Equal(TimeSpan.FromSeconds(30), IncidentBatchShadowCadence.NextDelay(false, 300, TimeSpan.FromSeconds(400)));
     }
 
     [Fact]

@@ -78,7 +78,7 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     public async Task EnqueueAsync(EngineCall call, CancellationToken ct)
     {
-        if (!_config.Setup.Completed || !IsEnabled() || !DownstreamProfilePolicy.Allows(_config, _catalog, call))
+        if (!_config.Setup.Completed || !IsConfigured() || !DownstreamProfilePolicy.Allows(_config, _catalog, call))
             return;
         await _database.QueueIncidentAnalysisAsync(call.Id, ct);
         _queue.Enqueue(call);
@@ -86,13 +86,13 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     public int ConfiguredBatchSize => BatchSize();
 
-    public bool IsConfiguredAndEnabled => IsEnabled();
+    public bool IsConfiguredAndEnabled => IsConfigured() && _config.AiInsights.IncidentAnalysisExecutionEnabled;
 
     public bool IsSetupComplete => _config.Setup.Completed;
 
     public async Task<int> GenerateWindowForCallsAsync(List<EngineCall> calls, CancellationToken ct)
     {
-        if (!IsEnabled())
+        if (!IsConfigured())
             throw new InvalidOperationException("AI insights are disabled or not fully configured.");
 
         calls = calls
@@ -122,7 +122,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             try
             {
-                if (_config.Setup.Completed && IsEnabled())
+                if (_config.Setup.Completed && IsConfigured() && _config.AiInsights.IncidentAnalysisExecutionEnabled)
                 {
                     await RefreshDurableQueueAsync(stoppingToken);
                     DrainQueue();
@@ -5342,7 +5342,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         return IncidentEvidenceClassifier.Analyze(evidenceText).Category;
     }
 
-    private bool IsEnabled() =>
+    private bool IsConfigured() =>
         _config.Setup.Completed &&
         _config.AiInsights.Enabled &&
         !string.IsNullOrWhiteSpace(InsightBaseUrl()) &&

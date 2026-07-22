@@ -46,9 +46,10 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             {
                 _logger.LogWarning(ex, "Incident batch constructor shadow failed; production incident state was not changed");
             }
-            var interval = TimeSpan.FromSeconds(_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds);
-            var remaining = interval - Stopwatch.GetElapsedTime(iterationStarted);
-            await DelayAsync(remaining > TimeSpan.Zero ? remaining : TimeSpan.FromSeconds(30), stoppingToken);
+            await DelayAsync(IncidentBatchShadowCadence.NextDelay(
+                _config.AiInsights.IncidentBatchConstructorShadowContinuous,
+                _config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds,
+                Stopwatch.GetElapsedTime(iterationStarted)), stoppingToken);
         }
     }
 
@@ -66,11 +67,16 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             var latest = await _database.GetLatestIncidentBatchLedgerEntryAsync(runId, ct);
             _lastSampledCallId = latest?.Entry.Bundle.Observations
                 .Where(item => latest.Entry.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
-                .Max(item => item.CallId) ?? calls.LastOrDefault()?.Id ?? 0;
+                .Max(item => item.CallId)
+                ?? (_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId > 0
+                    ? _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId
+                    : calls.LastOrDefault()?.Id ?? 0);
             _logger.LogInformation(
-                "Incident batch constructor shadow run {RunId} initialized after call {CallId}; historical calls will not be backfilled",
+                "Incident batch constructor shadow run {RunId} initialized after call {CallId}; configuredStart={ConfiguredStartCallId}, continuous={Continuous}",
                 runId,
-                _lastSampledCallId);
+                _lastSampledCallId,
+                _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId,
+                _config.AiInsights.IncidentBatchConstructorShadowContinuous);
             return;
         }
 
@@ -162,12 +168,23 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit}";
+        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};{IncidentBatchContract.OldestUnseenCursorConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+}
+
+public static class IncidentBatchShadowCadence
+{
+    public static TimeSpan NextDelay(bool continuous, int intervalSeconds, TimeSpan elapsed)
+    {
+        if (continuous)
+            return TimeSpan.FromSeconds(5);
+        var remaining = TimeSpan.FromSeconds(Math.Max(1, intervalSeconds)) - elapsed;
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.FromSeconds(30);
     }
 }
 

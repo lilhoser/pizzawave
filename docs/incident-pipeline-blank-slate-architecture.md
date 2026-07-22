@@ -1781,14 +1781,19 @@ an embedding job and were embedded; none failed and none lacked a job. This is
 the intended use of quality-neutral transcript evidence as candidate routing,
 not proof of event membership.
 
-The current runtime nevertheless fails the Paxan production-capacity gate. It
-processed 624 observations in 142.2 minutes, or 4.39 observations per minute,
-while its source cursor fell 5,008 seconds (83.5 minutes) behind current radio
-traffic. Constructor latency averaged 167.364 seconds and reached 427.714
-seconds under shared production-model load. The run made 26 constructor, 23
+Run AB does not establish standalone replacement capacity. It processed 624
+observations in 142.2 minutes, or 4.39 observations per minute, while its source
+cursor fell 5,008 seconds (83.5 minutes) behind current radio traffic. That lag
+has two deliberate confounders: the shadow shared one inference endpoint with
+the legacy production incident pipeline, and its configured 300-second cadence
+caps a 24-observation batch at 4.8 observations per minute even with zero model
+latency. Constructor request time, including endpoint queueing, averaged 167.364
+seconds and reached 427.714 seconds. The run made 26 constructor, 23
 relationship, and 11 confirmation calls, consuming 191,952 prompt tokens and
-51,850 completion tokens. All 60 requests succeeded, so the shortfall is the
-three-stage inference budget rather than an endpoint outage.
+51,850 completion tokens. All 60 requests succeeded. These measurements prove
+that side-by-side shadow execution cannot keep up under that cadence; they do
+not prove that the new pipeline cannot replace the inference load of the legacy
+pipeline on Paxan.
 
 Six of 26 batches retained deterministic validation errors: inexact quotes,
 duplicate event ownership or relationship pairs, multiple confirmed targets
@@ -1799,16 +1804,19 @@ The multiple-target failures also expose fragmented prior state: later exact
 missing-person evidence matched more than one earlier projection fragment, but
 the current contract cannot merge those fragments safely.
 
-The architectural conclusion is split. Cross-system, quality-neutral embedding
-retrieval, opaque candidate boundaries, exact source citations, separate
-confirmation, confirmed versus provisional projection state, and fail-closed
-ledger validation survive. The current sequential constructor plus relationship
-proposer plus verifier does not. Do not connect Run AB to production incident
-persistence. The next offline design should remove one broad model stage,
-preserve independent verification only for sparse proposed relationships, and
-add an explicit multi-fragment merge proposal that can remain provisional for
-operator review. It must replay this frozen evidence and demonstrate sustained
-throughput above live arrival rate before another OT shadow run.
+The architectural conclusion is therefore narrower. Cross-system,
+quality-neutral embedding retrieval, opaque candidate boundaries, exact source
+citations, separate confirmation, confirmed versus provisional projection
+state, and fail-closed ledger validation survive. Capacity remains unresolved;
+Run AB does not justify removing a model stage or pivoting back to a previously
+rejected link-only design. Do not connect Run AB to production incident
+persistence. The next experiment must measure the unchanged semantic pipeline
+under replacement-load conditions: retain transcription and permanent services,
+remove only the legacy incident-inference work that this pipeline would replace,
+and remove the artificial five-minute shadow cadence. Only that controlled run
+can decide whether execution optimization or different production hardware is
+needed. Multi-fragment merge remains a separate correctness problem and must
+stay provisional for operator review.
 
 Run AB was disabled at 2026-07-22 18:50 UTC. The pre-stop configuration is
 preserved at
