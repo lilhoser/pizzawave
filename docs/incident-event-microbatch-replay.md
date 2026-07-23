@@ -265,6 +265,60 @@ and expectation results in `result.json`. Scenario files, snapshot databases,
 telemetry databases, and results belong under the ignored `artifacts/`
 directory and must not be committed.
 
+## Combined OT and RPI capacity plan
+
+The combined-capacity mode compares the established shared-Paxan legacy
+control with a mixed replacement run and a projected two-system replacement.
+It does not call a model, inspect transcript content, modify incidents, or
+declare the stable legacy pipeline overloaded. Capacity traces contain only
+bounded observation counts, request counts, token usage, constructor duration,
+and candidate-backed batch counts.
+
+Export four traces from source databases opened read-only:
+
+```text
+python3 scripts/export_incident_capacity_trace.py \
+  --source /var/lib/pizzawave/pizzad.db \
+  --output /tmp/ot-control.json \
+  --cohort-id stable-control --system-id ot --pipeline legacy \
+  --start CONTROL_START --end CONTROL_END
+
+python3 scripts/export_incident_capacity_trace.py \
+  --source /var/lib/pizzawave/pizzad.db \
+  --output /tmp/ot-run-f.json \
+  --cohort-id run-f --system-id ot --pipeline provisional-intake \
+  --run-id ot-batch-provisional-intake-20260722-f \
+  --start-after-call-id 1442645 \
+  --start 1784768397 --end 1784770058
+```
+
+Create matching RPI legacy traces for the identical half-open windows. The
+planner rejects cohorts whose system windows do not align, duplicate boundary
+traces, missing per-system legacy controls, and replacement traces without
+measured work. Generate the report with:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --combined-capacity-plan `
+  --replay-id ot-rpi-capacity-v1 `
+  --control-cohort stable-control `
+  --mixed-cohort run-f `
+  --replacement-system ot `
+  --headroom 1.5 `
+  --trace C:\path\to\ot-control.json `
+  --trace C:\path\to\rpi-control.json `
+  --trace C:\path\to\ot-run-f.json `
+  --trace C:\path\to\rpi-run-f.json `
+  --output artifacts\incident-event-microbatch-replay\ot-rpi-capacity-v1.json
+```
+
+The `old-old` and `new-old` scenarios remain explicitly measured, including
+their failed-request rates. `new-new` uses measured replacement cost per
+processed observation against the higher observation demand from those two
+measured cohorts and is explicitly projected. The headroom scenario multiplies
+that higher proven demand by the configured gate. Verification load is excluded
+and reported as such; it cannot be hidden inside an intake capacity claim.
+
 ## Decision gates
 
 This experiment is not a route around the gates in

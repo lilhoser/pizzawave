@@ -5,6 +5,12 @@ using System.Text;
 using System.Text.Json;
 using pizzad;
 
+if (args.Contains("--combined-capacity-plan", StringComparer.Ordinal))
+{
+    await CombinedCapacityReplay.RunAsync(args);
+    return;
+}
+
 if (args.Contains("--batch-constructor-scenario-replay", StringComparer.Ordinal))
 {
     await BatchConstructorScenarioReplay.RunAsync(args);

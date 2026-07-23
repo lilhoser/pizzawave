@@ -2031,25 +2031,26 @@ semantic rules, labels, categories, talkgroups, phrases, or quality classes.
 Run `ot-batch-provisional-intake-20260722-f` exercised the replacement intake
 path on OT with legacy incident construction paused, the independent verifier
 disabled, a fresh no-backfill fence at call `1442645`, and a 24-observation
-maximum batch size. The evidence stop was reached after 27.52 minutes. The
+maximum batch size. The evidence stop was reached after 27.68 minutes, including
+the final in-flight request that completed while the stop restart began. The
 append-only ledger retained 22 completed batches, including 21 candidate-backed
 batches, and 184 distinct observations. OT received 200 usable transcript
-observations during the same fenced interval. Intake therefore achieved 6.69
-observations per minute against 7.27 arrivals per minute and ended 16
+observations during the same fenced interval. Intake therefore achieved 6.65
+observations per minute against 7.22 arrivals per minute and ended 16
 observations behind. This is a substantial improvement over the retired
 three-stage execution shape, but it does not provide real-time recovery
 headroom on Paxan with `qwen/qwen3.6-35b-a3b@q8_0`.
 
 All 22 constructor requests succeeded and consumed 64,727 prompt tokens and
 22,793 completion tokens. OT constructor requests were outstanding for
-1,462.910 seconds, or 88.6 percent of the complete run. Mean constructor
+1,462.910 seconds, or 88.1 percent of the complete run. Mean constructor
 latency was 66.50 seconds, median latency was 64.53 seconds, the measured
 90th-percentile value was 126.45 seconds, and the maximum was 142.83 seconds.
-Retrieval used 55.311
-seconds total, including one 31.067-second outlier. Constructor plus retrieval
-therefore occupied approximately 92 percent of the OT runner's wall time before
-scheduling delays. These durations include any wait inside the shared inference
-path; they are not measurements of exclusive Paxan GPU time.
+Retrieval used 55.311 seconds total, including one 31.067-second outlier.
+Constructor plus retrieval therefore occupied approximately 91.4 percent of
+the OT runner's wall time before scheduling delays. These durations include any
+wait inside the shared inference path; they are not measurements of exclusive
+Paxan GPU time.
 
 Run F did not have exclusive use of Paxan. RPI routes its incident pipeline to
 the same Paxan model through LM Link, and its separate host-local usage ledger
@@ -2058,13 +2059,26 @@ during the Run F interval. Several completed inside OT's longest constructor
 interval. The earlier OT-only ledger check could not observe those requests and
 must not be used to attribute tail latency to the constructor alone. RPI also
 received 64 usable observations during the interval, making future combined
-new-architecture demand 264 observations, or approximately 9.59 observations
-per minute, rather than OT's 7.27. Applying Run F's average constructor token
+new-architecture demand 264 observations, or approximately 9.54 observations
+per minute, rather than OT's 7.22. Applying Run F's average constructor token
 cost to both systems gives a rough 125,600-token combined intake demand. Paxan
 served approximately 129,200 OT-plus-RPI tokens in the measured interval. That
 comparison is not a capacity benchmark because the request shapes differ, but
 it shows that two independent constructors would have essentially no measured
 margin before verification, bursts, or other AI work.
+
+An aligned clean legacy control from 2026-07-20 17:00 through 20:00 UTC changes
+the capacity diagnosis without changing the safety result. OT and RPI jointly
+received 2,476 usable observations, or 13.76 per minute, while completing 200
+successful legacy requests with zero failed requests, no incident shadow, and
+485,048 tokens,
+or 2,695 per minute. Run F's quieter new-old mix consumed 4,668 tokens per
+minute while covering only 92 percent of OT replacement intake. At the proven
+control demand, two replacement constructors project to approximately 6,543
+tokens per minute before verification, 2.43 times the successful legacy
+control. The 1.5-times headroom gate is 20.63 observations and approximately
+9,814 constructor tokens per minute. This does not show that Paxan is generally
+overloaded; it shows that the replacement request shape is too expensive.
 
 The model proposed 62 events. Per-event validation admitted 47 as Review-only
 provisional events and rejected 15; no constructor output became an
@@ -2092,12 +2106,13 @@ provisional boundary is retained; the serial three-stage constructor is not
 restored and batch-size tuning is not repeated. The verifier must remain
 disabled until a Paxan-wide scheduler, rather than either PizzaWave instance
 acting alone, can establish idle capacity and prevent verification from
-competing with either system's intake. Separately, the constructor requires a
-faster capable local model or equivalent production compute on Paxan, proven
-against the combined OT and RPI workload, before this shadow can replace the
-legacy incident paths. Those are explicit capacity gates, not reasons to
-weaken citation validation, introduce static semantic rules, or resume
-prompt-by-prompt architecture pivots.
+competing with either system's intake. Before changing hardware or assuming a
+new model is required, the replacement must reduce its request frequency and
+prompt/output cost against the combined replay while preserving the evidence
+contract. Any remaining model or production-compute change must then be proven
+against the combined OT and RPI workload. Those are explicit capacity gates,
+not reasons to weaken citation validation, introduce static semantic rules, or
+resume prompt-by-prompt architecture pivots.
 
 ### Initial OT shadow checkpoint
 
