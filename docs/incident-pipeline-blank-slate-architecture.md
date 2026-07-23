@@ -2041,15 +2041,30 @@ three-stage execution shape, but it does not provide real-time recovery
 headroom on Paxan with `qwen/qwen3.6-35b-a3b@q8_0`.
 
 All 22 constructor requests succeeded and consumed 64,727 prompt tokens and
-22,793 completion tokens. Constructor inference occupied 1,462.910 seconds,
-or 88.6 percent of the complete run. Mean constructor latency was 66.50
-seconds, median latency was 64.53 seconds, the measured 90th-percentile value
-was 126.45 seconds, and the maximum was 142.83 seconds. Retrieval used 55.311
+22,793 completion tokens. OT constructor requests were outstanding for
+1,462.910 seconds, or 88.6 percent of the complete run. Mean constructor
+latency was 66.50 seconds, median latency was 64.53 seconds, the measured
+90th-percentile value was 126.45 seconds, and the maximum was 142.83 seconds.
+Retrieval used 55.311
 seconds total, including one 31.067-second outlier. Constructor plus retrieval
-therefore occupied approximately 92 percent of wall time before scheduling
-delays. The inference ledger showed no competing PizzaWave completion during
-the longest constructor request, so that tail latency was intrinsic to the
-large constructor request rather than production endpoint contention.
+therefore occupied approximately 92 percent of the OT runner's wall time before
+scheduling delays. These durations include any wait inside the shared inference
+path; they are not measurements of exclusive Paxan GPU time.
+
+Run F did not have exclusive use of Paxan. RPI routes its incident pipeline to
+the same Paxan model through LM Link, and its separate host-local usage ledger
+recorded 19 successful `automatic insights` requests totaling 41,709 tokens
+during the Run F interval. Several completed inside OT's longest constructor
+interval. The earlier OT-only ledger check could not observe those requests and
+must not be used to attribute tail latency to the constructor alone. RPI also
+received 64 usable observations during the interval, making future combined
+new-architecture demand 264 observations, or approximately 9.59 observations
+per minute, rather than OT's 7.27. Applying Run F's average constructor token
+cost to both systems gives a rough 125,600-token combined intake demand. Paxan
+served approximately 129,200 OT-plus-RPI tokens in the measured interval. That
+comparison is not a capacity benchmark because the request shapes differ, but
+it shows that two independent constructors would have essentially no measured
+margin before verification, bursts, or other AI work.
 
 The model proposed 62 events. Per-event validation admitted 47 as Review-only
 provisional events and rejected 15; no constructor output became an
@@ -2075,12 +2090,14 @@ and
 Run F closes the architecture-selection experiment. The asynchronous
 provisional boundary is retained; the serial three-stage constructor is not
 restored and batch-size tuning is not repeated. The verifier must remain
-disabled until it is scheduled only from demonstrably idle capacity and cannot
-compete with intake. Separately, the constructor requires a faster capable
-local model or equivalent production compute on Paxan before this shadow can
-replace the legacy incident path. Those are explicit capacity gates, not
-reasons to weaken citation validation, introduce static semantic rules, or
-resume prompt-by-prompt architecture pivots.
+disabled until a Paxan-wide scheduler, rather than either PizzaWave instance
+acting alone, can establish idle capacity and prevent verification from
+competing with either system's intake. Separately, the constructor requires a
+faster capable local model or equivalent production compute on Paxan, proven
+against the combined OT and RPI workload, before this shadow can replace the
+legacy incident paths. Those are explicit capacity gates, not reasons to
+weaken citation validation, introduce static semantic rules, or resume
+prompt-by-prompt architecture pivots.
 
 ### Initial OT shadow checkpoint
 
