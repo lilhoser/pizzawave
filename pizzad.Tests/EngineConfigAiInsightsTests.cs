@@ -61,6 +61,7 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(0, config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId);
         Assert.False(config.AiInsights.IncidentBatchVerificationShadowEnabled);
         Assert.Equal(5, config.AiInsights.IncidentBatchVerificationShadowIntervalSeconds);
+        Assert.False(config.AiInsights.IncidentBatchCanaryPersistenceEnabled);
     }
 
     [Fact]
@@ -128,6 +129,29 @@ public sealed class EngineConfigAiInsightsTests
         Assert.False(IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(false, false));
         Assert.False(IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(true, true));
         Assert.True(IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(true, false));
+    }
+
+    [Fact]
+    public void CanaryPersistenceRequiresTheCompleteExclusiveStagedBoundary()
+    {
+        var config = new AiInsightsConfig
+        {
+            IncidentBatchCanaryPersistenceEnabled = true,
+            IncidentAnalysisExecutionEnabled = false,
+            IncidentBatchConstructorShadowExclusiveInferenceWindow = true,
+            IncidentBatchConstructorShadowEnabled = true,
+            IncidentBatchRelationshipShadowEnabled = true,
+            IncidentBatchVerificationShadowEnabled = true,
+            IncidentBatchConstructorShadowObservationIsolated = true,
+            IncidentBatchConstructorShadowSourceIsolated = true,
+            IncidentBatchConstructorShadowRunId = "canary:1"
+        };
+
+        Assert.True(IncidentBatchCanaryGate.AllowsPersistence(config));
+
+        config.IncidentAnalysisExecutionEnabled = true;
+        Assert.False(IncidentBatchCanaryGate.AllowsPersistence(config));
+        Assert.Contains("legacy incident execution", IncidentBatchCanaryGate.BlockReason(config), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -777,11 +777,16 @@ app.MapGet("/api/v1/incidents/association-reviews", async (HttpContext context, 
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     var range = new TimeRangeQuery(start, end).Resolve();
+    var batchReviewEnabled =
+        config.AiInsights.IncidentBatchCanaryPersistenceEnabled &&
+        IncidentBatchCanaryGate.AllowsPersistence(config.AiInsights);
     var selectedRunId = string.IsNullOrWhiteSpace(runId)
-        ? config.AiInsights.IncidentAssociationShadowRunId
+        ? batchReviewEnabled
+            ? config.AiInsights.IncidentBatchConstructorShadowRunId
+            : config.AiInsights.IncidentAssociationShadowRunId
         : runId;
     return Results.Ok(await database.GetIncidentAssociationReviewReportAsync(
-        config.AiInsights.IncidentAssociationShadowEnabled,
+        batchReviewEnabled || config.AiInsights.IncidentAssociationShadowEnabled,
         selectedRunId,
         range.Start,
         range.End,
@@ -920,12 +925,12 @@ app.MapGet("/api/v1/incidents/batch-constructor-shadow", async (HttpContext cont
 .WithName("IncidentBatchConstructorShadowReport")
 .WithOpenApi();
 
-app.MapGet("/api/v1/incidents/batch-verification-shadow", async (HttpContext context, int? limit, AuthService authService, EngineConfig config, EngineDatabase database) =>
+app.MapGet("/api/v1/incidents/batch-verification-shadow", async (HttpContext context, string? runId, int? limit, AuthService authService, EngineConfig config, EngineDatabase database) =>
 {
     if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
     return Results.Ok(await database.GetIncidentBatchVerificationShadowReportAsync(
         config.AiInsights.IncidentBatchVerificationShadowEnabled,
-        config.AiInsights.IncidentBatchConstructorShadowRunId,
+        string.IsNullOrWhiteSpace(runId) ? config.AiInsights.IncidentBatchConstructorShadowRunId : runId,
         limit ?? 100,
         context.RequestAborted));
 })

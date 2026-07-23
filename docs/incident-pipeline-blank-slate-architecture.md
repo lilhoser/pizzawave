@@ -2305,6 +2305,54 @@ post-window verification, and RPI advanced to `13:04:25Z`. Both health
 endpoints were `ok`, AI completion failures remained zero, and
 `trunk-recorder` retained PID `3068317` on OT and PID `884754` on RPI.
 
+#### Reversible production-canary boundary
+
+The production canary remains inside the existing `pizzad` process. It does not
+introduce a gateway, inference proxy, scheduler service, or second deployment.
+The existing batch constructor and asynchronous verifier perform the work.
+
+The disabled-by-default `incidentBatchCanaryPersistenceEnabled` switch has a
+fail-closed gate. Persistence is allowed only when all of the following are
+simultaneously true:
+
+- legacy `incidentAnalysisExecutionEnabled` is false;
+- the explicit exclusive-inference-window switch is true;
+- constructor, separate relationship, and independent verification stages are
+  enabled;
+- source construction is both source-isolated and observation-isolated; and
+- the configured run identifier is the same run that produced the verification.
+
+Even inside that mode, only an independently verified
+`ConfirmedMembership` result can reach production persistence. The application
+recomputes the expected projection from the append-only request and result and
+rejects any altered title, evidence ownership, call set, or transition.
+Verified provisional associations remain non-membership Review items.
+Rejected, invalid, pending, or constructor-only output cannot write an
+incident.
+
+The verification result, verified projection, production incident change,
+incident-operation audit row, and append-only canary-commit record share one
+SQLite transaction. Existing call ownership is checked before any incident is
+created or updated. If another incident owns any proposed call, the entire
+incident write is refused and a canary conflict is recorded; the canary never
+steals or partially attaches evidence. Incident evidence display no longer
+uses the transcript quality label as a visibility or membership gate.
+
+The existing Incident Pipeline Inspector reports verification outcomes,
+canary writes, ownership conflicts, and persisted incident IDs. Independently
+verified provisional associations feed the existing Dashboard Review
+workflow. Operator review remains append-only evidence during this first
+canary; it does not silently merge membership.
+
+The first live canary should be OT-only and time-bounded. It uses a fresh run
+identifier and no-backfill fence, pauses OT legacy incident generation, and
+leaves RPI on the legacy pipeline. The stop procedure disables canary
+persistence, constructor, relationship, and verifier switches; restores OT
+legacy incident execution; restarts only `pizzad`; verifies production
+incident currency; and confirms the `trunk-recorder` PID did not change. Any
+production-health degradation, repeated model failure, unexpected write,
+ownership conflict, or inability to keep up ends the canary immediately.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

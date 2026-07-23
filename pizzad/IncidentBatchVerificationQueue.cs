@@ -283,7 +283,7 @@ public static class IncidentBatchVerificationProjector
             {
                 ObservationIds = target.ObservationIds.Concat(source.ObservationIds).Distinct(StringComparer.Ordinal).ToList(),
                 Title = string.IsNullOrWhiteSpace(target.Title) ? source.Title : target.Title,
-                Summary = string.IsNullOrWhiteSpace(target.Summary) ? source.Summary : target.Summary,
+                Summary = IncidentBatchProjector.AppendEvidenceSummary(target.Summary, source.Summary),
                 OperatorVisible = true,
                 OperatorReview = false,
                 SourceLedgerEntryIds = target.SourceLedgerEntryIds.Concat(source.SourceLedgerEntryIds).Distinct(StringComparer.Ordinal).ToList()

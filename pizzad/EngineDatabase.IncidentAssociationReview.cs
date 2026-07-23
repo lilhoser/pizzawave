@@ -12,15 +12,14 @@ public sealed partial class EngineDatabase
         var errors = IncidentAssociationReviewContract.Validate(entry).ToList();
 
         await using var connection = OpenConnection();
-        var sourceEntries = await LoadAdmittedAssociationSourceEntriesAsync(
+        var sourceCallIds = await LoadReviewSourceCallIdsAsync(
             connection,
             entry.RunId,
             entry.ProjectionEventId,
             ct);
-        if (sourceEntries.Count == 0)
+        if (sourceCallIds.Count == 0)
             errors.Add("the source provisional association does not exist");
 
-        var sourceCallIds = SourceCallIds(sourceEntries);
         foreach (var callId in entry.CallIds)
         {
             if (!sourceCallIds.Contains(callId))
@@ -119,18 +118,13 @@ public sealed partial class EngineDatabase
             return new IncidentAssociationReviewReportDto(enabled, string.Empty, 0, 0, []);
 
         await using var connection = OpenConnection();
-        var sourceEntries = await LoadAdmittedAssociationSourceEntriesAsync(connection, runId, null, ct);
-        if (sourceEntries.Count == 0)
+        var sourceGroups = await LoadReviewSourceGroupsAsync(connection, runId, ct);
+        if (sourceGroups.Count == 0)
             return new IncidentAssociationReviewReportDto(enabled, runId, 0, 0, []);
 
-        var sourceGroups = sourceEntries
-            .GroupBy(row => row.Candidate.ProjectionEventId, StringComparer.Ordinal)
-            .Select(group => new SourceAssociationGroup(
-                group.Key,
-                group.OrderBy(row => row.StoredEntry.Sequence).ToList(),
-                SourceCallIds(group)))
+        sourceGroups = sourceGroups
             .Where(group => group.CallIds.Count >= 2)
-            .OrderByDescending(group => group.Entries.Max(row => row.StoredEntry.Entry.RecordedAtUtc))
+            .OrderByDescending(group => group.LatestProposalUtc)
             .Take(100)
             .ToList();
 
@@ -218,7 +212,6 @@ public sealed partial class EngineDatabase
             if (callDtos.All(call => call.ReviewState == "established"))
                 continue;
 
-            var evidence = sourceGroup.Entries.Select(BuildEvidence).ToList();
             var pending = callDtos.Count(call => call.ReviewState == "pending");
             var reviewed = callDtos.Count(call => call.ReviewState is "confirmed" or "rejected" or "deferred");
             var status = pending > 0
@@ -234,10 +227,10 @@ public sealed partial class EngineDatabase
                 sourceGroup.ProjectionEventId,
                 placement,
                 status,
-                sourceGroup.Entries.Max(row => row.StoredEntry.Entry.RecordedAtUtc).UtcDateTime,
+                sourceGroup.LatestProposalUtc.UtcDateTime,
                 activeAnchorIds,
                 callDtos,
-                evidence,
+                sourceGroup.Evidence,
                 pending));
         }
 
@@ -249,6 +242,133 @@ public sealed partial class EngineDatabase
             pendingGroups,
             standalonePendingGroups,
             groups);
+    }
+
+    private async Task<HashSet<long>> LoadReviewSourceCallIdsAsync(
+        SqliteConnection connection,
+        string runId,
+        string projectionEventId,
+        CancellationToken ct)
+    {
+        var legacy = await LoadAdmittedAssociationSourceEntriesAsync(
+            connection,
+            runId,
+            projectionEventId,
+            ct);
+        if (legacy.Count > 0)
+            return SourceCallIds(legacy);
+        var batchGroups = await LoadVerifiedBatchReviewSourceGroupsAsync(runId, ct);
+        return batchGroups
+            .SingleOrDefault(group => group.ProjectionEventId == projectionEventId)
+            ?.CallIds
+            .ToHashSet() ?? [];
+    }
+
+    private async Task<List<ReviewSourceGroup>> LoadReviewSourceGroupsAsync(
+        SqliteConnection connection,
+        string runId,
+        CancellationToken ct)
+    {
+        var groups = new List<ReviewSourceGroup>();
+        var legacy = await LoadAdmittedAssociationSourceEntriesAsync(connection, runId, null, ct);
+        groups.AddRange(legacy
+            .GroupBy(row => row.Candidate.ProjectionEventId, StringComparer.Ordinal)
+            .Select(group => new ReviewSourceGroup(
+                group.Key,
+                group.Max(row => row.StoredEntry.Entry.RecordedAtUtc),
+                SourceCallIds(group),
+                group.OrderBy(row => row.StoredEntry.Sequence).Select(BuildEvidence).ToList())));
+        groups.AddRange(await LoadVerifiedBatchReviewSourceGroupsAsync(runId, ct));
+        return groups;
+    }
+
+    private async Task<IReadOnlyList<ReviewSourceGroup>> LoadVerifiedBatchReviewSourceGroupsAsync(
+        string runId,
+        CancellationToken ct)
+    {
+        var projection = await GetLatestIncidentBatchProjectionAsync(runId, ct);
+        if (projection is null || projection.Projection.ProvisionalAssociations.Count == 0)
+            return [];
+        var requests = await ListIncidentBatchVerificationRequestsAsync(runId, 1000, ct);
+        var results = await ListIncidentBatchVerificationResultsAsync(runId, 1000, ct);
+        var verifiedRequestIds = results
+            .Where(item => item.Result.Outcome == IncidentBatchVerificationOutcome.Verified)
+            .Select(item => item.Result.RequestId)
+            .ToHashSet(StringComparer.Ordinal);
+        var eligibleRequests = requests
+            .Where(item =>
+                item.Request.ProposedDisposition == IncidentBatchEventDisposition.ProvisionalAssociation &&
+                verifiedRequestIds.Contains(item.Request.RequestId))
+            .ToList();
+        if (eligibleRequests.Count == 0)
+            return [];
+
+        var rows = new List<(string ProjectionEventId, DateTimeOffset RecordedAtUtc, HashSet<long> CallIds, IncidentAssociationReviewEvidenceDto Evidence)>();
+        foreach (var storedRequest in eligibleRequests)
+        {
+            var request = storedRequest.Request;
+            var sourceEntry = await GetIncidentBatchLedgerEntryAsync(runId, request.SourceLedgerEntryId, ct);
+            if (sourceEntry is null)
+                continue;
+            var context = IncidentBatchVerificationQueueContract.BuildContext(sourceEntry.Entry, request);
+            var sourceProjectionEventId = sourceEntry.Entry.SingletonEvents
+                .FirstOrDefault(item => context.Source.NewObservationIds.Contains(item.ObservationId, StringComparer.Ordinal))
+                ?.ProjectionEventId;
+            if (string.IsNullOrWhiteSpace(sourceProjectionEventId))
+                continue;
+            var associationExists = projection.Projection.ProvisionalAssociations.Any(item =>
+                item.SourceProjectionEventId == sourceProjectionEventId &&
+                item.CandidateProjectionEventId == context.Candidate.ProjectionEventId);
+            if (!associationExists)
+                continue;
+
+            var callIdsByObservation = sourceEntry.Entry.Bundle.Observations
+                .Where(observation => observation.CallId > 0)
+                .ToDictionary(
+                    observation => observation.ObservationId,
+                    observation => observation.CallId!.Value,
+                    StringComparer.Ordinal);
+            var sourceCallIds = context.Source.NewObservationIds
+                .Select(observationId => callIdsByObservation.GetValueOrDefault(observationId))
+                .Where(callId => callId > 0)
+                .Distinct()
+                .ToList();
+            var candidateCallIds = context.Candidate.ObservationIds
+                .Select(observationId => callIdsByObservation.GetValueOrDefault(observationId))
+                .Where(callId => callId > 0)
+                .Distinct()
+                .ToList();
+            var callIds = sourceCallIds.Concat(candidateCallIds).ToHashSet();
+            if (callIds.Count < 2)
+                continue;
+            rows.Add((
+                context.Candidate.ProjectionEventId,
+                sourceEntry.Entry.RecordedAtUtc,
+                callIds,
+                new IncidentAssociationReviewEvidenceDto(
+                    sourceCallIds.FirstOrDefault(),
+                    candidateCallIds,
+                    context.Relationship.RelationshipStatement,
+                    context.Relationship.Uncertainty,
+                    context.Relationship.SourceEvidence
+                        .Select(citation => citation.ExactQuote)
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .ToList(),
+                    context.Relationship.CandidateEvidence
+                        .Select(citation => citation.ExactQuote)
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .ToList(),
+                    context.Relationship.UnresolvedQuestions)));
+        }
+
+        return rows
+            .GroupBy(row => row.ProjectionEventId, StringComparer.Ordinal)
+            .Select(group => new ReviewSourceGroup(
+                group.Key,
+                group.Max(row => row.RecordedAtUtc),
+                group.SelectMany(row => row.CallIds).ToHashSet(),
+                group.Select(row => row.Evidence).ToList()))
+            .ToList();
     }
 
     private static IncidentAssociationReviewEvidenceDto BuildEvidence(ProvisionalAssociationSource row)
@@ -351,10 +471,11 @@ public sealed partial class EngineDatabase
         return rows;
     }
 
-    private sealed record SourceAssociationGroup(
+    private sealed record ReviewSourceGroup(
         string ProjectionEventId,
-        IReadOnlyList<ProvisionalAssociationSource> Entries,
-        HashSet<long> CallIds);
+        DateTimeOffset LatestProposalUtc,
+        HashSet<long> CallIds,
+        IReadOnlyList<IncidentAssociationReviewEvidenceDto> Evidence);
 
     private sealed record ProvisionalAssociationSource(
         IncidentAssociationStoredLedgerEntry StoredEntry,

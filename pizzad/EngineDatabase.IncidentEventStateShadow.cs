@@ -355,6 +355,25 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         CREATE INDEX IF NOT EXISTS idx_incident_batch_verification_shadow_result_run_sequence
             ON incident_batch_verification_shadow_results(run_id, sequence);
 
+        CREATE TABLE IF NOT EXISTS incident_batch_canary_commits (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            commit_id TEXT NOT NULL UNIQUE,
+            request_id TEXT NOT NULL UNIQUE,
+            result_id TEXT NOT NULL UNIQUE,
+            projection_id TEXT NOT NULL,
+            projection_event_id TEXT NOT NULL,
+            recorded_at_utc TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            incident_id INTEGER NOT NULL DEFAULT 0,
+            incident_key TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_batch_canary_commit_run_sequence
+            ON incident_batch_canary_commits(run_id, sequence);
+
         CREATE TABLE IF NOT EXISTS incident_association_review_ledger (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             review_entry_id TEXT NOT NULL UNIQUE,
@@ -491,6 +510,18 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         BEFORE DELETE ON incident_batch_verification_shadow_results
         BEGIN
             SELECT RAISE(ABORT, 'incident batch verification shadow results are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_canary_commits_no_update
+        BEFORE UPDATE ON incident_batch_canary_commits
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch canary commits are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_canary_commits_no_delete
+        BEFORE DELETE ON incident_batch_canary_commits
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch canary commits are append-only');
         END;
 
         CREATE TRIGGER IF NOT EXISTS incident_association_review_ledger_no_update

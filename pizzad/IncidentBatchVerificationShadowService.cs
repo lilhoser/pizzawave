@@ -94,19 +94,38 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
                 now);
             try
             {
-                await _database.AppendIncidentBatchVerificationResultAsync(
-                    latest.Sequence,
-                    sourceEntry.Entry,
-                    request,
-                    result,
-                    projection,
-                    ct);
+                IncidentBatchStoredCanaryCommit? canaryCommit = null;
+                if (_config.AiInsights.IncidentBatchCanaryPersistenceEnabled &&
+                    result.Outcome == IncidentBatchVerificationOutcome.Verified &&
+                    request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership)
+                {
+                    var persisted = await _database.AppendIncidentBatchVerificationResultWithCanaryAsync(
+                        latest.Sequence,
+                        sourceEntry.Entry,
+                        request,
+                        result,
+                        projection,
+                        ct);
+                    canaryCommit = persisted.Commit;
+                }
+                else
+                {
+                    await _database.AppendIncidentBatchVerificationResultAsync(
+                        latest.Sequence,
+                        sourceEntry.Entry,
+                        request,
+                        result,
+                        projection,
+                        ct);
+                }
                 _logger.LogInformation(
-                    "Incident batch asynchronous verification completed request {RequestId}: outcome={Outcome}, durationMs={DurationMs}, validationErrors={ValidationErrorCount}; production incident state unchanged",
+                    "Incident batch asynchronous verification completed request {RequestId}: outcome={Outcome}, durationMs={DurationMs}, validationErrors={ValidationErrorCount}, canaryPersistence={CanaryPersistence}, canaryIncidentId={CanaryIncidentId}",
                     request.RequestId,
                     result.Outcome,
                     timer.ElapsedMilliseconds,
-                    result.ValidationErrors.Count);
+                    result.ValidationErrors.Count,
+                    canaryCommit?.Commit.Outcome.ToString() ?? "none",
+                    canaryCommit?.Commit.IncidentId ?? 0);
                 return true;
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("projection advanced", StringComparison.Ordinal) && attempt < 2)
@@ -124,6 +143,8 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
         IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(
             _config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow,
             _config.AiInsights.IncidentAnalysisExecutionEnabled) &&
+        (!_config.AiInsights.IncidentBatchCanaryPersistenceEnabled ||
+         IncidentBatchCanaryGate.AllowsPersistence(_config.AiInsights)) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.IncidentBatchConstructorShadowRunId) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);

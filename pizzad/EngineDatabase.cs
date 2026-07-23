@@ -4603,7 +4603,6 @@ public sealed partial class EngineDatabase
             LEFT JOIN alert_matches am ON am.call_id = c.id
             WHERE ic.incident_id = $incident_id
               AND c.transcription_status = 'complete'
-              AND c.quality_reason = 'ok'
               AND length(trim(c.transcription)) > 0
             GROUP BY c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name, c.talkgroup, c.audio_path
             ORDER BY c.start_time ASC;
@@ -4647,7 +4646,6 @@ public sealed partial class EngineDatabase
             LEFT JOIN alert_matches am ON am.call_id = c.id
             WHERE ic.incident_id IN ({string.Join(",", parameters)})
               AND c.transcription_status = 'complete'
-              AND c.quality_reason = 'ok'
               AND length(trim(c.transcription)) > 0
             GROUP BY ic.incident_id, c.id, c.start_time, c.transcription, c.category, c.talkgroup_name, c.system_short_name, c.talkgroup, c.audio_path
             ORDER BY ic.incident_id ASC, c.start_time ASC;

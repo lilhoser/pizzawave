@@ -753,7 +753,7 @@ public static class IncidentBatchProjector
         return $"{evidenceSummary[..(maximumLength - 1)].TrimEnd()}\u2026";
     }
 
-    private static string AppendEvidenceSummary(string existing, string added)
+    public static string AppendEvidenceSummary(string existing, string added)
     {
         if (string.IsNullOrWhiteSpace(existing)) return added;
         if (string.IsNullOrWhiteSpace(added) || existing.Contains(added, StringComparison.Ordinal)) return existing;

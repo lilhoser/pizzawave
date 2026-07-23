@@ -8,7 +8,7 @@ import type { AuthTokenRequest } from "./api";
 import { usePersistentRefresh } from "./refresh";
 import type { RefreshState } from "./refresh";
 import { locationDisplayName, locationKey, locationShortName } from "./features/dashboard/location";
-import type { IncidentAssociationReviewGroup, IncidentAssociationReviewReport, IncidentAssociationShadowReport, IncidentBatchShadowReport, IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
+import type { IncidentAssociationReviewGroup, IncidentAssociationReviewReport, IncidentAssociationShadowReport, IncidentBatchShadowReport, IncidentBatchVerificationReport, IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
 import type { LiveRfStatus } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
@@ -9518,6 +9518,12 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
     load: () => api.request<IncidentBatchShadowReport>(`/api/v1/incidents/batch-constructor-shadow?limit=100${selectedBatchShadowRun ? `&runId=${encodeURIComponent(selectedBatchShadowRun)}` : ""}`)
   });
   const batchShadow = batchShadowResource.data;
+  const batchVerificationResource = usePersistentRefresh({
+    key: `incident-batch-verification-shadow|${selectedBatchShadowRun}|${refreshToken}`,
+    enabled: true,
+    load: () => api.request<IncidentBatchVerificationReport>(`/api/v1/incidents/batch-verification-shadow?limit=100${selectedBatchShadowRun ? `&runId=${encodeURIComponent(selectedBatchShadowRun)}` : ""}`)
+  });
+  const batchVerification = batchVerificationResource.data;
   if (!dashboard || !chains) return <div className="card">Loading incident performance...</div>;
 
   const categoryCounts = Array.from(new Set(dashboard.incidents.map(incident => incident.category))).map(category => ({ label: label(category), value: dashboard.incidents.filter(incident => incident.category === category).length })).sort((a, b) => b.value - a.value);
@@ -9547,7 +9553,7 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
       <section className="system-content-section"><SystemSectionHeader title="Retained Calls per Incident" /><Bars title="Retained Calls per Incident" rows={callBars} showTitle={false} /></section>
     </div>
     <section className="card incident-shadow-card system-content-section">
-      <SystemSectionHeader title="Micro-Batch Incident Constructor" description="Current read-only architecture experiment. Source-cited events may be new, held for operator review, confirmed against an existing shadow event, or retained as provisional associations. Invalid and omitted output remains unresolved; production incidents are unchanged." actions={batchShadow?.runs.length ? <label className="incident-shadow-run-picker">Run <select value={batchShadow.selectedRunId} onChange={event => setSelectedBatchShadowRun(event.target.value)}>{batchShadow.runs.map(run => <option value={run.runId} key={run.runId}>{run.runId}{run.isConfiguredRun ? " (configured)" : ""}</option>)}</select></label> : null} />
+      <SystemSectionHeader title="Micro-Batch Incident Constructor" description="Source construction, relationship proposals, independent verification, and any verified canary persistence are recorded here. Provisional links remain review-only; invalid and omitted output remains unresolved." actions={batchShadow?.runs.length ? <label className="incident-shadow-run-picker">Run <select value={batchShadow.selectedRunId} onChange={event => setSelectedBatchShadowRun(event.target.value)}>{batchShadow.runs.map(run => <option value={run.runId} key={run.runId}>{run.runId}{run.isConfiguredRun ? " (configured)" : ""}</option>)}</select></label> : null} />
       <PanelLoadState label="micro-batch incident constructor" state={batchShadowResource.state} hasData={Boolean(batchShadow)} onRetry={batchShadowResource.refresh} />
       {batchShadow && <>
         <div className="incident-outcome-summary incident-shadow-summary" aria-label="Micro-batch constructor outcomes">
@@ -9565,6 +9571,28 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
           <span><strong>{batchShadow.totals.operatorVisibleEvents.toLocaleString()}</strong> visible shadow events</span>
           <span><strong>{batchShadow.totals.operatorReviewEvents.toLocaleString()}</strong> shadow review queue</span>
         </div>
+        <PanelLoadState label="independent incident verification" state={batchVerificationResource.state} hasData={Boolean(batchVerification)} onRetry={batchVerificationResource.refresh} />
+        {batchVerification && <div className="incident-outcome-summary incident-shadow-summary" aria-label="Micro-batch verification outcomes">
+          <span><strong>{batchVerification.totals.enqueued.toLocaleString()}</strong> verification requests</span>
+          <span><strong>{batchVerification.totals.pending.toLocaleString()}</strong> pending</span>
+          <span><strong>{batchVerification.totals.verified.toLocaleString()}</strong> verified</span>
+          <span><strong>{batchVerification.totals.rejected.toLocaleString()}</strong> rejected</span>
+          <span><strong>{batchVerification.totals.invalid.toLocaleString()}</strong> invalid</span>
+          <span><strong>{batchVerification.totals.canaryPersisted.toLocaleString()}</strong> canary writes</span>
+          <span><strong>{batchVerification.totals.canaryConflicts.toLocaleString()}</strong> ownership conflicts</span>
+          <span><strong>{(batchVerification.totals.averageVerifierMilliseconds / 1000).toFixed(1)}s</strong> average verifier time</span>
+        </div>}
+        {batchVerification && batchVerification.items.length > 0 && <div className="incident-shadow-list">{batchVerification.items.map(item => {
+          const verified = item.outcome === "Verified";
+          const invalid = item.outcome === "Invalid";
+          const persisted = item.canaryOutcome === "Persisted";
+          const conflicted = item.canaryOutcome === "Conflict";
+          return <div className="incident-shadow-row" key={item.requestId}>
+            <span className={`section-status ${persisted ? "ok" : invalid || conflicted ? "warning" : "neutral"}`}>{persisted ? "Persisted" : conflicted ? "Conflict" : item.outcome}</span>
+            <span className="incident-shadow-identity"><strong>{item.sourceProposalToken} â†’ {item.candidateToken}</strong><small>{item.proposedDisposition} Â· {new Date(item.enqueuedAtUtc).toLocaleString()}</small>{item.canaryReason && <em>{item.canaryReason}</em>}{item.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}</span>
+            <span className="incident-shadow-activity"><strong>{persisted ? `Incident ${item.canaryIncidentId}` : verified ? "Verified, review-only" : item.outcome}</strong><small>{item.verifierMilliseconds ? `${(item.verifierMilliseconds / 1000).toFixed(1)}s` : "Awaiting verifier"}</small></span>
+          </div>;
+        })}</div>}
         <div className="incident-shadow-list">{batchShadow.attempts.map(attempt => {
           const failed = Boolean(attempt.validationErrors.length || attempt.proposerError);
           const produced = attempt.newEventCount + attempt.confirmedMembershipCount;

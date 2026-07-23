@@ -6,6 +6,8 @@ public sealed record IncidentBatchVerificationShadowTotalsDto(
     int Verified,
     int Rejected,
     int Invalid,
+    int CanaryPersisted,
+    int CanaryConflicts,
     double AverageVerifierMilliseconds,
     long MaximumVerifierMilliseconds);
 
@@ -20,7 +22,10 @@ public sealed record IncidentBatchVerificationShadowItemDto(
     string Outcome,
     DateTime? CompletedAtUtc,
     long VerifierMilliseconds,
-    IReadOnlyList<string> ValidationErrors);
+    IReadOnlyList<string> ValidationErrors,
+    string CanaryOutcome,
+    long CanaryIncidentId,
+    string CanaryReason);
 
 public sealed record IncidentBatchVerificationShadowReportDto(
     bool Enabled,
@@ -38,10 +43,12 @@ public sealed partial class EngineDatabase
     {
         runId = runId.Trim();
         if (string.IsNullOrWhiteSpace(runId))
-            return new IncidentBatchVerificationShadowReportDto(enabled, string.Empty, new(0, 0, 0, 0, 0, 0, 0), []);
+            return new IncidentBatchVerificationShadowReportDto(enabled, string.Empty, new(0, 0, 0, 0, 0, 0, 0, 0, 0), []);
         var requests = await ListIncidentBatchVerificationRequestsAsync(runId, 1000, ct);
         var results = await ListIncidentBatchVerificationResultsAsync(runId, 1000, ct);
+        var commits = await ListIncidentBatchCanaryCommitsAsync(runId, 1000, ct);
         var resultsByRequest = results.ToDictionary(item => item.Result.RequestId, StringComparer.Ordinal);
+        var commitsByRequest = commits.ToDictionary(item => item.Commit.RequestId, StringComparer.Ordinal);
         var completed = results.Select(item => item.Result).ToList();
         var totals = new IncidentBatchVerificationShadowTotalsDto(
             requests.Count,
@@ -49,6 +56,8 @@ public sealed partial class EngineDatabase
             completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Verified),
             completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Rejected),
             completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Invalid),
+            commits.Count(item => item.Commit.Outcome == IncidentBatchCanaryCommitOutcome.Persisted),
+            commits.Count(item => item.Commit.Outcome == IncidentBatchCanaryCommitOutcome.Conflict),
             completed.Count == 0 ? 0 : completed.Average(item => item.Execution.VerifierDurationMilliseconds),
             completed.Count == 0 ? 0 : completed.Max(item => item.Execution.VerifierDurationMilliseconds));
         var items = requests
@@ -57,6 +66,7 @@ public sealed partial class EngineDatabase
             .Select(item =>
             {
                 resultsByRequest.TryGetValue(item.Request.RequestId, out var storedResult);
+                commitsByRequest.TryGetValue(item.Request.RequestId, out var storedCommit);
                 return new IncidentBatchVerificationShadowItemDto(
                     item.Sequence,
                     item.Request.RequestId,
@@ -68,7 +78,10 @@ public sealed partial class EngineDatabase
                     storedResult?.Result.Outcome.ToString() ?? "Pending",
                     storedResult?.Result.RecordedAtUtc.UtcDateTime,
                     storedResult?.Result.Execution.VerifierDurationMilliseconds ?? 0,
-                    storedResult?.Result.ValidationErrors ?? []);
+                    storedResult?.Result.ValidationErrors ?? [],
+                    storedCommit?.Commit.Outcome.ToString() ?? string.Empty,
+                    storedCommit?.Commit.IncidentId ?? 0,
+                    storedCommit?.Commit.Reason ?? string.Empty);
             })
             .ToList();
         return new IncidentBatchVerificationShadowReportDto(enabled, runId, totals, items);
