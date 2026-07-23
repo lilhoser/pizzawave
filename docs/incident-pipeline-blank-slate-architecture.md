@@ -2390,6 +2390,40 @@ The pre-run configuration is preserved at
 the stopped-run configuration is preserved at
 `/etc/pizzawave/pizzad.json.post-ot-batch-production-canary-20260723-j-20260723T142337Z.bak`.
 
+#### Deterministic positive-control result
+
+The live canary exercised only rejection paths, so a bounded maintenance test
+used the previously reviewed `relationship-case-04` pair from the local
+relationship-review package. Both OT and RPI legacy incident executors were
+paused to give the existing Paxan Q8 model an exclusive request window.
+Capture, transcription, embeddings, alerts, and both `trunk-recorder`
+processes remained online. The control used a temporary database and could not
+write production incident state.
+
+The relationship stage correctly proposed confirmed membership for the two
+transmissions describing 260 Low Circle and the same 38-year-old female. The
+v2 independent verifier rejected it because the shorter follow-up did not
+repeat Apartment 7A and the clinical details. That is a demonstrated false
+negative: detail present on only one side was incorrectly treated as
+counterevidence.
+
+Verifier contract v3 corrects that ownership boundary. It states that
+elliptical radio follow-ups need not repeat every detail, omission is not a
+contradiction, and an explicit conflict or unresolved material mismatch still
+requires rejection. It does not add address lists, phrases, categories,
+talkgroups, quality labels, or other static membership rules. Previously
+stored v1 and v2 verifier results remain readable.
+
+The same unmodified positive-control evidence then passed on
+`qwen/qwen3.6-35b-a3b@q8_0`: the relationship stage produced a valid
+zero-uncertainty confirmed membership in 14,880 milliseconds, and verifier v3
+independently verified it with exact citations and no counterevidence or
+unresolved questions in 26,137 milliseconds. All 706 tests passed before the
+replay; the added backward-compatibility test raises the suite to 707 tests.
+Both production executors were restored immediately afterward. OT and RPI
+health were `ok`, AI failures remained zero, and `trunk-recorder` retained PID
+`3068317` on OT and `884754` on RPI.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

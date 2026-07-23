@@ -159,6 +159,7 @@ public static class IncidentBatchConfirmationContract
         RequireValue(proposal.ProposalId, "confirmation proposal id", errors);
         RequireValue(proposal.ModelIdentity, "confirmation model identity", errors);
         if (!string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.LegacyPromptIdentity, StringComparison.Ordinal))
             errors.Add("confirmation prompt identity does not match the verifier contract");
         if (proposal.GeneratedAtUtc == default)
@@ -248,7 +249,8 @@ public sealed record IncidentBatchConfirmationPromptPayload(string SystemPrompt,
 public static class IncidentBatchConfirmationPrompt
 {
     public const string LegacyPromptIdentity = "incident-batch-confirmation-verifier-v1";
-    public const string PromptIdentity = "incident-batch-relationship-verifier-v2";
+    public const string PreviousPromptIdentity = "incident-batch-relationship-verifier-v2";
+    public const string PromptIdentity = "incident-batch-relationship-verifier-v3";
 
     public static IncidentBatchConfirmationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -281,11 +283,13 @@ public static class IncidentBatchConfirmationPrompt
         var user = new StringBuilder();
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
-        user.AppendLine("Independently verify every proposed relationship. The earlier proposer is untrusted and may have invented a match, promoted generic similarity, or ignored contradictions.");
-        user.AppendLine("For confirmed_membership, use verify only when exact transcript evidence from both sides directly establishes one unfolding real-world event.");
+        user.AppendLine("Independently test every proposed relationship. The earlier proposer is untrusted and may have invented a match, promoted generic similarity, or ignored contradictions.");
+        user.AppendLine("For confirmed_membership, use verify when exact transcript evidence from both sides supports one unfolding real-world event and no material contradiction remains.");
+        user.AppendLine("Radio follow-ups are often elliptical: a later transmission need not repeat every address component, clinical detail, vehicle detail, or circumstance from an earlier transmission. Information present on only one side is omission, not contradiction.");
+        user.AppendLine("A sufficiently specific shared identity across both sides can establish membership even when one side adds detail. Judge the combined identity evidence and chronology, rather than requiring each side to restate the other verbatim.");
         user.AppendLine("For provisional_association, use verify only when exact evidence establishes a specific operational connection or cross-reference between the sides even though it does not establish shared event membership. Reject topical resemblance, shared words, concurrent but independent responses, and pairs that explicitly lack a direct link.");
         user.AppendLine("Shared generic event type, response language, color, age range, radio timing, retrieval rank, or broad location type is insufficient.");
-        user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, and chronology. A material mismatch requires reject unless the transcripts themselves connect or resolve it.");
+        user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, and chronology. Reject explicit conflicts and unresolved material mismatches; do not manufacture a mismatch from a detail that is merely absent on one side.");
         user.AppendLine("For verify, counter_evidence and unresolved_questions about whether the claimed relationship itself exists must both be empty. Otherwise reject.");
         user.AppendLine("Both decisions must cite short contiguous verbatim spans from both source boundaries. Never copy or paraphrase a quote.");
         user.AppendLine("Rejection prevents a merge but does not prove the events are unrelated; each source group remains independently reviewable.");
@@ -330,7 +334,7 @@ public static class IncidentBatchConfirmationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_verifier_v2",
+                name = "pizzawave_incident_batch_relationship_verifier_v3",
                 strict = true,
                 schema = new
                 {

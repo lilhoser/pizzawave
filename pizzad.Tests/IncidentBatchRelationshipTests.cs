@@ -553,8 +553,49 @@ public sealed class IncidentBatchRelationshipTests
 
         Assert.Contains("For confirmed_membership", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("For provisional_association", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Information present on only one side is omission, not contradiction", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("do not manufacture a mismatch from a detail that is merely absent", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("pairs that explicitly lack a direct link", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains($"\"maxLength\": {IncidentBatchRelationshipContract.MaximumTextLength}", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreviousRelationshipVerifierResultsRemainReadable()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "Respond to 260 Low Circle for a 38-year-old female."),
+            Observation("call:2", "transcript:2", "260 Low Circle for a 38-year-old female."));
+        var sources = new[] { new IncidentBatchRelationshipSource("event:update", ["call:2"]) };
+        var candidates = new[] { new IncidentBatchCandidate("candidate:existing", "projection:existing", ["call:1"]) };
+        var relationship = Relationship(
+            "event:update", "candidate:existing", "transcript:2", "260 Low Circle",
+            "transcript:1", "260 Low Circle") with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+            Uncertainty = 0
+        };
+        var previous = new IncidentBatchConfirmationProposal(
+            "confirmation:previous",
+            Now,
+            "test-model",
+            IncidentBatchConfirmationPrompt.PreviousPromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                "event:update",
+                "candidate:existing",
+                IncidentBatchConfirmationDecisionKind.Verify,
+                "Both sides identify the same address and patient.",
+                [new IncidentEventStateTranscriptCitation("transcript:2", "260 Low Circle")],
+                [new IncidentEventStateTranscriptCitation("transcript:1", "260 Low Circle")],
+                [],
+                [])]);
+
+        Assert.Single(IncidentBatchConfirmationContract.AcceptedVerifiedPairs(
+            bundle,
+            sources,
+            candidates,
+            [relationship],
+            previous,
+            retainOnlyExactEvidence: true));
     }
 
     [Fact]
