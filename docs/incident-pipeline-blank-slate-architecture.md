@@ -2610,6 +2610,84 @@ restart loop. Ownership was corrected to `root:pizzawave`, mode `0660`, and
 during the interruption. OT `trunk-recorder` retained PID `3411589` with one
 historical restart, and RPI `trunk-recorder` retained PID `884754`.
 
+#### Completed Review-downgrade verifier shadow
+
+Commit `9e2e019` was deployed to OT only. Run
+`ot-batch-verifier-review-shadow-20260723-n` began at approximately
+2026-07-23 18:33:02 UTC above no-backfill fence `1453536`. OT legacy incident
+execution was paused for the bounded sample. The source-isolated constructor,
+relationship stage, verifier v5, observation isolation, continuous intake,
+and the exclusive inference window were enabled. Canary persistence remained
+off. The production baseline was 5,700 incidents, maximum incident ID 7,114,
+and 53,572 incident-operation audits. RPI remained on the legacy pipeline and
+was not deployed or reconfigured.
+
+The run stopped at its 45-minute boundary. Twenty-four constructor batches
+processed 317 observations. The constructor accepted 70 of 71 event proposals
+and produced 11 relationship-verification requests. Four constructor
+proposals with inexact evidence were rejected deterministically before they
+could affect a relationship decision; there were no proposer execution
+errors. Average constructor model latency was 60,566 milliseconds and the
+maximum was 128,358 milliseconds. The last completed batch covered through
+call `1454204`, 31 calls behind the live maximum observed during the final
+snapshot.
+
+All 11 relationship requests completed: two were verified, seven were routed
+to Review, and two were rejected. There were zero invalid verifier results,
+zero model execution errors, zero canary writes or conflicts, and zero
+production incident or audit changes. Average verifier latency was 21,988
+milliseconds and the maximum was 39,642 milliseconds. Every decision used
+application-resolved exact transcript evidence.
+
+The two verified memberships were strong:
+
+- the initial trailer-collapse dispatch and the responding-unit update both
+  identified 115 Linda Drive, the adult patient, the trailer, and changing
+  entrapment status;
+- two Creek Elementary transmissions described the same active-shooter
+  response, barricaded classroom, and operational escalation.
+
+The two rejected links had explicit conflicting facts:
+
+- a tree blocking traffic near Cleveland High School was unrelated to the
+  trailer-collapse medical incident;
+- a 75-year-old female with neurological symptoms was unrelated to a
+  72-year-old male with different symptoms.
+
+The Review path worked as the intended safety boundary. Plausible but
+incomplete force-entry continuations and a fragmented injury transmission
+were preserved for operator inspection without merging or persisting them.
+It also exposed a precision cost: at least one Review paired different
+patients, a 70-year-old and a 10-year-old, because they shared Engine 17 and
+similar South Quail wording. Several other Reviews were based only on weak
+geographic or temporal resemblance, such as Bailey versus Quail or a stolen
+vehicle on John Court versus an unspecified Bailey response. Those links
+should likely have been rejected. This is safe for incident membership but
+would create avoidable operator work.
+
+The experiment therefore passes the architectural safety gate but not an
+unqualified operator-workload gate. Verifier v5 correctly prevents uncertain
+evidence from becoming incident membership and preserves useful uncertainty
+instead of discarding it. Before enabling replacement persistence, the next
+change should reduce speculative candidate admission upstream using learned
+relationship evidence and explicit contradiction reasoning, not static
+addresses, phrases, categories, talkgroups, or system labels. Review should
+remain the result for genuinely plausible continuity, not the fallback for
+generic resemblance.
+
+At 2026-07-23 19:19:12 UTC the constructor, relationship, verifier,
+exclusive-window, and canary switches were disabled and OT legacy incident
+execution was restored. The production database still matched the baseline.
+The resumed legacy worker completed a current batch at 19:22:18 UTC, advancing
+its latest completed source call from 18:21:29 UTC to 19:17:12 UTC and
+returning incident-analysis health to `ok`.
+OT `trunk-recorder` retained PID `3411589` with one historical restart, and
+RPI `trunk-recorder` retained PID `884754`. The pre-run and post-run
+configurations are preserved at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-verifier-review-shadow-20260723-n-20260723T183232Z.bak`
+and
+`/etc/pizzawave/pizzad.json.post-ot-batch-verifier-review-shadow-20260723-n-20260723T191842Z.bak`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
