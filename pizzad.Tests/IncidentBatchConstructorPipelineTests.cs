@@ -65,6 +65,33 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void AsynchronousProvisionalProposalDoesNotRequireDiscardedDisplayProse()
+    {
+        var bundle = Bundle(Observation("call:1", "transcript:1", "The vehicle is sparking near Notting Hill."));
+        var item = Event(
+            "event:vehicle",
+            IncidentBatchEventDisposition.ProvisionalEvent,
+            string.Empty,
+            ["call:1"],
+            string.Empty,
+            string.Empty,
+            [Citation("transcript:1", "vehicle is sparking")],
+            []);
+
+        var regular = IncidentBatchContract.ValidateProposal(bundle, ["call:1"], [], Proposal([item]));
+        var asynchronous = IncidentBatchContract.ValidateProposal(
+            bundle,
+            ["call:1"],
+            [],
+            Proposal([item]) with { PromptIdentity = IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity });
+
+        Assert.False(regular.IsValid);
+        Assert.Contains(regular.Errors, error => error.Contains("title", StringComparison.Ordinal));
+        Assert.Contains(regular.Errors, error => error.Contains("summary", StringComparison.Ordinal));
+        Assert.True(asynchronous.IsValid, string.Join(Environment.NewLine, asynchronous.Errors));
+    }
+
+    [Fact]
     public async Task ProvisionalEventIsGroupedForReviewWithoutBecomingVisible()
     {
         var bundle = Bundle(
@@ -394,6 +421,27 @@ public sealed class IncidentBatchConstructorPipelineTests
         Assert.Contains("exact_quotes", schema, StringComparison.Ordinal);
         Assert.Contains("provisional_event", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("relationship_statement", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AsynchronousProvisionalPromptOmitsDisplayTextThatProjectionDerivesFromEvidence()
+    {
+        var bundle = Bundle(Observation("call:1", "transcript:1", "Tree down across the southbound lane."));
+
+        var regular = IncidentBatchPrompt.Build(bundle, ["call:1"], []);
+        var asynchronous = IncidentBatchPrompt.Build(bundle, ["call:1"], [], asynchronousProvisional: true);
+        var regularSchema = System.Text.Json.JsonSerializer.Serialize(regular.ResponseFormat, EngineConfig.JsonOptions());
+        var asynchronousSchema = System.Text.Json.JsonSerializer.Serialize(asynchronous.ResponseFormat, EngineConfig.JsonOptions());
+        using var regularDocument = System.Text.Json.JsonDocument.Parse(regularSchema);
+        using var asynchronousDocument = System.Text.Json.JsonDocument.Parse(asynchronousSchema);
+        var regularProperties = regularDocument.RootElement.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").GetProperty("events").GetProperty("items").GetProperty("properties");
+        var asynchronousProperties = asynchronousDocument.RootElement.GetProperty("json_schema").GetProperty("schema").GetProperty("properties").GetProperty("events").GetProperty("items").GetProperty("properties");
+
+        Assert.True(regularProperties.TryGetProperty("title", out _));
+        Assert.True(regularProperties.TryGetProperty("summary", out _));
+        Assert.False(asynchronousProperties.TryGetProperty("title", out _));
+        Assert.False(asynchronousProperties.TryGetProperty("summary", out _));
+        Assert.Contains("do not return title or summary", asynchronous.UserPrompt, StringComparison.Ordinal);
     }
 
     [Fact]

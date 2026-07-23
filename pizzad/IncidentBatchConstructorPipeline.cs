@@ -202,11 +202,18 @@ public static class IncidentBatchContract
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var candidateMap = candidates.ToDictionary(item => item.CandidateToken, StringComparer.Ordinal);
 
+        var derivesDisplayTextFromEvidence = string.Equals(
+            proposal.PromptIdentity,
+            IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity,
+            StringComparison.Ordinal);
         foreach (var item in proposal.Events)
         {
             RequireValue(item.ProposalToken, "event proposal token", errors);
-            RequireValue(item.Title, $"title for event proposal '{item.ProposalToken}'", errors);
-            RequireValue(item.Summary, $"summary for event proposal '{item.ProposalToken}'", errors);
+            if (!derivesDisplayTextFromEvidence)
+            {
+                RequireValue(item.Title, $"title for event proposal '{item.ProposalToken}'", errors);
+                RequireValue(item.Summary, $"summary for event proposal '{item.ProposalToken}'", errors);
+            }
             RequireValue(item.RelationshipStatement, $"relationship statement for event proposal '{item.ProposalToken}'", errors);
             RequireUnique(item.NewObservationIds, $"new observation id in event proposal '{item.ProposalToken}'", errors);
             if (item.NewObservationIds.Count == 0)

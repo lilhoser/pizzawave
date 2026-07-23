@@ -10,7 +10,7 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 public static class IncidentBatchPrompt
 {
     public const string PromptIdentity = "incident-batch-constructor-v13";
-    public const string AsynchronousProvisionalPromptIdentity = "incident-batch-provisional-constructor-v1";
+    public const string AsynchronousProvisionalPromptIdentity = "incident-batch-provisional-constructor-v2";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
@@ -72,7 +72,10 @@ public static class IncidentBatchPrompt
         user.AppendLine(candidates.Count > 0
             ? "For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up. For confirmed or provisional association, also explain how the two cited sides relate."
             : "For operator_basis, explain what the cited words establish and why the situation merits operator awareness or follow-up.");
-        user.AppendLine("For each event, use only that event's own exact_quotes to write its title, summary, and operator_basis. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
+        if (asynchronousProvisional)
+            user.AppendLine("For each event, use only that event's own exact_quotes to write its operator_basis. The application derives operator-facing title and summary from validated exact quotes; do not return title or summary. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
+        else
+            user.AppendLine("For each event, use only that event's own exact_quotes to write its title, summary, and operator_basis. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
         user.AppendLine("Compare every pair of drafted events before returning them. If two drafts may describe the same unfolding situation and the cited evidence cannot reliably separate them, combine their observations and evidence into one provisional_event for review instead of returning parallel new_event drafts.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
         user.AppendLine("Remove every discarded draft from the events array entirely. Never return an event that you decided should be omitted, and never return an event without exact evidence for every included new observation.");
@@ -87,13 +90,14 @@ public static class IncidentBatchPrompt
                     ? "You construct source-grounded provisional incident state in one intake pass. Application code validates identity, ownership, and citations. Candidate relationships enter an independent asynchronous verification queue and never merge in this pass."
                     : "You construct source-grounded incident events. Application code validates identity, ownership, and citations but does not interpret semantic meaning. Unsupported observations remain unresolved. Provisional associations never change event membership.",
             user.ToString(),
-            ResponseFormat(bundle, newObservationIds, candidates));
+            ResponseFormat(bundle, newObservationIds, candidates, asynchronousProvisional));
     }
 
     private static object ResponseFormat(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<string> newObservationIds,
-        IReadOnlyList<IncidentBatchCandidate> candidates)
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        bool asynchronousProvisional)
     {
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var newTranscriptIds = newObservationIds.SelectMany(id => observations[id].Transcripts).Select(item => item.TranscriptId).Distinct(StringComparer.Ordinal).ToArray();
@@ -120,33 +124,48 @@ public static class IncidentBatchPrompt
                             {
                                 type = "object",
                                 additionalProperties = false,
-                                properties = new
-                                {
-                                    proposal_token = new { type = "string" },
-                                    disposition = new
+                                properties = asynchronousProvisional
+                                    ? (object)new
                                     {
-                                        type = "string",
-                                        @enum = candidates.Count == 0
-                                            ? new[] { "new_event", "provisional_event" }
-                                            : new[] { "new_event", "provisional_event", "confirmed_membership", "provisional_association" }
+                                        proposal_token = new { type = "string" },
+                                        disposition = DispositionSchema(candidates),
+                                        candidate_token = new { type = "string", @enum = candidateTokens },
+                                        new_observation_ids = StringArraySchema(newObservationIds),
+                                        operator_basis = new { type = "string" },
+                                        uncertainty = new { type = "number", minimum = 0, maximum = 1 },
+                                        new_observation_evidence = CitationArraySchema(newTranscriptIds),
+                                        candidate_evidence = CitationArraySchema(candidateTranscriptIds),
+                                        alternative_interpretations = OpenStringArraySchema(),
+                                        unresolved_questions = OpenStringArraySchema()
+                                    }
+                                    : new
+                                    {
+                                        proposal_token = new { type = "string" },
+                                        disposition = DispositionSchema(candidates),
+                                        candidate_token = new { type = "string", @enum = candidateTokens },
+                                        new_observation_ids = StringArraySchema(newObservationIds),
+                                        title = new { type = "string" },
+                                        summary = new { type = "string" },
+                                        operator_basis = new { type = "string" },
+                                        uncertainty = new { type = "number", minimum = 0, maximum = 1 },
+                                        new_observation_evidence = CitationArraySchema(newTranscriptIds),
+                                        candidate_evidence = CitationArraySchema(candidateTranscriptIds),
+                                        alternative_interpretations = OpenStringArraySchema(),
+                                        unresolved_questions = OpenStringArraySchema()
                                     },
-                                    candidate_token = new { type = "string", @enum = candidateTokens },
-                                    new_observation_ids = StringArraySchema(newObservationIds),
-                                    title = new { type = "string" },
-                                    summary = new { type = "string" },
-                                    operator_basis = new { type = "string" },
-                                    uncertainty = new { type = "number", minimum = 0, maximum = 1 },
-                                    new_observation_evidence = CitationArraySchema(newTranscriptIds),
-                                    candidate_evidence = CitationArraySchema(candidateTranscriptIds),
-                                    alternative_interpretations = OpenStringArraySchema(),
-                                    unresolved_questions = OpenStringArraySchema()
-                                },
-                                required = new[]
-                                {
-                                    "proposal_token", "disposition", "candidate_token", "new_observation_ids", "title", "summary",
-                                    "operator_basis", "uncertainty", "new_observation_evidence", "candidate_evidence",
-                                    "alternative_interpretations", "unresolved_questions"
-                                }
+                                required = asynchronousProvisional
+                                    ? new[]
+                                    {
+                                        "proposal_token", "disposition", "candidate_token", "new_observation_ids",
+                                        "operator_basis", "uncertainty", "new_observation_evidence", "candidate_evidence",
+                                        "alternative_interpretations", "unresolved_questions"
+                                    }
+                                    : new[]
+                                    {
+                                        "proposal_token", "disposition", "candidate_token", "new_observation_ids", "title", "summary",
+                                        "operator_basis", "uncertainty", "new_observation_evidence", "candidate_evidence",
+                                        "alternative_interpretations", "unresolved_questions"
+                                    }
                             }
                         }
                     },
@@ -155,6 +174,14 @@ public static class IncidentBatchPrompt
             }
         };
     }
+
+    private static object DispositionSchema(IReadOnlyList<IncidentBatchCandidate> candidates) => new
+    {
+        type = "string",
+        @enum = candidates.Count == 0
+            ? new[] { "new_event", "provisional_event" }
+            : new[] { "new_event", "provisional_event", "confirmed_membership", "provisional_association" }
+    };
 
     private static object PromptObservation(IncidentEventStateSourceObservation observation) => new
     {
@@ -272,8 +299,8 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 },
                 item.CandidateToken,
                 item.NewObservationIds,
-                item.Title,
-                item.Summary,
+                item.Title ?? string.Empty,
+                item.Summary ?? string.Empty,
                 item.OperatorBasis,
                 item.Uncertainty,
                 ResolveCitations(item.NewObservationEvidence, transcripts),
@@ -348,8 +375,8 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
         [property: JsonPropertyName("disposition")] string Disposition,
         [property: JsonPropertyName("candidate_token")] string CandidateToken,
         [property: JsonPropertyName("new_observation_ids")] IReadOnlyList<string> NewObservationIds,
-        [property: JsonPropertyName("title")] string Title,
-        [property: JsonPropertyName("summary")] string Summary,
+        [property: JsonPropertyName("title")] string? Title,
+        [property: JsonPropertyName("summary")] string? Summary,
         [property: JsonPropertyName("operator_basis")] string OperatorBasis,
         [property: JsonPropertyName("uncertainty")] double Uncertainty,
         [property: JsonPropertyName("new_observation_evidence")] IReadOnlyList<BatchCitationResponse> NewObservationEvidence,

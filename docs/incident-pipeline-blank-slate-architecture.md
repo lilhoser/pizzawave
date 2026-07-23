@@ -2114,6 +2114,20 @@ against the combined OT and RPI workload. Those are explicit capacity gates,
 not reasons to weaken citation validation, introduce static semantic rules, or
 resume prompt-by-prompt architecture pivots.
 
+The first local capacity correction follows directly from that combined replay.
+It does not treat two PizzaWave systems as a new load condition: Paxan already
+served the clean legacy control at 13.76 usable observations per minute without
+failed requests. Instead, it corrects the replacement's inefficient request
+shape. Continuous intake now accumulates up to the configured 24-observation
+maximum, runs as soon as 12 observations are ready, and otherwise runs after a
+bounded 120-second dwell. Non-continuous replay cadence remains immediate. The
+asynchronous provisional schema also no longer asks the model for `title` or
+`summary`, because the projector already ignores that prose and derives both
+fields deterministically from validated exact citations. Citation, ownership,
+uncertainty, disposition, and membership validation are unchanged. These local,
+default-disabled changes must be measured with another aligned combined trace
+before enabling verification or changing production persistence.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

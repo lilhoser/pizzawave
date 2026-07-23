@@ -13,6 +13,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
     private string _activeRunId = string.Empty;
     private HashSet<long>? _processedCallIds;
     private long _effectiveStartAfterCallId;
+    private DateTimeOffset? _pendingSinceUtc;
 
     public IncidentBatchConstructorShadowService(
         EngineConfig config,
@@ -32,6 +33,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         {
             if (!IsEnabled())
             {
+                _pendingSinceUtc = null;
                 await DelayAsync(TimeSpan.FromSeconds(30), stoppingToken);
                 continue;
             }
@@ -68,6 +70,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         {
             _processedCallIds = (await _database.ListIncidentBatchProcessedCallIdsAsync(runId, ct)).ToHashSet();
             _activeRunId = runId;
+            _pendingSinceUtc = null;
             _effectiveStartAfterCallId = IncidentBatchLiveCursor.ResolveStartFence(
                 _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId,
                 _processedCallIds,
@@ -96,6 +99,18 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             _processedCallIds,
             batchSize);
         if (newCalls.Count == 0)
+        {
+            _pendingSinceUtc = null;
+            return;
+        }
+        _pendingSinceUtc ??= now;
+        if (!IncidentBatchAdmissionPolicy.ShouldProcess(
+                _config.AiInsights.IncidentBatchConstructorShadowContinuous,
+                newCalls.Count,
+                batchSize,
+                _config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize,
+                now - _pendingSinceUtc.Value,
+                TimeSpan.FromSeconds(_config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds)))
             return;
         var retrievalTimer = Stopwatch.StartNew();
         var priorStored = await _database.GetLatestIncidentBatchProjectionAsync(runId, ct);
@@ -141,6 +156,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
             ct);
         foreach (var call in newCalls)
             _processedCallIds.Add(call.Id);
+        _pendingSinceUtc = null;
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
         var queuedVerificationCount = IncidentBatchVerificationQueueContract.BuildRequests(result.LedgerEntry.Entry).Count;
         _logger.LogInformation(
@@ -169,12 +185,36 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
+        $"{IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken};{IncidentBatchAdmissionPolicy.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};minimumBatch={_config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize};maximumWait={_config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {
         try { await Task.Delay(delay, ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+}
+
+public static class IncidentBatchAdmissionPolicy
+{
+    public const string ConfigurationToken = "admission=bounded-dwell-v1";
+
+    public static bool ShouldProcess(
+        bool continuous,
+        int pendingCount,
+        int maximumBatchSize,
+        int minimumBatchSize,
+        TimeSpan pendingAge,
+        TimeSpan maximumWait)
+    {
+        if (pendingCount <= 0)
+            return false;
+        if (!continuous)
+            return true;
+        if (pendingCount >= Math.Max(1, maximumBatchSize))
+            return true;
+        if (pendingCount >= Math.Clamp(minimumBatchSize, 1, Math.Max(1, maximumBatchSize)))
+            return true;
+        return pendingAge >= maximumWait;
     }
 }
 

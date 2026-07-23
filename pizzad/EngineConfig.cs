@@ -185,6 +185,10 @@ public sealed class EngineConfig
         AiInsights.IncidentBatchConstructorShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentBatchConstructorShadowLookbackMinutes, 30, 360);
         if (AiInsights.IncidentBatchConstructorShadowBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowBatchSize = 24;
         AiInsights.IncidentBatchConstructorShadowBatchSize = Math.Clamp(AiInsights.IncidentBatchConstructorShadowBatchSize, 2, IncidentBatchContract.MaximumNewObservationCount);
+        if (AiInsights.IncidentBatchConstructorShadowMinimumBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowMinimumBatchSize = 12;
+        AiInsights.IncidentBatchConstructorShadowMinimumBatchSize = Math.Clamp(AiInsights.IncidentBatchConstructorShadowMinimumBatchSize, 1, AiInsights.IncidentBatchConstructorShadowBatchSize);
+        if (AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds <= 0) AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds = 120;
+        AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds = Math.Clamp(AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds, 5, 300);
         if (AiInsights.IncidentBatchConstructorShadowCandidateLimit <= 0) AiInsights.IncidentBatchConstructorShadowCandidateLimit = 4;
         AiInsights.IncidentBatchConstructorShadowCandidateLimit = Math.Clamp(AiInsights.IncidentBatchConstructorShadowCandidateLimit, 1, IncidentBatchContract.MaximumCandidateCount);
         if (AiInsights.IncidentBatchVerificationShadowIntervalSeconds <= 0) AiInsights.IncidentBatchVerificationShadowIntervalSeconds = 30;
@@ -437,6 +441,8 @@ public sealed class AiInsightsConfig
     public int IncidentBatchConstructorShadowIntervalSeconds { get; set; } = 600;
     public int IncidentBatchConstructorShadowLookbackMinutes { get; set; } = 120;
     public int IncidentBatchConstructorShadowBatchSize { get; set; } = 24;
+    public int IncidentBatchConstructorShadowMinimumBatchSize { get; set; } = 12;
+    public int IncidentBatchConstructorShadowMaximumWaitSeconds { get; set; } = 120;
     public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
     public bool IncidentBatchConstructorShadowContinuous { get; set; }
     public long IncidentBatchConstructorShadowStartAfterCallId { get; set; }

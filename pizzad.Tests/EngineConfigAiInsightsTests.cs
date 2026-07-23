@@ -21,6 +21,8 @@ public sealed class EngineConfigAiInsightsTests
                 IncidentBatchConstructorShadowIntervalSeconds = 1,
                 IncidentBatchConstructorShadowLookbackMinutes = 10,
                 IncidentBatchConstructorShadowBatchSize = 100,
+                IncidentBatchConstructorShadowMinimumBatchSize = 100,
+                IncidentBatchConstructorShadowMaximumWaitSeconds = 1,
                 IncidentBatchConstructorShadowCandidateLimit = 100,
                 IncidentBatchVerificationShadowIntervalSeconds = 1
             }
@@ -48,6 +50,8 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(300, config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds);
         Assert.Equal(30, config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes);
         Assert.Equal(IncidentBatchContract.MaximumNewObservationCount, config.AiInsights.IncidentBatchConstructorShadowBatchSize);
+        Assert.Equal(IncidentBatchContract.MaximumNewObservationCount, config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize);
+        Assert.Equal(5, config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds);
         Assert.Equal(IncidentBatchContract.MaximumCandidateCount, config.AiInsights.IncidentBatchConstructorShadowCandidateLimit);
         Assert.False(config.AiInsights.IncidentBatchConstructorShadowContinuous);
         Assert.Equal(0, config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId);
@@ -61,6 +65,17 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(TimeSpan.FromSeconds(5), IncidentBatchShadowCadence.NextDelay(true, 300, TimeSpan.FromSeconds(200)));
         Assert.Equal(TimeSpan.FromSeconds(100), IncidentBatchShadowCadence.NextDelay(false, 300, TimeSpan.FromSeconds(200)));
         Assert.Equal(TimeSpan.FromSeconds(30), IncidentBatchShadowCadence.NextDelay(false, 300, TimeSpan.FromSeconds(400)));
+    }
+
+    [Fact]
+    public void BatchAdmissionPolicy_CombinesUsefulBatchesWithoutUnboundedDelay()
+    {
+        Assert.False(IncidentBatchAdmissionPolicy.ShouldProcess(true, 0, 24, 12, TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(2)));
+        Assert.False(IncidentBatchAdmissionPolicy.ShouldProcess(true, 11, 24, 12, TimeSpan.FromSeconds(119), TimeSpan.FromMinutes(2)));
+        Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(true, 12, 24, 12, TimeSpan.Zero, TimeSpan.FromMinutes(2)));
+        Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(true, 24, 24, 12, TimeSpan.Zero, TimeSpan.FromMinutes(2)));
+        Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(true, 1, 24, 12, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2)));
+        Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(false, 1, 24, 12, TimeSpan.Zero, TimeSpan.FromMinutes(2)));
     }
 
     [Fact]
