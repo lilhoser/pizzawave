@@ -2353,6 +2353,43 @@ incident currency; and confirms the `trunk-recorder` PID did not change. Any
 production-health degradation, repeated model failure, unexpected write,
 ownership conflict, or inability to keep up ends the canary immediately.
 
+#### First reversible OT production-canary result
+
+Commit `475fd3f` was deployed to OT only. Run
+`ot-batch-production-canary-20260723-j` operated from approximately
+2026-07-23 13:57:49 UTC through 14:23:37 UTC above no-backfill fence
+`1449561`. OT legacy incident execution was disabled for the run. RPI remained
+on its legacy pipeline and continued using the shared Paxan inference path.
+Capture, transcription, embeddings, alerts, and `trunk-recorder` remained
+online.
+
+Ten batches processed 117 new observations. They retained 27 grounded singleton
+Review events and left 90 observations unresolved. The source constructor made
+no multi-observation event. The relationship stage proposed one provisional
+association and one confirmed membership. Independent verification rejected
+both proposals in 20,489 and 17,894 milliseconds respectively. Consequently,
+no proposal reached canary persistence.
+
+The constructor and relationship work averaged 59,582 milliseconds per batch
+and peaked at 125,185 milliseconds. There were no constructor errors, invalid
+proposals, AI completion failures, transcription backlog, embedding backlog,
+ownership conflicts, or canary commits. Before the run and immediately before
+legacy restoration, OT remained at 5,686 production incidents, maximum
+incident ID 7,100, and 53,449 incident-operation audit rows. This demonstrates
+that the live veto and no-write paths fail closed under concurrent RPI legacy
+demand. It does not prove the live positive-write path because neither proposed
+relationship earned independent confirmation; that path is covered only by
+the atomic persistence tests in this checkpoint.
+
+At the stop boundary, all replacement switches and canary persistence were
+disabled and OT legacy incident execution was restored. OT's legacy latest
+completed source recovered from 45 minutes old to 4.2 minutes old without an
+AI failure. RPI remained current. OT `trunk-recorder` retained PID `3068317`.
+The pre-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-production-canary-20260723-j-20260723T135718Z.bak`;
+the stopped-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.post-ot-batch-production-canary-20260723-j-20260723T142337Z.bak`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
