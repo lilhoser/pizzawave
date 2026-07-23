@@ -2466,11 +2466,36 @@ before rollback is preserved at
 `/etc/pizzawave/pizzad.json.pre-rollback-20260723T160719Z.bak`.
 
 The run proves that the atomic verified-write boundary works on live evidence,
-but the current verifier is not reliable enough for continued production
-ownership. The next change must address citation generation or constrain the
-verifier to evidence selections that the application can validate without
-weakening exact grounding. Another production cutover is not justified until
-the repeated invalid-citation mode passes replay and shadow evidence.
+but verifier v3 is not reliable enough for continued production ownership.
+
+The first corrective checkpoint removes free-form quote generation from the
+verifier contract. Application code now divides each stored transcript into
+deterministic, bounded, overlapping exact spans and assigns opaque evidence
+identifiers. The prompt exposes the identifiers and application-owned text for
+reasoning, but the response schema permits the model to return only evidence
+identifiers. Application code resolves those identifiers back to the original
+transcript and quote. Duplicate selections are canonicalized, unknown
+identifiers fail closed, and existing source/candidate ownership validation
+still applies. This adds no semantic label, phrase list, address rule,
+talkgroup rule, category rule, regex, or other static incident-membership
+authority.
+
+The final implementation was replayed read-only against the three exact live
+requests that verifier v3 made invalid and the exact request that created
+incident `7106`. The former invalid requests produced, respectively, one clean
+rejection, one verified confirmed membership, and one verified provisional
+association. The successful medical membership remained verified. All four
+results had zero validation errors and application-owned evidence from both
+sides; final verifier latency ranged from 11,661 to 13,564 milliseconds. The
+full test suite passed with 709 tests.
+
+This is ready for a short non-mutating OT shadow checkpoint with OT legacy
+execution paused so the measurement does not repeat the invalid side-by-side
+capacity experiment. RPI legacy execution remains on and canary persistence
+remains off. OT legacy execution is restored after the bounded sample. Another
+production cutover remains blocked until that shadow confirms that invalid
+citations stay at zero on new traffic and that verified decisions remain
+semantically sound.
 
 ### Initial OT shadow checkpoint
 

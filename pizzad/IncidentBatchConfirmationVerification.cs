@@ -32,6 +32,110 @@ public sealed record IncidentBatchConfirmationExecutionContext(
     long VerifierDurationMilliseconds,
     string VerifierError);
 
+public sealed record IncidentBatchConfirmationEvidenceSpan(
+    string EvidenceId,
+    string ObservationId,
+    string TranscriptId,
+    string ExactQuote);
+
+public static class IncidentBatchConfirmationEvidenceCatalog
+{
+    public const int MaximumSpanLength = 240;
+    private const int TargetOverlapLength = 48;
+
+    public static IReadOnlyList<IncidentBatchConfirmationEvidenceSpan> Build(
+        IncidentEventStateObservationBundle bundle)
+    {
+        var result = new List<IncidentBatchConfirmationEvidenceSpan>();
+        for (var observationIndex = 0; observationIndex < bundle.Observations.Count; observationIndex++)
+        {
+            var observation = bundle.Observations[observationIndex];
+            for (var transcriptIndex = 0; transcriptIndex < observation.Transcripts.Count; transcriptIndex++)
+            {
+                var transcript = observation.Transcripts[transcriptIndex];
+                var spans = SplitExactSpans(transcript.Text);
+                for (var spanIndex = 0; spanIndex < spans.Count; spanIndex++)
+                {
+                    result.Add(new IncidentBatchConfirmationEvidenceSpan(
+                        $"evidence:{observationIndex + 1}:{transcriptIndex + 1}:{spanIndex + 1}",
+                        observation.ObservationId,
+                        transcript.TranscriptId,
+                        spans[spanIndex]));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    public static IReadOnlyList<IncidentEventStateTranscriptCitation> Resolve(
+        IEnumerable<string> evidenceIds,
+        IReadOnlyList<IncidentBatchConfirmationEvidenceSpan> catalog)
+    {
+        var spans = catalog
+            .GroupBy(item => item.EvidenceId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<IncidentEventStateTranscriptCitation>();
+        foreach (var evidenceId in evidenceIds)
+        {
+            if (!spans.TryGetValue(evidenceId, out var span))
+                throw new InvalidDataException($"Unknown confirmation evidence id '{evidenceId}'.");
+            if (!seen.Add(evidenceId))
+                continue;
+            result.Add(new IncidentEventStateTranscriptCitation(span.TranscriptId, span.ExactQuote));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<string> SplitExactSpans(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+
+        var result = new List<string>();
+        var start = 0;
+        while (start < text.Length && char.IsWhiteSpace(text[start]))
+            start++;
+
+        while (start < text.Length)
+        {
+            var limit = Math.Min(text.Length, start + MaximumSpanLength);
+            var end = limit;
+            if (limit < text.Length)
+            {
+                var lowerBound = Math.Min(limit, start + (MaximumSpanLength / 2));
+                for (var index = limit; index > lowerBound; index--)
+                {
+                    if (!char.IsWhiteSpace(text[index - 1]))
+                        continue;
+                    end = index - 1;
+                    break;
+                }
+            }
+
+            while (end > start && char.IsWhiteSpace(text[end - 1]))
+                end--;
+            if (end <= start)
+                end = limit;
+
+            result.Add(text[start..end]);
+            if (end >= text.Length)
+                break;
+
+            var next = Math.Max(start + 1, end - TargetOverlapLength);
+            while (next < end && !char.IsWhiteSpace(text[next]))
+                next++;
+            while (next < text.Length && char.IsWhiteSpace(text[next]))
+                next++;
+            start = next <= start ? end : next;
+        }
+
+        return result;
+    }
+}
+
 public interface IIncidentBatchConfirmationVerifier
 {
     Task<IncidentBatchConfirmationProposal> VerifyAsync(
@@ -46,7 +150,8 @@ public static class IncidentBatchConfirmationContract
 {
     public const string LegacyConfigurationToken = "confirmation=independent-verifier-v1";
     public const string PerCitationEvidenceToken = "evidence=per-citation-v1";
-    public const string ConfigurationToken = "relationship-verification=independent-v2;evidence=per-citation-v1";
+    public const string ApplicationOwnedEvidenceToken = "evidence=application-spans-v1";
+    public const string ConfigurationToken = $"relationship-verification=independent-v2;{ApplicationOwnedEvidenceToken}";
 
     public static IncidentEventStateContractValidationResult ValidateProposal(
         IncidentEventStateObservationBundle bundle,
@@ -118,7 +223,8 @@ public static class IncidentBatchConfirmationContract
 
     public static bool UsesPerCitationEvidence(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Contains(PerCitationEvidenceToken, StringComparer.Ordinal);
+            .Any(token => string.Equals(token, PerCitationEvidenceToken, StringComparison.Ordinal) ||
+                          string.Equals(token, ApplicationOwnedEvidenceToken, StringComparison.Ordinal));
 
     private static IncidentBatchConfirmationDecision RetainExactEvidence(
         IncidentEventStateObservationBundle bundle,
@@ -159,6 +265,7 @@ public static class IncidentBatchConfirmationContract
         RequireValue(proposal.ProposalId, "confirmation proposal id", errors);
         RequireValue(proposal.ModelIdentity, "confirmation model identity", errors);
         if (!string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.LegacyPromptIdentity, StringComparison.Ordinal))
             errors.Add("confirmation prompt identity does not match the verifier contract");
@@ -250,7 +357,8 @@ public static class IncidentBatchConfirmationPrompt
 {
     public const string LegacyPromptIdentity = "incident-batch-confirmation-verifier-v1";
     public const string PreviousPromptIdentity = "incident-batch-relationship-verifier-v2";
-    public const string PromptIdentity = "incident-batch-relationship-verifier-v3";
+    public const string PriorPromptIdentity = "incident-batch-relationship-verifier-v3";
+    public const string PromptIdentity = "incident-batch-relationship-verifier-v4-application-evidence";
 
     public static IncidentBatchConfirmationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -263,11 +371,21 @@ public static class IncidentBatchConfirmationPrompt
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var sourceMap = sources.ToDictionary(item => item.SourceProposalToken, StringComparer.Ordinal);
         var candidateMap = candidates.ToDictionary(item => item.CandidateToken, StringComparer.Ordinal);
+        var evidenceCatalog = IncidentBatchConfirmationEvidenceCatalog.Build(bundle);
+        var spansByTranscript = evidenceCatalog
+            .GroupBy(item => item.TranscriptId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
         object PromptObservation(string id) => new
         {
             observation_id = id,
             observed_at_unix_seconds = observations[id].ObservedAtUnixSeconds,
-            transcripts = observations[id].Transcripts.Select(item => new { transcript_id = item.TranscriptId, text = item.Text }).ToList()
+            transcripts = observations[id].Transcripts.Select(item => new
+            {
+                transcript_id = item.TranscriptId,
+                evidence_spans = spansByTranscript[item.TranscriptId]
+                    .Select(span => new { evidence_id = span.EvidenceId, exact_quote = span.ExactQuote })
+                    .ToList()
+            }).ToList()
         };
         var pairs = relationships.Select(item => new
         {
@@ -291,42 +409,35 @@ public static class IncidentBatchConfirmationPrompt
         user.AppendLine("Shared generic event type, response language, color, age range, radio timing, retrieval rank, or broad location type is insufficient.");
         user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, and chronology. Reject explicit conflicts and unresolved material mismatches; do not manufacture a mismatch from a detail that is merely absent on one side.");
         user.AppendLine("For verify, counter_evidence and unresolved_questions about whether the claimed relationship itself exists must both be empty. Otherwise reject.");
-        user.AppendLine("Both decisions must cite short contiguous verbatim spans from both source boundaries. Never copy or paraphrase a quote.");
+        user.AppendLine("Both decisions must select evidence_id values from both source boundaries. Evidence spans and their exact quote text are owned by the application; return only their IDs and never generate, copy, edit, or paraphrase quote text.");
         user.AppendLine("Rejection prevents a merge but does not prove the events are unrelated; each source group remains independently reviewable.");
         user.AppendLine();
         user.AppendLine("Proposed relationships:");
         user.AppendLine(JsonSerializer.Serialize(pairs, EngineConfig.JsonOptions()));
         return new IncidentBatchConfirmationPromptPayload(
-            "You are an independent fail-closed verifier for proposed incident relationships. You cannot construct events or alter evidence. Application code validates exact citations and owns state transitions.",
+            "You are an independent fail-closed verifier for proposed incident relationships. You cannot construct events, write quote text, or alter evidence. Application code owns evidence spans and state transitions.",
             user.ToString(),
-            ResponseFormat(bundle, sources, candidates, relationships));
+            ResponseFormat(bundle, sources, candidates, relationships, evidenceCatalog));
     }
 
     private static object ResponseFormat(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<IncidentBatchRelationshipSource> sources,
         IReadOnlyList<IncidentBatchCandidate> candidates,
-        IReadOnlyList<IncidentBatchRelationship> relationships)
+        IReadOnlyList<IncidentBatchRelationship> relationships,
+        IReadOnlyList<IncidentBatchConfirmationEvidenceSpan> evidenceCatalog)
     {
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var sourceIds = sources.SelectMany(item => item.NewObservationIds).SelectMany(id => observations[id].Transcripts).Select(item => item.TranscriptId).Distinct(StringComparer.Ordinal).ToArray();
         var candidateIds = candidates.SelectMany(item => item.ObservationIds).SelectMany(id => observations[id].Transcripts).Select(item => item.TranscriptId).Distinct(StringComparer.Ordinal).ToArray();
-        object Citations(string[] ids) => new
+        var sourceEvidenceIds = evidenceCatalog.Where(item => sourceIds.Contains(item.TranscriptId, StringComparer.Ordinal)).Select(item => item.EvidenceId).ToArray();
+        var candidateEvidenceIds = evidenceCatalog.Where(item => candidateIds.Contains(item.TranscriptId, StringComparer.Ordinal)).Select(item => item.EvidenceId).ToArray();
+        object EvidenceIds(string[] ids) => new
         {
             type = "array",
             minItems = 1,
-            maxItems = 2,
-            items = new
-            {
-                type = "object",
-                additionalProperties = false,
-                properties = new
-                {
-                    transcript_id = new { type = "string", @enum = ids },
-                    exact_quotes = new { type = "array", minItems = 1, maxItems = 2, items = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength } }
-                },
-                required = new[] { "transcript_id", "exact_quotes" }
-            }
+            maxItems = IncidentBatchRelationshipContract.MaximumEvidenceSpansPerSide,
+            items = new { type = "string", @enum = ids }
         };
         object Strings() => new { type = "array", maxItems = 2, items = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength } };
         return new
@@ -334,7 +445,7 @@ public static class IncidentBatchConfirmationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_verifier_v3",
+                name = "pizzawave_incident_batch_relationship_verifier_v4",
                 strict = true,
                 schema = new
                 {
@@ -357,12 +468,12 @@ public static class IncidentBatchConfirmationPrompt
                                     candidate_token = new { type = "string", @enum = relationships.Select(item => item.CandidateToken).Distinct(StringComparer.Ordinal).ToArray() },
                                     decision = new { type = "string", @enum = new[] { "verify", "reject" } },
                                     verification_statement = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength },
-                                    source_evidence = Citations(sourceIds),
-                                    candidate_evidence = Citations(candidateIds),
+                                    source_evidence_ids = EvidenceIds(sourceEvidenceIds),
+                                    candidate_evidence_ids = EvidenceIds(candidateEvidenceIds),
                                     counter_evidence = Strings(),
                                     unresolved_questions = Strings()
                                 },
-                                required = new[] { "source_proposal_token", "candidate_token", "decision", "verification_statement", "source_evidence", "candidate_evidence", "counter_evidence", "unresolved_questions" }
+                                required = new[] { "source_proposal_token", "candidate_token", "decision", "verification_statement", "source_evidence_ids", "candidate_evidence_ids", "counter_evidence", "unresolved_questions" }
                             }
                         }
                     },
@@ -430,7 +541,7 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
                        ?? throw new InvalidDataException("Batch confirmation response content was empty.");
             var parsed = JsonSerializer.Deserialize<ConfirmationResponse>(json, EngineConfig.JsonOptions())
                          ?? throw new InvalidDataException("Batch confirmation JSON was empty.");
-            var transcripts = bundle.Observations.SelectMany(item => item.Transcripts).ToDictionary(item => item.TranscriptId, item => item.Text, StringComparer.Ordinal);
+            var evidenceCatalog = IncidentBatchConfirmationEvidenceCatalog.Build(bundle);
             var decisions = parsed.Decisions.Select(item => new IncidentBatchConfirmationDecision(
                 item.SourceProposalToken,
                 item.CandidateToken,
@@ -441,8 +552,8 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
                     _ => throw new InvalidDataException($"Unsupported confirmation decision '{item.Decision}'.")
                 },
                 item.VerificationStatement,
-                ResolveCitations(item.SourceEvidence, transcripts),
-                ResolveCitations(item.CandidateEvidence, transcripts),
+                IncidentBatchConfirmationEvidenceCatalog.Resolve(item.SourceEvidenceIds, evidenceCatalog),
+                IncidentBatchConfirmationEvidenceCatalog.Resolve(item.CandidateEvidenceIds, evidenceCatalog),
                 item.CounterEvidence,
                 item.UnresolvedQuestions)).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
@@ -471,17 +582,6 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
         }
     }
 
-    private static IReadOnlyList<IncidentEventStateTranscriptCitation> ResolveCitations(
-        IEnumerable<ConfirmationCitationResponse> citations,
-        IReadOnlyDictionary<string, string> transcripts) =>
-        citations.SelectMany(citation => citation.ExactQuotes.SelectMany(quote =>
-        {
-            var quotes = transcripts.TryGetValue(citation.TranscriptId, out var transcript)
-                ? IncidentTranscriptCitationResolver.ResolveSegments(transcript, quote)
-                : [quote];
-            return quotes.Select(resolved => new IncidentEventStateTranscriptCitation(citation.TranscriptId, resolved));
-        })).ToList();
-
     private static (int PromptTokens, int CompletionTokens, int TotalTokens, string ResponseModel, string FinishReason) ReadUsage(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return (0, 0, 0, string.Empty, string.Empty);
@@ -507,11 +607,8 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
         [property: JsonPropertyName("candidate_token")] string CandidateToken,
         [property: JsonPropertyName("decision")] string Decision,
         [property: JsonPropertyName("verification_statement")] string VerificationStatement,
-        [property: JsonPropertyName("source_evidence")] IReadOnlyList<ConfirmationCitationResponse> SourceEvidence,
-        [property: JsonPropertyName("candidate_evidence")] IReadOnlyList<ConfirmationCitationResponse> CandidateEvidence,
+        [property: JsonPropertyName("source_evidence_ids")] IReadOnlyList<string> SourceEvidenceIds,
+        [property: JsonPropertyName("candidate_evidence_ids")] IReadOnlyList<string> CandidateEvidenceIds,
         [property: JsonPropertyName("counter_evidence")] IReadOnlyList<string> CounterEvidence,
         [property: JsonPropertyName("unresolved_questions")] IReadOnlyList<string> UnresolvedQuestions);
-    private sealed record ConfirmationCitationResponse(
-        [property: JsonPropertyName("transcript_id")] string TranscriptId,
-        [property: JsonPropertyName("exact_quotes")] IReadOnlyList<string> ExactQuotes);
 }

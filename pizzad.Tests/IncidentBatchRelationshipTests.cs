@@ -556,11 +556,56 @@ public sealed class IncidentBatchRelationshipTests
         Assert.Contains("Information present on only one side is omission, not contradiction", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("do not manufacture a mismatch from a detail that is merely absent", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("pairs that explicitly lack a direct link", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Evidence spans and their exact quote text are owned by the application", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("evidence_id", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("source_evidence_ids", schema, StringComparison.Ordinal);
+        Assert.Contains("candidate_evidence_ids", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"source_evidence\"", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"candidate_evidence\"", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("exact_quotes", schema, StringComparison.Ordinal);
         Assert.Contains($"\"maxLength\": {IncidentBatchRelationshipContract.MaximumTextLength}", schema, StringComparison.Ordinal);
+        Assert.Contains(IncidentBatchConfirmationContract.ApplicationOwnedEvidenceToken, IncidentBatchConfirmationContract.ConfigurationToken, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PreviousRelationshipVerifierResultsRemainReadable()
+    public void ApplicationEvidenceCatalogReturnsOnlyExactBoundedSpansAndDeduplicatesSelections()
+    {
+        var transcript = string.Join(" ", Enumerable.Range(1, 100).Select(index => $"word{index}"));
+        var bundle = Bundle(Observation("call:1", "transcript:1", transcript));
+
+        var catalog = IncidentBatchConfirmationEvidenceCatalog.Build(bundle);
+
+        Assert.True(catalog.Count > 1);
+        Assert.All(catalog, span =>
+        {
+            Assert.InRange(span.ExactQuote.Length, 1, IncidentBatchConfirmationEvidenceCatalog.MaximumSpanLength);
+            Assert.Contains(span.ExactQuote, transcript, StringComparison.Ordinal);
+            Assert.Equal("transcript:1", span.TranscriptId);
+        });
+        var selected = IncidentBatchConfirmationEvidenceCatalog.Resolve(
+            [catalog[0].EvidenceId, catalog[0].EvidenceId, catalog[^1].EvidenceId],
+            catalog);
+        Assert.Equal(2, selected.Count);
+        Assert.Equal(catalog[0].ExactQuote, selected[0].ExactQuote);
+        Assert.Equal(catalog[^1].ExactQuote, selected[1].ExactQuote);
+        Assert.Throws<InvalidDataException>(() =>
+            IncidentBatchConfirmationEvidenceCatalog.Resolve(["evidence:unknown"], catalog));
+
+        var unbrokenTranscript = new string('x', 1000);
+        var unbrokenCatalog = IncidentBatchConfirmationEvidenceCatalog.Build(
+            Bundle(Observation("call:2", "transcript:2", unbrokenTranscript)));
+        Assert.Equal(5, unbrokenCatalog.Count);
+        Assert.All(unbrokenCatalog, span =>
+        {
+            Assert.InRange(span.ExactQuote.Length, 1, IncidentBatchConfirmationEvidenceCatalog.MaximumSpanLength);
+            Assert.Contains(span.ExactQuote, unbrokenTranscript, StringComparison.Ordinal);
+        });
+    }
+
+    [Theory]
+    [InlineData(IncidentBatchConfirmationPrompt.PreviousPromptIdentity)]
+    [InlineData(IncidentBatchConfirmationPrompt.PriorPromptIdentity)]
+    public void PreviousRelationshipVerifierResultsRemainReadable(string promptIdentity)
     {
         var bundle = Bundle(
             Observation("call:1", "transcript:1", "Respond to 260 Low Circle for a 38-year-old female."),
@@ -578,7 +623,7 @@ public sealed class IncidentBatchRelationshipTests
             "confirmation:previous",
             Now,
             "test-model",
-            IncidentBatchConfirmationPrompt.PreviousPromptIdentity,
+            promptIdentity,
             [new IncidentBatchConfirmationDecision(
                 "event:update",
                 "candidate:existing",
