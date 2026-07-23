@@ -69,8 +69,11 @@ public sealed class IncidentBatchRelationshipTests
         Assert.Contains("Never borrow a candidate fact", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("event:new-fall", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("candidate:prior-fall", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("eligible_relationship_pairs", prompt.UserPrompt, StringComparison.Ordinal);
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
-        Assert.Contains("source_proposal_token", schema, StringComparison.Ordinal);
+        Assert.Contains("relationship_pair_token", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("source_proposal_token", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"candidate_token\"", schema, StringComparison.Ordinal);
         Assert.Contains("confirmed_membership", schema, StringComparison.Ordinal);
         Assert.Contains("provisional_association", schema, StringComparison.Ordinal);
     }

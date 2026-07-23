@@ -2765,6 +2765,59 @@ a reverse/cyclic pair, and rejection of an altered peer projection identity.
 The full suite passes with 722 tests. A fresh non-mutating OT run is required
 before production persistence can be reconsidered.
 
+#### Same-batch run P and opaque eligible-pair identity
+
+Commit `fad8f72` was deployed to OT only. Run
+`ot-batch-same-batch-peer-shadow-20260723-p` began at approximately
+2026-07-23 21:27:50 UTC above no-backfill fence `1455946`, with a production
+baseline of 5,713 incidents, maximum incident ID 7,127, and 53,664
+incident-operation audits. OT legacy execution was paused; the replacement
+constructor, relationship stage, verifier, source and observation isolation,
+continuous intake, and exclusive inference window were enabled; canary
+persistence remained off.
+
+The first 13-observation batch accepted six source events and exposed five
+ordered same-batch candidates. The evidence included a strong I-75 collision
+sequence: call `1455952` reported a motor-vehicle collision with injuries,
+`1455954` requested DSP/Catoosa notification for I-75 southbound, `1455964`
+reported a two-vehicle collision near mile marker 345 involving a Ford and an
+18-wheeler, and `1455966` repeated that specific collision with a 20-year-old
+patient.
+
+The relationship model returned five proposed relationships, but application
+validation rejected all five. It repeated source/candidate pairs, returned
+more than one confirmed membership for a source, and attempted self or
+otherwise ineligible pairings. This was a model identifier-control failure,
+not a failure to expose the evidence: the ordered same-batch candidates
+contained the relevant calls. The deterministic boundary prevented verifier
+work, merging, canary writes, production incident changes, and audit changes.
+Run P was stopped at approximately 21:33 UTC and OT legacy execution was
+restored. The stopped configuration is preserved at
+`/etc/pizzawave/pizzad.json.post-ot-batch-same-batch-peer-shadow-20260723-p-20260723T213339Z.bak`.
+OT `trunk-recorder` remained PID `3411589` with one historical restart.
+
+The correction removes free-form source/candidate pair selection from the
+model response. Application code enumerates every eligible directed pair and
+assigns it an opaque, deterministic pair token. The model can now return only
+one of those pair tokens, once, with its relationship disposition and exact
+evidence. Application code resolves the token back to the source and
+candidate. Consequently, self-links, reverse links, and unlisted pairings
+cannot be expressed by the response schema; duplicate pair tokens remain
+fail-closed. This is an identifier and ownership constraint, not a semantic
+rule. The model and independent verifier still decide relationship meaning
+from the transcripts.
+
+Before another OT deployment, the exact four-call I-75 evidence was replayed
+once against the live Paxan completion endpoint while production incident
+workers were briefly paused. The v6 schema was accepted by the endpoint and
+completed in 72 seconds. Every returned pair token was unique and
+application-eligible, and the model returned the grounded `1455966` to
+`1455964` relationship. The replay did not run the replacement scheduler or
+write production state. OT legacy execution was restored from
+`/etc/pizzawave/pizzad.json.pre-opaque-pair-replay-20260723T213745Z.bak`;
+the transient replay configuration is preserved at
+`/etc/pizzawave/pizzad.json.post-opaque-pair-replay-20260723T2143Z.bak`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

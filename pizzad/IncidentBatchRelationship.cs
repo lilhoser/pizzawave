@@ -16,6 +16,11 @@ public sealed record IncidentBatchRelationshipSource(
     string SourceProposalToken,
     IReadOnlyList<string> NewObservationIds);
 
+public sealed record IncidentBatchRelationshipPair(
+    string PairToken,
+    string SourceProposalToken,
+    string CandidateToken);
+
 public sealed record IncidentBatchRelationship(
     string SourceProposalToken,
     string CandidateToken,
@@ -58,7 +63,7 @@ public static class IncidentBatchRelationshipContract
     public const int MaximumAlternatives = 2;
     public const int MaximumUnresolvedQuestions = 2;
     public const int MaximumTextLength = 320;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v4;same-batch-peers=ordered-v1;admission=concrete-cross-reference-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
+    public const string ConfigurationToken = "relationship-stage=source-isolated-v5;same-batch-peers=ordered-v1;pair-identity=opaque-eligible-v1;admission=concrete-cross-reference-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
 
     public static IReadOnlyList<IncidentBatchRelationshipSource> BuildSources(
         IReadOnlyList<string> newObservationIds,
@@ -136,6 +141,17 @@ public static class IncidentBatchRelationshipContract
             .ToList();
     }
 
+    public static IReadOnlyList<IncidentBatchRelationshipPair> EligiblePairs(
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchCandidate> candidates) =>
+        sources
+            .SelectMany(source => EligibleCandidateTokens(sources, candidates, source)
+                .Select(candidateToken => new IncidentBatchRelationshipPair(
+                    RelationshipPairToken(source.SourceProposalToken, candidateToken),
+                    source.SourceProposalToken,
+                    candidateToken)))
+            .ToList();
+
     private static int PeerSourceIndex(
         IReadOnlyList<IncidentBatchRelationshipSource> sources,
         IncidentBatchCandidate candidate)
@@ -153,6 +169,14 @@ public static class IncidentBatchRelationshipContract
         var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceProposalToken)))
             .ToLowerInvariant();
         return $"candidate-peer-{digest[..16]}";
+    }
+
+    private static string RelationshipPairToken(string sourceProposalToken, string candidateToken)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes($"{sourceProposalToken}\n{candidateToken}")))
+            .ToLowerInvariant();
+        return $"relationship-pair-{digest[..20]}";
     }
 
     public static IncidentEventStateContractValidationResult ValidateInput(
@@ -436,7 +460,7 @@ public sealed record IncidentBatchRelationshipPromptPayload(string SystemPrompt,
 
 public static class IncidentBatchRelationshipPrompt
 {
-    public const string PromptIdentity = "incident-batch-relationship-v5-ordered-same-batch-peers";
+    public const string PromptIdentity = "incident-batch-relationship-v6-opaque-eligible-pairs";
 
     public static IncidentBatchRelationshipPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -450,6 +474,7 @@ public static class IncidentBatchRelationshipPrompt
             throw new ArgumentException("relationship prompts require at least one constructed group and candidate");
 
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
+        var eligiblePairs = IncidentBatchRelationshipContract.EligiblePairs(sources, candidates);
         object PromptObservation(string id) => new
         {
             observation_id = id,
@@ -461,8 +486,14 @@ public static class IncidentBatchRelationshipPrompt
             constructed_groups = sources.Select(item => new
             {
                 source_proposal_token = item.SourceProposalToken,
-                eligible_candidate_tokens = IncidentBatchRelationshipContract
-                    .EligibleCandidateTokens(sources, candidates, item),
+                eligible_relationship_pairs = eligiblePairs
+                    .Where(pair => pair.SourceProposalToken == item.SourceProposalToken)
+                    .Select(pair => new
+                    {
+                        relationship_pair_token = pair.PairToken,
+                        candidate_token = pair.CandidateToken
+                    })
+                    .ToList(),
                 source_observations = item.NewObservationIds.Select(PromptObservation).ToList()
             }).ToList(),
             candidate_events = candidates.Select(item => new
@@ -476,7 +507,7 @@ public static class IncidentBatchRelationshipPrompt
         user.AppendLine("Return only JSON matching the supplied schema.");
         user.AppendLine("Search for a small number of evidence-established relationships between constructed groups and supplied candidates using only their transcripts. Most pairs are unrelated; returning an empty relationships array is a correct and expected result.");
         user.AppendLine("The constructed groups are immutable. Do not rewrite, split, combine, discard, or add facts to them.");
-        user.AppendLine("Some candidates are earlier constructed groups from this same batch. For each constructed group, consider only its eligible_candidate_tokens. This ordered boundary permits later observations to connect to earlier observations without cycles; never return another source-candidate pairing.");
+        user.AppendLine("Some candidates are earlier constructed groups from this same batch. Each constructed group lists its application-issued eligible_relationship_pairs. Return only the opaque relationship_pair_token for an eligible pair and return each pair at most once. The application resolves that token back to its source and candidate. This ordered boundary permits later observations to connect to earlier observations without cycles; self, reverse, and other unlisted pairings cannot be expressed.");
         user.AppendLine("Return confirmed_membership only when exact evidence from both sides directly establishes one unfolding real-world event. Return at most one confirmed membership for each constructed group.");
         user.AppendLine("A confirmed_membership must use uncertainty 0 and empty alternative_interpretations and unresolved_questions. If either side contains a material discrepancy, counterinterpretation, or unresolved question, return provisional_association or omit the pair; never confirm it.");
         user.AppendLine("Return provisional_association only when exact evidence from both sides already establishes a specific operational connection: one side continues, answers, updates, acts on, or explicitly refers to a concrete subject, location, vehicle, identifier, circumstance, or request from the other side, but meaningful uncertainty remains about the nature or extent of that connection. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");
@@ -487,20 +518,21 @@ public static class IncidentBatchRelationshipPrompt
         user.AppendLine($"Return at most {IncidentBatchRelationshipContract.MaximumReturnedRelationships} relationships total and at most {IncidentBatchRelationshipContract.MaximumRelationshipsPerSource} for one constructed group. Choose the strongest specific relationships and omit weaker pairs rather than producing an oversized response.");
         user.AppendLine("Omit unsupported pairs. Timing, retrieval rank, radio metadata, generic similarity, and shared event type do not prove a relationship. If the relationship statement would need words such as potentially, possibly, merely, or unrelated because no concrete cross-reference exists, omit the pair.");
         user.AppendLine("Each returned relationship must cite short contiguous verbatim spans from both source boundaries. Never borrow a candidate fact into constructed-group evidence or the reverse.");
-        user.AppendLine("Copy source_proposal_token, candidate_token, and transcript_id values exactly.");
+        user.AppendLine("Copy relationship_pair_token and transcript_id values exactly.");
         user.AppendLine();
         user.AppendLine("Source bundle:");
         user.AppendLine(JsonSerializer.Serialize(source, EngineConfig.JsonOptions()));
         return new IncidentBatchRelationshipPromptPayload(
             "You evaluate typed relationships between immutable source-grounded event groups. You may attach evidence-cited relationships but cannot construct or rewrite events. Application code validates both citation boundaries and owns all state transitions.",
             user.ToString(),
-            ResponseFormat(bundle, sources, candidates));
+            ResponseFormat(bundle, sources, candidates, eligiblePairs));
     }
 
     private static object ResponseFormat(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<IncidentBatchRelationshipSource> sources,
-        IReadOnlyList<IncidentBatchCandidate> candidates)
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        IReadOnlyList<IncidentBatchRelationshipPair> eligiblePairs)
     {
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var sourceTranscriptIds = sources.SelectMany(item => item.NewObservationIds).SelectMany(id => observations[id].Transcripts).Select(item => item.TranscriptId).Distinct(StringComparer.Ordinal).ToArray();
@@ -528,7 +560,7 @@ public static class IncidentBatchRelationshipPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_v4_concrete_admission",
+                name = "pizzawave_incident_batch_relationship_v6_opaque_eligible_pairs",
                 strict = true,
                 schema = new
                 {
@@ -540,14 +572,18 @@ public static class IncidentBatchRelationshipPrompt
                         {
                             type = "array",
                             maxItems = IncidentBatchRelationshipContract.MaximumReturnedRelationships,
+                            uniqueItems = true,
                             items = new
                             {
                                 type = "object",
                                 additionalProperties = false,
                                 properties = new
                                 {
-                                    source_proposal_token = new { type = "string", @enum = sources.Select(item => item.SourceProposalToken).ToArray() },
-                                    candidate_token = new { type = "string", @enum = candidates.Select(item => item.CandidateToken).ToArray() },
+                                    relationship_pair_token = new
+                                    {
+                                        type = "string",
+                                        @enum = eligiblePairs.Select(item => item.PairToken).ToArray()
+                                    },
                                     disposition = new { type = "string", @enum = new[] { "confirmed_membership", "provisional_association" } },
                                     relationship_statement = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength },
                                     uncertainty = new { type = "number", minimum = 0, maximum = 1 },
@@ -556,7 +592,7 @@ public static class IncidentBatchRelationshipPrompt
                                     alternative_interpretations = Strings(IncidentBatchRelationshipContract.MaximumAlternatives),
                                     unresolved_questions = Strings(IncidentBatchRelationshipContract.MaximumUnresolvedQuestions)
                                 },
-                                required = new[] { "source_proposal_token", "candidate_token", "disposition", "relationship_statement", "uncertainty", "source_evidence", "candidate_evidence", "alternative_interpretations", "unresolved_questions" }
+                                required = new[] { "relationship_pair_token", "disposition", "relationship_statement", "uncertainty", "source_evidence", "candidate_evidence", "alternative_interpretations", "unresolved_questions" }
                             }
                         }
                     },
@@ -626,21 +662,29 @@ public sealed class OpenAiIncidentBatchRelationshipProposer : IIncidentBatchRela
             var transcripts = bundle.Observations
                 .SelectMany(item => item.Transcripts)
                 .ToDictionary(item => item.TranscriptId, item => item.Text, StringComparer.Ordinal);
-            var relationships = parsed.Relationships.Select(item => new IncidentBatchRelationship(
-                item.SourceProposalToken,
-                item.CandidateToken,
-                item.Disposition switch
-                {
-                    "confirmed_membership" => IncidentBatchRelationshipDisposition.ConfirmedMembership,
-                    "provisional_association" => IncidentBatchRelationshipDisposition.ProvisionalAssociation,
-                    _ => throw new InvalidDataException($"Unsupported batch relationship disposition '{item.Disposition}'.")
-                },
-                item.RelationshipStatement,
-                item.Uncertainty,
-                ResolveCitations(item.SourceEvidence, transcripts),
-                ResolveCitations(item.CandidateEvidence, transcripts),
-                item.AlternativeInterpretations,
-                item.UnresolvedQuestions)).ToList();
+            var eligiblePairs = IncidentBatchRelationshipContract.EligiblePairs(sources, candidates)
+                .ToDictionary(item => item.PairToken, StringComparer.Ordinal);
+            var relationships = parsed.Relationships.Select(item =>
+            {
+                if (!eligiblePairs.TryGetValue(item.RelationshipPairToken, out var pair))
+                    throw new InvalidDataException(
+                        $"Unknown batch relationship pair token '{item.RelationshipPairToken}'.");
+                return new IncidentBatchRelationship(
+                    pair.SourceProposalToken,
+                    pair.CandidateToken,
+                    item.Disposition switch
+                    {
+                        "confirmed_membership" => IncidentBatchRelationshipDisposition.ConfirmedMembership,
+                        "provisional_association" => IncidentBatchRelationshipDisposition.ProvisionalAssociation,
+                        _ => throw new InvalidDataException($"Unsupported batch relationship disposition '{item.Disposition}'.")
+                    },
+                    item.RelationshipStatement,
+                    item.Uncertainty,
+                    ResolveCitations(item.SourceEvidence, transcripts),
+                    ResolveCitations(item.CandidateEvidence, transcripts),
+                    item.AlternativeInterpretations,
+                    item.UnresolvedQuestions);
+            }).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
             return new IncidentBatchRelationshipProposal(
                 $"model:incident-batch-relationship:{Guid.NewGuid():N}",
@@ -705,8 +749,7 @@ public sealed class OpenAiIncidentBatchRelationshipProposer : IIncidentBatchRela
 
     private sealed record RelationshipResponse([property: JsonPropertyName("relationships")] IReadOnlyList<RelationshipItemResponse> Relationships);
     private sealed record RelationshipItemResponse(
-        [property: JsonPropertyName("source_proposal_token")] string SourceProposalToken,
-        [property: JsonPropertyName("candidate_token")] string CandidateToken,
+        [property: JsonPropertyName("relationship_pair_token")] string RelationshipPairToken,
         [property: JsonPropertyName("disposition")] string Disposition,
         [property: JsonPropertyName("relationship_statement")] string RelationshipStatement,
         [property: JsonPropertyName("uncertainty")] double Uncertainty,
