@@ -66,16 +66,69 @@ public sealed class IncidentBatchRelationshipTests
         var prompt = IncidentBatchRelationshipPrompt.Build(bundle, sources, candidates);
 
         Assert.Contains("constructed groups are immutable", prompt.UserPrompt, StringComparison.Ordinal);
-        Assert.Contains("Never borrow a candidate fact", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("an index cannot cite another pair", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("event:new-fall", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("candidate:prior-fall", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("eligible_relationship_pairs", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("evidence_spans", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("span_index", prompt.UserPrompt, StringComparison.Ordinal);
         var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
         Assert.Contains("relationship_pair_token", schema, StringComparison.Ordinal);
+        Assert.Contains("source_evidence_span_indices", schema, StringComparison.Ordinal);
+        Assert.Contains("candidate_evidence_span_indices", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"oneOf\"", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("source_proposal_token", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("\"candidate_token\"", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"exact_quotes\"", schema, StringComparison.Ordinal);
         Assert.Contains("confirmed_membership", schema, StringComparison.Ordinal);
         Assert.Contains("provisional_association", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PairRelativeEvidenceIndicesResolveOnlyInsideTheSelectedPair()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "The first incident is at 100 Alpha Road."),
+            Observation("call:2", "transcript:2", "The second incident is at 200 Beta Road."),
+            Observation("call:3", "transcript:3", "The follow-up explicitly continues the first incident."));
+        var sources = new[]
+        {
+            new IncidentBatchRelationshipSource("event:first", ["call:1"]),
+            new IncidentBatchRelationshipSource("event:follow-up", ["call:3"])
+        };
+        var candidates = new[]
+        {
+            new IncidentBatchCandidate("candidate:second", "projection:second", ["call:2"]),
+            new IncidentBatchCandidate("candidate:first", "projection:first", ["call:1"])
+        };
+
+        var prompt = IncidentBatchRelationshipPrompt.Build(bundle, sources, candidates);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(
+            System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions()))!;
+        var item = root["json_schema"]!["schema"]!["properties"]!["relationships"]!["items"]!;
+        var evidenceCatalog = IncidentBatchConfirmationEvidenceCatalog.Build(bundle);
+        var sourceSpans = IncidentBatchRelationshipEvidenceCatalog.ForObservationIds(
+            bundle,
+            evidenceCatalog,
+            ["call:3"]);
+        var candidateSpans = IncidentBatchRelationshipEvidenceCatalog.ForObservationIds(
+            bundle,
+            evidenceCatalog,
+            ["call:1"]);
+        var sourceCitation = Assert.Single(
+            IncidentBatchRelationshipEvidenceCatalog.ResolvePairRelativeIndices([0], sourceSpans, "source"));
+        var candidateCitation = Assert.Single(
+            IncidentBatchRelationshipEvidenceCatalog.ResolvePairRelativeIndices([0], candidateSpans, "candidate"));
+
+        Assert.Equal("transcript:3", sourceCitation.TranscriptId);
+        Assert.Equal("transcript:1", candidateCitation.TranscriptId);
+        Assert.Throws<InvalidDataException>(() =>
+            IncidentBatchRelationshipEvidenceCatalog.ResolvePairRelativeIndices([sourceSpans.Count], sourceSpans, "source"));
+        Assert.Equal(
+            "integer",
+            item["properties"]!["source_evidence_span_indices"]!["items"]!["type"]!.GetValue<string>());
+        Assert.Null(item["oneOf"]);
+        Assert.Null(item["allOf"]);
     }
 
     [Fact]

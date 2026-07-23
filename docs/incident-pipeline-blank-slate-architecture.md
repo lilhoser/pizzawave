@@ -2818,6 +2818,76 @@ write production state. OT legacy execution was restored from
 the transient replay configuration is preserved at
 `/etc/pizzawave/pizzad.json.post-opaque-pair-replay-20260723T2143Z.bak`.
 
+#### Opaque-pair run Q and pair-relative evidence ownership
+
+Commit `092ef1e` was deployed to OT only. Run
+`ot-batch-opaque-pair-shadow-20260723-q` began at approximately
+2026-07-23 21:47:54 UTC above no-backfill fence `1456184`, with a production
+baseline of 5,713 incidents, maximum incident ID 7,127, and 53,669
+incident-operation audits. OT legacy execution was paused; constructor,
+relationship, verifier, source and observation isolation, continuous intake,
+and the exclusive inference window were enabled; canary persistence remained
+off.
+
+The first 12-observation batch accepted two source events and returned no
+relationships. The second 12-observation batch accepted six source events.
+The opaque eligible-pair boundary worked: all six model-returned relationships
+resolved to application-issued pairs. The response nevertheless attached
+evidence from other eligible pairs, returned more than one confirmed
+membership for two sources, and produced eight deterministic validation
+errors. Application validation rejected every relationship before verifier
+work or persistence.
+
+The batch contained a real continuation that proves both the value of the
+candidate path and the remaining contract defect. Call `1456190` said
+`577-6, Call 634, Talwood Trail, North East.` Call `1456214` repeated the
+non-emergency call at `634, Talwood Trail, North East.` The model selected
+that eligible pair, but its global evidence-ID fields also allowed evidence
+from unrelated pairs to be attached to returned relationships. The failure
+was therefore not an address or phrase-matching problem. Pair identity was
+application-owned, but evidence identity was still globally addressable
+inside the request.
+
+Run Q was stopped without verifier decisions, canary writes, production
+incident changes, or audit changes, and OT legacy execution was restored. Its
+pre-run and stopped configurations are preserved at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-opaque-pair-shadow-20260723-q-20260723T2147Z.bak`
+and
+`/etc/pizzawave/pizzad.json.post-ot-batch-opaque-pair-shadow-20260723-q-20260723T2154Z.bak`.
+Separately, `trunk-recorder` terminated itself at 21:55:30 UTC because Source
+3 stopped receiving samples. Systemd restarted it as PID `2409838` with
+restart count 2. PizzaWave did not restart or reconfigure the recorder, and
+the incident contract failure had already occurred before that independent RF
+runtime event.
+
+An initial correction used JSON Schema `oneOf` branches to bind global
+application evidence IDs to each pair. A single non-persistent live replay
+showed that the LM Studio endpoint accepted the schema but did not reliably
+enforce the selected conditional branch: a returned candidate citation still
+resolved outside its pair boundary. That provider-dependent design was not
+deployed.
+
+The replacement contract makes evidence identity pair-relative in application
+code. Each eligible pair contains source and candidate spans numbered locally
+from zero. The model returns the opaque pair token plus source-side and
+candidate-side span indices. Application code first resolves the pair token,
+then resolves each index only against that pair side. The same numeric index
+can therefore refer only to the selected pair and cannot name evidence from
+another pair, even if an inference server ignores advanced JSON Schema
+conditions. Out-of-range indices fail closed. No transcript label, address,
+phrase, category, talkgroup, system, quality label, or regex decides
+membership.
+
+The exact Talwood case plus unrelated distractors was replayed once against
+the live Paxan endpoint while only OT legacy incident analysis was briefly
+paused. The provider accepted the simple v8 schema, returned the Talwood
+continuation, and every citation validated inside the selected pair. The
+request completed in 18 seconds. It did not schedule the replacement or write
+production state. OT legacy execution was restored immediately; health was
+`ok`, and `trunk-recorder` retained PID `2409838` with restart count 2. A fresh
+non-mutating OT shadow run remains required before permanent persistence can
+be reconsidered.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
