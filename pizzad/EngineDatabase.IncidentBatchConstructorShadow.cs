@@ -50,6 +50,30 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
         entryCommand.Parameters.AddWithValue("$payload_json", entryPayload);
         var entrySequence = Convert.ToInt64(await entryCommand.ExecuteScalarAsync(ct));
 
+        var observationsById = entry.Bundle.Observations.ToDictionary(
+            item => item.ObservationId,
+            StringComparer.Ordinal);
+        foreach (var observationId in entry.NewObservationIds)
+        {
+            var observation = observationsById[observationId];
+            if (observation.CallId is not long callId)
+                continue;
+            await using var processedCommand = connection.CreateCommand();
+            processedCommand.Transaction = transaction;
+            processedCommand.CommandText = """
+                INSERT INTO incident_batch_processed_calls (
+                    run_id, call_id, ledger_entry_id, processed_at_utc, source_start_time)
+                VALUES (
+                    $run_id, $call_id, $ledger_entry_id, $processed_at_utc, $source_start_time);
+                """;
+            processedCommand.Parameters.AddWithValue("$run_id", entry.RunId);
+            processedCommand.Parameters.AddWithValue("$call_id", callId);
+            processedCommand.Parameters.AddWithValue("$ledger_entry_id", entry.LedgerEntryId);
+            processedCommand.Parameters.AddWithValue("$processed_at_utc", entry.RecordedAtUtc.UtcDateTime.ToString("O"));
+            processedCommand.Parameters.AddWithValue("$source_start_time", observation.ObservedAtUnixSeconds);
+            await processedCommand.ExecuteNonQueryAsync(ct);
+        }
+
         await ValidateBatchProjectionLedgerReferencesAsync(connection, transaction, projection, ct);
         var projectionPayload = JsonSerializer.Serialize(projection, EngineConfig.JsonOptions());
         var projectionHash = ContentHash(projectionPayload);
@@ -202,29 +226,120 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT sequence, content_hash, payload_json
-            FROM incident_batch_constructor_shadow_ledger
+            SELECT call_id
+            FROM incident_batch_processed_calls
             WHERE run_id=$run_id
-            ORDER BY sequence;
+            ORDER BY call_id;
             """;
         command.Parameters.AddWithValue("$run_id", runId);
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-        {
-            var sequence = reader.GetInt64(0);
-            var hash = reader.GetString(1);
-            var payload = reader.GetString(2);
-            VerifyContentHash("incident batch ledger entry", sequence, payload, hash);
-            var entry = JsonSerializer.Deserialize<IncidentBatchLedgerEntry>(payload, EngineConfig.JsonOptions())
-                        ?? throw new InvalidDataException($"Incident batch ledger entry {sequence} has an empty payload.");
-            var newObservationIds = entry.NewObservationIds.ToHashSet(StringComparer.Ordinal);
-            foreach (var observation in entry.Bundle.Observations.Where(item => newObservationIds.Contains(item.ObservationId)))
-            {
-                if (observation.CallId is long callId)
-                    callIds.Add(callId);
-            }
-        }
+            callIds.Add(reader.GetInt64(0));
         return callIds;
+    }
+
+    public async Task<IncidentAnalysisQueueHealthDto> GetIncidentBatchPipelineHealthAsync(
+        string runId,
+        long startAfterCallId,
+        int maximumAgeMinutes,
+        CancellationToken ct)
+    {
+        runId = runId.Trim();
+        maximumAgeMinutes = Math.Clamp(maximumAgeMinutes, 15, 360);
+        var now = DateTimeOffset.UtcNow;
+        var cutoff = now.AddMinutes(-maximumAgeMinutes).ToUnixTimeSeconds();
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COALESCE(SUM(CASE WHEN processed.call_id IS NULL THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN processed.call_id IS NULL AND calls.start_time < $cutoff THEN 1 ELSE 0 END), 0),
+                MIN(CASE WHEN processed.call_id IS NULL THEN calls.start_time END),
+                (
+                    SELECT MAX(source_start_time)
+                    FROM incident_batch_processed_calls
+                    WHERE run_id=$run_id
+                ),
+                (
+                    SELECT COUNT(*)
+                    FROM incident_batch_verification_shadow_requests request
+                    LEFT JOIN incident_batch_verification_shadow_results result
+                        ON result.request_id=request.request_id
+                    WHERE request.run_id=$run_id AND result.request_id IS NULL
+                ),
+                (
+                    SELECT MIN(request.enqueued_at_utc)
+                    FROM incident_batch_verification_shadow_requests request
+                    LEFT JOIN incident_batch_verification_shadow_results result
+                        ON result.request_id=request.request_id
+                    WHERE request.run_id=$run_id AND result.request_id IS NULL
+                )
+            FROM calls
+            LEFT JOIN incident_batch_processed_calls processed
+                ON processed.run_id=$run_id AND processed.call_id=calls.id
+            WHERE calls.id > $start_after_call_id
+              AND LENGTH(TRIM(COALESCE(calls.transcription, ''))) >= $minimum_characters;
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$start_after_call_id", Math.Max(0, startAfterCallId));
+        command.Parameters.AddWithValue("$minimum_characters", TranscriptRetrievalEvidence.MinimumCharacters);
+        command.Parameters.AddWithValue("$cutoff", cutoff);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        var pending = reader.GetInt64(0);
+        var stale = reader.GetInt64(1);
+        var pendingVerifications = reader.GetInt64(4);
+        DateTime? oldestUtc = null;
+        var oldestAgeMinutes = 0d;
+        if (!reader.IsDBNull(2))
+        {
+            var oldest = reader.GetInt64(2);
+            oldestUtc = DateTimeOffset.FromUnixTimeSeconds(oldest).UtcDateTime;
+            oldestAgeMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(oldest)).TotalMinutes);
+        }
+        DateTime? latestProcessedUtc = null;
+        var latestProcessedAgeMinutes = 0d;
+        if (!reader.IsDBNull(3))
+        {
+            var latest = reader.GetInt64(3);
+            latestProcessedUtc = DateTimeOffset.FromUnixTimeSeconds(latest).UtcDateTime;
+            latestProcessedAgeMinutes = Math.Max(0, (now - DateTimeOffset.FromUnixTimeSeconds(latest)).TotalMinutes);
+        }
+        DateTimeOffset? oldestVerificationUtc = null;
+        var oldestVerificationAgeMinutes = 0d;
+        if (!reader.IsDBNull(5) &&
+            DateTimeOffset.TryParse(
+                reader.GetString(5),
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var parsedVerificationUtc))
+        {
+            oldestVerificationUtc = parsedVerificationUtc;
+            oldestVerificationAgeMinutes = Math.Max(0, (now - parsedVerificationUtc).TotalMinutes);
+        }
+
+        var sourceWorkStale = stale > 0;
+        var verificationWorkStale = pendingVerifications > 0 &&
+                                    oldestVerificationAgeMinutes > maximumAgeMinutes;
+        var status = sourceWorkStale || verificationWorkStale ? "degraded" : "ok";
+        var message = status == "degraded"
+            ? sourceWorkStale
+                ? $"Replacement incident intake is stale: {stale:N0} eligible call(s) have waited more than {maximumAgeMinutes:N0} minutes."
+                : $"Replacement incident verification is stale: {pendingVerifications:N0} decision(s) are pending and the oldest has waited {oldestVerificationAgeMinutes:N0} minutes."
+            : pending > 0 || pendingVerifications > 0
+                ? $"Replacement incident pipeline is current: {pending:N0} eligible call(s) and {pendingVerifications:N0} verification decision(s) are pending."
+                : "Replacement incident pipeline is current.";
+        return new IncidentAnalysisQueueHealthDto(
+            status,
+            message,
+            pending,
+            stale,
+            0,
+            oldestUtc,
+            oldestAgeMinutes,
+            latestProcessedUtc,
+            latestProcessedAgeMinutes,
+            maximumAgeMinutes);
     }
 
     public async Task<IReadOnlyList<IncidentBatchStoredVerificationRequest>> ListIncidentBatchVerificationRequestsAsync(

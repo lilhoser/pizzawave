@@ -44,6 +44,16 @@ public sealed class IncidentBatchConstructorPersistenceTests
             var loadedEvent = Assert.Single(loadedProjection!.Projection.Events);
             Assert.False(loadedEvent.OperatorVisible);
             Assert.True(loadedEvent.OperatorReview);
+            await using (var indexedConnection = new SqliteConnection($"Data Source={path}"))
+            {
+                await indexedConnection.OpenAsync();
+                await using var indexed = indexedConnection.CreateCommand();
+                indexed.CommandText = "SELECT ledger_entry_id, source_start_time FROM incident_batch_processed_calls WHERE run_id='run:1' AND call_id=1;";
+                await using var indexedReader = await indexed.ExecuteReaderAsync();
+                Assert.True(await indexedReader.ReadAsync());
+                Assert.Equal("ledger:1", indexedReader.GetString(0));
+                Assert.Equal(now.ToUnixTimeSeconds(), indexedReader.GetInt64(1));
+            }
             var report = await database.GetIncidentBatchShadowReportAsync(true, "run:1", null, 100, CancellationToken.None);
             Assert.True(report.Enabled);
             Assert.Equal(1, report.Totals.Batches);
@@ -67,6 +77,9 @@ public sealed class IncidentBatchConstructorPersistenceTests
             await using var command = connection.CreateCommand();
             command.CommandText = "UPDATE incident_batch_constructor_shadow_ledger SET run_id='changed' WHERE sequence=1;";
             var error = await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+            Assert.Contains("append-only", error.Message, StringComparison.OrdinalIgnoreCase);
+            command.CommandText = "DELETE FROM incident_batch_processed_calls WHERE run_id='run:1' AND call_id=1;";
+            error = await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
             Assert.Contains("append-only", error.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
@@ -192,6 +205,145 @@ public sealed class IncidentBatchConstructorPersistenceTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(root, true);
         }
+    }
+
+    [Fact]
+    public async Task ReplacementHealthUsesDurableProcessedCursorInsteadOfDisabledLegacyQueue()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-batch-health-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var database = new EngineDatabase(new EngineConfig
+            {
+                Storage = new StorageConfig
+                {
+                    DatabasePath = Path.Combine(root, "pizzad.db"),
+                    AudioRoot = root
+                }
+            }, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var now = DateTimeOffset.UtcNow;
+            var firstCallId = await AddCallAsync(database, "First eligible replacement call.", now.AddMinutes(-1));
+            var secondCallId = await AddCallAsync(database, "Second eligible replacement call.", now.AddMinutes(-120));
+            var first = await AppendSingletonAsync(
+                database,
+                "run:health",
+                "health:ledger:1",
+                "health:projection:1",
+                firstCallId,
+                now.AddMinutes(-1),
+                null);
+
+            var stale = await database.GetIncidentBatchPipelineHealthAsync(
+                "run:health",
+                0,
+                60,
+                CancellationToken.None);
+            Assert.Equal("degraded", stale.Status);
+            Assert.Equal(1, stale.PendingCalls);
+            Assert.Equal(1, stale.StalePendingCalls);
+            Assert.Contains("Replacement incident intake is stale", stale.Message, StringComparison.Ordinal);
+
+            await AppendSingletonAsync(
+                database,
+                "run:health",
+                "health:ledger:2",
+                "health:projection:2",
+                secondCallId,
+                now.AddMinutes(-120),
+                first.Projection.Projection);
+            var current = await database.GetIncidentBatchPipelineHealthAsync(
+                "run:health",
+                0,
+                60,
+                CancellationToken.None);
+            Assert.Equal("ok", current.Status);
+            Assert.Equal(0, current.PendingCalls);
+            Assert.Contains("Replacement incident pipeline is current", current.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static async Task<long> AddCallAsync(
+        EngineDatabase database,
+        string transcript,
+        DateTimeOffset timestamp) =>
+        await database.UpsertCallAsync(new EngineCall
+        {
+            UniqueKey = $"batch-health:{Guid.NewGuid():N}",
+            StartTime = timestamp.ToUnixTimeSeconds(),
+            StopTime = timestamp.AddSeconds(3).ToUnixTimeSeconds(),
+            SystemShortName = "test-system",
+            Talkgroup = 1,
+            AudioPath = "test.wav",
+            Transcription = transcript,
+            TranscriptionStatus = "complete",
+            QualityReason = "ok"
+        }, CancellationToken.None);
+
+    private static async Task<IncidentBatchRunResult> AppendSingletonAsync(
+        EngineDatabase database,
+        string runId,
+        string ledgerEntryId,
+        string projectionId,
+        long callId,
+        DateTimeOffset observedAt,
+        IncidentBatchProjection? prior)
+    {
+        var observationId = $"call:{callId}";
+        var transcriptId = $"transcript:{callId}";
+        var observation = new IncidentEventStateSourceObservation(
+            observationId,
+            callId,
+            observedAt.ToUnixTimeSeconds(),
+            string.Empty,
+            null,
+            [new IncidentEventStateTranscriptObservation(
+                transcriptId,
+                $"Eligible transcript for call {callId}.",
+                "test",
+                observedAt)],
+            new Dictionary<string, IncidentEventStateMetadataObservation>());
+        var proposal = new IncidentBatchProposal(
+            $"proposal:{callId}",
+            observedAt,
+            "test-model",
+            IncidentBatchPrompt.PromptIdentity,
+            [new IncidentBatchEventProposal(
+                $"event:{callId}",
+                IncidentBatchEventDisposition.NewEvent,
+                string.Empty,
+                [observationId],
+                "Grounded event",
+                $"Eligible transcript for call {callId}.",
+                "The source transcript is retained for Review.",
+                0.1,
+                [new IncidentEventStateTranscriptCitation(transcriptId, "Eligible transcript")],
+                [],
+                [],
+                [])]);
+        var coordinator = new IncidentBatchCoordinator(
+            new FixedProposer(proposal),
+            database,
+            new FixedTimeProvider(observedAt));
+        return await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                runId,
+                ledgerEntryId,
+                projectionId,
+                [new IncidentBatchSingletonIdentity(observationId, $"singleton:{callId}")],
+                "test",
+                "test-config"),
+            new IncidentEventStateObservationBundle($"bundle:{callId}", observedAt, [observation], []),
+            prior,
+            [observationId],
+            [],
+            CancellationToken.None);
     }
 
     private sealed class FixedProposer(IncidentBatchProposal proposal) : IIncidentBatchProposer

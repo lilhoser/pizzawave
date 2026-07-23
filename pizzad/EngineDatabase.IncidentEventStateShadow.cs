@@ -317,6 +317,35 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         CREATE INDEX IF NOT EXISTS idx_incident_batch_constructor_shadow_run_sequence
             ON incident_batch_constructor_shadow_ledger(run_id, sequence);
 
+        CREATE TABLE IF NOT EXISTS incident_batch_processed_calls (
+            run_id TEXT NOT NULL,
+            call_id INTEGER NOT NULL,
+            ledger_entry_id TEXT NOT NULL,
+            processed_at_utc TEXT NOT NULL,
+            source_start_time INTEGER NOT NULL,
+            PRIMARY KEY (run_id, call_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_batch_processed_calls_run_time
+            ON incident_batch_processed_calls(run_id, source_start_time, call_id);
+
+        INSERT OR IGNORE INTO incident_batch_processed_calls (
+            run_id, call_id, ledger_entry_id, processed_at_utc, source_start_time)
+        SELECT
+            ledger.run_id,
+            CAST(json_extract(observation.value, '$.callId') AS INTEGER),
+            ledger.ledger_entry_id,
+            ledger.recorded_at_utc,
+            CAST(json_extract(observation.value, '$.observedAtUnixSeconds') AS INTEGER)
+        FROM incident_batch_constructor_shadow_ledger ledger,
+             json_each(ledger.payload_json, '$.bundle.observations') observation
+        WHERE json_extract(observation.value, '$.callId') IS NOT NULL
+          AND EXISTS (
+              SELECT 1
+              FROM json_each(ledger.payload_json, '$.newObservationIds') new_observation
+              WHERE new_observation.value = json_extract(observation.value, '$.observationId')
+          );
+
         CREATE TABLE IF NOT EXISTS incident_batch_constructor_shadow_projections (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
@@ -474,6 +503,18 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         BEFORE DELETE ON incident_batch_constructor_shadow_ledger
         BEGIN
             SELECT RAISE(ABORT, 'incident batch constructor shadow ledger is append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_processed_calls_no_update
+        BEFORE UPDATE ON incident_batch_processed_calls
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch processed calls are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_processed_calls_no_delete
+        BEFORE DELETE ON incident_batch_processed_calls
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch processed calls are append-only');
         END;
 
         CREATE TRIGGER IF NOT EXISTS incident_batch_constructor_shadow_projections_no_update

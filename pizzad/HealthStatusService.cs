@@ -76,9 +76,18 @@ public sealed class HealthStatusService
             && !string.Equals(aiCompletionHealth.Status, "unknown", StringComparison.OrdinalIgnoreCase)
             ? aiCompletionHealth.Message
             : null;
-        var incidentAnalysisQueueHealth = await _database.GetIncidentAnalysisQueueHealthAsync(
-            _config.AiInsights.IncidentAnalysisMaximumAgeMinutes,
-            ct);
+        var replacementOwnsProduction =
+            _config.AiInsights.IncidentBatchCanaryPersistenceEnabled &&
+            IncidentBatchCanaryGate.AllowsPersistence(_config.AiInsights);
+        var incidentAnalysisQueueHealth = replacementOwnsProduction
+            ? await _database.GetIncidentBatchPipelineHealthAsync(
+                _config.AiInsights.IncidentBatchConstructorShadowRunId,
+                _config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId,
+                _config.AiInsights.IncidentAnalysisMaximumAgeMinutes,
+                ct)
+            : await _database.GetIncidentAnalysisQueueHealthAsync(
+                _config.AiInsights.IncidentAnalysisMaximumAgeMinutes,
+                ct);
         var incidentAnalysisBlockedReason = !string.Equals(incidentAnalysisQueueHealth.Status, "ok", StringComparison.OrdinalIgnoreCase)
             ? incidentAnalysisQueueHealth.Message
             : null;
