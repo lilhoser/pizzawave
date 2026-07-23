@@ -3024,6 +3024,57 @@ replacement authoritative for health and stop creation of new legacy incident
 jobs. Temporary shadows and canaries continue to preserve the legacy queue for
 rollback. The permanent switch defaults off.
 
+#### Serialized-projection readiness run T
+
+Commit `5f186c5` deployed to OT only. Non-mutating run
+`ot-batch-serialized-projection-20260723-t` began above no-backfill fence
+`1456990`. The production baseline taken after legacy execution had stopped was
+5,718 incidents, maximum incident ID 7,132, and 53,701 incident-operation
+audits. Constructor, relationship, verifier, source and observation isolation,
+continuous intake, and the exclusive inference window were enabled.
+Canary persistence and permanent replacement ownership remained off.
+
+The first batch processed eight calls into six grounded Review events and two
+unresolved observations. The second, candidate-backed batch processed 13
+calls, proposed one relationship, and queued it for independent verification.
+While that request was pending, intake logged that it was waiting rather than
+starting from a projection that the verifier might replace. The verifier
+rejected the relationship in 16.764 seconds with no validation error. It found
+that an administrative report-transfer call and a call about a person running
+through a bay described materially different contexts without an explicit
+cross-reference.
+
+A later intake batch then processed another 12 calls from the verifier-written
+projection. The latest projection retained the two rejected calls as separate
+events, contained no merged event for them, and had zero provisional
+associations. It did not resurrect the rejected relationship. Across the three
+batches, the durable cursor covered 33 calls. The run produced no canary
+commit, incident change, or incident-audit change.
+
+One relationship response in the third batch cited a nonexistent source-span
+index and failed closed. It created no verification request or projected
+association. This remains an observable recall loss from occasional model
+formatting error, not an unsafe membership decision. It is not justification
+for a static semantic fallback.
+
+Run T was stopped after the exact former race sequence had passed. OT legacy
+incident execution was restored; all replacement stages, canary persistence,
+and permanent ownership were disabled. The stopped configuration is preserved
+at
+`/etc/pizzawave/pizzad.json.post-ot-batch-serialized-projection-20260723-t-20260723T232227Z.bak`.
+OT `trunk-recorder` remained PID `2409838` with restart count 2. RPI was not
+deployed or reconfigured and retained `trunk-recorder` PID `884754` with
+restart count 0.
+
+The remaining production action is configuration, not another architecture
+experiment: choose a fresh permanent run ID and no-backfill fence, stop legacy
+incident execution, enable the complete constructor/relationship/verifier and
+isolated-source boundary, enable verified persistence, and explicitly enable
+permanent replacement ownership. That transition must retain the existing
+rollback backup and be monitored against a fresh production baseline. No
+additional static event rules, taxonomy, model training, or second production
+model is required.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
