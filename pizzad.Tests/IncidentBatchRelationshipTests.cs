@@ -437,6 +437,40 @@ public sealed class IncidentBatchRelationshipTests
         var context = IncidentBatchVerificationQueueContract.BuildContext(result.LedgerEntry.Entry, request);
         Assert.Equal(confirmed, context.Relationship);
 
+        var reviewConfirmation = new IncidentBatchConfirmationProposal(
+            "confirmation:review",
+            Now.AddSeconds(1),
+            "test-model",
+            IncidentBatchConfirmationPrompt.PromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                "event:update",
+                "candidate:crash",
+                IncidentBatchConfirmationDecisionKind.Review,
+                "The calls plausibly describe the same crash, but the later call omits the road.",
+                [new IncidentEventStateTranscriptCitation("transcript:2", "same white truck crash")],
+                [new IncidentEventStateTranscriptCitation("transcript:1", "White truck crashed")],
+                [],
+                ["The later transmission does not repeat County Road 725."])]);
+        var reviewResult = IncidentBatchVerificationQueueContract.BuildResult(
+            result.LedgerEntry.Entry,
+            request,
+            reviewConfirmation,
+            new IncidentBatchConfirmationExecutionContext(100, string.Empty),
+            Now.AddSeconds(2));
+        Assert.Equal(IncidentBatchVerificationOutcome.Review, reviewResult.Outcome);
+        var reviewProjection = IncidentBatchVerificationProjector.Apply(
+            result.Projection.Projection,
+            result.LedgerEntry.Entry,
+            request,
+            reviewResult,
+            "projection:review",
+            Now.AddSeconds(2));
+        Assert.Equal(2, reviewProjection.Events.Count);
+        var reviewedLink = Assert.Single(reviewProjection.ProvisionalAssociations);
+        Assert.Equal(IncidentBatchConfirmationContract.ReviewUncertaintyFloor, reviewedLink.Uncertainty);
+        Assert.Equal(reviewConfirmation.Decisions[0].VerificationStatement, reviewedLink.RelationshipStatement);
+        Assert.Equal(reviewConfirmation.Decisions[0].UnresolvedQuestions, reviewedLink.UnresolvedQuestions);
+
         var confirmation = new IncidentBatchConfirmationProposal(
             "confirmation:staged",
             Now.AddSeconds(1),
@@ -553,11 +587,15 @@ public sealed class IncidentBatchRelationshipTests
 
         Assert.Contains("For confirmed_membership", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("For provisional_association", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Choose verify, review, or reject", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("ASR text is noisy evidence, not authoritative spelling", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Timing alone remains insufficient", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("non-merging operator-visible association", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Information present on only one side is omission, not contradiction", prompt.UserPrompt, StringComparison.Ordinal);
-        Assert.Contains("do not manufacture a mismatch from a detail that is merely absent", prompt.UserPrompt, StringComparison.Ordinal);
-        Assert.Contains("pairs that explicitly lack a direct link", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not manufacture a mismatch from a detail that is merely absent", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Evidence spans and their exact quote text are owned by the application", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("evidence_id", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("\"review\"", schema, StringComparison.Ordinal);
         Assert.Contains("source_evidence_ids", schema, StringComparison.Ordinal);
         Assert.Contains("candidate_evidence_ids", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("\"source_evidence\"", schema, StringComparison.Ordinal);
@@ -565,6 +603,7 @@ public sealed class IncidentBatchRelationshipTests
         Assert.DoesNotContain("exact_quotes", schema, StringComparison.Ordinal);
         Assert.Contains($"\"maxLength\": {IncidentBatchRelationshipContract.MaximumTextLength}", schema, StringComparison.Ordinal);
         Assert.Contains(IncidentBatchConfirmationContract.ApplicationOwnedEvidenceToken, IncidentBatchConfirmationContract.ConfigurationToken, StringComparison.Ordinal);
+        Assert.Contains(IncidentBatchConfirmationContract.ReviewDowngradeToken, IncidentBatchConfirmationContract.ConfigurationToken, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -605,6 +644,7 @@ public sealed class IncidentBatchRelationshipTests
     [Theory]
     [InlineData(IncidentBatchConfirmationPrompt.PreviousPromptIdentity)]
     [InlineData(IncidentBatchConfirmationPrompt.PriorPromptIdentity)]
+    [InlineData(IncidentBatchConfirmationPrompt.ApplicationOwnedPromptIdentity)]
     public void PreviousRelationshipVerifierResultsRemainReadable(string promptIdentity)
     {
         var bundle = Bundle(

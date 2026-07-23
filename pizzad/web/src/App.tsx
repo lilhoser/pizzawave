@@ -9576,6 +9576,7 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
           <span><strong>{batchVerification.totals.enqueued.toLocaleString()}</strong> verification requests</span>
           <span><strong>{batchVerification.totals.pending.toLocaleString()}</strong> pending</span>
           <span><strong>{batchVerification.totals.verified.toLocaleString()}</strong> verified</span>
+          <span><strong>{batchVerification.totals.review.toLocaleString()}</strong> review</span>
           <span><strong>{batchVerification.totals.rejected.toLocaleString()}</strong> rejected</span>
           <span><strong>{batchVerification.totals.invalid.toLocaleString()}</strong> invalid</span>
           <span><strong>{batchVerification.totals.canaryPersisted.toLocaleString()}</strong> canary writes</span>
@@ -9584,13 +9585,14 @@ function IncidentMetricsPanel({ dashboard, rangeHours, refreshToken, onRangeHour
         </div>}
         {batchVerification && batchVerification.items.length > 0 && <div className="incident-shadow-list">{batchVerification.items.map(item => {
           const verified = item.outcome === "Verified";
+          const review = item.outcome === "Review";
           const invalid = item.outcome === "Invalid";
           const persisted = item.canaryOutcome === "Persisted";
           const conflicted = item.canaryOutcome === "Conflict";
           return <div className="incident-shadow-row" key={item.requestId}>
             <span className={`section-status ${persisted ? "ok" : invalid || conflicted ? "warning" : "neutral"}`}>{persisted ? "Persisted" : conflicted ? "Conflict" : item.outcome}</span>
             <span className="incident-shadow-identity"><strong>{item.sourceProposalToken} â†’ {item.candidateToken}</strong><small>{item.proposedDisposition} Â· {new Date(item.enqueuedAtUtc).toLocaleString()}</small>{item.canaryReason && <em>{item.canaryReason}</em>}{item.validationErrors.map(error => <small className="warning-text" key={error}>{error}</small>)}</span>
-            <span className="incident-shadow-activity"><strong>{persisted ? `Incident ${item.canaryIncidentId}` : verified ? "Verified, review-only" : item.outcome}</strong><small>{item.verifierMilliseconds ? `${(item.verifierMilliseconds / 1000).toFixed(1)}s` : "Awaiting verifier"}</small></span>
+            <span className="incident-shadow-activity"><strong>{persisted ? `Incident ${item.canaryIncidentId}` : review ? "Needs operator review" : verified ? "Verified, review-only" : item.outcome}</strong><small>{item.verifierMilliseconds ? `${(item.verifierMilliseconds / 1000).toFixed(1)}s` : "Awaiting verifier"}</small></span>
           </div>;
         })}</div>}
         <div className="incident-shadow-list">{batchShadow.attempts.map(attempt => {

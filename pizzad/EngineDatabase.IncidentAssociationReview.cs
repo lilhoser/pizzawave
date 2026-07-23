@@ -291,14 +291,13 @@ public sealed partial class EngineDatabase
             return [];
         var requests = await ListIncidentBatchVerificationRequestsAsync(runId, 1000, ct);
         var results = await ListIncidentBatchVerificationResultsAsync(runId, 1000, ct);
-        var verifiedRequestIds = results
-            .Where(item => item.Result.Outcome == IncidentBatchVerificationOutcome.Verified)
-            .Select(item => item.Result.RequestId)
-            .ToHashSet(StringComparer.Ordinal);
+        var outcomesByRequest = results
+            .ToDictionary(item => item.Result.RequestId, item => item.Result.Outcome, StringComparer.Ordinal);
         var eligibleRequests = requests
-            .Where(item =>
-                item.Request.ProposedDisposition == IncidentBatchEventDisposition.ProvisionalAssociation &&
-                verifiedRequestIds.Contains(item.Request.RequestId))
+            .Where(item => outcomesByRequest.TryGetValue(item.Request.RequestId, out var outcome) &&
+                           (outcome == IncidentBatchVerificationOutcome.Review ||
+                            outcome == IncidentBatchVerificationOutcome.Verified &&
+                            item.Request.ProposedDisposition == IncidentBatchEventDisposition.ProvisionalAssociation))
             .ToList();
         if (eligibleRequests.Count == 0)
             return [];

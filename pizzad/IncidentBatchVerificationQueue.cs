@@ -18,7 +18,8 @@ public enum IncidentBatchVerificationOutcome
 {
     Rejected,
     Verified,
-    Invalid
+    Invalid,
+    Review
 }
 
 public sealed record IncidentBatchVerificationResult(
@@ -180,18 +181,26 @@ public static class IncidentBatchVerificationQueueContract
             [context.Candidate],
             [context.Relationship],
             proposal);
-        var verified = validation.IsValid && IncidentBatchConfirmationContract.AcceptedVerifiedPairs(
-            entry.Bundle,
-            [context.Source],
-            [context.Candidate],
-            [context.Relationship],
-            proposal,
-            retainOnlyExactEvidence: true).Count == 1;
+        var acceptedDecisions = validation.IsValid
+            ? IncidentBatchConfirmationContract.AcceptedDecisions(
+                entry.Bundle,
+                [context.Source],
+                [context.Candidate],
+                [context.Relationship],
+                proposal,
+                retainOnlyExactEvidence: true)
+            : new Dictionary<string, IncidentBatchConfirmationDecision>(StringComparer.Ordinal);
+        acceptedDecisions.TryGetValue(
+            IncidentBatchConfirmationContract.RelationshipKey(context.Relationship),
+            out var acceptedDecision);
         var outcome = !validation.IsValid
             ? IncidentBatchVerificationOutcome.Invalid
-            : verified
-                ? IncidentBatchVerificationOutcome.Verified
-                : IncidentBatchVerificationOutcome.Rejected;
+            : acceptedDecision?.Decision switch
+            {
+                IncidentBatchConfirmationDecisionKind.Verify => IncidentBatchVerificationOutcome.Verified,
+                IncidentBatchConfirmationDecisionKind.Review => IncidentBatchVerificationOutcome.Review,
+                _ => IncidentBatchVerificationOutcome.Rejected
+            };
         return new IncidentBatchVerificationResult(
             $"{request.RequestId}:result:{proposal.ProposalId}",
             request.RequestId,
@@ -272,6 +281,35 @@ public static class IncidentBatchVerificationProjector
             (result.Outcome == IncidentBatchVerificationOutcome.Verified &&
              request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership))
             links.RemoveAll(item => item.AssociationId == associationId);
+
+        if (result.Outcome == IncidentBatchVerificationOutcome.Review && pendingLink is not null)
+        {
+            var acceptedDecision = IncidentBatchConfirmationContract.AcceptedDecisions(
+                    sourceEntry.Bundle,
+                    [context.Source],
+                    [context.Candidate],
+                    [context.Relationship],
+                    result.Proposal,
+                    retainOnlyExactEvidence: true)
+                .Values
+                .Single();
+            var reviewed = IncidentBatchConfirmationContract.ApplyAcceptedDecision(
+                context.Relationship,
+                acceptedDecision);
+            links = links
+                .Select(item => item.AssociationId == associationId
+                    ? item with
+                    {
+                        RelationshipStatement = reviewed.RelationshipStatement,
+                        Uncertainty = reviewed.Uncertainty,
+                        NewObservationEvidence = reviewed.SourceEvidence,
+                        CandidateEvidence = reviewed.CandidateEvidence,
+                        AlternativeInterpretations = reviewed.AlternativeInterpretations,
+                        UnresolvedQuestions = reviewed.UnresolvedQuestions
+                    }
+                    : item)
+                .ToList();
+        }
 
         if (result.Outcome == IncidentBatchVerificationOutcome.Verified &&
             request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership &&

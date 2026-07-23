@@ -2574,12 +2574,30 @@ locations, or operational situations. This is a small operator-style audit,
 not a statistically complete accuracy benchmark, but the repeated failure
 shape is clear: verifier v4 is fail-closed and citation-safe while remaining
 too literal about ASR variation and context carried by follow-up calls. The
-next change should correct that general reasoning boundary and route
-well-supported but still uncertain continuity to Review rather than forcing a
-hard rejection. It must not add phrase lists, address rules, talkgroup rules,
-categories, regex membership checks, or other static semantic authority.
-Another production cutover remains blocked until a bounded shadow demonstrates
-the corrected behavior without reducing citation safety.
+verifier v5 correction adds a third application-owned outcome: `review`.
+`verify` retains the proposed disposition, `review` preserves a non-merging
+operator association and downgrades a proposed confirmed membership when
+necessary, and `reject` removes the association. A Review decision must cite
+both source boundaries and state its remaining uncertainty. This changes the
+general reasoning boundary without adding phrase lists, address rules,
+talkgroup rules, categories, regex membership checks, or other static semantic
+authority.
+
+The exact seven live relationship requests from the three relevant run-M
+batches were replayed read-only against the same
+`qwen/qwen3.6-35b-a3b@q8_0` model. The Altima/`Ultima` pair changed from reject
+to a verified provisional link. The explicit accident-with-injuries/Narcan
+follow-up changed to Review. The uncertain `shooter down` continuation changed
+from a proposed confirmed membership to Review. Three unrelated controls
+remained rejected. The weaker police Narcan transmission, which did not
+mention the accident, also remained rejected. All seven decisions used valid
+application-owned evidence and produced zero contract errors. The full test
+suite passes with 711 tests, including asynchronous projection and operator
+Review coverage for a downgraded confirmed proposal.
+
+Another production cutover remains blocked until a bounded OT shadow
+demonstrates the corrected behavior on new traffic without reducing citation
+safety.
 
 The run stopped at approximately 17:59 UTC. Constructor, relationship,
 verifier, exclusive-window, and canary switches are off, and OT legacy

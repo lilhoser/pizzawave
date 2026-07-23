@@ -8,7 +8,8 @@ namespace pizzad;
 public enum IncidentBatchConfirmationDecisionKind
 {
     Reject,
-    Verify
+    Verify,
+    Review
 }
 
 public sealed record IncidentBatchConfirmationDecision(
@@ -149,9 +150,13 @@ public interface IIncidentBatchConfirmationVerifier
 public static class IncidentBatchConfirmationContract
 {
     public const string LegacyConfigurationToken = "confirmation=independent-verifier-v1";
+    public const string PreviousIndependentConfigurationToken = "relationship-verification=independent-v2";
+    public const string ReviewDecisionConfigurationToken = "relationship-verification=independent-v3";
     public const string PerCitationEvidenceToken = "evidence=per-citation-v1";
     public const string ApplicationOwnedEvidenceToken = "evidence=application-spans-v1";
-    public const string ConfigurationToken = $"relationship-verification=independent-v2;{ApplicationOwnedEvidenceToken}";
+    public const string ReviewDowngradeToken = "confirmation=review-downgrade-v1";
+    public const string ConfigurationToken = $"{ReviewDecisionConfigurationToken};{ApplicationOwnedEvidenceToken};{ReviewDowngradeToken}";
+    public const double ReviewUncertaintyFloor = 0.5;
 
     public static IncidentEventStateContractValidationResult ValidateProposal(
         IncidentEventStateObservationBundle bundle,
@@ -184,8 +189,28 @@ public static class IncidentBatchConfirmationContract
         IncidentBatchConfirmationProposal proposal,
         bool retainOnlyExactEvidence = false)
     {
+        return AcceptedDecisions(
+                bundle,
+                sources,
+                candidates,
+                relationships,
+                proposal,
+                retainOnlyExactEvidence)
+            .Where(item => item.Value.Decision == IncidentBatchConfirmationDecisionKind.Verify)
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public static IReadOnlyDictionary<string, IncidentBatchConfirmationDecision> AcceptedDecisions(
+        IncidentEventStateObservationBundle bundle,
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        IReadOnlyList<IncidentBatchRelationship> relationships,
+        IncidentBatchConfirmationProposal proposal,
+        bool retainOnlyExactEvidence = false)
+    {
         if (ValidateHeader(proposal).Count > 0)
-            return new HashSet<string>(StringComparer.Ordinal);
+            return new Dictionary<string, IncidentBatchConfirmationDecision>(StringComparer.Ordinal);
         var expected = relationships
             .Select(RelationshipKey)
             .ToHashSet(StringComparer.Ordinal);
@@ -195,15 +220,33 @@ public static class IncidentBatchConfirmationContract
             .Select(group => group.Key)
             .ToHashSet(StringComparer.Ordinal);
         var decisions = proposal.Decisions
-            .Where(item => item.Decision == IncidentBatchConfirmationDecisionKind.Verify)
             .Where(item => expected.Contains(DecisionKey(item)))
             .Where(item => !duplicate.Contains(DecisionKey(item)));
         if (retainOnlyExactEvidence)
             decisions = decisions.Select(item => RetainExactEvidence(bundle, sources, candidates, item));
         return decisions
             .Where(item => ValidateDecision(bundle, sources, candidates, expected, item).Count == 0)
-            .Select(DecisionKey)
-            .ToHashSet(StringComparer.Ordinal);
+            .ToDictionary(DecisionKey, item => item, StringComparer.Ordinal);
+    }
+
+    public static IncidentBatchRelationship ApplyAcceptedDecision(
+        IncidentBatchRelationship relationship,
+        IncidentBatchConfirmationDecision decision)
+    {
+        if (decision.Decision == IncidentBatchConfirmationDecisionKind.Reject)
+            throw new InvalidOperationException("A rejected confirmation decision cannot be applied.");
+        if (decision.Decision == IncidentBatchConfirmationDecisionKind.Verify)
+            return relationship;
+        return relationship with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ProvisionalAssociation,
+            RelationshipStatement = decision.VerificationStatement,
+            Uncertainty = Math.Max(relationship.Uncertainty, ReviewUncertaintyFloor),
+            SourceEvidence = decision.SourceEvidence,
+            CandidateEvidence = decision.CandidateEvidence,
+            AlternativeInterpretations = decision.CounterEvidence,
+            UnresolvedQuestions = decision.UnresolvedQuestions
+        };
     }
 
     public static string RelationshipKey(IncidentBatchRelationship relationship) =>
@@ -215,11 +258,13 @@ public static class IncidentBatchConfirmationContract
     public static bool UsesIndependentVerifier(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Any(token => string.Equals(token, LegacyConfigurationToken, StringComparison.Ordinal) ||
-                          string.Equals(token, "relationship-verification=independent-v2", StringComparison.Ordinal));
+                          string.Equals(token, PreviousIndependentConfigurationToken, StringComparison.Ordinal) ||
+                          string.Equals(token, ReviewDecisionConfigurationToken, StringComparison.Ordinal));
 
     public static bool VerifiesAllRelationships(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Contains("relationship-verification=independent-v2", StringComparer.Ordinal);
+            .Any(token => string.Equals(token, PreviousIndependentConfigurationToken, StringComparison.Ordinal) ||
+                          string.Equals(token, ReviewDecisionConfigurationToken, StringComparison.Ordinal));
 
     public static bool UsesPerCitationEvidence(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -265,6 +310,7 @@ public static class IncidentBatchConfirmationContract
         RequireValue(proposal.ProposalId, "confirmation proposal id", errors);
         RequireValue(proposal.ModelIdentity, "confirmation model identity", errors);
         if (!string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.ApplicationOwnedPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.LegacyPromptIdentity, StringComparison.Ordinal))
@@ -286,6 +332,8 @@ public static class IncidentBatchConfirmationContract
         RequireValue(decision.SourceProposalToken, "confirmation source proposal token", errors);
         RequireValue(decision.CandidateToken, "confirmation candidate token", errors);
         RequireValue(decision.VerificationStatement, $"confirmation statement for '{DisplayKey(key)}'", errors);
+        if (decision.VerificationStatement?.Length > IncidentBatchRelationshipContract.MaximumTextLength)
+            errors.Add($"confirmation statement for '{DisplayKey(key)}' exceeds {IncidentBatchRelationshipContract.MaximumTextLength} characters");
         if (!Enum.IsDefined(decision.Decision))
             errors.Add($"confirmation '{DisplayKey(key)}' has an invalid decision");
         if (!expected.Contains(key))
@@ -296,10 +344,24 @@ public static class IncidentBatchConfirmationContract
         ValidateCitations(bundle, candidate.ObservationIds, decision.CandidateEvidence, "confirmation candidate evidence", errors);
         ValidateStrings(decision.CounterEvidence, "confirmation counterevidence", errors);
         ValidateStrings(decision.UnresolvedQuestions, "confirmation unresolved question", errors);
+        if (decision.SourceEvidence.Count > IncidentBatchRelationshipContract.MaximumEvidenceSpansPerSide)
+            errors.Add($"confirmation source evidence contains more than {IncidentBatchRelationshipContract.MaximumEvidenceSpansPerSide} spans");
+        if (decision.CandidateEvidence.Count > IncidentBatchRelationshipContract.MaximumEvidenceSpansPerSide)
+            errors.Add($"confirmation candidate evidence contains more than {IncidentBatchRelationshipContract.MaximumEvidenceSpansPerSide} spans");
+        if (decision.CounterEvidence.Count > IncidentBatchRelationshipContract.MaximumAlternatives)
+            errors.Add($"confirmation contains more than {IncidentBatchRelationshipContract.MaximumAlternatives} counterevidence items");
+        if (decision.UnresolvedQuestions.Count > IncidentBatchRelationshipContract.MaximumUnresolvedQuestions)
+            errors.Add($"confirmation contains more than {IncidentBatchRelationshipContract.MaximumUnresolvedQuestions} unresolved questions");
         if (decision.Decision == IncidentBatchConfirmationDecisionKind.Verify &&
             (decision.CounterEvidence.Count > 0 || decision.UnresolvedQuestions.Count > 0))
         {
             errors.Add($"verified confirmation '{DisplayKey(key)}' cannot retain counterevidence or unresolved questions");
+        }
+        if (decision.Decision == IncidentBatchConfirmationDecisionKind.Review &&
+            decision.CounterEvidence.Count == 0 &&
+            decision.UnresolvedQuestions.Count == 0)
+        {
+            errors.Add($"review confirmation '{DisplayKey(key)}' must explain its remaining uncertainty");
         }
         return errors;
     }
@@ -338,6 +400,8 @@ public static class IncidentBatchConfirmationContract
         foreach (var value in values)
         {
             RequireValue(value, owner, errors);
+            if (value?.Length > IncidentBatchRelationshipContract.MaximumTextLength)
+                errors.Add($"{owner} exceeds {IncidentBatchRelationshipContract.MaximumTextLength} characters");
             if (!seen.Add(value ?? string.Empty))
                 errors.Add($"duplicate {owner}");
         }
@@ -358,7 +422,8 @@ public static class IncidentBatchConfirmationPrompt
     public const string LegacyPromptIdentity = "incident-batch-confirmation-verifier-v1";
     public const string PreviousPromptIdentity = "incident-batch-relationship-verifier-v2";
     public const string PriorPromptIdentity = "incident-batch-relationship-verifier-v3";
-    public const string PromptIdentity = "incident-batch-relationship-verifier-v4-application-evidence";
+    public const string ApplicationOwnedPromptIdentity = "incident-batch-relationship-verifier-v4-application-evidence";
+    public const string PromptIdentity = "incident-batch-relationship-verifier-v5-review-downgrade";
 
     public static IncidentBatchConfirmationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -402,20 +467,22 @@ public static class IncidentBatchConfirmationPrompt
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
         user.AppendLine("Independently test every proposed relationship. The earlier proposer is untrusted and may have invented a match, promoted generic similarity, or ignored contradictions.");
-        user.AppendLine("For confirmed_membership, use verify when exact transcript evidence from both sides supports one unfolding real-world event and no material contradiction remains.");
+        user.AppendLine("Choose verify, review, or reject. Review is a non-merging operator-visible association; it never grants event membership.");
+        user.AppendLine("For confirmed_membership, use verify when exact transcript evidence from both sides supports one unfolding real-world event and no material contradiction remains. Use review when specific continuity is plausible but a material identity question prevents safe membership.");
         user.AppendLine("Radio follow-ups are often elliptical: a later transmission need not repeat every address component, clinical detail, vehicle detail, or circumstance from an earlier transmission. Information present on only one side is omission, not contradiction.");
-        user.AppendLine("A sufficiently specific shared identity across both sides can establish membership even when one side adds detail. Judge the combined identity evidence and chronology, rather than requiring each side to restate the other verbatim.");
-        user.AppendLine("For provisional_association, use verify only when exact evidence establishes a specific operational connection or cross-reference between the sides even though it does not establish shared event membership. Reject topical resemblance, shared words, concurrent but independent responses, and pairs that explicitly lack a direct link.");
-        user.AppendLine("Shared generic event type, response language, color, age range, radio timing, retrieval rank, or broad location type is insufficient.");
-        user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, and chronology. Reject explicit conflicts and unresolved material mismatches; do not manufacture a mismatch from a detail that is merely absent on one side.");
-        user.AppendLine("For verify, counter_evidence and unresolved_questions about whether the claimed relationship itself exists must both be empty. Otherwise reject.");
-        user.AppendLine("Both decisions must select evidence_id values from both source boundaries. Evidence spans and their exact quote text are owned by the application; return only their IDs and never generate, copy, edit, or paraphrase quote text.");
+        user.AppendLine("ASR text is noisy evidence, not authoritative spelling. Plausible near-homophones, partial identifiers, and differently transcribed fragments are not matches or contradictions by themselves. Evaluate whether multiple independent details converge, and put any remaining ambiguity in review.");
+        user.AppendLine("A sufficiently specific shared identity or a coherent sequence of dispatch and follow-up facts can establish continuity even when one side adds detail. Judge the combined evidence and chronology rather than requiring each side to restate the other verbatim. Timing alone remains insufficient.");
+        user.AppendLine("For provisional_association, use verify when exact evidence establishes a specific operational connection or cross-reference even though it does not establish shared event membership. Use review when exact evidence supports a concrete plausible connection but a material question remains. Both outcomes remain non-merging Review links.");
+        user.AppendLine("Reject topical resemblance, isolated shared words, concurrent but independent responses, explicit conflicts, and proposals with no specific operational connection. Shared generic event type, response language, color, age range, radio timing, retrieval rank, or broad location type is insufficient.");
+        user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, operational progression, and chronology. Do not manufacture a mismatch from a detail that is merely absent or plausibly mistranscribed.");
+        user.AppendLine("For verify, counter_evidence and unresolved_questions must both be empty. For review, include at least one concrete unresolved question or counterevidence item explaining why membership is not safe. Reject only when the specific relationship itself is unsupported or contradicted.");
+        user.AppendLine("Every decision must select evidence_id values from both source boundaries. Evidence spans and their exact quote text are owned by the application; return only their IDs and never generate, copy, edit, or paraphrase quote text.");
         user.AppendLine("Rejection prevents a merge but does not prove the events are unrelated; each source group remains independently reviewable.");
         user.AppendLine();
         user.AppendLine("Proposed relationships:");
         user.AppendLine(JsonSerializer.Serialize(pairs, EngineConfig.JsonOptions()));
         return new IncidentBatchConfirmationPromptPayload(
-            "You are an independent fail-closed verifier for proposed incident relationships. You cannot construct events, write quote text, or alter evidence. Application code owns evidence spans and state transitions.",
+            "You are an independent evidence-bounded verifier for proposed incident relationships. You cannot construct events, write quote text, or alter evidence. Application code owns evidence spans and state transitions. Preserve plausible but uncertain specific continuity as review instead of forcing either membership or rejection.",
             user.ToString(),
             ResponseFormat(bundle, sources, candidates, relationships, evidenceCatalog));
     }
@@ -445,7 +512,7 @@ public static class IncidentBatchConfirmationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_verifier_v4",
+                name = "pizzawave_incident_batch_relationship_verifier_v5",
                 strict = true,
                 schema = new
                 {
@@ -466,7 +533,7 @@ public static class IncidentBatchConfirmationPrompt
                                 {
                                     source_proposal_token = new { type = "string", @enum = relationships.Select(item => item.SourceProposalToken).Distinct(StringComparer.Ordinal).ToArray() },
                                     candidate_token = new { type = "string", @enum = relationships.Select(item => item.CandidateToken).Distinct(StringComparer.Ordinal).ToArray() },
-                                    decision = new { type = "string", @enum = new[] { "verify", "reject" } },
+                                    decision = new { type = "string", @enum = new[] { "verify", "review", "reject" } },
                                     verification_statement = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength },
                                     source_evidence_ids = EvidenceIds(sourceEvidenceIds),
                                     candidate_evidence_ids = EvidenceIds(candidateEvidenceIds),
@@ -548,6 +615,7 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
                 item.Decision switch
                 {
                     "verify" => IncidentBatchConfirmationDecisionKind.Verify,
+                    "review" => IncidentBatchConfirmationDecisionKind.Review,
                     "reject" => IncidentBatchConfirmationDecisionKind.Reject,
                     _ => throw new InvalidDataException($"Unsupported confirmation decision '{item.Decision}'.")
                 },

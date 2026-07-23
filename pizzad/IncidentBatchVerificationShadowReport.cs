@@ -4,6 +4,7 @@ public sealed record IncidentBatchVerificationShadowTotalsDto(
     int Enqueued,
     int Pending,
     int Verified,
+    int Review,
     int Rejected,
     int Invalid,
     int CanaryPersisted,
@@ -43,7 +44,7 @@ public sealed partial class EngineDatabase
     {
         runId = runId.Trim();
         if (string.IsNullOrWhiteSpace(runId))
-            return new IncidentBatchVerificationShadowReportDto(enabled, string.Empty, new(0, 0, 0, 0, 0, 0, 0, 0, 0), []);
+            return new IncidentBatchVerificationShadowReportDto(enabled, string.Empty, new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), []);
         var requests = await ListIncidentBatchVerificationRequestsAsync(runId, 1000, ct);
         var results = await ListIncidentBatchVerificationResultsAsync(runId, 1000, ct);
         var commits = await ListIncidentBatchCanaryCommitsAsync(runId, 1000, ct);
@@ -54,6 +55,7 @@ public sealed partial class EngineDatabase
             requests.Count,
             requests.Count(item => !resultsByRequest.ContainsKey(item.Request.RequestId)),
             completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Verified),
+            completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Review),
             completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Rejected),
             completed.Count(item => item.Outcome == IncidentBatchVerificationOutcome.Invalid),
             commits.Count(item => item.Commit.Outcome == IncidentBatchCanaryCommitOutcome.Persisted),

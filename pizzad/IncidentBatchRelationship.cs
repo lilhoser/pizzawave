@@ -230,7 +230,7 @@ public static class IncidentBatchRelationshipContract
         var verifiedInput = verifiesAll
             ? accepted
             : accepted.Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership).ToList();
-        var verifiedPairs = IncidentBatchConfirmationContract.AcceptedVerifiedPairs(
+        var acceptedDecisions = IncidentBatchConfirmationContract.AcceptedDecisions(
             entry.Bundle,
             sources,
             entry.Candidates,
@@ -238,8 +238,16 @@ public static class IncidentBatchRelationshipContract
             entry.ConfirmationProposal,
             IncidentBatchConfirmationContract.UsesPerCitationEvidence(entry.Execution.ConfigurationIdentity));
         return accepted
-            .Where(item => (item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation && !verifiesAll) ||
-                           verifiedPairs.Contains(IncidentBatchConfirmationContract.RelationshipKey(item)))
+            .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation && !verifiesAll ||
+                           acceptedDecisions.TryGetValue(IncidentBatchConfirmationContract.RelationshipKey(item), out var decision) &&
+                           decision.Decision != IncidentBatchConfirmationDecisionKind.Reject)
+            .Select(item =>
+            {
+                if (!verifiesAll)
+                    return item;
+                var decision = acceptedDecisions[IncidentBatchConfirmationContract.RelationshipKey(item)];
+                return IncidentBatchConfirmationContract.ApplyAcceptedDecision(item, decision);
+            })
             .ToList();
     }
 

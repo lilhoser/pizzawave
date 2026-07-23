@@ -216,6 +216,39 @@ public sealed class IncidentBatchCanaryPersistenceTests
         Assert.Equal(0, reviewed.PendingGroupCount);
     }
 
+    [Fact]
+    public async Task ReviewedConfirmedMembershipIsDowngradedIntoOperatorReviewWithoutPersistingIncident()
+    {
+        await using var fixture = await CanaryFixture.CreateAsync();
+        var staged = await fixture.StageReviewedMembershipAsync();
+        Assert.Equal(IncidentBatchVerificationOutcome.Review, staged.Result.Outcome);
+        Assert.Equal(2, staged.Projection.Events.Count);
+        Assert.Single(staged.Projection.ProvisionalAssociations);
+
+        await fixture.Database.AppendIncidentBatchVerificationResultAsync(
+            staged.BaseProjectionSequence,
+            staged.SourceEntry,
+            staged.Request,
+            staged.Result,
+            staged.Projection,
+            CancellationToken.None);
+
+        var report = await fixture.Database.GetIncidentAssociationReviewReportAsync(
+            true,
+            fixture.RunId,
+            fixture.Now.AddMinutes(-5).ToUnixTimeSeconds(),
+            fixture.Now.AddMinutes(5).ToUnixTimeSeconds(),
+            CancellationToken.None);
+        var group = Assert.Single(report.Groups);
+        Assert.Equal("review", group.Placement);
+        Assert.Equal("pending", group.Status);
+        Assert.Equal([fixture.PriorCallId, fixture.SourceCallId], group.Calls.Select(call => call.CallId).Order());
+        Assert.Empty(await fixture.Database.ListIncidentsAsync(
+            fixture.Now.AddMinutes(-5).ToUnixTimeSeconds(),
+            fixture.Now.AddMinutes(5).ToUnixTimeSeconds(),
+            CancellationToken.None));
+    }
+
     private sealed record StagedVerification(
         long BaseProjectionSequence,
         IncidentBatchLedgerEntry SourceEntry,
@@ -307,16 +340,25 @@ public sealed class IncidentBatchCanaryPersistenceTests
         public Task<StagedVerification> StageVerifiedMembershipAsync() =>
             StageVerificationAsync(
                 IncidentBatchRelationshipDisposition.ConfirmedMembership,
-                0);
+                0,
+                IncidentBatchConfirmationDecisionKind.Verify);
 
         public Task<StagedVerification> StageVerifiedProvisionalAssociationAsync() =>
             StageVerificationAsync(
                 IncidentBatchRelationshipDisposition.ProvisionalAssociation,
-                0.4);
+                0.4,
+                IncidentBatchConfirmationDecisionKind.Verify);
+
+        public Task<StagedVerification> StageReviewedMembershipAsync() =>
+            StageVerificationAsync(
+                IncidentBatchRelationshipDisposition.ConfirmedMembership,
+                0,
+                IncidentBatchConfirmationDecisionKind.Review);
 
         private async Task<StagedVerification> StageVerificationAsync(
             IncidentBatchRelationshipDisposition disposition,
-            double uncertainty)
+            double uncertainty,
+            IncidentBatchConfirmationDecisionKind confirmationDecision)
         {
             var priorObservationId = $"call:{PriorCallId}";
             var sourceObservationId = $"call:{SourceCallId}";
@@ -438,12 +480,16 @@ public sealed class IncidentBatchCanaryPersistenceTests
                 [new IncidentBatchConfirmationDecision(
                     "event:source",
                     candidate.CandidateToken,
-                    IncidentBatchConfirmationDecisionKind.Verify,
-                    "Both transcripts explicitly identify the same white-truck crash.",
+                    confirmationDecision,
+                    confirmationDecision == IncidentBatchConfirmationDecisionKind.Review
+                        ? "The calls plausibly describe the same crash, but the later call omits the road."
+                        : "Both transcripts explicitly identify the same white-truck crash.",
                     [new IncidentEventStateTranscriptCitation("transcript:source", "white truck crash")],
                     [new IncidentEventStateTranscriptCitation("transcript:prior", "White truck crashed")],
                     [],
-                    [])]);
+                    confirmationDecision == IncidentBatchConfirmationDecisionKind.Review
+                        ? ["The later transmission does not repeat County Road 725."]
+                        : [])]);
             var result = IncidentBatchVerificationQueueContract.BuildResult(
                 batch.LedgerEntry.Entry,
                 request,
