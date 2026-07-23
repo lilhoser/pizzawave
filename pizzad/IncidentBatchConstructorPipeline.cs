@@ -280,6 +280,29 @@ public static class IncidentBatchContract
             RequireValue(singleton.ObservationId, "singleton observation id", errors);
             RequireValue(singleton.ProjectionEventId, "singleton projection event id", errors);
         }
+        var singletonByObservation = entry.SingletonEvents.ToDictionary(
+            item => item.ObservationId,
+            StringComparer.Ordinal);
+        foreach (var candidate in entry.Candidates.Where(item =>
+                     item.ObservationIds.Any(entry.NewObservationIds.Contains)))
+        {
+            if (!candidate.ObservationIds.All(singletonByObservation.ContainsKey))
+            {
+                errors.Add(
+                    $"same-batch candidate '{candidate.CandidateToken}' mixes new and prior observations");
+                continue;
+            }
+            var expectedProjectionEventId =
+                singletonByObservation[candidate.ObservationIds[0]].ProjectionEventId;
+            if (!string.Equals(
+                    candidate.ProjectionEventId,
+                    expectedProjectionEventId,
+                    StringComparison.Ordinal))
+            {
+                errors.Add(
+                    $"same-batch candidate '{candidate.CandidateToken}' does not use its application-owned singleton projection");
+            }
+        }
         RequireValue(entry.Execution.SoftwareVersion, "batch execution software version", errors);
         RequireValue(entry.Execution.ConfigurationIdentity, "batch execution configuration identity", errors);
         if (entry.Execution.ProposerDurationMilliseconds < 0)
@@ -300,9 +323,9 @@ public static class IncidentBatchContract
             errors.Add("batch ledger proposal validation errors do not match deterministic validation");
         if (entry.RelationshipProposal is not null)
         {
-            var sources = AcceptedEvents(entry)
-                .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-                .ToList();
+            var sources = IncidentBatchRelationshipContract.BuildSources(
+                entry.NewObservationIds,
+                AcceptedEvents(entry));
             var relationshipValidation = IncidentBatchRelationshipContract.ValidateProposal(
                 entry.Bundle,
                 sources,
@@ -652,9 +675,6 @@ public static class IncidentBatchProjector
         if (entry.RelationshipProposal is not null)
         {
             var acceptedSourceEvents = IncidentBatchContract.AcceptedEvents(entry);
-            var acceptedSources = acceptedSourceEvents
-                .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-                .ToList();
             var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(entry);
             var sourceEventsByToken = acceptedSourceEvents
                 .ToDictionary(item => item.ProposalToken, StringComparer.Ordinal);
@@ -849,30 +869,38 @@ public sealed class IncidentBatchCoordinator
         IncidentBatchConfirmationProposal? confirmationProposal = null;
         IReadOnlyList<string>? confirmationValidationErrors = null;
         IncidentBatchConfirmationExecutionContext? confirmationExecution = null;
+        var relationshipCandidates = candidates;
         if (_relationshipProposer is not null)
         {
-            var sources = IncidentBatchContract.AcceptedEvents(
+            var acceptedEvents = IncidentBatchContract.AcceptedEvents(
                     bundle,
                     newObservationIds,
                     [],
                     proposal,
                     proposalValidation.Errors,
                     request.ConfigurationIdentity)
-                .Where(item => item.Disposition is IncidentBatchEventDisposition.NewEvent or IncidentBatchEventDisposition.ProvisionalEvent)
-                .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
                 .ToList();
+            var sources = IncidentBatchRelationshipContract.BuildSources(
+                newObservationIds,
+                acceptedEvents
+                    .Where(item => item.Disposition is IncidentBatchEventDisposition.NewEvent or IncidentBatchEventDisposition.ProvisionalEvent)
+                    .ToList());
+            relationshipCandidates = IncidentBatchRelationshipContract.AddOrderedSameBatchCandidates(
+                sources,
+                request.SingletonEvents,
+                candidates);
             var relationshipTimer = Stopwatch.StartNew();
             var relationshipError = string.Empty;
             try
             {
-                relationshipProposal = sources.Count == 0 || candidates.Count == 0
+                relationshipProposal = sources.Count == 0 || relationshipCandidates.Count == 0
                     ? new IncidentBatchRelationshipProposal(
                         $"application:no-relationship-input:{request.LedgerEntryId}",
                         now,
                         "application",
                         IncidentBatchRelationshipPrompt.PromptIdentity,
                         [])
-                    : await _relationshipProposer.ProposeAsync(bundle, sources, candidates, ct);
+                    : await _relationshipProposer.ProposeAsync(bundle, sources, relationshipCandidates, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -891,13 +919,17 @@ public sealed class IncidentBatchCoordinator
             relationshipValidationErrors = IncidentBatchRelationshipContract.ValidateProposal(
                 bundle,
                 sources,
-                candidates,
+                relationshipCandidates,
                 relationshipProposal).Errors;
             relationshipExecution = new IncidentBatchRelationshipExecutionContext(relationshipTimer.ElapsedMilliseconds, relationshipError);
 
             if (_confirmationVerifier is not null)
             {
-                var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(bundle, sources, candidates, relationshipProposal);
+                var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(
+                    bundle,
+                    sources,
+                    relationshipCandidates,
+                    relationshipProposal);
                 var relationshipsToVerify = acceptedRelationships;
                 var confirmationTimer = Stopwatch.StartNew();
                 var confirmationError = string.Empty;
@@ -910,7 +942,12 @@ public sealed class IncidentBatchCoordinator
                             "application",
                             IncidentBatchConfirmationPrompt.PromptIdentity,
                             [])
-                        : await _confirmationVerifier.VerifyAsync(bundle, sources, candidates, relationshipsToVerify, ct);
+                        : await _confirmationVerifier.VerifyAsync(
+                            bundle,
+                            sources,
+                            relationshipCandidates,
+                            relationshipsToVerify,
+                            ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
@@ -929,7 +966,7 @@ public sealed class IncidentBatchCoordinator
                 confirmationValidationErrors = IncidentBatchConfirmationContract.ValidateProposal(
                     bundle,
                     sources,
-                    candidates,
+                    relationshipCandidates,
                     relationshipsToVerify,
                     confirmationProposal).Errors;
                 confirmationExecution = new IncidentBatchConfirmationExecutionContext(confirmationTimer.ElapsedMilliseconds, confirmationError);
@@ -942,7 +979,7 @@ public sealed class IncidentBatchCoordinator
             bundle,
             newObservationIds,
             request.SingletonEvents,
-            candidates,
+            relationshipCandidates,
             proposal,
             proposalValidation.Errors,
             new IncidentBatchExecutionContext(

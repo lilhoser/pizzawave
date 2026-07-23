@@ -67,9 +67,9 @@ public static class IncidentBatchVerificationQueueContract
 
         if (entry.RelationshipProposal is not null)
         {
-            var sources = IncidentBatchContract.AcceptedEvents(entry)
-                .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-                .ToList();
+            var sources = IncidentBatchRelationshipContract.BuildSources(
+                entry.NewObservationIds,
+                IncidentBatchContract.AcceptedEvents(entry));
             return IncidentBatchRelationshipContract.AcceptedRelationships(
                     entry.Bundle,
                     sources,
@@ -141,9 +141,9 @@ public static class IncidentBatchVerificationQueueContract
         {
             var stagedRelationship = IncidentBatchRelationshipContract.AcceptedRelationships(
                     entry.Bundle,
-                    IncidentBatchContract.AcceptedEvents(entry)
-                        .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-                        .ToList(),
+                    IncidentBatchRelationshipContract.BuildSources(
+                        entry.NewObservationIds,
+                        IncidentBatchContract.AcceptedEvents(entry)),
                     entry.Candidates,
                     entry.RelationshipProposal)
                 .Single(item =>

@@ -2712,6 +2712,59 @@ configurations are preserved at
 and
 `/etc/pizzawave/pizzad.json.post-ot-batch-verifier-review-shadow-20260723-n-20260723T191842Z.bak`.
 
+#### Final-readiness run O and same-batch relationship boundary
+
+Commit `79d01a2` was deployed to OT only. Run
+`ot-batch-final-readiness-shadow-20260723-o` began at approximately
+2026-07-23 21:05:46 UTC above no-backfill fence `1455702`. OT legacy incident
+execution was paused, the source constructor, relationship stage, independent
+verifier, observation isolation, source isolation, continuous intake, and
+exclusive inference window were enabled, and canary persistence remained off.
+The production baseline was 5,712 incidents, maximum incident ID 7,126, and
+53,661 incident-operation audits. RPI remained on the legacy pipeline.
+
+The run was stopped early after three batches and 32 observations because the
+exact live evidence exposed an architectural recall hole. Calls `1455716`,
+`1455720`, and `1455726` respectively requested a wrecker for two vehicles,
+gave the second vehicle's tag, and identified vehicle one. They arrived in the
+same observation-isolated batch. The constructor correctly retained each as an
+independent grounded source event, but the relationship stage compared new
+source events only with prior-projection candidates. It never compared
+independent source events inside the same batch. A later transmission,
+`1455730`, said all parties were refusing medical treatment; it was compared
+with the prior candidates but not admitted. The latter relationship is
+uncertain, but the first three calls prove the structural omission independent
+of any semantic judgment about the later update.
+
+The run produced no relationship requests, model errors, canary writes,
+production incident changes, or audit changes. One constructor event was
+rejected because its model-produced quotation was not exact. OT legacy
+incident execution was restored at approximately 21:17 UTC. OT health returned
+to `ok`, and `trunk-recorder` retained PID `3411589` with one historical
+restart. The stopped-run configuration is preserved at
+`/etc/pizzawave/pizzad.json.post-ot-batch-final-readiness-shadow-20260723-o-20260723T211659Z.bak`.
+
+The correction keeps observation isolation and the independent verifier. After
+source construction, application code now exposes each earlier accepted
+source singleton as an opaque same-batch candidate for later source groups.
+Allowed pair direction follows only the application-owned batch order, so every
+same-batch pair can be considered once without cycles. The relationship model
+still owns semantic admission, exact citations remain mandatory, and every
+admitted relationship still enters independent verification. Peer candidate
+tokens and projection identities are application-owned; deterministic
+validation rejects self-links, reverse links, mixed prior/new candidates, and
+any peer candidate that does not resolve to its source singleton. No address,
+phrase, category, talkgroup, system, label, regex, or other static semantic
+membership rule was added.
+
+The focused relationship, projection, queue, and canary tests pass, including
+a three-call two-vehicle sequence whose constructor proposals are deliberately
+returned out of order. The test proves canonical source ordering, two
+same-batch verification requests, non-merging intake projection, rejection of
+a reverse/cyclic pair, and rejection of an altered peer projection identity.
+The full suite passes with 722 tests. A fresh non-mutating OT run is required
+before production persistence can be reconsidered.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

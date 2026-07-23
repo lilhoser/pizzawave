@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -49,14 +50,110 @@ public interface IIncidentBatchRelationshipProposer
 public static class IncidentBatchRelationshipContract
 {
     public const int MaximumSourceCount = IncidentBatchPrompt.MaximumReturnedEvents;
-    public const int MaximumCandidateCount = IncidentBatchContract.MaximumCandidateCount;
+    public const int MaximumCandidateCount =
+        IncidentBatchContract.MaximumCandidateCount + IncidentBatchPrompt.MaximumReturnedEvents - 1;
     public const int MaximumReturnedRelationships = 6;
     public const int MaximumRelationshipsPerSource = 3;
     public const int MaximumEvidenceSpansPerSide = 4;
     public const int MaximumAlternatives = 2;
     public const int MaximumUnresolvedQuestions = 2;
     public const int MaximumTextLength = 320;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v3;admission=concrete-cross-reference-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
+    public const string ConfigurationToken = "relationship-stage=source-isolated-v4;same-batch-peers=ordered-v1;admission=concrete-cross-reference-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
+
+    public static IReadOnlyList<IncidentBatchRelationshipSource> BuildSources(
+        IReadOnlyList<string> newObservationIds,
+        IReadOnlyList<IncidentBatchEventProposal> acceptedEvents)
+    {
+        var order = newObservationIds
+            .Select((observationId, index) => new { observationId, index })
+            .ToDictionary(item => item.observationId, item => item.index, StringComparer.Ordinal);
+        return acceptedEvents
+            .OrderBy(item => item.NewObservationIds.Min(observationId => order[observationId]))
+            .ThenBy(item => item.ProposalToken, StringComparer.Ordinal)
+            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+            .ToList();
+    }
+
+    public static IReadOnlyList<IncidentBatchCandidate> AddOrderedSameBatchCandidates(
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchSingletonIdentity> singletons,
+        IReadOnlyList<IncidentBatchCandidate> priorCandidates)
+    {
+        if (sources.Count < 2)
+            return priorCandidates.ToList();
+
+        var singletonByObservation = singletons.ToDictionary(
+            item => item.ObservationId,
+            StringComparer.Ordinal);
+        var candidates = priorCandidates.ToList();
+        var tokens = candidates.Select(item => item.CandidateToken).ToHashSet(StringComparer.Ordinal);
+        var projectionIds = candidates.Select(item => item.ProjectionEventId).ToHashSet(StringComparer.Ordinal);
+        foreach (var source in sources.Take(sources.Count - 1))
+        {
+            var projectionEventId = singletonByObservation[source.NewObservationIds[0]].ProjectionEventId;
+            var candidateToken = SameBatchCandidateToken(source.SourceProposalToken);
+            if (!tokens.Add(candidateToken))
+                throw new InvalidDataException($"same-batch candidate token '{candidateToken}' is not unique");
+            if (!projectionIds.Add(projectionEventId))
+                throw new InvalidDataException($"same-batch candidate projection '{projectionEventId}' is not unique");
+            candidates.Add(new IncidentBatchCandidate(
+                candidateToken,
+                projectionEventId,
+                source.NewObservationIds.ToList()));
+        }
+        if (candidates.Count > MaximumCandidateCount)
+            throw new InvalidDataException(
+                $"relationship stage contains more than {MaximumCandidateCount} candidates after adding same-batch peers");
+        return candidates;
+    }
+
+    public static IReadOnlyList<string> EligibleCandidateTokens(
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        IncidentBatchRelationshipSource source)
+    {
+        var sourceIndex = -1;
+        for (var index = 0; index < sources.Count; index++)
+        {
+            if (string.Equals(
+                    sources[index].SourceProposalToken,
+                    source.SourceProposalToken,
+                    StringComparison.Ordinal))
+            {
+                sourceIndex = index;
+                break;
+            }
+        }
+        if (sourceIndex < 0)
+            return [];
+        return candidates
+            .Where(candidate =>
+            {
+                var peerIndex = PeerSourceIndex(sources, candidate);
+                return peerIndex < 0 || peerIndex < sourceIndex;
+            })
+            .Select(item => item.CandidateToken)
+            .ToList();
+    }
+
+    private static int PeerSourceIndex(
+        IReadOnlyList<IncidentBatchRelationshipSource> sources,
+        IncidentBatchCandidate candidate)
+    {
+        for (var index = 0; index < sources.Count; index++)
+        {
+            if (candidate.ObservationIds.SequenceEqual(sources[index].NewObservationIds, StringComparer.Ordinal))
+                return index;
+        }
+        return -1;
+    }
+
+    private static string SameBatchCandidateToken(string sourceProposalToken)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceProposalToken)))
+            .ToLowerInvariant();
+        return $"candidate-peer-{digest[..16]}";
+    }
 
     public static IncidentEventStateContractValidationResult ValidateInput(
         IncidentEventStateObservationBundle bundle,
@@ -70,9 +167,10 @@ public static class IncidentBatchRelationshipContract
             errors.Add($"relationship stage contains more than {MaximumCandidateCount} candidates");
         RequireUnique(sources.Select(item => item.SourceProposalToken), "source proposal token", errors);
         RequireUnique(candidates.Select(item => item.CandidateToken), "candidate token", errors);
+        RequireUnique(candidates.Select(item => item.ProjectionEventId), "candidate projection event id", errors);
 
         var observations = bundle.Observations.Select(item => item.ObservationId).ToHashSet(StringComparer.Ordinal);
-        var sourceOwners = new HashSet<string>(StringComparer.Ordinal);
+        var sourceOwners = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var source in sources)
         {
             RequireValue(source.SourceProposalToken, "source proposal token", errors);
@@ -83,7 +181,7 @@ public static class IncidentBatchRelationshipContract
             {
                 if (!observations.Contains(observationId))
                     errors.Add($"source proposal '{source.SourceProposalToken}' references unknown observation '{observationId}'");
-                if (!sourceOwners.Add(observationId))
+                if (!sourceOwners.TryAdd(observationId, source.SourceProposalToken))
                     errors.Add($"new observation '{observationId}' belongs to more than one constructed group");
             }
         }
@@ -99,8 +197,29 @@ public static class IncidentBatchRelationshipContract
             {
                 if (!observations.Contains(observationId))
                     errors.Add($"candidate '{candidate.CandidateToken}' references unknown observation '{observationId}'");
-                if (sourceOwners.Contains(observationId))
-                    errors.Add($"candidate '{candidate.CandidateToken}' contains new source observation '{observationId}'");
+            }
+            var peerOwners = candidate.ObservationIds
+                .Where(sourceOwners.ContainsKey)
+                .Select(observationId => sourceOwners[observationId])
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (peerOwners.Count > 0)
+            {
+                if (peerOwners.Count != 1)
+                    errors.Add($"same-batch candidate '{candidate.CandidateToken}' spans more than one constructed group");
+                else
+                {
+                    var peer = sources.Single(item => item.SourceProposalToken == peerOwners[0]);
+                    if (!candidate.ObservationIds.SequenceEqual(peer.NewObservationIds, StringComparer.Ordinal))
+                        errors.Add($"same-batch candidate '{candidate.CandidateToken}' does not exactly match constructed group '{peer.SourceProposalToken}'");
+                    if (!sources
+                            .Where(item => !string.Equals(
+                                item.SourceProposalToken,
+                                peer.SourceProposalToken,
+                                StringComparison.Ordinal))
+                            .Any(item => EligibleCandidateTokens(sources, [candidate], item).Contains(candidate.CandidateToken, StringComparer.Ordinal)))
+                        errors.Add($"same-batch candidate '{candidate.CandidateToken}' has no later constructed group");
+                }
             }
         }
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
@@ -145,6 +264,13 @@ public static class IncidentBatchRelationshipContract
             if (!candidateMap.TryGetValue(relationship.CandidateToken, out var candidate))
             {
                 errors.Add($"relationship references unknown candidate '{relationship.CandidateToken}'");
+                continue;
+            }
+            if (!EligibleCandidateTokens(sources, candidates, source)
+                    .Contains(relationship.CandidateToken, StringComparer.Ordinal))
+            {
+                errors.Add(
+                    $"relationship '{relationship.SourceProposalToken}' cannot reference ineligible candidate '{relationship.CandidateToken}'");
                 continue;
             }
             if (!Enum.IsDefined(relationship.Disposition))
@@ -217,9 +343,9 @@ public static class IncidentBatchRelationshipContract
     {
         if (entry.RelationshipProposal is null)
             return [];
-        var sources = IncidentBatchContract.AcceptedEvents(entry)
-            .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
-            .ToList();
+        var sources = BuildSources(
+            entry.NewObservationIds,
+            IncidentBatchContract.AcceptedEvents(entry));
         var accepted = AcceptedRelationships(entry.Bundle, sources, entry.Candidates, entry.RelationshipProposal);
         if (!IncidentBatchConfirmationContract.UsesIndependentVerifier(entry.Execution.ConfigurationIdentity))
             return accepted;
@@ -310,7 +436,7 @@ public sealed record IncidentBatchRelationshipPromptPayload(string SystemPrompt,
 
 public static class IncidentBatchRelationshipPrompt
 {
-    public const string PromptIdentity = "incident-batch-relationship-v4-concrete-admission";
+    public const string PromptIdentity = "incident-batch-relationship-v5-ordered-same-batch-peers";
 
     public static IncidentBatchRelationshipPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -335,6 +461,8 @@ public static class IncidentBatchRelationshipPrompt
             constructed_groups = sources.Select(item => new
             {
                 source_proposal_token = item.SourceProposalToken,
+                eligible_candidate_tokens = IncidentBatchRelationshipContract
+                    .EligibleCandidateTokens(sources, candidates, item),
                 source_observations = item.NewObservationIds.Select(PromptObservation).ToList()
             }).ToList(),
             candidate_events = candidates.Select(item => new
@@ -348,6 +476,7 @@ public static class IncidentBatchRelationshipPrompt
         user.AppendLine("Return only JSON matching the supplied schema.");
         user.AppendLine("Search for a small number of evidence-established relationships between constructed groups and supplied candidates using only their transcripts. Most pairs are unrelated; returning an empty relationships array is a correct and expected result.");
         user.AppendLine("The constructed groups are immutable. Do not rewrite, split, combine, discard, or add facts to them.");
+        user.AppendLine("Some candidates are earlier constructed groups from this same batch. For each constructed group, consider only its eligible_candidate_tokens. This ordered boundary permits later observations to connect to earlier observations without cycles; never return another source-candidate pairing.");
         user.AppendLine("Return confirmed_membership only when exact evidence from both sides directly establishes one unfolding real-world event. Return at most one confirmed membership for each constructed group.");
         user.AppendLine("A confirmed_membership must use uncertainty 0 and empty alternative_interpretations and unresolved_questions. If either side contains a material discrepancy, counterinterpretation, or unresolved question, return provisional_association or omit the pair; never confirm it.");
         user.AppendLine("Return provisional_association only when exact evidence from both sides already establishes a specific operational connection: one side continues, answers, updates, acts on, or explicitly refers to a concrete subject, location, vehicle, identifier, circumstance, or request from the other side, but meaningful uncertainty remains about the nature or extent of that connection. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");

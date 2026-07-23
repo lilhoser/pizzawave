@@ -506,6 +506,108 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public async Task StagedRelationshipComparesLaterObservationsWithOrderedPeersFromTheSameBatch()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "I need a wrecker for two vehicles."),
+            Observation("call:2", "transcript:2", "The second tag is Georgia Sierra 2719."),
+            Observation("call:3", "transcript:3", "This is vehicle one, Tennessee 2048."));
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction",
+            Now,
+            "test-model",
+            IncidentBatchPrompt.ObservationIsolatedProvisionalPromptIdentity,
+            [
+                new IncidentBatchEventProposal(
+                    "event:vehicle-one", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:3"],
+                    string.Empty, string.Empty, "vehicle one", 0.1,
+                    [new IncidentEventStateTranscriptCitation("transcript:3", "vehicle one")], [], [], []),
+                new IncidentBatchEventProposal(
+                    "event:wrecker", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:1"],
+                    string.Empty, string.Empty, "two vehicles", 0.1,
+                    [new IncidentEventStateTranscriptCitation("transcript:1", "wrecker for two vehicles")], [], [], []),
+                new IncidentBatchEventProposal(
+                    "event:second-tag", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:2"],
+                    string.Empty, string.Empty, "second vehicle tag", 0.1,
+                    [new IncidentEventStateTranscriptCitation("transcript:2", "second tag")], [], [], [])
+            ]));
+        var relationships = new SameBatchRelationshipProposer();
+        var coordinator = new IncidentBatchCoordinator(
+            constructor,
+            relationships,
+            new MemoryStore(),
+            new FixedTimeProvider(Now));
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:same-batch",
+                "ledger:same-batch",
+                "projection:same-batch",
+                [
+                    new IncidentBatchSingletonIdentity("call:1", "projection:wrecker"),
+                    new IncidentBatchSingletonIdentity("call:2", "projection:second-tag"),
+                    new IncidentBatchSingletonIdentity("call:3", "projection:vehicle-one")
+                ],
+                "test",
+                $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken}"),
+            bundle,
+            null,
+            ["call:1", "call:2", "call:3"],
+            [],
+            CancellationToken.None);
+
+        Assert.Equal(
+            ["event:wrecker", "event:second-tag", "event:vehicle-one"],
+            relationships.ReceivedSources.Select(item => item.SourceProposalToken));
+        Assert.Equal(2, relationships.ReceivedCandidates.Count);
+        Assert.Contains(relationships.ReceivedCandidates, item =>
+            item.ProjectionEventId == "projection:wrecker" &&
+            item.ObservationIds.SequenceEqual(["call:1"]));
+        Assert.Contains(relationships.ReceivedCandidates, item =>
+            item.ProjectionEventId == "projection:second-tag" &&
+            item.ObservationIds.SequenceEqual(["call:2"]));
+        Assert.True(IncidentBatchContract.ValidateLedgerEntry(result.LedgerEntry.Entry).IsValid);
+        Assert.Equal(2, IncidentBatchVerificationQueueContract.BuildRequests(result.LedgerEntry.Entry).Count);
+        Assert.Equal(3, result.Projection.Projection.Events.Count);
+        Assert.Equal(2, result.Projection.Projection.ProvisionalAssociations.Count);
+        Assert.All(
+            result.Projection.Projection.ProvisionalAssociations,
+            item => Assert.Equal("projection:wrecker", item.CandidateProjectionEventId));
+
+        var backwards = relationships.ReceivedProposal.Relationships[0] with
+        {
+            SourceProposalToken = "event:wrecker",
+            CandidateToken = relationships.ReceivedCandidates.Single(item =>
+                item.ProjectionEventId == "projection:second-tag").CandidateToken,
+            SourceEvidence = [new IncidentEventStateTranscriptCitation("transcript:1", "wrecker for two vehicles")],
+            CandidateEvidence = [new IncidentEventStateTranscriptCitation("transcript:2", "second tag")]
+        };
+        var invalid = IncidentBatchRelationshipContract.ValidateProposal(
+            bundle,
+            relationships.ReceivedSources,
+            relationships.ReceivedCandidates,
+            Proposal(backwards));
+        Assert.False(invalid.IsValid);
+        Assert.Contains(
+            invalid.Errors,
+            error => error.Contains("ineligible candidate", StringComparison.Ordinal));
+
+        var corruptedEntry = result.LedgerEntry.Entry with
+        {
+            Candidates = result.LedgerEntry.Entry.Candidates
+                .Select(item => item.ProjectionEventId == "projection:wrecker"
+                    ? item with { ProjectionEventId = "projection:not-the-singleton" }
+                    : item)
+                .ToList()
+        };
+        var corruptedValidation = IncidentBatchContract.ValidateLedgerEntry(corruptedEntry);
+        Assert.False(corruptedValidation.IsValid);
+        Assert.Contains(
+            corruptedValidation.Errors,
+            error => error.Contains("application-owned singleton projection", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task IndependentVerifierAllowsGroundedConfirmationToMergeEvents()
     {
         var bundle = Bundle(
@@ -859,6 +961,7 @@ public sealed class IncidentBatchRelationshipTests
     private sealed class CapturingRelationshipProposer(IncidentBatchRelationshipProposal proposal) : IIncidentBatchRelationshipProposer
     {
         public IReadOnlyList<IncidentBatchRelationshipSource> ReceivedSources { get; private set; } = [];
+        public IReadOnlyList<IncidentBatchCandidate> ReceivedCandidates { get; private set; } = [];
 
         public Task<IncidentBatchRelationshipProposal> ProposeAsync(
             IncidentEventStateObservationBundle bundle,
@@ -867,7 +970,50 @@ public sealed class IncidentBatchRelationshipTests
             CancellationToken ct)
         {
             ReceivedSources = sources;
+            ReceivedCandidates = candidates;
             return Task.FromResult(proposal);
+        }
+    }
+
+    private sealed class SameBatchRelationshipProposer : IIncidentBatchRelationshipProposer
+    {
+        public IReadOnlyList<IncidentBatchRelationshipSource> ReceivedSources { get; private set; } = [];
+        public IReadOnlyList<IncidentBatchCandidate> ReceivedCandidates { get; private set; } = [];
+        public IncidentBatchRelationshipProposal ReceivedProposal { get; private set; } = Proposal();
+
+        public Task<IncidentBatchRelationshipProposal> ProposeAsync(
+            IncidentEventStateObservationBundle bundle,
+            IReadOnlyList<IncidentBatchRelationshipSource> sources,
+            IReadOnlyList<IncidentBatchCandidate> candidates,
+            CancellationToken ct)
+        {
+            ReceivedSources = sources;
+            ReceivedCandidates = candidates;
+            var first = candidates.Single(item => item.ProjectionEventId == "projection:wrecker");
+            ReceivedProposal = Proposal(
+                Relationship(
+                    "event:second-tag",
+                    first.CandidateToken,
+                    "transcript:2",
+                    "second tag",
+                    "transcript:1",
+                    "two vehicles") with
+                {
+                    Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+                    Uncertainty = 0
+                },
+                Relationship(
+                    "event:vehicle-one",
+                    first.CandidateToken,
+                    "transcript:3",
+                    "vehicle one",
+                    "transcript:1",
+                    "two vehicles") with
+                {
+                    Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+                    Uncertainty = 0
+                });
+            return Task.FromResult(ReceivedProposal);
         }
     }
 
