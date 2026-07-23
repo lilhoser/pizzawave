@@ -3078,6 +3078,43 @@ rollback backup and be monitored against a fresh production baseline. No
 additional static event rules, taxonomy, model training, or second production
 model is required.
 
+#### Permanent OT replacement ownership
+
+The operator approved permanent OT cutover after run T passed. At approximately
+2026-07-23 23:38:49 UTC, OT began stable run
+`production-incident-replacement-v1` above fresh no-backfill fence `1457222`.
+The production baseline, taken after the legacy worker had stopped, was 5,719
+incidents, maximum incident ID 7,133, 53,718 incident-operation audits, and one
+prior canary-commit record. The pre-cutover configuration is preserved at:
+
+`/etc/pizzawave/pizzad.json.pre-production-incident-replacement-v1-20260723T233817Z.bak`
+
+OT legacy incident execution is disabled. Constructor, relationship,
+independent verification, source and observation isolation, continuous intake,
+the exclusive inference window, verified persistence, and explicit permanent
+replacement ownership are enabled. Configuration ownership is
+`root:pizzawave` with mode `0660`. New calls no longer create legacy
+`incident_analysis_jobs`; the replacement materialized cursor is now the
+incident-pipeline health authority.
+
+The first three production batches processed 26 calls. They produced no
+invalid constructor result or model error. The first candidate-backed
+relationship reached independent verification. The verifier rejected it in
+17.462 seconds because the source omitted the patient, location, and incident
+details present in the candidate; it also identified the proposer's
+“identical transcripts” assertion as factually incorrect. No persistence
+intent was created. A later 12-call batch started from the verifier-written
+projection, retained zero provisional associations, and did not resurrect the
+rejected relationship.
+
+At this checkpoint there were no production-run persistence commits, no
+incident or audit delta from the cutover baseline, no legacy jobs for calls
+above the fence, and no ownership conflict. Replacement health was `ok`, with
+seven eligible calls awaiting the next bounded batch and no pending verifier
+decision. Transcription and embedding queues were healthy. OT
+`trunk-recorder` remained PID `2409838` with restart count 2. RPI was neither
+deployed nor reconfigured.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
