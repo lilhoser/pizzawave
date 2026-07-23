@@ -123,10 +123,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         var singletons = newCalls.Select(call => new IncidentBatchSingletonIdentity(
             $"call:{call.Id.ToString(CultureInfo.InvariantCulture)}",
             $"batch-live:{runId}:event:call:{call.Id.ToString(CultureInfo.InvariantCulture)}")).ToList();
-        var proposer = new OpenAiIncidentBatchProposer(_config, _database, _logger, runId);
-        var relationshipProposer = new OpenAiIncidentBatchRelationshipProposer(_config, _database, _logger, runId);
-        var confirmationVerifier = new OpenAiIncidentBatchConfirmationVerifier(_config, _database, _logger, runId);
-        var coordinator = new IncidentBatchCoordinator(proposer, relationshipProposer, confirmationVerifier, _database);
+        var proposer = new OpenAiIncidentBatchProposer(_config, _database, _logger, runId, asynchronousProvisional: true);
+        var coordinator = new IncidentBatchCoordinator(proposer, new IncidentBatchProvisionalStore(_database));
         var result = await coordinator.RunAsync(
             new IncidentBatchRunRequest(
                 runId,
@@ -144,28 +142,22 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         foreach (var call in newCalls)
             _processedCallIds.Add(call.Id);
         var validEvents = IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry);
-        var validRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(result.LedgerEntry.Entry);
+        var queuedVerificationCount = IncidentBatchVerificationQueueContract.BuildRequests(result.LedgerEntry.Entry).Count;
         _logger.LogInformation(
-            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, confirmed={ConfirmedCount}, provisionalLinks={ProvisionalCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, retrievalMs={RetrievalDurationMs}, constructorMs={DurationMs}, relationshipMs={RelationshipDurationMs}, confirmationMs={ConfirmationDurationMs}, invalid={Invalid}, relationshipInvalid={RelationshipInvalid}, confirmationInvalid={ConfirmationInvalid}, proposerError={HasError}, relationshipError={HasRelationshipError}, confirmationError={HasConfirmationError}; production incident state unchanged",
+            "Incident batch constructor shadow run {RunId} processed {CallCount} calls through {LastCallId}: new={NewCount}, review={ProvisionalEventCount}, verificationQueued={VerificationQueuedCount}, unresolved={UnresolvedCount}, candidates={CandidateCount}, retrievalMs={RetrievalDurationMs}, constructorMs={DurationMs}, invalid={Invalid}, proposerError={HasError}; production incident state unchanged",
             runId,
             newCalls.Count,
             newCalls.Max(call => call.Id),
             validEvents.Count(IncidentBatchContract.IsOperatorVisibleNewEvent),
-            validEvents.Count(IncidentBatchContract.IsOperatorReviewEvent),
-            validRelationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership),
-            validRelationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation),
+            validEvents.Count(item => IncidentBatchContract.IsOperatorReviewEvent(item) ||
+                                      item.Disposition is IncidentBatchEventDisposition.ConfirmedMembership or IncidentBatchEventDisposition.ProvisionalAssociation),
+            queuedVerificationCount,
             newCalls.Count - validEvents.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count(),
             selection.Candidates.Count,
             result.LedgerEntry.Entry.Execution.RetrievalDurationMilliseconds,
             result.LedgerEntry.Entry.Execution.ProposerDurationMilliseconds,
-            result.LedgerEntry.Entry.RelationshipExecution?.ProposerDurationMilliseconds ?? 0,
-            result.LedgerEntry.Entry.ConfirmationExecution?.VerifierDurationMilliseconds ?? 0,
             result.LedgerEntry.Entry.ProposalValidationErrors.Count > 0,
-            (result.LedgerEntry.Entry.RelationshipProposalValidationErrors ?? []).Count > 0,
-            (result.LedgerEntry.Entry.ConfirmationProposalValidationErrors ?? []).Count > 0,
-            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.Execution.ProposerError),
-            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.RelationshipExecution?.ProposerError),
-            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.ConfirmationExecution?.VerifierError));
+            !string.IsNullOrWhiteSpace(result.LedgerEntry.Entry.Execution.ProposerError));
     }
 
     private bool IsEnabled() =>
@@ -177,7 +169,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.PromptIdentity};{IncidentBatchRelationshipPrompt.PromptIdentity};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchConfirmationContract.ConfigurationToken};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
+        $"{IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {

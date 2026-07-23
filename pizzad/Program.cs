@@ -48,6 +48,7 @@ builder.Services.AddHttpClient<GeocodingService>();
 builder.Services.AddSingleton<AutomaticInsightsService>();
 builder.Services.AddSingleton<IncidentAssociationShadowService>();
 builder.Services.AddSingleton<IncidentBatchConstructorShadowService>();
+builder.Services.AddSingleton<IncidentBatchVerificationShadowService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
 builder.Services.AddSingleton<HealthStatusService>();
 builder.Services.AddSingleton<EnginePipeline>();
@@ -92,6 +93,7 @@ builder.Services.AddHostedService<CallstreamListener>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAssociationShadowService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentBatchConstructorShadowService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentBatchVerificationShadowService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TranscriptPostProcessingService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<EmbeddingService>());
 builder.Services.AddHostedService<TrHealthCollector>();
@@ -916,6 +918,18 @@ app.MapGet("/api/v1/incidents/batch-constructor-shadow", async (HttpContext cont
         context.RequestAborted));
 })
 .WithName("IncidentBatchConstructorShadowReport")
+.WithOpenApi();
+
+app.MapGet("/api/v1/incidents/batch-verification-shadow", async (HttpContext context, int? limit, AuthService authService, EngineConfig config, EngineDatabase database) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Ok(await database.GetIncidentBatchVerificationShadowReportAsync(
+        config.AiInsights.IncidentBatchVerificationShadowEnabled,
+        config.AiInsights.IncidentBatchConstructorShadowRunId,
+        limit ?? 100,
+        context.RequestAborted));
+})
+.WithName("IncidentBatchVerificationShadowReport")
 .WithOpenApi();
 
 app.MapGet("/api/v1/troubleshoot/tr-health", async (HttpContext context, long? start, long? end, AuthService authService, EngineDatabase database) =>

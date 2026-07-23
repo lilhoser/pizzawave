@@ -270,6 +270,11 @@ public static class IncidentBatchContract
         RequireValue(entry.Execution.ConfigurationIdentity, "batch execution configuration identity", errors);
         if (entry.Execution.ProposerDurationMilliseconds < 0)
             errors.Add("batch proposer duration cannot be negative");
+        if (IncidentBatchExecutionArchitecture.UsesAsynchronousProvisionalVerification(entry.Execution.ConfigurationIdentity) &&
+            (entry.RelationshipProposal is not null || entry.ConfirmationProposal is not null))
+        {
+            errors.Add("asynchronous provisional intake cannot contain synchronous relationship or confirmation output");
+        }
         var constructionCandidates = entry.RelationshipProposal is null ? entry.Candidates : [];
         var proposalValidation = ValidateProposal(entry.Bundle, entry.NewObservationIds, constructionCandidates, entry.Proposal);
         if (!entry.ProposalValidationErrors.SequenceEqual(proposalValidation.Errors, StringComparer.Ordinal))
@@ -543,6 +548,8 @@ public static class IncidentBatchProjector
         }).ToList();
         if (events.SelectMany(item => item.ObservationIds).Intersect(entry.NewObservationIds, StringComparer.Ordinal).Any())
             throw new InvalidOperationException("batch contains an observation already owned by the prior projection");
+        var asynchronousProvisional = IncidentBatchExecutionArchitecture.UsesAsynchronousProvisionalVerification(
+            entry.Execution.ConfigurationIdentity);
         events.AddRange(entry.SingletonEvents.Select(item => new IncidentBatchProjectionEvent(
             item.ProjectionEventId,
             [item.ObservationId],
@@ -555,6 +562,9 @@ public static class IncidentBatchProjector
         var links = (priorProjection?.ProvisionalAssociations ?? []).ToList();
         foreach (var proposal in IncidentBatchContract.AcceptedEvents(entry))
         {
+            var requiresAsynchronousVerification = asynchronousProvisional &&
+                                                   (proposal.Disposition == IncidentBatchEventDisposition.ConfirmedMembership ||
+                                                    proposal.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation);
             var evidenceSummary = BuildEvidenceSummary(proposal.NewObservationEvidence);
             var evidenceTitle = BuildEvidenceTitle(evidenceSummary);
             var singletonIds = entry.SingletonEvents
@@ -562,7 +572,7 @@ public static class IncidentBatchProjector
                 .Select(item => item.ProjectionEventId)
                 .ToHashSet(StringComparer.Ordinal);
             var sourceEventId = entry.SingletonEvents.First(item => item.ObservationId == proposal.NewObservationIds[0]).ProjectionEventId;
-            if (proposal.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
+            if (proposal.Disposition == IncidentBatchEventDisposition.ConfirmedMembership && !asynchronousProvisional)
             {
                 var candidate = entry.Candidates.Single(item => item.CandidateToken == proposal.CandidateToken);
                 sourceEventId = candidate.ProjectionEventId;
@@ -591,11 +601,11 @@ public static class IncidentBatchProjector
                     Title = evidenceTitle,
                     Summary = evidenceSummary,
                     OperatorVisible = IncidentBatchContract.IsOperatorVisibleNewEvent(proposal),
-                    OperatorReview = IncidentBatchContract.IsOperatorReviewEvent(proposal),
+                    OperatorReview = IncidentBatchContract.IsOperatorReviewEvent(proposal) || requiresAsynchronousVerification,
                     SourceLedgerEntryIds = source.SourceLedgerEntryIds.Append(entry.LedgerEntryId).Distinct(StringComparer.Ordinal).ToList()
                 };
                 events.RemoveAll(item => item.ProjectionEventId != sourceEventId && singletonIds.Contains(item.ProjectionEventId));
-                if (proposal.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation)
+                if (proposal.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation || requiresAsynchronousVerification)
                 {
                     var candidate = entry.Candidates.Single(item => item.CandidateToken == proposal.CandidateToken);
                     links.Add(new IncidentBatchProjectedAssociation(

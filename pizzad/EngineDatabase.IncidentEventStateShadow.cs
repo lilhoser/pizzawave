@@ -329,6 +329,32 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         CREATE INDEX IF NOT EXISTS idx_incident_batch_constructor_shadow_projection_run_sequence
             ON incident_batch_constructor_shadow_projections(run_id, sequence);
 
+        CREATE TABLE IF NOT EXISTS incident_batch_verification_shadow_requests (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            request_id TEXT NOT NULL UNIQUE,
+            source_ledger_entry_id TEXT NOT NULL,
+            enqueued_at_utc TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_batch_verification_shadow_request_run_sequence
+            ON incident_batch_verification_shadow_requests(run_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS incident_batch_verification_shadow_results (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            result_id TEXT NOT NULL UNIQUE,
+            request_id TEXT NOT NULL UNIQUE,
+            recorded_at_utc TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_incident_batch_verification_shadow_result_run_sequence
+            ON incident_batch_verification_shadow_results(run_id, sequence);
+
         CREATE TABLE IF NOT EXISTS incident_association_review_ledger (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             review_entry_id TEXT NOT NULL UNIQUE,
@@ -441,6 +467,30 @@ public sealed partial class EngineDatabase : IIncidentEventStateShadowStore
         BEFORE DELETE ON incident_batch_constructor_shadow_projections
         BEGIN
             SELECT RAISE(ABORT, 'incident batch constructor shadow projections are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_verification_shadow_requests_no_update
+        BEFORE UPDATE ON incident_batch_verification_shadow_requests
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch verification shadow requests are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_verification_shadow_requests_no_delete
+        BEFORE DELETE ON incident_batch_verification_shadow_requests
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch verification shadow requests are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_verification_shadow_results_no_update
+        BEFORE UPDATE ON incident_batch_verification_shadow_results
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch verification shadow results are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS incident_batch_verification_shadow_results_no_delete
+        BEFORE DELETE ON incident_batch_verification_shadow_results
+        BEGIN
+            SELECT RAISE(ABORT, 'incident batch verification shadow results are append-only');
         END;
 
         CREATE TRIGGER IF NOT EXISTS incident_association_review_ledger_no_update

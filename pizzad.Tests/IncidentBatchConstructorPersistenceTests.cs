@@ -76,6 +76,124 @@ public sealed class IncidentBatchConstructorPersistenceTests
         }
     }
 
+    [Fact]
+    public async Task ProvisionalIntakeAtomicallyPersistsVerificationRequestWithoutMergingMembership()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-batch-verification-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "pizzad.db");
+            var database = new EngineDatabase(new EngineConfig
+            {
+                Storage = new StorageConfig { DatabasePath = path, AudioRoot = root }
+            }, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var now = new DateTimeOffset(2026, 7, 22, 3, 0, 0, TimeSpan.Zero);
+            var priorObservation = new IncidentEventStateSourceObservation(
+                "call:10", 10, now.AddMinutes(-1).ToUnixTimeSeconds(), string.Empty, null,
+                [new IncidentEventStateTranscriptObservation("transcript:10", "White truck crashed on County Road 725.", "test", now)],
+                new Dictionary<string, IncidentEventStateMetadataObservation>());
+            var newObservation = new IncidentEventStateSourceObservation(
+                "call:11", 11, now.ToUnixTimeSeconds(), string.Empty, null,
+                [new IncidentEventStateTranscriptObservation("transcript:11", "Critical injuries in that white truck crash.", "test", now)],
+                new Dictionary<string, IncidentEventStateMetadataObservation>());
+            var bundle = new IncidentEventStateObservationBundle("bundle:async", now, [priorObservation, newObservation], []);
+            var prior = new IncidentBatchProjection(
+                "run:async",
+                "projection:prior",
+                now.AddMinutes(-1),
+                ["ledger:async"],
+                [new IncidentBatchProjectionEvent(
+                    "projection:event:existing", ["call:10"], "Vehicle crash", "A vehicle crash is active.", true, false, ["ledger:async"])],
+                []);
+            var candidate = new IncidentBatchCandidate("candidate:1", "projection:event:existing", ["call:10"]);
+            var proposal = new IncidentBatchProposal(
+                "proposal:async", now, "test-model", IncidentBatchPrompt.PromptIdentity,
+                [new IncidentBatchEventProposal(
+                    "event:update", IncidentBatchEventDisposition.ConfirmedMembership, candidate.CandidateToken, ["call:11"],
+                    "Critical-injury crash", "Critical injuries were reported.", "Both sides explicitly describe the same white-truck crash.", 0.1,
+                    [new IncidentEventStateTranscriptCitation("transcript:11", "Critical injuries")],
+                    [new IncidentEventStateTranscriptCitation("transcript:10", "White truck crashed")], [], [])]);
+            var coordinator = new IncidentBatchCoordinator(
+                new FixedProposer(proposal),
+                new IncidentBatchProvisionalStore(database),
+                new FixedTimeProvider(now));
+
+            var result = await coordinator.RunAsync(
+                new IncidentBatchRunRequest(
+                    "run:async", "ledger:async", "projection:async", [new IncidentBatchSingletonIdentity("call:11", "projection:event:source")],
+                    "test", $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken}"),
+                bundle, prior, ["call:11"], [candidate], CancellationToken.None);
+
+            var requests = await database.ListIncidentBatchVerificationRequestsAsync("run:async", 10, CancellationToken.None);
+            var request = Assert.Single(requests).Request;
+            Assert.Equal(IncidentBatchEventDisposition.ConfirmedMembership, request.ProposedDisposition);
+            Assert.Equal("event:update", request.SourceProposalToken);
+            Assert.Equal(2, result.Projection.Projection.Events.Count);
+            Assert.Single(result.Projection.Projection.ProvisionalAssociations);
+
+            var confirmation = new IncidentBatchConfirmationProposal(
+                "confirmation:async",
+                now.AddSeconds(1),
+                "test-verifier",
+                IncidentBatchConfirmationPrompt.PromptIdentity,
+                [new IncidentBatchConfirmationDecision(
+                    "event:update",
+                    "candidate:1",
+                    IncidentBatchConfirmationDecisionKind.Verify,
+                    "Both transcripts explicitly identify the same white-truck crash.",
+                    [new IncidentEventStateTranscriptCitation("transcript:11", "white truck crash")],
+                    [new IncidentEventStateTranscriptCitation("transcript:10", "White truck crashed")],
+                    [],
+                    [])]);
+            var verificationResult = IncidentBatchVerificationQueueContract.BuildResult(
+                result.LedgerEntry.Entry,
+                request,
+                confirmation,
+                new IncidentBatchConfirmationExecutionContext(1200, string.Empty),
+                now.AddSeconds(2));
+            Assert.Equal(IncidentBatchVerificationOutcome.Verified, verificationResult.Outcome);
+            var verifiedProjection = IncidentBatchVerificationProjector.Apply(
+                result.Projection.Projection,
+                result.LedgerEntry.Entry,
+                request,
+                verificationResult,
+                "projection:verified",
+                now.AddSeconds(2));
+            await database.AppendIncidentBatchVerificationResultAsync(
+                result.Projection.Sequence,
+                result.LedgerEntry.Entry,
+                request,
+                verificationResult,
+                verifiedProjection,
+                CancellationToken.None);
+
+            Assert.Empty(await database.ListPendingIncidentBatchVerificationRequestsAsync("run:async", 10, CancellationToken.None));
+            Assert.Single(await database.ListIncidentBatchVerificationResultsAsync("run:async", 10, CancellationToken.None));
+            var latestProjection = await database.GetLatestIncidentBatchProjectionAsync("run:async", CancellationToken.None);
+            var merged = Assert.Single(latestProjection!.Projection.Events);
+            Assert.Equal(["call:10", "call:11"], merged.ObservationIds);
+            Assert.Empty(latestProjection.Projection.ProvisionalAssociations);
+            var report = await database.GetIncidentBatchVerificationShadowReportAsync(true, "run:async", 10, CancellationToken.None);
+            Assert.Equal(1, report.Totals.Enqueued);
+            Assert.Equal(0, report.Totals.Pending);
+            Assert.Equal(1, report.Totals.Verified);
+
+            await using var connection = new SqliteConnection($"Data Source={path}");
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE incident_batch_verification_shadow_requests SET run_id='changed' WHERE sequence=1;";
+            var error = await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+            Assert.Contains("append-only", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
+    }
+
     private sealed class FixedProposer(IncidentBatchProposal proposal) : IIncidentBatchProposer
     {
         public Task<IncidentBatchProposal> ProposeAsync(IncidentEventStateObservationBundle bundle, IReadOnlyList<string> newObservationIds, IReadOnlyList<IncidentBatchCandidate> candidates, CancellationToken ct) => Task.FromResult(proposal);

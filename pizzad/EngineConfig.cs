@@ -183,10 +183,12 @@ public sealed class EngineConfig
         AiInsights.IncidentBatchConstructorShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentBatchConstructorShadowIntervalSeconds, 300, 1800);
         if (AiInsights.IncidentBatchConstructorShadowLookbackMinutes <= 0) AiInsights.IncidentBatchConstructorShadowLookbackMinutes = 120;
         AiInsights.IncidentBatchConstructorShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentBatchConstructorShadowLookbackMinutes, 30, 360);
-        if (AiInsights.IncidentBatchConstructorShadowBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowBatchSize = 12;
+        if (AiInsights.IncidentBatchConstructorShadowBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowBatchSize = 24;
         AiInsights.IncidentBatchConstructorShadowBatchSize = Math.Clamp(AiInsights.IncidentBatchConstructorShadowBatchSize, 2, IncidentBatchContract.MaximumNewObservationCount);
         if (AiInsights.IncidentBatchConstructorShadowCandidateLimit <= 0) AiInsights.IncidentBatchConstructorShadowCandidateLimit = 4;
         AiInsights.IncidentBatchConstructorShadowCandidateLimit = Math.Clamp(AiInsights.IncidentBatchConstructorShadowCandidateLimit, 1, IncidentBatchContract.MaximumCandidateCount);
+        if (AiInsights.IncidentBatchVerificationShadowIntervalSeconds <= 0) AiInsights.IncidentBatchVerificationShadowIntervalSeconds = 30;
+        AiInsights.IncidentBatchVerificationShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentBatchVerificationShadowIntervalSeconds, 5, 300);
         // Incident V3 is retained only as a read-only comparison baseline. Its
         // semantic executor is retired and must not be enabled by deployed
         // configuration left over from an earlier experiment.
@@ -434,10 +436,12 @@ public sealed class AiInsightsConfig
     public string IncidentBatchConstructorShadowRunId { get; set; } = string.Empty;
     public int IncidentBatchConstructorShadowIntervalSeconds { get; set; } = 600;
     public int IncidentBatchConstructorShadowLookbackMinutes { get; set; } = 120;
-    public int IncidentBatchConstructorShadowBatchSize { get; set; } = 12;
+    public int IncidentBatchConstructorShadowBatchSize { get; set; } = 24;
     public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
     public bool IncidentBatchConstructorShadowContinuous { get; set; }
     public long IncidentBatchConstructorShadowStartAfterCallId { get; set; }
+    public bool IncidentBatchVerificationShadowEnabled { get; set; }
+    public int IncidentBatchVerificationShadowIntervalSeconds { get; set; } = 30;
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

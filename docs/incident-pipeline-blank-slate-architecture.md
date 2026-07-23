@@ -1986,6 +1986,46 @@ and
 `trunk-recorder` retained PID `3068317`; RPI and production incident rows were
 not changed.
 
+### Asynchronous provisional-construction replacement
+
+The Run D and Run E results end optimization of the synchronous three-stage
+execution shape. The deployed shadow service had performed construction,
+relationship evaluation, and independent confirmation serially before it could
+advance intake. That shape is retired rather than tuned further. The durable
+observation ledger, stored-vector candidate retrieval, exact-citation
+validation, provisional projection, and independent verification contracts are
+retained.
+
+The replacement shadow architecture has two independently scheduled paths:
+
+1. Intake retrieves candidate state and makes one candidate-aware constructor
+   request for a 24-observation batch. It atomically persists the batch ledger,
+   a provisional projection, and any consequential candidate-relationship
+   requests. Even a model disposition named `confirmed_membership` remains a
+   Review event plus a provisional association at this boundary; intake cannot
+   merge it.
+2. A separate verifier worker consumes the append-only request queue. It writes
+   an append-only result and an optimistic, validated shadow projection
+   transition in one transaction. A verified membership may merge shadow event
+   state; a rejection removes the pending association; an invalid verifier
+   output remains fail-closed and visible in telemetry.
+
+The verifier has its own `incidentBatchVerificationShadowEnabled` switch. It is
+disabled for the first intake-capacity run so the run measures whether the
+single-pass constructor can keep up without hidden competing inference. Queue
+arrival volume is measured at the same time. Verification can then be enabled
+separately to measure drain capacity and scheduling policy. This is an
+execution-boundary test, not another batch-size or prompt-model bakeoff.
+
+Requests and results live in append-only SQLite tables and are exposed through
+`GET /api/v1/incidents/batch-verification-shadow`. Batch persistence and queue
+enqueue are transactional, so a crash cannot advance the durable processed-call
+set without preserving its required verification work. Projection writes use
+optimistic concurrency and reapply a completed verification to the newest
+shadow projection if intake advanced while inference was running. All of this
+remains shadow-only: it does not write production incidents or require static
+semantic rules, labels, categories, talkgroups, phrases, or quality classes.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

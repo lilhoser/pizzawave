@@ -162,6 +162,7 @@ public sealed partial class EngineDatabase
             .Order()
             .ToList();
         var proposedObservationCount = events.SelectMany(item => item.NewObservationIds).Distinct(StringComparer.Ordinal).Count();
+        var asynchronousProvisional = IncidentBatchExecutionArchitecture.UsesAsynchronousProvisionalVerification(entry.Execution.ConfigurationIdentity);
         var relationships = IncidentBatchRelationshipContract.AcceptedRelationships(entry);
         var acceptedRelationshipKeys = relationships
             .Select(RelationshipKey)
@@ -209,12 +210,18 @@ public sealed partial class EngineDatabase
             events.Count,
             Math.Max(0, proposedEvents - events.Count),
             events.Count(IncidentBatchContract.IsOperatorVisibleNewEvent),
-            events.Count(IncidentBatchContract.IsOperatorReviewEvent),
+            events.Count(item => IncidentBatchContract.IsOperatorReviewEvent(item) ||
+                                 (asynchronousProvisional &&
+                                  (item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership ||
+                                   item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation))),
             entry.RelationshipProposal is null
-                ? events.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
+                ? asynchronousProvisional
+                    ? 0
+                    : events.Count(item => item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership)
                 : relationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership),
             entry.RelationshipProposal is null
-                ? events.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation)
+                ? events.Count(item => item.Disposition == IncidentBatchEventDisposition.ProvisionalAssociation ||
+                                       (asynchronousProvisional && item.Disposition == IncidentBatchEventDisposition.ConfirmedMembership))
                 : relationships.Count(item => item.Disposition == IncidentBatchRelationshipDisposition.ProvisionalAssociation),
             Math.Max(0, entry.NewObservationIds.Count - proposedObservationCount),
             entry.Proposal.ModelIdentity,

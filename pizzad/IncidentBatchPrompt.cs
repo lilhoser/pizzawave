@@ -10,12 +10,14 @@ public sealed record IncidentBatchPromptPayload(string SystemPrompt, string User
 public static class IncidentBatchPrompt
 {
     public const string PromptIdentity = "incident-batch-constructor-v13";
+    public const string AsynchronousProvisionalPromptIdentity = "incident-batch-provisional-constructor-v1";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<string> newObservationIds,
-        IReadOnlyList<IncidentBatchCandidate> candidates)
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        bool asynchronousProvisional = false)
     {
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var newObservations = newObservationIds.Select(id => PromptObservation(observations[id])).ToList();
@@ -42,7 +44,11 @@ public static class IncidentBatchPrompt
         user.AppendLine($"Return at most {MaximumReturnedEvents} events. Choose the strongest source-grounded events and leave lower-priority observations unresolved rather than producing an oversized response.");
         user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         if (candidates.Count > 0)
+        {
             user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
+            if (asynchronousProvisional)
+                user.AppendLine("Both candidate dispositions are proposals only. confirmed_membership requests independent asynchronous verification and never changes membership in this intake pass.");
+        }
         user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event. A candidate-free new_event remains in Review; it does not become operator-visible until a later confirmed_membership transition or operator action.");
         user.AppendLine("Use provisional_event for a source-grounded candidate-free possible situation that lacks two-observation corroboration or otherwise has meaningful uncertainty. A provisional event is review evidence, not an operator-visible incident. A single-observation event must always be provisional_event.");
         user.AppendLine("No candidate-free proposal becomes operator-visible directly, regardless of how many observations it groups. Automatic visibility requires a separately evaluated confirmed_membership against prior Review state.");
@@ -77,7 +83,9 @@ public static class IncidentBatchPrompt
         return new IncidentBatchPromptPayload(
             candidates.Count == 0
                 ? "You construct immutable source-grounded incident groups from new observations only. Application code validates identity, ownership, and citations. A separate source-cited stage evaluates relationships to prior state."
-                : "You construct source-grounded incident events. Application code validates identity, ownership, and citations but does not interpret semantic meaning. Unsupported observations remain unresolved. Provisional associations never change event membership.",
+                : asynchronousProvisional
+                    ? "You construct source-grounded provisional incident state in one intake pass. Application code validates identity, ownership, and citations. Candidate relationships enter an independent asynchronous verification queue and never merge in this pass."
+                    : "You construct source-grounded incident events. Application code validates identity, ownership, and citations but does not interpret semantic meaning. Unsupported observations remain unresolved. Provisional associations never change event membership.",
             user.ToString(),
             ResponseFormat(bundle, newObservationIds, candidates));
     }
@@ -192,13 +200,20 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
     private readonly EngineDatabase _database;
     private readonly ILogger _logger;
     private readonly string _runId;
+    private readonly bool _asynchronousProvisional;
 
-    public OpenAiIncidentBatchProposer(EngineConfig config, EngineDatabase database, ILogger logger, string runId)
+    public OpenAiIncidentBatchProposer(
+        EngineConfig config,
+        EngineDatabase database,
+        ILogger logger,
+        string runId,
+        bool asynchronousProvisional = false)
     {
         _config = config;
         _database = database;
         _logger = logger;
         _runId = runId;
+        _asynchronousProvisional = asynchronousProvisional;
     }
 
     public async Task<IncidentBatchProposal> ProposeAsync(
@@ -207,7 +222,7 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
         IReadOnlyList<IncidentBatchCandidate> candidates,
         CancellationToken ct)
     {
-        var prompt = IncidentBatchPrompt.Build(bundle, newObservationIds, candidates);
+        var prompt = IncidentBatchPrompt.Build(bundle, newObservationIds, candidates, _asynchronousProvisional);
         var model = _config.AiInsights.OpenAiModel;
         var body = new
         {
@@ -266,7 +281,12 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 item.AlternativeInterpretations,
                 item.UnresolvedQuestions)).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
-            return new IncidentBatchProposal($"model:incident-batch:{Guid.NewGuid():N}", DateTimeOffset.UtcNow, responseModel, IncidentBatchPrompt.PromptIdentity, events);
+            return new IncidentBatchProposal(
+                $"model:incident-batch:{Guid.NewGuid():N}",
+                DateTimeOffset.UtcNow,
+                responseModel,
+                _asynchronousProvisional ? IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity : IncidentBatchPrompt.PromptIdentity,
+                events);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

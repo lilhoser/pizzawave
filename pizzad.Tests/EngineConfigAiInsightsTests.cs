@@ -21,7 +21,8 @@ public sealed class EngineConfigAiInsightsTests
                 IncidentBatchConstructorShadowIntervalSeconds = 1,
                 IncidentBatchConstructorShadowLookbackMinutes = 10,
                 IncidentBatchConstructorShadowBatchSize = 100,
-                IncidentBatchConstructorShadowCandidateLimit = 100
+                IncidentBatchConstructorShadowCandidateLimit = 100,
+                IncidentBatchVerificationShadowIntervalSeconds = 1
             }
         };
 
@@ -50,6 +51,8 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(IncidentBatchContract.MaximumCandidateCount, config.AiInsights.IncidentBatchConstructorShadowCandidateLimit);
         Assert.False(config.AiInsights.IncidentBatchConstructorShadowContinuous);
         Assert.Equal(0, config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId);
+        Assert.False(config.AiInsights.IncidentBatchVerificationShadowEnabled);
+        Assert.Equal(5, config.AiInsights.IncidentBatchVerificationShadowIntervalSeconds);
     }
 
     [Fact]

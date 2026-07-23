@@ -122,6 +122,93 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public async Task AsynchronousIntakeKeepsProposedMembershipProvisionalAndQueuesVerification()
+    {
+        var prior = PriorProjection(new IncidentBatchProjectionEvent(
+            "projection:event:existing",
+            ["call:10"],
+            "Vehicle crash",
+            "A vehicle crash is active.",
+            true,
+            false,
+            ["ledger:prior"]));
+        var bundle = Bundle(
+            Observation("call:10", "transcript:10", "White truck crashed on County Road 725."),
+            Observation("call:11", "transcript:11", "Critical injuries in that white truck crash."));
+        var candidate = new IncidentBatchCandidate("candidate:1", "projection:event:existing", ["call:10"]);
+        var item = Event(
+            "event:crash-update",
+            IncidentBatchEventDisposition.ConfirmedMembership,
+            candidate.CandidateToken,
+            ["call:11"],
+            "Critical-injury crash on County Road 725",
+            "The white-truck crash now includes reported critical injuries.",
+            [Citation("transcript:11", "Critical injuries")],
+            [Citation("transcript:10", "White truck crashed")]);
+
+        var result = await RunAsync(
+            bundle,
+            ["call:11"],
+            [candidate],
+            new FixedProposer(Proposal([item])),
+            prior,
+            IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken);
+
+        Assert.Equal(2, result.Projection.Projection.Events.Count);
+        var existing = result.Projection.Projection.Events.Single(row => row.ProjectionEventId == "projection:event:existing");
+        var source = result.Projection.Projection.Events.Single(row => row.ProjectionEventId != existing.ProjectionEventId);
+        Assert.Equal(["call:10"], existing.ObservationIds);
+        Assert.Equal(["call:11"], source.ObservationIds);
+        Assert.True(source.OperatorReview);
+        var link = Assert.Single(result.Projection.Projection.ProvisionalAssociations);
+        Assert.Equal(existing.ProjectionEventId, link.CandidateProjectionEventId);
+        var request = Assert.Single(IncidentBatchVerificationQueueContract.BuildRequests(result.LedgerEntry.Entry));
+        Assert.Equal(IncidentBatchEventDisposition.ConfirmedMembership, request.ProposedDisposition);
+        Assert.Equal(item.ProposalToken, request.SourceProposalToken);
+        var unsafeSynchronousEntry = result.LedgerEntry.Entry with
+        {
+            RelationshipProposal = new IncidentBatchRelationshipProposal(
+                "relationship:unsafe", Now, "application", IncidentBatchRelationshipPrompt.PromptIdentity, []),
+            RelationshipProposalValidationErrors = [],
+            RelationshipExecution = new IncidentBatchRelationshipExecutionContext(0, string.Empty)
+        };
+        Assert.Contains(
+            IncidentBatchContract.ValidateLedgerEntry(unsafeSynchronousEntry).Errors,
+            error => error.Contains("cannot contain synchronous", StringComparison.Ordinal));
+
+        var rejectionProposal = new IncidentBatchConfirmationProposal(
+            "confirmation:reject",
+            Now.AddSeconds(1),
+            "test-verifier",
+            IncidentBatchConfirmationPrompt.PromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                item.ProposalToken,
+                candidate.CandidateToken,
+                IncidentBatchConfirmationDecisionKind.Reject,
+                "The cited excerpts do not independently establish shared event membership.",
+                [Citation("transcript:11", "Critical injuries")],
+                [Citation("transcript:10", "White truck crashed")],
+                ["The excerpts do not provide an independently verified shared identifier."],
+                [])]);
+        var rejection = IncidentBatchVerificationQueueContract.BuildResult(
+            result.LedgerEntry.Entry,
+            request,
+            rejectionProposal,
+            new IncidentBatchConfirmationExecutionContext(10, string.Empty),
+            Now.AddSeconds(2));
+        Assert.Equal(IncidentBatchVerificationOutcome.Rejected, rejection.Outcome);
+        var rejectedProjection = IncidentBatchVerificationProjector.Apply(
+            result.Projection.Projection,
+            result.LedgerEntry.Entry,
+            request,
+            rejection,
+            "projection:rejected",
+            Now.AddSeconds(2));
+        Assert.Equal(2, rejectedProjection.Events.Count);
+        Assert.Empty(rejectedProjection.ProvisionalAssociations);
+    }
+
+    [Fact]
     public async Task ProvisionalAssociationDoesNotMutateCandidateMembership()
     {
         var prior = PriorProjection(new IncidentBatchProjectionEvent(
@@ -499,12 +586,13 @@ public sealed class IncidentBatchConstructorPipelineTests
         IReadOnlyList<string> newObservationIds,
         IReadOnlyList<IncidentBatchCandidate> candidates,
         IIncidentBatchProposer proposer,
-        IncidentBatchProjection? prior = null)
+        IncidentBatchProjection? prior = null,
+        string executionToken = "")
     {
         var singletons = newObservationIds.Select(id => new IncidentBatchSingletonIdentity(id, $"projection:singleton:{id}")).ToList();
         var coordinator = new IncidentBatchCoordinator(proposer, new MemoryStore(), new FixedTimeProvider(Now));
         return await coordinator.RunAsync(
-            new IncidentBatchRunRequest("run:1", "ledger:1", "projection:1", singletons, "test", $"test-config;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken}"),
+            new IncidentBatchRunRequest("run:1", "ledger:1", "projection:1", singletons, "test", $"test-config;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{executionToken}"),
             bundle,
             prior,
             newObservationIds,
