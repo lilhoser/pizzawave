@@ -3064,7 +3064,10 @@ at
 `/etc/pizzawave/pizzad.json.post-ot-batch-serialized-projection-20260723-t-20260723T232227Z.bak`.
 OT `trunk-recorder` remained PID `2409838` with restart count 2. RPI was not
 deployed or reconfigured and retained `trunk-recorder` PID `884754` with
-restart count 0.
+restart count 0. The recorded fail-closed formatting error briefly made OT
+health degraded after restart. Four subsequent successful legacy completion
+requests cleared the consecutive-failure state, and OT returned to `ok` with
+current incident analysis and healthy transcription and embedding queues.
 
 The remaining production action is configuration, not another architecture
 experiment: choose a fresh permanent run ID and no-backfill fence, stop legacy
